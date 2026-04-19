@@ -1,0 +1,57 @@
+<.header>
+  <%= @issue.title %>
+  <:actions>
+    <.link navigate={~p"/issues"} class="phx-btn-secondary">
+      Back
+    </.link>
+  </:actions>
+</.header>
+
+<div class="issue-detail">
+  <div class="issue-info">
+    <div class="status-row">
+      <span class="badge status-<%= @issue.status %>"><%= @issue.status %></span>
+      <span class="priority-<%= @issue.priority %>"><%= @issue.priority %></span>
+    </div>
+
+    <p class="description"><%= @issue.description %></p>
+
+    <div class="meta">
+      <span>Created <%= @issue.inserted_at %></span>
+    </div>
+  </div>
+
+  <div class="comments-section">
+    <h3>Comments (<%= length(@issue.comments) %>)</h3>
+
+    <div class="comments-list">
+      <%= for comment <- @issue.comments do %>
+        <div class="comment" id={"comment-#{comment.id}"}>
+          <div class="comment-header">
+            <strong><%= comment.author %></strong>
+            <span><%= comment.inserted_at %></span>
+          </div>
+          <p><%= comment.body %></p>
+          <button
+            type="button"
+            class="delete-btn"
+            phx-click="delete_comment"
+            phx-value-id={comment.id}
+            data-confirm="Delete this comment?"
+          >
+            Delete
+          </button>
+        </div>
+      <% end %>
+    </div>
+
+    <div class="comment-form">
+      <h4>Add Comment</h4>
+      <.simple_form :let={f} for={@comment_changeset} phx-submit="add_comment">
+        <.input field={f[:author]} label="Author" />
+        <.input field={f[:body]} label="Comment" type="textarea" />
+        <.button type="submit">Add Comment</.button>
+      </.simple_form>
+    </div>
+  </div>
+</div>

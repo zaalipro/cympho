@@ -1,0 +1,30 @@
+# Dependencies
+/deps/
+/_build/
+
+# Generated files
+/priv/static/
+
+# The config/prod.secret.exs file may contain sensitive data
+/config/prod.secret.exs
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dialyzer
+/priv/plts/
+
+# Coverage
+/coverage/
+
+# Node
+/assets/node_modules/
+
+# Backup files
+*.bak

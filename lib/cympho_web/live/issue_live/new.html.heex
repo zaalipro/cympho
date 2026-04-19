@@ -1,0 +1,27 @@
+<.header>
+  Create New Issue
+  <:actions>
+    <.link navigate={~p"/issues"} class="phx-btn-secondary">
+      Cancel
+    </.link>
+  </:actions>
+</.header>
+
+<div class="issue-form">
+  <.simple_form :let={f} for={@changeset} phx-submit="save">
+    <.input field={f[:title]} label="Title" />
+    <.input field={f[:description]} label="Description" type="textarea" />
+
+    <div class="form-group">
+      <label>Status</label>
+      <%= select(f, :status, ["open": "open", "in_progress": "in_progress", "closed": "closed"]) %>
+    </div>
+
+    <div class="form-group">
+      <label>Priority</label>
+      <%= select(f, :priority, ["low": "low", "medium": "medium", "high": "high"]) %>
+    </div>
+
+    <.button type="submit">Create Issue</.button>
+  </.simple_form>
+</div>
