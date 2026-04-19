@@ -1,6 +1,9 @@
 import Config
 
 config :cympho, Cympho.Repo,
+  username: "postgres",
+  password: "postgres",
+  hostname: "localhost",
   database: "cympho_dev",
   pool_size: 5
 

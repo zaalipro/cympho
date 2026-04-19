@@ -5,12 +5,14 @@ defmodule Cympho.IssuesTest do
   alias Cympho.Issues.Issue
 
   setup do
-    {:ok, issue} = Issues.create_issue(%{
-      title: "Test Issue",
-      description: "Test description",
-      status: :open,
-      priority: :high
-    })
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Test Issue",
+        description: "Test description",
+        status: :open,
+        priority: :high
+      })
+
     %{issue: issue}
   end
 
@@ -55,6 +57,7 @@ defmodule Cympho.IssuesTest do
         status: :open,
         priority: :medium
       }
+
       assert {:ok, %Issue{} = issue} = Issues.create_issue(attrs)
       assert issue.title == "New Issue"
       assert issue.description == "New description"
@@ -85,6 +88,7 @@ defmodule Cympho.IssuesTest do
   describe "delete_issue/1" do
     test "deletes the issue", %{issue: issue} do
       assert :ok = Issues.delete_issue(issue)
+
       assert_raise Ecto.NoResultsError, fn ->
         Issues.get_issue!(issue.id)
       end

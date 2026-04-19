@@ -14,6 +14,7 @@ defmodule CymphoWeb.IssueLive.New do
     case Issues.create_issue(issue_params) do
       {:ok, _issue} ->
         {:noreply, push_navigate(socket, to: ~p"/issues")}
+
       {:error, changeset} ->
         {:noreply, assign(socket, changeset: changeset)}
     end
@@ -32,9 +33,22 @@ defmodule CymphoWeb.IssueLive.New do
     </.header>
 
     <div class="issue-form">
-      <.simple_form :let={f} for={@changeset} phx-submit="save">
-        <.input field={f[:title]} label="Title" />
-        <.input field={f[:description]} label="Description" type="textarea" />
+      <form phx-submit="save">
+        <div class="form-group">
+          <label for="issue_title">Title</label>
+          <input
+            type="text"
+            id="issue_title"
+            name="issue[title]"
+            value={@changeset.params["title"]}
+            required
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="issue_description">Description</label>
+          <textarea id="issue_description" name="issue[description]" required><%= @changeset.params["description"] %></textarea>
+        </div>
 
         <div class="form-group">
           <label>Status</label>
@@ -54,8 +68,8 @@ defmodule CymphoWeb.IssueLive.New do
           </select>
         </div>
 
-        <.button type="submit">Create Issue</.button>
-      </.simple_form>
+        <button type="submit" class="phx-btn">Create Issue</button>
+      </form>
     </div>
     """
   end

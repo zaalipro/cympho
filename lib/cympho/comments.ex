@@ -55,6 +55,7 @@ defmodule Cympho.Comments do
   """
   def delete_comment(%Comment{} = comment) do
     issue_id = comment.issue_id
+
     Repo.delete(comment)
     |> then(fn {:ok, _comment} ->
       issue = Repo.get!(Issue, issue_id) |> Repo.preload(:comments)

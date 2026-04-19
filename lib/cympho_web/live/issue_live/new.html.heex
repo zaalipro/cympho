@@ -14,12 +14,12 @@
 
     <div class="form-group">
       <label>Status</label>
-      <%= select(f, :status, ["open": "open", "in_progress": "in_progress", "closed": "closed"]) %>
+      <%= select(f, :status, open: "open", in_progress: "in_progress", closed: "closed") %>
     </div>
 
     <div class="form-group">
       <label>Priority</label>
-      <%= select(f, :priority, ["low": "low", "medium": "medium", "high": "high"]) %>
+      <%= select(f, :priority, low: "low", medium: "medium", high: "high") %>
     </div>
 
     <.button type="submit">Create Issue</.button>

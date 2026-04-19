@@ -107,14 +107,19 @@ defmodule Cympho.Issues do
     if blocked_issue.id == blocker_issue.id do
       {:error, :cannot_block_self}
     else
-      Repo.insert_all("issue_blockers", [
-        %{
-          blocked_issue_id: blocked_issue.id,
-          blocking_issue_id: blocker_issue.id,
-          inserted_at: DateTime.utc_now(),
-          updated_at: DateTime.utc_now()
-        }
-      ], on_conflict: :nothing)
+      Repo.insert_all(
+        "issue_blockers",
+        [
+          %{
+            blocked_issue_id: blocked_issue.id,
+            blocking_issue_id: blocker_issue.id,
+            inserted_at: DateTime.utc_now(),
+            updated_at: DateTime.utc_now()
+          }
+        ],
+        on_conflict: :nothing
+      )
+
       {:ok, Repo.preload(blocked_issue, [:comments, :blocked_by, :blocks])}
     end
   end
@@ -124,7 +129,8 @@ defmodule Cympho.Issues do
   """
   def remove_blocker(%Issue{} = blocked_issue, %Issue{} = blocker_issue) do
     from(bb in "issue_blockers",
-      where: bb.blocked_issue_id == ^blocked_issue.id and bb.blocking_issue_id == ^blocker_issue.id
+      where:
+        bb.blocked_issue_id == ^blocked_issue.id and bb.blocking_issue_id == ^blocker_issue.id
     )
     |> Repo.delete_all()
 

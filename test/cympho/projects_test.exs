@@ -6,11 +6,12 @@ defmodule Cympho.ProjectsTest do
 
   describe "list_projects/0" do
     test "returns all projects" do
-      {:ok, project} = Projects.create_project(%{
-        name: "Test Project",
-        prefix: "TST",
-        status: :active
-      })
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Test Project",
+          prefix: "TST",
+          status: :active
+        })
 
       projects = Projects.list_projects()
       assert length(projects) >= 1
@@ -20,10 +21,11 @@ defmodule Cympho.ProjectsTest do
 
   describe "get_project!/1" do
     test "returns the project with given id" do
-      {:ok, project} = Projects.create_project(%{
-        name: "Test Project",
-        prefix: "TST"
-      })
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Test Project",
+          prefix: "TST"
+        })
 
       found = Projects.get_project!(project.id)
       assert found.id == project.id
@@ -39,10 +41,11 @@ defmodule Cympho.ProjectsTest do
 
   describe "get_project/1" do
     test "returns {:ok, project} for valid id" do
-      {:ok, project} = Projects.create_project(%{
-        name: "Test Project",
-        prefix: "TST"
-      })
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Test Project",
+          prefix: "TST"
+        })
 
       assert {:ok, found} = Projects.get_project(project.id)
       assert found.id == project.id
@@ -55,10 +58,11 @@ defmodule Cympho.ProjectsTest do
 
   describe "get_project_by_prefix/1" do
     test "returns {:ok, project} for valid prefix" do
-      {:ok, project} = Projects.create_project(%{
-        name: "Test Project",
-        prefix: "TST"
-      })
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Test Project",
+          prefix: "TST"
+        })
 
       assert {:ok, found} = Projects.get_project_by_prefix("TST")
       assert found.id == project.id
@@ -120,10 +124,11 @@ defmodule Cympho.ProjectsTest do
 
   describe "update_project/2" do
     test "updates project with valid data" do
-      {:ok, project} = Projects.create_project(%{
-        name: "Original Name",
-        prefix: "ORIG"
-      })
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Original Name",
+          prefix: "ORIG"
+        })
 
       attrs = %{name: "Updated Name", status: :archived}
       assert {:ok, updated} = Projects.update_project(project, attrs)
@@ -132,10 +137,11 @@ defmodule Cympho.ProjectsTest do
     end
 
     test "returns error changeset for invalid data" do
-      {:ok, project} = Projects.create_project(%{
-        name: "Test",
-        prefix: "TST"
-      })
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Test",
+          prefix: "TST"
+        })
 
       attrs = %{name: ""}
       assert {:error, %Ecto.Changeset{}} = Projects.update_project(project, attrs)
@@ -144,10 +150,11 @@ defmodule Cympho.ProjectsTest do
 
   describe "archive_project/1" do
     test "archives the project" do
-      {:ok, project} = Projects.create_project(%{
-        name: "Test",
-        prefix: "TST"
-      })
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Test",
+          prefix: "TST"
+        })
 
       assert {:ok, archived} = Projects.archive_project(project)
       assert archived.status == :archived
@@ -156,10 +163,11 @@ defmodule Cympho.ProjectsTest do
 
   describe "delete_project/1" do
     test "deletes the project" do
-      {:ok, project} = Projects.create_project(%{
-        name: "Test",
-        prefix: "TST"
-      })
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Test",
+          prefix: "TST"
+        })
 
       assert {:ok, _} = Projects.delete_project(project)
 
@@ -171,10 +179,11 @@ defmodule Cympho.ProjectsTest do
 
   describe "change_project/2" do
     test "returns a changeset" do
-      {:ok, project} = Projects.create_project(%{
-        name: "Test",
-        prefix: "TST"
-      })
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Test",
+          prefix: "TST"
+        })
 
       changeset = Projects.change_project(project, %{name: "New Name"})
       assert changeset.changes[:name] == "New Name"

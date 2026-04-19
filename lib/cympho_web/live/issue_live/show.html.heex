@@ -10,8 +10,8 @@
 <div class="issue-detail">
   <div class="issue-info">
     <div class="status-row">
-      <span class="badge status-<%= @issue.status %>"><%= @issue.status %></span>
-      <span class="priority-<%= @issue.priority %>"><%= @issue.priority %></span>
+      <span class={"badge status-#{@issue.status}"}><%= @issue.status %></span>
+      <span class={"priority-#{@issue.priority}"}><%= @issue.priority %></span>
     </div>
 
     <p class="description"><%= @issue.description %></p>
@@ -47,11 +47,22 @@
 
     <div class="comment-form">
       <h4>Add Comment</h4>
-      <.simple_form :let={f} for={@comment_changeset} phx-submit="add_comment">
-        <.input field={f[:author]} label="Author" />
-        <.input field={f[:body]} label="Comment" type="textarea" />
-        <.button type="submit">Add Comment</.button>
-      </.simple_form>
+      <form phx-submit="add_comment">
+        <div class="form-group">
+          <label for="comment_author">Author</label>
+          <input
+            type="text"
+            id="comment_author"
+            name="comment[author]"
+            value={@comment_changeset.params["author"]}
+          />
+        </div>
+        <div class="form-group">
+          <label for="comment_body">Comment</label>
+          <textarea id="comment_body" name="comment[body]"><%= @comment_changeset.params["body"] %></textarea>
+        </div>
+        <button type="submit" class="phx-btn">Add Comment</button>
+      </form>
     </div>
   </div>
 </div>
