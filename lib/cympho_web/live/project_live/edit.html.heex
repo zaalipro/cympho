@@ -1,0 +1,26 @@
+<.header>
+  Edit Project
+  <:actions>
+    <.link navigate={~p"/projects"} class="phx-btn-secondary">
+      Cancel
+    </.link>
+  </:actions>
+</.header>
+
+<div class="project-form">
+  <.simple_form :let={f} for={@changeset} phx-submit="save">
+    <.input field={f[:name]} label="Name" />
+    <.input field={f[:description]} label="Description" type="textarea" />
+    <.input field={f[:prefix]} label="Prefix" placeholder="e.g., PROJ" />
+
+    <div class="form-group">
+      <label>Status</label>
+      <select name="project[status]">
+        <option value="active">Active</option>
+        <option value="archived">Archived</option>
+      </select>
+    </div>
+
+    <.button type="submit">Update Project</.button>
+  </.simple_form>
+</div>
