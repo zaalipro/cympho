@@ -1,5 +1,5 @@
 <.header>
-  <%= @page_title %>
+  {@page_title}
   <:actions>
     <.link navigate={~p"/issues/new"} class="phx-btn">
       New Issue
@@ -8,32 +8,28 @@
 </.header>
 
 <div class="issue-list">
-  <%= for issue <- @issues do %>
-    <.link navigate={~p"/issues/#{issue.id}"} class="issue-card">
-      <div class="issue-header">
-        <h3><%= issue.title %></h3>
-        <span class="badge status-<%= issue.status %>"><%= issue.status %></span>
-      </div>
-      <p class="issue-description"><%= String.slice(issue.description, 0, 100) %>...</p>
-      <div class="issue-meta">
-        <span class="priority-<%= issue.priority %>"><%= issue.priority %></span>
-        <span><%= length(issue.comments) %> comments</span>
-        <button
-          type="button"
-          class="delete-btn"
-          phx-click="delete_issue"
-          phx-value-id={issue.id}
-          data-confirm="Delete this issue?"
-        >
-          Delete
-        </button>
-      </div>
-    </.link>
-  <% end %>
+  <.link :for={issue <- @issues} navigate={~p"/issues/#{issue.id}"} class="issue-card">
+    <div class="issue-header">
+      <h3>{issue.title}</h3>
+      <span class={"badge status-#{issue.status}"}>{issue.status}</span>
+    </div>
+    <p class="issue-description">{String.slice(issue.description, 0, 100)}...</p>
+    <div class="issue-meta">
+      <span class={"priority-#{issue.priority}"}>{issue.priority}</span>
+      <span>{length(issue.comments)} comments</span>
+      <button
+        type="button"
+        class="delete-btn"
+        phx-click="delete_issue"
+        phx-value-id={issue.id}
+        data-confirm="Delete this issue?"
+      >
+        Delete
+      </button>
+    </div>
+  </.link>
 </div>
 
-<%= if Enum.empty?(@issues) do %>
-  <div class="empty-state">
-    <p>No issues yet. Create your first issue to get started.</p>
-  </div>
-<% end %>
+<div :if={Enum.empty?(@issues)} class="empty-state">
+  <p>No issues yet. Create your first issue to get started.</p>
+</div>
