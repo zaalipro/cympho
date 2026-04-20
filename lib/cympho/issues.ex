@@ -3,7 +3,7 @@ defmodule Cympho.Issues do
   The Issues context for managing issues and their CRUD operations.
   """
   import Ecto.Query, warn: false
-  import Ecto.Changeset, only: [optimistic_lock: 3]
+  import Ecto.Changeset, only: [optimistic_lock: 2]
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
@@ -56,13 +56,17 @@ defmodule Cympho.Issues do
   """
   def create_issue(attrs \\ %{}) do
     attrs = maybe_generate_identifier(attrs)
-    %Issue{}
-    |> Issue.changeset(attrs)
-    |> Repo.insert()
-    |> then(fn {:ok, issue} ->
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
-      {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
-    end)
+
+    case %Issue{}
+         |> Issue.changeset(attrs)
+         |> Repo.insert() do
+      {:ok, issue} ->
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
+        {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
   end
 
   defp maybe_generate_identifier(%{"project_id" => project_id} = attrs) do
@@ -88,21 +92,17 @@ defmodule Cympho.Issues do
     end
   end
 
-  defp do_update_issue(%Issue{} = issue, %{status: new_status} = attrs) do
-    if StateMachine.valid_transition?(issue.status, new_status) do
-      issue
-      |> Issue.changeset(attrs)
-      |> optimistic_lock(:lock_version, [:lock_version])
-      |> Repo.update()
-    else
-      {:error, :invalid_transition}
-    end
+  defp do_update_issue(%Issue{} = issue, %{status: _new_status} = attrs) do
+    issue
+    |> Issue.changeset(attrs)
+    |> optimistic_lock(:lock_version)
+    |> Repo.update()
   end
 
   defp do_update_issue(%Issue{} = issue, attrs) do
     issue
     |> Issue.changeset(attrs)
-    |> optimistic_lock(:lock_version, [:lock_version])
+    |> optimistic_lock(:lock_version)
     |> Repo.update()
   end
 
@@ -111,10 +111,15 @@ defmodule Cympho.Issues do
   Returns {:ok, issue} or {:error, :invalid_transition}.
   """
   def transition_issue(%Issue{} = issue, new_status) do
-    if new_status == :done and is_blocked?(issue) do
-      {:error, :blocked_by_active_issues}
-    else
-      update_issue(issue, %{status: new_status})
+    cond do
+      new_status == :done and is_blocked?(issue) ->
+        {:error, :blocked_by_active_issues}
+
+      not StateMachine.valid_transition?(issue.status, new_status) ->
+        {:error, :invalid_transition}
+
+      true ->
+        update_issue(issue, %{status: new_status})
     end
   end
 
@@ -153,17 +158,18 @@ defmodule Cympho.Issues do
     checkout_issue(issue, agent.id)
   end
 
+  def checkout_issue(%Agent{} = agent, %Issue{} = issue) do
+    checkout_issue(issue, agent.id)
+  end
+
   def checkout_issue(%Issue{} = issue, agent_id) do
     cond do
       issue.assignee_id != nil and issue.assignee_id != agent_id ->
         {:error, :already_assigned}
 
-      StateMachine.valid_transition?(issue.status, :in_progress) ->
+      true ->
         update_issue(issue, %{assignee_id: agent_id, status: :in_progress})
         |> maybe_adjust_lock_version()
-
-      true ->
-        {:error, :invalid_transition}
     end
   end
 
@@ -172,12 +178,8 @@ defmodule Cympho.Issues do
   Returns {:ok, issue} or {:error, :invalid_transition}.
   """
   def release_issue(%Issue{} = issue, target_status \\ :todo) do
-    if StateMachine.valid_transition?(issue.status, target_status) do
-      update_issue(issue, %{assignee_id: nil, status: target_status})
-      |> maybe_adjust_lock_version()
-    else
-      {:error, :invalid_transition}
-    end
+    update_issue(issue, %{assignee_id: nil, status: target_status})
+    |> maybe_adjust_lock_version()
   end
 
   defp maybe_adjust_lock_version({:ok, issue}), do: {:ok, issue}
@@ -194,15 +196,16 @@ defmodule Cympho.Issues do
       transitively_blocked_by?(blocker_issue, blocked_issue) ->
         {:error, :circular_blocker}
       true ->
+        blocked_binary = Ecto.UUID.dump!(blocked_issue.id)
+        blocker_binary = Ecto.UUID.dump!(blocker_issue.id)
+        now = DateTime.utc_now()
+
         Repo.transaction(fn ->
-          Repo.insert_all("issue_blockers", [
-            %{
-              blocked_issue_id: blocked_issue.id,
-              blocking_issue_id: blocker_issue.id,
-              inserted_at: DateTime.utc_now(),
-              updated_at: DateTime.utc_now()
-            }
-          ], on_conflict: :nothing)
+          Repo.query!("""
+            INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT DO NOTHING
+          """, [blocked_binary, blocker_binary, now, now])
 
           Repo.reload(blocked_issue)
         end)
@@ -223,7 +226,12 @@ defmodule Cympho.Issues do
       false
     else
       visited = MapSet.put(visited, current_id)
-      blocker_ids = Repo.all(from bb in "issue_blockers", where: bb.blocked_issue_id == ^current_id, select: bb.blocking_issue_id)
+      binary_id = Ecto.UUID.dump!(current_id)
+      blocker_ids = Repo.all(
+        from bb in "issue_blockers",
+        where: bb.blocked_issue_id == ^binary_id,
+        select: bb.blocking_issue_id
+      )
       Enum.any?(blocker_ids, fn blocker_id ->
         if blocker_id == target_id do
           true
@@ -240,7 +248,8 @@ defmodule Cympho.Issues do
   def remove_blocker(%Issue{} = blocked_issue, %Issue{} = blocker_issue) do
     count =
       from(bb in "issue_blockers",
-        where: bb.blocked_issue_id == ^blocked_issue.id and bb.blocking_issue_id == ^blocker_issue.id
+        where: bb.blocked_issue_id == Ecto.UUID.dump!(blocked_issue.id) and
+               bb.blocking_issue_id == Ecto.UUID.dump!(blocker_issue.id)
       )
       |> Repo.delete_all()
       |> elem(1)
@@ -256,11 +265,14 @@ defmodule Cympho.Issues do
   Deletes an issue.
   """
   def delete_issue(%Issue{} = issue) do
-    Repo.delete(issue)
-    |> then(fn {:ok, _issue} ->
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_deleted, issue.id})
-      :ok
-    end)
+    case Repo.delete(issue) do
+      {:ok, _issue} ->
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_deleted, issue.id})
+        :ok
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
   end
 
   @doc """

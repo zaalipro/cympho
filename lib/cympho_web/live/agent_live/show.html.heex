@@ -1,0 +1,30 @@
+<.header>
+  {@agent.name}
+  <:actions>
+    <.link navigate={~p"/agents"} class="phx-btn-secondary">
+      Back
+    </.link>
+    <.link navigate={~p"/agents/#{@agent.id}/edit"} class="phx-btn-secondary">
+      Edit
+    </.link>
+  </:actions>
+</.header>
+
+<div class="agent-detail">
+  <div class="agent-info">
+    <div class="status-row">
+      <span class={"status-badge status-#{@agent.status}"}>{status_label(@agent.status)}</span>
+      <span class="role-badge">{role_label(@agent.role)}</span>
+    </div>
+
+    <p class="instructions">{@agent.instructions}</p>
+
+    <div class="card-meta">
+      <span class="adapter-badge">{@agent.adapter || "No adapter"}</span>
+    </div>
+
+    <div class="meta">
+      <span>Created {@agent.inserted_at}</span>
+    </div>
+  </div>
+</div>

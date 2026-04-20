@@ -44,7 +44,8 @@ defmodule Cympho.MixProject do
       {:gettext, "~> 0.20"},
       {:jason, "~> 1.4"},
       {:dns_cluster, "~> 0.1.1"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:floki, ">= 0.30.0", only: :test}
     ]
   end
 

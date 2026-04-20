@@ -22,9 +22,15 @@ defmodule Cympho.Users do
   Gets a user by id, returns {:ok, user} or {:error, :not_found}.
   """
   def get_user(id) do
-    case Repo.get(User, id) do
-      nil -> {:error, :not_found}
-      user -> {:ok, user}
+    case Ecto.UUID.cast(id) do
+      :error ->
+        {:error, :not_found}
+
+      {:ok, _uuid} ->
+        case Repo.get(User, id) do
+          nil -> {:error, :not_found}
+          user -> {:ok, user}
+        end
     end
   end
 
@@ -79,7 +85,10 @@ defmodule Cympho.Users do
   Deletes a user.
   """
   def delete_user(%User{} = user) do
-    Repo.delete(user)
+    case Repo.delete(user) do
+      {:ok, _user} -> :ok
+      {:error, changeset} -> {:error, changeset}
+    end
   end
 
   @doc """

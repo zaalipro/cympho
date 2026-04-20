@@ -11,7 +11,7 @@ defmodule CymphoWeb.IssueLiveTest do
       Issues.create_issue(%{
         title: "Test Issue",
         description: "Test description for the issue",
-        status: :open,
+        status: :backlog,
         priority: :high
       })
 
@@ -29,7 +29,7 @@ defmodule CymphoWeb.IssueLiveTest do
     test "shows issue status badges", %{issue: issue} do
       {:ok, _view, html} = live(conn(), "/issues")
 
-      assert html =~ "open"
+      assert html =~ "backlog"
       assert html =~ "high"
     end
 
@@ -46,7 +46,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert html =~ issue.title
       assert html =~ issue.description
-      assert html =~ "open"
+      assert html =~ "backlog"
       assert html =~ "high"
     end
 

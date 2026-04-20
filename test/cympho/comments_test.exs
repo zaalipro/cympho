@@ -10,7 +10,7 @@ defmodule Cympho.CommentsTest do
       Issues.create_issue(%{
         title: "Test Issue",
         description: "Test description",
-        status: :open,
+        status: :backlog,
         priority: :high
       })
 
