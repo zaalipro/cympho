@@ -16,7 +16,7 @@ defmodule Cympho.Issues do
     Issue
     |> maybe_filter_by_project(opts)
     |> Repo.all()
-    |> Repo.preload([:comments, :blocked_by, :blocks])
+    |> Repo.preload([:comments, :blocked_by, :blocks, :assignee])
   end
 
   defp maybe_filter_by_project(query, %{project_id: project_id}) do
@@ -38,7 +38,7 @@ defmodule Cympho.Issues do
   @doc """
   Gets a single issue by id.
   """
-  def get_issue!(id), do: Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks])
+  def get_issue!(id), do: Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee])
 
   @doc """
   Gets a single issue by id, returns {:ok, issue} or {:error, :not_found}.
@@ -46,7 +46,7 @@ defmodule Cympho.Issues do
   def get_issue(id) do
     case Repo.get(Issue, id) do
       nil -> {:error, :not_found}
-      issue -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
+      issue -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee])}
     end
   end
 
@@ -139,6 +139,52 @@ defmodule Cympho.Issues do
     blocked_by = issue.blocked_by || []
     Enum.filter(blocked_by, fn blocker -> blocker.status != :done end)
   end
+
+  @doc """
+  Checks out an issue for an agent. Assigns the issue to the agent and transitions
+  to :in_progress if the issue is in :backlog or :todo. Returns:
+  - {:ok, issue} on success
+  - {:error, :already_assigned} if issue is assigned to another agent
+  - {:error, :stale} if lock version mismatch
+  - {:error, :invalid_transition} if current status cannot transition to :in_progress
+  """
+  def checkout_issue(%Issue{} = issue, %Agent{} = agent) do
+    checkout_issue(issue, agent.id)
+  end
+
+  def checkout_issue(%Issue{} = issue, agent_id) do
+    cond do
+      issue.assignee_id != nil and issue.assignee_id != agent_id ->
+        {:error, :already_assigned}
+
+      StateMachine.valid_transition?(issue.status, :in_progress) ->
+        update_issue(issue, %{assignee_id: agent_id, status: :in_progress})
+        |> maybe_adjust_lock_version()
+
+      true ->
+        {:error, :invalid_transition}
+    end
+  end
+
+  @doc """
+  Releases an issue, clearing the assignee and transitioning to :todo (or provided status).
+  Returns {:ok, issue} or {:error, :invalid_transition}.
+  """
+  def release_issue(%Issue{} = issue, %Agent{} = agent, target_status \\ :todo) do
+    release_issue(issue, agent.id, target_status)
+  end
+
+  def release_issue(%Issue{} = issue, target_status \\ :todo) do
+    if StateMachine.valid_transition?(issue.status, target_status) do
+      update_issue(issue, %{assignee_id: nil, status: target_status})
+      |> maybe_adjust_lock_version()
+    else
+      {:error, :invalid_transition}
+    end
+  end
+
+  defp maybe_adjust_lock_version({:ok, issue}), do: {:ok, issue}
+  defp maybe_adjust_lock_version({:error, _} = error), do: error
 
   @doc """
   Adds a blocker relationship: blocker_issue blocks blocked_issue.

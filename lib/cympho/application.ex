@@ -9,6 +9,7 @@ defmodule Cympho.Application do
       Cympho.Repo,
       {Phoenix.PubSub, name: Cympho.PubSub},
       {Task.Supervisor, name: Cympho.TaskSupervisor},
+      {Registry, keys: :unique, name: Cympho.OrchestratorRegistry},
       Cympho.Notifications.RetryWorker,
       CymphoWeb.Endpoint
     ]
