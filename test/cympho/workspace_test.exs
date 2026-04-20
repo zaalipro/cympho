@@ -17,8 +17,7 @@ defmodule Cympho.WorkspaceTest do
 
   describe "write_prompt_file/2" do
     test "writes prompt to workspace path" do
-      # Use a temp directory for testing
-      tmp_dir = Path.join(System.tmp_dir(), "cympho_test_#{:rand.uniform(99999)}")
+      tmp_dir = Path.join(Workspace.workspace_root(), "test_#{:rand.uniform(99999)}")
       File.mkdir_p!(tmp_dir)
 
       on_exit(fn -> File.rm_rf!(tmp_dir) end)
@@ -30,7 +29,7 @@ defmodule Cympho.WorkspaceTest do
 
   describe "remove_workspace/1" do
     test "removes workspace directory" do
-      tmp_dir = Path.join(System.tmp_dir(), "cympho_test_remove_#{:rand.uniform(99999)}")
+      tmp_dir = Path.join(Workspace.workspace_root(), "test_remove_#{:rand.uniform(99999)}")
       File.mkdir_p!(tmp_dir)
       File.write!(Path.join(tmp_dir, "test.txt"), "content")
 

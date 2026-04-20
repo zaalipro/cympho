@@ -30,8 +30,7 @@ defmodule CymphoWeb do
 
   def live_view do
     quote do
-      use Phoenix.LiveView,
-        layout: {CymphoWeb.Layouts, :root}
+      use Phoenix.LiveView
 
       unquote(html_helpers())
     end

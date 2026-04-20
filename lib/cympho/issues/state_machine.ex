@@ -15,7 +15,7 @@ defmodule Cympho.Issues.StateMachine do
   """
 
   @valid_transitions %{
-    backlog: [:todo, :blocked],
+    backlog: [:todo, :in_progress, :blocked],
     todo: [:in_progress, :blocked],
     in_progress: [:in_review, :blocked],
     in_review: [:done, :in_progress],

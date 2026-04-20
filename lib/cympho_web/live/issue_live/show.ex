@@ -44,6 +44,10 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
+  defp apply_action(socket, nil, id) do
+    apply_action(socket, :show, id)
+  end
+
   @impl true
   def handle_info({:issue_updated, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do

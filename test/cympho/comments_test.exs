@@ -10,7 +10,7 @@ defmodule Cympho.CommentsTest do
       Issues.create_issue(%{
         title: "Test Issue",
         description: "Test description",
-        status: :open,
+        status: :backlog,
         priority: :high
       })
 
@@ -26,14 +26,16 @@ defmodule Cympho.CommentsTest do
       {:ok, comment1} =
         Comments.create_comment(%{
           body: "First comment",
-          author: "Alice",
+          author_type: "user",
+          author_id: "alice-123",
           issue_id: issue.id
         })
 
       {:ok, comment2} =
         Comments.create_comment(%{
           body: "Second comment",
-          author: "Bob",
+          author_type: "user",
+          author_id: "bob-456",
           issue_id: issue.id
         })
 
@@ -49,7 +51,8 @@ defmodule Cympho.CommentsTest do
       {:ok, comment} =
         Comments.create_comment(%{
           body: "Test comment",
-          author: "Test Author",
+          author_type: "user",
+          author_id: "test-author",
           issue_id: issue.id
         })
 
@@ -69,18 +72,20 @@ defmodule Cympho.CommentsTest do
     test "creates comment with valid data", %{issue: issue} do
       attrs = %{
         body: "New comment body",
-        author: "New Author",
+        author_type: "user",
+        author_id: "new-author",
         issue_id: issue.id
       }
 
       assert {:ok, %Comment{} = comment} = Comments.create_comment(attrs)
       assert comment.body == "New comment body"
-      assert comment.author == "New Author"
+      assert comment.author_type == "user"
+      assert comment.author_id == "new-author"
       assert comment.issue_id == issue.id
     end
 
     test "returns error changeset for invalid data", %{issue: issue} do
-      attrs = %{body: "", author: "", issue_id: issue.id}
+      attrs = %{body: "", author_type: "", author_id: "", issue_id: issue.id}
       assert {:error, %Ecto.Changeset{}} = Comments.create_comment(attrs)
     end
   end
@@ -90,7 +95,8 @@ defmodule Cympho.CommentsTest do
       {:ok, comment} =
         Comments.create_comment(%{
           body: "Original body",
-          author: "Original Author",
+          author_type: "user",
+          author_id: "original-author",
           issue_id: issue.id
         })
 
@@ -114,7 +120,8 @@ defmodule Cympho.CommentsTest do
       {:ok, comment} =
         Comments.create_comment(%{
           body: "To be deleted",
-          author: "Author",
+          author_type: "user",
+          author_id: "to-delete",
           issue_id: issue.id
         })
 

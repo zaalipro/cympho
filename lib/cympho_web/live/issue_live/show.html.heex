@@ -54,7 +54,7 @@
     <div class="comments-list">
       <div :for={comment <- @issue.comments} class="comment" id={"comment-#{comment.id}"}>
         <div class="comment-header">
-          <strong>{comment.author}</strong>
+          <strong>{comment.author_type}: {comment.author_id}</strong>
           <span>{comment.inserted_at}</span>
         </div>
         <p>{comment.body}</p>
@@ -72,14 +72,21 @@
 
     <div class="comment-form">
       <h4>Add Comment</h4>
-      <form phx-submit="add_comment">
+      <form id="comment-form" phx-submit="add_comment">
         <div class="form-group">
-          <label for="comment_author">Author</label>
+          <label for="comment_author_type">Author Type</label>
+          <select id="comment_author_type" name="comment[author_type]">
+            <option value="user">User</option>
+            <option value="agent">Agent</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="comment_author_id">Author ID</label>
           <input
             type="text"
-            id="comment_author"
-            name="comment[author]"
-            value={@comment_changeset.params["author"]}
+            id="comment_author_id"
+            name="comment[author_id]"
+            value={@comment_changeset.params["author_id"]}
           />
         </div>
         <div class="form-group">

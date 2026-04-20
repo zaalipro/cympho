@@ -22,9 +22,9 @@ defmodule Cympho.AgentRunner.Mock do
       Process.sleep(delay)
 
       result = %{
-        type: "mock_result",
-        content: [%{"type" => "text", "text" => "Mock Claude response"}],
-        usage: %{input_tokens: 100, output_tokens: 50}
+        "type" => "mock_result",
+        "content" => [%{"type" => "text", "text" => "Mock Claude response"}],
+        "usage" => %{"input_tokens" => 100, "output_tokens" => 50}
       }
 
       send(recipient_pid, {:turn_completed, session_id, result})
