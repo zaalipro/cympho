@@ -3,9 +3,19 @@ defmodule CymphoWeb.AgentLive.Index do
   alias Cympho.Agents
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     Agents.subscribe()
-    {:ok, assign(socket, :agents, Agents.list_agents())}
+
+    # For now, derive current agent from session. In production, this would
+    # come from a proper auth system. Format: %{id: "...", role: :cto}
+    current_agent = session["current_agent"]
+
+    socket =
+      assign(socket, :agents, Agents.list_agents())
+      |> assign(:current_agent_id, current_agent && current_agent.id)
+      |> assign(:current_agent_role, current_agent && current_agent.role)
+
+    {:ok, socket}
   end
 
   @impl true
@@ -54,4 +64,7 @@ defmodule CymphoWeb.AgentLive.Index do
   def role_label(:engineer), do: "Engineer"
   def role_label(:ceo), do: "CEO"
   def role_label(:cto), do: "CTO"
+
+  def show_spawn_button?(role) when role in [:ceo, :cto], do: true
+  def show_spawn_button?(_role), do: false
 end

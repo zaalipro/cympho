@@ -97,7 +97,10 @@ defmodule Cympho.Issues do
         {:error, :invalid_transition}
 
       true ->
-        update_issue(issue, %{status: new_status})
+        with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
+          if new_status == :done, do: unblock_dependents(issue.id)
+          {:ok, updated}
+        end
     end
   end
 
@@ -113,6 +116,62 @@ defmodule Cympho.Issues do
   def active_blockers(%Issue{} = issue) do
     blocked_by = issue.blocked_by || []
     Enum.filter(blocked_by, fn blocker -> blocker.status != :done end)
+  end
+
+  @doc """
+  For each issue that this issue blocks, check if ALL of its blockers are now done.
+  If so, transition it to :todo (unblocked) and wake its assignee via AgentHeartbeat.
+  Adds a system comment to each unblocked issue.
+  """
+  def unblock_dependents(blocker_issue_id) do
+    # Find all issues where this issue is a blocker
+    dependent_ids =
+      Repo.all(
+        from bb in "issue_blockers",
+          where: bb.blocking_issue_id == type(^blocker_issue_id, Ecto.UUID),
+          select: bb.blocked_issue_id
+      )
+      |> Enum.map(fn id ->
+        if is_binary(id) and byte_size(id) == 16, do: Ecto.UUID.load!(id), else: id
+      end)
+
+    Enum.each(dependent_ids, fn dependent_id ->
+      case get_issue(dependent_id) do
+        {:ok, dependent} ->
+          if dependent.status == :blocked and all_blockers_done?(dependent) do
+            {:ok, updated} = update_issue(dependent, %{status: :todo})
+            wake_assignee(updated)
+            add_system_comment(updated, "Auto-unblocked")
+          end
+
+        {:error, _} ->
+          :skip
+      end
+    end)
+  end
+
+  defp all_blockers_done?(%Issue{} = issue) do
+    blockers = issue.blocked_by || []
+    Enum.all?(blockers, fn blocker -> blocker.status == :done end)
+  end
+
+  defp wake_assignee(%Issue{} = issue) do
+    if issue.assignee_id do
+      try do
+        :ok = Cympho.AgentHeartbeat.set_working(issue.assignee_id, issue.id)
+      rescue
+        _ -> :ok
+      end
+    end
+  end
+
+  defp add_system_comment(%Issue{} = issue, body) do
+    Comments.create_comment(%{
+      body: body,
+      author_type: "system",
+      author_id: "00000000-0000-0000-0000-000000000000",
+      issue_id: issue.id
+    })
   end
 
   def checkout_issue(%Issue{} = issue, %Agent{} = agent) do

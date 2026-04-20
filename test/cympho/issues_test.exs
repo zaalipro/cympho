@@ -480,4 +480,107 @@ defmodule Cympho.IssuesTest do
       assert {:error, :invalid_transition} = Issues.transition_issue(issue, :done)
     end
   end
+
+  describe "unblock_dependents/1" do
+    test "auto-unblocks dependent issue when all blockers are done" do
+      {:ok, blocker} =
+        Issues.create_issue(%{
+          title: "Blocker",
+          description: "Will be done",
+          status: :in_review
+        })
+
+      {:ok, dependent} =
+        Issues.create_issue(%{
+          title: "Dependent",
+          description: "Blocked",
+          status: :blocked
+        })
+
+      {:ok, _} = Issues.add_blocker(dependent, blocker)
+      reloaded_blocker = Issues.get_issue!(blocker.id)
+      reloaded_dependent = Issues.get_issue!(dependent.id)
+
+      # Sanity check: dependent is blocked by an open issue
+      assert reloaded_dependent.status == :blocked
+      assert Issues.is_blocked?(reloaded_dependent)
+
+      # Transition blocker to done
+      {:ok, done_blocker} = Issues.transition_issue(reloaded_blocker, :done)
+      assert done_blocker.status == :done
+
+      Issues.unblock_dependents(done_blocker.id)
+      reloaded_dependent = Issues.get_issue!(dependent.id)
+      assert reloaded_dependent.status == :todo
+    end
+
+    test "does not unblock when other blockers are still open" do
+      {:ok, done_blocker} =
+        Issues.create_issue(%{
+          title: "Done Blocker",
+          description: "Done",
+          status: :done
+        })
+
+      {:ok, open_blocker} =
+        Issues.create_issue(%{
+          title: "Open Blocker",
+          description: "Still open",
+          status: :in_progress
+        })
+
+      {:ok, dependent} =
+        Issues.create_issue(%{
+          title: "Dependent",
+          description: "Blocked by two",
+          status: :blocked
+        })
+
+      {:ok, _} = Issues.add_blocker(dependent, done_blocker)
+      {:ok, _} = Issues.add_blocker(dependent, open_blocker)
+
+      reloaded_blocker = Issues.get_issue!(done_blocker.id)
+      Issues.unblock_dependents(reloaded_blocker.id)
+
+      # Dependent should still be blocked
+      reloaded_dependent = Issues.get_issue!(dependent.id)
+      assert reloaded_dependent.status == :blocked
+      assert Issues.is_blocked?(reloaded_dependent)
+    end
+
+    test "adds Auto-unblocked system comment when unblocking" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer
+        })
+
+      {:ok, blocker} =
+        Issues.create_issue(%{
+          title: "Blocker",
+          description: "Done",
+          status: :in_review
+        })
+
+      {:ok, dependent} =
+        Issues.create_issue(%{
+          title: "Dependent",
+          description: "Blocked",
+          status: :blocked,
+          assignee_id: agent.id
+        })
+
+      {:ok, _} = Issues.add_blocker(dependent, blocker)
+      reloaded_blocker = Issues.get_issue!(blocker.id)
+
+      {:ok, done_blocker} = Issues.transition_issue(reloaded_blocker, :done)
+      Issues.unblock_dependents(done_blocker.id)
+
+      reloaded_dependent = Issues.get_issue!(dependent.id)
+      comments = Cympho.Comments.list_comments(reloaded_dependent.id)
+      auto_comments = Enum.filter(comments, fn c -> c.author_type == "system" end)
+      assert length(auto_comments) >= 1
+      assert Enum.any?(auto_comments, fn c -> c.body =~ "Auto-unblocked" end)
+    end
+  end
 end

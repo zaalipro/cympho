@@ -6,6 +6,7 @@ defmodule CymphoWeb.KanbanLive.Index do
   @impl true
   def mount(_params, _session, socket) do
     Issues.subscribe()
+    Cympho.Agents.subscribe()
     {:ok, assign(socket, :issues, Issues.list_issues())}
   end
 
@@ -37,6 +38,19 @@ defmodule CymphoWeb.KanbanLive.Index do
     {:noreply,
      update(socket, :issues, fn issues ->
        Enum.filter(issues, fn issue -> issue.id != deleted_id end)
+     end)}
+  end
+
+  def handle_info({:agent_updated, updated_agent}, socket) do
+    {:noreply,
+     update(socket, :issues, fn issues ->
+       Enum.map(issues, fn issue ->
+         if issue.assignee && issue.assignee.id == updated_agent.id do
+           %{issue | assignee: updated_agent}
+         else
+           issue
+         end
+       end)
      end)}
   end
 
