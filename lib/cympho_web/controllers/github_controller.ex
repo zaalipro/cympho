@@ -58,8 +58,34 @@ defmodule CymphoWeb.GithubController do
   end
 
   defp handle_pr_action(issue, "opened", _pr) do
-    Logger.info("PR opened for issue #{issue.id}, transitioning to in_review")
-    Issues.transition_issue(issue, :in_review)
+    Logger.info("PR opened for issue #{issue.id}, current status: #{issue.status}")
+
+    # Ensure issue is in_progress before transitioning to in_review
+    # State machine requires: backlog/todo -> in_progress -> in_review
+    updated_issue =
+      case issue.status do
+        status when status in [:backlog, :todo] ->
+          Logger.info("Issue #{issue.id} in #{status}, transitioning to in_progress first")
+          case Issues.transition_issue(issue, :in_progress) do
+            {:ok, new_issue} -> new_issue
+            {:error, _} -> issue
+          end
+
+        _ ->
+          issue
+      end
+
+    # Now transition to in_review (if not already there)
+    if updated_issue.status != :in_review do
+      case Issues.transition_issue(updated_issue, :in_review) do
+        {:ok, _} ->
+          Logger.info("Issue #{issue.id} transitioned to in_review")
+
+        {:error, reason} ->
+          Logger.warning("Failed to transition issue #{issue.id} to in_review: #{inspect(reason)}")
+      end
+    end
+
     :ok
   end
 

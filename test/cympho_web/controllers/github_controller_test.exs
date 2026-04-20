@@ -77,6 +77,64 @@ defmodule CymphoWeb.GithubControllerTest do
       assert updated_issue.status == :in_review
     end
 
+    test "PR opened for issue in backlog transitions backlog -> in_progress -> in_review", %{
+      conn: conn,
+      project: project
+    } do
+      {:ok, backlog_issue} =
+        Issues.create_issue(%{
+          title: "Backlog Issue",
+          description: "Issue in backlog",
+          status: :backlog,
+          priority: :medium,
+          project_id: project.id,
+          github_pr_url: "https://github.com/owner/repo/pull/124"
+        })
+
+      payload = build_pr_payload("opened", backlog_issue.github_pr_url)
+      signature = compute_signature(payload, project.github_webhook_secret)
+
+      conn =
+        conn
+        |> put_req_header("x-hub-signature-256", signature)
+        |> post("/github/webhook", payload)
+
+      assert response(conn, :ok) == ""
+
+      # Verify issue was transitioned through in_progress to in_review
+      updated_issue = Issues.get_issue!(backlog_issue.id)
+      assert updated_issue.status == :in_review
+    end
+
+    test "PR opened for issue in todo transitions todo -> in_progress -> in_review", %{
+      conn: conn,
+      project: project
+    } do
+      {:ok, todo_issue} =
+        Issues.create_issue(%{
+          title: "Todo Issue",
+          description: "Issue in todo",
+          status: :todo,
+          priority: :medium,
+          project_id: project.id,
+          github_pr_url: "https://github.com/owner/repo/pull/125"
+        })
+
+      payload = build_pr_payload("opened", todo_issue.github_pr_url)
+      signature = compute_signature(payload, project.github_webhook_secret)
+
+      conn =
+        conn
+        |> put_req_header("x-hub-signature-256", signature)
+        |> post("/github/webhook", payload)
+
+      assert response(conn, :ok) == ""
+
+      # Verify issue was transitioned through in_progress to in_review
+      updated_issue = Issues.get_issue!(todo_issue.id)
+      assert updated_issue.status == :in_review
+    end
+
     test "PR synchronize adds a system comment", %{conn: conn, issue: issue, project: project} do
       payload = build_pr_payload("synchronize", issue.github_pr_url, %{"head" => %{"ref" => "feature-branch"}})
       signature = compute_signature(payload, project.github_webhook_secret)
