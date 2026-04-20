@@ -6,6 +6,7 @@ defmodule Cympho.Agents do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Agents.Agent
+  alias Cympho.Issues.Issue
 
   @doc """
   Returns the list of all agents.
@@ -131,6 +132,34 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Counts the number of running jobs for an agent.
+  """
+  @spec count_running_jobs(String.t()) :: non_neg_integer()
+  def count_running_jobs(agent_id) when is_binary(agent_id) do
+    Repo.one(
+      from(i in Issue,
+        where: i.assignee_id == ^agent_id and i.status == :running,
+        select: count(i.id)
+      )
+    ) || 0
+  end
+
+  @doc """
+  Returns true if the agent is at or above their max_concurrent_jobs limit.
+  """
+  @spec is_agent_at_capacity?(String.t()) :: boolean()
+  def is_agent_at_capacity?(agent_id) when is_binary(agent_id) do
+    case get_agent(agent_id) do
+      {:ok, agent} ->
+        running = count_running_jobs(agent_id)
+        running >= agent.max_concurrent_jobs
+
+      {:error, _} ->
+        true
+    end
+  end
+
+  @doc """
   Gets an agent by its url_key field, returns {:ok, agent} or {:error, :not_found}.
   """
   def get_agent_by_url_key(url_key) when is_binary(url_key) do
@@ -138,6 +167,29 @@ defmodule Cympho.Agents do
     |> case do
       nil -> {:error, :not_found}
       agent -> {:ok, agent}
+    end
+  end
+
+  @doc """
+  Spawns a new agent: creates the agent record and starts its heartbeat process.
+  Returns {:ok, agent} or {:error, reason}.
+  """
+  @spec spawn_agent(map(), String.t()) :: {:ok, Agent.t()} | {:error, Ecto.Changeset.t() | atom()}
+  def spawn_agent(attrs \\ %{}, parent_agent_id) when is_binary(parent_agent_id) do
+    case create_agent(attrs) do
+      {:ok, agent} ->
+        case Cympho.AgentHeartbeat.start_for_agent(agent.id) do
+          {:ok, _pid} ->
+            {:ok, agent}
+
+          {:error, reason} ->
+            # Clean up the agent record if heartbeat start fails
+            Repo.delete(agent)
+            {:error, reason}
+        end
+
+      {:error, changeset} ->
+        {:error, changeset}
     end
   end
 end

@@ -164,12 +164,29 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   defp agent_for_dispatch do
+    # First try the configured dispatch agent if not at capacity
     case Agents.get_agent_by_url_key(@dispatch_agent_url_key) do
-      {:ok, agent} -> {:ok, agent}
+      {:ok, agent} ->
+        if Agents.is_agent_at_capacity?(agent.id) do
+          find_available_agent_by_role(:engineer)
+        else
+          {:ok, agent}
+        end
+
       {:error, _} ->
-        case Agents.list_agents_by_role(:engineer) do
-          [agent | _] -> {:ok, agent}
-          [] -> {:error, :no_agent}
+        find_available_agent_by_role(:engineer)
+    end
+  end
+
+  defp find_available_agent_by_role(role) do
+    case Agents.list_agents_by_role(role) do
+      [] ->
+        {:error, :no_agent}
+
+      agents ->
+        case Enum.find(agents, &(not Agents.is_agent_at_capacity?(&1.id))) do
+          nil -> {:error, :no_available_agent}
+          agent -> {:ok, agent}
         end
     end
   end
