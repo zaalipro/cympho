@@ -13,7 +13,14 @@ defmodule Cympho.Notifications.TelegramChannel do
     chat_id = config[:telegram_chat_id]
     bot_token = config[:telegram_bot_token]
 
-    if is_binary(chat_id) and chat_id != "" and is_binary(bot_token) and bot_token != "" do
+    cond do
+      not is_binary(chat_id) or chat_id == "" ->
+        {:error, :no_telegram_chat_id}
+
+      not is_binary(bot_token) or bot_token == "" ->
+        {:error, :no_telegram_bot_token}
+
+      true ->
       text = "*#{message.subject}*\n\n#{message.body}"
       url = "https://api.telegram.org/bot#{bot_token}/sendMessage"
 
@@ -24,22 +31,28 @@ defmodule Cympho.Notifications.TelegramChannel do
           parse_mode: "Markdown"
         })
 
-      case Finch.build(:post, url, [{"content-type", "application/json"}], body)
-           |> Finch.request(Cympho.Finch) do
-        {:ok, %Finch.Response{status: 200}} -> :ok
-        {:ok, %Finch.Response{status: status, body: resp_body}} -> {:error, {status, resp_body}}
-        {:error, reason} -> {:error, reason}
-      end
-    else
-      {:error, :missing_telegram_config}
+        url = "https://api.telegram.org/bot#{bot_token}/sendMessage"
+
+        body =
+          Jason.encode!(%{
+            chat_id: chat_id,
+            text: text,
+            parse_mode: "Markdown"
+          })
+
+        case Finch.build(:post, url, [{"content-type", "application/json"}], body)
+             |> Finch.request(Cympho.Finch) do
+          {:ok, %Finch.Response{status: 200}} -> :ok
+          {:ok, %Finch.Response{status: status, body: resp_body}} -> {:error, {status, resp_body}}
+          {:error, reason} -> {:error, reason}
+        end
     end
   end
 
   @impl Channel
   def available?(config) do
     chat_id = config[:telegram_chat_id]
-    bot_token = config[:telegram_bot_token]
-    is_binary(chat_id) and chat_id != "" and is_binary(bot_token) and bot_token != ""
+    is_binary(chat_id) and chat_id != ""
   end
 
   @impl Channel

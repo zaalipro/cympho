@@ -53,7 +53,8 @@ defmodule Cympho.IssuesLifecycleTest do
       {:ok, child_issue} =
         Issues.create_issue(%{
           title: "Child Issue",
-          description: "Depends on parent"
+          description: "Depends on parent",
+          status: :in_review
         })
 
       # Add blocker relationship

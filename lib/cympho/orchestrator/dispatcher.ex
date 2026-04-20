@@ -13,6 +13,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
   """
 
   use GenServer, restart: :permanent
+  import Ecto.Query
   alias Cympho.Orchestrator.Dispatcher.State
   alias Cympho.Orchestrator
   alias Cympho.Issues

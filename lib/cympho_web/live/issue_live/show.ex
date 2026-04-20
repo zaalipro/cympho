@@ -139,7 +139,7 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_event("spawn_agent", %{"agent_id" => agent_id}, socket) do
     issue = socket.assigns.issue
 
-    case Orchestrator.start_link(issue, agent_id) do
+    case Orchestrator.start_and_run(issue, agent_id) do
       {:ok, _pid} ->
         {:ok, _updated_agent} = Agents.update_agent(%Agents.Agent{id: agent_id}, %{status: :running})
         {:noreply,

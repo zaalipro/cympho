@@ -12,11 +12,12 @@ defmodule Cympho.AgentHeartbeat do
 
   use GenServer
 
-  alias Cympho.AgentHeartbeat.{Registry, Supervisor}
+  alias Cympho.AgentHeartbeat.Supervisor
+  alias Cympho.AgentHeartbeat.Registry, as: HeartbeatRegistry
   alias Cympho.{Orchestrator, Issues, Agents}
   alias Cympho.Issues.Issue
   alias Cympho.Repo
-  import Ecto.Query, only: [where: 3, first: 1]
+  import Ecto.Query
 
   @type status :: :idle | :working
   @type state :: %{
@@ -44,7 +45,7 @@ defmodule Cympho.AgentHeartbeat do
   Returns a tuple used to register/lookup the heartbeat process via Registry.
   """
   def via(agent_id) do
-    {:via, Registry, {agent_id}}
+    {:via, Registry, {Cympho.AgentHeartbeat.Registry, agent_id}}
   end
 
   @doc """
@@ -53,7 +54,7 @@ defmodule Cympho.AgentHeartbeat do
   """
   @spec start_for_agent(String.t()) :: {:ok, pid()} | {:error, atom()}
   def start_for_agent(agent_id) when is_binary(agent_id) do
-    case Registry.lookup(agent_id) do
+    case HeartbeatRegistry.lookup(agent_id) do
       {:ok, _pid} ->
         {:error, :already_started}
 
@@ -70,7 +71,7 @@ defmodule Cympho.AgentHeartbeat do
   """
   @spec stop_for_agent(String.t()) :: :ok | {:error, :not_found}
   def stop_for_agent(agent_id) do
-    case Registry.lookup(agent_id) do
+    case HeartbeatRegistry.lookup(agent_id) do
       {:ok, pid} ->
         GenServer.stop(pid, :normal)
 
@@ -84,7 +85,7 @@ defmodule Cympho.AgentHeartbeat do
   """
   @spec status(String.t()) :: {:ok, status()} | {:error, :not_found}
   def status(agent_id) do
-    case Registry.lookup(agent_id) do
+    case HeartbeatRegistry.lookup(agent_id) do
       {:ok, pid} ->
         {:ok, GenServer.call(pid, :get_status)}
 
@@ -99,7 +100,7 @@ defmodule Cympho.AgentHeartbeat do
   """
   @spec set_working(String.t(), String.t()) :: :ok | {:error, :not_found}
   def set_working(agent_id, issue_id) do
-    case Registry.lookup(agent_id) do
+    case HeartbeatRegistry.lookup(agent_id) do
       {:ok, pid} ->
         GenServer.call(pid, {:set_working, issue_id})
 
@@ -114,7 +115,7 @@ defmodule Cympho.AgentHeartbeat do
   """
   @spec set_idle(String.t()) :: :ok | {:error, :not_found}
   def set_idle(agent_id) do
-    case Registry.lookup(agent_id) do
+    case HeartbeatRegistry.lookup(agent_id) do
       {:ok, pid} ->
         GenServer.call(pid, :set_idle)
 
@@ -128,7 +129,7 @@ defmodule Cympho.AgentHeartbeat do
   # ---------------------------------------------------------------------------
 
   @impl true
-  def init(agent_id: agent_id) do
+  def init(agent_id) do
     timer_ref = schedule_heartbeat(agent_id)
     state = %{agent_id: agent_id, status: :idle, current_issue_id: nil, timer_ref: timer_ref}
     {:ok, state}
@@ -218,9 +219,12 @@ defmodule Cympho.AgentHeartbeat do
         config = agent.heartbeat_config || %{}
         Map.get(config, "interval_ms", @default_heartbeat_interval)
 
-      :error ->
+      {:error, _} ->
         @default_heartbeat_interval
     end
+  rescue
+    Ecto.Query.CastError ->
+      @default_heartbeat_interval
   end
 
   defp fetch_next_todo_issue(agent_id) do

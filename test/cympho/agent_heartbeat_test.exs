@@ -4,9 +4,16 @@ defmodule Cympho.AgentHeartbeatTest do
   alias Cympho.AgentHeartbeat
 
   setup do
-    # Ensure the supervisor and registry are started for tests
-    start_supervised!({Cympho.AgentHeartbeat.Supervisor, []})
-    start_supervised!({Registry, keys: :unique, name: Cympho.AgentHeartbeat.Registry})
+    case start_supervised({Cympho.AgentHeartbeat.Supervisor, []}) do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> :ok
+    end
+
+    case start_supervised({Registry, keys: :unique, name: Cympho.AgentHeartbeat.Registry}) do
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> :ok
+    end
+
     :ok
   end
 

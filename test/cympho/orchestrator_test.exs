@@ -5,8 +5,21 @@ defmodule Cympho.OrchestratorTest do
   alias Cympho.Orchestrator.Session
 
   setup do
-    # Start registry for test
-    start_supervised!({Registry, keys: :unique, name: Cympho.OrchestratorRegistry})
+    unless Process.whereis(Cympho.OrchestratorRegistry) do
+      start_supervised!({Registry, keys: :unique, name: Cympho.OrchestratorRegistry})
+    end
+
+    on_exit(fn ->
+      Registry.select(Cympho.OrchestratorRegistry, [{{:_, :"$1", :_}, [], [:"$1"]}])
+      |> Enum.each(fn pid ->
+        try do
+          GenServer.stop(pid, :normal, 500)
+        catch
+          _, _ -> :ok
+        end
+      end)
+    end)
+
     :ok
   end
 
@@ -20,7 +33,7 @@ defmodule Cympho.OrchestratorTest do
       assert session.issue.id == "test-1"
       assert session.agent_id == "agent-1"
       assert session.session_id == nil
-      assert session.turn_count == nil
+      assert session.turn_count == 0
     end
 
     test "can be created with all fields" do
@@ -78,7 +91,7 @@ defmodule Cympho.OrchestratorTest do
       issue = %{id: "orch-stop-test", title: "Test", description: "Desc"}
       agent_id = "agent-1"
 
-      {:ok, pid} = Orchestrator.start_link(issue, agent_id)
+      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
       assert Orchestrator.whereis(issue.id) == pid
       assert :ok = Orchestrator.stop(issue.id)
       # Give the Registry time to clean up the entry
@@ -115,6 +128,7 @@ defmodule Cympho.OrchestratorTest do
       assert Orchestrator.whereis(issue.id) == pid
 
       Orchestrator.stop(issue.id)
+      :timer.sleep(50)
       assert Orchestrator.whereis(issue.id) == nil
     end
 
