@@ -25,8 +25,8 @@ defmodule Cympho.Orchestrator.DispatcherTest do
   describe "handle_info(:session_ended, ...)" do
     @tag :capture_log
     test "removes issue_id from running set" do
-      # Start the dispatcher - it will be cleaned up after
-      dispatcher_pid = start_supervised!(Dispatcher)
+      # Dispatcher may already be started by app supervisor - use it directly
+      ensure_dispatcher_running()
       send(Dispatcher, {:session_ended, "any-issue-id", :normal})
       :timer.sleep(50)
       state = Dispatcher.state()
@@ -37,9 +37,18 @@ defmodule Cympho.Orchestrator.DispatcherTest do
   describe "start_link/1" do
     @tag :capture_log
     test "starts linked to calling process" do
-      dispatcher_pid = start_supervised!(Dispatcher)
-      assert is_pid(dispatcher_pid)
-      assert Process.alive?(dispatcher_pid)
+      ensure_dispatcher_running()
+      pid = Process.whereis(Dispatcher)
+      assert is_pid(pid)
+      assert Process.alive?(pid)
+    end
+  end
+
+  # Helpers
+
+  defp ensure_dispatcher_running do
+    unless Process.whereis(Dispatcher) do
+      {:ok, _} = Dispatcher.start_link([])
     end
   end
 end
