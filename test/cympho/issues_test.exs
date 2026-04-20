@@ -306,6 +306,62 @@ defmodule Cympho.IssuesTest do
     end
   end
 
+  describe "checkout_issue/2 capacity enforcement" do
+    test "returns error when agent is at capacity" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Capacity Test Agent",
+          role: :engineer,
+          max_concurrent_jobs: 2
+        })
+
+      # Create and checkout 2 issues to fill capacity
+      {:ok, issue1} =
+        Issues.create_issue(%{
+          title: "Issue 1",
+          description: "Fills capacity"
+        })
+
+      {:ok, issue2} =
+        Issues.create_issue(%{
+          title: "Issue 2",
+          description: "Fills capacity"
+        })
+
+      {:ok, _} = Issues.checkout_issue(issue1, agent)
+      {:ok, _} = Issues.checkout_issue(issue2, agent)
+
+      # Now agent is at capacity (2 in_progress issues, max 2)
+      {:ok, issue3} =
+        Issues.create_issue(%{
+          title: "Issue 3",
+          description: "Should fail"
+        })
+
+      assert {:error, :agent_at_capacity} = Issues.checkout_issue(issue3, agent)
+    end
+
+    test "agent at capacity can still re-checkout their own issue" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Capacity Test Agent",
+          role: :engineer,
+          max_concurrent_jobs: 1
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "My Issue",
+          description: "Already checked out"
+        })
+
+      {:ok, _} = Issues.checkout_issue(issue, agent)
+
+      # Even at capacity, can re-checkout own issue
+      assert {:ok, _} = Issues.checkout_issue(issue, agent)
+    end
+  end
+
   describe "checkout_issue/2 edge cases" do
     test "checkout by same agent is idempotent", %{issue: issue} do
       {:ok, agent} =

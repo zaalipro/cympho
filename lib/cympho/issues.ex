@@ -215,6 +215,9 @@ defmodule Cympho.Issues do
       current_issue.assignee_id == agent_id ->
         {:ok, current_issue}
 
+      Agents.is_agent_at_capacity?(agent) ->
+        {:error, :agent_at_capacity}
+
       not Issue.role_authorized?(agent.role, required_role) ->
         {:error, :chain_of_command_violation}
 
