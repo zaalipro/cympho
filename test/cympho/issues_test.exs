@@ -313,11 +313,11 @@ defmodule Cympho.IssuesTest do
           role: :engineer
         })
 
-      assert {:ok, checked_out1} = Issues.checkout_issue(agent, issue)
+      assert {:ok, checked_out1} = Issues.checkout_issue(issue, agent)
       assert checked_out1.assignee_id == agent.id
       assert checked_out1.status == :in_progress
 
-      assert {:ok, checked_out2} = Issues.checkout_issue(agent, issue)
+      assert {:ok, checked_out2} = Issues.checkout_issue(issue, agent)
       assert checked_out2.assignee_id == agent.id
     end
   end
@@ -374,7 +374,7 @@ defmodule Cympho.IssuesTest do
           description: "Test checkout"
         })
 
-      assert {:ok, checked_out} = Issues.checkout_issue(agent, issue)
+      assert {:ok, checked_out} = Issues.checkout_issue(issue, agent)
       assert checked_out.assignee_id == agent.id
       assert checked_out.status == :in_progress
     end
@@ -398,8 +398,8 @@ defmodule Cympho.IssuesTest do
           description: "Test"
         })
 
-      {:ok, _} = Issues.checkout_issue(agent1, issue)
-      assert {:error, :already_assigned} = Issues.checkout_issue(agent2, issue)
+      {:ok, _} = Issues.checkout_issue(issue, agent1)
+      assert {:error, :already_assigned} = Issues.checkout_issue(issue, agent2)
     end
   end
 

@@ -163,12 +163,18 @@ defmodule Cympho.Issues do
   end
 
   def checkout_issue(%Issue{} = issue, agent_id) do
+    # Reload issue to get current state (assignee may have changed)
+    current_issue = Repo.reload(issue)
+
     cond do
-      issue.assignee_id != nil and issue.assignee_id != agent_id ->
+      current_issue.assignee_id != nil and current_issue.assignee_id != agent_id ->
         {:error, :already_assigned}
 
+      not StateMachine.valid_transition?(current_issue.status, :in_progress) ->
+        {:error, :invalid_transition}
+
       true ->
-        update_issue(issue, %{assignee_id: agent_id, status: :in_progress})
+        update_issue(current_issue, %{assignee_id: agent_id, status: :in_progress})
         |> maybe_adjust_lock_version()
     end
   end
@@ -248,8 +254,8 @@ defmodule Cympho.Issues do
   def remove_blocker(%Issue{} = blocked_issue, %Issue{} = blocker_issue) do
     count =
       from(bb in "issue_blockers",
-        where: bb.blocked_issue_id == Ecto.UUID.dump!(blocked_issue.id) and
-               bb.blocking_issue_id == Ecto.UUID.dump!(blocker_issue.id)
+        where: bb.blocked_issue_id == ^Ecto.UUID.dump!(blocked_issue.id) and
+               bb.blocking_issue_id == ^Ecto.UUID.dump!(blocker_issue.id)
       )
       |> Repo.delete_all()
       |> elem(1)

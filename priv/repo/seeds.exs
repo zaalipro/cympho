@@ -4,7 +4,7 @@ alias Cympho.Comments
 {:ok, issue1} = Issues.create_issue(%{
   title: "First Issue",
   description: "This is the first issue in the system",
-  status: :open,
+  status: :backlog,
   priority: :high
 })
 
