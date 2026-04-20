@@ -13,13 +13,17 @@ defmodule Cympho.Agents.Agent do
     field :instructions, :string
     field :max_concurrent_jobs, :integer, default: 3
 
+    belongs_to :created_by_agent, Cympho.Agents.Agent,
+      foreign_key: :created_by_agent_id,
+      type: :binary_id
+
     timestamps(type: :utc_datetime)
   end
 
   @doc false
   def changeset(agent, attrs) do
     agent
-    |> cast(attrs, [:name, :url_key, :role, :status, :config, :instructions, :max_concurrent_jobs])
+    |> cast(attrs, [:name, :url_key, :role, :status, :config, :instructions, :max_concurrent_jobs, :created_by_agent_id])
     |> validate_required([:name, :role])
     |> validate_inclusion(:role, [:engineer, :product_manager, :designer, :ceo, :cto])
     |> validate_inclusion(:status, [:idle, :running, :error])

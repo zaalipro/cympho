@@ -1,12 +1,11 @@
 <.header>
   {@page_title}
   <:actions>
-    <%= if show_spawn_button?(@current_agent_role) do %>
+    <%= if show_spawn_button?(@current_agent) do %>
       <.live_component
         module={CymphoWeb.SpawnAgentComponent}
         id="spawn-agent"
-        current_agent_id={@current_agent_id}
-        current_agent_role={@current_agent_role}
+        current_agent={@current_agent}
       />
     <% else %>
       <.link navigate={~p"/agents/new"} class="phx-btn">

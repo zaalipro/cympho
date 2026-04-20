@@ -9,11 +9,13 @@ defmodule CymphoWeb.AgentLive.Index do
     # For now, derive current agent from session. In production, this would
     # come from a proper auth system. Format: %{id: "...", role: :cto}
     current_agent = session["current_agent"]
+    full_agent = current_agent && Agents.get_agent(current_agent.id) |> then(fn {:ok, a} -> a end)
 
     socket =
       assign(socket, :agents, Agents.list_agents())
       |> assign(:current_agent_id, current_agent && current_agent.id)
       |> assign(:current_agent_role, current_agent && current_agent.role)
+      |> assign(:current_agent, full_agent)
 
     {:ok, socket}
   end
@@ -65,6 +67,8 @@ defmodule CymphoWeb.AgentLive.Index do
   def role_label(:ceo), do: "CEO"
   def role_label(:cto), do: "CTO"
 
-  def show_spawn_button?(role) when role in [:ceo, :cto], do: true
-  def show_spawn_button?(_role), do: false
+  def show_spawn_button?(%Agents.Agent{} = agent) do
+    Agents.spawnable_roles(agent) |> length() > 1
+  end
+  def show_spawn_button?(_), do: false
 end

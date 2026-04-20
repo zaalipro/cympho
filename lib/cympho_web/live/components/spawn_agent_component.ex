@@ -22,13 +22,12 @@ defmodule CymphoWeb.SpawnAgentComponent do
               <label>Role</label>
               <select
                 name="agent[role]"
-                disabled
                 class="role-select"
               >
-                <option value="cto" selected={@prefilled_role == :cto}>CTO</option>
-                <option value="engineer" selected={@prefilled_role == :engineer}>Engineer</option>
+                <option :for={role <- @spawnable_roles} value={role} selected={@prefilled_role == role}>
+                  {role_label(role)}
+                </option>
               </select>
-              <input type="hidden" name="agent[role]" value={Atom.to_string(@prefilled_role)} />
             </div>
 
             <.input field={@changeset[:config]} label="Adapter Config" placeholder="{}" />
@@ -65,7 +64,8 @@ defmodule CymphoWeb.SpawnAgentComponent do
       |> assign(assigns)
       |> assign(:changeset, changeset)
       |> assign(:show_form, false)
-      |> assign(:prefilled_role, prefilled_role(assigns.current_agent_role))
+      |> assign(:spawnable_roles, Agents.spawnable_roles(assigns.current_agent))
+      |> assign(:prefilled_role, prefilled_role(assigns.current_agent.role))
 
     {:ok, socket}
   end
@@ -81,12 +81,18 @@ defmodule CymphoWeb.SpawnAgentComponent do
   end
 
   def handle_event("spawn", %{"agent" => agent_params}, socket) do
-    case Agents.spawn_agent(agent_params, socket.assigns.current_agent_id) do
+    case Agents.spawn_agent(agent_params, socket.assigns.current_agent.id) do
       {:ok, _agent} ->
         {:noreply,
          socket
          |> assign(:show_form, false)
          |> put_flash(:info, "Agent spawned successfully")}
+
+      {:error, :unauthorized_spawn} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Not authorized to spawn this role")
+         |> assign(:show_form, false)}
 
       {:error, changeset} ->
         {:noreply, assign(socket, changeset: changeset)}
@@ -95,5 +101,11 @@ defmodule CymphoWeb.SpawnAgentComponent do
 
   defp prefilled_role(:cto), do: :engineer
   defp prefilled_role(:ceo), do: :cto
-  defp prefilled_role(_), do: :engineer
+  defp prefilled_role(role), do: role
+
+  defp role_label(:engineer), do: "Engineer"
+  defp role_label(:product_manager), do: "Product Manager"
+  defp role_label(:designer), do: "Designer"
+  defp role_label(:cto), do: "CTO"
+  defp role_label(:ceo), do: "CEO"
 end
