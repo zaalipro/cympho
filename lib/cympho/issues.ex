@@ -7,6 +7,7 @@ defmodule Cympho.Issues do
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
+  alias Cympho.Agents.Agent
   alias Cympho.Comments
 
   @doc """
@@ -170,10 +171,6 @@ defmodule Cympho.Issues do
   Releases an issue, clearing the assignee and transitioning to :todo (or provided status).
   Returns {:ok, issue} or {:error, :invalid_transition}.
   """
-  def release_issue(%Issue{} = issue, %Agent{} = agent, target_status \\ :todo) do
-    release_issue(issue, agent.id, target_status)
-  end
-
   def release_issue(%Issue{} = issue, target_status \\ :todo) do
     if StateMachine.valid_transition?(issue.status, target_status) do
       update_issue(issue, %{assignee_id: nil, status: target_status})
