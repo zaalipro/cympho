@@ -28,3 +28,4 @@ Thumbs.db
 
 # Backup files
 *.bak
+erl_crash.dump
