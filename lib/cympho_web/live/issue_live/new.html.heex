@@ -8,20 +8,30 @@
 </.header>
 
 <div class="issue-form">
-  <.simple_form :let={f} for={@changeset} phx-submit="save">
-    <.input field={f[:title]} label="Title" />
-    <.input field={f[:description]} label="Description" type="textarea" />
+  <.simple_form for={@changeset} as={:issue} phx-submit="save">
+    <.input field={@changeset[:title]} label="Title" />
+    <.input field={@changeset[:description]} label="Description" type="textarea" />
 
     <div class="form-group">
       <label>Status</label>
-      <%= select(f, :status, open: "open", in_progress: "in_progress", closed: "closed") %>
+      <select name="issue[status]">
+        <option value="open">Open</option>
+        <option value="in_progress">In Progress</option>
+        <option value="closed">Closed</option>
+      </select>
     </div>
 
     <div class="form-group">
       <label>Priority</label>
-      <%= select(f, :priority, low: "low", medium: "medium", high: "high") %>
+      <select name="issue[priority]">
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+      </select>
     </div>
 
-    <.button type="submit">Create Issue</.button>
+    <:actions>
+      <.button type="submit">Create Issue</.button>
+    </:actions>
   </.simple_form>
 </div>

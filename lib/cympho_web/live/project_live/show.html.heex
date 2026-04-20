@@ -1,5 +1,5 @@
 <.header>
-  <%= @project.name %>
+  {@project.name}
   <:actions>
     <.link navigate={~p"/projects"} class="phx-btn-secondary">
       Back
@@ -13,14 +13,14 @@
 <div class="project-detail">
   <div class="project-info">
     <div class="status-row">
-      <span class="badge status-<%= @project.status %>"><%= @project.status %></span>
-      <span class="prefix-badge"><%= @project.prefix %></span>
+      <span class={"badge status-#{@project.status}"}>{@project.status}</span>
+      <span class="prefix-badge">{@project.prefix}</span>
     </div>
 
-    <p class="description"><%= @project.description %></p>
+    <p class="description">{@project.description}</p>
 
     <div class="meta">
-      <span>Created <%= @project.inserted_at %></span>
+      <span>Created {@project.inserted_at}</span>
     </div>
   </div>
 </div>

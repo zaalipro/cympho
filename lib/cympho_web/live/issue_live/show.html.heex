@@ -1,5 +1,5 @@
 <.header>
-  <%= @issue.title %>
+  {@issue.title}
   <:actions>
     <.link navigate={~p"/issues"} class="phx-btn-secondary">
       Back
@@ -10,39 +10,37 @@
 <div class="issue-detail">
   <div class="issue-info">
     <div class="status-row">
-      <span class={"badge status-#{@issue.status}"}><%= @issue.status %></span>
-      <span class={"priority-#{@issue.priority}"}><%= @issue.priority %></span>
+      <span class={"badge status-#{@issue.status}"}>{@issue.status}</span>
+      <span class={"priority-#{@issue.priority}"}>{@issue.priority}</span>
     </div>
 
-    <p class="description"><%= @issue.description %></p>
+    <p class="description">{@issue.description}</p>
 
     <div class="meta">
-      <span>Created <%= @issue.inserted_at %></span>
+      <span>Created {@issue.inserted_at}</span>
     </div>
   </div>
 
   <div class="comments-section">
-    <h3>Comments (<%= length(@issue.comments) %>)</h3>
+    <h3>Comments ({length(@issue.comments)})</h3>
 
     <div class="comments-list">
-      <%= for comment <- @issue.comments do %>
-        <div class="comment" id={"comment-#{comment.id}"}>
-          <div class="comment-header">
-            <strong><%= comment.author %></strong>
-            <span><%= comment.inserted_at %></span>
-          </div>
-          <p><%= comment.body %></p>
-          <button
-            type="button"
-            class="delete-btn"
-            phx-click="delete_comment"
-            phx-value-id={comment.id}
-            data-confirm="Delete this comment?"
-          >
-            Delete
-          </button>
+      <div :for={comment <- @issue.comments} class="comment" id={"comment-#{comment.id}"}>
+        <div class="comment-header">
+          <strong>{comment.author}</strong>
+          <span>{comment.inserted_at}</span>
         </div>
-      <% end %>
+        <p>{comment.body}</p>
+        <button
+          type="button"
+          class="delete-btn"
+          phx-click="delete_comment"
+          phx-value-id={comment.id}
+          data-confirm="Delete this comment?"
+        >
+          Delete
+        </button>
+      </div>
     </div>
 
     <div class="comment-form">
@@ -59,7 +57,7 @@
         </div>
         <div class="form-group">
           <label for="comment_body">Comment</label>
-          <textarea id="comment_body" name="comment[body]"><%= @comment_changeset.params["body"] %></textarea>
+          <textarea id="comment_body" name="comment[body]">{@comment_changeset.params["body"]}</textarea>
         </div>
         <button type="submit" class="phx-btn">Add Comment</button>
       </form>

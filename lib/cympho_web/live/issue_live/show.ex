@@ -92,17 +92,24 @@ defmodule CymphoWeb.IssueLive.Show do
 
   @impl true
   def handle_event("update_issue_status", %{"status" => status}, socket) do
-    valid_statuses = ~w(backlog todo in_progress in_review done blocked)
-    case status do
-      s when s in valid_statuses ->
-        status_atom = String.to_existing_atom(s)
+    status_atoms = %{
+      "backlog" => :backlog,
+      "todo" => :todo,
+      "in_progress" => :in_progress,
+      "in_review" => :in_review,
+      "done" => :done,
+      "blocked" => :blocked
+    }
+
+    case Map.fetch(status_atoms, status) do
+      {:ok, status_atom} ->
         case Issues.update_issue(socket.assigns.issue, %{status: status_atom}) do
           {:ok, _issue} ->
             {:noreply, socket}
           {:error, _changeset} ->
             {:noreply, put_flash(socket, :error, "Failed to update status")}
         end
-      _ ->
+      :error ->
         {:noreply, put_flash(socket, :error, "Invalid status")}
     end
   end

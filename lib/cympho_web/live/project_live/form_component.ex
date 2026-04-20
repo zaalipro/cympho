@@ -7,14 +7,14 @@ defmodule CymphoWeb.ProjectLive.FormComponent do
     ~H"""
     <div class="project-form">
       <.simple_form
-        :let={f}
         for={@changeset}
+        as={:project}
         phx-submit="save"
         phx-target={@myself}
       >
-        <.input field={f[:name]} label="Name" />
-        <.input field={f[:description]} label="Description" type="textarea" />
-        <.input field={f[:prefix]} label="Prefix" placeholder="e.g., PROJ" />
+        <.input field={@changeset[:name]} label="Name" />
+        <.input field={@changeset[:description]} label="Description" type="textarea" />
+        <.input field={@changeset[:prefix]} label="Prefix" placeholder="e.g., PROJ" />
 
         <div class="form-group">
           <label>Status</label>
@@ -24,7 +24,9 @@ defmodule CymphoWeb.ProjectLive.FormComponent do
           </select>
         </div>
 
-        <.button type="submit"><%= if @project.id, do: "Update Project", else: "Create Project" %></.button>
+        <:actions>
+          <.button type="submit">{if @project.id, do: "Update Project", else: "Create Project"}</.button>
+        </:actions>
       </.simple_form>
     </div>
     """
