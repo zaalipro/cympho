@@ -2,18 +2,24 @@ defmodule Cympho.Issues.StateMachine do
   @moduledoc """
   State machine for Issue status transitions.
 
-  Valid transitions:
-  - open -> in_progress (work started)
-  - open -> closed (wontfix)
-  - in_progress -> open (reopened)
-  - in_progress -> closed (completed)
-  - closed -> open (reopened)
+  Valid transitions for 6-state kanban:
+  - backlog -> todo
+  - todo -> in_progress
+  - in_progress -> in_review
+  - in_review -> done
+  - in_review -> in_progress (changes requested)
+  - done -> in_progress (reopened)
+  - any -> blocked
+  - blocked -> previous status (unblocked)
   """
 
   @valid_transitions %{
-    open: [:in_progress, :closed],
-    in_progress: [:open, :closed],
-    closed: [:open]
+    backlog: [:todo, :blocked],
+    todo: [:in_progress, :blocked],
+    in_progress: [:in_review, :blocked],
+    in_review: [:done, :in_progress],
+    done: [:in_progress, :blocked],
+    blocked: [:backlog, :todo, :in_progress, :in_review, :done]
   }
 
   @doc """
@@ -23,6 +29,8 @@ defmodule Cympho.Issues.StateMachine do
       when is_atom(from_status) and is_atom(to_status) do
     Map.get(@valid_transitions, from_status, []) |> Enum.member?(to_status)
   end
+
+  def can_transition?(from_status, to_status), do: valid_transition?(from_status, to_status)
 
   @doc """
   Returns the list of valid next statuses for a given status.
@@ -34,5 +42,6 @@ defmodule Cympho.Issues.StateMachine do
   @doc """
   Returns the list of all possible statuses.
   """
-  def statuses, do: [:open, :in_progress, :closed]
+  def valid_states, do: [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
+  def statuses, do: valid_states()
 end
