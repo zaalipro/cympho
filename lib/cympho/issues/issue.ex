@@ -10,7 +10,7 @@ defmodule Cympho.Issues.Issue do
   schema "issues" do
     field :title, :string
     field :description, :string
-    field :status, Ecto.Enum, values: [:open, :in_progress, :closed], default: :open
+    field :status, Ecto.Enum, values: [:backlog, :todo, :in_progress, :in_review, :done, :blocked], default: :backlog
     field :priority, Ecto.Enum, values: [:low, :medium, :high], default: :medium
     field :assignee, :string
 
@@ -49,8 +49,9 @@ defmodule Cympho.Issues.Issue do
     |> validate_required([:title, :description])
     |> validate_length(:title, min: 1, max: 255)
     |> validate_length(:description, min: 1)
+    |> unique_constraint(:identifier, name: :issues_project_id_identifier_index)
   end
 
-  def status_options, do: [:open, :in_progress, :closed]
+  def status_options, do: [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
   def priority_options, do: [:low, :medium, :high]
 end

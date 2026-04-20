@@ -73,6 +73,13 @@ defmodule Cympho.Projects do
   end
 
   @doc """
+  Subscribes to project updates.
+  """
+  def subscribe do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "projects")
+  end
+
+  @doc """
   Returns a changeset for creating a new project.
   """
   def change_project(%Project{} = project, attrs \\ %{}) do

@@ -1,5 +1,6 @@
 defmodule Cympho.Issues.StateMachineTest do
   use Cympho.DataCase, async: true
+  use ExUnit.Case, async: true
 
   alias Cympho.Issues.StateMachine
 

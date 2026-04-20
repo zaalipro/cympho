@@ -36,7 +36,6 @@ defmodule Cympho.Comments do
           issue = Repo.preload(issue, :comments)
           Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_created, issue})
       end
-
       {:ok, comment}
     end)
   end
@@ -55,7 +54,6 @@ defmodule Cympho.Comments do
           issue = Repo.preload(issue, :comments)
           Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_updated, issue})
       end
-
       {:ok, comment}
     end)
   end
@@ -65,6 +63,7 @@ defmodule Cympho.Comments do
   """
   def delete_comment(%Comment{} = comment) do
     issue_id = comment.issue_id
+
     Repo.delete(comment)
     |> then(fn {:ok, _comment} ->
       case Repo.get(Issue, issue_id) do
@@ -73,7 +72,6 @@ defmodule Cympho.Comments do
           issue = Repo.preload(issue, :comments)
           Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_deleted, issue})
       end
-
       :ok
     end)
   end

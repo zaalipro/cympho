@@ -22,5 +22,15 @@ defmodule CymphoWeb.Router do
     live "/issues", IssueLive.Index
     live "/issues/new", IssueLive.New
     live "/issues/:id", IssueLive.Show
+    live "/kanban", KanbanLive.Index
+  end
+
+  scope "/api", CymphoWeb do
+    pipe_through :api
+
+    resources "/users", UserController, only: [:index, :show, :create, :update, :delete]
+    patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
+
+    post "/telegram/webhook", TelegramController, :webhook
   end
 end

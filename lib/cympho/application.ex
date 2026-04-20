@@ -8,6 +8,8 @@ defmodule Cympho.Application do
     children = [
       Cympho.Repo,
       {Phoenix.PubSub, name: Cympho.PubSub},
+      {Task.Supervisor, name: Cympho.TaskSupervisor},
+      Cympho.Notifications.RetryWorker,
       CymphoWeb.Endpoint
     ]
 

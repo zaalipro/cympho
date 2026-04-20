@@ -6,12 +6,14 @@ defmodule Cympho.CommentsTest do
   alias Cympho.Issues
 
   setup do
-    {:ok, issue} = Issues.create_issue(%{
-      title: "Test Issue",
-      description: "Test description",
-      status: :open,
-      priority: :high
-    })
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Test Issue",
+        description: "Test description",
+        status: :open,
+        priority: :high
+      })
+
     %{issue: issue}
   end
 
@@ -21,16 +23,19 @@ defmodule Cympho.CommentsTest do
     end
 
     test "returns comments for issue", %{issue: issue} do
-      {:ok, comment1} = Comments.create_comment(%{
-        body: "First comment",
-        author: "Alice",
-        issue_id: issue.id
-      })
-      {:ok, comment2} = Comments.create_comment(%{
-        body: "Second comment",
-        author: "Bob",
-        issue_id: issue.id
-      })
+      {:ok, comment1} =
+        Comments.create_comment(%{
+          body: "First comment",
+          author: "Alice",
+          issue_id: issue.id
+        })
+
+      {:ok, comment2} =
+        Comments.create_comment(%{
+          body: "Second comment",
+          author: "Bob",
+          issue_id: issue.id
+        })
 
       comments = Comments.list_comments(issue.id)
       assert length(comments) == 2
@@ -41,11 +46,12 @@ defmodule Cympho.CommentsTest do
 
   describe "get_comment!/1" do
     test "returns comment with given id", %{issue: issue} do
-      {:ok, comment} = Comments.create_comment(%{
-        body: "Test comment",
-        author: "Test Author",
-        issue_id: issue.id
-      })
+      {:ok, comment} =
+        Comments.create_comment(%{
+          body: "Test comment",
+          author: "Test Author",
+          issue_id: issue.id
+        })
 
       found = Comments.get_comment!(comment.id)
       assert found.id == comment.id
@@ -66,6 +72,7 @@ defmodule Cympho.CommentsTest do
         author: "New Author",
         issue_id: issue.id
       }
+
       assert {:ok, %Comment{} = comment} = Comments.create_comment(attrs)
       assert comment.body == "New comment body"
       assert comment.author == "New Author"
@@ -80,11 +87,13 @@ defmodule Cympho.CommentsTest do
 
   describe "update_comment/2" do
     setup %{issue: issue} do
-      {:ok, comment} = Comments.create_comment(%{
-        body: "Original body",
-        author: "Original Author",
-        issue_id: issue.id
-      })
+      {:ok, comment} =
+        Comments.create_comment(%{
+          body: "Original body",
+          author: "Original Author",
+          issue_id: issue.id
+        })
+
       %{comment: comment}
     end
 
@@ -102,16 +111,19 @@ defmodule Cympho.CommentsTest do
 
   describe "delete_comment/1" do
     setup %{issue: issue} do
-      {:ok, comment} = Comments.create_comment(%{
-        body: "To be deleted",
-        author: "Author",
-        issue_id: issue.id
-      })
+      {:ok, comment} =
+        Comments.create_comment(%{
+          body: "To be deleted",
+          author: "Author",
+          issue_id: issue.id
+        })
+
       %{comment: comment}
     end
 
     test "deletes the comment", %{comment: comment} do
       assert :ok = Comments.delete_comment(comment)
+
       assert_raise Ecto.NoResultsError, fn ->
         Comments.get_comment!(comment.id)
       end

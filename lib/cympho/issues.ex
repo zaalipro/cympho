@@ -3,6 +3,7 @@ defmodule Cympho.Issues do
   The Issues context for managing issues and their CRUD operations.
   """
   import Ecto.Query, warn: false
+  import Ecto.Changeset, only: [optimistic_lock: 3]
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
@@ -11,9 +12,18 @@ defmodule Cympho.Issues do
   @doc """
   Returns the list of issues.
   """
-  def list_issues do
-    Repo.all(Issue) |> Repo.preload([:comments, :blocked_by, :blocks])
+  def list_issues(opts \\ %{}) do
+    Issue
+    |> maybe_filter_by_project(opts)
+    |> Repo.all()
+    |> Repo.preload([:comments, :blocked_by, :blocks])
   end
+
+  defp maybe_filter_by_project(query, %{project_id: project_id}) do
+    where(query, project_id: ^project_id)
+  end
+
+  defp maybe_filter_by_project(query, _opts), do: query
 
   @doc """
   Returns the list of issues for a given project.
@@ -44,6 +54,7 @@ defmodule Cympho.Issues do
   Creates an issue.
   """
   def create_issue(attrs \\ %{}) do
+    attrs = maybe_generate_identifier(attrs)
     %Issue{}
     |> Issue.changeset(attrs)
     |> Repo.insert()
@@ -52,6 +63,19 @@ defmodule Cympho.Issues do
       {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
     end)
   end
+
+  defp maybe_generate_identifier(%{"project_id" => project_id} = attrs) do
+    if Map.has_key?(attrs, "identifier") do
+      attrs
+    else
+      project = Repo.get!(Cympho.Projects.Project, project_id)
+      max_seq = Repo.one(from i in Issue, where: i.project_id == ^project_id, select: max fragment("CAST(SPLIT_PART(i.identifier, '-', 2) AS INTEGER)")) || 0
+      seq = max_seq + 1
+      Map.put(attrs, "identifier", "#{project.prefix}-#{seq}")
+    end
+  end
+
+  defp maybe_generate_identifier(attrs), do: attrs
 
   @doc """
   Updates an issue.
@@ -67,6 +91,7 @@ defmodule Cympho.Issues do
     if StateMachine.valid_transition?(issue.status, new_status) do
       issue
       |> Issue.changeset(attrs)
+      |> optimistic_lock(:lock_version, [:lock_version])
       |> Repo.update()
     else
       {:error, :invalid_transition}
@@ -76,6 +101,7 @@ defmodule Cympho.Issues do
   defp do_update_issue(%Issue{} = issue, attrs) do
     issue
     |> Issue.changeset(attrs)
+    |> optimistic_lock(:lock_version, [:lock_version])
     |> Repo.update()
   end
 
@@ -84,7 +110,11 @@ defmodule Cympho.Issues do
   Returns {:ok, issue} or {:error, :invalid_transition}.
   """
   def transition_issue(%Issue{} = issue, new_status) do
-    update_issue(issue, %{status: new_status})
+    if new_status == :done and is_blocked?(issue) do
+      {:error, :blocked_by_active_issues}
+    else
+      update_issue(issue, %{status: new_status})
+    end
   end
 
   @doc """
@@ -99,7 +129,7 @@ defmodule Cympho.Issues do
   """
   def is_blocked?(%Issue{} = issue) do
     blocked_by = issue.blocked_by || []
-    Enum.any?(blocked_by, fn blocker -> blocker.status != :closed end)
+    Enum.any?(blocked_by, fn blocker -> blocker.status != :done end)
   end
 
   @doc """
@@ -107,25 +137,57 @@ defmodule Cympho.Issues do
   """
   def active_blockers(%Issue{} = issue) do
     blocked_by = issue.blocked_by || []
-    Enum.filter(blocked_by, fn blocker -> blocker.status != :closed end)
+    Enum.filter(blocked_by, fn blocker -> blocker.status != :done end)
   end
 
   @doc """
   Adds a blocker relationship: blocker_issue blocks blocked_issue.
+  Rejects circular blocker chains.
   """
   def add_blocker(%Issue{} = blocked_issue, %Issue{} = blocker_issue) do
-    if blocked_issue.id == blocker_issue.id do
-      {:error, :cannot_block_self}
+    cond do
+      blocked_issue.id == blocker_issue.id ->
+        {:error, :cannot_block_self}
+      transitively_blocked_by?(blocker_issue, blocked_issue) ->
+        {:error, :circular_blocker}
+      true ->
+        Repo.transaction(fn ->
+          Repo.insert_all("issue_blockers", [
+            %{
+              blocked_issue_id: blocked_issue.id,
+              blocking_issue_id: blocker_issue.id,
+              inserted_at: DateTime.utc_now(),
+              updated_at: DateTime.utc_now()
+            }
+          ], on_conflict: :nothing)
+
+          Repo.reload(blocked_issue)
+        end)
+        |> case do
+          {:ok, issue} -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp transitively_blocked_by?(issue, target) do
+    visited = MapSet.new()
+    do_transitively_blocked_by?(issue.id, target.id, visited)
+  end
+
+  defp do_transitively_blocked_by?(current_id, target_id, visited) do
+    if MapSet.member?(visited, current_id) do
+      false
     else
-      Repo.insert_all("issue_blockers", [
-        %{
-          blocked_issue_id: blocked_issue.id,
-          blocking_issue_id: blocker_issue.id,
-          inserted_at: DateTime.utc_now(),
-          updated_at: DateTime.utc_now()
-        }
-      ], on_conflict: :nothing)
-      {:ok, Repo.preload(blocked_issue, [:comments, :blocked_by, :blocks])}
+      visited = MapSet.put(visited, current_id)
+      blocker_ids = Repo.all(from bb in "issue_blockers", where: bb.blocked_issue_id == ^current_id, select: bb.blocking_issue_id)
+      Enum.any?(blocker_ids, fn blocker_id ->
+        if blocker_id == target_id do
+          true
+        else
+          do_transitively_blocked_by?(blocker_id, target_id, visited)
+        end
+      end)
     end
   end
 
@@ -133,12 +195,18 @@ defmodule Cympho.Issues do
   Removes a blocker relationship.
   """
   def remove_blocker(%Issue{} = blocked_issue, %Issue{} = blocker_issue) do
-    from(bb in "issue_blockers",
-      where: bb.blocked_issue_id == ^blocked_issue.id and bb.blocking_issue_id == ^blocker_issue.id
-    )
-    |> Repo.delete_all()
+    count =
+      from(bb in "issue_blockers",
+        where: bb.blocked_issue_id == ^blocked_issue.id and bb.blocking_issue_id == ^blocker_issue.id
+      )
+      |> Repo.delete_all()
+      |> elem(1)
 
-    {:ok, Repo.preload(blocked_issue, [:comments, :blocked_by, :blocks])}
+    if count == 0 do
+      {:error, :not_found}
+    else
+      {:ok, Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks])}
+    end
   end
 
   @doc """
