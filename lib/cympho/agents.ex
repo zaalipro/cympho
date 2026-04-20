@@ -132,6 +132,31 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Returns agents eligible for dispatch: matching role, not in :error status,
+  and not at max_concurrent_jobs capacity.
+  """
+  @spec list_eligible_agents(:ceo | :cto | :engineer) :: [Agent.t()]
+  def list_eligible_agents(role) when is_atom(role) do
+    Agent
+    |> where(role: ^role, status: :idle)
+    |> Repo.all()
+    |> Enum.reject(&is_agent_at_capacity?/1)
+  end
+
+  @doc """
+  Counts the number of :in_progress issues assigned to an agent.
+  """
+  @spec count_active_assignments(String.t()) :: non_neg_integer()
+  def count_active_assignments(agent_id) when is_binary(agent_id) do
+    Repo.one(
+      from(i in Issue,
+        where: i.assignee_id == ^agent_id and i.status == :in_progress,
+        select: count(i.id)
+      )
+    ) || 0
+  end
+
+  @doc """
   Counts the number of running jobs for an agent.
   """
   @spec count_running_jobs(String.t()) :: non_neg_integer()
