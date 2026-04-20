@@ -47,7 +47,7 @@ defmodule Cympho.IssuesLifecycleTest do
         Issues.create_issue(%{
           title: "Parent Issue",
           description: "Must be done first",
-          status: :in_progress
+          status: :in_review
         })
 
       {:ok, child_issue} =
@@ -88,7 +88,8 @@ defmodule Cympho.IssuesLifecycleTest do
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Blocked Issue",
-          description: "Will be unblocked"
+          description: "Will be unblocked",
+          status: :in_review
         })
 
       {:ok, _} = Issues.add_blocker(issue, blocker)

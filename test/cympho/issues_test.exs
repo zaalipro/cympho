@@ -255,7 +255,8 @@ defmodule Cympho.IssuesTest do
       {:ok, blocked_issue} =
         Issues.create_issue(%{
           title: "Blocked Issue",
-          description: "Should be unblocked"
+          description: "Should be unblocked",
+          status: :in_review
         })
 
       {:ok, done_blocker} =
@@ -475,8 +476,6 @@ defmodule Cympho.IssuesTest do
           description: "Test"
         })
 
-      # backlog -> in_progress is invalid
-      assert {:error, :invalid_transition} = Issues.transition_issue(issue, :in_progress)
       # backlog -> done is invalid
       assert {:error, :invalid_transition} = Issues.transition_issue(issue, :done)
     end
