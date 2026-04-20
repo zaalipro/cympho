@@ -18,13 +18,27 @@ defmodule Cympho.Issues.Issue do
 
     has_many :comments, Comment, foreign_key: :issue_id
 
-    many_to_many :blocked_by, Issue,
+<<<<<<< HEAD
+    many_to_many :blocked_by, Cympho.Issues.Issue,
       join_through: "issue_blockers",
-      join_keys: [blocked_issue_id: :id, blocking_issue_id: :id]
+      join_keys: [blocked_issue_id: :id, blocking_issue_id: :id],
+      unique: true
 
-    many_to_many :blocks, Issue,
+    many_to_many :blocks, Cympho.Issues.Issue,
       join_through: "issue_blockers",
-      join_keys: [blocking_issue_id: :id, blocked_issue_id: :id]
+      join_keys: [blocking_issue_id: :id, blocked_issue_id: :id],
+      unique: true
+=======
+    many_to_many :blocked_by, Cympho.Issues.Issue,
+      join_through: "issue_blockers",
+      join_keys: [blocked_issue_id: :id, blocking_issue_id: :id],
+      unique: true
+
+    many_to_many :blocks, Cympho.Issues.Issue,
+      join_through: "issue_blockers",
+      join_keys: [blocking_issue_id: :id, blocked_issue_id: :id],
+      unique: true
+>>>>>>> LLM-203/fix-db-bugs
 
     timestamps(type: :utc_datetime)
   end

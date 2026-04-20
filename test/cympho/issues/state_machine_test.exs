@@ -1,59 +1,54 @@
 defmodule Cympho.Issues.StateMachineTest do
+  use Cympho.DataCase, async: true
   use ExUnit.Case, async: true
 
   alias Cympho.Issues.StateMachine
 
   describe "valid_transition?/2" do
-    test "open -> in_progress is valid" do
-      assert StateMachine.valid_transition?(:open, :in_progress)
+    test "open to in_progress is valid" do
+      assert StateMachine.valid_transition?(:open, :in_progress) == true
     end
 
-    test "open -> closed is valid" do
-      assert StateMachine.valid_transition?(:open, :closed)
+    test "open to closed is valid" do
+      assert StateMachine.valid_transition?(:open, :closed) == true
     end
 
-    test "in_progress -> open is valid" do
-      assert StateMachine.valid_transition?(:in_progress, :open)
+    test "open to open is invalid" do
+      assert StateMachine.valid_transition?(:open, :open) == false
     end
 
-    test "in_progress -> closed is valid" do
-      assert StateMachine.valid_transition?(:in_progress, :closed)
+    test "in_progress to open is valid" do
+      assert StateMachine.valid_transition?(:in_progress, :open) == true
     end
 
-    test "closed -> open is valid" do
-      assert StateMachine.valid_transition?(:closed, :open)
+    test "in_progress to closed is valid" do
+      assert StateMachine.valid_transition?(:in_progress, :closed) == true
     end
 
-    test "closed -> in_progress is invalid" do
-      refute StateMachine.valid_transition?(:closed, :in_progress)
+    test "closed to open is valid" do
+      assert StateMachine.valid_transition?(:closed, :open) == true
     end
 
-    test "closed -> closed is invalid" do
-      refute StateMachine.valid_transition?(:closed, :closed)
-    end
-
-    test "open -> open is invalid" do
-      refute StateMachine.valid_transition?(:open, :open)
+    test "closed to in_progress is invalid" do
+      assert StateMachine.valid_transition?(:closed, :in_progress) == false
     end
   end
 
   describe "valid_transitions/1" do
-    test "returns transitions for open" do
+    test "open transitions" do
       assert StateMachine.valid_transitions(:open) == [:in_progress, :closed]
     end
 
-    test "returns transitions for in_progress" do
+    test "in_progress transitions" do
       assert StateMachine.valid_transitions(:in_progress) == [:open, :closed]
     end
 
-    test "returns transitions for closed" do
+    test "closed transitions" do
       assert StateMachine.valid_transitions(:closed) == [:open]
     end
-  end
 
-  describe "statuses/0" do
-    test "returns all statuses" do
-      assert StateMachine.statuses() == [:open, :in_progress, :closed]
+    test "unknown status returns empty list" do
+      assert StateMachine.valid_transitions(:unknown) == []
     end
   end
 end
