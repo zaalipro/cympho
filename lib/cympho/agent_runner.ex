@@ -61,13 +61,10 @@ defmodule Cympho.AgentRunner do
   defp bash_command(claude_args, prompt) do
     claude_cmd = Enum.join(["claude" | claude_args], " ")
 
-    # Use bash -c with piped input to avoid interactive prompts
-    ~s(bash -c 'echo #{escape_shell(prompt)} | #{claude_cmd}')
-  end
-
-  defp escape_shell(prompt) do
-    prompt
-    |> String.replace("'", "'\\''")
+    # Use heredoc to pass prompt safely without shell interpretation.
+    # The single-quoted 'EOF' delimiter prevents variable expansion,
+    # command substitution, and other shell interpretations.
+    ~s(bash -c '#{claude_cmd}' << 'PROMPT'\n#{prompt}\nPROMPT)
   end
 
   defp build_prompt(issue) do
@@ -78,7 +75,6 @@ defmodule Cympho.AgentRunner do
     #{issue.description || "No description provided."}
     """
     |> String.trim()
-    |> String.replace("'", "'\\''")
   end
 
   defp do_run(session_id, cmd, cwd, recipient_pid, stall_timeout) do

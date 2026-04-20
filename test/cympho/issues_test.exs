@@ -4,6 +4,7 @@ defmodule Cympho.IssuesTest do
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.Projects
+  alias Cympho.Agents
 
   setup do
     {:ok, issue} =
@@ -55,14 +56,14 @@ defmodule Cympho.IssuesTest do
       attrs = %{
         title: "New Issue",
         description: "New description",
-        status: :open,
+        status: :backlog,
         priority: :medium
       }
 
       assert {:ok, %Issue{} = issue} = Issues.create_issue(attrs)
       assert issue.title == "New Issue"
       assert issue.description == "New description"
-      assert issue.status == :open
+      assert issue.status == :backlog
       assert issue.priority == :medium
     end
 
@@ -72,22 +73,29 @@ defmodule Cympho.IssuesTest do
     end
 
     test "creates issue with assignee" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer
+        })
+
       attrs = %{
         title: "Assigned Issue",
         description: "Has an assignee",
-        assignee: "alice@example.com"
+        assignee_id: agent.id
       }
+
       assert {:ok, %Issue{} = issue} = Issues.create_issue(attrs)
-      assert issue.assignee == "alice@example.com"
+      assert issue.assignee_id == agent.id
     end
   end
 
   describe "update_issue/2" do
     test "updates issue with valid data", %{issue: issue} do
-      attrs = %{title: "Updated Title", status: :closed}
+      attrs = %{title: "Updated Title", status: :done}
       assert {:ok, updated} = Issues.update_issue(issue, attrs)
       assert updated.title == "Updated Title"
-      assert updated.status == :closed
+      assert updated.status == :done
     end
 
     test "returns error changeset for invalid data", %{issue: issue} do
@@ -96,9 +104,15 @@ defmodule Cympho.IssuesTest do
     end
 
     test "updates assignee", %{issue: issue} do
-      attrs = %{assignee: "bob@example.com"}
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer
+        })
+
+      attrs = %{assignee_id: agent.id}
       assert {:ok, updated} = Issues.update_issue(issue, attrs)
-      assert updated.assignee == "bob@example.com"
+      assert updated.assignee_id == agent.id
     end
   end
 
@@ -114,21 +128,24 @@ defmodule Cympho.IssuesTest do
 
   describe "list_issues_by_project/1" do
     test "returns issues scoped to a project" do
-      {:ok, project} = Projects.create_project(%{
-        name: "Test Project",
-        prefix: "TTP"
-      })
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Test Project",
+          prefix: "TTP"
+        })
 
-      {:ok, project_issue} = Issues.create_issue(%{
-        title: "Project Issue",
-        description: "Belongs to project",
-        project_id: project.id
-      })
+      {:ok, project_issue} =
+        Issues.create_issue(%{
+          title: "Project Issue",
+          description: "Belongs to project",
+          project_id: project.id
+        })
 
-      {:ok, orphan_issue} = Issues.create_issue(%{
-        title: "Orphan Issue",
-        description: "No project"
-      })
+      {:ok, orphan_issue} =
+        Issues.create_issue(%{
+          title: "Orphan Issue",
+          description: "No project"
+        })
 
       project_issues = Issues.list_issues_by_project(project.id)
       assert length(project_issues) >= 1
@@ -139,20 +156,22 @@ defmodule Cympho.IssuesTest do
 
   describe "add_blocker/2" do
     test "adds a blocker relationship", %{issue: blocked_issue} do
-      {:ok, blocker_issue} = Issues.create_issue(%{
-        title: "Blocker",
-        description: "This blocks the other issue"
-      })
+      {:ok, blocker_issue} =
+        Issues.create_issue(%{
+          title: "Blocker",
+          description: "This blocks the other issue"
+        })
 
       assert {:ok, updated} = Issues.add_blocker(blocked_issue, blocker_issue)
       assert Enum.any?(updated.blocked_by, fn b -> b.id == blocker_issue.id end)
     end
 
     test "returns error when issue tries to block itself" do
-      {:ok, issue} = Issues.create_issue(%{
-        title: "Self Ref",
-        description: "Trying to block itself"
-      })
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Self Ref",
+          description: "Trying to block itself"
+        })
 
       assert {:error, :cannot_block_self} = Issues.add_blocker(issue, issue)
     end
@@ -160,10 +179,11 @@ defmodule Cympho.IssuesTest do
 
   describe "remove_blocker/2" do
     test "removes a blocker relationship", %{issue: blocked_issue} do
-      {:ok, blocker_issue} = Issues.create_issue(%{
-        title: "Blocker",
-        description: "Will be removed"
-      })
+      {:ok, blocker_issue} =
+        Issues.create_issue(%{
+          title: "Blocker",
+          description: "Will be removed"
+        })
 
       {:ok, _} = Issues.add_blocker(blocked_issue, blocker_issue)
       assert {:ok, updated} = Issues.remove_blocker(blocked_issue, blocker_issue)
@@ -173,33 +193,37 @@ defmodule Cympho.IssuesTest do
 
   describe "is_blocked?/1" do
     test "returns true when issue is blocked by open issue" do
-      {:ok, blocked_issue} = Issues.create_issue(%{
-        title: "Blocked",
-        description: "Is blocked"
-      })
+      {:ok, blocked_issue} =
+        Issues.create_issue(%{
+          title: "Blocked",
+          description: "Is blocked"
+        })
 
-      {:ok, blocker_issue} = Issues.create_issue(%{
-        title: "Blocker",
-        description: "Open blocker",
-        status: :open
-      })
+      {:ok, blocker_issue} =
+        Issues.create_issue(%{
+          title: "Blocker",
+          description: "Open blocker",
+          status: :in_progress
+        })
 
       {:ok, _} = Issues.add_blocker(blocked_issue, blocker_issue)
       reloaded = Issues.get_issue!(blocked_issue.id)
       assert Issues.is_blocked?(reloaded)
     end
 
-    test "returns false when all blockers are closed" do
-      {:ok, blocked_issue} = Issues.create_issue(%{
-        title: "Blocked",
-        description: "Is blocked"
-      })
+    test "returns false when all blockers are done" do
+      {:ok, blocked_issue} =
+        Issues.create_issue(%{
+          title: "Blocked",
+          description: "Is blocked"
+        })
 
-      {:ok, blocker_issue} = Issues.create_issue(%{
-        title: "Blocker",
-        description: "Closed blocker",
-        status: :closed
-      })
+      {:ok, blocker_issue} =
+        Issues.create_issue(%{
+          title: "Blocker",
+          description: "Done blocker",
+          status: :done
+        })
 
       {:ok, _} = Issues.add_blocker(blocked_issue, blocker_issue)
       reloaded = Issues.get_issue!(blocked_issue.id)
@@ -209,25 +233,149 @@ defmodule Cympho.IssuesTest do
 
   describe "active_blockers/1" do
     test "returns only open blockers", %{issue: blocked_issue} do
-      {:ok, open_blocker} = Issues.create_issue(%{
-        title: "Open Blocker",
-        description: "Open",
-        status: :open
-      })
+      {:ok, open_blocker} =
+        Issues.create_issue(%{
+          title: "Open Blocker",
+          description: "Open",
+          status: :in_progress
+        })
 
-      {:ok, closed_blocker} = Issues.create_issue(%{
-        title: "Closed Blocker",
-        description: "Closed",
-        status: :closed
-      })
+      {:ok, done_blocker} =
+        Issues.create_issue(%{
+          title: "Done Blocker",
+          description: "Done",
+          status: :done
+        })
 
       {:ok, _} = Issues.add_blocker(blocked_issue, open_blocker)
-      {:ok, _} = Issues.add_blocker(blocked_issue, closed_blocker)
+      {:ok, _} = Issues.add_blocker(blocked_issue, done_blocker)
 
       reloaded = Issues.get_issue!(blocked_issue.id)
       active = Issues.active_blockers(reloaded)
       assert length(active) == 1
       assert hd(active).id == open_blocker.id
+    end
+  end
+
+  describe "checkout_issue/2" do
+    test "successfully checks out an unassigned issue" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Checkout Test",
+          description: "Test checkout"
+        })
+
+      assert {:ok, checked_out} = Issues.checkout_issue(agent, issue)
+      assert checked_out.assignee_id == agent.id
+      assert checked_out.status == :in_progress
+    end
+
+    test "returns error when issue already assigned" do
+      {:ok, agent1} =
+        Agents.create_agent(%{
+          name: "Agent 1",
+          role: :engineer
+        })
+
+      {:ok, agent2} =
+        Agents.create_agent(%{
+          name: "Agent 2",
+          role: :cto
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Already Assigned",
+          description: "Test"
+        })
+
+      {:ok, _} = Issues.checkout_issue(agent1, issue)
+      assert {:error, :already_assigned} = Issues.checkout_issue(agent2, issue)
+    end
+  end
+
+  describe "release_issue/1" do
+    test "releases an issue and sets status to todo" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Release Test",
+          description: "Test release"
+        })
+
+      {:ok, checked_out} = Issues.checkout_issue(agent, issue)
+      assert {:ok, released} = Issues.release_issue(checked_out)
+      assert released.assignee_id == nil
+      assert released.status == :todo
+    end
+
+    test "releases with custom status" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Release Test",
+          description: "Test release",
+          status: :in_review
+        })
+
+      {:ok, checked_out} = Issues.checkout_issue(agent, issue)
+      assert {:ok, released} = Issues.release_issue(checked_out, :in_review)
+      assert released.status == :in_review
+    end
+  end
+
+  describe "transition_issue/2" do
+    test "transitions issue through valid state machine path" do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Transition Test",
+          description: "Test transitions"
+        })
+
+      # backlog -> todo
+      assert {:ok, issue1} = Issues.transition_issue(issue, :todo)
+      assert issue1.status == :todo
+
+      # todo -> in_progress
+      assert {:ok, issue2} = Issues.transition_issue(issue1, :in_progress)
+      assert issue2.status == :in_progress
+
+      # in_progress -> in_review
+      assert {:ok, issue3} = Issues.transition_issue(issue2, :in_review)
+      assert issue3.status == :in_review
+
+      # in_review -> done
+      assert {:ok, issue4} = Issues.transition_issue(issue3, :done)
+      assert issue4.status == :done
+    end
+
+    test "rejects invalid transitions" do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Invalid Transition Test",
+          description: "Test"
+        })
+
+      # backlog -> in_progress is invalid
+      assert {:error, :invalid_transition} = Issues.transition_issue(issue, :in_progress)
+      # backlog -> done is invalid
+      assert {:error, :invalid_transition} = Issues.transition_issue(issue, :done)
     end
   end
 end

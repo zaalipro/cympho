@@ -8,13 +8,13 @@
 </.header>
 
 <div class="kanban-board">
-  <div class="kanban-column" id="column-open">
+  <div class="kanban-column" id="column-backlog">
     <div class="column-header">
-      <h2>Open</h2>
-      <span class="issue-count"><%= length(open_issues(@issues)) %></span>
+      <h2>Backlog</h2>
+      <span class="issue-count"><%= length(backlog_issues(@issues)) %></span>
     </div>
     <div class="column-cards">
-      <%= for issue <- open_issues(@issues) do %>
+      <%= for issue <- backlog_issues(@issues) do %>
         <div class="kanban-card" id={"issue-#{issue.id}"}>
           <div class="card-title"><%= issue.title %></div>
           <div class="card-meta">
@@ -22,7 +22,38 @@
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
           </div>
           <div class="card-actions">
-            <%= for next_status <- valid_next_statuses(:open) do %>
+            <%= for next_status <- valid_next_statuses(:backlog) do %>
+              <button
+                type="button"
+                class="transition-btn"
+                phx-click="transition_issue"
+                phx-value-id={issue.id}
+                phx-value-to_status={next_status}
+              >
+                <%= status_label(next_status) %>
+              </button>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="kanban-column" id="column-todo">
+    <div class="column-header">
+      <h2>To Do</h2>
+      <span class="issue-count"><%= length(todo_issues(@issues)) %></span>
+    </div>
+    <div class="column-cards">
+      <%= for issue <- todo_issues(@issues) do %>
+        <div class="kanban-card" id={"issue-#{issue.id}"}>
+          <div class="card-title"><%= issue.title %></div>
+          <div class="card-meta">
+            <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
+            <span class="comment-count"><%= length(issue.comments) %> comments</span>
+          </div>
+          <div class="card-actions">
+            <%= for next_status <- valid_next_statuses(:todo) do %>
               <button
                 type="button"
                 class="transition-btn"
@@ -70,13 +101,13 @@
     </div>
   </div>
 
-  <div class="kanban-column" id="column-closed">
+  <div class="kanban-column" id="column-in-review">
     <div class="column-header">
-      <h2>Closed</h2>
-      <span class="issue-count"><%= length(closed_issues(@issues)) %></span>
+      <h2>In Review</h2>
+      <span class="issue-count"><%= length(in_review_issues(@issues)) %></span>
     </div>
     <div class="column-cards">
-      <%= for issue <- closed_issues(@issues) do %>
+      <%= for issue <- in_review_issues(@issues) do %>
         <div class="kanban-card" id={"issue-#{issue.id}"}>
           <div class="card-title"><%= issue.title %></div>
           <div class="card-meta">
@@ -84,7 +115,69 @@
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
           </div>
           <div class="card-actions">
-            <%= for next_status <- valid_next_statuses(:closed) do %>
+            <%= for next_status <- valid_next_statuses(:in_review) do %>
+              <button
+                type="button"
+                class="transition-btn"
+                phx-click="transition_issue"
+                phx-value-id={issue.id}
+                phx-value-to_status={next_status}
+              >
+                <%= status_label(next_status) %>
+              </button>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="kanban-column" id="column-done">
+    <div class="column-header">
+      <h2>Done</h2>
+      <span class="issue-count"><%= length(done_issues(@issues)) %></span>
+    </div>
+    <div class="column-cards">
+      <%= for issue <- done_issues(@issues) do %>
+        <div class="kanban-card" id={"issue-#{issue.id}"}>
+          <div class="card-title"><%= issue.title %></div>
+          <div class="card-meta">
+            <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
+            <span class="comment-count"><%= length(issue.comments) %> comments</span>
+          </div>
+          <div class="card-actions">
+            <%= for next_status <- valid_next_statuses(:done) do %>
+              <button
+                type="button"
+                class="transition-btn"
+                phx-click="transition_issue"
+                phx-value-id={issue.id}
+                phx-value-to_status={next_status}
+              >
+                <%= status_label(next_status) %>
+              </button>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="kanban-column" id="column-blocked">
+    <div class="column-header">
+      <h2>Blocked</h2>
+      <span class="issue-count"><%= length(blocked_issues(@issues)) %></span>
+    </div>
+    <div class="column-cards">
+      <%= for issue <- blocked_issues(@issues) do %>
+        <div class="kanban-card" id={"issue-#{issue.id}"}>
+          <div class="card-title"><%= issue.title %></div>
+          <div class="card-meta">
+            <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
+            <span class="comment-count"><%= length(issue.comments) %> comments</span>
+          </div>
+          <div class="card-actions">
+            <%= for next_status <- valid_next_statuses(:blocked) do %>
               <button
                 type="button"
                 class="transition-btn"

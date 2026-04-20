@@ -10,7 +10,12 @@ defmodule CymphoWeb.IssueLive.Show do
 
     case Issues.get_issue(id) do
       {:ok, issue} ->
-        {:ok, assign(socket, issue: issue, comment_changeset: Comments.Comment.changeset(%Comments.Comment{}, %{}))}
+        {:ok,
+         assign(socket,
+           issue: issue,
+           comment_changeset: Comments.Comment.changeset(%Comments.Comment{}, %{})
+         )}
+
       {:error, :not_found} ->
         {:ok, push_navigate(socket, to: ~p"/issues")}
     end
@@ -27,6 +32,7 @@ defmodule CymphoWeb.IssueLive.Show do
         socket
         |> assign(:page_title, issue.title)
         |> assign(:issue, issue)
+
       {:error, :not_found} ->
         socket
         |> put_flash(:error, "Issue not found")
@@ -77,7 +83,9 @@ defmodule CymphoWeb.IssueLive.Show do
 
     case Comments.create_comment(comment_params) do
       {:ok, _comment} ->
-        {:noreply, assign(socket, :comment_changeset, Comments.Comment.changeset(%Comments.Comment{}, %{}))}
+        {:noreply,
+         assign(socket, :comment_changeset, Comments.Comment.changeset(%Comments.Comment{}, %{}))}
+
       {:error, changeset} ->
         {:noreply, assign(socket, :comment_changeset, changeset)}
     end
