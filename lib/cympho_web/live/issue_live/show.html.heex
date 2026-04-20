@@ -10,8 +10,8 @@
 <div class="issue-detail">
   <div class="issue-info">
     <div class="status-row">
-      <span class="badge status-<%= @issue.status %>"><%= @issue.status %></span>
-      <span class="priority-<%= @issue.priority %>"><%= @issue.priority %></span>
+      <span class={"badge status-#{@issue.status}"}><%= @issue.status %></span>
+      <span class={"priority-#{@issue.priority}"}><%= @issue.priority %></span>
     </div>
 
     <p class="description"><%= @issue.description %></p>
