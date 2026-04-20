@@ -27,9 +27,5 @@ defmodule Cympho.GithubWebhook do
     |> Base.encode16(case: :lower)
   end
 
-  # Constant-time comparison to prevent timing attacks
-  defp secure_compare(a, b) when byte_size(a) == byte_size(b) do
-    a === b
-  end
-  defp secure_compare(_, _), do: false
+  defp secure_compare(a, b), do: Plug.Crypto.secure_compare(a, b)
 end
