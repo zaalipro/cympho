@@ -53,14 +53,21 @@ defmodule CymphoWeb.KanbanLive.Index do
         {:ok, _updated_issue} ->
           {:noreply, socket}
 
-        {:error, _reason} ->
-          {:noreply, socket}
+        {:error, :invalid_transition} ->
+          {:noreply, put_flash(socket, :error, "Invalid status transition")}
+
+        {:error, :blocked_by_active_issues} ->
+          {:noreply, put_flash(socket, :error, "Cannot complete - issue is blocked")}
       end
     end
   end
 
   defp try_string_to_status(string) do
-    String.to_existing_atom(string)
+    if Enum.member?(Issue.status_options(), String.to_existing_atom(string)) do
+      String.to_existing_atom(string)
+    else
+      nil
+    end
   rescue
     ArgumentError -> nil
   end
@@ -80,7 +87,6 @@ defmodule CymphoWeb.KanbanLive.Index do
   def valid_next_statuses(:in_review), do: [:done, :in_progress]
   def valid_next_statuses(:done), do: [:todo]
   def valid_next_statuses(:blocked), do: [:todo]
-  def valid_next_statuses(:closed), do: [:todo]
 
   def status_label(:backlog), do: "Backlog"
   def status_label(:todo), do: "To Do"
