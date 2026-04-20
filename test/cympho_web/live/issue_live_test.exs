@@ -61,14 +61,15 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _comment} =
         Comments.create_comment(%{
           body: "Test comment body",
-          author: "Test Author",
+          author_type: "user",
+          author_id: "test-author",
           issue_id: issue.id
         })
 
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
       assert html =~ "Test comment body"
-      assert html =~ "Test Author"
+      assert html =~ "test-author"
     end
 
     test "comment form accepts input", %{issue: issue} do
@@ -77,7 +78,8 @@ defmodule CymphoWeb.IssueLiveTest do
       form =
         form(view, "#comment-form", %{
           "comment" => %{
-            "author" => "New Author",
+            "author_type" => "user",
+            "author_id" => "new-author",
             "body" => "New comment body"
           }
         })

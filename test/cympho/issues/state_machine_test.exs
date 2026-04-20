@@ -14,8 +14,8 @@ defmodule Cympho.Issues.StateMachineTest do
       assert StateMachine.valid_transition?(:backlog, :blocked) == true
     end
 
-    test "backlog to in_progress is invalid" do
-      assert StateMachine.valid_transition?(:backlog, :in_progress) == false
+    test "backlog to in_progress is valid" do
+      assert StateMachine.valid_transition?(:backlog, :in_progress) == true
     end
 
     # todo transitions
@@ -94,7 +94,7 @@ defmodule Cympho.Issues.StateMachineTest do
 
   describe "valid_transitions/1" do
     test "backlog transitions" do
-      assert StateMachine.valid_transitions(:backlog) == [:todo, :blocked]
+      assert StateMachine.valid_transitions(:backlog) == [:todo, :in_progress, :blocked]
     end
 
     test "todo transitions" do
