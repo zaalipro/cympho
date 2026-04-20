@@ -2,6 +2,8 @@ defmodule CymphoWeb.IssueLive.Show do
   use CymphoWeb, :live_view
   alias Cympho.Issues
   alias Cympho.Comments
+  alias Cympho.Agents
+  alias Cympho.Orchestrator
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -13,7 +15,9 @@ defmodule CymphoWeb.IssueLive.Show do
         {:ok,
          assign(socket,
            issue: issue,
-           comment_changeset: Comments.Comment.changeset(%Comments.Comment{}, %{})
+           comment_changeset: Comments.Comment.changeset(%Comments.Comment{}, %{}),
+           agents: Agents.list_agents_by_status(:idle),
+           show_agent_panel: false
          )}
 
       {:error, :not_found} ->
@@ -120,5 +124,42 @@ defmodule CymphoWeb.IssueLive.Show do
       :error ->
         {:noreply, put_flash(socket, :error, "Invalid status")}
     end
+  end
+
+  @impl true
+  def handle_event("toggle_agent_panel", _, socket) do
+    {:noreply, update(socket, :show_agent_panel, &(!&1))}
+  end
+
+  @impl true
+  def handle_event("spawn_agent", %{"agent_id" => agent_id}, socket) do
+    issue = socket.assigns.issue
+
+    case Orchestrator.start_link(issue, agent_id) do
+      {:ok, _pid} ->
+        {:ok, _updated_agent} = Agents.update_agent(%Agents.Agent{id: agent_id}, %{status: :running})
+        {:noreply,
+         socket
+         |> put_flash(:info, "Agent spawned successfully")
+         |> assign(:show_agent_panel, false)
+         |> assign(:agents, Agents.list_agents_by_status(:idle))}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to spawn agent: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_info({:session_started, session_id}, socket) do
+    {:noreply, assign(socket, :agent_session_id, session_id)}
+  end
+
+  def handle_info({:turn_completed, session_id, result}, socket) do
+    IO.inspect({:turn_completed, session_id, result}, label: "Agent turn completed")
+    {:noreply, socket}
+  end
+
+  def handle_info({:turn_ended_with_error, session_id, reason}, socket) do
+    IO.inspect({:turn_ended_with_error, session_id, reason}, label: "Agent error")
+    {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
   end
 end

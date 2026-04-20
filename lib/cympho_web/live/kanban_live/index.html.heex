@@ -20,6 +20,11 @@
           <div class="card-meta">
             <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
+            <%= if issue.assignee do %>
+              <span class={"agent-badge agent-#{issue.assignee.status}"}>
+                {issue.assignee.name} ({issue.assignee.status})
+              </span>
+            <% end %>
           </div>
           <div class="card-actions">
             <%= for next_status <- valid_next_statuses(:backlog) do %>
@@ -51,6 +56,11 @@
           <div class="card-meta">
             <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
+            <%= if issue.assignee do %>
+              <span class={"agent-badge agent-#{issue.assignee.status}"}>
+                {issue.assignee.name} ({issue.assignee.status})
+              </span>
+            <% end %>
           </div>
           <div class="card-actions">
             <%= for next_status <- valid_next_statuses(:todo) do %>
@@ -82,6 +92,11 @@
           <div class="card-meta">
             <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
+            <%= if issue.assignee do %>
+              <span class={"agent-badge agent-#{issue.assignee.status}"}>
+                {issue.assignee.name} ({issue.assignee.status})
+              </span>
+            <% end %>
           </div>
           <div class="card-actions">
             <%= for next_status <- valid_next_statuses(:in_progress) do %>
@@ -113,6 +128,11 @@
           <div class="card-meta">
             <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
+            <%= if issue.assignee do %>
+              <span class={"agent-badge agent-#{issue.assignee.status}"}>
+                {issue.assignee.name} ({issue.assignee.status})
+              </span>
+            <% end %>
           </div>
           <div class="card-actions">
             <%= for next_status <- valid_next_statuses(:in_review) do %>
@@ -144,6 +164,11 @@
           <div class="card-meta">
             <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
+            <%= if issue.assignee do %>
+              <span class={"agent-badge agent-#{issue.assignee.status}"}>
+                {issue.assignee.name} ({issue.assignee.status})
+              </span>
+            <% end %>
           </div>
           <div class="card-actions">
             <%= for next_status <- valid_next_statuses(:done) do %>
@@ -175,6 +200,11 @@
           <div class="card-meta">
             <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
+            <%= if issue.assignee do %>
+              <span class={"agent-badge agent-#{issue.assignee.status}"}>
+                {issue.assignee.name} ({issue.assignee.status})
+              </span>
+            <% end %>
           </div>
           <div class="card-actions">
             <%= for next_status <- valid_next_statuses(:blocked) do %>

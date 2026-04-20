@@ -41,10 +41,28 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   @impl true
-  def handle_event("transition_issue", %{"id" => id, "to_status" => to_status}, socket) do
-    issue = Issues.get_issue!(id)
-    {:ok, _updated_issue} = Issues.transition_issue(issue, String.to_existing_atom(to_status))
-    {:noreply, socket}
+  def handle_event("transition_issue", %{"id" => id, "to_status" => to_status_string}, socket) do
+    to_status = try_string_to_status(to_status_string)
+
+    if is_nil(to_status) do
+      {:noreply, socket}
+    else
+      issue = Issues.get_issue!(id)
+
+      case Issues.transition_issue(issue, to_status) do
+        {:ok, _updated_issue} ->
+          {:noreply, socket}
+
+        {:error, _reason} ->
+          {:noreply, socket}
+      end
+    end
+  end
+
+  defp try_string_to_status(string) do
+    String.to_existing_atom(string)
+  rescue
+    ArgumentError -> nil
   end
 
   def backlog_issues(issues), do: Enum.filter(issues, &(&1.status == :backlog))

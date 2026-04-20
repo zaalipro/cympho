@@ -1,3 +1,4 @@
+
 <.header>
   {@issue.title}
   <:actions>
@@ -18,6 +19,32 @@
 
     <div class="meta">
       <span>Created {@issue.inserted_at}</span>
+    </div>
+
+    <div class="agent-section">
+      <button
+        type="button"
+        class="phx-btn"
+        phx-click="toggle_agent_panel"
+      >
+        {@show_agent_panel && "Hide" || "Spawn"} Agent
+      </button>
+
+      <div :if={@show_agent_panel} class="agent-panel">
+        <h4>Select an Agent</h4>
+        <p :if={Enum.empty?(@agents)} class="no-agents">No idle agents available.</p>
+        <form :if={!Enum.empty?(@agents)} phx-submit="spawn_agent">
+          <div class="form-group">
+            <select name="agent_id" required>
+              <option value="">Choose an agent...</option>
+              <option :for={agent <- @agents} value={agent.id}>
+                {agent.name} ({agent.role})
+              </option>
+            </select>
+          </div>
+          <button type="submit" class="phx-btn">Start Agent</button>
+        </form>
+      </div>
     </div>
   </div>
 
