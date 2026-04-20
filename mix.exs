@@ -46,7 +46,7 @@ defmodule Cympho.MixProject do
       {:dns_cluster, "~> 0.1.1"},
       {:bandit, "~> 1.5"},
       {:floki, ">= 0.30.0", only: :test},
-      {:lazy_html, ">= 0.1.0", only: :test}
+      {:lazy_html, "~> 0.1", only: :test}
     ]
   end
 

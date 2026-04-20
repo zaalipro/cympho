@@ -21,7 +21,16 @@ defmodule Cympho.Notifications.TelegramChannel do
         {:error, :no_telegram_bot_token}
 
       true ->
-        text = "*#{message.subject}*\n\n#{message.body}"
+      text = "*#{message.subject}*\n\n#{message.body}"
+      url = "https://api.telegram.org/bot#{bot_token}/sendMessage"
+
+      body =
+        Jason.encode!(%{
+          chat_id: chat_id,
+          text: text,
+          parse_mode: "Markdown"
+        })
+
         url = "https://api.telegram.org/bot#{bot_token}/sendMessage"
 
         body =

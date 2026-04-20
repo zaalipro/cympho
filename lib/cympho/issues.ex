@@ -134,9 +134,7 @@ defmodule Cympho.Issues do
         {:ok, current_issue}
 
       true ->
-        new_status =
-          if current_issue.status in [:backlog, :todo], do: :in_progress, else: current_issue.status
-
+        new_status = if current_issue.status in [:backlog, :todo], do: :in_progress, else: current_issue.status
         update_issue(current_issue, %{assignee_id: agent_id, status: new_status})
         |> maybe_adjust_lock_version()
     end
