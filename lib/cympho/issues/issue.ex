@@ -12,31 +12,27 @@ defmodule Cympho.Issues.Issue do
     field :description, :string
     field :status, Ecto.Enum, values: [:backlog, :todo, :in_progress, :in_review, :done, :blocked], default: :backlog
     field :priority, Ecto.Enum, values: [:low, :medium, :high], default: :medium
-    field :identifier, :string
-    field :assignee_agent_id, :string
-    field :lock_version, :integer, default: 1
+    field :assignee, :string
 
     belongs_to :project, Project
 
     has_many :comments, Comment, foreign_key: :issue_id
 
-    many_to_many :blocked_by, Cympho.Issues.Issue,
+    many_to_many :blocked_by, Issue,
       join_through: "issue_blockers",
-      join_keys: [blocked_issue_id: :id, blocking_issue_id: :id],
-      unique: true
+      join_keys: [blocked_issue_id: :id, blocking_issue_id: :id]
 
-    many_to_many :blocks, Cympho.Issues.Issue,
+    many_to_many :blocks, Issue,
       join_through: "issue_blockers",
-      join_keys: [blocking_issue_id: :id, blocked_issue_id: :id],
-      unique: true
+      join_keys: [blocking_issue_id: :id, blocked_issue_id: :id]
 
     timestamps(type: :utc_datetime)
   end
 
   def changeset(issue, attrs) do
     issue
-    |> cast(attrs, [:title, :description, :status, :priority, :project_id, :identifier, :assignee_agent_id, :lock_version])
-    |> validate_required([:title, :description, :project_id, :identifier])
+    |> cast(attrs, [:title, :description, :status, :priority, :assignee, :project_id])
+    |> validate_required([:title, :description])
     |> validate_length(:title, min: 1, max: 255)
     |> validate_length(:description, min: 1)
     |> unique_constraint(:identifier, name: :issues_project_id_identifier_index)

@@ -26,6 +26,16 @@ defmodule Cympho.Issues do
   defp maybe_filter_by_project(query, _opts), do: query
 
   @doc """
+  Returns the list of issues for a given project.
+  """
+  def list_issues_by_project(project_id) do
+    Issue
+    |> where(project_id: ^project_id)
+    |> Repo.all()
+    |> Repo.preload([:comments, :blocked_by, :blocks])
+  end
+
+  @doc """
   Gets a single issue by id.
   """
   def get_issue!(id), do: Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks])
