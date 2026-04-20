@@ -2,13 +2,75 @@ defmodule CymphoWeb.KanbanLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Issues
   alias Cympho.Issues.Issue
+  alias Cympho.AgentHeartbeat
 
   @impl true
   def mount(_params, _session, socket) do
     Issues.subscribe()
     Cympho.Agents.subscribe()
-    {:ok, assign(socket, :issues, Issues.list_issues())}
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "agent_heartbeats")
+
+    # Load initial heartbeat states for all agents assigned to issues
+    issues = Issues.list_issues()
+    agent_heartbeat_states = load_heartbeat_states(issues)
+
+    {:ok, assign(socket, :issues, issues) |> assign(:agent_heartbeat_states, agent_heartbeat_states)}
   end
+
+  defp load_heartbeat_states(issues) do
+    issues
+    |> Enum.map(fn issue -> issue.assignee end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq_by(& &1.id)
+    |> Enum.reduce(%{}, fn agent, acc ->
+      case AgentHeartbeat.get_state(agent.id) do
+        {:ok, state} -> Map.put(acc, agent.id, state)
+        {:error, _} -> Map.put(acc, agent.id, %{agent_id: agent.id, status: :offline, current_issue_id: nil, eta_ms: nil})
+      end
+    end)
+  end
+
+  @doc """
+  Returns the heartbeat state for a given agent_id, or a default offline state.
+  """
+  def get_heartbeat_state(agent_heartbeat_states, agent_id) do
+    Map.get(agent_heartbeat_states, agent_id, %{status: :offline, current_issue_id: nil, eta_ms: nil})
+  end
+
+  @doc """
+  Returns a human-readable heartbeat status label.
+  """
+  def heartbeat_status_label(%{status: :idle, eta_ms: eta_ms}, _issues) do
+    if eta_ms do
+      seconds = div(eta_ms, 1000)
+      "Next heartbeat in #{seconds}s"
+    else
+      "Idle"
+    end
+  end
+
+  def heartbeat_status_label(%{status: :working, current_issue_id: issue_id, eta_ms: eta_ms}, issues) do
+    issue_title = if issue_id do
+      case Enum.find(issues, fn i -> i.id == issue_id end) do
+        nil -> nil
+        issue -> String.slice(issue.title, 0, 20)
+      end
+    else
+      nil
+    end
+
+    base = if issue_title, do: "Working: #{issue_title}", else: "Working"
+    if eta_ms do
+      seconds = div(eta_ms, 1000)
+      "#{base} (#{seconds}s)"
+    else
+      base
+    end
+  end
+
+  def heartbeat_status_label(%{status: :error}, _issues), do: "Error"
+  def heartbeat_status_label(%{status: :offline}, _issues), do: "Offline"
+  def heartbeat_status_label(_, _issues), do: "Unknown"
 
   @impl true
   def handle_params(params, _url, socket) do
@@ -51,6 +113,13 @@ defmodule CymphoWeb.KanbanLive.Index do
            issue
          end
        end)
+     end)}
+  end
+
+  def handle_info({:agent_heartbeat_updated, agent_id, heartbeat_state}, socket) do
+    {:noreply,
+     update(socket, :agent_heartbeat_states, fn states ->
+       Map.put(states, agent_id, heartbeat_state)
      end)}
   end
 
