@@ -12,7 +12,8 @@ defmodule Cympho.Application do
       {Registry, keys: :unique, name: Cympho.OrchestratorRegistry},
       {Registry, keys: :unique, name: Cympho.AgentHeartbeat.Registry},
       Cympho.AgentHeartbeat.Supervisor,
-      Cympho.Notifications.RetryWorker,
+      # Layer 2: NotificationSupervisor
+      {Cympho.Notifications.NotificationSupervisor, []},
       Cympho.Orchestrator.Dispatcher,
       CymphoWeb.Endpoint
     ]
