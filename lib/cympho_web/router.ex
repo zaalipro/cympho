@@ -36,5 +36,6 @@ defmodule CymphoWeb.Router do
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
 
     post "/telegram/webhook", TelegramController, :webhook
+    post "/github/webhook", GithubController, :webhook
   end
 end
