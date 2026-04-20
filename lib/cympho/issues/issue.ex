@@ -35,13 +35,29 @@ defmodule Cympho.Issues.Issue do
     timestamps(type: :utc_datetime)
   end
 
+  @github_pr_url_regex ~r/^https:\/\/github\.com\/[\w\-\.]+\/[\w\-\.]+\/pull\/\d+\/?$/
+
   def changeset(issue, attrs) do
     issue
     |> cast(attrs, [:title, :description, :status, :priority, :assignee_id, :project_id, :github_pr_url, :assigned_role])
     |> validate_required([:title, :description])
     |> validate_length(:title, min: 1, max: 255)
     |> validate_length(:description, min: 1)
+    |> validate_github_pr_url()
     |> unique_constraint(:identifier, name: :issues_project_id_identifier_index)
+  end
+
+  defp validate_github_pr_url(changeset) do
+    validate_change(changeset, :github_pr_url, fn _, value ->
+      if is_nil(value) or value == "" do
+        []
+      else
+        case Regex.match?(@github_pr_url_regex, value) do
+          true -> []
+          false -> [github_pr_url: "must be a valid GitHub PR URL (https://github.com/owner/repo/pull/123)"]
+        end
+      end
+    end)
   end
 
   @doc """
