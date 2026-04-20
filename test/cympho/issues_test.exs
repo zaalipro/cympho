@@ -404,6 +404,184 @@ defmodule Cympho.IssuesTest do
     end
   end
 
+  describe "checkout_issue/3 chain-of-command enforcement" do
+    test "engineer can checkout issue with engineer role" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Engineer",
+          role: :engineer
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Engineering Task",
+          description: "Build something"
+        })
+
+      assert {:ok, checked_out} = Issues.checkout_issue(issue, agent, :engineer)
+      assert checked_out.assignee_id == agent.id
+      assert checked_out.assigned_role == :engineer
+    end
+
+    test "engineer can checkout issue with no required role" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Engineer",
+          role: :engineer
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Any Task",
+          description: "Any role"
+        })
+
+      assert {:ok, checked_out} = Issues.checkout_issue(issue, agent, nil)
+      assert checked_out.assignee_id == agent.id
+    end
+
+    test "engineer cannot checkout issue requiring cto role" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Engineer",
+          role: :engineer
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "CTO Task",
+          description: "Architectural decision"
+        })
+
+      assert {:error, :chain_of_command_violation} = Issues.checkout_issue(issue, agent, :cto)
+    end
+
+    test "engineer cannot checkout issue requiring ceo role" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Engineer",
+          role: :engineer
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Strategic Task",
+          description: "Funding round"
+        })
+
+      assert {:error, :chain_of_command_violation} = Issues.checkout_issue(issue, agent, :ceo)
+    end
+
+    test "cto can checkout issue requiring engineer role" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "CTO",
+          role: :cto
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Engineering Task",
+          description: "Build something"
+        })
+
+      assert {:ok, checked_out} = Issues.checkout_issue(issue, agent, :engineer)
+      assert checked_out.assignee_id == agent.id
+      assert checked_out.assigned_role == :engineer
+    end
+
+    test "cto cannot checkout issue requiring ceo role" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "CTO",
+          role: :cto
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Strategic Task",
+          description: "Funding round"
+        })
+
+      assert {:error, :chain_of_command_violation} = Issues.checkout_issue(issue, agent, :ceo)
+    end
+
+    test "ceo can checkout issue requiring any role" do
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "CEO",
+          role: :ceo
+        })
+
+      {:ok, engineer_issue} =
+        Issues.create_issue(%{
+          title: "Engineering Task",
+          description: "Build something"
+        })
+
+      {:ok, cto_issue} =
+        Issues.create_issue(%{
+          title: "CTO Task",
+          description: "Architectural decision"
+        })
+
+      {:ok, ceo_issue} =
+        Issues.create_issue(%{
+          title: "Strategic Task",
+          description: "Funding round"
+        })
+
+      assert {:ok, _} = Issues.checkout_issue(engineer_issue, ceo, :engineer)
+      assert {:ok, _} = Issues.checkout_issue(cto_issue, ceo, :cto)
+      assert {:ok, _} = Issues.checkout_issue(ceo_issue, ceo, :ceo)
+    end
+  end
+
+  describe "Issue.role_authorized?/2" do
+    test "engineer is authorized for engineer role" do
+      assert Issue.role_authorized?(:engineer, :engineer)
+    end
+
+    test "engineer is not authorized for cto role" do
+      refute Issue.role_authorized?(:engineer, :cto)
+    end
+
+    test "engineer is not authorized for ceo role" do
+      refute Issue.role_authorized?(:engineer, :ceo)
+    end
+
+    test "cto is authorized for engineer role" do
+      assert Issue.role_authorized?(:cto, :engineer)
+    end
+
+    test "cto is authorized for cto role" do
+      assert Issue.role_authorized?(:cto, :cto)
+    end
+
+    test "cto is not authorized for ceo role" do
+      refute Issue.role_authorized?(:cto, :ceo)
+    end
+
+    test "ceo is authorized for all roles" do
+      assert Issue.role_authorized?(:ceo, :engineer)
+      assert Issue.role_authorized?(:ceo, :cto)
+      assert Issue.role_authorized?(:ceo, :ceo)
+    end
+
+    test "nil required_role is always authorized" do
+      assert Issue.role_authorized?(:engineer, nil)
+      assert Issue.role_authorized?(:cto, nil)
+      assert Issue.role_authorized?(:ceo, nil)
+    end
+  end
+
+  describe "Issue.role_rank/1" do
+    test "rank order is engineer < cto < ceo" do
+      assert Issue.role_rank(:engineer) < Issue.role_rank(:cto)
+      assert Issue.role_rank(:cto) < Issue.role_rank(:ceo)
+    end
+  end
+
   describe "release_issue/1" do
     test "releases an issue and sets status to todo" do
       {:ok, agent} =

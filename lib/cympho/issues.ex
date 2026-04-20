@@ -174,16 +174,17 @@ defmodule Cympho.Issues do
     })
   end
 
-  def checkout_issue(%Issue{} = issue, %Agent{} = agent) do
-    checkout_issue(issue, agent.id)
+  def checkout_issue(%Issue{} = issue, %Agent{} = agent, required_role \\ nil) do
+    checkout_issue(issue, agent.id, required_role)
   end
 
-  def checkout_issue(%Agent{} = agent, %Issue{} = issue) do
-    checkout_issue(issue, agent.id)
+  def checkout_issue(%Agent{} = agent, %Issue{} = issue, required_role \\ nil) do
+    checkout_issue(issue, agent.id, required_role)
   end
 
-  def checkout_issue(%Issue{} = issue, agent_id) do
+  def checkout_issue(%Issue{} = issue, agent_id, required_role) do
     current_issue = Repo.reload(issue)
+    agent = Agents.get_agent!(agent_id)
 
     cond do
       current_issue.assignee_id != nil and current_issue.assignee_id != agent_id ->
@@ -192,9 +193,14 @@ defmodule Cympho.Issues do
       current_issue.assignee_id == agent_id ->
         {:ok, current_issue}
 
+      not Issue.role_authorized?(agent.role, required_role) ->
+        {:error, :chain_of_command_violation}
+
       true ->
         new_status = if current_issue.status in [:backlog, :todo], do: :in_progress, else: current_issue.status
-        update_issue(current_issue, %{assignee_id: agent_id, status: new_status})
+        attrs = %{assignee_id: agent_id, status: new_status}
+        attrs = if required_role, do: Map.put(attrs, :assigned_role, required_role), else: attrs
+        update_issue(current_issue, attrs)
         |> maybe_adjust_lock_version()
     end
   end

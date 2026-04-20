@@ -283,8 +283,9 @@ defmodule Cympho.AgentHeartbeat do
         Issue
         |> where(assignee_id: ^agent_id, status: :todo)
         |> maybe_filter_by_project(project_id)
-        |> first()
-        |> Repo.one()
+        |> Repo.all()
+        |> Enum.filter(fn issue -> Issue.role_authorized?(agent.role, issue.assigned_role) end)
+        |> List.first()
 
       :error ->
         nil
