@@ -7,7 +7,9 @@ defmodule Cympho.Issues do
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
+  alias Cympho.Issues.AutoAssignment
   alias Cympho.Agents.Agent
+  alias Cympho.Agents
   alias Cympho.Comments
 
   def list_issues(opts \\ %{}) do
@@ -47,10 +49,28 @@ defmodule Cympho.Issues do
          |> Repo.insert() do
       {:ok, issue} ->
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
-        {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
+        issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
+
+        if is_nil(issue.assignee_id) do
+          issue = maybe_auto_assign(issue)
+          {:ok, issue}
+        else
+          {:ok, issue}
+        end
 
       {:error, changeset} ->
         {:error, changeset}
+    end
+  end
+
+  defp maybe_auto_assign(%Issue{} = issue) do
+    case AutoAssignment.assign_issue(issue) do
+      {:ok, assigned} ->
+        assigned
+
+      {:error, :no_eligible_agent, _} ->
+        _ = AutoAssignment.queue_for_assignment(issue)
+        issue
     end
   end
 
@@ -174,11 +194,13 @@ defmodule Cympho.Issues do
     })
   end
 
-  def checkout_issue(%Issue{} = issue, %Agent{} = agent, required_role \\ nil) do
+  def checkout_issue(issue, agent_id, required_role \\ nil)
+
+  def checkout_issue(%Issue{} = issue, %Agent{} = agent, required_role) do
     checkout_issue(issue, agent.id, required_role)
   end
 
-  def checkout_issue(%Agent{} = agent, %Issue{} = issue, required_role \\ nil) do
+  def checkout_issue(%Agent{} = agent, %Issue{} = issue, required_role) do
     checkout_issue(issue, agent.id, required_role)
   end
 
