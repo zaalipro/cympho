@@ -81,12 +81,12 @@ defmodule CymphoWeb.KanbanLive.Index do
   def open_issues(issues), do: Enum.filter(issues, &(&1.status != :done))
   def closed_issues(issues), do: Enum.filter(issues, &(&1.status == :done))
 
-  def valid_next_statuses(:backlog), do: [:todo]
+  def valid_next_statuses(:backlog), do: [:todo, :in_progress, :blocked]
   def valid_next_statuses(:todo), do: [:in_progress, :blocked]
-  def valid_next_statuses(:in_progress), do: [:in_review, :todo, :blocked]
+  def valid_next_statuses(:in_progress), do: [:in_review, :blocked]
   def valid_next_statuses(:in_review), do: [:done, :in_progress]
-  def valid_next_statuses(:done), do: [:todo]
-  def valid_next_statuses(:blocked), do: [:todo]
+  def valid_next_statuses(:done), do: [:in_progress, :blocked]
+  def valid_next_statuses(:blocked), do: [:backlog, :todo, :in_progress, :in_review, :done]
 
   def status_label(:backlog), do: "Backlog"
   def status_label(:todo), do: "To Do"
