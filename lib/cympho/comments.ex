@@ -30,8 +30,12 @@ defmodule Cympho.Comments do
     |> Comment.changeset(attrs)
     |> Repo.insert()
     |> then(fn {:ok, comment} ->
-      issue = Repo.get!(Issue, comment.issue_id) |> Repo.preload(:comments)
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_created, issue})
+      case Repo.get(Issue, comment.issue_id) do
+        nil -> :ok
+        issue ->
+          issue = Repo.preload(issue, :comments)
+          Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_created, issue})
+      end
       {:ok, comment}
     end)
   end
@@ -44,8 +48,12 @@ defmodule Cympho.Comments do
     |> Comment.changeset(attrs)
     |> Repo.update()
     |> then(fn {:ok, comment} ->
-      issue = Repo.get!(Issue, comment.issue_id) |> Repo.preload(:comments)
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_updated, issue})
+      case Repo.get(Issue, comment.issue_id) do
+        nil -> :ok
+        issue ->
+          issue = Repo.preload(issue, :comments)
+          Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_updated, issue})
+      end
       {:ok, comment}
     end)
   end
@@ -58,8 +66,12 @@ defmodule Cympho.Comments do
 
     Repo.delete(comment)
     |> then(fn {:ok, _comment} ->
-      issue = Repo.get!(Issue, issue_id) |> Repo.preload(:comments)
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_deleted, issue})
+      case Repo.get(Issue, issue_id) do
+        nil -> :ok
+        issue ->
+          issue = Repo.preload(issue, :comments)
+          Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_deleted, issue})
+      end
       :ok
     end)
   end

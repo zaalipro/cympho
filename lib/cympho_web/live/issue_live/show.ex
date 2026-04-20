@@ -10,12 +10,7 @@ defmodule CymphoWeb.IssueLive.Show do
 
     case Issues.get_issue(id) do
       {:ok, issue} ->
-        {:ok,
-         assign(socket,
-           issue: issue,
-           comment_changeset: Comments.Comment.changeset(%Comments.Comment{}, %{})
-         )}
-
+        {:ok, assign(socket, issue: issue, comment_changeset: Comments.Comment.changeset(%Comments.Comment{}, %{}))}
       {:error, :not_found} ->
         {:ok, push_navigate(socket, to: ~p"/issues")}
     end
@@ -32,7 +27,6 @@ defmodule CymphoWeb.IssueLive.Show do
         socket
         |> assign(:page_title, issue.title)
         |> assign(:issue, issue)
-
       {:error, :not_found} ->
         socket
         |> put_flash(:error, "Issue not found")
@@ -83,9 +77,7 @@ defmodule CymphoWeb.IssueLive.Show do
 
     case Comments.create_comment(comment_params) do
       {:ok, _comment} ->
-        {:noreply,
-         assign(socket, :comment_changeset, Comments.Comment.changeset(%Comments.Comment{}, %{}))}
-
+        {:noreply, assign(socket, :comment_changeset, Comments.Comment.changeset(%Comments.Comment{}, %{}))}
       {:error, changeset} ->
         {:noreply, assign(socket, :comment_changeset, changeset)}
     end
@@ -100,14 +92,18 @@ defmodule CymphoWeb.IssueLive.Show do
 
   @impl true
   def handle_event("update_issue_status", %{"status" => status}, socket) do
-    status_atom = String.to_existing_atom(status)
-
-    case Issues.update_issue(socket.assigns.issue, %{status: status_atom}) do
-      {:ok, _issue} ->
-        {:noreply, socket}
-
-      {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Failed to update status")}
+    valid_statuses = ~w(backlog todo in_progress in_review done blocked)
+    case status do
+      s when s in valid_statuses ->
+        status_atom = String.to_existing_atom(s)
+        case Issues.update_issue(socket.assigns.issue, %{status: status_atom}) do
+          {:ok, _issue} ->
+            {:noreply, socket}
+          {:error, _changeset} ->
+            {:noreply, put_flash(socket, :error, "Failed to update status")}
+        end
+      _ ->
+        {:noreply, put_flash(socket, :error, "Invalid status")}
     end
   end
 end

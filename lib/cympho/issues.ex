@@ -11,9 +11,18 @@ defmodule Cympho.Issues do
   @doc """
   Returns the list of issues.
   """
-  def list_issues do
-    Repo.all(Issue) |> Repo.preload([:comments, :blocked_by, :blocks])
+  def list_issues(opts \\ %{}) do
+    Issue
+    |> maybe_filter_by_project(opts)
+    |> Repo.all()
+    |> Repo.preload([:comments, :blocked_by, :blocks])
   end
+
+  defp maybe_filter_by_project(query, %{project_id: project_id}) do
+    where(query, project_id: ^project_id)
+  end
+
+  defp maybe_filter_by_project(query, _opts), do: query
 
   @doc """
   Gets a single issue by id.
@@ -34,6 +43,7 @@ defmodule Cympho.Issues do
   Creates an issue.
   """
   def create_issue(attrs \\ %{}) do
+    attrs = maybe_generate_identifier(attrs)
     %Issue{}
     |> Issue.changeset(attrs)
     |> Repo.insert()
@@ -42,6 +52,19 @@ defmodule Cympho.Issues do
       {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
     end)
   end
+
+  defp maybe_generate_identifier(%{"project_id" => project_id} = attrs) do
+    if Map.has_key?(attrs, "identifier") do
+      attrs
+    else
+      project = Repo.get!(Cympho.Projects.Project, project_id)
+      max_seq = Repo.one(from i in Issue, where: i.project_id == ^project_id, select: max fragment("CAST(SPLIT_PART(i.identifier, '-', 2) AS INTEGER)")) || 0
+      seq = max_seq + 1
+      Map.put(attrs, "identifier", "#{project.prefix}-#{seq}")
+    end
+  end
+
+  defp maybe_generate_identifier(attrs), do: attrs
 
   @doc """
   Updates an issue.
@@ -89,7 +112,7 @@ defmodule Cympho.Issues do
   """
   def is_blocked?(%Issue{} = issue) do
     blocked_by = issue.blocked_by || []
-    Enum.any?(blocked_by, fn blocker -> blocker.status != :closed end)
+    Enum.any?(blocked_by, fn blocker -> blocker.status not in [:done, :cancelled] end)
   end
 
   @doc """
@@ -97,30 +120,50 @@ defmodule Cympho.Issues do
   """
   def active_blockers(%Issue{} = issue) do
     blocked_by = issue.blocked_by || []
-    Enum.filter(blocked_by, fn blocker -> blocker.status != :closed end)
+    Enum.filter(blocked_by, fn blocker -> blocker.status not in [:done, :cancelled] end)
   end
 
   @doc """
   Adds a blocker relationship: blocker_issue blocks blocked_issue.
+  Rejects circular blocker chains.
   """
   def add_blocker(%Issue{} = blocked_issue, %Issue{} = blocker_issue) do
-    if blocked_issue.id == blocker_issue.id do
-      {:error, :cannot_block_self}
-    else
-      Repo.insert_all(
-        "issue_blockers",
-        [
+    cond do
+      blocked_issue.id == blocker_issue.id ->
+        {:error, :cannot_block_self}
+      transitively_blocked_by?(blocker_issue, blocked_issue) ->
+        {:error, :circular_blocker}
+      true ->
+        Repo.insert_all("issue_blockers", [
           %{
             blocked_issue_id: blocked_issue.id,
             blocking_issue_id: blocker_issue.id,
             inserted_at: DateTime.utc_now(),
             updated_at: DateTime.utc_now()
           }
-        ],
-        on_conflict: :nothing
-      )
+        ], on_conflict: :nothing)
+        {:ok, Repo.preload(blocked_issue, [:comments, :blocked_by, :blocks])}
+    end
+  end
 
-      {:ok, Repo.preload(blocked_issue, [:comments, :blocked_by, :blocks])}
+  defp transitively_blocked_by?(issue, target) do
+    visited = MapSet.new()
+    do_transitively_blocked_by?(issue.id, target.id, visited)
+  end
+
+  defp do_transitively_blocked_by?(current_id, target_id, visited) do
+    if MapSet.member?(visited, current_id) do
+      false
+    else
+      visited = MapSet.put(visited, current_id)
+      blocker_ids = Repo.all(from bb in "issue_blockers", where: bb.blocked_issue_id == ^current_id, select: bb.blocking_issue_id)
+      Enum.any?(blocker_ids, fn blocker_id ->
+        if blocker_id == target_id do
+          true
+        else
+          do_transitively_blocked_by?(blocker_id, target_id, visited)
+        end
+      end)
     end
   end
 
@@ -129,8 +172,7 @@ defmodule Cympho.Issues do
   """
   def remove_blocker(%Issue{} = blocked_issue, %Issue{} = blocker_issue) do
     from(bb in "issue_blockers",
-      where:
-        bb.blocked_issue_id == ^blocked_issue.id and bb.blocking_issue_id == ^blocker_issue.id
+      where: bb.blocked_issue_id == ^blocked_issue.id and bb.blocking_issue_id == ^blocker_issue.id
     )
     |> Repo.delete_all()
 

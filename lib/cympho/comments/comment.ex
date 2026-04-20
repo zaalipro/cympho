@@ -8,7 +8,8 @@ defmodule Cympho.Comments.Comment do
   @foreign_key_type :binary_id
   schema "comments" do
     field :body, :string
-    field :author, :string
+    field :author_type, :string
+    field :author_id, :string
 
     belongs_to :issue, Issue
 
@@ -17,9 +18,9 @@ defmodule Cympho.Comments.Comment do
 
   def changeset(comment, attrs) do
     comment
-    |> cast(attrs, [:body, :author, :issue_id])
-    |> validate_required([:body, :author, :issue_id])
+    |> cast(attrs, [:body, :author_type, :author_id, :issue_id])
+    |> validate_required([:body, :author_type, :author_id, :issue_id])
     |> validate_length(:body, min: 1)
-    |> validate_length(:author, min: 1, max: 100)
+    |> validate_inclusion(:author_type, ["agent", "user"])
   end
 end

@@ -10,33 +10,38 @@ defmodule Cympho.Issues.Issue do
   schema "issues" do
     field :title, :string
     field :description, :string
-    field :status, Ecto.Enum, values: [:open, :in_progress, :closed], default: :open
+    field :status, Ecto.Enum, values: [:backlog, :todo, :in_progress, :in_review, :done, :blocked], default: :backlog
     field :priority, Ecto.Enum, values: [:low, :medium, :high], default: :medium
-    field :assignee, :string
+    field :identifier, :string
+    field :assignee_agent_id, :string
+    field :lock_version, :integer, default: 1
 
-    belongs_to :project, Project, type: :binary_id
+    belongs_to :project, Project
+
     has_many :comments, Comment, foreign_key: :issue_id
 
-    many_to_many :blocked_by, __MODULE__,
+    many_to_many :blocked_by, Cympho.Issues.Issue,
       join_through: "issue_blockers",
-      join_keys: [blocked_issue_id: :id, blocking_issue_id: :id]
+      join_keys: [blocked_issue_id: :id, blocking_issue_id: :id],
+      unique: true
 
-    many_to_many :blocks, __MODULE__,
+    many_to_many :blocks, Cympho.Issues.Issue,
       join_through: "issue_blockers",
-      join_keys: [blocking_issue_id: :id, blocked_issue_id: :id]
+      join_keys: [blocking_issue_id: :id, blocked_issue_id: :id],
+      unique: true
 
     timestamps(type: :utc_datetime)
   end
 
   def changeset(issue, attrs) do
     issue
-    |> cast(attrs, [:title, :description, :status, :priority, :project_id, :assignee])
-    |> validate_required([:title, :description])
+    |> cast(attrs, [:title, :description, :status, :priority, :project_id, :identifier, :assignee_agent_id, :lock_version])
+    |> validate_required([:title, :description, :project_id, :identifier])
     |> validate_length(:title, min: 1, max: 255)
     |> validate_length(:description, min: 1)
-    |> validate_length(:assignee, min: 1, max: 100)
+    |> unique_constraint(:identifier, name: :issues_project_id_identifier_index)
   end
 
-  def status_options, do: [:open, :in_progress, :closed]
+  def status_options, do: [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
   def priority_options, do: [:low, :medium, :high]
 end

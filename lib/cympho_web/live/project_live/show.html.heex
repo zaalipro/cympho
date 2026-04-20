@@ -1,0 +1,26 @@
+<.header>
+  <%= @project.name %>
+  <:actions>
+    <.link navigate={~p"/projects"} class="phx-btn-secondary">
+      Back
+    </.link>
+    <.link navigate={~p"/projects/#{@project.id}/edit"} class="phx-btn-secondary">
+      Edit
+    </.link>
+  </:actions>
+</.header>
+
+<div class="project-detail">
+  <div class="project-info">
+    <div class="status-row">
+      <span class="badge status-<%= @project.status %>"><%= @project.status %></span>
+      <span class="prefix-badge"><%= @project.prefix %></span>
+    </div>
+
+    <p class="description"><%= @project.description %></p>
+
+    <div class="meta">
+      <span>Created <%= @project.inserted_at %></span>
+    </div>
+  </div>
+</div>
