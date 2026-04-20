@@ -33,6 +33,7 @@ defmodule CymphoWeb.IssueLive.Show do
   defp apply_action(socket, :show, id) do
     case Issues.get_issue(id) do
       {:ok, issue} ->
+        Orchestrator.subscribe(issue.id)
         socket
         |> assign(:page_title, issue.title)
         |> assign(:issue, issue)
