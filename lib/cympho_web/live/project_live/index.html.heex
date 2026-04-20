@@ -12,7 +12,7 @@
     <div class="project-card" id={"project-#{project.id}"}>
       <div class="card-header">
         <h3><%= project.name %></h3>
-        <span class="status-badge status-<%= project.status %>"><%= project.status %></span>
+        <span class={"status-badge status-#{project.status}"}]><%= project.status %></span>
       </div>
       <p class="card-description"><%= project.description %></p>
       <div class="card-meta">

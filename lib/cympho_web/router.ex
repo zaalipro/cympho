@@ -27,5 +27,7 @@ defmodule CymphoWeb.Router do
     live "/projects/new", ProjectLive.New
     live "/projects/:id", ProjectLive.Show
     live "/projects/:id/edit", ProjectLive.Edit
+
+    live "/kanban", KanbanLive.Index
   end
 end

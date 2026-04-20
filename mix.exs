@@ -43,7 +43,7 @@ defmodule Cympho.MixProject do
       {:gettext, "~> 0.20"},
       {:jason, "~> 1.4"},
       {:dns_cluster, "~> 0.1.1"},
-      {:bandit, "~> 1.5"}
+      {:hackney, "~> 1.9"},
     ]
   end
 

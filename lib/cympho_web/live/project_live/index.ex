@@ -6,7 +6,7 @@ defmodule CymphoWeb.ProjectLive.Index do
   @impl true
   def mount(_params, _session, socket) do
     Projects.subscribe()
-    {:ok, assign(socket, :projects, Projects.list_projects()))}
+    {:ok, assign(socket, :projects, Projects.list_projects())}
   end
 
   @impl true
