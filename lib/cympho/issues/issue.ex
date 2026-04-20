@@ -13,6 +13,7 @@ defmodule Cympho.Issues.Issue do
     field :description, :string
     field :status, Ecto.Enum, values: [:backlog, :todo, :in_progress, :in_review, :done, :blocked], default: :backlog
     field :priority, Ecto.Enum, values: [:low, :medium, :high], default: :medium
+    field :lock_version, :integer, default: 0
 
     belongs_to :project, Project
     belongs_to :assignee, Agent, foreign_key: :assignee_id
