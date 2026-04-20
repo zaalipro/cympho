@@ -62,10 +62,14 @@ defmodule Cympho.Issues.Issue do
 
   @doc """
   Returns the role hierarchy rank. Higher number = higher authority.
+  Order: designer(1) < product_manager(2) < engineer(3) < cto(4) < ceo(5).
+  Matches Cympho.Agents.role_rank/1.
   """
-  def role_rank(:engineer), do: 1
-  def role_rank(:cto), do: 2
-  def role_rank(:ceo), do: 3
+  def role_rank(:designer), do: 1
+  def role_rank(:product_manager), do: 2
+  def role_rank(:engineer), do: 3
+  def role_rank(:cto), do: 4
+  def role_rank(:ceo), do: 5
 
   @doc """
   Returns true if agent_role has authority over (or equal to) required_role.
