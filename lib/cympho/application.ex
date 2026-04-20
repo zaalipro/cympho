@@ -9,8 +9,11 @@ defmodule Cympho.Application do
       Cympho.Repo,
       {Phoenix.PubSub, name: Cympho.PubSub},
       {Task.Supervisor, name: Cympho.TaskSupervisor},
-      {Registry, keys: :unique, name: Cympho.Orchestrator.Registry},
+      {Registry, keys: :unique, name: Cympho.OrchestratorRegistry},
+      {Registry, keys: :unique, name: Cympho.AgentHeartbeat.Registry},
+      Cympho.AgentHeartbeat.Supervisor,
       Cympho.Notifications.RetryWorker,
+      Cympho.Orchestrator.Dispatcher,
       CymphoWeb.Endpoint
     ]
 

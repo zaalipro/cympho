@@ -1,6 +1,10 @@
 defmodule Cympho.Orchestrator do
   @moduledoc """
-  GenServer that manages Claude CLI sessions for issue processing.
+  Represents an active agent session for an issue.
+  """
+
+  @enforce_keys [:issue, :agent_id]
+  defstruct [:issue, :agent_id, :session_id, turn_count: 0]
 
   Receives AgentRunner Port messages and translates them into session lifecycle events,
   publishing results via PubSub for LiveView consumption.
@@ -8,27 +12,53 @@ defmodule Cympho.Orchestrator do
   Session lifecycle:
     start_session → session_started → turn_completed (possibly multiple) → session_ended
 
-  Error cases:
-    turn_ended_with_error (stall_timeout | exit_code | parse_error)
+  Each orchestrator instance is registered by issue_id and manages
+  a single agent session, forwarding messages to the caller via messages
+  from AgentRunner.
+
+  Protocol:
+    - Started by AgentHeartbeat via `start_and_run/2`
+    - Calls AgentRunner.run/4 with self() as recipient_pid
+    - Receives {:session_started, session_id}, {:turn_completed, session_id, result},
+      {:turn_ended_with_error, session_id, reason} from AgentRunner
+    - On completion: creates Comment, transitions issue, updates agent status
   """
 
   use GenServer
   alias Cympho.AgentRunner
   alias Cympho.Orchestrator.Session
+  alias Cympho.{AgentRunner, AgentHeartbeat, Issues, Comments, Agents}
 
-  @stall_timeout Application.compile_env(:cympho, :agent_runner_stall_timeout, 300_000)
+  @registry Cympho.OrchestratorRegistry
+
+  @default_heartbeat_interval :timer.seconds(60)
+
+  ## Client API
 
   @doc """
-  Starts an orchestrator for the given issue, linked to the caller's process.
+  Starts an orchestrator for the given issue and agent, runs the session immediately.
+  Returns {:ok, pid} or {:error, reason}.
   """
-  def start_link(issue, agent_id) do
-    name = via_tuple(issue.id)
-    GenServer.start_link(__MODULE__, {issue, agent_id}, name: name)
+  @spec start_and_run(map(), String.t()) :: {:ok, pid()} | {:error, atom()}
+  def start_and_run(%{id: issue_id} = issue, agent_id) when is_binary(agent_id) do
+    case Registry.lookup(@registry, issue_id) do
+      [{_pid, _}] ->
+        {:error, :already_started}
+
+      [] ->
+        name = via_tuple(issue_id)
+        case GenServer.start_link(__MODULE__, {issue, agent_id}, name: name) do
+          {:ok, pid} -> {:ok, pid}
+          {:error, {:already_started, _pid}} -> {:error, :already_started}
+          {:error, reason} -> {:error, reason}
+        end
+    end
   end
 
   @doc """
   Looks up the orchestrator PID for a given issue.
   """
+  @spec whereis(String.t()) :: pid() | nil
   def whereis(issue_id) do
     case Registry.lookup(Cympho.Orchestrator.Registry, issue_id) do
       [{pid, _}] -> pid
@@ -46,6 +76,7 @@ defmodule Cympho.Orchestrator do
   @doc """
   Stops the orchestrator for a given issue.
   """
+  @spec stop(String.t()) :: :ok
   def stop(issue_id) do
     case whereis(issue_id) do
       nil -> :ok
@@ -59,95 +90,126 @@ defmodule Cympho.Orchestrator do
 
   @impl true
   def init({issue, agent_id}) do
-    state = %Session{
-      issue: issue,
-      agent_id: agent_id,
-      status: :idle,
-      turn_count: 0
-    }
-
-    {:ok, state}
+    session = %Session{issue: issue, agent_id: agent_id}
+    {:ok, session, {:continue, :start_session}}
   end
 
   @impl true
-  def handle_call(:start_session, _from, %Session{status: :running} = state) do
-    {:reply, {:ok, state.session_id}, state}
+  def handle_continue(:start_session, %Session{} = session) do
+    issue = session.issue
+    agent_id = session.agent_id
+
+    # Use Mock for test environment, real runner otherwise
+    runner = runner_module()
+    session_id = runner.run(issue, agent_id, self(), run_opts(issue))
+
+    {:noreply, %{session | session_id: session_id}}
   end
 
   @impl true
-  def handle_call(:start_session, _from, state) do
-    session_id = AgentRunner.run(state.issue, state.agent_id, self())
-    new_state = %{state | session_id: session_id, status: :running, turn_count: 0}
-    {:reply, {:ok, session_id}, new_state}
+  def handle_info({:session_started, session_id}, %Session{} = session) do
+    # AgentRunner confirmed the session started
+    {:noreply, %{session | session_id: session_id}}
   end
 
   @impl true
-  def handle_info({:session_started, session_id}, %Session{} = state) do
-    new_state = %{state | session_id: session_id, status: :running}
-    broadcast(state, {:session_started, session_id})
-    schedule_stall_check()
-    {:noreply, new_state}
+  def handle_info({:turn_completed, _session_id, result}, %Session{} = session) do
+    issue = session.issue
+    agent_id = session.agent_id
+
+    # Extract text content from Claude result
+    body = extract_result_content(result)
+
+    # Create comment with agent as polymorphic author
+    {:ok, _comment} =
+      Comments.create_comment(%{
+        body: body,
+        author_type: "agent",
+        author_id: agent_id,
+        issue_id: issue.id
+      })
+
+    # Mark issue done
+    Issues.transition_issue(issue, :done)
+
+    # Update agent status back to idle
+    set_agent_idle(agent_id)
+
+    # Stop this orchestrator - work is complete
+    {:stop, :normal, session}
   end
 
   @impl true
-  def handle_info({:turn_completed, session_id, result}, %Session{} = state) do
-    case state.session_id == session_id do
-      true ->
-        turn_count = state.turn_count + 1
-        new_state = %{state | turn_count: turn_count, last_result: result, last_output_time: now_ms()}
-        broadcast(state, {:turn_completed, session_id, result})
-        schedule_stall_check()
-        {:noreply, new_state}
+  def handle_info({:turn_ended_with_error, _session_id, reason}, %Session{} = session) do
+    issue = session.issue
+    agent_id = session.agent_id
 
-      false ->
-        {:noreply, state}
+    # Create error comment
+    error_body = "Agent work error: #{inspect(reason)}"
+    {:ok, _comment} =
+      Comments.create_comment(%{
+        body: error_body,
+        author_type: "agent",
+        author_id: agent_id,
+        issue_id: issue.id
+      })
+
+    # Mark issue as blocked waiting on resolution
+    Issues.update_issue(issue, %{status: :blocked})
+
+    # Keep agent idle
+    set_agent_idle(agent_id)
+
+    {:stop, :normal, session}
+  end
+
+  @impl true
+  def terminate(reason, %Session{} = session) do
+    _ =
+      :logger.info(
+        "[Orchestrator] terminated for issue #{session.issue.id}, agent #{session.agent_id}, reason: #{inspect(reason)}"
+      )
+
+    :ok
+  end
+
+  ## Private
+
+  defp extract_result_content(result) when is_map(result) do
+    content = result["content"] || []
+
+    texts =
+      content
+      |> Enum.filter(fn item -> item["type"] == "text" end)
+      |> Enum.map(fn item -> item["text"] end)
+      |> Enum.join("\n\n")
+
+    if texts == "",
+      do: inspect(result),
+      else: texts
+  end
+
+  defp extract_result_content(_), do: "No content returned"
+
+  defp set_agent_idle(agent_id) do
+    case Agents.get_agent(agent_id) do
+      {:ok, agent} ->
+        Agents.update_agent(agent, %{status: :idle})
+
+      :error ->
+        :error
     end
   end
 
-  @impl true
-  def handle_info({:turn_ended_with_error, session_id, reason}, %Session{} = state) do
-    case state.session_id == session_id do
-      true ->
-        new_state = %{state | status: :failed, last_error: reason}
-        broadcast(state, {:turn_ended_with_error, session_id, reason})
-        {:noreply, new_state}
-
-      false ->
-        {:noreply, state}
-    end
-  end
-
-  @impl true
-  def handle_info(:stall_check, %Session{} = state) do
-    if state.status == :running && state.last_output_time do
-      if now_ms() - state.last_output_time > @stall_timeout do
-        new_state = %{state | status: :failed, last_error: :stall_timeout}
-        broadcast(state, {:turn_ended_with_error, state.session_id, :stall_timeout})
-        {:noreply, new_state}
-      else
-        schedule_stall_check()
-        {:noreply, state}
-      end
+  defp runner_module do
+    if Application.get_env(:cympho, :env) == :test do
+      Cympho.AgentRunner.Mock
     else
-      {:noreply, state}
+      Cympho.AgentRunner
     end
   end
 
-  @impl true
-  def handle_info({:exit_status, code}, %Session{} = state) do
-    new_state = %{state | status: :failed, last_error: {:exit_code, code}}
-    broadcast(state, {:session_ended, state.session_id, :exit_code})
-    {:noreply, new_state}
+  defp run_opts(_issue) do
+    []
   end
-
-  defp broadcast(%Session{} = state, message) do
-    Phoenix.PubSub.broadcast(Cympho.PubSub, "orchestrator:#{state.issue.id}", message)
-  end
-
-  defp schedule_stall_check do
-    check_interval = min(@stall_timeout, 30_000)
-    Process.send_after(self(), :stall_check, check_interval)
-  end
-
-  defp now_ms, do: System.system_time(:millisecond)
 end
