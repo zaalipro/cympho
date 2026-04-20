@@ -129,4 +129,15 @@ defmodule Cympho.Agents do
     |> first()
     |> Repo.one()
   end
+
+  @doc """
+  Gets an agent by its url_key field, returns {:ok, agent} or {:error, :not_found}.
+  """
+  def get_agent_by_url_key(url_key) when is_binary(url_key) do
+    Repo.one(from a in Agent, where: a.url_key == ^url_key)
+    |> case do
+      nil -> {:error, :not_found}
+      agent -> {:ok, agent}
+    end
+  end
 end

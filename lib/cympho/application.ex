@@ -13,6 +13,7 @@ defmodule Cympho.Application do
       {Registry, keys: :unique, name: Cympho.AgentHeartbeat.Registry},
       Cympho.AgentHeartbeat.Supervisor,
       Cympho.Notifications.RetryWorker,
+      Cympho.Orchestrator.Dispatcher,
       CymphoWeb.Endpoint
     ]
 
