@@ -139,6 +139,18 @@ defmodule Cympho.AgentHeartbeat do
   def handle_info(:heartbeat, state) do
     agent_id = state.agent_id
 
+    # Check if agent is at capacity before picking up more work
+    if Agents.is_agent_at_capacity?(agent_id) do
+      timer_ref = schedule_heartbeat(agent_id)
+      {:noreply, %{state | timer_ref: timer_ref}}
+    else
+      do_heartbeat(state)
+    end
+  end
+
+  defp do_heartbeat(state) do
+    agent_id = state.agent_id
+
     # Update agent status to running if idle
     _ = maybe_update_agent_status(agent_id, :running)
 
