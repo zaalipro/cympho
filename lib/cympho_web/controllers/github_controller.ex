@@ -1,8 +1,6 @@
 defmodule CymphoWeb.GithubController do
   use CymphoWeb, :controller
 
-  import Ecto.Query
-
   alias Cympho.Issues
   alias Cympho.Comments
   alias Cympho.GithubWebhook
@@ -28,7 +26,7 @@ defmodule CymphoWeb.GithubController do
   def webhook(conn, %{"action" => action, "pull_request" => pr} = params) do
     pr_url = pr["html_url"]
 
-    case find_issue_by_pr_url(pr_url) do
+    case Issues.get_issue_by_pr_url(pr_url) do
       {:ok, issue} ->
         project = issue.project
 
@@ -57,13 +55,6 @@ defmodule CymphoWeb.GithubController do
     secret = project && project.github_webhook_secret
 
     GithubWebhook.verify_signature(raw_body, signature, secret)
-  end
-
-  defp find_issue_by_pr_url(pr_url) do
-    case Cympho.Repo.all(from i in Cympho.Issues.Issue, where: i.github_pr_url == ^pr_url, preload: [:project]) do
-      [issue] -> {:ok, issue}
-      [] -> {:error, :not_found}
-    end
   end
 
   defp handle_pr_action(issue, "opened", _pr) do
