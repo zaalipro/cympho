@@ -13,3 +13,5 @@ config :cympho, CymphoWeb.Endpoint,
 config :logger, level: :warning
 
 config :phoenix, :plug_init_mode, :runtime
+
+config :swoosh, :api_client, Swoosh.ApiClient.Test
