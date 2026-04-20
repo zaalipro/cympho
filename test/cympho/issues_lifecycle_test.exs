@@ -53,16 +53,19 @@ defmodule Cympho.IssuesLifecycleTest do
       {:ok, child_issue} =
         Issues.create_issue(%{
           title: "Child Issue",
-          description: "Depends on parent"
+          description: "Depends on parent",
+          status: :in_review
         })
 
       # Add blocker relationship
       assert {:ok, updated} = Issues.add_blocker(child_issue, parent_issue)
-      assert Issues.is_blocked?(updated)
+      # Reload to get updated blocked_by association
+      reloaded_child = Issues.get_issue!(child_issue.id)
+      assert Issues.is_blocked?(reloaded_child)
 
       # Cannot transition blocked child to done
       assert {:error, :blocked_by_active_issues} =
-               Issues.transition_issue(updated, :done)
+               Issues.transition_issue(reloaded_child, :done)
 
       # Complete parent issue
       assert {:ok, parent_done} = Issues.transition_issue(parent_issue, :done)

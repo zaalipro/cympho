@@ -20,7 +20,7 @@ defmodule Cympho.OrchestratorTest do
       assert session.issue.id == "test-1"
       assert session.agent_id == "agent-1"
       assert session.session_id == nil
-      assert session.turn_count == nil
+      assert session.turn_count == 0
     end
 
     test "can be created with all fields" do

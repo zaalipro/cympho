@@ -1,4 +1,4 @@
-defmodule Cympho.Orchestrator.Session do
+defmodule Cympho.Orchestrator do
   @moduledoc """
   Represents an active agent session for an issue.
   """
@@ -6,17 +6,11 @@ defmodule Cympho.Orchestrator.Session do
   @enforce_keys [:issue, :agent_id]
   defstruct [:issue, :agent_id, :session_id, turn_count: 0]
 
-  @type t :: %__MODULE__{
-          issue: map(),
-          agent_id: String.t(),
-          session_id: reference() | nil,
-          turn_count: non_neg_integer()
-        }
-end
+  Receives AgentRunner Port messages and translates them into session lifecycle events,
+  publishing results via PubSub for LiveView consumption.
 
-defmodule Cympho.Orchestrator do
-  @moduledoc """
-  Orchestrates agent sessions for issue processing.
+  Session lifecycle:
+    start_session → session_started → turn_completed (possibly multiple) → session_ended
 
   Each orchestrator instance is registered by issue_id and manages
   a single agent session, forwarding messages to the caller via messages
@@ -31,6 +25,7 @@ defmodule Cympho.Orchestrator do
   """
 
   use GenServer
+  alias Cympho.AgentRunner
   alias Cympho.Orchestrator.Session
   alias Cympho.{AgentRunner, AgentHeartbeat, Issues, Comments, Agents}
 
@@ -61,18 +56,25 @@ defmodule Cympho.Orchestrator do
   end
 
   @doc """
-  Returns the pid of the orchestrator for a given issue_id, or nil.
+  Looks up the orchestrator PID for a given issue.
   """
   @spec whereis(String.t()) :: pid() | nil
   def whereis(issue_id) do
-    case Registry.lookup(@registry, issue_id) do
+    case Registry.lookup(Cympho.Orchestrator.Registry, issue_id) do
       [{pid, _}] -> pid
       [] -> nil
     end
   end
 
   @doc """
-  Stops the orchestrator for a given issue_id.
+  Subscribes to orchestrator events for a given issue.
+  """
+  def subscribe(issue_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "orchestrator:#{issue_id}")
+  end
+
+  @doc """
+  Stops the orchestrator for a given issue.
   """
   @spec stop(String.t()) :: :ok
   def stop(issue_id) do
@@ -83,10 +85,8 @@ defmodule Cympho.Orchestrator do
   end
 
   defp via_tuple(issue_id) do
-    {:via, Registry, {@registry, issue_id}}
+    {:via, Registry, {Cympho.Orchestrator.Registry, issue_id}}
   end
-
-  ## Server Callbacks
 
   @impl true
   def init({issue, agent_id}) do
