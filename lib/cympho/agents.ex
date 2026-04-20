@@ -54,6 +54,14 @@ defmodule Cympho.Agents do
     %Agent{}
     |> Agent.changeset(attrs)
     |> Repo.insert()
+    |> case do
+      {:ok, agent} ->
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_created, agent})
+        {:ok, agent}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
   end
 
   @doc """
@@ -63,6 +71,24 @@ defmodule Cympho.Agents do
     agent
     |> Agent.changeset(attrs)
     |> Repo.update()
+    |> case do
+      {:ok, updated} ->
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_updated, updated})
+        {:ok, updated}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  @doc """
+  Updates an agent by ID, returns {:ok, agent} or {:error, reason}.
+  """
+  def update_agent_by_id(agent_id, attrs) when is_binary(agent_id) do
+    case get_agent(agent_id) do
+      {:ok, agent} -> update_agent(agent, attrs)
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc """
@@ -70,6 +96,14 @@ defmodule Cympho.Agents do
   """
   def delete_agent(%Agent{} = agent) do
     Repo.delete(agent)
+    |> case do
+      {:ok, _} ->
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_deleted, agent.id})
+        {:ok, agent}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
   end
 
   @doc """
@@ -77,6 +111,13 @@ defmodule Cympho.Agents do
   """
   def change_agent(%Agent{} = agent, attrs \\ %{}) do
     Agent.changeset(agent, attrs)
+  end
+
+  @doc """
+  Subscribes to agent updates.
+  """
+  def subscribe do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "agents")
   end
 
   @doc """
