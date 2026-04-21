@@ -1,0 +1,52 @@
+<.header>
+  {@page_title}
+  <:actions>
+    <%= if show_spawn_button?(@current_agent_role) do %>
+      <.live_component
+        module={CymphoWeb.SpawnAgentComponent}
+        id="spawn-agent"
+        current_agent_id={@current_agent_id}
+        current_agent_role={@current_agent_role}
+      />
+    <% else %>
+      <.link navigate={~p"/agents/new"} class="phx-btn">
+        New Agent
+      </.link>
+    <% end %>
+  </:actions>
+</.header>
+
+<div :if={@flash && @flash[:info]} class="alert alert-info">
+  <%= @flash[:info] %>
+</div>
+
+<div class="agents-grid">
+  <div :for={agent <- @agents} class="agent-card" id={"agent-#{agent.id}"}>
+    <div class="card-header">
+      <h3>{agent.name}</h3>
+      <span class={"status-badge status-#{agent.status}"}>{status_label(agent.status)}</span>
+    </div>
+    <p class="card-role">Role: {role_label(agent.role)}</p>
+    <div class="card-meta">
+      <span class="adapter-badge">{agent.adapter || "No adapter"}</span>
+    </div>
+    <div class="card-actions">
+      <.link navigate={~p"/agents/#{agent.id}"} class="phx-btn-secondary">
+        View
+      </.link>
+      <button
+        type="button"
+        class="delete-btn"
+        phx-click="delete_agent"
+        phx-value-id={agent.id}
+        data-confirm="Delete this agent?"
+      >
+        Delete
+      </button>
+    </div>
+  </div>
+</div>
+
+<div :if={Enum.empty?(@agents)} class="empty-state">
+  <p>No agents yet. Create your first agent to get started.</p>
+</div>

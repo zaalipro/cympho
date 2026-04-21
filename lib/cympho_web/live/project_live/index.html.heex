@@ -1,0 +1,42 @@
+<.header>
+  {@page_title}
+  <:actions>
+    <.link navigate={~p"/projects/new"} class="phx-btn">
+      New Project
+    </.link>
+  </:actions>
+</.header>
+
+<div class="projects-grid">
+  <div :for={project <- @projects} class="project-card" id={"project-#{project.id}"}>
+    <div class="card-header">
+      <h3>{project.name}</h3>
+      <span class={"status-badge status-#{project.status}"}>{project.status}</span>
+    </div>
+    <p class="card-description">{project.description}</p>
+    <div class="card-meta">
+      <span class="prefix-badge">{project.prefix}</span>
+    </div>
+    <div class="card-actions">
+      <.link navigate={~p"/projects/#{project.id}"} class="phx-btn-secondary">
+        View
+      </.link>
+      <.link navigate={~p"/projects/#{project.id}/edit"} class="phx-btn-secondary">
+        Edit
+      </.link>
+      <button
+        type="button"
+        class="delete-btn"
+        phx-click="delete_project"
+        phx-value-id={project.id}
+        data-confirm="Archive this project?"
+      >
+        Archive
+      </button>
+    </div>
+  </div>
+</div>
+
+<div :if={Enum.empty?(@projects)} class="empty-state">
+  <p>No projects yet. Create your first project to get started.</p>
+</div>

@@ -19,23 +19,29 @@ defmodule CymphoWeb.IssueLive.Index do
     |> assign(:page_title, "All Issues")
   end
 
+  defp apply_action(socket, nil, _params) do
+    apply_action(socket, :index, _params)
+  end
+
   @impl true
   def handle_info({:issue_created, issue}, socket) do
     {:noreply, update(socket, :issues, fn issues -> [issue | issues] end)}
   end
 
   def handle_info({:issue_updated, updated_issue}, socket) do
-    {:noreply, update(socket, :issues, fn issues ->
-      Enum.map(issues, fn issue ->
-        if issue.id == updated_issue.id, do: updated_issue, else: issue
-      end)
-    end)}
+    {:noreply,
+     update(socket, :issues, fn issues ->
+       Enum.map(issues, fn issue ->
+         if issue.id == updated_issue.id, do: updated_issue, else: issue
+       end)
+     end)}
   end
 
   def handle_info({:issue_deleted, deleted_id}, socket) do
-    {:noreply, update(socket, :issues, fn issues ->
-      Enum.filter(issues, fn issue -> issue.id != deleted_id end)
-    end)}
+    {:noreply,
+     update(socket, :issues, fn issues ->
+       Enum.filter(issues, fn issue -> issue.id != deleted_id end)
+     end)}
   end
 
   @impl true

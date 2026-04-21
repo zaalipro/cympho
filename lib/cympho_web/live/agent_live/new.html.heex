@@ -1,0 +1,30 @@
+<.header>
+  New Agent
+  <:actions>
+    <.link navigate={~p"/agents"} class="phx-btn-secondary">
+      Cancel
+    </.link>
+  </:actions>
+</.header>
+
+<div class="agent-form">
+  <.simple_form for={@changeset} as={:agent} phx-submit="save">
+    <.input field={@changeset[:name]} label="Name" />
+    <.input field={@changeset[:instructions]} label="Instructions" type="textarea" />
+
+    <div class="form-group">
+      <label>Role</label>
+      <select name="agent[role]">
+        <option value="engineer">Engineer</option>
+        <option value="ceo">CEO</option>
+        <option value="cto">CTO</option>
+      </select>
+    </div>
+
+    <.input field={@changeset[:adapter]} label="Adapter" placeholder="e.g., anthropic" />
+
+    <:actions>
+      <.button type="submit">Create Agent</.button>
+    </:actions>
+  </.simple_form>
+</div>

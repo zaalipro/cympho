@@ -3,13 +3,14 @@ defmodule CymphoWeb.Components do
 
   attr :title, :string, required: true
   attr :rest, :global
+  slot :inner_block
 
   def header(assigns) do
     ~H"""
     <header {@rest}>
-      <h1><%= @title %></h1>
+      <h1>{@title}</h1>
       <div class="header-actions">
-        <%= render_slot(@inner_block) %>
+        {render_slot(@inner_block)}
       </div>
     </header>
     """
@@ -18,11 +19,12 @@ defmodule CymphoWeb.Components do
   attr :navigate, :string, required: true
   attr :class, :string, default: ""
   attr :rest, :global
+  slot :inner_block, required: true
 
   def link(assigns) do
     ~H"""
     <a navigate={@navigate} class={@class} {@rest}>
-      <%= render_slot(@inner_block) %>
+      {render_slot(@inner_block)}
     </a>
     """
   end
@@ -30,11 +32,16 @@ defmodule CymphoWeb.Components do
   attr :for, :any, required: true
   attr :as, :any, default: :global
   attr :rest, :global, include: ~w(method action)
+  slot :inner_block, required: true
+  slot :actions
 
   def simple_form(assigns) do
     ~H"""
     <form {@rest}>
-      <%= render_slot(@inner_block) %>
+      {render_slot(@inner_block)}
+      <div :if={@actions != []} class="form-actions">
+        {render_slot(@actions)}
+      </div>
     </form>
     """
   end
@@ -47,7 +54,7 @@ defmodule CymphoWeb.Components do
   def input(assigns) do
     ~H"""
     <div class="form-group">
-      <label><%= @label %></label>
+      <label>{@label}</label>
       <input type={@type} name={input_name(@field)} value={input_value(@field)} {@rest} />
     </div>
     """
@@ -55,15 +62,18 @@ defmodule CymphoWeb.Components do
 
   attr :type, :string, default: "submit"
   attr :rest, :global
+  slot :inner_block, required: true
 
   def button(assigns) do
     ~H"""
     <button type={@type} {@rest}>
-      <%= render_slot(@inner_block) %>
+      {render_slot(@inner_block)}
     </button>
     """
   end
 
   defp input_name(field), do: field.name
-  defp input_value(field), do: Ecto.Changeset.get_change(field.source, field.name) || field.data[field.name]
+
+  defp input_value(field),
+    do: Ecto.Changeset.get_change(field.source, field.name) || field.data[field.name]
 end

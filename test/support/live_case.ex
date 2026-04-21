@@ -8,12 +8,15 @@ defmodule CymphoWeb.LiveCase do
 
   using do
     quote do
+      import Phoenix.ConnTest
       import Phoenix.LiveViewTest
       import CymphoWeb.LiveCase
 
       @endpoint CymphoWeb.Endpoint
     end
   end
+
+  def conn, do: Phoenix.ConnTest.build_conn()
 
   setup tags do
     Cympho.DataCase.setup_sandbox(tags)

@@ -1,5 +1,8 @@
 import Config
 
+config :cympho,
+  ecto_repos: [Cympho.Repo]
+
 config :cympho, Cympho.Repo,
   database: "cympho_repo",
   pool_size: 10,
@@ -19,7 +22,8 @@ config :cympho, CymphoWeb.Endpoint,
 
 config :esbuild, version: "0.17.11"
 
-config :tailwind, version: "3.4.0",
+config :tailwind,
+  version: "3.4.0",
   cympho: [
     args: ~w(
       --config=tailwind.config.js
@@ -32,5 +36,7 @@ config :tailwind, version: "3.4.0",
 config :logger, :console, format: "[$level] $message\n"
 
 config :phoenix, :json_library, Jason
+
+config :swoosh, :api_client, Swoosh.ApiClient.Finch
 
 import_config "#{config_env()}.exs"

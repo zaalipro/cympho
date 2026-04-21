@@ -7,12 +7,14 @@ defmodule CymphoWeb.IssueLiveTest do
   alias Cympho.Comments
 
   setup do
-    {:ok, issue} = Issues.create_issue(%{
-      title: "Test Issue",
-      description: "Test description for the issue",
-      status: :open,
-      priority: :high
-    })
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Test Issue",
+        description: "Test description for the issue",
+        status: :backlog,
+        priority: :high
+      })
+
     %{issue: issue}
   end
 
@@ -27,7 +29,7 @@ defmodule CymphoWeb.IssueLiveTest do
     test "shows issue status badges", %{issue: issue} do
       {:ok, _view, html} = live(conn(), "/issues")
 
-      assert html =~ "open"
+      assert html =~ "backlog"
       assert html =~ "high"
     end
 
@@ -44,7 +46,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert html =~ issue.title
       assert html =~ issue.description
-      assert html =~ "open"
+      assert html =~ "backlog"
       assert html =~ "high"
     end
 
@@ -56,27 +58,31 @@ defmodule CymphoWeb.IssueLiveTest do
     end
 
     test "shows existing comments", %{issue: issue} do
-      {:ok, _comment} = Comments.create_comment(%{
-        body: "Test comment body",
-        author: "Test Author",
-        issue_id: issue.id
-      })
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body: "Test comment body",
+          author_type: "user",
+          author_id: "test-author",
+          issue_id: issue.id
+        })
 
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
       assert html =~ "Test comment body"
-      assert html =~ "Test Author"
+      assert html =~ "test-author"
     end
 
     test "comment form accepts input", %{issue: issue} do
       {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
 
-      form = form(view, "#comment-form", %{
-        "comment" => %{
-          "author" => "New Author",
-          "body" => "New comment body"
-        }
-      })
+      form =
+        form(view, "#comment-form", %{
+          "comment" => %{
+            "author_type" => "user",
+            "author_id" => "new-author",
+            "body" => "New comment body"
+          }
+        })
 
       assert form
     end

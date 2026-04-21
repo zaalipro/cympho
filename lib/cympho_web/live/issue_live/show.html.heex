@@ -1,5 +1,6 @@
+
 <.header>
-  <%= @issue.title %>
+  {@issue.title}
   <:actions>
     <.link navigate={~p"/issues"} class="phx-btn-secondary">
       Back
@@ -10,48 +11,90 @@
 <div class="issue-detail">
   <div class="issue-info">
     <div class="status-row">
-      <span class={"badge status-#{@issue.status}"}><%= @issue.status %></span>
-      <span class={"priority-#{@issue.priority}"}><%= @issue.priority %></span>
+      <span class={"badge status-#{@issue.status}"}>{@issue.status}</span>
+      <span class={"priority-#{@issue.priority}"}>{@issue.priority}</span>
     </div>
 
-    <p class="description"><%= @issue.description %></p>
+    <p class="description">{@issue.description}</p>
 
     <div class="meta">
-      <span>Created <%= @issue.inserted_at %></span>
+      <span>Created {@issue.inserted_at}</span>
+    </div>
+
+    <div class="agent-section">
+      <button
+        type="button"
+        class="phx-btn"
+        phx-click="toggle_agent_panel"
+      >
+        {@show_agent_panel && "Hide" || "Spawn"} Agent
+      </button>
+
+      <div :if={@show_agent_panel} class="agent-panel">
+        <h4>Select an Agent</h4>
+        <p :if={Enum.empty?(@agents)} class="no-agents">No idle agents available.</p>
+        <form :if={!Enum.empty?(@agents)} phx-submit="spawn_agent">
+          <div class="form-group">
+            <select name="agent_id" required>
+              <option value="">Choose an agent...</option>
+              <option :for={agent <- @agents} value={agent.id}>
+                {agent.name} ({agent.role})
+              </option>
+            </select>
+          </div>
+          <button type="submit" class="phx-btn">Start Agent</button>
+        </form>
+      </div>
     </div>
   </div>
 
   <div class="comments-section">
-    <h3>Comments (<%= length(@issue.comments) %>)</h3>
+    <h3>Comments ({length(@issue.comments)})</h3>
 
     <div class="comments-list">
-      <%= for comment <- @issue.comments do %>
-        <div class="comment" id={"comment-#{comment.id}"}>
-          <div class="comment-header">
-            <strong><%= comment.author %></strong>
-            <span><%= comment.inserted_at %></span>
-          </div>
-          <p><%= comment.body %></p>
-          <button
-            type="button"
-            class="delete-btn"
-            phx-click="delete_comment"
-            phx-value-id={comment.id}
-            data-confirm="Delete this comment?"
-          >
-            Delete
-          </button>
+      <div :for={comment <- @issue.comments} class="comment" id={"comment-#{comment.id}"}>
+        <div class="comment-header">
+          <strong>{comment.author_type}: {comment.author_id}</strong>
+          <span>{comment.inserted_at}</span>
         </div>
-      <% end %>
+        <p>{comment.body}</p>
+        <button
+          type="button"
+          class="delete-btn"
+          phx-click="delete_comment"
+          phx-value-id={comment.id}
+          data-confirm="Delete this comment?"
+        >
+          Delete
+        </button>
+      </div>
     </div>
 
     <div class="comment-form">
       <h4>Add Comment</h4>
-      <.simple_form :let={f} for={@comment_changeset} phx-submit="add_comment">
-        <.input field={f[:author]} label="Author" />
-        <.input field={f[:body]} label="Comment" type="textarea" />
-        <.button type="submit">Add Comment</.button>
-      </.simple_form>
+      <form id="comment-form" phx-submit="add_comment">
+        <div class="form-group">
+          <label for="comment_author_type">Author Type</label>
+          <select id="comment_author_type" name="comment[author_type]">
+            <option value="user">User</option>
+            <option value="agent">Agent</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="comment_author_id">Author ID</label>
+          <input
+            type="text"
+            id="comment_author_id"
+            name="comment[author_id]"
+            value={@comment_changeset.params["author_id"]}
+          />
+        </div>
+        <div class="form-group">
+          <label for="comment_body">Comment</label>
+          <textarea id="comment_body" name="comment[body]">{@comment_changeset.params["body"]}</textarea>
+        </div>
+        <button type="submit" class="phx-btn">Add Comment</button>
+      </form>
     </div>
   </div>
 </div>
