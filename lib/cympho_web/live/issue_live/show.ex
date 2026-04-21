@@ -15,7 +15,7 @@ defmodule CymphoWeb.IssueLive.Show do
         {:ok,
          assign(socket,
            issue: issue,
-           comment_changeset: Comments.Comment.changeset(%Comments.Comment{}, %{}),
+           comment_form: to_form(Comments.Comment.changeset(%Comments.Comment{}, %{})),
            agents: Agents.list_agents_by_status(:idle),
            show_agent_panel: false
          )}
@@ -33,6 +33,7 @@ defmodule CymphoWeb.IssueLive.Show do
   defp apply_action(socket, :show, id) do
     case Issues.get_issue(id) do
       {:ok, issue} ->
+        Orchestrator.subscribe(issue.id)
         socket
         |> assign(:page_title, issue.title)
         |> assign(:issue, issue)
@@ -85,6 +86,20 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
+  def handle_info({:session_started, session_id}, socket) do
+    {:noreply, assign(socket, :agent_session_id, session_id)}
+  end
+
+  def handle_info({:turn_completed, session_id, result}, socket) do
+    IO.inspect({:turn_completed, session_id, result}, label: "Agent turn completed")
+    {:noreply, socket}
+  end
+
+  def handle_info({:turn_ended_with_error, session_id, reason}, socket) do
+    IO.inspect({:turn_ended_with_error, session_id, reason}, label: "Agent error")
+    {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
+  end
+
   @impl true
   def handle_event("add_comment", %{"comment" => comment_params}, socket) do
     comment_params = Map.put(comment_params, "issue_id", socket.assigns.issue.id)
@@ -92,17 +107,17 @@ defmodule CymphoWeb.IssueLive.Show do
     case Comments.create_comment(comment_params) do
       {:ok, _comment} ->
         {:noreply,
-         assign(socket, :comment_changeset, Comments.Comment.changeset(%Comments.Comment{}, %{}))}
+         assign(socket, :comment_form, to_form(Comments.Comment.changeset(%Comments.Comment{}, %{})))}
 
       {:error, changeset} ->
-        {:noreply, assign(socket, :comment_changeset, changeset)}
+        {:noreply, assign(socket, :comment_form, to_form(changeset))}
     end
   end
 
   @impl true
   def handle_event("delete_comment", %{"id" => id}, socket) do
     comment = Comments.get_comment!(id)
-    {:ok, _} = Comments.delete_comment(comment)
+    _ = Comments.delete_comment(comment)
     {:noreply, socket}
   end
 
@@ -153,17 +168,32 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
-  def handle_info({:session_started, session_id}, socket) do
-    {:noreply, assign(socket, :agent_session_id, session_id)}
+  @doc """
+  Validates that the URL is a valid GitHub PR URL.
+  """
+  def handle_event("update_github_pr_url", %{"github_pr_url" => url}, socket) do
+    url = String.trim(url)
+
+    attrs = %{
+      github_pr_url: url
+    }
+
+    case Issues.update_issue(socket.assigns.issue, attrs) do
+      {:ok, _issue} ->
+        {:noreply, socket}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Invalid PR URL format")}
+    end
   end
 
-  def handle_info({:turn_completed, session_id, result}, socket) do
-    IO.inspect({:turn_completed, session_id, result}, label: "Agent turn completed")
-    {:noreply, socket}
-  end
+  def handle_event("clear_github_pr_url", _, socket) do
+    case Issues.update_issue(socket.assigns.issue, %{github_pr_url: nil}) do
+      {:ok, _issue} ->
+        {:noreply, socket}
 
-  def handle_info({:turn_ended_with_error, session_id, reason}, socket) do
-    IO.inspect({:turn_ended_with_error, session_id, reason}, label: "Agent error")
-    {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to clear PR URL")}
+    end
   end
 end

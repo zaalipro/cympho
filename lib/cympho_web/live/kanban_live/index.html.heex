@@ -1,48 +1,70 @@
-<.header>
-  <%= @page_title %>
-  <:actions>
-    <.link navigate={~p"/issues/new"} class="phx-btn">
-      New Issue
-    </.link>
-  </:actions>
-</.header>
+<div class="p-6 lg:p-8 h-[calc(100vh-64px)] flex flex-col">
+  <.header title={@page_title}>
+    <:actions>
+      <.app_link navigate={~p"/issues/new"} class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        New Issue
+      </.app_link>
+    </:actions>
+  </.header>
 
-<div class="kanban-board">
-  <div class="kanban-column" id="column-backlog">
-    <div class="column-header">
-      <h2>Backlog</h2>
-      <span class="issue-count"><%= length(backlog_issues(@issues)) %></span>
-    </div>
-    <div class="column-cards">
-      <%= for issue <- backlog_issues(@issues) do %>
-        <div class="kanban-card" id={"issue-#{issue.id}"}>
-          <div class="card-title"><%= issue.title %></div>
-          <div class="card-meta">
-            <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
-            <span class="comment-count"><%= length(issue.comments) %> comments</span>
-            <%= if issue.assignee do %>
-              <% hb_state = get_heartbeat_state(@agent_heartbeat_states, issue.assignee.id) %>
-              <span class={"agent-badge heartbeat-#{hb_state.status}"}>
-                <%= issue.assignee.name %>: <%= heartbeat_status_label(hb_state, @issues) %>
-              </span>
-            <% end %>
-            <%= if issue.github_pr_url do %>
-              <a href={issue.github_pr_url} target="_blank" class="pr-badge" title="GitHub PR">
-                PR
-              </a>
-            <% end %>
+  <div class="flex-1 overflow-x-auto overflow-y-hidden">
+    <div class="flex gap-4 h-full min-w-max">
+      <% columns = [
+        {:backlog, backlog_issues(@issues)},
+        {:todo, todo_issues(@issues)},
+        {:in_progress, in_progress_issues(@issues)},
+        {:in_review, in_review_issues(@issues)},
+        {:done, done_issues(@issues)},
+        {:blocked, blocked_issues(@issues)}
+      ] %>
+      <%= for {status, issues} <- columns do %>
+        <div class="w-72 flex flex-col bg-panel border border-border rounded-card h-full">
+          <div class="px-4 py-3 border-b border-border-subtle flex items-center justify-between sticky top-0 bg-panel rounded-t-card">
+            <h2 class="text-sm font-510 text-text-primary"><%= status_label(status) %></h2>
+            <span class="text-xs text-text-quaternary bg-white/[0.05] px-2 py-0.5 rounded-full"><%= length(issues) %></span>
           </div>
-          <div class="card-actions">
-            <%= for next_status <- valid_next_statuses(:backlog) do %>
-              <button
-                type="button"
-                class="transition-btn"
-                phx-click="transition_issue"
-                phx-value-id={issue.id}
-                phx-value-to_status={next_status}
-              >
-                <%= status_label(next_status) %>
-              </button>
+          <div class="flex-1 overflow-y-auto p-3 space-y-3">
+            <%= if Enum.empty?(issues) do %>
+              <div class="text-center py-8">
+                <p class="text-xs text-text-quaternary">No issues</p>
+              </div>
+            <% end %>
+            <%= for issue <- issues do %>
+              <div class="bg-white/[0.02] border border-border rounded-md p-3 space-y-2 hover:bg-white/[0.04] transition-colors">
+                <div class="text-sm font-510 text-text-primary leading-snug"><%= issue.title %></div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <.badge variant="priority" value={to_string(issue.priority)} />
+                  <span class="text-xs text-text-quaternary flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
+                    <%= length(issue.comments) %>
+                  </span>
+                  <%= if issue.assignee do %>
+                    <% _hb_state = get_heartbeat_state(@agent_heartbeat_states, issue.assignee.id) %>
+                    <span class="text-xs text-text-quaternary truncate max-w-[140px]">
+                      <%= issue.assignee.name %>
+                    </span>
+                  <% end %>
+                  <%= if issue.github_pr_url do %>
+                    <a href={issue.github_pr_url} target="_blank" class="text-xs text-accent hover:text-accent-hover transition-colors" title="GitHub PR">
+                      PR
+                    </a>
+                  <% end %>
+                </div>
+                <div class="flex flex-wrap gap-1.5 pt-1">
+                  <%= for next_status <- valid_next_statuses(status) do %>
+                    <button
+                      type="button"
+                      class="text-[10px] font-510 bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-tertiary hover:text-text-secondary px-2 py-1 rounded transition-colors"
+                      phx-click="transition_issue"
+                      phx-value-id={issue.id}
+                      phx-value-to_status={next_status}
+                    >
+                      <%= status_label(next_status) %>
+                    </button>
+                  <% end %>
+                </div>
+              </div>
             <% end %>
           </div>
         </div>
@@ -50,219 +72,15 @@
     </div>
   </div>
 
-  <div class="kanban-column" id="column-todo">
-    <div class="column-header">
-      <h2>To Do</h2>
-      <span class="issue-count"><%= length(todo_issues(@issues)) %></span>
+  <%= if Enum.empty?(@issues) do %>
+    <div class="flex flex-col items-center justify-center py-20 text-center">
+      <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
+        <svg class="w-6 h-6 text-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+      </div>
+      <p class="text-sm text-text-tertiary mb-4">No issues yet.</p>
+      <.app_link navigate={~p"/issues/new"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
+        Create your first issue
+      </.app_link>
     </div>
-    <div class="column-cards">
-      <%= for issue <- todo_issues(@issues) do %>
-        <div class="kanban-card" id={"issue-#{issue.id}"}>
-          <div class="card-title"><%= issue.title %></div>
-          <div class="card-meta">
-            <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
-            <span class="comment-count"><%= length(issue.comments) %> comments</span>
-            <%= if issue.assignee do %>
-              <% hb_state = get_heartbeat_state(@agent_heartbeat_states, issue.assignee.id) %>
-              <span class={"agent-badge heartbeat-#{hb_state.status}"}>
-                <%= issue.assignee.name %>: <%= heartbeat_status_label(hb_state, @issues) %>
-              </span>
-            <% end %>
-            <%= if issue.github_pr_url do %>
-              <a href={issue.github_pr_url} target="_blank" class="pr-badge" title="GitHub PR">
-                PR
-              </a>
-            <% end %>
-          </div>
-          <div class="card-actions">
-            <%= for next_status <- valid_next_statuses(:todo) do %>
-              <button
-                type="button"
-                class="transition-btn"
-                phx-click="transition_issue"
-                phx-value-id={issue.id}
-                phx-value-to_status={next_status}
-              >
-                <%= status_label(next_status) %>
-              </button>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
-    </div>
-  </div>
-
-  <div class="kanban-column" id="column-in-progress">
-    <div class="column-header">
-      <h2>In Progress</h2>
-      <span class="issue-count"><%= length(in_progress_issues(@issues)) %></span>
-    </div>
-    <div class="column-cards">
-      <%= for issue <- in_progress_issues(@issues) do %>
-        <div class="kanban-card" id={"issue-#{issue.id}"}>
-          <div class="card-title"><%= issue.title %></div>
-          <div class="card-meta">
-            <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
-            <span class="comment-count"><%= length(issue.comments) %> comments</span>
-            <%= if issue.assignee do %>
-              <% hb_state = get_heartbeat_state(@agent_heartbeat_states, issue.assignee.id) %>
-              <span class={"agent-badge heartbeat-#{hb_state.status}"}>
-                <%= issue.assignee.name %>: <%= heartbeat_status_label(hb_state, @issues) %>
-              </span>
-            <% end %>
-            <%= if issue.github_pr_url do %>
-              <a href={issue.github_pr_url} target="_blank" class="pr-badge" title="GitHub PR">
-                PR
-              </a>
-            <% end %>
-          </div>
-          <div class="card-actions">
-            <%= for next_status <- valid_next_statuses(:in_progress) do %>
-              <button
-                type="button"
-                class="transition-btn"
-                phx-click="transition_issue"
-                phx-value-id={issue.id}
-                phx-value-to_status={next_status}
-              >
-                <%= status_label(next_status) %>
-              </button>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
-    </div>
-  </div>
-
-  <div class="kanban-column" id="column-in-review">
-    <div class="column-header">
-      <h2>In Review</h2>
-      <span class="issue-count"><%= length(in_review_issues(@issues)) %></span>
-    </div>
-    <div class="column-cards">
-      <%= for issue <- in_review_issues(@issues) do %>
-        <div class="kanban-card" id={"issue-#{issue.id}"}>
-          <div class="card-title"><%= issue.title %></div>
-          <div class="card-meta">
-            <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
-            <span class="comment-count"><%= length(issue.comments) %> comments</span>
-            <%= if issue.assignee do %>
-              <% hb_state = get_heartbeat_state(@agent_heartbeat_states, issue.assignee.id) %>
-              <span class={"agent-badge heartbeat-#{hb_state.status}"}>
-                <%= issue.assignee.name %>: <%= heartbeat_status_label(hb_state, @issues) %>
-              </span>
-            <% end %>
-            <%= if issue.github_pr_url do %>
-              <a href={issue.github_pr_url} target="_blank" class="pr-badge" title="GitHub PR">
-                PR
-              </a>
-            <% end %>
-          </div>
-          <div class="card-actions">
-            <%= for next_status <- valid_next_statuses(:in_review) do %>
-              <button
-                type="button"
-                class="transition-btn"
-                phx-click="transition_issue"
-                phx-value-id={issue.id}
-                phx-value-to_status={next_status}
-              >
-                <%= status_label(next_status) %>
-              </button>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
-    </div>
-  </div>
-
-  <div class="kanban-column" id="column-done">
-    <div class="column-header">
-      <h2>Done</h2>
-      <span class="issue-count"><%= length(done_issues(@issues)) %></span>
-    </div>
-    <div class="column-cards">
-      <%= for issue <- done_issues(@issues) do %>
-        <div class="kanban-card" id={"issue-#{issue.id}"}>
-          <div class="card-title"><%= issue.title %></div>
-          <div class="card-meta">
-            <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
-            <span class="comment-count"><%= length(issue.comments) %> comments</span>
-            <%= if issue.assignee do %>
-              <% hb_state = get_heartbeat_state(@agent_heartbeat_states, issue.assignee.id) %>
-              <span class={"agent-badge heartbeat-#{hb_state.status}"}>
-                <%= issue.assignee.name %>: <%= heartbeat_status_label(hb_state, @issues) %>
-              </span>
-            <% end %>
-            <%= if issue.github_pr_url do %>
-              <a href={issue.github_pr_url} target="_blank" class="pr-badge" title="GitHub PR">
-                PR
-              </a>
-            <% end %>
-          </div>
-          <div class="card-actions">
-            <%= for next_status <- valid_next_statuses(:done) do %>
-              <button
-                type="button"
-                class="transition-btn"
-                phx-click="transition_issue"
-                phx-value-id={issue.id}
-                phx-value-to_status={next_status}
-              >
-                <%= status_label(next_status) %>
-              </button>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
-    </div>
-  </div>
-
-  <div class="kanban-column" id="column-blocked">
-    <div class="column-header">
-      <h2>Blocked</h2>
-      <span class="issue-count"><%= length(blocked_issues(@issues)) %></span>
-    </div>
-    <div class="column-cards">
-      <%= for issue <- blocked_issues(@issues) do %>
-        <div class="kanban-card" id={"issue-#{issue.id}"}>
-          <div class="card-title"><%= issue.title %></div>
-          <div class="card-meta">
-            <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
-            <span class="comment-count"><%= length(issue.comments) %> comments</span>
-            <%= if issue.assignee do %>
-              <% hb_state = get_heartbeat_state(@agent_heartbeat_states, issue.assignee.id) %>
-              <span class={"agent-badge heartbeat-#{hb_state.status}"}>
-                <%= issue.assignee.name %>: <%= heartbeat_status_label(hb_state, @issues) %>
-              </span>
-            <% end %>
-            <%= if issue.github_pr_url do %>
-              <a href={issue.github_pr_url} target="_blank" class="pr-badge" title="GitHub PR">
-                PR
-              </a>
-            <% end %>
-          </div>
-          <div class="card-actions">
-            <%= for next_status <- valid_next_statuses(:blocked) do %>
-              <button
-                type="button"
-                class="transition-btn"
-                phx-click="transition_issue"
-                phx-value-id={issue.id}
-                phx-value-to_status={next_status}
-              >
-                <%= status_label(next_status) %>
-              </button>
-            <% end %>
-          </div>
-        </div>
-      <% end %>
-    </div>
-  </div>
+  <% end %>
 </div>
-
-<%= if Enum.empty?(@issues) do %>
-  <div class="empty-state">
-    <p>No issues yet. Create your first issue to get started.</p>
-  </div>
-<% end %>

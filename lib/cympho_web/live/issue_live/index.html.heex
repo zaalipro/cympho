@@ -1,35 +1,48 @@
-<.header>
-  {@page_title}
-  <:actions>
-    <.link navigate={~p"/issues/new"} class="phx-btn">
-      New Issue
-    </.link>
-  </:actions>
-</.header>
+<div class="p-6 lg:p-8 max-w-6xl mx-auto">
+  <.header title={@page_title}>
+    <:actions>
+      <.app_link navigate={~p"/issues/new"} class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        New Issue
+      </.app_link>
+    </:actions>
+  </.header>
 
-<div class="issue-list">
-  <.link :for={issue <- @issues} navigate={~p"/issues/#{issue.id}"} class="issue-card">
-    <div class="issue-header">
-      <h3>{issue.title}</h3>
-      <span class={"badge status-#{issue.status}"}>{issue.status}</span>
-    </div>
-    <p class="issue-description">{String.slice(issue.description, 0, 100)}...</p>
-    <div class="issue-meta">
-      <span class={"priority-#{issue.priority}"}>{issue.priority}</span>
-      <span>{length(issue.comments)} comments</span>
-      <button
-        type="button"
-        class="delete-btn"
-        phx-click="delete_issue"
-        phx-value-id={issue.id}
-        data-confirm="Delete this issue?"
-      >
-        Delete
-      </button>
-    </div>
-  </.link>
-</div>
+  <div class="space-y-2">
+    <.app_link :for={issue <- @issues} navigate={~p"/issues/#{issue.id}"} class="group flex items-center gap-4 p-3 rounded-md hover:bg-white/[0.04] transition-colors border border-transparent hover:border-border-subtle">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-3">
+          <span class="text-sm font-510 text-text-primary truncate">{issue.title}</span>
+          <.badge variant="status" value={issue.status} />
+        </div>
+        <p class="text-xs text-text-tertiary mt-1 truncate">{issue.description}</p>
+      </div>
+      <div class="flex items-center gap-3 shrink-0">
+        <.badge variant="priority" value={issue.priority} />
+        <span class="text-xs text-text-quaternary flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
+          {length(issue.comments)}
+        </span>
+        <button
+          type="button"
+          class="opacity-0 group-hover:opacity-100 p-1.5 rounded-md text-text-quaternary hover:text-red-400 hover:bg-red-500/10 transition-all"
+          phx-click="delete_issue"
+          phx-value-id={issue.id}
+          data-confirm="Delete this issue?"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        </button>
+      </div>
+    </.app_link>
+  </div>
 
-<div :if={Enum.empty?(@issues)} class="empty-state">
-  <p>No issues yet. Create your first issue to get started.</p>
+  <div :if={Enum.empty?(@issues)} class="flex flex-col items-center justify-center py-20 text-center">
+    <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
+      <svg class="w-6 h-6 text-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+    </div>
+    <p class="text-sm text-text-tertiary mb-4">No issues yet.</p>
+    <.app_link navigate={~p"/issues/new"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
+      Create your first issue
+    </.app_link>
+  </div>
 </div>

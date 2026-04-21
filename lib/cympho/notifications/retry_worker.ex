@@ -17,7 +17,7 @@ defmodule Cympho.Notifications.RetryWorker do
   end
 
   @impl GenServer
-  def init(opts) do
+  def init(_opts) do
     {:ok, %{}}
   end
 

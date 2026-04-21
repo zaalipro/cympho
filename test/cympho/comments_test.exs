@@ -4,14 +4,22 @@ defmodule Cympho.CommentsTest do
   alias Cympho.Comments
   alias Cympho.Comments.Comment
   alias Cympho.Issues
+  alias Cympho.Agents
 
   setup do
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Test Agent",
+        role: :engineer
+      })
+
     {:ok, issue} =
       Issues.create_issue(%{
         title: "Test Issue",
         description: "Test description",
         status: :backlog,
-        priority: :high
+        priority: :high,
+        assignee_id: agent.id
       })
 
     %{issue: issue}

@@ -12,6 +12,8 @@ defmodule Cympho.Notifications.Dispatcher do
   alias Cympho.Notifications.NotificationPreference
   alias Cympho.Users
 
+  use GenServer
+
   @cache_table :notification_preferences_cache
   @channels %{
     email: EmailChannel,
@@ -26,7 +28,7 @@ defmodule Cympho.Notifications.Dispatcher do
   end
 
   @impl true
-  def init(opts) do
+  def init(_opts) do
     table_opts = [:set, :named_table, :public, read_concurrency: true, write_concurrency: true]
     :ets.new(@cache_table, table_opts)
     warm_cache()

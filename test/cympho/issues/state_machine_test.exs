@@ -38,7 +38,6 @@ defmodule Cympho.Issues.StateMachineTest do
     test "in_progress to in_review is valid" do
       assert StateMachine.valid_transition?(:in_progress, :in_review) == true
     end
-
     test "in_progress to blocked is valid" do
       assert StateMachine.valid_transition?(:in_progress, :blocked) == true
     end

@@ -1,30 +1,34 @@
-<.header>
-  {@agent.name}
-  <:actions>
-    <.link navigate={~p"/agents"} class="phx-btn-secondary">
-      Back
-    </.link>
-    <.link navigate={~p"/agents/#{@agent.id}/edit"} class="phx-btn-secondary">
-      Edit
-    </.link>
-  </:actions>
-</.header>
+<div class="p-6 lg:p-8 max-w-4xl mx-auto">
+  <.header title={@agent.name}>
+    <:actions>
+      <.app_link navigate={~p"/agents"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
+        Back
+      </.app_link>
+      <.app_link navigate={~p"/agents/#{@agent.id}/edit"} class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors">
+        Edit
+      </.app_link>
+    </:actions>
+  </.header>
 
-<div class="agent-detail">
-  <div class="agent-info">
-    <div class="status-row">
-      <span class={"status-badge status-#{@agent.status}"}>{status_label(@agent.status)}</span>
-      <span class="role-badge">{role_label(@agent.role)}</span>
+  <div class="space-y-6">
+    <div class="flex items-center gap-3">
+      <.badge variant="agent" value={to_string(@agent.status)} />
+      <.badge variant="pill" value={role_label(@agent.role)} />
     </div>
 
-    <p class="instructions">{@agent.instructions}</p>
-
-    <div class="card-meta">
-      <span class="adapter-badge">{@agent.adapter || "No adapter"}</span>
+    <div class="bg-surface border border-border rounded-card p-5 space-y-4">
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider">Instructions</h3>
+      <p class="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">
+        {@agent.instructions}
+      </p>
     </div>
 
-    <div class="meta">
-      <span>Created {@agent.inserted_at}</span>
+    <div class="flex items-center gap-2">
+      <.badge variant="pill" value={@agent.adapter || "No adapter"} />
+    </div>
+
+    <div class="text-xs text-text-quaternary">
+      Created {@agent.inserted_at}
     </div>
   </div>
 </div>

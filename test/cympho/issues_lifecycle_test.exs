@@ -11,16 +11,16 @@ defmodule Cympho.IssuesLifecycleTest do
 
   describe "full issue lifecycle: create -> work -> review -> done" do
     test "issue progresses through all states correctly" do
-      {:ok, agent} =
-        Agents.create_agent(%{
-          name: "Lifecycle Agent",
-          role: :engineer
-        })
-
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Lifecycle Test Issue",
           description: "Full lifecycle test"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Lifecycle Agent",
+          role: :engineer
         })
 
       # Initial state should be :backlog
@@ -59,11 +59,13 @@ defmodule Cympho.IssuesLifecycleTest do
 
       # Add blocker relationship
       assert {:ok, updated} = Issues.add_blocker(child_issue, parent_issue)
-      assert Issues.is_blocked?(updated)
+      # Reload to get updated blocked_by association
+      reloaded_child = Issues.get_issue!(child_issue.id)
+      assert Issues.is_blocked?(reloaded_child)
 
       # Cannot transition blocked child to done
       assert {:error, :blocked_by_active_issues} =
-               Issues.transition_issue(updated, :done)
+               Issues.transition_issue(reloaded_child, :done)
 
       # Complete parent issue
       assert {:ok, parent_done} = Issues.transition_issue(parent_issue, :done)
@@ -112,6 +114,12 @@ defmodule Cympho.IssuesLifecycleTest do
 
   describe "agent checkout and release lifecycle" do
     test "released issue can be checked out by another agent" do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Shared Issue",
+          description: "Will be released"
+        })
+
       {:ok, agent1} =
         Agents.create_agent(%{
           name: "Agent 1",
@@ -122,12 +130,6 @@ defmodule Cympho.IssuesLifecycleTest do
         Agents.create_agent(%{
           name: "Agent 2",
           role: :engineer
-        })
-
-      {:ok, issue} =
-        Issues.create_issue(%{
-          title: "Shared Issue",
-          description: "Will be released"
         })
 
       # Agent 1 checks out

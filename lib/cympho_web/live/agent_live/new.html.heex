@@ -1,27 +1,17 @@
-<.header>
-  New Agent
-  <:actions>
-    <.link navigate={~p"/agents"} class="phx-btn-secondary">
-      Cancel
-    </.link>
-  </:actions>
-</.header>
+<div class="p-6 lg:p-8 max-w-2xl mx-auto">
+  <.header title="New Agent">
+    <:actions>
+      <.app_link navigate={~p"/agents"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
+        Cancel
+      </.app_link>
+    </:actions>
+  </.header>
 
-<div class="agent-form">
-  <.simple_form for={@changeset} as={:agent} phx-submit="save">
-    <.input field={@changeset[:name]} label="Name" />
-    <.input field={@changeset[:instructions]} label="Instructions" type="textarea" />
-
-    <div class="form-group">
-      <label>Role</label>
-      <select name="agent[role]">
-        <option value="engineer">Engineer</option>
-        <option value="ceo">CEO</option>
-        <option value="cto">CTO</option>
-      </select>
-    </div>
-
-    <.input field={@changeset[:adapter]} label="Adapter" placeholder="e.g., anthropic" />
+  <.simple_form for={@form} phx-submit="save">
+    <.input field={@form[:name]} label="Name" />
+    <.input field={@form[:instructions]} label="Instructions" type="textarea" />
+    <.select name="agent[role]" label="Role" options={[Engineer: "engineer", CEO: "ceo", CTO: "cto"]} />
+    <.input field={@form[:adapter]} label="Adapter" placeholder="e.g., anthropic" />
 
     <:actions>
       <.button type="submit">Create Agent</.button>

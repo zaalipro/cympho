@@ -14,6 +14,11 @@ defmodule CymphoWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :github_webhook do
+    plug :accepts, ["json"]
+    plug CymphoWeb.Plugs.GithubWebhookVerification
+  end
+
   scope "/", CymphoWeb do
     pipe_through :browser
 
@@ -27,6 +32,10 @@ defmodule CymphoWeb.Router do
     live "/projects/:id", ProjectLive.Show
     live "/projects/:id/edit", ProjectLive.Edit
     live "/kanban", KanbanLive.Index
+    live "/agents", AgentLive.Index
+    live "/agents/new", AgentLive.New
+    live "/agents/:id", AgentLive.Show
+    live "/agents/:id/edit", AgentLive.Edit
   end
 
   scope "/api", CymphoWeb do
@@ -36,6 +45,11 @@ defmodule CymphoWeb.Router do
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
 
     post "/telegram/webhook", TelegramController, :webhook
+  end
+
+  scope "/api", CymphoWeb do
+    pipe_through :github_webhook
+
     post "/github/webhook", GithubController, :webhook
   end
 end

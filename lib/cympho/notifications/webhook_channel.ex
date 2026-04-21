@@ -25,11 +25,12 @@ defmodule Cympho.Notifications.WebhookChannel do
       encoded = Jason.encode!(payload)
       headers = [{"Content-Type", "application/json"} | signature_headers(encoded, config)]
 
-      case Finch.post(url, encoded, headers) do
-        {:ok, %{status: status}} when status in 200..299 ->
+      case Finch.build(:post, url, headers, encoded)
+           |> Finch.request(Cympho.Finch) do
+        {:ok, %Finch.Response{status: status}} when status in 200..299 ->
           :ok
 
-        {:ok, %{status: status}} ->
+        {:ok, %Finch.Response{status: status}} ->
           {:error, {:http_error, status}}
 
         {:error, reason} ->

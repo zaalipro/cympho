@@ -1,42 +1,52 @@
-<.header>
-  {@page_title}
-  <:actions>
-    <.link navigate={~p"/projects/new"} class="phx-btn">
-      New Project
-    </.link>
-  </:actions>
-</.header>
+<div class="p-6 lg:p-8 max-w-6xl mx-auto">
+  <.header title={@page_title}>
+    <:actions>
+      <.app_link navigate={~p"/projects/new"} class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        New Project
+      </.app_link>
+    </:actions>
+  </.header>
 
-<div class="projects-grid">
-  <div :for={project <- @projects} class="project-card" id={"project-#{project.id}"}>
-    <div class="card-header">
-      <h3>{project.name}</h3>
-      <span class={"status-badge status-#{project.status}"}>{project.status}</span>
-    </div>
-    <p class="card-description">{project.description}</p>
-    <div class="card-meta">
-      <span class="prefix-badge">{project.prefix}</span>
-    </div>
-    <div class="card-actions">
-      <.link navigate={~p"/projects/#{project.id}"} class="phx-btn-secondary">
-        View
-      </.link>
-      <.link navigate={~p"/projects/#{project.id}/edit"} class="phx-btn-secondary">
-        Edit
-      </.link>
-      <button
-        type="button"
-        class="delete-btn"
-        phx-click="delete_project"
-        phx-value-id={project.id}
-        data-confirm="Archive this project?"
-      >
-        Archive
-      </button>
-    </div>
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <.card :for={project <- @projects} id={"project-#{project.id}"}>
+      <div class="p-5 space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-510 text-text-primary truncate">{project.name}</h3>
+          <.badge variant="status" value={project.status} />
+        </div>
+        <p class="text-xs text-text-tertiary line-clamp-2">{project.description}</p>
+        <div class="flex items-center gap-2">
+          <.badge variant="pill" value={project.prefix} />
+        </div>
+        <div class="flex items-center gap-2 pt-2">
+          <.app_link navigate={~p"/projects/#{project.id}"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-md transition-colors">
+            View
+          </.app_link>
+          <.app_link navigate={~p"/projects/#{project.id}/edit"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-md transition-colors">
+            Edit
+          </.app_link>
+          <button
+            type="button"
+            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+            phx-click="delete_project"
+            phx-value-id={project.id}
+            data-confirm="Archive this project?"
+          >
+            Archive
+          </button>
+        </div>
+      </div>
+    </.card>
   </div>
-</div>
 
-<div :if={Enum.empty?(@projects)} class="empty-state">
-  <p>No projects yet. Create your first project to get started.</p>
+  <div :if={Enum.empty?(@projects)} class="flex flex-col items-center justify-center py-20 text-center">
+    <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
+      <svg class="w-6 h-6 text-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+    </div>
+    <p class="text-sm text-text-tertiary mb-4">No projects yet.</p>
+    <.app_link navigate={~p"/projects/new"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
+      Create your first project
+    </.app_link>
+  </div>
 </div>

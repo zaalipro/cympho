@@ -6,7 +6,7 @@ defmodule CymphoWeb.AgentLive.Edit do
   def mount(%{"id" => id}, _session, socket) do
     agent = Agents.get_agent!(id)
     changeset = Agents.change_agent(agent)
-    {:ok, assign(socket, agent: agent, changeset: changeset)}
+    {:ok, assign(socket, agent: agent, form: to_form(changeset))}
   end
 
   @impl true
@@ -15,7 +15,7 @@ defmodule CymphoWeb.AgentLive.Edit do
       {:ok, _agent} ->
         {:noreply, push_navigate(socket, to: ~p"/agents")}
       {:error, changeset} ->
-        {:noreply, assign(socket, changeset: changeset)}
+        {:noreply, assign(socket, form: to_form(changeset))}
     end
   end
 end

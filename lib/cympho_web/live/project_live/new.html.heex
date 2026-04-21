@@ -1,25 +1,17 @@
-<.header>
-  New Project
-  <:actions>
-    <.link navigate={~p"/projects"} class="phx-btn-secondary">
-      Cancel
-    </.link>
-  </:actions>
-</.header>
+<div class="p-6 lg:p-8 max-w-2xl mx-auto">
+  <.header title="New Project">
+    <:actions>
+      <.app_link navigate={~p"/projects"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
+        Cancel
+      </.app_link>
+    </:actions>
+  </.header>
 
-<div class="project-form">
-  <.simple_form for={@changeset} as={:project} phx-submit="save">
-    <.input field={@changeset[:name]} label="Name" />
-    <.input field={@changeset[:description]} label="Description" type="textarea" />
-    <.input field={@changeset[:prefix]} label="Prefix" placeholder="e.g., PROJ" />
-
-    <div class="form-group">
-      <label>Status</label>
-      <select name="project[status]">
-        <option value="active">Active</option>
-        <option value="archived">Archived</option>
-      </select>
-    </div>
+  <.simple_form for={@form} phx-submit="save">
+    <.input field={@form[:name]} label="Name" />
+    <.input field={@form[:description]} label="Description" type="textarea" />
+    <.input field={@form[:prefix]} label="Prefix" placeholder="e.g., PROJ" />
+    <.select name="project[status]" label="Status" options={[Active: "active", Archived: "archived"]} />
 
     <:actions>
       <.button type="submit">Create Project</.button>

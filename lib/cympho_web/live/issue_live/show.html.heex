@@ -1,100 +1,124 @@
+<div class="p-6 lg:p-8 max-w-6xl mx-auto">
+  <.header title={@issue.title}>
+    <:actions>
+      <.app_link navigate={~p"/issues"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
+        Back
+      </.app_link>
+    </:actions>
+  </.header>
 
-<.header>
-  {@issue.title}
-  <:actions>
-    <.link navigate={~p"/issues"} class="phx-btn-secondary">
-      Back
-    </.link>
-  </:actions>
-</.header>
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="lg:col-span-2 space-y-6">
+      <div class="flex items-center gap-3">
+        <.badge variant="status" value={to_string(@issue.status)} />
+        <.badge variant="priority" value={to_string(@issue.priority)} />
+      </div>
 
-<div class="issue-detail">
-  <div class="issue-info">
-    <div class="status-row">
-      <span class={"badge status-#{@issue.status}"}>{@issue.status}</span>
-      <span class={"priority-#{@issue.priority}"}>{@issue.priority}</span>
-    </div>
+      <p class="text-sm text-text-secondary leading-relaxed">
+        {@issue.description}
+      </p>
 
-    <p class="description">{@issue.description}</p>
+      <div class="text-xs text-text-quaternary">
+        Created {@issue.inserted_at}
+      </div>
 
-    <div class="meta">
-      <span>Created {@issue.inserted_at}</span>
-    </div>
+      <div class="bg-surface border border-border rounded-card p-5 space-y-4">
+        <h3 class="text-sm font-510 text-text-primary">GitHub PR Link</h3>
+        <form phx-submit="update_github_pr_url" class="space-y-3">
+          <input
+            type="text"
+            name="github_pr_url"
+            value={@issue.github_pr_url || ""}
+            placeholder="https://github.com/owner/repo/pull/123"
+            class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+          />
+          <div class="flex items-center gap-3">
+            <.button type="submit">Save PR URL</.button>
+            <.button type="button" variant="ghost" phx-click="clear_github_pr_url" data-confirm="Clear the PR URL?">
+              Clear
+            </.button>
+          </div>
+        </form>
+      </div>
 
-    <div class="agent-section">
-      <button
-        type="button"
-        class="phx-btn"
-        phx-click="toggle_agent_panel"
-      >
-        {@show_agent_panel && "Hide" || "Spawn"} Agent
-      </button>
+      <div class="bg-surface border border-border rounded-card p-5 space-y-4">
+        <.button type="button" phx-click="toggle_agent_panel">
+          {@show_agent_panel && "Hide" || "Spawn"} Agent
+        </.button>
 
-      <div :if={@show_agent_panel} class="agent-panel">
-        <h4>Select an Agent</h4>
-        <p :if={Enum.empty?(@agents)} class="no-agents">No idle agents available.</p>
-        <form :if={!Enum.empty?(@agents)} phx-submit="spawn_agent">
-          <div class="form-group">
-            <select name="agent_id" required>
+        <div :if={@show_agent_panel} class="space-y-3 pt-2">
+          <h4 class="text-sm font-510 text-text-primary">Select an Agent</h4>
+          <p :if={Enum.empty?(@agents)} class="text-sm text-text-tertiary">No idle agents available.</p>
+          <form :if={!Enum.empty?(@agents)} phx-submit="spawn_agent" class="space-y-3">
+            <select name="agent_id" required class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none">
               <option value="">Choose an agent...</option>
               <option :for={agent <- @agents} value={agent.id}>
                 {agent.name} ({agent.role})
               </option>
             </select>
+            <.button type="submit">Start Agent</.button>
+          </form>
+        </div>
+      </div>
+
+      <div class="border-t border-border pt-6 space-y-4">
+        <h3 class="text-sm font-510 text-text-primary">Comments ({length(@issue.comments)})</h3>
+
+        <div class="space-y-3">
+          <div :for={comment <- @issue.comments} id={"comment-#{comment.id}"} class="bg-surface border border-border rounded-card p-4">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-510 text-text-secondary">
+                {String.capitalize(to_string(comment.author_type))}: {comment.author_id}
+              </span>
+              <span class="text-xs text-text-quaternary">{comment.inserted_at}</span>
+            </div>
+            <p class="text-sm text-text-secondary">{comment.body}</p>
+            <button
+              type="button"
+              class="mt-2 text-xs text-text-quaternary hover:text-red-400 transition-colors"
+              phx-click="delete_comment"
+              phx-value-id={comment.id}
+              data-confirm="Delete this comment?"
+            >
+              Delete
+            </button>
           </div>
-          <button type="submit" class="phx-btn">Start Agent</button>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <div class="comments-section">
-    <h3>Comments ({length(@issue.comments)})</h3>
-
-    <div class="comments-list">
-      <div :for={comment <- @issue.comments} class="comment" id={"comment-#{comment.id}"}>
-        <div class="comment-header">
-          <strong>{comment.author_type}: {comment.author_id}</strong>
-          <span>{comment.inserted_at}</span>
         </div>
-        <p>{comment.body}</p>
-        <button
-          type="button"
-          class="delete-btn"
-          phx-click="delete_comment"
-          phx-value-id={comment.id}
-          data-confirm="Delete this comment?"
-        >
-          Delete
-        </button>
+
+        <div class="bg-surface border border-border rounded-card p-5 space-y-4">
+          <h4 class="text-sm font-510 text-text-primary">Add Comment</h4>
+          <form id="comment-form" phx-submit="add_comment" class="space-y-4">
+            <.select name="comment[author_type]" label="Author Type" options={[User: "user", Agent: "agent"]} />
+            <.input field={@comment_form[:author_id]} label="Author ID" />
+            <.input field={@comment_form[:body]} label="Comment" type="textarea" />
+            <.button type="submit">Add Comment</.button>
+          </form>
+        </div>
       </div>
     </div>
 
-    <div class="comment-form">
-      <h4>Add Comment</h4>
-      <form id="comment-form" phx-submit="add_comment">
-        <div class="form-group">
-          <label for="comment_author_type">Author Type</label>
-          <select id="comment_author_type" name="comment[author_type]">
-            <option value="user">User</option>
-            <option value="agent">Agent</option>
-          </select>
+    <div class="space-y-4">
+      <div class="bg-surface border border-border rounded-card p-5 space-y-4">
+        <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider">Details</h3>
+        <div class="space-y-3 text-sm">
+          <div class="flex justify-between">
+            <span class="text-text-tertiary">Status</span>
+            <.badge variant="status" value={to_string(@issue.status)} />
+          </div>
+          <div class="flex justify-between">
+            <span class="text-text-tertiary">Priority</span>
+            <.badge variant="priority" value={to_string(@issue.priority)} />
+          </div>
+          <div class="flex justify-between">
+            <span class="text-text-tertiary">Comments</span>
+            <span class="text-text-secondary">{length(@issue.comments)}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-text-tertiary">Created</span>
+            <span class="text-text-secondary">{@issue.inserted_at}</span>
+          </div>
         </div>
-        <div class="form-group">
-          <label for="comment_author_id">Author ID</label>
-          <input
-            type="text"
-            id="comment_author_id"
-            name="comment[author_id]"
-            value={@comment_changeset.params["author_id"]}
-          />
-        </div>
-        <div class="form-group">
-          <label for="comment_body">Comment</label>
-          <textarea id="comment_body" name="comment[body]">{@comment_changeset.params["body"]}</textarea>
-        </div>
-        <button type="submit" class="phx-btn">Add Comment</button>
-      </form>
+      </div>
     </div>
   </div>
 </div>

@@ -4,12 +4,13 @@ defmodule Cympho.Issues do
   """
   import Ecto.Query, warn: false
   import Ecto.Changeset, only: [optimistic_lock: 2]
+  require Logger
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
   alias Cympho.Issues.AutoAssignment
-  alias Cympho.Agents.Agent
   alias Cympho.Agents
+  alias Cympho.Agents.Agent
   alias Cympho.Comments
 
   def list_issues(opts \\ %{}) do
@@ -32,12 +33,20 @@ defmodule Cympho.Issues do
     |> Repo.preload([:comments, :blocked_by, :blocks])
   end
 
-  def get_issue!(id), do: Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee])
+  def get_issue!(id),
+    do: Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee])
 
   def get_issue(id) do
     case Repo.get(Issue, id) do
       nil -> {:error, :not_found}
       issue -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee])}
+    end
+  end
+
+  def get_issue_by_pr_url(pr_url) do
+    case Repo.one(from i in Issue, where: i.github_pr_url == ^pr_url, preload: [:project]) do
+      nil -> {:error, :not_found}
+      issue -> {:ok, issue}
     end
   end
 
@@ -49,7 +58,7 @@ defmodule Cympho.Issues do
          |> Repo.insert() do
       {:ok, issue} ->
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
-        issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
+        issue = Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee])
 
         if is_nil(issue.assignee_id) do
           issue = maybe_auto_assign(issue)
@@ -81,7 +90,14 @@ defmodule Cympho.Issues do
       attrs
     else
       project = Repo.get!(Cympho.Projects.Project, project_id)
-      max_seq = Repo.one(from i in Issue, where: i.project_id == ^project_id, select: max fragment("CAST(SPLIT_PART(i.identifier, '-', 2) AS INTEGER)")) || 0
+
+      max_seq =
+        Repo.one(
+          from i in Issue,
+            where: i.project_id == ^project_id,
+            select: max(fragment("CAST(SPLIT_PART(i.identifier, '-', 2) AS INTEGER)"))
+        ) || 0
+
       seq = max_seq + 1
       Map.put(attrs, "identifier", "#{project.prefix}-#{seq}")
     end
@@ -91,8 +107,9 @@ defmodule Cympho.Issues do
 
   def update_issue(%Issue{} = issue, attrs) do
     with {:ok, issue} <- do_update_issue(issue, attrs) do
+      issue = Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee])
       Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
-      {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
+      {:ok, issue}
     end
   end
 
@@ -110,7 +127,27 @@ defmodule Cympho.Issues do
     |> Repo.update()
   end
 
-  def transition_issue(%Issue{} = issue, new_status) do
+  def transition_issue(%Issue{} = issue, new_status, agent_id) when is_binary(agent_id) do
+    cond do
+      new_status == :in_review ->
+        with {:ok, agent} <- Agents.get_agent(agent_id),
+             :ok <- validate_reviewer_role(agent),
+             {:ok, updated} <- do_transition(issue, new_status) do
+          {:ok, updated}
+        end
+
+      new_status == :done and is_blocked?(issue) ->
+        {:error, :blocked_by_active_issues}
+
+      not StateMachine.valid_transition?(issue.status, new_status) ->
+        {:error, :invalid_transition}
+
+      true ->
+        do_transition(issue, new_status)
+    end
+  end
+
+  def transition_issue(%Issue{} = issue, new_status, nil) do
     cond do
       new_status == :done and is_blocked?(issue) ->
         {:error, :blocked_by_active_issues}
@@ -119,10 +156,26 @@ defmodule Cympho.Issues do
         {:error, :invalid_transition}
 
       true ->
-        with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
-          if new_status == :done, do: unblock_dependents(issue.id)
-          {:ok, updated}
-        end
+        do_transition(issue, new_status)
+    end
+  end
+
+  def transition_issue(%Issue{} = issue, new_status) do
+    transition_issue(issue, new_status, nil)
+  end
+
+  defp validate_reviewer_role(%Agent{} = agent) do
+    if agent.role in [:cto, :ceo] do
+      :ok
+    else
+      {:error, :chain_of_command_violation}
+    end
+  end
+
+  defp do_transition(%Issue{} = issue, new_status) do
+    with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
+      if new_status == :done, do: unblock_dependents(issue.id)
+      {:ok, updated}
     end
   end
 
@@ -132,12 +185,18 @@ defmodule Cympho.Issues do
 
   def is_blocked?(%Issue{} = issue) do
     blocked_by = issue.blocked_by || []
-    Enum.any?(blocked_by, fn blocker -> blocker.status != :done end)
+
+    Enum.any?(blocked_by, fn blocker ->
+      blocker.status != :done and blocker.status != :cancelled
+    end)
   end
 
   def active_blockers(%Issue{} = issue) do
     blocked_by = issue.blocked_by || []
-    Enum.filter(blocked_by, fn blocker -> blocker.status != :done end)
+
+    Enum.filter(blocked_by, fn blocker ->
+      blocker.status != :done and blocker.status != :cancelled
+    end)
   end
 
   @doc """
@@ -178,9 +237,22 @@ defmodule Cympho.Issues do
   defp wake_assignee(%Issue{} = issue) do
     if issue.assignee_id do
       try do
-        :ok = Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id)
+        case Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id) do
+          :ok -> :ok
+          {:error, reason} ->
+            Logger.warning("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
+              error: inspect(reason)
+            )
+            :ok
+        end
       rescue
-        _ -> :ok
+        e in [Ecto.QueryError, DBConnection.Error, ArgumentError] ->
+          _ =
+            Logger.warning("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
+              error: inspect(e)
+            )
+
+          :ok
       end
     end
   end
@@ -238,11 +310,15 @@ defmodule Cympho.Issues do
       Agents.is_agent_at_capacity?(agent) ->
         {:error, :agent_at_capacity}
 
-      not Agents.role_authorized?(agent.role, required_role) ->
+      not Issue.role_authorized?(agent.role, required_role) ->
         {:error, :chain_of_command_violation}
 
       true ->
-        new_status = if current_issue.status in [:backlog, :todo], do: :in_progress, else: current_issue.status
+        new_status =
+          if current_issue.status in [:backlog, :todo],
+            do: :in_progress,
+            else: current_issue.status
+
         attrs = %{assignee_id: agent_id, status: new_status}
         attrs = if required_role, do: Map.put(attrs, :assigned_role, required_role), else: attrs
         update_issue(current_issue, attrs)
@@ -262,8 +338,10 @@ defmodule Cympho.Issues do
     cond do
       blocked_issue.id == blocker_issue.id ->
         {:error, :cannot_block_self}
+
       transitively_blocked_by?(blocker_issue, blocked_issue) ->
         {:error, :circular_blocker}
+
       true ->
         now = DateTime.utc_now()
 
@@ -277,8 +355,13 @@ defmodule Cympho.Issues do
           Repo.reload(blocked_issue)
         end)
         |> case do
-          {:ok, issue} -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
-          {:error, reason} -> {:error, reason}
+          {:ok, issue} ->
+            issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
+            Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
+            {:ok, issue}
+
+          {:error, reason} ->
+            {:error, reason}
         end
     end
   end
@@ -293,11 +376,14 @@ defmodule Cympho.Issues do
       false
     else
       visited = MapSet.put(visited, current_id)
-      blocker_ids = Repo.all(
-        from bb in "issue_blockers",
-        where: bb.blocked_issue_id == type(^current_id, Ecto.UUID),
-        select: bb.blocking_issue_id
-      )
+
+      blocker_ids =
+        Repo.all(
+          from bb in "issue_blockers",
+            where: bb.blocked_issue_id == type(^current_id, Ecto.UUID),
+            select: bb.blocking_issue_id
+        )
+
       Enum.any?(blocker_ids, fn blocker_id ->
         blocker_string = load_uuid(blocker_id)
 
@@ -313,15 +399,18 @@ defmodule Cympho.Issues do
   def remove_blocker(%Issue{} = blocked_issue, %Issue{} = blocker_issue) do
     {count, _} =
       from(bb in "issue_blockers",
-        where: bb.blocked_issue_id == type(^blocked_issue.id, Ecto.UUID) and
-               bb.blocking_issue_id == type(^blocker_issue.id, Ecto.UUID)
+        where:
+          bb.blocked_issue_id == type(^blocked_issue.id, Ecto.UUID) and
+            bb.blocking_issue_id == type(^blocker_issue.id, Ecto.UUID)
       )
       |> Repo.delete_all()
 
     if count == 0 do
       {:error, :not_found}
     else
-      {:ok, Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks])}
+      issue = Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks])
+      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
+      {:ok, issue}
     end
   end
 

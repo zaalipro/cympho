@@ -59,7 +59,9 @@ defmodule CymphoWeb do
     quote do
       import Phoenix.HTML
       import CymphoWeb.CoreComponents
-      import CymphoWeb.Components, only: [simple_form: 1, input: 1, button: 1]
+      import CymphoWeb.Components
+      import CymphoWeb.Components.Badge
+      import CymphoWeb.Components.Card
       import CymphoWeb.Gettext
 
       unquote(verified_routes())

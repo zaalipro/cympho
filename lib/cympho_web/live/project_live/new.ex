@@ -6,7 +6,7 @@ defmodule CymphoWeb.ProjectLive.New do
   @impl true
   def mount(_params, _session, socket) do
     changeset = Projects.change_project(%Project{})
-    {:ok, assign(socket, changeset: changeset)}
+    {:ok, assign(socket, form: to_form(changeset))}
   end
 
   @impl true
@@ -15,7 +15,7 @@ defmodule CymphoWeb.ProjectLive.New do
       {:ok, _project} ->
         {:noreply, push_navigate(socket, to: ~p"/projects")}
       {:error, changeset} ->
-        {:noreply, assign(socket, changeset: changeset)}
+        {:noreply, assign(socket, form: to_form(changeset))}
     end
   end
 end
