@@ -167,4 +167,33 @@ defmodule CymphoWeb.IssueLive.Show do
     IO.inspect({:turn_ended_with_error, session_id, reason}, label: "Agent error")
     {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
   end
+
+  @doc """
+  Validates that the URL is a valid GitHub PR URL.
+  """
+  def handle_event("update_github_pr_url", %{"github_pr_url" => url}, socket) do
+    url = String.trim(url)
+
+    attrs = %{
+      github_pr_url: url
+    }
+
+    case Issues.update_issue(socket.assigns.issue, attrs) do
+      {:ok, _issue} ->
+        {:noreply, socket}
+
+      {:error, changeset} ->
+        {:noreply, put_flash(socket, :error, "Invalid PR URL format")}
+    end
+  end
+
+  def handle_event("clear_github_pr_url", _, socket) do
+    case Issues.update_issue(socket.assigns.issue, %{github_pr_url: nil}) do
+      {:ok, _issue} ->
+        {:noreply, socket}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to clear PR URL")}
+    end
+  end
 end

@@ -41,6 +41,13 @@ defmodule Cympho.Issues do
     end
   end
 
+  def get_issue_by_pr_url(pr_url) do
+    case Repo.all(from i in Issue, where: i.github_pr_url == ^pr_url, preload: [:project]) do
+      [issue] -> {:ok, issue}
+      [] -> {:error, :not_found}
+    end
+  end
+
   def create_issue(attrs \\ %{}) do
     attrs = maybe_generate_identifier(attrs)
 

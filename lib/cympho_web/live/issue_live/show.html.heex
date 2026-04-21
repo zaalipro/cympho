@@ -21,6 +21,32 @@
       <span>Created {@issue.inserted_at}</span>
     </div>
 
+    <div class="pr-link-section">
+      <h4>GitHub PR Link</h4>
+      <form phx-submit="update_github_pr_url">
+        <div class="form-group">
+          <input
+            type="text"
+            name="github_pr_url"
+            value={@issue.github_pr_url || ""}
+            placeholder="https://github.com/owner/repo/pull/123"
+            class="pr-url-input"
+          />
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="phx-btn">Save PR URL</button>
+          <button
+            type="button"
+            class="phx-btn-secondary"
+            phx-click="clear_github_pr_url"
+            data-confirm="Clear the PR URL?"
+          >
+            Clear
+          </button>
+        </div>
+      </form>
+    </div>
+
     <div class="agent-section">
       <button
         type="button"
