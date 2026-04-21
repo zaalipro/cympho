@@ -23,7 +23,7 @@ defmodule CymphoWeb.GithubController do
     }
   }
   """
-  def webhook(conn, %{"action" => action, "pull_request" => pr} = params) do
+  def webhook(conn, %{"action" => action, "pull_request" => pr} = _params) do
     pr_url = pr["html_url"]
 
     case Issues.get_issue_by_pr_url(pr_url) do

@@ -31,6 +31,10 @@ defmodule CymphoWeb.AgentLive.Index do
     |> assign(:agent, nil)
   end
 
+  defp apply_action(socket, nil, params) do
+    apply_action(socket, :index, params)
+  end
+
   @impl true
   def handle_info({:agent_created, agent}, socket) do
     {:noreply, update(socket, :agents, fn agents -> [agent | agents] end)}

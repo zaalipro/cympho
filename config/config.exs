@@ -20,7 +20,14 @@ config :cympho, CymphoWeb.Endpoint,
   pubsub_server: Cympho.PubSub,
   live_view: [signing_salt: "cympho_secret"]
 
-config :esbuild, version: "0.17.11"
+config :esbuild,
+  version: "0.17.11",
+  cympho: [
+    args:
+      ~w(js/app.js --bundle --target=es2016 --outdir=../priv/static/assets --external:/fonts/* --external:/images/*),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => Path.expand("../deps", __DIR__)}
+  ]
 
 config :tailwind,
   version: "3.4.0",

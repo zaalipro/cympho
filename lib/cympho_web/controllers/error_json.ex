@@ -1,9 +1,9 @@
 defmodule CymphoWeb.ErrorJSON do
-  def render(template, %{message: message}) do
+  def render(_template, %{message: message}) do
     %{errors: %{detail: message}}
   end
 
-  def render(template, %{changeset: changeset}) do
+  def render(_template, %{changeset: changeset}) do
     %{
       errors:
         Ecto.Changeset.traverse_errors(changeset, &translate_error/1)

@@ -20,6 +20,10 @@ defmodule CymphoWeb.ProjectLive.Index do
     |> assign(:project, nil)
   end
 
+  defp apply_action(socket, nil, params) do
+    apply_action(socket, :index, params)
+  end
+
   defp apply_action(socket, :new, _params) do
     socket
     |> assign(:page_title, "New Project")

@@ -37,7 +37,7 @@ defmodule Cympho.Notifications do
       {:error, :user_not_found} = error ->
         error
 
-      {:error, _} = error ->
+      {:error, _} = _error ->
         Cympho.Notifications.RetryWorker.schedule_retry(message, 1)
     end
   end

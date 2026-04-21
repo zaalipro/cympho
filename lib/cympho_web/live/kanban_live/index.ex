@@ -82,6 +82,10 @@ defmodule CymphoWeb.KanbanLive.Index do
     |> assign(:page_title, "Kanban Board")
   end
 
+  defp apply_action(socket, nil, params) do
+    apply_action(socket, :index, params)
+  end
+
   @impl true
   def handle_info({:issue_created, issue}, socket) do
     {:noreply, update(socket, :issues, fn issues -> [issue | issues] end)}

@@ -8,8 +8,8 @@ defmodule CymphoWeb.SpawnAgentComponent do
     ~H"""
     <div>
       <%= if @show_form do %>
-        <div class="spawn-form-panel">
-          <h4>Spawn New Agent</h4>
+        <div class="bg-surface border border-border rounded-card p-5 mb-6">
+          <h4 class="text-sm font-510 text-text-primary mb-4">Spawn New Agent</h4>
           <.simple_form
             for={@changeset}
             as={:agent}
@@ -18,37 +18,33 @@ defmodule CymphoWeb.SpawnAgentComponent do
           >
             <.input field={@changeset[:name]} label="Name" />
 
-            <div class="form-group">
-              <label>Role</label>
-              <select
-                name="agent[role]"
-                class="role-select"
-              >
-                <option :for={role <- @spawnable_roles} value={role} selected={@prefilled_role == role}>
-                  {role_label(role)}
-                </option>
-              </select>
-            </div>
+            <.select
+              name="agent[role]"
+              label="Role"
+              options={Enum.map(@spawnable_roles, &({role_label(&1), to_string(&1)}))}
+              value={to_string(@prefilled_role)}
+            />
 
             <.input field={@changeset[:config]} label="Adapter Config" placeholder="{}" />
             <.input field={@changeset[:instructions]} label="Instructions" type="textarea" />
 
             <:actions>
               <.button type="submit" phx-disable-with="Spawning...">Spawn Agent</.button>
-              <button type="button" class="cancel-btn" phx-click="hide_form" phx-target={@myself}>
+              <.button type="button" variant="ghost" phx-click="hide_form" phx-target={@myself}>
                 Cancel
-              </button>
+              </.button>
             </:actions>
           </.simple_form>
         </div>
       <% else %>
         <button
           type="button"
-          class="spawn-btn"
+          class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2"
           phx-click="show_form"
           phx-target={@myself}
         >
-          + Spawn Agent
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          Spawn Agent
         </button>
       <% end %>
     </div>

@@ -6,7 +6,7 @@ defmodule CymphoWeb.ProjectLive.Edit do
   def mount(%{"id" => id}, _session, socket) do
     project = Projects.get_project!(id)
     changeset = Projects.change_project(project)
-    {:ok, assign(socket, project: project, changeset: changeset)}
+    {:ok, assign(socket, project: project, form: to_form(changeset))}
   end
 
   @impl true
@@ -15,7 +15,7 @@ defmodule CymphoWeb.ProjectLive.Edit do
       {:ok, _project} ->
         {:noreply, push_navigate(socket, to: ~p"/projects")}
       {:error, changeset} ->
-        {:noreply, assign(socket, changeset: changeset)}
+        {:noreply, assign(socket, form: to_form(changeset))}
     end
   end
 end

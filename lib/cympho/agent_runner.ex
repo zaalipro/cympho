@@ -110,10 +110,10 @@ defmodule Cympho.AgentRunner do
             send(recipient_pid, {:turn_ended_with_error, session_id, {:parse_error, output}})
         end
 
-      {port, {:exit_status, 0}} ->
+      {^port, {:exit_status, 0}} ->
         :ok
 
-      {port, {:exit_status, code}} ->
+      {^port, {:exit_status, code}} ->
         send(recipient_pid, {:turn_ended_with_error, session_id, {:exit_code, code}})
 
       :stall_check ->

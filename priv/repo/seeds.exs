@@ -8,7 +8,7 @@ alias Cympho.Comments
   priority: :high
 })
 
-{:ok, issue2} = Issues.create_issue(%{
+{:ok, _issue2} = Issues.create_issue(%{
   title: "Second Issue",
   description: "This is the second issue for testing",
   status: :in_progress,

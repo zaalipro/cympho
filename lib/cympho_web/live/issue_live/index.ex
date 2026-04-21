@@ -1,7 +1,6 @@
 defmodule CymphoWeb.IssueLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Issues
-  alias Cympho.Issues.Issue
 
   @impl true
   def mount(_params, _session, socket) do
@@ -19,8 +18,8 @@ defmodule CymphoWeb.IssueLive.Index do
     |> assign(:page_title, "All Issues")
   end
 
-  defp apply_action(socket, nil, _params) do
-    apply_action(socket, :index, _params)
+  defp apply_action(socket, nil, params) do
+    apply_action(socket, :index, params)
   end
 
   @impl true
@@ -47,7 +46,7 @@ defmodule CymphoWeb.IssueLive.Index do
   @impl true
   def handle_event("delete_issue", %{"id" => id}, socket) do
     issue = Issues.get_issue!(id)
-    {:ok, _} = Issues.delete_issue(issue)
+    _ = Issues.delete_issue(issue)
     {:noreply, socket}
   end
 end

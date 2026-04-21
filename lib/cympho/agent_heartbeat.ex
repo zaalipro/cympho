@@ -183,6 +183,11 @@ defmodule Cympho.AgentHeartbeat do
     end
   end
 
+  @impl true
+  def handle_info(:shutdown, state) do
+    {:stop, :normal, state}
+  end
+
   defp do_heartbeat(state) do
     agent_id = state.agent_id
 
@@ -230,11 +235,6 @@ defmodule Cympho.AgentHeartbeat do
       broadcast_heartbeat_update(new_state)
       {:noreply, new_state}
     end
-  end
-
-  @impl true
-  def handle_info(:shutdown, state) do
-    {:stop, :normal, state}
   end
 
   @impl true
@@ -304,7 +304,7 @@ defmodule Cympho.AgentHeartbeat do
         |> Enum.filter(fn issue -> Issue.role_authorized?(agent.role, issue.assigned_role) end)
         |> List.first()
 
-      :error ->
+      {:error, _} ->
         nil
     end
   end
@@ -319,7 +319,7 @@ defmodule Cympho.AgentHeartbeat do
           Agents.update_agent(agent, %{status: new_status})
         end
 
-      :error ->
+      {:error, _} ->
         :error
     end
   end

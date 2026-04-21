@@ -1,16 +1,12 @@
 defmodule Cympho.Orchestrator do
   @moduledoc """
   Represents an active agent session for an issue.
-  """
-
-  @enforce_keys [:issue, :agent_id]
-  defstruct [:issue, :agent_id, :session_id, turn_count: 0]
 
   Receives AgentRunner Port messages and translates them into session lifecycle events,
   publishing results via PubSub for LiveView consumption.
 
   Session lifecycle:
-    start_session → session_started → turn_completed (possibly multiple) → session_ended
+    start_session -> session_started -> turn_completed (possibly multiple) -> session_ended
 
   Each orchestrator instance is registered by issue_id and manages
   a single agent session, forwarding messages to the caller via messages
@@ -24,14 +20,14 @@ defmodule Cympho.Orchestrator do
     - On completion: creates Comment, transitions issue, updates agent status
   """
 
+  @enforce_keys [:issue, :agent_id]
+  defstruct [:issue, :agent_id, :session_id, turn_count: 0]
+
   use GenServer
-  alias Cympho.AgentRunner
   alias Cympho.Orchestrator.Session
-  alias Cympho.{AgentRunner, AgentHeartbeat, Issues, Comments, Agents}
+  alias Cympho.{Issues, Comments, Agents}
 
   @registry Cympho.OrchestratorRegistry
-
-  @default_heartbeat_interval :timer.seconds(60)
 
   ## Client API
 
@@ -196,7 +192,7 @@ defmodule Cympho.Orchestrator do
       {:ok, agent} ->
         Agents.update_agent(agent, %{status: :idle})
 
-      :error ->
+      {:error, _} ->
         :error
     end
   end

@@ -19,7 +19,7 @@ defmodule Cympho.Notifications.EmailChannel do
         |> Swoosh.Email.from(config[:from_address] || "noreply@cympho.app")
         |> Swoosh.Email.subject(message.subject)
         |> Swoosh.Email.text_body(message.body)
-        |> Swoosh.Adapters.Finch.deliver()
+        |> Cympho.Mailer.deliver()
 
       :ok
     else
