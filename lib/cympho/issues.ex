@@ -42,9 +42,9 @@ defmodule Cympho.Issues do
   end
 
   def get_issue_by_pr_url(pr_url) do
-    case Repo.all(from i in Issue, where: i.github_pr_url == ^pr_url, preload: [:project]) do
-      [issue] -> {:ok, issue}
-      [] -> {:error, :not_found}
+    case Repo.one(from i in Issue, where: i.github_pr_url == ^pr_url, preload: [:project]) do
+      nil -> {:error, :not_found}
+      issue -> {:ok, issue}
     end
   end
 
