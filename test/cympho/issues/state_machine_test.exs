@@ -4,56 +4,136 @@ defmodule Cympho.Issues.StateMachineTest do
   alias Cympho.Issues.StateMachine
 
   describe "valid_transition?/2" do
-    test "open -> in_progress is valid" do
-      assert StateMachine.valid_transition?(:open, :in_progress)
+    # backlog transitions
+    test "backlog to todo is valid" do
+      assert StateMachine.valid_transition?(:backlog, :todo) == true
     end
 
-    test "open -> closed is valid" do
-      assert StateMachine.valid_transition?(:open, :closed)
+    test "backlog to in_progress is valid" do
+      assert StateMachine.valid_transition?(:backlog, :in_progress) == true
     end
 
-    test "in_progress -> open is valid" do
-      assert StateMachine.valid_transition?(:in_progress, :open)
+    test "backlog to blocked is valid" do
+      assert StateMachine.valid_transition?(:backlog, :blocked) == true
     end
 
-    test "in_progress -> closed is valid" do
-      assert StateMachine.valid_transition?(:in_progress, :closed)
+    test "backlog to done is invalid" do
+      assert StateMachine.valid_transition?(:backlog, :done) == false
     end
 
-    test "closed -> open is valid" do
-      assert StateMachine.valid_transition?(:closed, :open)
+    # todo transitions
+    test "todo to in_progress is valid" do
+      assert StateMachine.valid_transition?(:todo, :in_progress) == true
     end
 
-    test "closed -> in_progress is invalid" do
-      refute StateMachine.valid_transition?(:closed, :in_progress)
+    test "todo to blocked is valid" do
+      assert StateMachine.valid_transition?(:todo, :blocked) == true
     end
 
-    test "closed -> closed is invalid" do
-      refute StateMachine.valid_transition?(:closed, :closed)
+    test "todo to done is invalid" do
+      assert StateMachine.valid_transition?(:todo, :done) == false
     end
 
-    test "open -> open is invalid" do
-      refute StateMachine.valid_transition?(:open, :open)
+    # in_progress transitions
+    test "in_progress to in_review is valid" do
+      assert StateMachine.valid_transition?(:in_progress, :in_review) == true
+    end
+
+    test "in_progress to blocked is valid" do
+      assert StateMachine.valid_transition?(:in_progress, :blocked) == true
+    end
+
+    test "in_progress to done is invalid" do
+      assert StateMachine.valid_transition?(:in_progress, :done) == false
+    end
+
+    # in_review transitions
+    test "in_review to done is valid" do
+      assert StateMachine.valid_transition?(:in_review, :done) == true
+    end
+
+    test "in_review to in_progress is valid" do
+      assert StateMachine.valid_transition?(:in_review, :in_progress) == true
+    end
+
+    test "in_review to blocked is invalid" do
+      assert StateMachine.valid_transition?(:in_review, :blocked) == false
+    end
+
+    # done transitions
+    test "done to in_progress is valid (reopen)" do
+      assert StateMachine.valid_transition?(:done, :in_progress) == true
+    end
+
+    test "done to blocked is valid" do
+      assert StateMachine.valid_transition?(:done, :blocked) == true
+    end
+
+    test "done to backlog is invalid" do
+      assert StateMachine.valid_transition?(:done, :backlog) == false
+    end
+
+    # blocked transitions
+    test "blocked to backlog is valid" do
+      assert StateMachine.valid_transition?(:blocked, :backlog) == true
+    end
+
+    test "blocked to todo is valid" do
+      assert StateMachine.valid_transition?(:blocked, :todo) == true
+    end
+
+    test "blocked to in_progress is valid" do
+      assert StateMachine.valid_transition?(:blocked, :in_progress) == true
+    end
+
+    test "blocked to in_review is valid" do
+      assert StateMachine.valid_transition?(:blocked, :in_review) == true
+    end
+
+    test "blocked to done is valid" do
+      assert StateMachine.valid_transition?(:blocked, :done) == true
     end
   end
 
   describe "valid_transitions/1" do
-    test "returns transitions for open" do
-      assert StateMachine.valid_transitions(:open) == [:in_progress, :closed]
+    test "backlog transitions" do
+      assert StateMachine.valid_transitions(:backlog) == [:todo, :in_progress, :blocked]
     end
 
-    test "returns transitions for in_progress" do
-      assert StateMachine.valid_transitions(:in_progress) == [:open, :closed]
+    test "todo transitions" do
+      assert StateMachine.valid_transitions(:todo) == [:in_progress, :blocked]
     end
 
-    test "returns transitions for closed" do
-      assert StateMachine.valid_transitions(:closed) == [:open]
+    test "in_progress transitions" do
+      assert StateMachine.valid_transitions(:in_progress) == [:in_review, :blocked]
+    end
+
+    test "in_review transitions" do
+      assert StateMachine.valid_transitions(:in_review) == [:done, :in_progress]
+    end
+
+    test "done transitions (reopen or block)" do
+      assert StateMachine.valid_transitions(:done) == [:in_progress, :blocked]
+    end
+
+    test "blocked transitions (can go anywhere)" do
+      assert StateMachine.valid_transitions(:blocked) == [:backlog, :todo, :in_progress, :in_review, :done]
+    end
+
+    test "unknown status returns empty list" do
+      assert StateMachine.valid_transitions(:unknown) == []
+    end
+  end
+
+  describe "valid_states/0" do
+    test "returns all valid states" do
+      assert StateMachine.valid_states() == [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
     end
   end
 
   describe "statuses/0" do
-    test "returns all statuses" do
-      assert StateMachine.statuses() == [:open, :in_progress, :closed]
+    test "is an alias for valid_states" do
+      assert StateMachine.statuses() == StateMachine.valid_states()
     end
   end
 end
