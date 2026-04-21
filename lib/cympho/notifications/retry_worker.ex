@@ -23,17 +23,10 @@ defmodule Cympho.Notifications.RetryWorker do
 
   @doc """
   Schedule a notification for retry with exponential backoff.
+  Runs on the RetryWorker GenServer to ensure messages are delivered correctly.
   """
   def schedule_retry(%Message{} = message, attempt \\ 1) when attempt <= @max_retries do
-    delay = calculate_delay(attempt)
-
-    Process.send_after(
-      self(),
-      {:retry_notification, message, attempt},
-      delay
-    )
-
-    {:ok, attempt}
+    GenServer.call(__MODULE__, {:schedule_retry, message, attempt})
   end
 
   @doc """
@@ -58,6 +51,19 @@ defmodule Cympho.Notifications.RetryWorker do
           error
         end
     end
+  end
+
+  @impl GenServer
+  def handle_call({:schedule_retry, message, attempt}, _from, state) do
+    delay = calculate_delay(attempt)
+
+    Process.send_after(
+      self(),
+      {:retry_notification, message, attempt},
+      delay
+    )
+
+    {:reply, {:ok, attempt}, state}
   end
 
   @impl GenServer

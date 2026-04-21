@@ -122,14 +122,6 @@ defmodule Cympho.Notifications.Dispatcher do
     end
   end
 
-  defp deliver_via(channel_module, message, config) do
-    if channel_module.available?(config) do
-      channel_module.deliver(message, config)
-    else
-      {:error, :channel_unavailable}
-    end
-  end
-
   # Cache-aside pattern: check ETS first, fall back to DB
   defp lookup_preferences(user_id) do
     case :ets.lookup(@cache_table, user_id) do

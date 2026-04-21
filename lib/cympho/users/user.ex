@@ -32,6 +32,22 @@ defmodule Cympho.Users.User do
     |> validate_webhook_url()
   end
 
+  @doc """
+  Changeset for notification preferences only.
+  Only allows updating notification-related fields, not email or name.
+  """
+  def notification_prefs_changeset(user, attrs) do
+    user
+    |> cast(attrs, [
+      :telegram_chat_id,
+      :telegram_enabled,
+      :email_enabled,
+      :webhook_enabled,
+      :webhook_url
+    ])
+    |> validate_webhook_url()
+  end
+
   defp validate_email(changeset) do
     changeset
     |> validate_format(:email, ~r/@/, message: "must be a valid email address")
