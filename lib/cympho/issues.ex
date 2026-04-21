@@ -7,8 +7,9 @@ defmodule Cympho.Issues do
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
-  alias Cympho.Agents
+  alias Cympho.Issues.AutoAssignment
   alias Cympho.Agents.Agent
+  alias Cympho.Agents
   alias Cympho.Comments
 
   def list_issues(opts \\ %{}) do
@@ -40,6 +41,13 @@ defmodule Cympho.Issues do
     end
   end
 
+  def get_issue_by_pr_url(pr_url) do
+    case Repo.one(from i in Issue, where: i.github_pr_url == ^pr_url, preload: [:project]) do
+      nil -> {:error, :not_found}
+      issue -> {:ok, issue}
+    end
+  end
+
   def create_issue(attrs \\ %{}) do
     attrs = maybe_generate_identifier(attrs)
 
@@ -47,12 +55,29 @@ defmodule Cympho.Issues do
          |> Issue.changeset(attrs)
          |> Repo.insert() do
       {:ok, issue} ->
-        issue = Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee])
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
-        {:ok, issue}
+        issue = Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee])
+
+        if is_nil(issue.assignee_id) do
+          issue = maybe_auto_assign(issue)
+          {:ok, issue}
+        else
+          {:ok, issue}
+        end
 
       {:error, changeset} ->
         {:error, changeset}
+    end
+  end
+
+  defp maybe_auto_assign(%Issue{} = issue) do
+    case AutoAssignment.assign_issue(issue) do
+      {:ok, assigned} ->
+        assigned
+
+      {:error, :no_eligible_agent, _} ->
+        _ = AutoAssignment.queue_for_assignment(issue)
+        issue
     end
   end
 
@@ -61,7 +86,7 @@ defmodule Cympho.Issues do
       attrs
     else
       project = Repo.get!(Cympho.Projects.Project, project_id)
-      max_seq = Repo.one(from i in Issue, where: i.project_id == ^project_id, select: max fragment("CAST(SPLIT_PART(i.identifier, '-', 2) AS INTEGER)")) || 0
+      max_seq = Repo.one(from i in Issue, where: i.project_id == ^project_id, select: max(fragment("CAST(SPLIT_PART(i.identifier, '-', 2) AS INTEGER)"))) || 0
       seq = max_seq + 1
       Map.put(attrs, "identifier", "#{project.prefix}-#{seq}")
     end
@@ -91,7 +116,7 @@ defmodule Cympho.Issues do
     |> Repo.update()
   end
 
-  def transition_issue(%Issue{} = issue, new_status, agent_id \\ nil)
+  def transition_issue(issue, new_status, agent_id \\ nil)
 
   def transition_issue(%Issue{} = issue, new_status, agent_id) when is_binary(agent_id) do
     cond do
@@ -161,13 +186,16 @@ defmodule Cympho.Issues do
   Adds a system comment to each unblocked issue.
   """
   def unblock_dependents(blocker_issue_id) do
+    # Find all issues where this issue is a blocker
     dependent_ids =
       Repo.all(
         from bb in "issue_blockers",
           where: bb.blocking_issue_id == type(^blocker_issue_id, Ecto.UUID),
           select: bb.blocked_issue_id
       )
-      |> Enum.map(&load_uuid/1)
+      |> Enum.map(fn id ->
+        if is_binary(id) and byte_size(id) == 16, do: Ecto.UUID.load!(id), else: id
+      end)
 
     Enum.each(dependent_ids, fn dependent_id ->
       case get_issue(dependent_id) do
@@ -192,7 +220,7 @@ defmodule Cympho.Issues do
   defp wake_assignee(%Issue{} = issue) do
     if issue.assignee_id do
       try do
-        :ok = Cympho.AgentHeartbeat.set_working(issue.assignee_id, issue.id)
+        :ok = Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id)
       rescue
         _ -> :ok
       end
@@ -208,32 +236,20 @@ defmodule Cympho.Issues do
     })
   end
 
-  @doc """
-  Converts a PostgreSQL UUID (16-byte binary) to a string UUID.
-  PostgreSQL returns UUIDs as 16-byte binaries when selected directly;
-  this function normalizes them to the standard 36-character string format.
-  """
-  @spec load_uuid(binary()) :: binary()
-  defp load_uuid(id) do
-    if is_binary(id) and byte_size(id) == 16 do
-      Ecto.UUID.load!(id)
-    else
-      id
-    end
+  def checkout_issue(issue, agent_id, required_role \\ nil)
+
+  def checkout_issue(%Issue{} = issue, %Agent{} = agent, required_role) do
+    checkout_issue(issue, agent.id, required_role)
   end
 
-  def checkout_issue(%Issue{} = issue, %Agent{} = agent) do
-    checkout_issue(issue, agent.id)
+  def checkout_issue(%Agent{} = agent, %Issue{} = issue, required_role) do
+    checkout_issue(issue, agent.id, required_role)
   end
 
-  def checkout_issue(%Agent{} = agent, %Issue{} = issue) do
-    checkout_issue(issue, agent.id)
-  end
-
-  def checkout_issue(%Issue{} = issue, agent_id) do
-    # Only reload if issue appears unassigned — avoids N+1 on heartbeat ticks
-    # when the issue was freshly fetched as unassigned.
+  def checkout_issue(%Issue{} = issue, agent_id, required_role) do
+    # Optimization: only reload if issue appears unassigned
     current_issue = if issue.assignee_id == nil, do: Repo.reload(issue), else: issue
+    agent = Agents.get_agent!(agent_id)
 
     cond do
       current_issue.assignee_id != nil and current_issue.assignee_id != agent_id ->
@@ -242,9 +258,17 @@ defmodule Cympho.Issues do
       current_issue.assignee_id == agent_id ->
         {:ok, current_issue}
 
+      Agents.is_agent_at_capacity?(agent) ->
+        {:error, :agent_at_capacity}
+
+      not Issue.role_authorized?(agent.role, required_role) ->
+        {:error, :chain_of_command_violation}
+
       true ->
         new_status = if current_issue.status in [:backlog, :todo], do: :in_progress, else: current_issue.status
-        update_issue(current_issue, %{assignee_id: agent_id, status: new_status})
+        attrs = %{assignee_id: agent_id, status: new_status}
+        attrs = if required_role, do: Map.put(attrs, :assigned_role, required_role), else: attrs
+        update_issue(current_issue, attrs)
         |> maybe_adjust_lock_version()
     end
   end
@@ -264,6 +288,8 @@ defmodule Cympho.Issues do
       transitively_blocked_by?(blocker_issue, blocked_issue) ->
         {:error, :circular_blocker}
       true ->
+        blocked_binary = Ecto.UUID.dump!(blocked_issue.id)
+        blocker_binary = Ecto.UUID.dump!(blocker_issue.id)
         now = DateTime.utc_now()
 
         Repo.transaction(fn ->
@@ -271,7 +297,7 @@ defmodule Cympho.Issues do
             INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
             VALUES ($1, $2, $3, $4)
             ON CONFLICT DO NOTHING
-          """, [blocked_issue.id, blocker_issue.id, now, now])
+          """, [blocked_binary, blocker_binary, now, now])
 
           Repo.reload(blocked_issue)
         end)
@@ -302,7 +328,12 @@ defmodule Cympho.Issues do
         select: bb.blocking_issue_id
       )
       Enum.any?(blocker_ids, fn blocker_id ->
-        blocker_string = load_uuid(blocker_id)
+        blocker_string =
+          if is_binary(blocker_id) and byte_size(blocker_id) == 16 do
+            Ecto.UUID.load!(blocker_id)
+          else
+            blocker_id
+          end
 
         if blocker_string == target_id do
           true

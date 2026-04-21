@@ -1,5 +1,8 @@
 import Config
 
+config :cympho,
+  ecto_repos: [Cympho.Repo]
+
 config :cympho, Cympho.Repo,
   database: "cympho_repo",
   pool_size: 10,
@@ -17,9 +20,17 @@ config :cympho, CymphoWeb.Endpoint,
   pubsub_server: Cympho.PubSub,
   live_view: [signing_salt: "cympho_secret"]
 
-config :esbuild, version: "0.17.11"
+config :esbuild,
+  version: "0.17.11",
+  cympho: [
+    args:
+      ~w(js/app.js --bundle --target=es2016 --outdir=../priv/static/assets --external:/fonts/* --external:/images/*),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => Path.expand("../deps", __DIR__)}
+  ]
 
-config :tailwind, version: "3.4.0",
+config :tailwind,
+  version: "3.4.0",
   cympho: [
     args: ~w(
       --config=tailwind.config.js
@@ -32,5 +43,7 @@ config :tailwind, version: "3.4.0",
 config :logger, :console, format: "[$level] $message\n"
 
 config :phoenix, :json_library, Jason
+
+config :swoosh, :api_client, Swoosh.ApiClient.Finch
 
 import_config "#{config_env()}.exs"

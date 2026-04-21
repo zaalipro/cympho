@@ -30,8 +30,7 @@ defmodule CymphoWeb do
 
   def live_view do
     quote do
-      use Phoenix.LiveView,
-        layout: {CymphoWeb.Layouts, :root}
+      use Phoenix.LiveView
 
       unquote(html_helpers())
     end
@@ -60,6 +59,9 @@ defmodule CymphoWeb do
     quote do
       import Phoenix.HTML
       import CymphoWeb.CoreComponents
+      import CymphoWeb.Components
+      import CymphoWeb.Components.Badge
+      import CymphoWeb.Components.Card
       import CymphoWeb.Gettext
 
       unquote(verified_routes())
