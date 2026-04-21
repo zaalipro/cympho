@@ -12,13 +12,6 @@ defmodule Cympho.Notifications.TelegramBot do
   alias Cympho.Notifications.TelegramLink
   alias Cympho.Users
 
-  @bot_commands %{
-    "start" => :handle_start,
-    "help" => :handle_help,
-    "status" => :handle_status,
-    "link" => :handle_link
-  }
-
   @doc """
   Process an incoming Telegram update (webhook payload).
   Returns :ok or {:error, reason}.
@@ -71,8 +64,9 @@ defmodule Cympho.Notifications.TelegramBot do
     :ok
   end
 
-  defp handle_command("link", []) do
-    {:ok, :need_token}
+  defp handle_command("link", [], chat_id) do
+    reply(chat_id, "Usage: /link <token>")
+    :ok
   end
 
   defp handle_command(command, _, chat_id) do

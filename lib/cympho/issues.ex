@@ -246,7 +246,7 @@ defmodule Cympho.Issues do
             :ok
         end
       rescue
-        e in [Ecto.QueryError, DBConnection.Error, ArgumentError] ->
+        e ->
           _ =
             Logger.warning("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
               error: inspect(e)
@@ -275,10 +275,6 @@ defmodule Cympho.Issues do
     end
   end
 
-  @doc """
-  Converts a string UUID to a PostgreSQL 16-byte binary.
-  Used for raw SQL queries that require UUIDs in binary format.
-  """
   @spec dump_uuid(binary()) :: binary()
   defp dump_uuid(id) do
     Ecto.UUID.dump!(id)
