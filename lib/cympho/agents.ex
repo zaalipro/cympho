@@ -163,7 +163,7 @@ defmodule Cympho.Agents do
   def count_running_jobs(agent_id) when is_binary(agent_id) do
     Repo.one(
       from(i in Issue,
-        where: i.assignee_id == ^agent_id and i.status == :running,
+        where: i.assignee_id == ^agent_id and i.status == :in_progress,
         select: count(i.id)
       )
     ) || 0
@@ -172,7 +172,12 @@ defmodule Cympho.Agents do
   @doc """
   Returns true if the agent is at or above their max_concurrent_jobs limit.
   """
-  @spec is_agent_at_capacity?(String.t()) :: boolean()
+  @spec is_agent_at_capacity?(String.t() | Agent.t()) :: boolean()
+  def is_agent_at_capacity?(%Agent{} = agent) do
+    running = count_running_jobs(agent.id)
+    running >= agent.max_concurrent_jobs
+  end
+
   def is_agent_at_capacity?(agent_id) when is_binary(agent_id) do
     case get_agent(agent_id) do
       {:ok, agent} ->

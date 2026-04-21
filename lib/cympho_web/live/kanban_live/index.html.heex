@@ -21,8 +21,9 @@
             <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
             <%= if issue.assignee do %>
-              <span class={"agent-badge agent-#{issue.assignee.status}"}>
-                {issue.assignee.name} ({issue.assignee.status})
+              <% hb_state = get_heartbeat_state(@agent_heartbeat_states, issue.assignee.id) %>
+              <span class={"agent-badge heartbeat-#{hb_state.status}"}>
+                <%= issue.assignee.name %>: <%= heartbeat_status_label(hb_state, @issues) %>
               </span>
             <% end %>
             <%= if issue.github_pr_url do %>
@@ -62,8 +63,9 @@
             <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
             <%= if issue.assignee do %>
-              <span class={"agent-badge agent-#{issue.assignee.status}"}>
-                {issue.assignee.name} ({issue.assignee.status})
+              <% hb_state = get_heartbeat_state(@agent_heartbeat_states, issue.assignee.id) %>
+              <span class={"agent-badge heartbeat-#{hb_state.status}"}>
+                <%= issue.assignee.name %>: <%= heartbeat_status_label(hb_state, @issues) %>
               </span>
             <% end %>
             <%= if issue.github_pr_url do %>
@@ -103,8 +105,9 @@
             <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
             <%= if issue.assignee do %>
-              <span class={"agent-badge agent-#{issue.assignee.status}"}>
-                {issue.assignee.name} ({issue.assignee.status})
+              <% hb_state = get_heartbeat_state(@agent_heartbeat_states, issue.assignee.id) %>
+              <span class={"agent-badge heartbeat-#{hb_state.status}"}>
+                <%= issue.assignee.name %>: <%= heartbeat_status_label(hb_state, @issues) %>
               </span>
             <% end %>
             <%= if issue.github_pr_url do %>
@@ -144,8 +147,9 @@
             <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
             <%= if issue.assignee do %>
-              <span class={"agent-badge agent-#{issue.assignee.status}"}>
-                {issue.assignee.name} ({issue.assignee.status})
+              <% hb_state = get_heartbeat_state(@agent_heartbeat_states, issue.assignee.id) %>
+              <span class={"agent-badge heartbeat-#{hb_state.status}"}>
+                <%= issue.assignee.name %>: <%= heartbeat_status_label(hb_state, @issues) %>
               </span>
             <% end %>
             <%= if issue.github_pr_url do %>
@@ -185,8 +189,9 @@
             <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
             <%= if issue.assignee do %>
-              <span class={"agent-badge agent-#{issue.assignee.status}"}>
-                {issue.assignee.name} ({issue.assignee.status})
+              <% hb_state = get_heartbeat_state(@agent_heartbeat_states, issue.assignee.id) %>
+              <span class={"agent-badge heartbeat-#{hb_state.status}"}>
+                <%= issue.assignee.name %>: <%= heartbeat_status_label(hb_state, @issues) %>
               </span>
             <% end %>
             <%= if issue.github_pr_url do %>
@@ -226,8 +231,9 @@
             <span class={"priority-badge priority-#{issue.priority}"}><%= issue.priority %></span>
             <span class="comment-count"><%= length(issue.comments) %> comments</span>
             <%= if issue.assignee do %>
-              <span class={"agent-badge agent-#{issue.assignee.status}"}>
-                {issue.assignee.name} ({issue.assignee.status})
+              <% hb_state = get_heartbeat_state(@agent_heartbeat_states, issue.assignee.id) %>
+              <span class={"agent-badge heartbeat-#{hb_state.status}"}>
+                <%= issue.assignee.name %>: <%= heartbeat_status_label(hb_state, @issues) %>
               </span>
             <% end %>
             <%= if issue.github_pr_url do %>

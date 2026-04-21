@@ -7,7 +7,9 @@ defmodule Cympho.Issues do
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
+  alias Cympho.Issues.AutoAssignment
   alias Cympho.Agents.Agent
+  alias Cympho.Agents
   alias Cympho.Comments
 
   def list_issues(opts \\ %{}) do
@@ -47,10 +49,28 @@ defmodule Cympho.Issues do
          |> Repo.insert() do
       {:ok, issue} ->
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
-        {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
+        issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
+
+        if is_nil(issue.assignee_id) do
+          issue = maybe_auto_assign(issue)
+          {:ok, issue}
+        else
+          {:ok, issue}
+        end
 
       {:error, changeset} ->
         {:error, changeset}
+    end
+  end
+
+  defp maybe_auto_assign(%Issue{} = issue) do
+    case AutoAssignment.assign_issue(issue) do
+      {:ok, assigned} ->
+        assigned
+
+      {:error, :no_eligible_agent, _} ->
+        _ = AutoAssignment.queue_for_assignment(issue)
+        issue
     end
   end
 
@@ -174,16 +194,19 @@ defmodule Cympho.Issues do
     })
   end
 
-  def checkout_issue(%Issue{} = issue, %Agent{} = agent) do
-    checkout_issue(issue, agent.id)
+  def checkout_issue(issue, agent_id, required_role \\ nil)
+
+  def checkout_issue(%Issue{} = issue, %Agent{} = agent, required_role) do
+    checkout_issue(issue, agent.id, required_role)
   end
 
-  def checkout_issue(%Agent{} = agent, %Issue{} = issue) do
-    checkout_issue(issue, agent.id)
+  def checkout_issue(%Agent{} = agent, %Issue{} = issue, required_role) do
+    checkout_issue(issue, agent.id, required_role)
   end
 
-  def checkout_issue(%Issue{} = issue, agent_id) do
+  def checkout_issue(%Issue{} = issue, agent_id, required_role) do
     current_issue = Repo.reload(issue)
+    agent = Agents.get_agent!(agent_id)
 
     cond do
       current_issue.assignee_id != nil and current_issue.assignee_id != agent_id ->
@@ -192,9 +215,17 @@ defmodule Cympho.Issues do
       current_issue.assignee_id == agent_id ->
         {:ok, current_issue}
 
+      Agents.is_agent_at_capacity?(agent) ->
+        {:error, :agent_at_capacity}
+
+      not Issue.role_authorized?(agent.role, required_role) ->
+        {:error, :chain_of_command_violation}
+
       true ->
         new_status = if current_issue.status in [:backlog, :todo], do: :in_progress, else: current_issue.status
-        update_issue(current_issue, %{assignee_id: agent_id, status: new_status})
+        attrs = %{assignee_id: agent_id, status: new_status}
+        attrs = if required_role, do: Map.put(attrs, :assigned_role, required_role), else: attrs
+        update_issue(current_issue, attrs)
         |> maybe_adjust_lock_version()
     end
   end

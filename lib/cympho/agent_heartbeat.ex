@@ -24,7 +24,8 @@ defmodule Cympho.AgentHeartbeat do
           agent_id: String.t(),
           status: status(),
           current_issue_id: String.t() | nil,
-          timer_ref: reference() | nil
+          timer_ref: reference() | nil,
+          eta_ms: non_neg_integer() | nil
         }
 
   @default_heartbeat_interval :timer.seconds(60)
@@ -95,6 +96,21 @@ defmodule Cympho.AgentHeartbeat do
   end
 
   @doc """
+  Gets the full state of the heartbeat for the given agent_id.
+  Returns {:ok, state()} with :idle/:working, current_issue_id, and eta_ms.
+  """
+  @spec get_state(String.t()) :: {:ok, state()} | {:error, :not_found}
+  def get_state(agent_id) do
+    case HeartbeatRegistry.lookup(agent_id) do
+      {:ok, pid} ->
+        {:ok, GenServer.call(pid, :get_full_state)}
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  @doc """
   Transitions the heartbeat to working status and records the current issue.
   Called internally when starting work on an issue.
   """
@@ -130,8 +146,8 @@ defmodule Cympho.AgentHeartbeat do
 
   @impl true
   def init(agent_id) do
-    timer_ref = schedule_heartbeat(agent_id)
-    state = %{agent_id: agent_id, status: :idle, current_issue_id: nil, timer_ref: timer_ref}
+    {timer_ref, interval} = schedule_heartbeat(agent_id)
+    state = %{agent_id: agent_id, status: :idle, current_issue_id: nil, timer_ref: timer_ref, eta_ms: interval}
     {:ok, state}
   end
 
@@ -141,8 +157,10 @@ defmodule Cympho.AgentHeartbeat do
 
     # Check if agent is at capacity before picking up more work
     if Agents.is_agent_at_capacity?(agent_id) do
-      timer_ref = schedule_heartbeat(agent_id)
-      {:noreply, %{state | timer_ref: timer_ref}}
+      {timer_ref, interval} = schedule_heartbeat(agent_id)
+      new_state = %{state | timer_ref: timer_ref, eta_ms: interval}
+      broadcast_heartbeat_update(new_state)
+      {:noreply, new_state}
     else
       do_heartbeat(state)
     end
@@ -167,25 +185,33 @@ defmodule Cympho.AgentHeartbeat do
           # Start orchestrator - it handles the session and posts completion comment
           case Orchestrator.start_and_run(checked_out_issue, agent_id) do
             {:ok, _pid} ->
-              timer_ref = schedule_heartbeat(agent_id)
-              {:noreply, %{state | status: :working, current_issue_id: checked_out_issue.id, timer_ref: timer_ref}}
+              {timer_ref, interval} = schedule_heartbeat(agent_id)
+              new_state = %{state | status: :working, current_issue_id: checked_out_issue.id, timer_ref: timer_ref, eta_ms: interval}
+              broadcast_heartbeat_update(new_state)
+              {:noreply, new_state}
 
             {:error, reason} ->
               _ = :logger.error("[AgentHeartbeat] failed to start orchestrator: #{inspect(reason)}")
               _ = maybe_update_agent_status(agent_id, :error)
-              timer_ref = schedule_heartbeat(agent_id)
-              {:noreply, %{state | status: :idle, current_issue_id: nil, timer_ref: timer_ref}}
+              {timer_ref, interval} = schedule_heartbeat(agent_id)
+              new_state = %{state | status: :idle, current_issue_id: nil, timer_ref: timer_ref, eta_ms: interval}
+              broadcast_heartbeat_update(new_state)
+              {:noreply, new_state}
           end
 
         {:error, _reason} ->
           # No issue available or couldn't checkout
-          timer_ref = schedule_heartbeat(agent_id)
-          {:noreply, %{state | timer_ref: timer_ref}}
+          {timer_ref, interval} = schedule_heartbeat(agent_id)
+          new_state = %{state | timer_ref: timer_ref, eta_ms: interval}
+          broadcast_heartbeat_update(new_state)
+          {:noreply, new_state}
       end
     else
       # No work available, stay idle
-      timer_ref = schedule_heartbeat(agent_id)
-      {:noreply, %{state | timer_ref: timer_ref}}
+      {timer_ref, interval} = schedule_heartbeat(agent_id)
+      new_state = %{state | timer_ref: timer_ref, eta_ms: interval}
+      broadcast_heartbeat_update(new_state)
+      {:noreply, new_state}
     end
   end
 
@@ -200,13 +226,22 @@ defmodule Cympho.AgentHeartbeat do
   end
 
   @impl true
+  def handle_call(:get_full_state, _from, state) do
+    {:reply, state, state}
+  end
+
+  @impl true
   def handle_call({:set_working, issue_id}, _from, state) do
-    {:reply, :ok, %{state | status: :working, current_issue_id: issue_id}}
+    new_state = %{state | status: :working, current_issue_id: issue_id}
+    broadcast_heartbeat_update(new_state)
+    {:reply, :ok, new_state}
   end
 
   @impl true
   def handle_call(:set_idle, _from, state) do
-    {:reply, :ok, %{state | status: :idle, current_issue_id: nil}}
+    new_state = %{state | status: :idle, current_issue_id: nil}
+    broadcast_heartbeat_update(new_state)
+    {:reply, :ok, new_state}
   end
 
   @impl true
@@ -222,7 +257,8 @@ defmodule Cympho.AgentHeartbeat do
 
   defp schedule_heartbeat(agent_id) do
     interval = heartbeat_interval(agent_id)
-    Process.send_after(self(), :heartbeat, interval)
+    timer_ref = Process.send_after(self(), :heartbeat, interval)
+    {timer_ref, interval}
   end
 
   defp heartbeat_interval(agent_id) do
@@ -247,8 +283,9 @@ defmodule Cympho.AgentHeartbeat do
         Issue
         |> where(assignee_id: ^agent_id, status: :todo)
         |> maybe_filter_by_project(project_id)
-        |> first()
-        |> Repo.one()
+        |> Repo.all()
+        |> Enum.filter(fn issue -> Issue.role_authorized?(agent.role, issue.assigned_role) end)
+        |> List.first()
 
       :error ->
         nil
@@ -268,5 +305,9 @@ defmodule Cympho.AgentHeartbeat do
       :error ->
         :error
     end
+  end
+
+  defp broadcast_heartbeat_update(state) do
+    Phoenix.PubSub.broadcast(Cympho.PubSub, "agent_heartbeats", {:agent_heartbeat_updated, state.agent_id, state})
   end
 end

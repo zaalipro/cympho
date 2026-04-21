@@ -140,7 +140,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
     else
       case agent_for_issue(issue) do
         {:ok, agent} ->
-          case Issues.checkout_issue(issue, agent) do
+          required_role = Router.infer_role(issue)
+          case Issues.checkout_issue(issue, agent, required_role) do
             {:ok, checked_out} ->
               case Orchestrator.start_and_run(checked_out, agent.id) do
                 {:ok, _pid} ->
