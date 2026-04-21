@@ -15,6 +15,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
   use GenServer, restart: :permanent
   import Ecto.Query
   alias Cympho.Orchestrator.Dispatcher.State
+  alias Cympho.Orchestrator.Dispatcher.Router
   alias Cympho.Orchestrator
   alias Cympho.Issues
   alias Cympho.Agents
@@ -23,7 +24,6 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @max_concurrent   Application.compile_env(:cympho, [:orchestrator, :max_concurrent_agents], 3)
   @active_states    Application.compile_env(:cympho, [:orchestrator, :active_states], [:todo, :in_progress])
   @terminal_states   Application.compile_env(:cympho, [:orchestrator, :terminal_states], [:done, :cancelled])
-  @dispatch_agent_url_key Application.compile_env(:cympho, [:orchestrator, :dispatch_agent_url_key], "elixir-engineer-2")
 
   # Client
 
@@ -138,7 +138,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
     if MapSet.member?(state.running_issue_ids, issue.id) do
       state
     else
-      case agent_for_dispatch() do
+      case agent_for_issue(issue) do
         {:ok, agent} ->
           case Issues.checkout_issue(issue, agent) do
             {:ok, checked_out} ->
@@ -163,15 +163,22 @@ defmodule Cympho.Orchestrator.Dispatcher do
     end
   end
 
-  defp agent_for_dispatch do
-    case Agents.get_agent_by_url_key(@dispatch_agent_url_key) do
-      {:ok, agent} -> {:ok, agent}
-      {:error, _} ->
-        case Agents.list_agents_by_role(:engineer) do
-          [agent | _] -> {:ok, agent}
-          [] -> {:error, :no_agent}
-        end
-    end
+  defp agent_for_issue(%Cympho.Issues.Issue{} = issue) do
+    primary_role = Router.infer_role(issue)
+    fallback_roles = Router.fallback_chain(primary_role)
+    all_roles = [primary_role | fallback_roles]
+
+    Enum.each(all_roles, fn role ->
+      eligible = Agents.list_eligible_agents(role)
+      case Router.select_agent(role, eligible) do
+        {:ok, agent} -> throw({:found, agent})
+        {:error, _} -> :continue
+      end
+    end)
+
+    {:error, :no_agent_available}
+  catch
+    {:found, agent} -> {:ok, agent}
   end
 
   defp broadcast_state(%State{} = state) do

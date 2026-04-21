@@ -21,6 +21,6 @@ defmodule Cympho.Comments.Comment do
     |> cast(attrs, [:body, :author_type, :author_id, :issue_id])
     |> validate_required([:body, :author_type, :author_id, :issue_id])
     |> validate_length(:body, min: 1)
-    |> validate_inclusion(:author_type, ["agent", "user"])
+    |> validate_inclusion(:author_type, ["agent", "user", "system"])
   end
 end

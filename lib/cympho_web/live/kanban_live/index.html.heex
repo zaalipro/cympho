@@ -25,6 +25,11 @@
                 {issue.assignee.name} ({issue.assignee.status})
               </span>
             <% end %>
+            <%= if issue.github_pr_url do %>
+              <a href={issue.github_pr_url} target="_blank" class="pr-badge" title="GitHub PR">
+                PR
+              </a>
+            <% end %>
           </div>
           <div class="card-actions">
             <%= for next_status <- valid_next_statuses(:backlog) do %>
@@ -60,6 +65,11 @@
               <span class={"agent-badge agent-#{issue.assignee.status}"}>
                 {issue.assignee.name} ({issue.assignee.status})
               </span>
+            <% end %>
+            <%= if issue.github_pr_url do %>
+              <a href={issue.github_pr_url} target="_blank" class="pr-badge" title="GitHub PR">
+                PR
+              </a>
             <% end %>
           </div>
           <div class="card-actions">
@@ -97,6 +107,11 @@
                 {issue.assignee.name} ({issue.assignee.status})
               </span>
             <% end %>
+            <%= if issue.github_pr_url do %>
+              <a href={issue.github_pr_url} target="_blank" class="pr-badge" title="GitHub PR">
+                PR
+              </a>
+            <% end %>
           </div>
           <div class="card-actions">
             <%= for next_status <- valid_next_statuses(:in_progress) do %>
@@ -132,6 +147,11 @@
               <span class={"agent-badge agent-#{issue.assignee.status}"}>
                 {issue.assignee.name} ({issue.assignee.status})
               </span>
+            <% end %>
+            <%= if issue.github_pr_url do %>
+              <a href={issue.github_pr_url} target="_blank" class="pr-badge" title="GitHub PR">
+                PR
+              </a>
             <% end %>
           </div>
           <div class="card-actions">
@@ -169,6 +189,11 @@
                 {issue.assignee.name} ({issue.assignee.status})
               </span>
             <% end %>
+            <%= if issue.github_pr_url do %>
+              <a href={issue.github_pr_url} target="_blank" class="pr-badge" title="GitHub PR">
+                PR
+              </a>
+            <% end %>
           </div>
           <div class="card-actions">
             <%= for next_status <- valid_next_statuses(:done) do %>
@@ -204,6 +229,11 @@
               <span class={"agent-badge agent-#{issue.assignee.status}"}>
                 {issue.assignee.name} ({issue.assignee.status})
               </span>
+            <% end %>
+            <%= if issue.github_pr_url do %>
+              <a href={issue.github_pr_url} target="_blank" class="pr-badge" title="GitHub PR">
+                PR
+              </a>
             <% end %>
           </div>
           <div class="card-actions">

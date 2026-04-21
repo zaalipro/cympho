@@ -14,6 +14,7 @@ defmodule Cympho.Issues.Issue do
     field :status, Ecto.Enum, values: [:backlog, :todo, :in_progress, :in_review, :done, :blocked], default: :backlog
     field :priority, Ecto.Enum, values: [:low, :medium, :high], default: :medium
     field :lock_version, :integer, default: 0
+    field :github_pr_url, :string
 
     belongs_to :project, Project
     belongs_to :assignee, Agent, foreign_key: :assignee_id
@@ -35,7 +36,7 @@ defmodule Cympho.Issues.Issue do
 
   def changeset(issue, attrs) do
     issue
-    |> cast(attrs, [:title, :description, :status, :priority, :assignee_id, :project_id])
+    |> cast(attrs, [:title, :description, :status, :priority, :assignee_id, :project_id, :github_pr_url])
     |> validate_required([:title, :description])
     |> validate_length(:title, min: 1, max: 255)
     |> validate_length(:description, min: 1)
