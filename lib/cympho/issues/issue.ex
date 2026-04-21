@@ -74,10 +74,10 @@ defmodule Cympho.Issues.Issue do
   @doc """
   Returns true if agent_role has authority over (or equal to) required_role.
   """
+  def role_authorized?(_agent_role, nil), do: true
   def role_authorized?(agent_role, required_role) when is_atom(agent_role) and is_atom(required_role) do
     role_rank(agent_role) >= role_rank(required_role)
   end
-  def role_authorized?(_agent_role, nil), do: true
 
   def status_options, do: [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
   def priority_options, do: [:low, :medium, :high]

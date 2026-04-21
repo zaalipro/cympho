@@ -58,7 +58,7 @@ defmodule Cympho.Issues do
          |> Repo.insert() do
       {:ok, issue} ->
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
-        issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
+        issue = Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee])
 
         if is_nil(issue.assignee_id) do
           issue = maybe_auto_assign(issue)
@@ -105,8 +105,9 @@ defmodule Cympho.Issues do
 
   def update_issue(%Issue{} = issue, attrs) do
     with {:ok, issue} <- do_update_issue(issue, attrs) do
+      issue = Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee])
       Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
-      {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
+      {:ok, issue}
     end
   end
 
@@ -236,7 +237,14 @@ defmodule Cympho.Issues do
   defp wake_assignee(%Issue{} = issue) do
     if issue.assignee_id do
       try do
-        :ok = Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id)
+        case Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id) do
+          :ok -> :ok
+          {:error, reason} ->
+            Logger.warning("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
+              error: inspect(reason)
+            )
+            :ok
+        end
       rescue
         e in [Ecto.QueryError, DBConnection.Error, ArgumentError] ->
           _ =
@@ -260,18 +268,19 @@ defmodule Cympho.Issues do
 
   def checkout_issue(issue, agent_id, required_role \\ nil)
 
-  def checkout_issue(%Issue{} = issue, %Agent{} = agent) do
-    checkout_issue(issue, agent.id)
+  def checkout_issue(%Issue{} = issue, %Agent{} = agent, required_role) do
+    checkout_issue(issue, agent.id, required_role)
   end
 
-  def checkout_issue(%Agent{} = agent, %Issue{} = issue) do
-    checkout_issue(issue, agent.id)
+  def checkout_issue(%Agent{} = agent, %Issue{} = issue, required_role) do
+    checkout_issue(issue, agent.id, required_role)
   end
 
-  def checkout_issue(%Issue{} = issue, agent_id) do
+  def checkout_issue(%Issue{} = issue, agent_id, required_role) do
     # Only reload if issue appears unassigned — avoids N+1 on heartbeat ticks
     # when the issue was freshly fetched as unassigned.
     current_issue = if issue.assignee_id == nil, do: Repo.reload(issue), else: issue
+    agent = Agents.get_agent!(agent_id)
 
     cond do
       current_issue.assignee_id != nil and current_issue.assignee_id != agent_id ->
@@ -280,13 +289,21 @@ defmodule Cympho.Issues do
       current_issue.assignee_id == agent_id ->
         {:ok, current_issue}
 
+      Agents.is_agent_at_capacity?(agent) ->
+        {:error, :agent_at_capacity}
+
+      not Issue.role_authorized?(agent.role, required_role) ->
+        {:error, :chain_of_command_violation}
+
       true ->
         new_status =
           if current_issue.status in [:backlog, :todo],
             do: :in_progress,
             else: current_issue.status
 
-        update_issue(current_issue, %{assignee_id: agent_id, status: new_status})
+        attrs = %{assignee_id: agent_id, status: new_status}
+        attrs = if required_role, do: Map.put(attrs, :assigned_role, required_role), else: attrs
+        update_issue(current_issue, attrs)
         |> maybe_adjust_lock_version()
     end
   end
@@ -325,8 +342,13 @@ defmodule Cympho.Issues do
           Repo.reload(blocked_issue)
         end)
         |> case do
-          {:ok, issue} -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
-          {:error, reason} -> {:error, reason}
+          {:ok, issue} ->
+            issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
+            Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
+            {:ok, issue}
+
+          {:error, reason} ->
+            {:error, reason}
         end
     end
   end
@@ -378,7 +400,9 @@ defmodule Cympho.Issues do
     if count == 0 do
       {:error, :not_found}
     else
-      {:ok, Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks])}
+      issue = Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks])
+      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
+      {:ok, issue}
     end
   end
 
