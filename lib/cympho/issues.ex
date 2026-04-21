@@ -69,8 +69,10 @@ defmodule Cympho.Issues do
         assigned
 
       {:error, :no_eligible_agent, _} ->
-        _ = AutoAssignment.queue_for_assignment(issue)
-        issue
+        case AutoAssignment.queue_for_assignment(issue) do
+          {:ok, _} -> issue
+          {:error, _} -> issue
+        end
     end
   end
 
@@ -151,9 +153,7 @@ defmodule Cympho.Issues do
           where: bb.blocking_issue_id == type(^blocker_issue_id, Ecto.UUID),
           select: bb.blocked_issue_id
       )
-      |> Enum.map(fn id ->
-        if is_binary(id) and byte_size(id) == 16, do: Ecto.UUID.load!(id), else: id
-      end)
+      |> Enum.map(&load_uuid/1)
 
     Enum.each(dependent_ids, fn dependent_id ->
       case get_issue(dependent_id) do
@@ -194,6 +194,24 @@ defmodule Cympho.Issues do
     })
   end
 
+  @spec load_uuid(binary()) :: binary()
+  defp load_uuid(id) do
+    if is_binary(id) and byte_size(id) == 16 do
+      Ecto.UUID.load!(id)
+    else
+      id
+    end
+  end
+
+  @doc """
+  Converts a string UUID to a PostgreSQL 16-byte binary.
+  Used for raw SQL queries that require UUIDs in binary format.
+  """
+  @spec dump_uuid(binary()) :: binary()
+  defp dump_uuid(id) do
+    Ecto.UUID.dump!(id)
+  end
+
   def checkout_issue(issue, agent_id, required_role \\ nil)
 
   def checkout_issue(%Issue{} = issue, %Agent{} = agent, required_role) do
@@ -205,7 +223,9 @@ defmodule Cympho.Issues do
   end
 
   def checkout_issue(%Issue{} = issue, agent_id, required_role) do
-    current_issue = Repo.reload(issue)
+    # Only reload if issue appears unassigned — avoids N+1 on heartbeat ticks
+    # when the issue was freshly fetched as unassigned.
+    current_issue = if issue.assignee_id == nil, do: Repo.reload(issue), else: issue
     agent = Agents.get_agent!(agent_id)
 
     cond do
@@ -218,7 +238,7 @@ defmodule Cympho.Issues do
       Agents.is_agent_at_capacity?(agent) ->
         {:error, :agent_at_capacity}
 
-      not Issue.role_authorized?(agent.role, required_role) ->
+      not Agents.role_authorized?(agent.role, required_role) ->
         {:error, :chain_of_command_violation}
 
       true ->
@@ -245,8 +265,6 @@ defmodule Cympho.Issues do
       transitively_blocked_by?(blocker_issue, blocked_issue) ->
         {:error, :circular_blocker}
       true ->
-        blocked_binary = Ecto.UUID.dump!(blocked_issue.id)
-        blocker_binary = Ecto.UUID.dump!(blocker_issue.id)
         now = DateTime.utc_now()
 
         Repo.transaction(fn ->
@@ -254,7 +272,7 @@ defmodule Cympho.Issues do
             INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
             VALUES ($1, $2, $3, $4)
             ON CONFLICT DO NOTHING
-          """, [blocked_binary, blocker_binary, now, now])
+          """, [dump_uuid(blocked_issue.id), dump_uuid(blocker_issue.id), now, now])
 
           Repo.reload(blocked_issue)
         end)
@@ -281,12 +299,7 @@ defmodule Cympho.Issues do
         select: bb.blocking_issue_id
       )
       Enum.any?(blocker_ids, fn blocker_id ->
-        blocker_string =
-          if is_binary(blocker_id) and byte_size(blocker_id) == 16 do
-            Ecto.UUID.load!(blocker_id)
-          else
-            blocker_id
-          end
+        blocker_string = load_uuid(blocker_id)
 
         if blocker_string == target_id do
           true

@@ -7,6 +7,7 @@ defmodule Cympho.Notifications.Dispatcher do
   via warm_cache/0 or invalidated via invalidate_cache/1.
   """
 
+  import Ecto.Query, warn: false
   alias Cympho.Notifications.{Channel, EmailChannel, Message, TelegramChannel, WebhookChannel}
   alias Cympho.Notifications.NotificationPreference
   alias Cympho.Users
@@ -92,7 +93,7 @@ defmodule Cympho.Notifications.Dispatcher do
       Enum.map(channel_configs, fn pref ->
         type = String.to_existing_atom(pref.channel_type)
         channel_module = Map.fetch!(@channels, type)
-        result = deliver_via(channel_module, message, pref.config)
+        result = deliver_via(channel_module, message, pref.config, user, type)
         {type, result}
       end)
 
@@ -102,6 +103,22 @@ defmodule Cympho.Notifications.Dispatcher do
       :ok
     else
       {:partial_failure, results}
+    end
+  end
+
+  defp deliver_via(channel_module, message, config, user, type) do
+    if channel_enabled?(user, type) and channel_module.available?(config) do
+      channel_module.deliver(message, config)
+    else
+      {:error, :channel_unavailable}
+    end
+  end
+
+  defp channel_enabled?(user, type) do
+    case type do
+      :email -> user.email_enabled
+      :telegram -> user.telegram_enabled
+      :webhook -> user.webhook_enabled
     end
   end
 
