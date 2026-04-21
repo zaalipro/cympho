@@ -9,6 +9,7 @@ defmodule Cympho.Issues do
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
   alias Cympho.Issues.AutoAssignment
+  alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Agents
   alias Cympho.Comments

@@ -960,4 +960,5 @@ defmodule Cympho.IssuesTest do
       assert {:error, :blocked_by_active_issues} = Issues.transition_issue(in_review_issue, :done, cto.id)
     end
   end
+
 end
