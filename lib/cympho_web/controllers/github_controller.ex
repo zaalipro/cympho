@@ -1,6 +1,5 @@
 defmodule CymphoWeb.GithubController do
   use CymphoWeb, :controller
-
   alias Cympho.Issues
   alias Cympho.Comments
   alias Cympho.GithubWebhook

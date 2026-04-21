@@ -11,7 +11,6 @@ defmodule Cympho.Issues do
   alias Cympho.Issues.AutoAssignment
   alias Cympho.Agents
   alias Cympho.Agents.Agent
-  alias Cympho.Agents
   alias Cympho.Comments
 
   def list_issues(opts \\ %{}) do
@@ -79,8 +78,10 @@ defmodule Cympho.Issues do
         assigned
 
       {:error, :no_eligible_agent, _} ->
-        _ = AutoAssignment.queue_for_assignment(issue)
-        issue
+        case AutoAssignment.queue_for_assignment(issue) do
+          {:ok, _} -> issue
+          {:error, _} -> issue
+        end
     end
   end
 
@@ -211,9 +212,7 @@ defmodule Cympho.Issues do
           where: bb.blocking_issue_id == type(^blocker_issue_id, Ecto.UUID),
           select: bb.blocked_issue_id
       )
-      |> Enum.map(fn id ->
-        if is_binary(id) and byte_size(id) == 16, do: Ecto.UUID.load!(id), else: id
-      end)
+      |> Enum.map(&load_uuid/1)
 
     Enum.each(dependent_ids, fn dependent_id ->
       case get_issue(dependent_id) do
@@ -265,6 +264,24 @@ defmodule Cympho.Issues do
       author_id: "00000000-0000-0000-0000-000000000000",
       issue_id: issue.id
     })
+  end
+
+  @spec load_uuid(binary()) :: binary()
+  defp load_uuid(id) do
+    if is_binary(id) and byte_size(id) == 16 do
+      Ecto.UUID.load!(id)
+    else
+      id
+    end
+  end
+
+  @doc """
+  Converts a string UUID to a PostgreSQL 16-byte binary.
+  Used for raw SQL queries that require UUIDs in binary format.
+  """
+  @spec dump_uuid(binary()) :: binary()
+  defp dump_uuid(id) do
+    Ecto.UUID.dump!(id)
   end
 
   def checkout_issue(issue, agent_id, required_role \\ nil)
@@ -326,19 +343,14 @@ defmodule Cympho.Issues do
         {:error, :circular_blocker}
 
       true ->
-        blocked_binary = Ecto.UUID.dump!(blocked_issue.id)
-        blocker_binary = Ecto.UUID.dump!(blocker_issue.id)
         now = DateTime.utc_now()
 
         Repo.transaction(fn ->
-          Repo.query!(
-            """
-              INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
-              VALUES ($1, $2, $3, $4)
-              ON CONFLICT DO NOTHING
-            """,
-            [blocked_binary, blocker_binary, now, now]
-          )
+          Repo.query!("""
+            INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT DO NOTHING
+          """, [dump_uuid(blocked_issue.id), dump_uuid(blocker_issue.id), now, now])
 
           Repo.reload(blocked_issue)
         end)
@@ -373,12 +385,7 @@ defmodule Cympho.Issues do
         )
 
       Enum.any?(blocker_ids, fn blocker_id ->
-        blocker_string =
-          if is_binary(blocker_id) and byte_size(blocker_id) == 16 do
-            Ecto.UUID.load!(blocker_id)
-          else
-            blocker_id
-          end
+        blocker_string = load_uuid(blocker_id)
 
         if blocker_string == target_id do
           true

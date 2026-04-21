@@ -74,10 +74,11 @@ defmodule Cympho.Users do
 
   @doc """
   Updates notification preferences for a user.
+  Only allows updating notification-related fields.
   """
   def update_notification_prefs(%User{} = user, attrs) do
     user
-    |> User.changeset(attrs)
+    |> User.notification_prefs_changeset(attrs)
     |> Repo.update()
   end
 

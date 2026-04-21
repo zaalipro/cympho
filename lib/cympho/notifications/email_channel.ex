@@ -13,15 +13,17 @@ defmodule Cympho.Notifications.EmailChannel do
     email = config[:email]
 
     if is_binary(email) and String.contains?(email, "@") do
-      {:ok, _email} =
+      email =
         Swoosh.Email.new()
         |> Swoosh.Email.to(email)
         |> Swoosh.Email.from(config[:from_address] || "noreply@cympho.app")
         |> Swoosh.Email.subject(message.subject)
         |> Swoosh.Email.text_body(message.body)
-        |> Cympho.Mailer.deliver()
 
-      :ok
+      case Cympho.Mailer.deliver(email) do
+        {:ok, _email} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
     else
       {:error, :invalid_email}
     end

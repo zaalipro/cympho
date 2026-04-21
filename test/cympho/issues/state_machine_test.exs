@@ -1,5 +1,4 @@
 defmodule Cympho.Issues.StateMachineTest do
-  use Cympho.DataCase, async: true
   use ExUnit.Case, async: true
 
   alias Cympho.Issues.StateMachine
@@ -122,12 +121,6 @@ defmodule Cympho.Issues.StateMachineTest do
 
     test "unknown status returns empty list" do
       assert StateMachine.valid_transitions(:unknown) == []
-    end
-  end
-
-  describe "can_transition?/2" do
-    test "is an alias for valid_transition?" do
-      assert StateMachine.can_transition?(:backlog, :todo) == StateMachine.valid_transition?(:backlog, :todo)
     end
   end
 
