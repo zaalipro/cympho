@@ -30,7 +30,7 @@ defmodule Cympho.MixProject do
       {:ecto_sql, "~> 3.10"},
       {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 3.3"},
-      {:phoenix_live_view, "~> 0.20.0"},
+      {:phoenix_live_view, "~> 1.0"},
       {:phoenix_live_reload, "~> 1.4", only: :dev},
       {:phoenix_live_dashboard, "~> 0.8"},
       {:esbuild, "~> 0.7", runtime: Mix.env() == :dev},
@@ -38,12 +38,15 @@ defmodule Cympho.MixProject do
       {:swoosh, "~> 1.5"},
       {:finch, "~> 0.13"},
       {:gen_smtp, "~> 1.2"},
+      # {:telegex, "~> 0.5"},
       {:telemetry_metrics, "~> 0.6"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 0.20"},
       {:jason, "~> 1.4"},
       {:dns_cluster, "~> 0.1.1"},
-      {:hackney, "~> 1.9"},
+      {:bandit, "~> 1.5"},
+      {:floki, ">= 0.30.0", only: :test},
+      {:lazy_html, "~> 0.1", only: :test}
     ]
   end
 

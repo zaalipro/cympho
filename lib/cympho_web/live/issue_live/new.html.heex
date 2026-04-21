@@ -1,27 +1,27 @@
-<.header>
-  Create New Issue
-  <:actions>
-    <.link navigate={~p"/issues"} class="phx-btn-secondary">
-      Cancel
-    </.link>
-  </:actions>
-</.header>
+<div class="p-6 lg:p-8 max-w-2xl mx-auto">
+  <.header title="Create New Issue">
+    <:actions>
+      <.app_link navigate={~p"/issues"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
+        Cancel
+      </.app_link>
+    </:actions>
+  </.header>
 
-<div class="issue-form">
-  <.simple_form :let={f} for={@changeset} phx-submit="save">
-    <.input field={f[:title]} label="Title" />
-    <.input field={f[:description]} label="Description" type="textarea" />
+  <.simple_form for={@form} phx-submit="save">
+    <.input field={@form[:title]} label="Title" />
+    <.input field={@form[:description]} label="Description" type="textarea" />
+    <.select name="issue[status]" label="Status" options={[
+      Backlog: "backlog",
+      "To Do": "todo",
+      "In Progress": "in_progress",
+      "In Review": "in_review",
+      Done: "done",
+      Blocked: "blocked"
+    ]} />
+    <.select name="issue[priority]" label="Priority" options={[Low: "low", Medium: "medium", High: "high"]} />
 
-    <div class="form-group">
-      <label>Status</label>
-      <%= select(f, :status, ["open": "open", "in_progress": "in_progress", "closed": "closed"]) %>
-    </div>
-
-    <div class="form-group">
-      <label>Priority</label>
-      <%= select(f, :priority, ["low": "low", "medium": "medium", "high": "high"]) %>
-    </div>
-
-    <.button type="submit">Create Issue</.button>
+    <:actions>
+      <.button type="submit">Create Issue</.button>
+    </:actions>
   </.simple_form>
 </div>

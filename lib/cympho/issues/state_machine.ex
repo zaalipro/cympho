@@ -1,5 +1,6 @@
 defmodule Cympho.Issues.StateMachine do
   @moduledoc """
+
   State machine for Issue status transitions.
 
   Valid transitions for 6-state kanban:
@@ -14,7 +15,7 @@ defmodule Cympho.Issues.StateMachine do
   """
 
   @valid_transitions %{
-    backlog: [:todo, :blocked],
+    backlog: [:todo, :in_progress, :blocked],
     todo: [:in_progress, :blocked],
     in_progress: [:in_review, :blocked],
     in_review: [:done, :in_progress],
@@ -25,6 +26,7 @@ defmodule Cympho.Issues.StateMachine do
   @doc """
   Returns true if the transition from from_status to to_status is valid.
   """
+
   def valid_transition?(from_status, to_status)
       when is_atom(from_status) and is_atom(to_status) do
     Map.get(@valid_transitions, from_status, []) |> Enum.member?(to_status)

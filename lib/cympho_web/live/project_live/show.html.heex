@@ -1,26 +1,27 @@
-<.header>
-  <%= @project.name %>
-  <:actions>
-    <.link navigate={~p"/projects"} class="phx-btn-secondary">
-      Back
-    </.link>
-    <.link navigate={~p"/projects/#{@project.id}/edit"} class="phx-btn-secondary">
-      Edit
-    </.link>
-  </:actions>
-</.header>
+<div class="p-6 lg:p-8 max-w-4xl mx-auto">
+  <.header title={@project.name}>
+    <:actions>
+      <.app_link navigate={~p"/projects"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
+        Back
+      </.app_link>
+      <.app_link navigate={~p"/projects/#{@project.id}/edit"} class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors">
+        Edit
+      </.app_link>
+    </:actions>
+  </.header>
 
-<div class="project-detail">
-  <div class="project-info">
-    <div class="status-row">
-      <span class={"badge status-#{@project.status}"}]><%= @project.status %></span>
-      <span class="prefix-badge"><%= @project.prefix %></span>
+  <div class="space-y-6">
+    <div class="flex items-center gap-3">
+      <.badge variant="status" value={@project.status} />
+      <.badge variant="pill" value={@project.prefix} />
     </div>
 
-    <p class="description"><%= @project.description %></p>
+    <p class="text-sm text-text-secondary leading-relaxed">
+      {@project.description}
+    </p>
 
-    <div class="meta">
-      <span>Created <%= @project.inserted_at %></span>
+    <div class="text-xs text-text-quaternary">
+      Created {@project.inserted_at}
     </div>
   </div>
 </div>
