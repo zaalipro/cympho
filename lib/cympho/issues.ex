@@ -178,7 +178,7 @@ defmodule Cympho.Issues do
   defp wake_assignee(%Issue{} = issue) do
     if issue.assignee_id do
       try do
-        :ok = Cympho.AgentHeartbeat.set_working(issue.assignee_id, issue.id)
+        :ok = Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id)
       rescue
         _ -> :ok
       end

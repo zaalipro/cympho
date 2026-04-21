@@ -201,11 +201,63 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Role hierarchy rank: higher rank = more authority.
+  Order: designer(1) < product_manager(2) < engineer(3) < cto(4) < ceo(5)
+  """
+  @spec role_rank(:designer | :product_manager | :engineer | :cto | :ceo) :: non_neg_integer()
+  def role_rank(:designer), do: 1
+  def role_rank(:product_manager), do: 2
+  def role_rank(:engineer), do: 3
+  def role_rank(:cto), do: 4
+  def role_rank(:ceo), do: 5
+
+  @doc """
+  Returns true if parent_agent can spawn an agent with child_role.
+  Parent must have role_rank >= child_rank (allows peer spawning for redundancy).
+  """
+  @spec spawn_authorized?(Agent.t(), :designer | :product_manager | :engineer | :cto | :ceo) :: boolean()
+  def spawn_authorized?(%Agent{} = parent_agent, child_role) do
+    role_rank(parent_agent.role) >= role_rank(child_role)
+  end
+
+  @doc """
+  Returns the list of roles that the given agent is authorized to spawn.
+  """
+  @spec spawnable_roles(Agent.t()) :: [:designer | :product_manager | :engineer | :cto | :ceo, ...]
+  def spawnable_roles(%Agent{} = parent_agent) do
+    parent_rank = role_rank(parent_agent.role)
+    [:designer, :product_manager, :engineer, :cto, :ceo]
+    |> Enum.filter(fn role -> role_rank(role) <= parent_rank end)
+  end
+
+  @doc """
   Spawns a new agent: creates the agent record and starts its heartbeat process.
   Returns {:ok, agent} or {:error, reason}.
   """
   @spec spawn_agent(map(), String.t()) :: {:ok, Agent.t()} | {:error, Ecto.Changeset.t() | atom()}
   def spawn_agent(attrs \\ %{}, parent_agent_id) when is_binary(parent_agent_id) do
+    with {:ok, parent_agent} <- get_agent(parent_agent_id),
+         {:ok, child_attrs} <- validate_spawn(parent_agent, attrs) do
+      child_attrs_with_creator = Map.put(child_attrs, :created_by_agent_id, parent_agent_id)
+      do_spawn_agent(child_attrs_with_creator)
+    end
+  end
+
+  defp validate_spawn(%Agent{} = parent_agent, attrs) do
+    case attrs do
+      %{role: child_role} when is_atom(child_role) ->
+        if spawn_authorized?(parent_agent, child_role) do
+          {:ok, attrs}
+        else
+          {:error, :unauthorized_spawn}
+        end
+
+      _ ->
+        {:error, :missing_role}
+    end
+  end
+
+  defp do_spawn_agent(attrs) do
     case create_agent(attrs) do
       {:ok, agent} ->
         case Cympho.AgentHeartbeat.start_for_agent(agent.id) do
@@ -213,7 +265,6 @@ defmodule Cympho.Agents do
             {:ok, agent}
 
           {:error, reason} ->
-            # Clean up the agent record if heartbeat start fails
             Repo.delete(agent)
             {:error, reason}
         end

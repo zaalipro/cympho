@@ -140,6 +140,23 @@ defmodule Cympho.AgentHeartbeat do
     end
   end
 
+  @doc """
+  Triggers an immediate heartbeat for the given agent.
+  Used to wake a sleeping heartbeat process when an issue becomes available
+  (e.g., when a blocker is resolved and a blocked issue is auto-unblocked).
+  """
+  @spec trigger_heartbeat(String.t()) :: :ok | {:error, :not_found}
+  def trigger_heartbeat(agent_id) do
+    case HeartbeatRegistry.lookup(agent_id) do
+      {:ok, pid} ->
+        send(pid, :heartbeat)
+        :ok
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Callbacks
   # ---------------------------------------------------------------------------
