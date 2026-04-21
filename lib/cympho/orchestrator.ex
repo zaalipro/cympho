@@ -140,6 +140,8 @@ defmodule Cympho.Orchestrator do
     issue = session.issue
     agent_id = session.agent_id
 
+    :logger.warning("[Orchestrator] Session ended with error for issue #{issue.id}, agent #{agent_id}: #{inspect(reason)}")
+
     # Create error comment
     error_body = "Agent work error: #{inspect(reason)}"
     {:ok, _comment} =
@@ -150,8 +152,13 @@ defmodule Cympho.Orchestrator do
         issue_id: issue.id
       })
 
-    # Mark issue as blocked waiting on resolution
-    Issues.update_issue(issue, %{status: :blocked})
+    # Mark issue as blocked waiting on resolution (use state machine)
+    case Issues.transition_issue(issue, :blocked) do
+      {:ok, _} ->
+        :logger.info("[Orchestrator] Issue #{issue.id} transitioned to :blocked after error")
+      {:error, reason} ->
+        :logger.error("[Orchestrator] Failed to transition issue #{issue.id} to :blocked: #{inspect(reason)}")
+    end
 
     # Keep agent idle
     set_agent_idle(agent_id)
