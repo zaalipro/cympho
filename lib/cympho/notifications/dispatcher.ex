@@ -7,10 +7,10 @@ defmodule Cympho.Notifications.Dispatcher do
   via warm_cache/0 or invalidated via invalidate_cache/1.
   """
 
-  alias Cympho.Notifications.{EmailChannel, Message, TelegramChannel, WebhookChannel}
+import Ecto.Query
+  alias Cympho.Notifications.{Channel, EmailChannel, Message, TelegramChannel, WebhookChannel}
   alias Cympho.Notifications.NotificationPreference
   alias Cympho.Users
-  import Ecto.Query
 
   use GenServer
 

@@ -5,16 +5,16 @@ defmodule Cympho.GithubWebhookTest do
 
   describe "verify_signature/3" do
     setup do
-      @secret = "test-webhook-secret"
-      @payload "{\"action\":\"opened\",\"pull_request\":{\"html_url\":\"https://github.com/owner/repo/pull/123\"}}"
+      secret = "test-webhook-secret"
+      payload = "{\"action\":\"opened\",\"pull_request\":{\"html_url\":\"https://github.com/owner/repo/pull/123\"}}"
 
       # Compute a valid signature
       valid_signature =
-        :crypto.mac(:hmac, :sha256, @secret, @payload)
+        :crypto.mac(:hmac, :sha256, secret, payload)
         |> Base.encode16(case: :lower)
         |> then(&"sha256=#{&1}")
 
-      %{payload: @payload, secret: @secret, valid_signature: valid_signature}
+      %{payload: payload, secret: secret, valid_signature: valid_signature}
     end
 
     test "returns :ok for valid signature", %{payload: payload, secret: secret, valid_signature: signature} do

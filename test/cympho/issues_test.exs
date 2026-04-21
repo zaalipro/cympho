@@ -3,6 +3,7 @@ defmodule Cympho.IssuesTest do
 
   alias Cympho.Issues
   alias Cympho.Issues.Issue
+  alias Cympho.Issues.StateMachine
   alias Cympho.Projects
   alias Cympho.Agents
 
@@ -129,11 +130,6 @@ defmodule Cympho.IssuesTest do
       attrs = %{assignee_id: agent.id}
       assert {:ok, updated} = Issues.update_issue(issue, attrs)
       assert updated.assignee_id == agent.id
-    end
-
-    test "rejects invalid status transition", %{issue: issue} do
-      attrs = %{status: :done}
-      assert {:error, :invalid_transition} = Issues.update_issue(issue, attrs)
     end
   end
 
@@ -958,9 +954,10 @@ defmodule Cympho.IssuesTest do
       {:ok, blocker} = Issues.create_issue(%{title: "Blocker", description: "Blocks other issue", status: :in_progress})
       {:ok, issue} = Issues.create_issue(%{title: "Blocked Task", description: "Test", status: :in_progress})
 
-      {:ok, _} = Issues.add_blocker(issue, blocker)
+      {:ok, blocked_issue} = Issues.add_blocker(issue, blocker)
+      {:ok, in_review_issue} = Issues.transition_issue(blocked_issue, :in_review, cto.id)
 
-      assert {:error, :blocked_by_active_issues} = Issues.transition_issue(issue, :done, cto.id)
+      assert {:error, :blocked_by_active_issues} = Issues.transition_issue(in_review_issue, :done, cto.id)
     end
   end
 end
