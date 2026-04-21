@@ -245,4 +245,123 @@ defmodule Cympho.IssuesTest do
       end
     end
   end
+
+  describe "transition_issue/3 chain-of-command for in_review" do
+    alias Cympho.Agents
+
+    test "cto can transition issue to in_review with agent_id", %{project: project} do
+      {:ok, cto} =
+        Agents.create_agent(%{
+          name: "CTO",
+          role: :cto
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "CTO Review Task",
+          description: "Test",
+          status: :in_progress,
+          project_id: project.id
+        })
+
+      assert {:ok, updated} = Issues.transition_issue(issue, :in_review, cto.id)
+      assert updated.status == :in_review
+    end
+
+    test "ceo can transition issue to in_review with agent_id", %{project: project} do
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "CEO",
+          role: :ceo
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "CEO Review Task",
+          description: "Test",
+          status: :in_progress,
+          project_id: project.id
+        })
+
+      assert {:ok, updated} = Issues.transition_issue(issue, :in_review, ceo.id)
+      assert updated.status == :in_review
+    end
+
+    test "engineer cannot transition issue to in_review with agent_id", %{project: project} do
+      {:ok, engineer} =
+        Agents.create_agent(%{
+          name: "Engineer",
+          role: :engineer
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Engineer Task",
+          description: "Test",
+          status: :in_progress,
+          project_id: project.id
+        })
+
+      assert {:error, :chain_of_command_violation} = Issues.transition_issue(issue, :in_review, engineer.id)
+    end
+
+    test "product_manager cannot transition issue to in_review with agent_id", %{project: project} do
+      {:ok, pm} =
+        Agents.create_agent(%{
+          name: "Product Manager",
+          role: :product_manager
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "PM Task",
+          description: "Test",
+          status: :in_progress,
+          project_id: project.id
+        })
+
+      assert {:error, :chain_of_command_violation} = Issues.transition_issue(issue, :in_review, pm.id)
+    end
+
+    test "transition to in_review without agent_id succeeds (backward compatibility)", %{project: project} do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "System Task",
+          description: "Test",
+          status: :in_progress,
+          project_id: project.id
+        })
+
+      assert {:ok, updated} = Issues.transition_issue(issue, :in_review, nil)
+      assert updated.status == :in_review
+    end
+
+    test "cto cannot transition blocked issue to done", %{project: project} do
+      {:ok, cto} =
+        Agents.create_agent(%{
+          name: "CTO",
+          role: :cto
+        })
+
+      {:ok, blocker} =
+        Issues.create_issue(%{
+          title: "Blocker",
+          description: "Blocks other issue",
+          status: :in_progress,
+          project_id: project.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Blocked Task",
+          description: "Test",
+          status: :in_progress,
+          project_id: project.id
+        })
+
+      {:ok, _} = Issues.add_blocker(issue, blocker)
+
+      assert {:error, :blocked_by_active_issues} = Issues.transition_issue(issue, :done, cto.id)
+    end
+  end
 end
