@@ -38,7 +38,6 @@ defmodule Cympho.Issues.Issue do
     |> cast(attrs, [:title, :description, :status, :priority, :project_id, :identifier, :assignee_agent_id, :lock_version])
     |> validate_required([:title, :description, :project_id, :identifier])
     |> validate_length(:title, min: 1, max: 255)
-    |> validate_length(:description, min: 1)
     |> unique_constraint(:identifier, name: :issues_project_id_identifier_index)
   end
 

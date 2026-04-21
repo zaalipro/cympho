@@ -22,40 +22,44 @@ defmodule Cympho.Comments do
   """
   def get_comment!(id), do: Repo.get!(Comment, id)
 
+  defp get_issue_with_comments(issue_id) do
+    Repo.one(from e in Issue, where: e.id == ^issue_id, preload: [:comments])
+  end
+
   @doc """
   Creates a comment for an issue.
   """
   def create_comment(attrs \\ %{}) do
-    %Comment{}
-    |> Comment.changeset(attrs)
-    |> Repo.insert()
-    |> then(fn {:ok, comment} ->
-      case Repo.get(Issue, comment.issue_id) do
-        nil -> :ok
-        issue ->
-          issue = Repo.preload(issue, :comments)
+    case %Comment{}
+         |> Comment.changeset(attrs)
+         |> Repo.insert() do
+      {:ok, comment} ->
+        if issue = get_issue_with_comments(comment.issue_id) do
           Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_created, issue})
-      end
-      {:ok, comment}
-    end)
+        end
+        {:ok, comment}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
   end
 
   @doc """
   Updates a comment.
   """
   def update_comment(%Comment{} = comment, attrs) do
-    comment
-    |> Comment.changeset(attrs)
-    |> Repo.update()
-    |> then(fn {:ok, comment} ->
-      case Repo.get(Issue, comment.issue_id) do
-        nil -> :ok
-        issue ->
-          issue = Repo.preload(issue, :comments)
+    case comment
+         |> Comment.changeset(attrs)
+         |> Repo.update() do
+      {:ok, comment} ->
+        if issue = get_issue_with_comments(comment.issue_id) do
           Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_updated, issue})
-      end
-      {:ok, comment}
-    end)
+        end
+        {:ok, comment}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
   end
 
   @doc """
@@ -63,16 +67,17 @@ defmodule Cympho.Comments do
   """
   def delete_comment(%Comment{} = comment) do
     issue_id = comment.issue_id
-    Repo.delete(comment)
-    |> then(fn {:ok, _comment} ->
-      case Repo.get(Issue, issue_id) do
-        nil -> :ok
-        issue ->
-          issue = Repo.preload(issue, :comments)
+
+    case Repo.delete(comment) do
+      {:ok, _comment} ->
+        if issue = get_issue_with_comments(issue_id) do
           Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_deleted, issue})
-      end
-      :ok
-    end)
+        end
+        :ok
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
   end
 
   @doc """

@@ -92,9 +92,8 @@ defmodule CymphoWeb.IssueLive.Show do
 
   @impl true
   def handle_event("update_issue_status", %{"status" => status}, socket) do
-    valid_statuses = ~w(backlog todo in_progress in_review done blocked)
     case status do
-      s when s in valid_statuses ->
+      s when s in ~w(backlog todo in_progress in_review done blocked) ->
         status_atom = String.to_existing_atom(s)
         case Issues.update_issue(socket.assigns.issue, %{status: status_atom}) do
           {:ok, _issue} ->
