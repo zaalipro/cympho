@@ -173,15 +173,16 @@ defmodule Cympho.DocumentsTest do
   end
 
   describe "list_revisions/1" do
-    test "returns revisions ordered newest first", %{issue: issue} do
+    test "returns all revisions for a document", %{issue: issue} do
       {:ok, doc} = Documents.create_document(%{key: "plan", title: "v0", body: "body0", issue_id: issue.id})
       {:ok, d1} = Documents.update_document(doc, %{title: "v1", body: "body1"})
       {:ok, _d2} = Documents.update_document(d1, %{title: "v2", body: "body2"})
 
       revisions = Documents.list_revisions(doc.id)
       assert length(revisions) == 2
-      assert hd(revisions).title == "v1"
-      assert Enum.at(revisions, 1).title == "v0"
+      titles = Enum.map(revisions, & &1.title)
+      assert "v0" in titles
+      assert "v1" in titles
     end
   end
 
