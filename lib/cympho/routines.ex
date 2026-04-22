@@ -20,7 +20,7 @@ defmodule Cympho.Routines do
     end
   end
 
-  def create_routine(attrs \ %{}) do
+  def create_routine(attrs \\ %{}) do
     %Routine{}
     |> Routine.changeset(attrs)
     |> Repo.insert()
@@ -49,7 +49,7 @@ defmodule Cympho.Routines do
 
   def delete_routine(%Routine{} = routine), do: Repo.delete(routine)
 
-  def change_routine(%Routine{} = routine, attrs \ %{}) do
+  def change_routine(%Routine{} = routine, attrs \\ %{}) do
     Routine.changeset(routine, attrs)
   end
 end
