@@ -19,7 +19,7 @@ defmodule Cympho.AgentHeartbeat do
   alias Cympho.Repo
   import Ecto.Query
 
-  @type status :: :idle | :working
+  @type status :: :idle | :running
   @type state :: %{
           agent_id: String.t(),
           status: status(),
@@ -168,7 +168,7 @@ defmodule Cympho.AgentHeartbeat do
           case Orchestrator.start_and_run(checked_out_issue, agent_id) do
             {:ok, _pid} ->
               timer_ref = schedule_heartbeat(agent_id)
-              {:noreply, %{state | status: :working, current_issue_id: checked_out_issue.id, timer_ref: timer_ref}}
+              {:noreply, %{state | status: :running, current_issue_id: checked_out_issue.id, timer_ref: timer_ref}}
 
             {:error, reason} ->
               _ = :logger.error("[AgentHeartbeat] failed to start orchestrator: #{inspect(reason)}")
@@ -201,7 +201,7 @@ defmodule Cympho.AgentHeartbeat do
 
   @impl true
   def handle_call({:set_working, issue_id}, _from, state) do
-    {:reply, :ok, %{state | status: :working, current_issue_id: issue_id}}
+    {:reply, :ok, %{state | status: :running, current_issue_id: issue_id}}
   end
 
   @impl true

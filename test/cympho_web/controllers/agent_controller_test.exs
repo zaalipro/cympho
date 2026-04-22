@@ -23,7 +23,11 @@ defmodule CymphoWeb.AgentControllerTest do
 
   describe "GET /api/agents/:id/inbox" do
     test "returns empty list for agent with no assignments", %{conn: conn, agent: agent} do
-      conn = get(conn, "/api/agents/#{agent.id}/inbox")
+      conn =
+        conn
+        |> put_req_header("x-agent-id", agent.id)
+        |> get("/api/agents/#{agent.id}/inbox")
+
       assert %{"data" => []} = json_response(conn, 200)
     end
 
@@ -42,7 +46,11 @@ defmodule CymphoWeb.AgentControllerTest do
           project_id: project.id
         })
 
-      conn = get(conn, "/api/agents/#{agent.id}/inbox")
+      conn =
+        conn
+        |> put_req_header("x-agent-id", agent.id)
+        |> get("/api/agents/#{agent.id}/inbox")
+
       assert %{"data" => [issue]} = json_response(conn, 200)
       assert issue["title"] == "My Issue"
       assert issue["status"] == "in_progress"
@@ -75,7 +83,11 @@ defmodule CymphoWeb.AgentControllerTest do
           project_id: project.id
         })
 
-      conn = get(conn, "/api/agents/#{agent.id}/inbox")
+      conn =
+        conn
+        |> put_req_header("x-agent-id", agent.id)
+        |> get("/api/agents/#{agent.id}/inbox")
+
       assert %{"data" => [first, second]} = json_response(conn, 200)
       assert first["priority"] == "high"
       assert second["priority"] == "low"
@@ -106,51 +118,140 @@ defmodule CymphoWeb.AgentControllerTest do
           project_id: project.id
         })
 
-      conn = get(conn, "/api/agents/#{agent.id}/inbox")
+      conn =
+        conn
+        |> put_req_header("x-agent-id", agent.id)
+        |> get("/api/agents/#{agent.id}/inbox")
+
       assert %{"data" => []} = json_response(conn, 200)
     end
 
-    test "returns 404 for non-existent agent", %{conn: conn} do
-      conn = get(conn, "/api/agents/00000000-0000-0000-0000-000000000000/inbox")
+    test "returns 404 for non-existent agent", %{conn: conn, agent: agent} do
+      conn =
+        conn
+        |> put_req_header("x-agent-id", agent.id)
+        |> get("/api/agents/00000000-0000-0000-0000-000000000000/inbox")
+
       assert %{"errors" => _} = json_response(conn, 404)
+    end
+
+    test "returns 401 when X-Agent-ID header is missing", %{conn: conn, agent: agent} do
+      conn = get(conn, "/api/agents/#{agent.id}/inbox")
+      assert %{"errors" => _} = json_response(conn, 401)
     end
   end
 
   describe "PATCH /api/agents/:id/status" do
-    test "updates agent status to sleeping", %{conn: conn, agent: agent} do
-      conn = patch(conn, "/api/agents/#{agent.id}/status", %{"status" => "sleeping"})
+    test "updates own status to sleeping", %{conn: conn, agent: agent} do
+      conn =
+        conn
+        |> put_req_header("x-agent-id", agent.id)
+        |> patch("/api/agents/#{agent.id}/status", %{"status" => "sleeping"})
+
       assert %{"data" => data} = json_response(conn, 200)
       assert data["status"] == "sleeping"
       assert data["last_heartbeat_at"] != nil
     end
 
-    test "updates agent status to offline", %{conn: conn, agent: agent} do
-      conn = patch(conn, "/api/agents/#{agent.id}/status", %{"status" => "offline"})
+    test "updates own status to offline", %{conn: conn, agent: agent} do
+      conn =
+        conn
+        |> put_req_header("x-agent-id", agent.id)
+        |> patch("/api/agents/#{agent.id}/status", %{"status" => "offline"})
+
       assert %{"data" => data} = json_response(conn, 200)
       assert data["status"] == "offline"
     end
 
-    test "updates agent status to idle", %{conn: conn, agent: agent} do
+    test "updates own status to idle", %{conn: conn, agent: agent} do
       {:ok, _} = Agents.update_agent(agent, %{status: :sleeping})
 
-      conn = patch(conn, "/api/agents/#{agent.id}/status", %{"status" => "idle"})
+      conn =
+        conn
+        |> put_req_header("x-agent-id", agent.id)
+        |> patch("/api/agents/#{agent.id}/status", %{"status" => "idle"})
+
       assert %{"data" => data} = json_response(conn, 200)
       assert data["status"] == "idle"
     end
 
+    test "CTO can update any agent's status", %{conn: conn, agent: agent} do
+      {:ok, cto} =
+        Agents.create_agent(%{
+          name: "CTO Agent",
+          role: :cto
+        })
+
+      conn =
+        conn
+        |> put_req_header("x-agent-id", cto.id)
+        |> patch("/api/agents/#{agent.id}/status", %{"status" => "sleeping"})
+
+      assert %{"data" => data} = json_response(conn, 200)
+      assert data["status"] == "sleeping"
+    end
+
+    test "CEO can update any agent's status", %{conn: conn, agent: agent} do
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "CEO Agent",
+          role: :ceo
+        })
+
+      conn =
+        conn
+        |> put_req_header("x-agent-id", ceo.id)
+        |> patch("/api/agents/#{agent.id}/status", %{"status" => "offline"})
+
+      assert %{"data" => data} = json_response(conn, 200)
+      assert data["status"] == "offline"
+    end
+
+    test "returns 403 when another agent tries to update status", %{conn: conn, agent: agent} do
+      {:ok, other} =
+        Agents.create_agent(%{
+          name: "Other Agent",
+          role: :engineer
+        })
+
+      conn =
+        conn
+        |> put_req_header("x-agent-id", other.id)
+        |> patch("/api/agents/#{agent.id}/status", %{"status" => "sleeping"})
+
+      assert %{"errors" => _} = json_response(conn, 403)
+    end
+
     test "returns 422 for invalid status", %{conn: conn, agent: agent} do
-      conn = patch(conn, "/api/agents/#{agent.id}/status", %{"status" => "invalid"})
+      conn =
+        conn
+        |> put_req_header("x-agent-id", agent.id)
+        |> patch("/api/agents/#{agent.id}/status", %{"status" => "invalid"})
+
       assert %{"errors" => _} = json_response(conn, 422)
     end
 
     test "returns 400 when status field is missing", %{conn: conn, agent: agent} do
-      conn = patch(conn, "/api/agents/#{agent.id}/status", %{})
+      conn =
+        conn
+        |> put_req_header("x-agent-id", agent.id)
+        |> patch("/api/agents/#{agent.id}/status", %{})
+
       assert %{"errors" => _} = json_response(conn, 400)
     end
 
-    test "returns 404 for non-existent agent", %{conn: conn} do
-      conn = patch(conn, "/api/agents/00000000-0000-0000-0000-000000000000/status", %{"status" => "idle"})
+    test "returns 404 for non-existent agent", %{conn: conn, agent: agent} do
+      conn =
+        conn
+        |> put_req_header("x-agent-id", agent.id)
+        |> patch("/api/agents/00000000-0000-0000-0000-000000000000/status", %{"status" => "idle"})
+
       assert %{"errors" => _} = json_response(conn, 404)
+    end
+
+    test "returns 401 when X-Agent-ID header is missing", %{conn: conn, agent: agent} do
+      conn = patch(conn, "/api/agents/#{agent.id}/status", %{"status" => "idle"})
+      assert %{"errors" => _} = json_response(conn, 401)
     end
   end
 end

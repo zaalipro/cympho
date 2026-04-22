@@ -8,24 +8,31 @@ defmodule CymphoWeb.FallbackController do
     |> render(:"404")
   end
 
+  def call(conn, {:error, :forbidden}) do
+    conn
+    |> put_status(:forbidden)
+    |> put_view(json: CymphoWeb.ErrorJSON)
+    |> render(:error, message: "Forbidden")
+  end
+
   def call(conn, {:error, %Ecto.Changeset{} = changeset}) do
     conn
     |> put_status(:unprocessable_entity)
     |> put_view(json: CymphoWeb.ErrorJSON)
-    |> render(:"error", changeset: changeset)
+    |> render(:error, changeset: changeset)
   end
 
   def call(conn, {:error, :invalid_transition}) do
     conn
     |> put_status(:unprocessable_entity)
     |> put_view(json: CymphoWeb.ErrorJSON)
-    |> render(:"error", message: "Invalid state transition")
+    |> render(:error, message: "Invalid state transition")
   end
 
   def call(conn, {:error, reason}) do
     conn
     |> put_status(:bad_request)
     |> put_view(json: CymphoWeb.ErrorJSON)
-    |> render(:"error", message: reason)
+    |> render(:error, message: reason)
   end
 end
