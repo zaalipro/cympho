@@ -1,0 +1,151 @@
+<.header>
+  {@page_title}
+</.header>
+
+<div :if={@user == nil} class="settings-empty">
+  <p>No users found. Create a user first via the API.</p>
+</div>
+
+<div :if={@user != nil} class="settings-container">
+  <div class="settings-section">
+    <h2>Notification Channels</h2>
+    <p class="settings-description">Choose how you want to receive notifications.</p>
+
+    <div class="channel-cards">
+      <!-- Email Channel -->
+      <div class="channel-card" id="channel-email">
+        <div class="channel-header">
+          <div class="channel-info">
+            <h3>Email</h3>
+            <span class="channel-status">{if @user.email_enabled, do: "Enabled", else: "Disabled"}</span>
+          </div>
+          <button
+            type="button"
+            class={"toggle-btn #{if @user.email_enabled, do: "toggle-on", else: "toggle-off"}"}
+            phx-click="toggle_channel"
+            phx-value-channel="email"
+          >
+            {if @user.email_enabled, do: "ON", else: "OFF"}
+          </button>
+        </div>
+        <p class="channel-detail">Notifications sent to: {@user.email}</p>
+      </div>
+
+      <!-- Telegram Channel -->
+      <div class="channel-card" id="channel-telegram">
+        <div class="channel-header">
+          <div class="channel-info">
+            <h3>Telegram</h3>
+            <span class="channel-status">{if @user.telegram_enabled, do: "Enabled", else: "Disabled"}</span>
+          </div>
+          <button
+            type="button"
+            class={"toggle-btn #{if @user.telegram_enabled, do: "toggle-on", else: "toggle-off"}"}
+            phx-click="toggle_channel"
+            phx-value-channel="telegram"
+          >
+            {if @user.telegram_enabled, do: "ON", else: "OFF"}
+          </button>
+        </div>
+        <div class="channel-detail">
+          <div :if={@user.telegram_chat_id && @user.telegram_chat_id != ""}>
+            <p>Linked chat ID: <code>{@user.telegram_chat_id}</code></p>
+            <span :if={@telegram_verify_status == :verified} class="badge badge-success">Verified</span>
+            <span :if={@telegram_verify_status == :linked} class="badge badge-info">Linked</span>
+            <button type="button" class="phx-btn-secondary" phx-click="verify_telegram">Verify Connection</button>
+          </div>
+          <form :if={!(@user.telegram_chat_id && @user.telegram_chat_id != "")} phx-submit="link_telegram" class="inline-form">
+            <input
+              type="text"
+              name="telegram_chat_id"
+              placeholder="Enter Telegram Chat ID"
+              value={@telegram_chat_id_input}
+              required
+            />
+            <button type="submit" class="phx-btn">Link</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Webhook Channel -->
+      <div class="channel-card" id="channel-webhook">
+        <div class="channel-header">
+          <div class="channel-info">
+            <h3>Webhook</h3>
+            <span class="channel-status">{if @user.webhook_enabled, do: "Enabled", else: "Disabled"}</span>
+          </div>
+          <button
+            type="button"
+            class={"toggle-btn #{if @user.webhook_enabled, do: "toggle-on", else: "toggle-off"}"}
+            phx-click="toggle_channel"
+            phx-value-channel="webhook"
+          >
+            {if @user.webhook_enabled, do: "ON", else: "OFF"}
+          </button>
+        </div>
+        <div class="channel-detail">
+          <form phx-submit="update_webhook_url" class="inline-form">
+            <input
+              type="url"
+              name="webhook_url"
+              placeholder="https://example.com/webhook"
+              value={@user.webhook_url || ""}
+            />
+            <button type="submit" class="phx-btn">Save URL</button>
+          </form>
+          <button
+            :if={@user.webhook_url && @user.webhook_url != ""}
+            type="button"
+            class="phx-btn-secondary"
+            phx-click="test_webhook"
+          >
+            Test Ping
+          </button>
+          <div :if={@webhook_test_result != nil} class="test-result">
+            <span :if={match?({:ok, _}, @webhook_test_result)} class="badge badge-success">
+              Test passed
+            </span>
+            <span :if={match?({:error, _}, @webhook_test_result)} class="badge badge-error">
+              Test failed
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="settings-section">
+    <h2>Event Notifications</h2>
+    <p class="settings-description">Choose which events trigger notifications for each channel.</p>
+
+    <div class="event-grid">
+      <div :for={pref <- @prefs} class="event-channel-group" id={"events-#{pref.channel_type}"}>
+        <div class="event-channel-header">
+          <h3>{String.capitalize(pref.channel_type)}</h3>
+          <button
+            type="button"
+            class={"toggle-btn #{if pref.enabled, do: "toggle-on", else: "toggle-off"}"}
+            phx-click="toggle_pref_enabled"
+            phx-value-pref_id={pref.id}
+          >
+            {if pref.enabled, do: "ON", else: "OFF"}
+          </button>
+        </div>
+        <div class="event-toggles">
+          <div class="event-toggle" :for={event <- ~w(issue_assigned comment status_change)}>
+            <button
+              type="button"
+              class={"event-toggle-btn #{if event_enabled?(pref, event), do: "event-on", else: "event-off"}"}
+              phx-click="toggle_event"
+              phx-value-pref_id={pref.id}
+              phx-value-event={event}
+            >
+              {if event_enabled?(pref, event), do: "&#10003;", else: "&#10007;"}
+            </button>
+            <span class="event-label">{format_event(event)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
