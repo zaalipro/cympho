@@ -3,12 +3,14 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.Issues
   alias Cympho.Comments
   alias Cympho.Agents
+  alias Cympho.Documents
   alias Cympho.Orchestrator
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     Issues.subscribe()
     Comments.subscribe()
+    Documents.subscribe()
 
     case Issues.get_issue(id) do
       {:ok, issue} ->
