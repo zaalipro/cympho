@@ -3,6 +3,7 @@ defmodule Cympho.Issues.Issue do
   import Ecto.Changeset
 
   alias Cympho.Comments.Comment
+  alias Cympho.Documents.IssueDocument
   alias Cympho.Projects.Project
   alias Cympho.Agents.Agent
 
@@ -21,6 +22,7 @@ defmodule Cympho.Issues.Issue do
     belongs_to :assignee, Agent, foreign_key: :assignee_id
 
     has_many :comments, Comment, foreign_key: :issue_id
+    has_many :documents, IssueDocument, foreign_key: :issue_id
 
     many_to_many :blocked_by, Cympho.Issues.Issue,
       join_through: "issue_blockers",
