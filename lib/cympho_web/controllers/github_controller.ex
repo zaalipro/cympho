@@ -1,5 +1,6 @@
 defmodule CymphoWeb.GithubController do
   use CymphoWeb, :controller
+  import Ecto.Query, warn: false
   alias Cympho.Issues
   require Logger
 
@@ -40,7 +41,9 @@ defmodule CymphoWeb.GithubController do
   end
 
   defp find_issue_by_pr_url(pr_url) do
-    case Cympho.Repo.all(from i in Cympho.Issues.Issue, where: i.github_pr_url == ^pr_url) do
+    query = from(i in Cympho.Issues.Issue, where: i.github_pr_url == ^pr_url)
+
+    case Cympho.Repo.all(query) do
       [issue] -> {:ok, issue}
       [] -> {:error, :not_found}
     end
