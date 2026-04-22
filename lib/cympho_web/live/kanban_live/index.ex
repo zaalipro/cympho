@@ -9,13 +9,15 @@ defmodule CymphoWeb.KanbanLive.Index do
   @status_columns [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     Issues.subscribe()
     Cympho.Agents.subscribe()
     Phoenix.PubSub.subscribe(Cympho.PubSub, "agent_heartbeats")
     projects = Projects.list_projects()
     issues = Issues.list_issues()
     agent_heartbeat_states = load_heartbeat_states(issues)
+
+    current_agent = session["current_agent"]
 
     socket =
       socket
@@ -24,6 +26,7 @@ defmodule CymphoWeb.KanbanLive.Index do
       |> assign(:projects, projects)
       |> assign(:collapsed_columns, MapSet.new())
       |> assign(:swimlane_mode, false)
+      |> assign(:current_agent_id, current_agent && current_agent.id)
 
     {:ok, socket}
   end
@@ -97,22 +100,64 @@ defmodule CymphoWeb.KanbanLive.Index do
   def handle_event("transition_issue", %{"id" => id, "to_status" => to_status_string}, socket) do
     to_status = try_string_to_status(to_status_string)
 
-    if is_nil(to_status) do
-      {:noreply, socket}
-    else
-      issue = Issues.get_issue!(id)
+    cond do
+      is_nil(to_status) ->
+        {:noreply, socket}
 
-      case Issues.transition_issue(issue, to_status) do
-        {:ok, _} ->
-          {:noreply, socket}
+      to_status == :in_review and is_nil(socket.assigns[:current_agent_id]) ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Use the issue detail page to submit for review")
+         |> push_event("shake_card", %{issue_id: id})}
 
-        {:error, :invalid_transition} ->
-          {:noreply, socket |> put_flash(:error, "Invalid status transition from #{issue.status} to #{to_status}") |> push_event("shake_card", %{issue_id: id})}
+      wip_limit_reached?(socket, to_status) ->
+        limit = wip_limit(socket.assigns.selected_project, to_status)
+        target_count = length(issues_for_status(socket.assigns.issues, to_status))
 
-        {:error, :blocked_by_active_issues} ->
-          {:noreply, socket |> put_flash(:error, "Cannot complete - issue is blocked by active issues") |> push_event("shake_card", %{issue_id: id})}
-      end
+        {:noreply,
+         socket
+         |> put_flash(:error, "WIP limit reached for #{status_label(to_status)} (#{target_count}/#{limit})")
+         |> push_event("shake_card", %{issue_id: id})}
+
+      true ->
+        issue = Issues.get_issue!(id)
+        agent_id = socket.assigns[:current_agent_id]
+
+        case Issues.transition_issue(issue, to_status, agent_id) do
+          {:ok, _} ->
+            {:noreply, socket}
+
+          {:error, :chain_of_command_violation} ->
+            {:noreply,
+             socket
+             |> put_flash(:error, "Use the issue detail page to submit for review")
+             |> push_event("shake_card", %{issue_id: id})}
+
+          {:error, :invalid_transition} ->
+            {:noreply,
+             socket
+             |> put_flash(:error, "Invalid status transition from #{issue.status} to #{to_status}")
+             |> push_event("shake_card", %{issue_id: id})}
+
+          {:error, :blocked_by_active_issues} ->
+            {:noreply,
+             socket
+             |> put_flash(:error, "Cannot complete - issue is blocked by active issues")
+             |> push_event("shake_card", %{issue_id: id})}
+
+          {:error, _changeset} ->
+            {:noreply,
+             socket
+             |> put_flash(:error, "Issue was modified concurrently. Please try again.")
+             |> push_event("shake_card", %{issue_id: id})}
+        end
     end
+  end
+
+  defp wip_limit_reached?(socket, to_status) do
+    limit = wip_limit(socket.assigns.selected_project, to_status)
+    target_count = length(issues_for_status(socket.assigns.issues, to_status))
+    wip_exceeded?(limit, target_count + 1)
   end
 
   def handle_event("toggle_column", %{"status" => status_str}, socket) do

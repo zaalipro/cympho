@@ -238,7 +238,8 @@ defmodule Cympho.Issues do
   end
 
   defp do_transition(%Issue{} = issue, new_status) do
-    with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
+    fresh = Repo.get!(Issue, issue.id)
+    with {:ok, updated} <- update_issue(fresh, %{status: new_status}) do
       if new_status == :done, do: unblock_dependents(issue.id)
       {:ok, updated}
     end

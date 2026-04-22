@@ -62,6 +62,37 @@ defmodule CymphoWeb.KanbanLiveTest do
       result = render_hook(view, "transition_issue", %{"id" => issue.id, "to_status" => "backlog"})
       assert result =~ "shake_card"
     end
+
+    test "in_review transition blocked without agent context" do
+      {:ok, in_progress} = Issues.create_issue(%{title: "IP Issue", description: "ip", status: :in_progress})
+      {:ok, view, _html} = live(conn(), "/kanban")
+      result = render_hook(view, "transition_issue", %{"id" => in_progress.id, "to_status" => "in_review"})
+      assert result =~ "Use the issue detail page to submit for review"
+    end
+  end
+
+  describe "WIP limits" do
+    test "transition rejected when WIP limit reached", %{project: project} do
+      {:ok, _} = Projects.update_project(project, %{settings: %{"wip_limits" => %{"todo" => 1}}})
+      {:ok, other} = Issues.create_issue(%{title: "Existing Todo", description: "todo", status: :todo, project_id: project.id})
+      {:ok, backlog} = Issues.create_issue(%{title: "To Move", description: "move", status: :backlog, project_id: project.id})
+
+      {:ok, view, _html} = live(conn(), "/kanban?project_id=#{project.id}")
+      result = render_hook(view, "transition_issue", %{"id" => backlog.id, "to_status" => "todo"})
+      assert result =~ "WIP limit reached"
+    end
+
+    test "WIP limit displayed when project has settings", %{project: project} do
+      {:ok, _} = Projects.update_project(project, %{settings: %{"wip_limits" => %{"in_progress" => 3}}})
+      {:ok, view, _html} = live(conn(), "/kanban?project_id=#{project.id}")
+      assert render(view) =~ "/3"
+    end
+
+    test "WIP exceeded shows red indicator", %{project: project} do
+      {:ok, _} = Projects.update_project(project, %{settings: %{"wip_limits" => %{"in_progress" => 1}}})
+      {:ok, view, _html} = live(conn(), "/kanban?project_id=#{project.id}")
+      assert render(view) =~ "1/1"
+    end
   end
 
   describe "Swimlanes" do
