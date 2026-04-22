@@ -1,0 +1,103 @@
+defmodule CymphoWeb.RoutineController do
+  use CymphoWeb, :controller
+  plug :accepts, ["json"]
+
+  alias Cympho.Routines
+
+  def index(conn, _params) do
+    routines = Routines.list_routines()
+    json(conn, %{data: Enum.map(routines, &serialize/1)})
+  end
+
+  def show(conn, %{"id" => id}) do
+    routine = Routines.get_routine!(id)
+    json(conn, %{data: serialize(routine)})
+  end
+
+  def create(conn, %{"routine" => routine_params}) do
+    case Routines.create_routine(routine_params) do
+      {:ok, routine} ->
+        conn
+        |> put_status(:created)
+        |> json(%{data: serialize(routine)})
+
+      {:error, changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: translate_errors(changeset)})
+    end
+  end
+
+  def create(conn, params) do
+    create(conn, %{"routine" => params})
+  end
+
+  def update(conn, %{"id" => id, "routine" => routine_params}) do
+    routine = Routines.get_routine!(id)
+
+    case Routines.update_routine(routine, routine_params) do
+      {:ok, routine} ->
+        json(conn, %{data: serialize(routine)})
+
+      {:error, changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: translate_errors(changeset)})
+    end
+  end
+
+  def update(conn, %{"id" => id} = params) do
+    update(conn, %{"id" => id, "routine" => params})
+  end
+
+  def delete(conn, %{"id" => id}) do
+    routine = Routines.get_routine!(id)
+    {:ok, _} = Routines.delete_routine(routine)
+    json(conn, %{message: "deleted"})
+  end
+
+  def pause(conn, %{"id" => id}) do
+    routine = Routines.get_routine!(id)
+    case Routines.pause_routine(routine) do
+      {:ok, paused} -> json(conn, %{data: serialize(paused)})
+      {:error, reason} -> conn |> put_status(:conflict) |> json(%{error: reason})
+    end
+  end
+
+  def resume(conn, %{"id" => id}) do
+    routine = Routines.get_routine!(id)
+    case Routines.resume_routine(routine) do
+      {:ok, resumed} -> json(conn, %{data: serialize(resumed)})
+      {:error, reason} -> conn |> put_status(:conflict) |> json(%{error: reason})
+    end
+  end
+
+  def archive(conn, %{"id" => id}) do
+    routine = Routines.get_routine!(id)
+    case Routines.archive_routine(routine) do
+      {:ok, archived} -> json(conn, %{data: serialize(archived)})
+      {:error, reason} -> conn |> put_status(:conflict) |> json(%{error: reason})
+    end
+  end
+
+  defp translate_errors(changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Regex.replace(~r/%{(\w+)}/, msg, fn _, key ->
+        opts |> Keyword.get(String.to_existing_atom(key), key)
+      end)
+    end)
+  end
+
+  defp serialize(routine) do
+    %{
+      id: routine.id,
+      name: routine.name,
+      description: routine.description,
+      status: routine.status,
+      agent_id: routine.agent_id,
+      project_id: routine.project_id,
+      inserted_at: routine.inserted_at,
+      updated_at: routine.updated_at
+    }
+  end
+end
