@@ -61,7 +61,7 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   @impl true
   def handle_info({:issue_created, issue}, socket), do: {:noreply, update(socket, :issues, &[issue | &1])}
-  def handle_info({:issue_updated, updated}, socket), do: {:noreply, update(socket, :issues, &Enum.map(&1, fn i -> if i.id == updated.id, do: updated, else: i end) end)}
+  def handle_info({:issue_updated, updated}, socket), do: {:noreply, update(socket, :issues, &Enum.map(&1, fn i -> if i.id == updated.id, do: updated, else: i end))}
   def handle_info({:issue_deleted, id}, socket), do: {:noreply, update(socket, :issues, &Enum.reject(&1, fn i -> i.id == id end) end)}
   def handle_info({:agent_updated, agent}, socket), do: {:noreply, update(socket, :issues, &Enum.map(&1, fn i -> if i.assignee && i.assignee.id == agent.id, do: %{i | assignee: agent}, else: i end) end)}
   def handle_info({:agent_heartbeat_updated, agent_id, state}, socket), do: {:noreply, update(socket, :agent_heartbeat_states, &Map.put(&1, agent_id, state))}

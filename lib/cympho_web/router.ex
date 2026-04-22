@@ -38,6 +38,13 @@ defmodule CymphoWeb.Router do
 
     post "/telegram/webhook", TelegramController, :webhook
     post "/github/webhook", GithubController, :webhook
+
+    resources "/labels", LabelController, only: [:index, :show, :create, :update, :delete]
+
+    get "/issues/:issue_id/labels", IssueLabelController, :index
+    post "/issues/:issue_id/labels", IssueLabelController, :add
+    delete "/issues/:issue_id/labels/:label_id", IssueLabelController, :remove
+    put "/issues/:issue_id/labels", IssueLabelController, :set
   end
 
   scope "/api", CymphoWeb do
