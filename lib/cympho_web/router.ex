@@ -27,6 +27,10 @@ defmodule CymphoWeb.Router do
     live "/projects/:id", ProjectLive.Show
     live "/projects/:id/edit", ProjectLive.Edit
     live "/kanban", KanbanLive.Index
+    live "/routines", RoutineLive.Index
+    live "/routines/new", RoutineLive.New
+    live "/routines/:id", RoutineLive.Show
+    live "/routines/:id/edit", RoutineLive.Edit
   end
 
   scope "/api", CymphoWeb do
@@ -37,5 +41,25 @@ defmodule CymphoWeb.Router do
 
     post "/telegram/webhook", TelegramController, :webhook
     post "/github/webhook", GithubController, :webhook
+
+    get "/issues/:issue_id/documents", DocumentController, :index
+    get "/issues/:issue_id/documents/:key", DocumentController, :show
+    put "/issues/:issue_id/documents/:key", DocumentController, :upsert
+    delete "/issues/:issue_id/documents/:key", DocumentController, :delete
+    get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
+
+    resources "/routines", RoutineController, only: [:index, :show, :create, :update, :delete]
+    patch "/routines/:id/pause", RoutineController, :pause
+    patch "/routines/:id/resume", RoutineController, :resume
+    patch "/routines/:id/archive", RoutineController, :archive
+
+    resources "/routines/:routine_id/triggers", RoutineTriggerController,
+      only: [:index, :create, :show, :update, :delete],
+      name: "routine_trigger"
+
+    post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_secret
+
+    # Public webhook endpoint (no auth, validates via secret header)
+    post "/routine-triggers/:public_id/fire", RoutineTriggerController, :fire
   end
 end
