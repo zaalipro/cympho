@@ -3,23 +3,30 @@ defmodule CymphoWeb.KanbanLive.Index do
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.AgentHeartbeat
+  alias Cympho.Projects
+
+  @status_columns [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
 
   @impl true
   def mount(_params, _session, socket) do
     Issues.subscribe()
     Cympho.Agents.subscribe()
     Phoenix.PubSub.subscribe(Cympho.PubSub, "agent_heartbeats")
-
-    # Load initial heartbeat states for all agents assigned to issues
+    projects = Projects.list_projects()
     issues = Issues.list_issues()
     agent_heartbeat_states = load_heartbeat_states(issues)
-
-    {:ok, assign(socket, :issues, issues) |> assign(:agent_heartbeat_states, agent_heartbeat_states)}
+    socket = socket
+      |> assign(:issues, issues)
+      |> assign(:agent_heartbeat_states, agent_heartbeat_states)
+      |> assign(:projects, projects)
+      |> assign(:collapsed_columns, MapSet.new())
+      |> assign(:swimlane_mode, false)
+    {:ok, socket}
   end
 
   defp load_heartbeat_states(issues) do
     issues
-    |> Enum.map(fn issue -> issue.assignee end)
+    |> Enum.map(& &1.assignee)
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq_by(& &1.id)
     |> Enum.reduce(%{}, fn agent, acc ->
@@ -30,143 +37,69 @@ defmodule CymphoWeb.KanbanLive.Index do
     end)
   end
 
-  @doc """
-  Returns the heartbeat state for a given agent_id, or a default offline state.
-  """
-  def get_heartbeat_state(agent_heartbeat_states, agent_id) do
-    Map.get(agent_heartbeat_states, agent_id, %{status: :offline, current_issue_id: nil, eta_ms: nil})
+  def get_heartbeat_state(states, agent_id) do
+    Map.get(states, agent_id, %{status: :offline, current_issue_id: nil, eta_ms: nil})
   end
-
-  @doc """
-  Returns a human-readable heartbeat status label.
-  """
-  def heartbeat_status_label(%{status: :idle, eta_ms: eta_ms}, _issues) do
-    if eta_ms do
-      seconds = div(eta_ms, 1000)
-      "Next heartbeat in #{seconds}s"
-    else
-      "Idle"
-    end
-  end
-
-  def heartbeat_status_label(%{status: :working, current_issue_id: issue_id, eta_ms: eta_ms}, issues) do
-    issue_title = if issue_id do
-      case Enum.find(issues, fn i -> i.id == issue_id end) do
-        nil -> nil
-        issue -> String.slice(issue.title, 0, 20)
-      end
-    else
-      nil
-    end
-
-    base = if issue_title, do: "Working: #{issue_title}", else: "Working"
-    if eta_ms do
-      seconds = div(eta_ms, 1000)
-      "#{base} (#{seconds}s)"
-    else
-      base
-    end
-  end
-
-  def heartbeat_status_label(%{status: :error}, _issues), do: "Error"
-  def heartbeat_status_label(%{status: :offline}, _issues), do: "Offline"
-  def heartbeat_status_label(_, _issues), do: "Unknown"
 
   @impl true
   def handle_params(params, _url, socket) do
-    {:noreply, apply_action(socket, socket.assigns.live_action, params)}
+    project_id = params["project_id"]
+    selected_project = case project_id do
+      nil -> nil
+      id -> case Projects.get_project(id) do {:ok, p} -> p; {:error, _} -> nil end
+    end
+    socket = socket
+      |> assign(:selected_project_id, project_id)
+      |> assign(:selected_project, selected_project)
+      |> assign(:page_title, "Kanban Board")
+      |> apply_project_filter(project_id)
+    {:noreply, socket}
   end
 
-  defp apply_action(socket, :index, _params) do
-    socket
-    |> assign(:page_title, "Kanban Board")
-  end
-
-  defp apply_action(socket, nil, params) do
-    apply_action(socket, :index, params)
-  end
+  defp apply_project_filter(socket, nil), do: assign(socket, :issues, Issues.list_issues())
+  defp apply_project_filter(socket, project_id), do: assign(socket, :issues, Issues.list_issues(%{project_id: project_id}))
 
   @impl true
-  def handle_info({:issue_created, issue}, socket) do
-    {:noreply, update(socket, :issues, fn issues -> [issue | issues] end)}
-  end
-
-  def handle_info({:issue_updated, updated_issue}, socket) do
-    {:noreply,
-     update(socket, :issues, fn issues ->
-       Enum.map(issues, fn issue ->
-         if issue.id == updated_issue.id, do: updated_issue, else: issue
-       end)
-     end)}
-  end
-
-  def handle_info({:issue_deleted, deleted_id}, socket) do
-    {:noreply,
-     update(socket, :issues, fn issues ->
-       Enum.filter(issues, fn issue -> issue.id != deleted_id end)
-     end)}
-  end
-
-  def handle_info({:agent_updated, updated_agent}, socket) do
-    {:noreply,
-     update(socket, :issues, fn issues ->
-       Enum.map(issues, fn issue ->
-         if issue.assignee && issue.assignee.id == updated_agent.id do
-           %{issue | assignee: updated_agent}
-         else
-           issue
-         end
-       end)
-     end)}
-  end
-
-  def handle_info({:agent_heartbeat_updated, agent_id, heartbeat_state}, socket) do
-    {:noreply,
-     update(socket, :agent_heartbeat_states, fn states ->
-       Map.put(states, agent_id, heartbeat_state)
-     end)}
-  end
+  def handle_info({:issue_created, issue}, socket), do: {:noreply, update(socket, :issues, &[issue | &1])}
+  def handle_info({:issue_updated, updated}, socket), do: {:noreply, update(socket, :issues, &Enum.map(&1, fn i -> if i.id == updated.id, do: updated, else: i end) end)}
+  def handle_info({:issue_deleted, id}, socket), do: {:noreply, update(socket, :issues, &Enum.reject(&1, fn i -> i.id == id end) end)}
+  def handle_info({:agent_updated, agent}, socket), do: {:noreply, update(socket, :issues, &Enum.map(&1, fn i -> if i.assignee && i.assignee.id == agent.id, do: %{i | assignee: agent}, else: i end) end)}
+  def handle_info({:agent_heartbeat_updated, agent_id, state}, socket), do: {:noreply, update(socket, :agent_heartbeat_states, &Map.put(&1, agent_id, state))}
 
   @impl true
   def handle_event("transition_issue", %{"id" => id, "to_status" => to_status_string}, socket) do
     to_status = try_string_to_status(to_status_string)
-
     if is_nil(to_status) do
       {:noreply, socket}
     else
       issue = Issues.get_issue!(id)
-
       case Issues.transition_issue(issue, to_status) do
-        {:ok, _updated_issue} ->
-          {:noreply, socket}
-
+        {:ok, _} -> {:noreply, socket}
         {:error, :invalid_transition} ->
-          {:noreply, put_flash(socket, :error, "Invalid status transition")}
-
+          {:noreply, socket |> put_flash(:error, "Invalid status transition from #{issue.status} to #{to_status}") |> push_event("shake_card", %{issue_id: id})}
         {:error, :blocked_by_active_issues} ->
-          {:noreply, put_flash(socket, :error, "Cannot complete - issue is blocked")}
+          {:noreply, socket |> put_flash(:error, "Cannot complete - issue is blocked by active issues") |> push_event("shake_card", %{issue_id: id})}
       end
     end
   end
 
-  defp try_string_to_status(string) do
-    if Enum.member?(Issue.status_options(), String.to_existing_atom(string)) do
-      String.to_existing_atom(string)
-    else
-      nil
-    end
-  rescue
-    ArgumentError -> nil
+  def handle_event("toggle_column", %{"status" => status_str}, socket) do
+    status = String.to_existing_atom(status_str)
+    {:noreply, update(socket, :collapsed_columns, fn c -> if MapSet.member?(c, status), do: MapSet.delete(c, status), else: MapSet.put(c, status) end) end}
   end
 
-  def backlog_issues(issues), do: Enum.filter(issues, &(&1.status == :backlog))
-  def todo_issues(issues), do: Enum.filter(issues, &(&1.status == :todo))
-  def in_progress_issues(issues), do: Enum.filter(issues, &(&1.status == :in_progress))
-  def in_review_issues(issues), do: Enum.filter(issues, &(&1.status == :in_review))
-  def done_issues(issues), do: Enum.filter(issues, &(&1.status == :done))
-  def blocked_issues(issues), do: Enum.filter(issues, &(&1.status == :blocked))
-  def open_issues(issues), do: Enum.filter(issues, &(&1.status != :done))
-  def closed_issues(issues), do: Enum.filter(issues, &(&1.status == :done))
+  def handle_event("toggle_swimlanes", _, socket), do: {:noreply, update(socket, :swimlane_mode, &(!&1))}
+
+  def handle_event("filter_project", %{"project_id" => ""}, socket), do: {:noreply, push_patch(socket, to: ~p"/kanban")}
+  def handle_event("filter_project", %{"project_id" => pid}, socket), do: {:noreply, push_patch(socket, to: ~p"/kanban?project_id=#{pid}")}
+
+  defp try_string_to_status(string) do
+    if Enum.member?(Issue.status_options(), String.to_existing_atom(string)), do: String.to_existing_atom(string), else: nil
+  rescue ArgumentError -> nil
+  end
+
+  def issues_for_status(issues, status), do: Enum.filter(issues, &(&1.status == status))
+  def status_columns, do: @status_columns
 
   def valid_next_statuses(:backlog), do: [:todo, :in_progress, :blocked]
   def valid_next_statuses(:todo), do: [:in_progress, :blocked]
@@ -181,4 +114,18 @@ defmodule CymphoWeb.KanbanLive.Index do
   def status_label(:in_review), do: "In Review"
   def status_label(:done), do: "Done"
   def status_label(:blocked), do: "Blocked"
+
+  def wip_limit(nil, _), do: nil
+  def wip_limit(project, status) when is_map(project) do
+    settings = project.settings || %{}
+    Map.get(Map.get(settings, "wip_limits", %{}), to_string(status))
+  end
+
+  def wip_exceeded?(nil, _), do: false
+  def wip_exceeded?(limit, count) when is_integer(limit), do: count > limit
+  def wip_exceeded?(_, _), do: false
+
+  def assignee_groups(issues) do
+    issues |> Enum.group_by(fn i -> if i.assignee, do: i.assignee.name, else: "Unassigned" end) |> Enum.sort_by(&elem(&1, 0))
+  end
 end
