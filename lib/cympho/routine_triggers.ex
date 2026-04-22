@@ -265,7 +265,9 @@ defmodule Cympho.RoutineTriggers do
   def rotate_webhook_secret(%RoutineTrigger{}), do: {:error, :not_webhook_trigger}
 
   def verify_webhook_secret(%RoutineTrigger{secret_hash: stored_hash}, secret) do
-    if hash_secret(secret) == stored_hash do
+    computed_hash = hash_secret(secret)
+
+    if Plug.Crypto.secure_compare(computed_hash, stored_hash) do
       :ok
     else
       {:error, :invalid_secret}
@@ -291,12 +293,15 @@ defmodule Cympho.RoutineTriggers do
   Called at application startup.
   """
   def schedule_all_triggers do
-    triggers =
-      RoutineTrigger
-      |> where(type: "schedule", enabled: true)
-      |> Repo.all()
+    # Run in a separate task to avoid blocking application startup
+    Task.Supervisor.start_child(Cympho.TaskSupervisor, fn ->
+      triggers =
+        RoutineTrigger
+        |> where(type: "schedule", enabled: true)
+        |> Repo.all()
 
-    Enum.each(triggers, &maybe_schedule_quantum_job/1)
+      Enum.each(triggers, &maybe_schedule_quantum_job/1)
+    end)
   end
 
   @doc """
