@@ -14,11 +14,6 @@ defmodule CymphoWeb.Router do
     plug :accepts, ["json"]
   end
 
-  pipeline :github_webhook do
-    plug :accepts, ["json"]
-    plug CymphoWeb.Plugs.GithubWebhookVerification
-  end
-
   scope "/", CymphoWeb do
     pipe_through :browser
 
@@ -32,6 +27,7 @@ defmodule CymphoWeb.Router do
     live "/projects/:id", ProjectLive.Show
     live "/projects/:id/edit", ProjectLive.Edit
     live "/kanban", KanbanLive.Index
+    live "/labels", LabelLive.Index
     live "/agents", AgentLive.Index
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
@@ -58,7 +54,17 @@ defmodule CymphoWeb.Router do
 
     post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_secret
 
-    # Public webhook endpoint (no auth, validates via secret header)
     post "/routine-triggers/:public_id/fire", RoutineTriggerController, :fire
+
+    post "/issues/:issue_id/execution-policy/assign", IssueExecutionPolicyController, :assign
+    post "/issues/:issue_id/execution-policy/decide", IssueExecutionPolicyController, :decide
+  end
+
+  scope "/api", CymphoWeb do
+    pipe_through :api
+    pipe_through CymphoWeb.Plugs.AgentAuth
+
+    get "/agents/:id/inbox", AgentController, :inbox
+    patch "/agents/:id/status", AgentController, :update_status
   end
 end

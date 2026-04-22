@@ -3,6 +3,7 @@ defmodule Cympho.Issues.Issue do
   import Ecto.Changeset
 
   alias Cympho.Comments.Comment
+  alias Cympho.ExecutionPolicies.ExecutionPolicy
   alias Cympho.Projects.Project
   alias Cympho.Agents.Agent
 
@@ -16,9 +17,11 @@ defmodule Cympho.Issues.Issue do
     field :lock_version, :integer, default: 0
     field :github_pr_url, :string
     field :assigned_role, Ecto.Enum, values: [:engineer, :cto, :ceo], default: nil
+    field :execution_state, :map, default: %{}
 
     belongs_to :project, Project
     belongs_to :assignee, Agent, foreign_key: :assignee_id
+    belongs_to :execution_policy, ExecutionPolicy, on_replace: :nilify
 
     has_many :comments, Comment, foreign_key: :issue_id
 
@@ -39,7 +42,7 @@ defmodule Cympho.Issues.Issue do
 
   def changeset(issue, attrs) do
     issue
-    |> cast(attrs, [:title, :description, :status, :priority, :assignee_id, :project_id, :github_pr_url, :assigned_role])
+    |> cast(attrs, [:title, :description, :status, :priority, :assignee_id, :project_id, :github_pr_url, :assigned_role, :execution_policy_id, :execution_state])
     |> validate_required([:title, :description])
     |> validate_length(:title, min: 1, max: 255)
     |> validate_length(:description, min: 1)
@@ -60,20 +63,12 @@ defmodule Cympho.Issues.Issue do
     end)
   end
 
-  @doc """
-  Returns the role hierarchy rank. Higher number = higher authority.
-  Order: designer(1) < product_manager(2) < engineer(3) < cto(4) < ceo(5).
-  Matches Cympho.Agents.role_rank/1.
-  """
   def role_rank(:designer), do: 1
   def role_rank(:product_manager), do: 2
   def role_rank(:engineer), do: 3
   def role_rank(:cto), do: 4
   def role_rank(:ceo), do: 5
 
-  @doc """
-  Returns true if agent_role has authority over (or equal to) required_role.
-  """
   def role_authorized?(_agent_role, nil), do: true
   def role_authorized?(agent_role, required_role) when is_atom(agent_role) and is_atom(required_role) do
     role_rank(agent_role) >= role_rank(required_role)
