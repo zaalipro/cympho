@@ -417,9 +417,9 @@ defmodule Cympho.Issues do
         end)
         |> case do
           {:ok, issue} ->
-            issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
+            issue = Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])
             Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
-            {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
+            {:ok, issue}
 
           {:error, reason} ->
             {:error, reason}
