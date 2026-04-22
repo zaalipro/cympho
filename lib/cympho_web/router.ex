@@ -33,6 +33,8 @@ defmodule CymphoWeb.Router do
     live "/projects/:id/edit", ProjectLive.Edit
     live "/kanban", KanbanLive.Index
     live "/labels", LabelLive.Index
+    live "/labels/new", LabelLive.Index, :new
+    live "/labels/:id/edit", LabelLive.Index, :edit
     live "/agents", AgentLive.Index
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
@@ -48,6 +50,13 @@ defmodule CymphoWeb.Router do
     get "/search", SearchController, :search
 
     post "/telegram/webhook", TelegramController, :webhook
+
+    resources "/labels", LabelController, only: [:index, :show, :create, :update, :delete]
+
+    get "/issues/:issue_id/labels", IssueLabelController, :index
+    post "/issues/:issue_id/labels", IssueLabelController, :add
+    delete "/issues/:issue_id/labels/:label_id", IssueLabelController, :remove
+    put "/issues/:issue_id/labels", IssueLabelController, :set
   end
 
   scope "/api", CymphoWeb do
