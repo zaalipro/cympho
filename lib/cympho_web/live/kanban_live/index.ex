@@ -16,12 +16,15 @@ defmodule CymphoWeb.KanbanLive.Index do
     projects = Projects.list_projects()
     issues = Issues.list_issues()
     agent_heartbeat_states = load_heartbeat_states(issues)
-    socket = socket
+
+    socket =
+      socket
       |> assign(:issues, issues)
       |> assign(:agent_heartbeat_states, agent_heartbeat_states)
       |> assign(:projects, projects)
       |> assign(:collapsed_columns, MapSet.new())
       |> assign(:swimlane_mode, false)
+
     {:ok, socket}
   end
 
@@ -45,15 +48,20 @@ defmodule CymphoWeb.KanbanLive.Index do
   @impl true
   def handle_params(params, _url, socket) do
     project_id = params["project_id"]
-    selected_project = case project_id do
-      nil -> nil
-      id -> case Projects.get_project(id) do {:ok, p} -> p; {:error, _} -> nil end
-    end
-    socket = socket
+
+    selected_project =
+      case project_id do
+        nil -> nil
+        id -> case Projects.get_project(id) do {:ok, p} -> p; {:error, _} -> nil end
+      end
+
+    socket =
+      socket
       |> assign(:selected_project_id, project_id)
       |> assign(:selected_project, selected_project)
       |> assign(:page_title, "Kanban Board")
       |> apply_project_filter(project_id)
+
     {:noreply, socket}
   end
 
@@ -61,23 +69,46 @@ defmodule CymphoWeb.KanbanLive.Index do
   defp apply_project_filter(socket, project_id), do: assign(socket, :issues, Issues.list_issues(%{project_id: project_id}))
 
   @impl true
-  def handle_info({:issue_created, issue}, socket), do: {:noreply, update(socket, :issues, &[issue | &1])}
-  def handle_info({:issue_updated, updated}, socket), do: {:noreply, update(socket, :issues, &Enum.map(&1, fn i -> if i.id == updated.id, do: updated, else: i end) end)}
-  def handle_info({:issue_deleted, id}, socket), do: {:noreply, update(socket, :issues, &Enum.reject(&1, fn i -> i.id == id end) end)}
-  def handle_info({:agent_updated, agent}, socket), do: {:noreply, update(socket, :issues, &Enum.map(&1, fn i -> if i.assignee && i.assignee.id == agent.id, do: %{i | assignee: agent}, else: i end) end)}
-  def handle_info({:agent_heartbeat_updated, agent_id, state}, socket), do: {:noreply, update(socket, :agent_heartbeat_states, &Map.put(&1, agent_id, state))}
+  def handle_info({:issue_created, issue}, socket) do
+    {:noreply, update(socket, :issues, &[issue | &1])}
+  end
+
+  def handle_info({:issue_updated, updated}, socket) do
+    {:noreply, update(socket, :issues, &Enum.map(&1, fn i ->
+      if i.id == updated.id, do: updated, else: i
+    end))}
+  end
+
+  def handle_info({:issue_deleted, id}, socket) do
+    {:noreply, update(socket, :issues, &Enum.reject(&1, fn i -> i.id == id end))}
+  end
+
+  def handle_info({:agent_updated, agent}, socket) do
+    {:noreply, update(socket, :issues, &Enum.map(&1, fn i ->
+      if i.assignee && i.assignee.id == agent.id, do: %{i | assignee: agent}, else: i
+    end))}
+  end
+
+  def handle_info({:agent_heartbeat_updated, agent_id, state}, socket) do
+    {:noreply, update(socket, :agent_heartbeat_states, &Map.put(&1, agent_id, state))}
+  end
 
   @impl true
   def handle_event("transition_issue", %{"id" => id, "to_status" => to_status_string}, socket) do
     to_status = try_string_to_status(to_status_string)
+
     if is_nil(to_status) do
       {:noreply, socket}
     else
       issue = Issues.get_issue!(id)
+
       case Issues.transition_issue(issue, to_status) do
-        {:ok, _} -> {:noreply, socket}
+        {:ok, _} ->
+          {:noreply, socket}
+
         {:error, :invalid_transition} ->
           {:noreply, socket |> put_flash(:error, "Invalid status transition from #{issue.status} to #{to_status}") |> push_event("shake_card", %{issue_id: id})}
+
         {:error, :blocked_by_active_issues} ->
           {:noreply, socket |> put_flash(:error, "Cannot complete - issue is blocked by active issues") |> push_event("shake_card", %{issue_id: id})}
       end
@@ -86,7 +117,10 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   def handle_event("toggle_column", %{"status" => status_str}, socket) do
     status = String.to_existing_atom(status_str)
-    {:noreply, update(socket, :collapsed_columns, fn c -> if MapSet.member?(c, status), do: MapSet.delete(c, status), else: MapSet.put(c, status) end) end}
+
+    {:noreply, update(socket, :collapsed_columns, fn c ->
+      if MapSet.member?(c, status), do: MapSet.delete(c, status), else: MapSet.put(c, status)
+    end)}
   end
 
   def handle_event("toggle_swimlanes", _, socket), do: {:noreply, update(socket, :swimlane_mode, &(!&1))}
@@ -144,4 +178,9 @@ defmodule CymphoWeb.KanbanLive.Index do
   def assignee_groups(issues) do
     issues |> Enum.group_by(fn i -> if i.assignee, do: i.assignee.name, else: "Unassigned" end) |> Enum.sort_by(&elem(&1, 0))
   end
+
+  def priority_class(:high), do: "bg-red-500/20 text-red-400"
+  def priority_class(:medium), do: "bg-yellow-500/20 text-yellow-400"
+  def priority_class(:low), do: "bg-emerald-500/20 text-emerald-400"
+  def priority_class(_), do: "bg-white/[0.05] text-text-quaternary"
 end
