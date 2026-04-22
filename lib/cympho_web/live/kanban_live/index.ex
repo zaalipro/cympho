@@ -3,6 +3,7 @@ defmodule CymphoWeb.KanbanLive.Index do
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.AgentHeartbeat
+  alias Cympho.Search
   alias Cympho.Projects
 
   @status_columns [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
@@ -92,6 +93,21 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   def handle_event("filter_project", %{"project_id" => ""}, socket), do: {:noreply, push_patch(socket, to: ~p"/kanban")}
   def handle_event("filter_project", %{"project_id" => pid}, socket), do: {:noreply, push_patch(socket, to: ~p"/kanban?project_id=#{pid}")}
+
+  def handle_event("search", %{"query" => query}, socket) do
+    query = String.trim(query)
+
+    if query == "" do
+      {:noreply, assign(socket, search_query: "", search_results: nil)}
+    else
+      results = Search.search_issues(query, limit: 10)
+      {:noreply, assign(socket, search_query: query, search_results: results)}
+    end
+  end
+
+  def handle_event("clear_search", _params, socket) do
+    {:noreply, assign(socket, search_query: "", search_results: nil)}
+  end
 
   defp try_string_to_status(string) do
     if Enum.member?(Issue.status_options(), String.to_existing_atom(string)), do: String.to_existing_atom(string), else: nil

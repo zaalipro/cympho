@@ -32,6 +32,7 @@ defmodule CymphoWeb.Router do
     live "/projects/:id", ProjectLive.Show
     live "/projects/:id/edit", ProjectLive.Edit
     live "/kanban", KanbanLive.Index
+    live "/labels", LabelLive.Index
     live "/agents", AgentLive.Index
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
@@ -43,6 +44,8 @@ defmodule CymphoWeb.Router do
 
     resources "/users", UserController, only: [:index, :show, :create, :update, :delete]
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
+
+    get "/search", SearchController, :search
 
     post "/telegram/webhook", TelegramController, :webhook
   end

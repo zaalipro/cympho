@@ -8,6 +8,28 @@
     </:actions>
   </.header>
 
+  <div class="flex items-center gap-3 mb-4">
+    <form phx-change="filter_status">
+      <select name="status" class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5">
+        <option value="">All Statuses</option>
+        <%= for status <- Cympho.Issues.Issue.status_options() do %>
+          <option value={status} selected={@current_status == to_string(status)}><%= status_label(status) %></option>
+        <% end %>
+      </select>
+    </form>
+
+    <form phx-change="filter_priority">
+      <select name="priority" class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5">
+        <option value="">All Priorities</option>
+        <%= for priority <- Cympho.Issues.Issue.priority_options() do %>
+          <option value={priority} selected={@current_priority == to_string(priority)}><%= priority %></option>
+        <% end %>
+      </select>
+    </form>
+
+    <span class="text-xs text-text-quaternary ml-auto">{@total} issue(s)</span>
+  </div>
+
   <div class="space-y-2">
     <.app_link :for={issue <- @issues} navigate={~p"/issues/#{issue.id}"} class="group flex items-center gap-4 p-3 rounded-md hover:bg-white/[0.04] transition-colors border border-transparent hover:border-border-subtle">
       <div class="flex-1 min-w-0">
@@ -40,9 +62,18 @@
     <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
       <svg class="w-6 h-6 text-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
     </div>
-    <p class="text-sm text-text-tertiary mb-4">No issues yet.</p>
-    <.app_link navigate={~p"/issues/new"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
-      Create your first issue
-    </.app_link>
+    <p class="text-sm text-text-tertiary mb-4">No issues found.</p>
+  </div>
+
+  <div :if={@total_pages > 1} class="flex items-center justify-center gap-4 mt-6">
+    <button :if={@page > 1} type="button" phx-click="change_page" phx-value-page={@page - 1}
+      class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary text-sm px-4 py-2 rounded-md transition-colors">
+      Previous
+    </button>
+    <span class="text-sm text-text-tertiary">Page {@page} of {@total_pages}</span>
+    <button :if={@page < @total_pages} type="button" phx-click="change_page" phx-value-page={@page + 1}
+      class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary text-sm px-4 py-2 rounded-md transition-colors">
+      Next
+    </button>
   </div>
 </div>
