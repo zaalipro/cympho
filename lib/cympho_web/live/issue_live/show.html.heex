@@ -1,11 +1,30 @@
 <div class="p-6 lg:p-8 max-w-6xl mx-auto">
-  <.header title={@issue.title}>
-    <:actions>
+  <div class="group flex items-start gap-2 mb-6">
+    <div class="flex-1">
+      <div :if={@editing != "title"} class="flex items-center gap-2">
+        <h1 class="text-2xl font-510 tracking-tight text-text-primary">{@issue.title}</h1>
+        <button type="button" phx-click="start_editing" phx-value-field="title" class="opacity-0 group-hover:opacity-100 text-text-quaternary hover:text-text-secondary transition-opacity text-xs">
+          Edit
+        </button>
+      </div>
+      <form :if={@editing == "title"} phx-submit="save_title" class="flex items-center gap-2">
+        <input
+          type="text"
+          name="title"
+          value={@issue.title}
+          class="flex-1 bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+          autofocus
+        />
+        <.button type="submit">Save</.button>
+        <.button type="button" variant="ghost" phx-click="cancel_editing">Cancel</.button>
+      </form>
+    </div>
+    <div>
       <.app_link navigate={~p"/issues"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
         Back
       </.app_link>
-    </:actions>
-  </.header>
+    </div>
+  </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <div class="lg:col-span-2 space-y-6">
@@ -14,9 +33,25 @@
         <.badge variant="priority" value={to_string(@issue.priority)} />
       </div>
 
-      <p class="text-sm text-text-secondary leading-relaxed">
-        {@issue.description}
-      </p>
+      <div class="group">
+        <div :if={@editing != "description"} class="relative">
+          <p class="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">{@issue.description}</p>
+          <button type="button" phx-click="start_editing" phx-value-field="description" class="absolute top-0 right-0 opacity-0 group-hover:opacity-100 text-text-quaternary hover:text-text-secondary transition-opacity text-xs">
+            Edit
+          </button>
+        </div>
+        <form :if={@editing == "description"} phx-submit="save_description" class="space-y-3">
+          <textarea
+            name="description"
+            class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[120px] resize-y"
+            autofocus
+          ><%= @issue.description %></textarea>
+          <div class="flex items-center gap-2">
+            <.button type="submit">Save</.button>
+            <.button type="button" variant="ghost" phx-click="cancel_editing">Cancel</.button>
+          </div>
+        </form>
+      </div>
 
       <div class="text-xs text-text-quaternary">
         Created {@issue.inserted_at}
@@ -100,15 +135,75 @@
     <div class="space-y-4">
       <div class="bg-surface border border-border rounded-card p-5 space-y-4">
         <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider">Details</h3>
-        <div class="space-y-3 text-sm">
-          <div class="flex justify-between">
-            <span class="text-text-tertiary">Status</span>
-            <.badge variant="status" value={to_string(@issue.status)} />
+        <div class="space-y-4 text-sm">
+          <div>
+            <span class="block text-text-tertiary text-xs mb-1.5">Status</span>
+            <form phx-change="update_status">
+              <select name="status" class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none">
+                <option value={to_string(@issue.status)} selected>
+                  {@issue.status |> to_string() |> String.replace("_", " ") |> String.capitalize()} (current)
+                </option>
+                <option :for={{label, value} <- valid_status_options(@issue.status)} value={value}>
+                  {label}
+                </option>
+              </select>
+            </form>
           </div>
-          <div class="flex justify-between">
-            <span class="text-text-tertiary">Priority</span>
-            <.badge variant="priority" value={to_string(@issue.priority)} />
+
+          <div>
+            <span class="block text-text-tertiary text-xs mb-1.5">Priority</span>
+            <form phx-change="update_priority">
+              <select name="priority" class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none">
+                <option :for={p <- [:low, :medium, :high]} value={to_string(p)} selected={@issue.priority == p}>
+                  {p |> to_string() |> String.capitalize()}
+                </option>
+              </select>
+            </form>
           </div>
+
+          <div>
+            <span class="block text-text-tertiary text-xs mb-1.5">Assignee</span>
+            <div :if={@issue.assignee} class="space-y-2">
+              <div class="flex items-center justify-between bg-white/[0.05] rounded-md px-3 py-2">
+                <div class="flex items-center gap-2">
+                  <div class="w-6 h-6 rounded-full bg-brand/20 flex items-center justify-center text-xs font-510 text-brand">
+                    {String.first(@issue.assignee.name) || "?"}
+                  </div>
+                  <span class="text-sm text-text-secondary">{@issue.assignee.name}</span>
+                  <.badge variant="agent" value={to_string(@issue.assignee.status)} />
+                </div>
+                <button type="button" phx-click="unassign_issue" class="text-text-quaternary hover:text-red-400 transition-colors text-xs" data-confirm="Unassign this issue?">
+                  Remove
+                </button>
+              </div>
+            </div>
+            <div :if={!@issue.assignee} class="space-y-2">
+              <input
+                type="text"
+                phx-change="search_assignee"
+                name="q"
+                value={@assignee_search}
+                placeholder="Search agents..."
+                class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              />
+              <div :if={@assignee_search != ""} class="max-h-40 overflow-y-auto space-y-1">
+                <button
+                  :for={agent <- filtered_agents(@all_agents, @assignee_search)}
+                  type="button"
+                  phx-click="assign_issue"
+                  phx-value-agent_id={agent.id}
+                  class="w-full flex items-center gap-2 bg-white/[0.05] hover:bg-white/[0.08] rounded-md px-3 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors text-left"
+                >
+                  <div class="w-5 h-5 rounded-full bg-brand/20 flex items-center justify-center text-[10px] font-510 text-brand">
+                    {String.first(agent.name) || "?"}
+                  </div>
+                  <span>{agent.name}</span>
+                  <span class="text-text-quaternary text-xs">({agent.role})</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div class="flex justify-between">
             <span class="text-text-tertiary">Comments</span>
             <span class="text-text-secondary">{length(@issue.comments)}</span>
