@@ -1,0 +1,31 @@
+<.header>
+  {@page_title}
+</.header>
+
+<div class="label-form">
+  <h3 :if={@editing_label}>Editing: {@editing_label.name}</h3>
+  <h3 :if={!@editing_label}>Create New Label</h3>
+  <.simple_form for={@label_changeset} phx-submit={@editing_label && "update_label" || "create_label"}>
+    <.input field={@label_changeset[:name]} name="label[name]" placeholder="Label name" />
+    <.input field={@label_changeset[:color]} name="label[color]" placeholder="#FF0000" />
+    <.input field={@label_changeset[:description]} name="label[description]" placeholder="Description (optional)" />
+    <:actions>
+      <button type="submit" class="phx-btn">{@editing_label && "Update" || "Create"} Label</button>
+      <button :if={@editing_label} type="button" class="phx-btn-secondary" phx-click="cancel_edit">Cancel</button>
+    </:actions>
+  </.simple_form>
+</div>
+
+<div class="label-list">
+  <div :for={label <- @labels} class="label-card" id={"label-#{label.id}"}>
+    <div class="label-info">
+      <span class="label-badge" style={"background-color: #{label.color}; color: #{text_color(label.color)}"}>{label.name}</span>
+      <span :if={label.description} class="label-description">{label.description}</span>
+    </div>
+    <div class="label-actions">
+      <button type="button" class="phx-btn-secondary" phx-click="edit_label" phx-value-id={label.id}>Edit</button>
+      <button type="button" class="delete-btn" phx-click="delete_label" phx-value-id={label.id} data-confirm="Delete this label?">Delete</button>
+    </div>
+  </div>
+  <div :if={Enum.empty?(@labels)} class="empty-state"><p>No labels yet. Create your first label above.</p></div>
+</div>

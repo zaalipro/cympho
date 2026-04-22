@@ -3,6 +3,7 @@ defmodule Cympho.Issues.Issue do
   import Ecto.Changeset
 
   alias Cympho.Comments.Comment
+  alias Cympho.Labels.Label
   alias Cympho.Projects.Project
   alias Cympho.Agents.Agent
 
@@ -30,6 +31,8 @@ defmodule Cympho.Issues.Issue do
       join_through: "issue_blockers",
       join_keys: [blocking_issue_id: :id, blocked_issue_id: :id],
       unique: true
+
+    many_to_many :labels, Label, join_through: "issue_labels", unique: true
 
     timestamps(type: :utc_datetime)
   end

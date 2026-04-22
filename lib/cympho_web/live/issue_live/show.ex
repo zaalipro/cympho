@@ -3,6 +3,7 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.Issues
   alias Cympho.Comments
   alias Cympho.Agents
+  alias Cympho.Labels
   alias Cympho.Orchestrator
 
   @impl true
@@ -17,7 +18,9 @@ defmodule CymphoWeb.IssueLive.Show do
            issue: issue,
            comment_changeset: Comments.Comment.changeset(%Comments.Comment{}, %{}),
            agents: Agents.list_agents_by_status(:idle),
-           show_agent_panel: false
+           show_agent_panel: false,
+           all_labels: Labels.list_labels(),
+           show_label_picker: false
          )}
 
       {:error, :not_found} ->
@@ -166,4 +169,41 @@ defmodule CymphoWeb.IssueLive.Show do
     IO.inspect({:turn_ended_with_error, session_id, reason}, label: "Agent error")
     {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
   end
+
+  def handle_event("toggle_label_picker", _, socket) do
+    {:noreply, update(socket, :show_label_picker, &(!&1))}
+  end
+
+  def handle_event("add_label", %{"label_id" => label_id}, socket) do
+    issue = socket.assigns.issue
+    label = Labels.get_label!(label_id)
+
+    case Issues.add_label_to_issue(issue, label) do
+      {:ok, updated} ->
+        {:noreply, socket |> assign(:issue, updated) |> assign(:show_label_picker, false)}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to add label")}
+    end
+  end
+
+  def handle_event("remove_label", %{"label_id" => label_id}, socket) do
+    issue = socket.assigns.issue
+    label = Labels.get_label!(label_id)
+
+    case Issues.remove_label_from_issue(issue, label) do
+      {:ok, updated} ->
+        {:noreply, assign(socket, :issue, updated)}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to remove label")}
+    end
+  end
+
+  defp text_color("#" <> hex) do
+    {:ok, <<r, g, b>>} = Base.decode16(String.upcase(hex))
+    if (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5, do: "#000000", else: "#FFFFFF"
+  end
+  defp text_color(_), do: "#FFFFFF"
+
 end
