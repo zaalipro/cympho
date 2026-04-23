@@ -52,4 +52,5 @@ defmodule CymphoWeb.Router do
 
     post "/github/webhook", GithubController, :webhook
   end
+    resources "/approvals", ApprovalController, only: [:index, :show, :create, :update]
 end
