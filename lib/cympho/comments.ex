@@ -7,6 +7,7 @@ defmodule Cympho.Comments do
   alias Cympho.Comments.Comment
   alias Cympho.Issues.Issue
   alias Cympho.Activities
+  alias Cympho.Wakes
 
   @doc """
   Returns the list of comments for a given issue.
@@ -25,6 +26,7 @@ defmodule Cympho.Comments do
 
   @doc """
   Creates a comment for an issue.
+  After creation, triggers Wakes.notify_comment to wake the assigned agent if applicable.
   """
   def create_comment(attrs \\ %{}) do
     case %Comment{}
@@ -38,6 +40,9 @@ defmodule Cympho.Comments do
             issue = Repo.preload(issue, :comments)
             Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_created, issue})
         end
+
+        # Wake the assigned agent if the issue is active
+        _ = Wakes.notify_comment(comment)
 
         {:ok, comment}
 
