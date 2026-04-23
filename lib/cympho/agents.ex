@@ -370,7 +370,7 @@ defmodule Cympho.Agents do
     case Cympho.AgentHeartbeat.Registry.lookup(agent_id) do
       {:ok, pid} ->
         try do
-          GenServer.call(pid, :get_full_state, 5000)
+          GenServer.call(pid, :get_state, 5000)
         catch
           :exit, _ -> %{status: :unknown}
         end
