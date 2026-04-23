@@ -64,4 +64,5 @@ defmodule CymphoWeb.Router do
     get "/attachments/:id/download", AttachmentController, :download
     delete "/attachments/:id", AttachmentController, :delete
   end
+    resources "/approvals", ApprovalController, only: [:index, :show, :create, :update]
 end
