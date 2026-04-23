@@ -39,6 +39,7 @@ defmodule CymphoWeb.Router do
     post "/telegram/webhook", TelegramController, :webhook
     post "/github/webhook", GithubController, :webhook
 
+<<<<<<< HEAD
     resources "/labels", LabelController, only: [:index, :show, :create, :update, :delete]
 
     get "/issues/:issue_id/labels", IssueLabelController, :index
@@ -61,5 +62,20 @@ defmodule CymphoWeb.Router do
     put "/issues/:issue_id/documents/:key", DocumentController, :upsert
     delete "/issues/:issue_id/documents/:key", DocumentController, :delete
     get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
+=======
+    resources "/routines", RoutineController, only: [:index, :show, :create, :update, :delete]
+    patch "/routines/:id/pause", RoutineController, :pause
+    patch "/routines/:id/resume", RoutineController, :resume
+    patch "/routines/:id/archive", RoutineController, :archive
+
+    resources "/routines/:routine_id/triggers", RoutineTriggerController,
+      only: [:index, :create, :show, :update, :delete],
+      name: "routine_trigger"
+
+    post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_secret
+
+    # Public webhook endpoint (no auth, validates via secret header)
+    post "/routine-triggers/:public_id/fire", RoutineTriggerController, :fire
+>>>>>>> origin/LLM-341/routine-triggers
   end
 end

@@ -2,6 +2,12 @@ defmodule Cympho.Routines.Routine do
   use Ecto.Schema
   import Ecto.Changeset
 
+<<<<<<< HEAD
+=======
+  alias Cympho.Agents.Agent
+  alias Cympho.Projects.Project
+
+>>>>>>> origin/LLM-341/routine-triggers
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
@@ -24,8 +30,13 @@ defmodule Cympho.Routines.Routine do
       values: [:critical, :high, :medium, :low],
       default: :medium
 
+<<<<<<< HEAD
     belongs_to :agent, Cympho.Agents.Agent
     belongs_to :project, Cympho.Projects.Project
+=======
+    belongs_to :agent, Agent
+    belongs_to :project, Project
+>>>>>>> origin/LLM-341/routine-triggers
 
     has_many :triggers, Cympho.RoutineTriggers.RoutineTrigger, foreign_key: :routine_id
     has_many :runs, Cympho.RoutineTriggers.RoutineRun, foreign_key: :routine_id
@@ -48,6 +59,7 @@ defmodule Cympho.Routines.Routine do
     |> validate_required([:name])
     |> validate_length(:name, min: 1, max: 200)
   end
+<<<<<<< HEAD
 
   @valid_transitions %{
     active: [:paused, :archived],
@@ -62,4 +74,6 @@ defmodule Cympho.Routines.Routine do
   def transition_allowed?(%__MODULE__{status: current}, target) do
     target in Map.get(@valid_transitions, current, [])
   end
+=======
+>>>>>>> origin/LLM-341/routine-triggers
 end

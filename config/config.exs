@@ -44,6 +44,10 @@ config :logger, :console, format: "[$level] $message\n"
 
 config :phoenix, :json_library, Jason
 
+config :cympho, Cympho.Scheduler,
+  jobs: [],
+  timezone: "Etc/UTC"
+
 config :swoosh, :api_client, Swoosh.ApiClient.Finch
 
 config :cympho, Cympho.Mailer,
