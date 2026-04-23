@@ -69,19 +69,15 @@ defmodule Cympho.Notifications.RetryWorkerTest do
 
   describe "calculate_delay (via schedule_retry timing)" do
     test "delay includes jitter — not a fixed value" do
-      # We verify calculate_delay uses jitter by checking it's not always
-      # the same base value. Since jitter is random, run multiple times.
       delays =
         for attempt <- 1..5 do
           base = (1_000 * :math.pow(2, attempt - 1)) |> round()
-          # Jitter adds 1..base/2 to the base
           {base, base + div(base, 2)}
         end
 
-      # Verify the ranges make sense
       for {min, max} <- delays do
         assert min <= max
-        assert max > min  # jitter always adds something
+        assert max > min
       end
     end
   end
