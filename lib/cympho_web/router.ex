@@ -23,7 +23,7 @@ defmodule CymphoWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
-
+    live "/dashboard", DashboardLive.Index
     live "/issues", IssueLive.Index
     live "/issues/new", IssueLive.New
     live "/issues/:id", IssueLive.Show
@@ -46,6 +46,7 @@ defmodule CymphoWeb.Router do
   scope "/api", CymphoWeb do
     pipe_through :api
 
+    get "/dashboard", DashboardController, :index
     resources "/users", UserController, only: [:index, :show, :create, :update, :delete]
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
 
