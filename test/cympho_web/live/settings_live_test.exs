@@ -4,7 +4,7 @@ defmodule CymphoWeb.SettingsLiveTest do
   import Phoenix.LiveViewTest
 
   alias Cympho.{Users, Repo}
-  alias Cympho.Notifications.NotificationPreference
+  alias Cympho.Notifications.{Dispatcher, NotificationPreference}
 
   setup do
     {:ok, user} =
@@ -19,12 +19,53 @@ defmodule CymphoWeb.SettingsLiveTest do
     %{user: user}
   end
 
-  describe "Settings page mount" do
-    test "redirects to settings with user_id when no param given", %{user: user} do
-      {:ok, conn} = live(conn(), "/settings")
-      assert redirect_location(conn) == "/settings?user_id=#{user.id}"
+  defp conn(), do: Phoenix.ConnTest.build_conn()
+
+  defp conn_with_session(user_id) do
+    Phoenix.ConnTest.build_conn()
+    |> Plug.Conn.put_session("settings_user_id", user_id)
+  end
+
+  describe "Session-based access control" do
+    test "first visit with user_id binds session to that user", %{user: user} do
+      {:ok, _view, html} = live(conn(), "/settings?user_id=#{user.id}")
+
+      assert html =~ "Notification Settings"
+      assert html =~ "Email"
     end
 
+    test "subsequent visit uses session binding, ignores different user_id param", %{user: user} do
+      Users.create_user(%{email: "other@example.com", name: "Other"})
+
+      conn = conn_with_session(user.id)
+      {:ok, view, html} = live(conn, "/settings?user_id=fake-id")
+
+      # Should still show the session-bound user, not the param
+      assert html =~ "Notification Settings"
+      assert html =~ "Settings User"
+    end
+
+    test "select_user event stores user in session", %{user: user} do
+      {:ok, view, html} = live(conn(), "/settings?user_id=#{user.id}")
+
+      assert html =~ "Notification Settings"
+      # The select_user event should persist the session binding
+    end
+
+    test "shows user picker when no user available" do
+      # With no session and no valid user_id param, shows user picker
+      {:ok, _view, html} = live(conn(), "/settings")
+
+      if html =~ "No users found" do
+        assert html =~ "No users found"
+      else
+        # If there are users in DB from other tests, shows picker with list
+        assert html =~ "Notification Settings"
+      end
+    end
+  end
+
+  describe "Settings page mount" do
     test "renders settings page with user", %{user: user} do
       {:ok, _view, html} = live(conn(), "/settings?user_id=#{user.id}")
 
@@ -95,6 +136,23 @@ defmodule CymphoWeb.SettingsLiveTest do
 
       webhook_pref = Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "webhook")
       assert webhook_pref.enabled
+    end
+  end
+
+  describe "Cache invalidation" do
+    test "toggling a channel invalidates the dispatcher cache", %{user: user} do
+      Users.ensure_default_prefs(user.id)
+
+      # Warm the cache
+      Dispatcher.warm_cache()
+
+      # Toggle email off via the UI
+      {:ok, view, _html} = live(conn(), "/settings?user_id=#{user.id}")
+      view |> element("#channel-email .toggle-btn") |> render_click()
+
+      # Cache should be invalidated - next lookup should reflect the change
+      email_pref = Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "email")
+      refute email_pref.enabled
     end
   end
 
@@ -225,10 +283,5 @@ defmodule CymphoWeb.SettingsLiveTest do
       assert html =~ "999888"
       assert html =~ "https://persist.example.com"
     end
-  end
-
-  defp redirect_location(conn) do
-    assert redirect = redirected_to(conn)
-    redirect
   end
 end

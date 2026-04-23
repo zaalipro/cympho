@@ -7,10 +7,18 @@ defmodule CymphoWeb.SettingsLive.Index do
   @event_types ~w(issue_assigned comment status_change)
 
   @impl true
-  def mount(%{"user_id" => user_id}, _session, socket) do
-    case Users.get_user(user_id) do
+  def mount(%{"user_id" => user_id}, session, socket) do
+    session_user_id = session["settings_user_id"]
+
+    # Enforce session-based access: if session is bound to a user, ignore param
+    effective_user_id = session_user_id || user_id
+
+    case Users.get_user(effective_user_id) do
       {:ok, user} ->
         prefs = Users.ensure_default_prefs(user.id)
+
+        # Store user_id in session on first access
+        socket = put_session(socket, "settings_user_id", effective_user_id)
 
         {:ok,
          socket
@@ -25,41 +33,23 @@ defmodule CymphoWeb.SettingsLive.Index do
          |> assign(:telegram_verify_status, nil)}
 
       {:error, :not_found} ->
-        users = Users.list_users()
-
-        {:ok,
-         socket
-         |> assign(:page_title, "Notification Settings")
-         |> assign(:user, nil)
-         |> assign(:user_id, nil)
-         |> assign(:users, users)
-         |> assign(:prefs, [])
-         |> assign(:webhook_test_result, nil)
-         |> assign(:webhook_url_input, "")
-         |> assign(:telegram_chat_id_input, "")
-         |> assign(:telegram_verify_status, nil)}
+        {:ok, mount_user_picker(socket)}
     end
   end
 
-  def mount(_params, _session, socket) do
-    users = Users.list_users()
+  def mount(_params, session, socket) do
+    session_user_id = session["settings_user_id"]
 
-    case users do
-      [user | _] ->
-        {:ok, push_navigate(socket, to: ~p"/settings?user_id=#{user.id}")}
+    if session_user_id do
+      case Users.get_user(session_user_id) do
+        {:ok, user} ->
+          {:ok, push_navigate(socket, to: ~p"/settings?user_id=#{user.id}")}
 
-      [] ->
-        {:ok,
-         socket
-         |> assign(:page_title, "Notification Settings")
-         |> assign(:user, nil)
-         |> assign(:user_id, nil)
-         |> assign(:users, [])
-         |> assign(:prefs, [])
-         |> assign(:webhook_test_result, nil)
-         |> assign(:webhook_url_input, "")
-         |> assign(:telegram_chat_id_input, "")
-         |> assign(:telegram_verify_status, nil)}
+        {:error, :not_found} ->
+          {:ok, mount_user_picker(socket)}
+      end
+    else
+      {:ok, mount_user_picker(socket)}
     end
   end
 
@@ -216,7 +206,23 @@ defmodule CymphoWeb.SettingsLive.Index do
   end
 
   def handle_event("select_user", %{"user_id" => user_id}, socket) do
+    socket = put_session(socket, "settings_user_id", user_id)
     {:noreply, push_navigate(socket, to: ~p"/settings?user_id=#{user_id}")}
+  end
+
+  defp mount_user_picker(socket) do
+    users = Users.list_users()
+
+    socket
+    |> assign(:page_title, "Notification Settings")
+    |> assign(:user, nil)
+    |> assign(:user_id, nil)
+    |> assign(:users, users)
+    |> assign(:prefs, [])
+    |> assign(:webhook_test_result, nil)
+    |> assign(:webhook_url_input, "")
+    |> assign(:telegram_chat_id_input, "")
+    |> assign(:telegram_verify_status, nil)
   end
 
   defp format_changeset_errors(changeset) do

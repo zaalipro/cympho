@@ -100,6 +100,7 @@ defmodule Cympho.Users do
   end
 
   alias Cympho.Notifications.NotificationPreference
+  alias Cympho.Notifications.Dispatcher
 
   def list_notification_prefs(user_id) do
     Repo.all(
@@ -119,32 +120,46 @@ defmodule Cympho.Users do
           where: p.user_id == ^user_id and p.channel_type == ^channel_type
       )
 
-    case existing do
-      nil ->
-        %NotificationPreference{user_id: user_id, channel_type: channel_type}
-        |> NotificationPreference.changeset(attrs)
-        |> Repo.insert()
+    result =
+      case existing do
+        nil ->
+          %NotificationPreference{user_id: user_id, channel_type: channel_type}
+          |> NotificationPreference.changeset(attrs)
+          |> Repo.insert()
 
-      pref ->
-        pref
-        |> NotificationPreference.changeset(attrs)
-        |> Repo.update()
-    end
+        pref ->
+          pref
+          |> NotificationPreference.changeset(attrs)
+          |> Repo.update()
+      end
+
+    # Invalidate ETS cache so Dispatcher picks up the change
+    Dispatcher.invalidate_cache(user_id)
+
+    result
   end
 
   def ensure_default_prefs(user_id) do
     for channel_type <- ["email", "telegram", "webhook"] do
-      unless Repo.one(
-               from p in NotificationPreference,
-                 where: p.user_id == ^user_id and p.channel_type == ^channel_type
-             ) do
+      existing =
+        Repo.one(
+          from p in NotificationPreference,
+            where: p.user_id == ^user_id and p.channel_type == ^channel_type
+        )
+
+      if is_nil(existing) do
         %NotificationPreference{
           user_id: user_id,
           channel_type: channel_type,
           enabled: channel_type == "email",
           config: default_event_config()
         }
-        |> Repo.insert!()
+        |> NotificationPreference.changeset(%{})
+        |> Repo.insert()
+        |> case do
+          {:ok, _pref} -> :ok
+          {:error, _changeset} -> :ok
+        end
       end
     end
 
@@ -163,8 +178,13 @@ defmodule Cympho.Users do
     pref = Repo.get!(NotificationPreference, pref_id)
     new_config = Map.merge(pref.config, %{"events" => events})
 
-    pref
-    |> NotificationPreference.changeset(%{config: new_config})
-    |> Repo.update()
+    result =
+      pref
+      |> NotificationPreference.changeset(%{config: new_config})
+      |> Repo.update()
+
+    Dispatcher.invalidate_cache(pref.user_id)
+
+    result
   end
 end
