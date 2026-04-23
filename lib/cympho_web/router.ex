@@ -14,9 +14,16 @@ defmodule CymphoWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :github_webhook do
+    plug :accepts, ["json"]
+    plug CymphoWeb.Plugs.GithubWebhookVerification
+  end
+
   scope "/", CymphoWeb do
     pipe_through :browser
+
     get "/", PageController, :home
+    live "/dashboard", DashboardLive.Index
     live "/issues", IssueLive.Index
     live "/issues/new", IssueLive.New
     live "/issues/:id", IssueLive.Show
@@ -24,34 +31,35 @@ defmodule CymphoWeb.Router do
     live "/projects/new", ProjectLive.New
     live "/projects/:id", ProjectLive.Show
     live "/projects/:id/edit", ProjectLive.Edit
+    live "/goals", GoalLive.Index
+    live "/goals/new", GoalLive.New
+    live "/goals/:id", GoalLive.Show
+    live "/goals/:id/edit", GoalLive.Edit
     live "/kanban", KanbanLive.Index
+    live "/labels", LabelLive.Index
     live "/agents", AgentLive.Index
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
     live "/agents/:id/edit", AgentLive.Edit
-    live "/approvals", ApprovalLive.Index
-    live "/approvals/:id", ApprovalLive.Show
   end
 
   scope "/api", CymphoWeb do
     pipe_through :api
-    resources "/approvals", ApprovalController, only: [:index, :show, :create, :update]
+
+    get "/dashboard", DashboardController, :index
     resources "/users", UserController, only: [:index, :show, :create, :update, :delete]
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
+
+    get "/search", SearchController, :search
+
+    resources "/goals", GoalController, only: [:index, :show, :create, :update, :delete]
+
     post "/telegram/webhook", TelegramController, :webhook
-    post "/github/webhook", GithubController, :webhook
   end
 
   scope "/api", CymphoWeb do
-    pipe_through :api
-    pipe_through CymphoWeb.Plugs.AgentAuth
-    get "/agents/:id/inbox", AgentController, :inbox
-    patch "/agents/:id/status", AgentController, :update_status
-    resources "/issues", IssueController, only: [:create, :show]
-    get "/issues/:issue_id/attachments", AttachmentController, :index
-    post "/issues/:issue_id/attachments", AttachmentController, :create
-    get "/attachments/:id", AttachmentController, :show
-    get "/attachments/:id/download", AttachmentController, :download
-    delete "/attachments/:id", AttachmentController, :delete
+    pipe_through :github_webhook
+
+    post "/github/webhook", GithubController, :webhook
   end
 end
