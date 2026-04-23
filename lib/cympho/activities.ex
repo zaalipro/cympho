@@ -33,6 +33,7 @@ defmodule Cympho.Activities do
         metadata: metadata
       })
     end)
+
     :ok
   end
 
@@ -46,16 +47,28 @@ defmodule Cympho.Activities do
   end
 
   defp maybe_add(acc, _key, old, new) when old == new, do: acc
-  defp maybe_add(acc, key, old, new), do: [{key, %{from: to_string(old), to: to_string(new)}} | acc]
+
+  defp maybe_add(acc, key, old, new),
+    do: [{key, %{from: to_string(old), to: to_string(new)}} | acc]
+
   defp maybe_add(acc, _key, old, new, _attrs) when old == new, do: acc
-  defp maybe_add(acc, key, old, new, _attrs), do: [{key, %{from: to_string(old), to: to_string(new)}} | acc]
+
+  defp maybe_add(acc, key, old, new, _attrs),
+    do: [{key, %{from: to_string(old), to: to_string(new)}} | acc]
 
   defp maybe_add_assign(acc, %{assignee_id: old_id}, %{assignee_id: new_id}) do
     cond do
-      old_id == new_id -> acc
-      is_nil(old_id) and not is_nil(new_id) -> [{:assigned, %{assignee_id: new_id}} | acc]
-      not is_nil(old_id) and is_nil(new_id) -> [{:unassigned, %{previous_assignee_id: old_id}} | acc]
-      true -> [{:assigned, %{assignee_id: new_id, previous_assignee_id: old_id}} | acc]
+      old_id == new_id ->
+        acc
+
+      is_nil(old_id) and not is_nil(new_id) ->
+        [{:assigned, %{assignee_id: new_id}} | acc]
+
+      not is_nil(old_id) and is_nil(new_id) ->
+        [{:unassigned, %{previous_assignee_id: old_id}} | acc]
+
+      true ->
+        [{:assigned, %{assignee_id: new_id, previous_assignee_id: old_id}} | acc]
     end
   end
 end

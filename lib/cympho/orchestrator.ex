@@ -43,6 +43,7 @@ defmodule Cympho.Orchestrator do
 
       [] ->
         name = via_tuple(issue_id)
+
         case GenServer.start_link(__MODULE__, {issue, agent_id}, name: name) do
           {:ok, pid} -> {:ok, pid}
           {:error, {:already_started, _pid}} -> {:error, :already_started}
@@ -56,7 +57,7 @@ defmodule Cympho.Orchestrator do
   """
   @spec whereis(String.t()) :: pid() | nil
   def whereis(issue_id) do
-    case Registry.lookup(Cympho.Orchestrator.Registry, issue_id) do
+    case Registry.lookup(@registry, issue_id) do
       [{pid, _}] -> pid
       [] -> nil
     end
@@ -81,7 +82,7 @@ defmodule Cympho.Orchestrator do
   end
 
   defp via_tuple(issue_id) do
-    {:via, Registry, {Cympho.Orchestrator.Registry, issue_id}}
+    {:via, Registry, {@registry, issue_id}}
   end
 
   @impl true
@@ -140,10 +141,13 @@ defmodule Cympho.Orchestrator do
     issue = session.issue
     agent_id = session.agent_id
 
-    :logger.warning("[Orchestrator] Session ended with error for issue #{issue.id}, agent #{agent_id}: #{inspect(reason)}")
+    :logger.warning(
+      "[Orchestrator] Session ended with error for issue #{issue.id}, agent #{agent_id}: #{inspect(reason)}"
+    )
 
     # Create error comment
     error_body = "Agent work error: #{inspect(reason)}"
+
     {:ok, _comment} =
       Comments.create_comment(%{
         body: error_body,
@@ -156,8 +160,11 @@ defmodule Cympho.Orchestrator do
     case Issues.transition_issue(issue, :blocked) do
       {:ok, _} ->
         :logger.info("[Orchestrator] Issue #{issue.id} transitioned to :blocked after error")
+
       {:error, reason} ->
-        :logger.error("[Orchestrator] Failed to transition issue #{issue.id} to :blocked: #{inspect(reason)}")
+        :logger.error(
+          "[Orchestrator] Failed to transition issue #{issue.id} to :blocked: #{inspect(reason)}"
+        )
     end
 
     # Keep agent idle

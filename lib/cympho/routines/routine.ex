@@ -11,6 +11,7 @@ defmodule Cympho.Routines.Routine do
   schema "routines" do
     field :name, :string
     field :description, :string
+
     field :status, Ecto.Enum,
       values: [:active, :paused, :archived],
       default: :active

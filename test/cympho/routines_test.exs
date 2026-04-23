@@ -15,13 +15,14 @@ defmodule Cympho.RoutinesTest do
       assert r1.id in ids
       # Most recent first
       assert Enum.find_index(routines, &(&1.id == r2.id)) <
-             Enum.find_index(routines, &(&1.id == r1.id))
+               Enum.find_index(routines, &(&1.id == r1.id))
     end
   end
 
   describe "list_routines_by_status/1" do
     test "returns only routines with the given status" do
       {:ok, _active} = Routines.create_routine(%{name: "Active"})
+
       {:ok, _paused} =
         Routines.create_routine(%{name: "Paused", status: :paused})
 

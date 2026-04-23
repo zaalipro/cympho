@@ -30,9 +30,14 @@ defmodule Cympho.Documents do
     case IssueDocument
          |> where(issue_id: ^issue_id, key: ^key)
          |> Repo.one() do
-      nil -> {:error, :not_found}
+      nil ->
+        {:error, :not_found}
+
       document ->
-        {:ok, Repo.preload(document, revisions: from(r in IssueDocumentRevision, order_by: [desc: r.inserted_at]))}
+        {:ok,
+         Repo.preload(document,
+           revisions: from(r in IssueDocumentRevision, order_by: [desc: r.inserted_at])
+         )}
     end
   end
 
@@ -43,6 +48,7 @@ defmodule Cympho.Documents do
       {:ok, document} ->
         broadcast_document_event({:document_created, document})
         {:ok, document}
+
       {:error, changeset} ->
         {:error, changeset}
     end
@@ -71,8 +77,12 @@ defmodule Cympho.Documents do
       {:ok, %{document: updated}} ->
         broadcast_document_event({:document_updated, updated})
         {:ok, updated}
-      {:error, :document, changeset, _} -> {:error, changeset}
-      {:error, :revision, changeset, _} -> {:error, changeset}
+
+      {:error, :document, changeset, _} ->
+        {:error, changeset}
+
+      {:error, :revision, changeset, _} ->
+        {:error, changeset}
     end
   end
 
@@ -86,7 +96,9 @@ defmodule Cympho.Documents do
       {:ok, document} ->
         broadcast_document_event({:document_deleted, document})
         {:ok, document}
-      {:error, changeset} -> {:error, changeset}
+
+      {:error, changeset} ->
+        {:error, changeset}
     end
   end
 

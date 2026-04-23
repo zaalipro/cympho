@@ -14,6 +14,7 @@ defmodule CymphoWeb.ProjectLive.New do
     case Projects.create_project(project_params) do
       {:ok, _project} ->
         {:noreply, push_navigate(socket, to: ~p"/projects")}
+
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
     end

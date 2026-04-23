@@ -19,7 +19,7 @@ defmodule CymphoWeb.SettingsLiveTest do
     %{user: user}
   end
 
-  defp conn(), do: Phoenix.ConnTest.build_conn()
+  defp build_conn_(), do: Phoenix.ConnTest.build_conn()
 
   defp conn_with_session(user_id) do
     Phoenix.ConnTest.build_conn()
@@ -28,7 +28,7 @@ defmodule CymphoWeb.SettingsLiveTest do
 
   describe "Session-based access control" do
     test "first visit with user_id binds session to that user", %{user: user} do
-      {:ok, _view, html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       assert html =~ "Notification Settings"
       assert html =~ "Email"
@@ -46,7 +46,7 @@ defmodule CymphoWeb.SettingsLiveTest do
     end
 
     test "select_user event stores user in session", %{user: user} do
-      {:ok, view, html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       assert html =~ "Notification Settings"
       # The select_user event should persist the session binding
@@ -54,7 +54,7 @@ defmodule CymphoWeb.SettingsLiveTest do
 
     test "shows user picker when no user available" do
       # With no session and no valid user_id param, shows user picker
-      {:ok, _view, html} = live(conn(), "/settings")
+      {:ok, _view, html} = live(build_conn_(), "/settings")
 
       if html =~ "No users found" do
         assert html =~ "No users found"
@@ -67,7 +67,7 @@ defmodule CymphoWeb.SettingsLiveTest do
 
   describe "Settings page mount" do
     test "renders settings page with user", %{user: user} do
-      {:ok, _view, html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       assert html =~ "Notification Settings"
       assert html =~ "Email"
@@ -77,14 +77,14 @@ defmodule CymphoWeb.SettingsLiveTest do
 
     test "shows enabled status for email channel", %{user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, _view, html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       assert html =~ "Enabled"
     end
 
     test "shows event notification section", %{user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, _view, html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       assert html =~ "Event Notifications"
       assert html =~ "Issue Assigned"
@@ -94,7 +94,7 @@ defmodule CymphoWeb.SettingsLiveTest do
 
     test "shows empty state when user not found" do
       fake_id = "00000000-0000-0000-0000-000000000000"
-      {:ok, _view, html} = live(conn(), "/settings?user_id=#{fake_id}")
+      {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{fake_id}")
 
       assert html =~ "No users found"
     end
@@ -103,7 +103,7 @@ defmodule CymphoWeb.SettingsLiveTest do
   describe "Channel toggles" do
     test "toggle email channel off writes to notification_preferences", %{user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, view, _html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       view
       |> element("#channel-email .toggle-btn")
@@ -116,25 +116,29 @@ defmodule CymphoWeb.SettingsLiveTest do
 
     test "toggle telegram channel on writes to notification_preferences", %{user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, view, _html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       view
       |> element("#channel-telegram .toggle-btn")
       |> render_click()
 
-      telegram_pref = Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "telegram")
+      telegram_pref =
+        Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "telegram")
+
       assert telegram_pref.enabled
     end
 
     test "toggle webhook channel on writes to notification_preferences", %{user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, view, _html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       view
       |> element("#channel-webhook .toggle-btn")
       |> render_click()
 
-      webhook_pref = Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "webhook")
+      webhook_pref =
+        Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "webhook")
+
       assert webhook_pref.enabled
     end
   end
@@ -147,7 +151,7 @@ defmodule CymphoWeb.SettingsLiveTest do
       Dispatcher.warm_cache()
 
       # Toggle email off via the UI
-      {:ok, view, _html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
       view |> element("#channel-email .toggle-btn") |> render_click()
 
       # Cache should be invalidated - next lookup should reflect the change
@@ -159,13 +163,15 @@ defmodule CymphoWeb.SettingsLiveTest do
   describe "Webhook URL configuration" do
     test "save webhook URL writes to notification_preferences", %{user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, view, _html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       view
       |> element("form[phx-submit='update_webhook_url']")
       |> render_submit(%{"webhook_url" => "https://example.com/hook"})
 
-      webhook_pref = Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "webhook")
+      webhook_pref =
+        Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "webhook")
+
       assert webhook_pref.config["url"] == "https://example.com/hook"
     end
 
@@ -173,7 +179,7 @@ defmodule CymphoWeb.SettingsLiveTest do
       Users.ensure_default_prefs(user.id)
       Users.upsert_notification_pref(user.id, "webhook", %{"url" => "https://example.com/hook"})
 
-      {:ok, _view, html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       assert html =~ "Test Ping"
     end
@@ -182,7 +188,7 @@ defmodule CymphoWeb.SettingsLiveTest do
       Users.ensure_default_prefs(user.id)
       Users.upsert_notification_pref(user.id, "webhook", %{"url" => "https://example.com/hook"})
 
-      {:ok, view, _html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       result =
         view
@@ -196,32 +202,35 @@ defmodule CymphoWeb.SettingsLiveTest do
   describe "Telegram linking" do
     test "shows link form when no chat ID set", %{user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, _view, html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       assert html =~ "Enter Telegram Chat ID"
     end
 
     test "link telegram chat ID writes to notification_preferences", %{user: user} do
       Users.ensure_default_prefs(user.id)
-      {:ok, view, _html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       view
       |> element("form[phx-submit='link_telegram']")
       |> render_submit(%{"telegram_chat_id" => "123456789"})
 
-      telegram_pref = Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "telegram")
+      telegram_pref =
+        Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "telegram")
+
       assert telegram_pref.config["telegram_chat_id"] == "123456789"
       assert telegram_pref.enabled
     end
 
     test "shows verify button after linking", %{user: user} do
       Users.ensure_default_prefs(user.id)
+
       Users.upsert_notification_pref(user.id, "telegram", %{
         "telegram_chat_id" => "123456789",
         "enabled" => true
       })
 
-      {:ok, _view, html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       assert html =~ "Verify Connection"
       assert html =~ "123456789"
@@ -232,7 +241,7 @@ defmodule CymphoWeb.SettingsLiveTest do
     test "shows event toggles for each channel", %{user: user} do
       Users.ensure_default_prefs(user.id)
 
-      {:ok, _view, html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       assert html =~ "events-email"
       assert html =~ "events-telegram"
@@ -242,7 +251,7 @@ defmodule CymphoWeb.SettingsLiveTest do
     test "toggle event type for a channel", %{user: user} do
       Users.ensure_default_prefs(user.id)
 
-      {:ok, view, _html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       result =
         view
@@ -255,7 +264,7 @@ defmodule CymphoWeb.SettingsLiveTest do
     test "toggle pref channel enabled", %{user: user} do
       Users.ensure_default_prefs(user.id)
 
-      {:ok, view, _html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       result =
         view
@@ -269,16 +278,18 @@ defmodule CymphoWeb.SettingsLiveTest do
   describe "Persistence" do
     test "settings persist on reload", %{user: user} do
       Users.ensure_default_prefs(user.id)
+
       Users.upsert_notification_pref(user.id, "telegram", %{
         "telegram_chat_id" => "999888",
         "enabled" => true
       })
+
       Users.upsert_notification_pref(user.id, "webhook", %{
         "url" => "https://persist.example.com",
         "enabled" => true
       })
 
-      {:ok, _view, html} = live(conn(), "/settings?user_id=#{user.id}")
+      {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       assert html =~ "999888"
       assert html =~ "https://persist.example.com"

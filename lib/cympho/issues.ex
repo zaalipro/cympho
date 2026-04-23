@@ -3,12 +3,11 @@ defmodule Cympho.Issues do
   The Issues context for managing issues and their CRUD operations.
   """
   import Ecto.Query, warn: false
-  import Ecto.Changeset, only: [optimistic_lock: 2]
+  import Ecto.Changeset, only: [optimistic_lock: 2, cast: 3, put_assoc: 3]
   require Logger
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
-  alias Cympho.Issues.AutoAssignment
   alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Comments
@@ -16,6 +15,9 @@ defmodule Cympho.Issues do
   alias Cympho.Labels.Label
   alias Cympho.Activities
   alias Cympho.Wakes
+  alias Cympho.ExecutionPolicies
+  alias Cympho.ExecutionPolicies.ExecutionPolicy
+  alias Cympho.Issues.ExecutionState
 
   def list_issues(opts \\ %{}) do
     Issue
@@ -37,7 +39,8 @@ defmodule Cympho.Issues do
     |> where([_, l], l.label_id == ^label_id)
   end
 
-  defp maybe_filter_by_labels(query, %{label_ids: label_ids}) when is_list(label_ids) and length(label_ids) > 0 do
+  defp maybe_filter_by_labels(query, %{label_ids: label_ids})
+       when is_list(label_ids) and length(label_ids) > 0 do
     query
     |> join(:inner, [i], l in "issue_labels", on: i.id == l.issue_id)
     |> where([_, l], l.label_id in ^label_ids)
@@ -46,7 +49,6 @@ defmodule Cympho.Issues do
   end
 
   defp maybe_filter_by_labels(query, _opts), do: query
-
 
   @default_page_size 25
 
@@ -108,7 +110,8 @@ defmodule Cympho.Issues do
   end
 
   def get_issue!(id),
-    do: Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
+    do:
+      Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
 
   def get_issue(id) do
     case Repo.get(Issue, id) do
@@ -131,25 +134,19 @@ defmodule Cympho.Issues do
          |> Issue.changeset(attrs)
          |> Repo.insert() do
       {:ok, issue} ->
-        Activities.log_activity(%{issue_id: issue.id, actor_type: Map.get(attrs, :actor_type, "system"), actor_id: Map.get(attrs, :actor_id), action: "created", metadata: %{title: issue.title}})
+        Activities.log_activity(%{
+          issue_id: issue.id,
+          actor_type: Map.get(attrs, :actor_type, "system"),
+          actor_id: Map.get(attrs, :actor_id),
+          action: "created",
+          metadata: %{title: issue.title}
+        })
+
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
         {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
       {:error, changeset} ->
         {:error, changeset}
-    end
-  end
-
-  defp maybe_auto_assign(%Issue{} = issue) do
-    case AutoAssignment.assign_issue(issue) do
-      {:ok, assigned} ->
-        assigned
-
-      {:error, :no_eligible_agent, _} ->
-        case AutoAssignment.queue_for_assignment(issue) do
-          {:ok, _} -> issue
-          {:error, _} -> issue
-        end
     end
   end
 
@@ -175,6 +172,7 @@ defmodule Cympho.Issues do
 
   def update_issue(%Issue{} = issue, attrs) do
     old_issue = issue
+
     with {:ok, updated} <- do_update_issue(issue, attrs) do
       updated = Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])
       Activities.log_issue_changes(old_issue, updated, attrs)
@@ -199,6 +197,16 @@ defmodule Cympho.Issues do
 
   def transition_issue(%Issue{} = issue, new_status, agent_id) when is_binary(agent_id) do
     cond do
+      # Execution policy is active and executor submits work
+      ExecutionState.active?(issue.execution_state) and
+      new_status == :in_review and
+      issue.execution_state.current_stage_type == :executor ->
+        do_executor_submit(issue, agent_id)
+
+      # Execution policy is active - only allow done via execution_policy_decision
+      ExecutionState.active?(issue.execution_state) and new_status == :done ->
+        {:error, :execution_policy_not_complete}
+
       new_status == :in_review ->
         with {:ok, agent} <- Agents.get_agent(agent_id),
              :ok <- validate_reviewer_role(agent),
@@ -219,6 +227,16 @@ defmodule Cympho.Issues do
 
   def transition_issue(%Issue{} = issue, new_status, nil) do
     cond do
+      # Execution policy is active and executor submits work (nil agent_id)
+      ExecutionState.active?(issue.execution_state) and
+      new_status == :in_review and
+      issue.execution_state.current_stage_type == :executor ->
+        do_executor_submit(issue, nil)
+
+      # Execution policy is active - only allow done via execution_policy_decision
+      ExecutionState.active?(issue.execution_state) and new_status == :done ->
+        {:error, :execution_policy_not_complete}
+
       new_status == :done and is_blocked?(issue) ->
         {:error, :blocked_by_active_issues}
 
@@ -232,6 +250,37 @@ defmodule Cympho.Issues do
 
   def transition_issue(%Issue{} = issue, new_status) do
     transition_issue(issue, new_status, nil)
+  end
+
+  defp do_executor_submit(%Issue{} = issue, executor_id) do
+    policy = ExecutionPolicies.get_execution_policy!(issue.execution_policy_id)
+    approved_state = ExecutionState.approve(issue.execution_state, executor_id)
+
+    case ExecutionState.advance(approved_state, policy, executor_id) do
+      {:done, final_state} ->
+        # Single-stage policy (executor only) - can mark done
+        update_issue(issue, %{
+          status: :done,
+          execution_state: final_state,
+          assignee_id: nil
+        })
+        |> tap(fn {:ok, _} ->
+          unblock_dependents(issue.id)
+          _ = Wakes.notify_children_completed(issue)
+        end)
+
+      {:ok, next_state} ->
+        next_assignee = next_state.current_participant
+
+        update_issue(issue, %{
+          status: :in_review,
+          execution_state: next_state,
+          assignee_id: next_assignee
+        })
+        |> tap(fn {:ok, _} ->
+          wake_next_participant(next_assignee, issue.id)
+        end)
+    end
   end
 
   defp validate_reviewer_role(%Agent{} = agent) do
@@ -312,11 +361,14 @@ defmodule Cympho.Issues do
     if issue.assignee_id do
       try do
         case Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id) do
-          :ok -> :ok
+          :ok ->
+            :ok
+
           {:error, reason} ->
             Logger.warning("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
               error: inspect(reason)
             )
+
             :ok
         end
       rescue
@@ -391,6 +443,7 @@ defmodule Cympho.Issues do
 
         attrs = %{assignee_id: agent_id, status: new_status}
         attrs = if required_role, do: Map.put(attrs, :assigned_role, required_role), else: attrs
+
         update_issue(current_issue, attrs)
         |> maybe_adjust_lock_version()
     end
@@ -416,18 +469,28 @@ defmodule Cympho.Issues do
         now = DateTime.utc_now()
 
         Repo.transaction(fn ->
-          Repo.query!("""
-            INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT DO NOTHING
-          """, [dump_uuid(blocked_issue.id), dump_uuid(blocker_issue.id), now, now])
+          Repo.query!(
+            """
+              INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
+              VALUES ($1, $2, $3, $4)
+              ON CONFLICT DO NOTHING
+            """,
+            [dump_uuid(blocked_issue.id), dump_uuid(blocker_issue.id), now, now]
+          )
 
           Repo.reload(blocked_issue)
         end)
         |> case do
           {:ok, issue} ->
             issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
-            Activities.log_activity(%{issue_id: blocked_issue.id, actor_type: "system", action: "blocker_added", metadata: %{blocker_id: blocker_issue.id}})
+
+            Activities.log_activity(%{
+              issue_id: blocked_issue.id,
+              actor_type: "system",
+              action: "blocker_added",
+              metadata: %{blocker_id: blocker_issue.id}
+            })
+
             Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
             {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
@@ -480,11 +543,49 @@ defmodule Cympho.Issues do
       {:error, :not_found}
     else
       issue = Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks, :labels])
-      Activities.log_activity(%{issue_id: blocked_issue.id, actor_type: "system", action: "blocker_removed", metadata: %{blocker_id: blocker_issue.id}})
+
+      Activities.log_activity(%{
+        issue_id: blocked_issue.id,
+        actor_type: "system",
+        action: "blocker_removed",
+        metadata: %{blocker_id: blocker_issue.id}
+      })
+
       Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
       {:ok, issue}
     end
   end
+
+  def add_label_to_issue(%Issue{} = issue, %Label{} = label) do
+    issue = Repo.preload(issue, :labels)
+    labels = issue.labels ++ [label]
+
+    issue
+    |> cast(%{}, [])
+    |> put_assoc(:labels, labels)
+    |> Repo.update()
+  end
+
+  def remove_label_from_issue(%Issue{} = issue, %Label{} = label) do
+    issue = Repo.preload(issue, :labels)
+    labels = Enum.reject(issue.labels, &(&1.id == label.id))
+
+    issue
+    |> cast(%{}, [])
+    |> put_assoc(:labels, labels)
+    |> Repo.update()
+  end
+
+  def set_issue_labels(%Issue{} = issue, label_ids) when is_list(label_ids) do
+    labels = Labels.list_labels() |> Enum.filter(&(&1.id in label_ids))
+    issue = Repo.preload(issue, :labels)
+
+    issue
+    |> cast(%{}, [])
+    |> put_assoc(:labels, labels)
+    |> Repo.update()
+  end
+
 
   def delete_issue(%Issue{} = issue) do
     case Repo.delete(issue) do
@@ -497,11 +598,136 @@ defmodule Cympho.Issues do
     end
   end
 
+  @doc """
+  Assigns an execution policy to an issue and initializes the execution state.
+  Sets the issue assignee to the executor_id.
+  """
+  @spec assign_execution_policy(Issue.t(), binary(), binary()) ::
+          {:ok, Issue.t()} | {:error, :not_found | :invalid_policy_stages | Ecto.Changeset.t()}
+  def assign_execution_policy(%Issue{} = issue, policy_id, executor_id) do
+    case ExecutionPolicies.get_execution_policy(policy_id) do
+      {:ok, %ExecutionPolicy{stage_configs: stage_configs} = policy} ->
+        if length(stage_configs) == 0 do
+          {:error, :invalid_policy_stages}
+        else
+          state = ExecutionState.initialize(policy, executor_id)
+
+          attrs = %{
+            execution_policy_id: policy_id,
+            execution_state: state,
+            assignee_id: executor_id,
+            status: :in_progress
+          }
+
+          update_issue(issue, attrs)
+        end
+
+      {:error, :not_found} ->
+        {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Handles a decision (approve/request_changes) for an issue with an execution policy.
+  Advances the execution state and assigns the issue to the next participant.
+
+  - :approve - advances to next stage or marks done if final stage
+  - :request_changes - returns to executor with in_progress status
+  """
+  @spec execution_policy_decision(Issue.t(), :approve | :request_changes, binary()) ::
+          {:ok, Issue.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def execution_policy_decision(%Issue{} = issue, decision, decided_by) do
+    if not ExecutionState.active?(issue.execution_state) do
+      {:error, :execution_policy_not_active}
+    else
+      policy = ExecutionPolicies.get_execution_policy!(issue.execution_policy_id)
+
+      case decision do
+        :approve ->
+          approved_state = ExecutionState.approve(issue.execution_state, decided_by)
+
+          case ExecutionState.advance(approved_state, policy, decided_by) do
+            {:done, final_state} ->
+              update_issue(issue, %{
+                status: :done,
+                execution_state: final_state,
+                assignee_id: nil
+              })
+              |> tap(fn {:ok, _} ->
+                unblock_dependents(issue.id)
+                _ = Wakes.notify_children_completed(issue)
+              end)
+
+            {:ok, next_state} ->
+              next_assignee = next_state.current_participant
+
+              update_issue(issue, %{
+                execution_state: next_state,
+                assignee_id: next_assignee,
+                status: :in_review
+              })
+              |> tap(fn {:ok, _} ->
+                wake_next_participant(next_assignee, issue.id)
+              end)
+          end
+
+        :request_changes ->
+          changes_state = ExecutionState.request_changes(issue.execution_state, decided_by)
+          executor_id = issue.execution_state.return_assignee || changes_state.current_participant
+
+          update_issue(issue, %{
+            execution_state: changes_state,
+            assignee_id: executor_id,
+            status: :in_progress
+          })
+          |> tap(fn {:ok, _} ->
+            wake_executor(executor_id, issue.id)
+          end)
+      end
+    end
+  end
+
+  defp wake_next_participant(assignee_id, issue_id) do
+    if assignee_id do
+      _ = Wakes.do_wake_agent(
+        assignee_id,
+        issue_id,
+        "execution_policy_stage_transition",
+        "system",
+        nil,
+        %{stage_type: "reviewer"}
+      )
+    end
+  end
+
+  defp wake_executor(executor_id, issue_id) do
+    if executor_id do
+      _ = Wakes.do_wake_agent(
+        executor_id,
+        issue_id,
+        "execution_policy_stage_transition",
+        "system",
+        nil,
+        %{stage_type: "executor", decision: "changes_requested"}
+      )
+    end
+  end
+
   def subscribe do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "issues")
   end
 
   def change_issue(%Issue{} = issue, attrs \\ %{}) do
     Issue.changeset(issue, attrs)
+  end
+
+  def assign_execution_policy(%Issue{} = issue, _policy_id, _executor_id) do
+    # Stub: business logic to be defined
+    {:ok, issue}
+  end
+
+  def execution_policy_decision(%Issue{} = issue, _decision, _decided_by) do
+    # Stub: business logic to be defined
+    {:ok, issue}
   end
 end

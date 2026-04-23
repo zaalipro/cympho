@@ -6,7 +6,10 @@ defmodule Cympho.IssuesLabelsTest do
 
   setup do
     {:ok, project} = Projects.create_project(%{name: "Test", prefix: "TST"})
-    {:ok, issue} = Issues.create_issue(%{title: "Test", description: "Desc", project_id: project.id})
+
+    {:ok, issue} =
+      Issues.create_issue(%{title: "Test", description: "Desc", project_id: project.id})
+
     {:ok, label} = Labels.create_label(%{name: "Bug", color: "#FF0000"})
     {:ok, label2} = Labels.create_label(%{name: "Feature", color: "#00FF00"})
     %{issue: issue, label: label, label2: label2, project: project}
@@ -21,7 +24,10 @@ defmodule Cympho.IssuesLabelsTest do
 
   test "filter by multiple label_ids AND", %{issue: issue, label: label, label2: label2} do
     {:ok, _} = Issues.add_label_to_issue(issue, label)
-    {:ok, issue2} = Issues.create_issue(%{title: "Other", description: "Desc2", project_id: issue.project_id})
+
+    {:ok, issue2} =
+      Issues.create_issue(%{title: "Other", description: "Desc2", project_id: issue.project_id})
+
     {:ok, _} = Issues.add_label_to_issue(issue2, label)
     {:ok, _} = Issues.add_label_to_issue(issue2, label2)
     result = Issues.list_issues(%{label_ids: [label.id, label2.id]})

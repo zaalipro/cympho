@@ -41,7 +41,13 @@ defmodule CymphoWeb.Router do
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
     live "/agents/:id/edit", AgentLive.Edit
+    live "/routines", RoutineLive.Index
+    live "/routines/new", RoutineLive.New
     live "/routines/:id", RoutineLive.Show
+    live "/routines/:id/edit", RoutineLive.Edit
+    live "/approvals", ApprovalLive.Index
+    live "/approvals/:id", ApprovalLive.Show
+    live "/settings", SettingsLive.Index
     live "/execution-policies", ExecutionPolicyLive.Index
     live "/execution-policies/new", ExecutionPolicyLive.New
     live "/execution-policies/:id", ExecutionPolicyLive.Show
@@ -55,6 +61,7 @@ defmodule CymphoWeb.Router do
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
 
     get "/search", SearchController, :search
+    get "/dashboard", DashboardController, :index
 
     resources "/goals", GoalController, only: [:index, :show, :create, :update, :delete]
 
@@ -77,12 +84,15 @@ defmodule CymphoWeb.Router do
       only: [:index, :create, :show, :update, :delete],
       name: "routine_trigger"
 
-post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_secret
+    post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_secret
 
     # Public webhook endpoint (no auth, validates via secret header)
     post "/routine-triggers/:public_id/fire", RoutineTriggerController, :fire
 
     resources "/issues", IssueController, only: [:create, :show]
+
+    patch "/agents/:id/status", AgentController, :update_status
+    get "/agents/:id/inbox", AgentController, :inbox
 
     get "/issues/:issue_id/documents", DocumentController, :index
     get "/issues/:issue_id/documents/:key", DocumentController, :show

@@ -1,8 +1,18 @@
 <div class="p-6 lg:p-8 max-w-6xl mx-auto">
   <.header title={@page_title}>
     <:actions>
-      <.app_link navigate={~p"/projects/new"} class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      <.app_link
+        navigate={~p"/projects/new"}
+        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M12 4v16m8-8H4"
+          />
+        </svg>
         New Project
       </.app_link>
     </:actions>
@@ -20,10 +30,16 @@
           <.badge variant="pill" value={project.prefix} />
         </div>
         <div class="flex items-center gap-2 pt-2">
-          <.app_link navigate={~p"/projects/#{project.id}"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-md transition-colors">
+          <.app_link
+            navigate={~p"/projects/#{project.id}"}
+            class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+          >
             View
           </.app_link>
-          <.app_link navigate={~p"/projects/#{project.id}/edit"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-md transition-colors">
+          <.app_link
+            navigate={~p"/projects/#{project.id}/edit"}
+            class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+          >
             Edit
           </.app_link>
           <button
@@ -40,12 +56,30 @@
     </.card>
   </div>
 
-  <div :if={Enum.empty?(@projects)} class="flex flex-col items-center justify-center py-20 text-center">
+  <div
+    :if={Enum.empty?(@projects)}
+    class="flex flex-col items-center justify-center py-20 text-center"
+  >
     <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
-      <svg class="w-6 h-6 text-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+      <svg
+        class="w-6 h-6 text-text-tertiary"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+        />
+      </svg>
     </div>
     <p class="text-sm text-text-tertiary mb-4">No projects yet.</p>
-    <.app_link navigate={~p"/projects/new"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
+    <.app_link
+      navigate={~p"/projects/new"}
+      class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors"
+    >
       Create your first project
     </.app_link>
   </div>

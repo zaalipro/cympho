@@ -14,6 +14,7 @@ defmodule CymphoWeb.AgentLive.Edit do
     case Agents.update_agent(socket.assigns.agent, agent_params) do
       {:ok, _agent} ->
         {:noreply, push_navigate(socket, to: ~p"/agents")}
+
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
     end

@@ -1,4 +1,3 @@
-
 <.header>
   {@issue.title}
   <:actions>
@@ -21,18 +20,28 @@
       <span>Created {@issue.inserted_at}</span>
     </div>
 
-
     <div class="labels-section">
       <h4>Labels</h4>
       <div class="label-list">
-        <span :for={label <- @issue.labels} class="label-badge" style={"background-color: #{label.color}; color: #{text_color(label.color)}"}>
+        <span
+          :for={label <- @issue.labels}
+          class="label-badge"
+          style={"background-color: #{label.color}; color: #{text_color(label.color)}"}
+        >
           {label.name}
-          <button type="button" class="label-remove-btn" phx-click="remove_label" phx-value-label_id={label.id}>&times;</button>
+          <button
+            type="button"
+            class="label-remove-btn"
+            phx-click="remove_label"
+            phx-value-label_id={label.id}
+          >
+            &times;
+          </button>
         </span>
         <span :if={Enum.empty?(@issue.labels)} class="no-labels">No labels</span>
       </div>
       <button type="button" class="phx-btn-secondary" phx-click="toggle_label_picker">
-        {@show_label_picker && "Cancel" || "Add Label"}
+        {(@show_label_picker && "Cancel") || "Add Label"}
       </button>
       <div :if={@show_label_picker} class="label-picker">
         <button
@@ -54,7 +63,7 @@
         class="phx-btn"
         phx-click="toggle_agent_panel"
       >
-        {@show_agent_panel && "Hide" || "Spawn"} Agent
+        {(@show_agent_panel && "Hide") || "Spawn"} Agent
       </button>
 
       <div :if={@show_agent_panel} class="agent-panel">

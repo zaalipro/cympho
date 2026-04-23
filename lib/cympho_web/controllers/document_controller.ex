@@ -22,7 +22,9 @@ defmodule CymphoWeb.DocumentController do
     case Documents.upsert_document(issue_id, key, attrs) do
       {:ok, document} ->
         conn |> put_status(:ok) |> render(:show, document: document)
-      {:error, changeset} -> {:error, changeset}
+
+      {:error, changeset} ->
+        {:error, changeset}
     end
   end
 
@@ -31,7 +33,9 @@ defmodule CymphoWeb.DocumentController do
       {:ok, document} ->
         {:ok, _document} = Documents.delete_document(document)
         send_resp(conn, :no_content, "")
-      {:error, :not_found} -> {:error, :not_found}
+
+      {:error, :not_found} ->
+        {:error, :not_found}
     end
   end
 
@@ -40,7 +44,9 @@ defmodule CymphoWeb.DocumentController do
       {:ok, document} ->
         revisions = Documents.list_revisions(document.id)
         render(conn, :revisions, revisions: revisions)
-      {:error, :not_found} -> {:error, :not_found}
+
+      {:error, :not_found} ->
+        {:error, :not_found}
     end
   end
 end

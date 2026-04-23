@@ -1,4 +1,7 @@
 defmodule Cympho.ExecutionPolicies do
+  @moduledoc """
+  The ExecutionPolicies context.
+  """
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.ExecutionPolicies.ExecutionPolicy

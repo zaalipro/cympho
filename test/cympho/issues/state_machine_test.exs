@@ -38,6 +38,7 @@ defmodule Cympho.Issues.StateMachineTest do
     test "in_progress to in_review is valid" do
       assert StateMachine.valid_transition?(:in_progress, :in_review) == true
     end
+
     test "in_progress to blocked is valid" do
       assert StateMachine.valid_transition?(:in_progress, :blocked) == true
     end
@@ -116,7 +117,13 @@ defmodule Cympho.Issues.StateMachineTest do
     end
 
     test "blocked transitions (can go anywhere)" do
-      assert StateMachine.valid_transitions(:blocked) == [:backlog, :todo, :in_progress, :in_review, :done]
+      assert StateMachine.valid_transitions(:blocked) == [
+               :backlog,
+               :todo,
+               :in_progress,
+               :in_review,
+               :done
+             ]
     end
 
     test "unknown status returns empty list" do
@@ -126,7 +133,14 @@ defmodule Cympho.Issues.StateMachineTest do
 
   describe "valid_states/0" do
     test "returns all valid states" do
-      assert StateMachine.valid_states() == [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
+      assert StateMachine.valid_states() == [
+               :backlog,
+               :todo,
+               :in_progress,
+               :in_review,
+               :done,
+               :blocked
+             ]
     end
   end
 

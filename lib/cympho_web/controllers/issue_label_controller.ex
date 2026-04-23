@@ -5,7 +5,8 @@ defmodule CymphoWeb.IssueLabelController do
   action_fallback CymphoWeb.FallbackController
 
   def index(conn, %{"issue_id" => issue_id}) do
-    with {:ok, issue} <- Issues.get_issue(issue_id), do: render(conn, :index, labels: issue.labels)
+    with {:ok, issue} <- Issues.get_issue(issue_id),
+         do: render(conn, :index, labels: issue.labels)
   end
 
   def add(conn, %{"issue_id" => issue_id, "label_id" => label_id}) do

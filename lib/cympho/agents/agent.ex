@@ -8,7 +8,11 @@ defmodule Cympho.Agents.Agent do
     field :name, :string
     field :url_key, :string
     field :role, Ecto.Enum, values: [:engineer, :product_manager, :designer, :ceo, :cto]
-    field :status, Ecto.Enum, values: [:idle, :running, :error, :sleeping, :offline], default: :idle
+
+    field :status, Ecto.Enum,
+      values: [:idle, :running, :error, :sleeping, :offline],
+      default: :idle
+
     field :config, :map, default: %{}
     field :instructions, :string
     field :instructions_path, :string
@@ -21,7 +25,16 @@ defmodule Cympho.Agents.Agent do
   @doc false
   def changeset(agent, attrs) do
     agent
-    |> cast(attrs, [:name, :url_key, :role, :status, :config, :instructions, :instructions_path, :max_concurrent_jobs, :last_heartbeat_at])
+    |> cast(attrs, [
+      :name,
+      :url_key,
+      :role,
+      :status,
+      :config,
+      :instructions,
+      :max_concurrent_jobs,
+      :last_heartbeat_at
+    ])
     |> validate_required([:name, :role])
     |> validate_inclusion(:role, [:engineer, :product_manager, :designer, :ceo, :cto])
     |> validate_inclusion(:status, [:idle, :running, :error, :sleeping, :offline])

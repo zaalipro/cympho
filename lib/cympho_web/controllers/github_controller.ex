@@ -20,7 +20,7 @@ defmodule CymphoWeb.GithubController do
     }
   }
   """
-  def webhook(conn, %{"action" => action, "pull_request" => pr} = params) do
+  def webhook(conn, %{"action" => action, "pull_request" => pr} = _params) do
     Logger.info("GitHub webhook received: action=#{action}, pr_url=#{pr["html_url"]}")
 
     pr_url = pr["html_url"]
@@ -60,6 +60,9 @@ defmodule CymphoWeb.GithubController do
     if pr["merged"] == true do
       Logger.info("PR merged for issue #{issue.id}, transitioning to done")
       Issues.transition_issue(issue, :done)
+    else
+      Logger.info("PR closed without merge for issue #{issue.id}, transitioning to blocked")
+      Issues.transition_issue(issue, :blocked)
     end
   end
 

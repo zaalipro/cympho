@@ -16,9 +16,9 @@ defmodule CymphoWeb.ApprovalLive.Show do
   @impl true
   def handle_event("approve", _params, socket) do
     case Approvals.resolve_approval(socket.assigns.approval.id, :approved, %{
-      resolved_by_user_id: nil,
-      resolution_reason: "Approved via UI"
-    }) do
+           resolved_by_user_id: nil,
+           resolution_reason: "Approved via UI"
+         }) do
       {:ok, approval} ->
         {:noreply, assign(socket, :approval, approval)}
 
@@ -29,9 +29,9 @@ defmodule CymphoWeb.ApprovalLive.Show do
 
   def handle_event("deny", _params, socket) do
     case Approvals.resolve_approval(socket.assigns.approval.id, :denied, %{
-      resolved_by_user_id: nil,
-      resolution_reason: "Denied via UI"
-    }) do
+           resolved_by_user_id: nil,
+           resolution_reason: "Denied via UI"
+         }) do
       {:ok, approval} ->
         {:noreply, assign(socket, :approval, approval)}
 

@@ -38,7 +38,9 @@ defmodule Cympho.Notifications do
     encoded = Jason.encode!(payload)
     headers = [{"Content-Type", "application/json"}]
 
-    case Finch.post(url, encoded, headers) do
+    req = Finch.build(:post, url, headers, encoded)
+
+    case Finch.request(req, Cympho.Finch) do
       {:ok, %{status: status}} when status in 200..299 -> {:ok, status}
       {:ok, %{status: status}} -> {:error, {:http_error, status}}
       {:error, reason} -> {:error, reason}

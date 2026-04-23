@@ -15,10 +15,16 @@ defmodule CymphoWeb.ProjectLive.FormComponent do
         <.input field={@changeset[:name]} label="Name" />
         <.input field={@changeset[:description]} label="Description" type="textarea" />
         <.input field={@changeset[:prefix]} label="Prefix" placeholder="e.g., PROJ" />
-        <.select name="project[status]" label="Status" options={[Active: "active", Archived: "archived"]} />
+        <.select
+          name="project[status]"
+          label="Status"
+          options={[Active: "active", Archived: "archived"]}
+        />
 
         <:actions>
-          <.button type="submit">{if @project.id, do: "Update Project", else: "Create Project"}</.button>
+          <.button type="submit">
+            {if @project.id, do: "Update Project", else: "Create Project"}
+          </.button>
         </:actions>
       </.simple_form>
     </div>
@@ -35,6 +41,7 @@ defmodule CymphoWeb.ProjectLive.FormComponent do
       {:ok, project} ->
         send(self(), {:project_updated, project})
         {:noreply, socket}
+
       {:error, changeset} ->
         {:noreply, assign(socket, changeset: changeset)}
     end
@@ -45,6 +52,7 @@ defmodule CymphoWeb.ProjectLive.FormComponent do
       {:ok, project} ->
         send(self(), {:project_created, project})
         {:noreply, socket}
+
       {:error, changeset} ->
         {:noreply, assign(socket, changeset: changeset)}
     end

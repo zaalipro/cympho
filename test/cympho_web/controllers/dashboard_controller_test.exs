@@ -16,7 +16,14 @@ defmodule CymphoWeb.DashboardControllerTest do
     end
 
     test "reflects created agents and issues", %{conn: conn} do
-      {:ok, _} = Agents.create_agent(%{name: "Dash Agent", role: :engineer, status: :idle, url_key: "dash1"})
+      {:ok, _} =
+        Agents.create_agent(%{
+          name: "Dash Agent",
+          role: :engineer,
+          status: :idle,
+          url_key: "dash1"
+        })
+
       {:ok, _} = Issues.create_issue(%{title: "Dash Issue", description: "desc"})
 
       conn = get(conn, ~p"/api/dashboard")

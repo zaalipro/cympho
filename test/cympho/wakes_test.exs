@@ -62,6 +62,7 @@ defmodule Cympho.WakesTest do
       assert {:ok, agent_wake} = result
       assert agent_wake.reason == "issue_comment_mentioned"
     end
+    end
 
     test "returns error when issue is not active", %{issue: issue} do
       {:ok, _} = Issues.update_issue(issue, %{status: :backlog})

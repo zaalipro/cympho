@@ -74,7 +74,15 @@ defmodule Cympho.GoalsTest do
 
     test "creates goal with all fields" do
       {:ok, project} = Cympho.Projects.create_project(%{name: "Proj", prefix: "PRJ"})
-      attrs = %{title: "Full Goal", description: "Desc", status: "completed", priority: "high", project_id: project.id}
+
+      attrs = %{
+        title: "Full Goal",
+        description: "Desc",
+        status: "completed",
+        priority: "high",
+        project_id: project.id
+      }
+
       assert {:ok, %Goal{} = goal} = Goals.create_goal(attrs)
       assert goal.title == "Full Goal"
       assert goal.status == "completed"

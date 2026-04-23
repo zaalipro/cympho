@@ -56,9 +56,16 @@ defmodule Cympho.Users.User do
 
   defp validate_webhook_url(changeset) do
     case get_change(changeset, :webhook_url) do
-      nil -> changeset
-      url when url == "" -> changeset
-      _url -> validate_format(changeset, :webhook_url, ~r/^https?:\/\/.+/, message: "must be a valid URL")
+      nil ->
+        changeset
+
+      url when url == "" ->
+        changeset
+
+      _url ->
+        validate_format(changeset, :webhook_url, ~r/^https?:\/\/.+/,
+          message: "must be a valid URL"
+        )
     end
   end
 end

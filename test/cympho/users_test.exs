@@ -156,6 +156,7 @@ defmodule Cympho.UsersTest do
   describe "delete_user/1" do
     test "deletes the user", %{user: user} do
       assert :ok = Users.delete_user(user)
+
       assert_raise Ecto.NoResultsError, fn ->
         Users.get_user!(user.id)
       end

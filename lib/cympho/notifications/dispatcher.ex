@@ -7,8 +7,10 @@ defmodule Cympho.Notifications.Dispatcher do
   via warm_cache/0 or invalidated via invalidate_cache/1.
   """
 
+  use GenServer
+
   import Ecto.Query, warn: false
-  alias Cympho.Notifications.{Channel, EmailChannel, Message, TelegramChannel, WebhookChannel}
+  alias Cympho.Notifications.{EmailChannel, Message, TelegramChannel, WebhookChannel}
   alias Cympho.Notifications.NotificationPreference
   alias Cympho.Users
 
@@ -26,7 +28,7 @@ defmodule Cympho.Notifications.Dispatcher do
   end
 
   @impl true
-  def init(opts) do
+  def init(_opts) do
     table_opts = [:set, :named_table, :public, read_concurrency: true, write_concurrency: true]
     :ets.new(@cache_table, table_opts)
     warm_cache()
@@ -135,7 +137,11 @@ defmodule Cympho.Notifications.Dispatcher do
   end
 
   defp cache_preference(%NotificationPreference{} = pref) do
-    existing = :ets.lookup(@cache_table, pref.user_id) |> List.wrap() |> Enum.flat_map(fn {_, ps} -> ps end)
+    existing =
+      :ets.lookup(@cache_table, pref.user_id)
+      |> List.wrap()
+      |> Enum.flat_map(fn {_, ps} -> ps end)
+
     new_prefs = Enum.reject(existing ++ [pref], fn p -> p.id == pref.id end)
     :ets.insert(@cache_table, {pref.user_id, new_prefs})
   end

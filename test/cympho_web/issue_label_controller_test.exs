@@ -6,7 +6,10 @@ defmodule CymphoWeb.IssueLabelControllerTest do
 
   setup do
     {:ok, project} = Projects.create_project(%{name: "Test", prefix: "TST"})
-    {:ok, issue} = Issues.create_issue(%{title: "Test", description: "Desc", project_id: project.id})
+
+    {:ok, issue} =
+      Issues.create_issue(%{title: "Test", description: "Desc", project_id: project.id})
+
     {:ok, label} = Labels.create_label(%{name: "Bug", color: "#FF0000"})
     %{issue: issue, label: label}
   end

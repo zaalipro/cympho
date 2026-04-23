@@ -14,7 +14,11 @@ defmodule Cympho.Issues.Issue do
   schema "issues" do
     field :title, :string
     field :description, :string
-    field :status, Ecto.Enum, values: [:backlog, :todo, :in_progress, :in_review, :done, :blocked], default: :backlog
+
+    field :status, Ecto.Enum,
+      values: [:backlog, :todo, :in_progress, :in_review, :done, :blocked],
+      default: :backlog
+
     field :priority, Ecto.Enum, values: [:low, :medium, :high], default: :medium
     field :lock_version, :integer, default: 0
     field :github_pr_url, :string
@@ -46,7 +50,18 @@ defmodule Cympho.Issues.Issue do
 
   def changeset(issue, attrs) do
     issue
-    |> cast(attrs, [:title, :description, :status, :priority, :assignee_id, :project_id, :github_pr_url, :parent_id, :execution_policy_id, :execution_state])
+    |> cast(attrs, [
+      :title,
+      :description,
+      :status,
+      :priority,
+      :assignee_id,
+      :project_id,
+      :github_pr_url,
+      :parent_id,
+      :execution_policy_id,
+      :execution_state
+    ])
     |> validate_required([:title, :description])
     |> validate_length(:title, min: 1, max: 255)
     |> validate_length(:description, min: 1)
@@ -55,4 +70,11 @@ defmodule Cympho.Issues.Issue do
 
   def status_options, do: [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
   def priority_options, do: [:low, :medium, :high]
+
+  def role_authorized?(_agent_role, nil), do: true
+
+  def role_authorized?(agent_role, required_role) do
+    role_order = %{ceo: 3, cto: 2, engineer: 1, product_manager: 1, designer: 1}
+    Map.get(role_order, agent_role, 0) >= Map.get(role_order, required_role, 0)
+  end
 end

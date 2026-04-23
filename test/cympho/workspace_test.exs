@@ -71,7 +71,12 @@ defmodule Cympho.Workspace.RepoUrlTest do
         })
 
       original = Application.get_env(:cympho, :workspace_default_repo)
-      Application.put_env(:cympho, :workspace_default_repo, "https://fallback.example.com/repo.git")
+
+      Application.put_env(
+        :cympho,
+        :workspace_default_repo,
+        "https://fallback.example.com/repo.git"
+      )
 
       on_exit(fn ->
         if original do
@@ -86,7 +91,12 @@ defmodule Cympho.Workspace.RepoUrlTest do
 
     test "falls back to app env when project not found" do
       original = Application.get_env(:cympho, :workspace_default_repo)
-      Application.put_env(:cympho, :workspace_default_repo, "https://fallback.example.com/repo.git")
+
+      Application.put_env(
+        :cympho,
+        :workspace_default_repo,
+        "https://fallback.example.com/repo.git"
+      )
 
       on_exit(fn ->
         if original do

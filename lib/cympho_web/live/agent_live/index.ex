@@ -74,5 +74,6 @@ defmodule CymphoWeb.AgentLive.Index do
   def show_spawn_button?(%Agents.Agent{} = agent) do
     Agents.spawnable_roles(agent) |> length() > 1
   end
+
   def show_spawn_button?(_), do: false
 end
