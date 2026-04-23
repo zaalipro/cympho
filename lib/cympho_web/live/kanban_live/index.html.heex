@@ -179,18 +179,13 @@
                     <% end %>
                   <% else %>
                     <%= if Enum.empty?(issues) do %>
-                      <div class="text-center py-8">
-                        <p class="text-xs text-text-quaternary">No issues</p>
-                      </div>
+                      <.empty_column_state status={status} />
                     <% end %>
                     <%= for issue <- issues do %>
                       <.issue_card
                         issue={issue}
                         status={status}
-                        agents={@agents}
                         agent_heartbeat_states={@agent_heartbeat_states}
-                        editing_card_id={@editing_card_id}
-                        card_action_open={@card_action_open}
                       />
                     <% end %>
                   <% end %>
