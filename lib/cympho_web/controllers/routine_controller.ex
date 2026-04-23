@@ -1,80 +1,5 @@
 defmodule CymphoWeb.RoutineController do
   use CymphoWeb, :controller
-<<<<<<< HEAD
-
-  alias Cympho.Routines
-  alias Cympho.Routines.Routine
-
-  action_fallback CymphoWeb.FallbackController
-
-  def index(conn, _params) do
-    routines = Routines.list_routines()
-    render(conn, :index, routines: routines)
-  end
-
-  def create(conn, %{"routine" => routine_params}) do
-    with {:ok, %Routine{} = routine} <- Routines.create_routine(routine_params) do
-      conn
-      |> put_status(:created)
-      |> render(:show, routine: routine)
-    end
-  end
-
-  def show(conn, %{"id" => id}) do
-    case Routines.get_routine(id) do
-      {:ok, routine} ->
-        render(conn, :show, routine: routine)
-
-      {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> put_view(json: CymphoWeb.ErrorJSON)
-        |> render(:"404")
-    end
-  end
-
-  def update(conn, %{"id" => id, "routine" => routine_params}) do
-    case Routines.get_routine(id) do
-      {:ok, routine} ->
-        with {:ok, %Routine{} = routine} <- Routines.update_routine(routine, routine_params) do
-          render(conn, :show, routine: routine)
-        end
-
-      {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> put_view(json: CymphoWeb.ErrorJSON)
-        |> render(:"404")
-    end
-  end
-
-  def delete(conn, %{"id" => id}) do
-    case Routines.get_routine(id) do
-      {:ok, routine} ->
-        Routines.delete_routine(routine)
-        send_resp(conn, :no_content, "")
-
-      {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> put_view(json: CymphoWeb.ErrorJSON)
-        |> render(:"404")
-    end
-  end
-
-  def pause(conn, %{"id" => id}) do
-    case Routines.get_routine(id) do
-      {:ok, routine} ->
-        with {:ok, %Routine{} = routine} <- Routines.pause_routine(routine) do
-          render(conn, :show, routine: routine)
-        end
-
-      {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> put_view(json: CymphoWeb.ErrorJSON)
-        |> render(:"404")
-=======
   plug :accepts, ["json"]
 
   alias Cympho.Routines
@@ -136,54 +61,59 @@ defmodule CymphoWeb.RoutineController do
     case Routines.pause_routine(routine) do
       {:ok, paused} -> json(conn, %{data: serialize(paused)})
       {:error, reason} -> conn |> put_status(:conflict) |> json(%{error: reason})
->>>>>>> origin/LLM-341/routine-triggers
     end
   end
 
   def resume(conn, %{"id" => id}) do
-<<<<<<< HEAD
-    case Routines.get_routine(id) do
-      {:ok, routine} ->
-        with {:ok, %Routine{} = routine} <- Routines.resume_routine(routine) do
-          render(conn, :show, routine: routine)
-        end
-
-      {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> put_view(json: CymphoWeb.ErrorJSON)
-        |> render(:"404")
-=======
     routine = Routines.get_routine!(id)
     case Routines.resume_routine(routine) do
       {:ok, resumed} -> json(conn, %{data: serialize(resumed)})
       {:error, reason} -> conn |> put_status(:conflict) |> json(%{error: reason})
->>>>>>> origin/LLM-341/routine-triggers
     end
   end
 
   def archive(conn, %{"id" => id}) do
-<<<<<<< HEAD
-    case Routines.get_routine(id) do
-      {:ok, routine} ->
-        with {:ok, %Routine{} = routine} <- Routines.archive_routine(routine) do
-          render(conn, :show, routine: routine)
-        end
-
-      {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> put_view(json: CymphoWeb.ErrorJSON)
-        |> render(:"404")
-    end
-  end
-=======
     routine = Routines.get_routine!(id)
     case Routines.archive_routine(routine) do
       {:ok, archived} -> json(conn, %{data: serialize(archived)})
       {:error, reason} -> conn |> put_status(:conflict) |> json(%{error: reason})
     end
   end
+
+  def run(conn, %{"id" => id}) do
+    case Cympho.RoutineTriggers.manual_run(id, []) do
+      {:ok, %{run: run, issue: issue}} ->
+        conn
+        |> put_status(:created)
+        |> json(%{data: serialize_run(run), issue_id: issue.id})
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: "routine not found"})
+
+      {:error, :routine_paused} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: "routine is paused"})
+
+      {:error, reason} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{error: "manual run failed", reason: inspect(reason)})
+    end
+  end
+
+  def runs(conn, %{"id" => id}) do
+    routine = Routines.get_routine!(id)
+    limit = conn.params["limit"] |> parse_int() |> Kernel.||(50)
+    runs = Cympho.RoutineTriggers.list_runs(routine.id, limit: limit)
+    json(conn, %{data: Enum.map(runs, &serialize_run/1)})
+  end
+
+  defp parse_int(nil), do: nil
+  defp parse_int(s) when is_binary(s), do: String.to_integer(s)
+  defp parse_int(n) when is_integer(n), do: n
 
   defp translate_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
@@ -205,5 +135,19 @@ defmodule CymphoWeb.RoutineController do
       updated_at: routine.updated_at
     }
   end
->>>>>>> origin/LLM-341/routine-triggers
+
+  defp serialize_run(run) do
+    %{
+      id: run.id,
+      status: run.status,
+      trigger_type: run.trigger_type,
+      triggered_at: run.triggered_at,
+      completed_at: run.completed_at,
+      routine_id: run.routine_id,
+      trigger_id: run.trigger_id,
+      issue_id: run.issue_id,
+      inserted_at: run.inserted_at,
+      updated_at: run.updated_at
+    }
+  end
 end

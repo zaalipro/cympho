@@ -6,6 +6,7 @@ defmodule Cympho.Approvals do
   alias Cympho.Repo
   alias Cympho.Approvals.Approval
   alias Cympho.Approvals.ApprovalIssue
+  alias Cympho.Activities
 
   def list_approvals(opts \\ %{}) do
     query = from(a in Approval, order_by: [desc: a.inserted_at])
@@ -59,6 +60,17 @@ defmodule Cympho.Approvals do
     |> case do
       {:ok, %{approval: approval}} ->
         approval = Repo.preload(approval, [:requested_by, :issues])
+
+        Enum.each(issue_ids, fn issue_id ->
+          Activities.log_activity(%{
+            issue_id: issue_id,
+            actor_type: "agent",
+            actor_id: Map.get(attrs, :requested_by_id) || Map.get(attrs, "requested_by_id"),
+            action: "approval_created",
+            metadata: %{approval_id: approval.id}
+          })
+        end)
+
         Phoenix.PubSub.broadcast(Cympho.PubSub, "approvals", {:approval_created, approval})
         {:ok, approval}
 
@@ -82,6 +94,17 @@ defmodule Cympho.Approvals do
     |> case do
       {:ok, updated} ->
         updated = Repo.preload(updated, [:requested_by, :resolved_by, :issues])
+
+        Enum.each(updated.issues, fn issue ->
+          Activities.log_activity(%{
+            issue_id: issue.id,
+            actor_type: "user",
+            actor_id: Map.get(opts, :resolved_by_user_id),
+            action: "approval_resolved",
+            metadata: %{approval_id: updated.id, status: to_string(status)}
+          })
+        end)
+
         Phoenix.PubSub.broadcast(Cympho.PubSub, "approvals", {:approval_resolved, updated})
         maybe_wake_agent(updated)
         {:ok, updated}

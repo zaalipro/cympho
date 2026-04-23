@@ -3,22 +3,25 @@ defmodule Cympho.Issues do
   The Issues context for managing issues and their CRUD operations.
   """
   import Ecto.Query, warn: false
-  import Ecto.Changeset, only: [optimistic_lock: 2]
+  import Ecto.Changeset, only: [optimistic_lock: 2, cast: 3, put_assoc: 3]
   require Logger
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
-  alias Cympho.Agents.Agent
+  alias Cympho.Issues.AutoAssignment
   alias Cympho.Agents
-  alias Cympho.Approvals
+  alias Cympho.Agents.Agent
   alias Cympho.Comments
-  alias Cympho.Approvals
+  alias Cympho.Labels
+  alias Cympho.Labels.Label
+  alias Cympho.Activities
 
   def list_issues(opts \\ %{}) do
     Issue
     |> maybe_filter_by_project(opts)
+    |> maybe_filter_by_labels(opts)
     |> Repo.all()
-    |> Repo.preload([:comments, :blocked_by, :blocks, :assignee])
+    |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
   end
 
   defp maybe_filter_by_project(query, %{project_id: project_id}) do
@@ -27,20 +30,96 @@ defmodule Cympho.Issues do
 
   defp maybe_filter_by_project(query, _opts), do: query
 
+  defp maybe_filter_by_labels(query, %{label_id: label_id}) do
+    query
+    |> join(:inner, [i], l in "issue_labels", on: i.id == l.issue_id)
+    |> where([_, l], l.label_id == ^label_id)
+  end
+
+  defp maybe_filter_by_labels(query, %{label_ids: label_ids}) when is_list(label_ids) and length(label_ids) > 0 do
+    query
+    |> join(:inner, [i], l in "issue_labels", on: i.id == l.issue_id)
+    |> where([_, l], l.label_id in ^label_ids)
+    |> group_by([i], i.id)
+    |> having([_, l], count(l.label_id) == ^length(label_ids))
+  end
+
+  defp maybe_filter_by_labels(query, _opts), do: query
+
+
+  @default_page_size 25
+
+  def list_issues_paginated(params \\ %{}) do
+    page = Map.get(params, "page", "1") |> to_int_max(1, 1)
+    per_page = Map.get(params, "per_page", "#{@default_page_size}") |> to_int_max(1, 100)
+    status = Map.get(params, "status")
+    priority = Map.get(params, "priority")
+
+    query =
+      Issue
+      |> maybe_filter_by_status(status)
+      |> maybe_filter_by_priority(priority)
+      |> order_by(desc: :updated_at)
+
+    total = Repo.aggregate(query, :count)
+    total_pages = max(1, ceil(total / per_page))
+    page = min(page, total_pages)
+    offset = (page - 1) * per_page
+
+    issues =
+      query
+      |> limit(^per_page)
+      |> offset(^offset)
+      |> Repo.all()
+      |> Repo.preload([:comments, :blocked_by, :blocks, :assignee])
+
+    %{
+      issues: issues,
+      page: page,
+      per_page: per_page,
+      total: total,
+      total_pages: total_pages
+    }
+  end
+
+  defp maybe_filter_by_status(query, nil), do: query
+  defp maybe_filter_by_status(query, ""), do: query
+  defp maybe_filter_by_status(query, status), do: where(query, status: ^status)
+
+  defp maybe_filter_by_priority(query, nil), do: query
+  defp maybe_filter_by_priority(query, ""), do: query
+  defp maybe_filter_by_priority(query, priority), do: where(query, priority: ^priority)
+
+  defp to_int_max(value, min, max) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, _} -> n |> max(min) |> min(max)
+      :error -> min
+    end
+  end
+
+  defp to_int_max(value, min, max) when is_integer(value), do: value |> max(min) |> min(max)
+
   def list_issues_by_project(project_id) do
     Issue
     |> where(project_id: ^project_id)
     |> Repo.all()
-    |> Repo.preload([:comments, :blocked_by, :blocks])
+    |> Repo.preload([:comments, :blocked_by, :blocks, :labels])
   end
 
   def get_issue!(id),
-    do: Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee])
+    do: Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
 
   def get_issue(id) do
     case Repo.get(Issue, id) do
       nil -> {:error, :not_found}
-      issue -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee])}
+      issue -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee, :labels])}
+    end
+  end
+
+  def get_issue_by_pr_url(pr_url) do
+    case Repo.one(from i in Issue, where: i.github_pr_url == ^pr_url, preload: [:project]) do
+      nil -> {:error, :not_found}
+      issue -> {:ok, issue}
     end
   end
 
@@ -51,11 +130,25 @@ defmodule Cympho.Issues do
          |> Issue.changeset(attrs)
          |> Repo.insert() do
       {:ok, issue} ->
+        Activities.log_activity(%{issue_id: issue.id, actor_type: Map.get(attrs, :actor_type, "system"), actor_id: Map.get(attrs, :actor_id), action: "created", metadata: %{title: issue.title}})
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
-        {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
+        {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
       {:error, changeset} ->
         {:error, changeset}
+    end
+  end
+
+  defp maybe_auto_assign(%Issue{} = issue) do
+    case AutoAssignment.assign_issue(issue) do
+      {:ok, assigned} ->
+        assigned
+
+      {:error, :no_eligible_agent, _} ->
+        case AutoAssignment.queue_for_assignment(issue) do
+          {:ok, _} -> issue
+          {:error, _} -> issue
+        end
     end
   end
 
@@ -80,9 +173,12 @@ defmodule Cympho.Issues do
   defp maybe_generate_identifier(attrs), do: attrs
 
   def update_issue(%Issue{} = issue, attrs) do
-    with {:ok, issue} <- do_update_issue(issue, attrs) do
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
-      {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
+    old_issue = issue
+    with {:ok, updated} <- do_update_issue(issue, attrs) do
+      updated = Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])
+      Activities.log_issue_changes(old_issue, updated, attrs)
+      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, updated})
+      {:ok, updated}
     end
   end
 
@@ -147,9 +243,7 @@ defmodule Cympho.Issues do
 
   defp do_transition(%Issue{} = issue, new_status) do
     with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
-      if new_status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
       if new_status == :done, do: unblock_dependents(issue.id)
-      if new_status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
       {:ok, updated}
     end
   end
@@ -187,9 +281,7 @@ defmodule Cympho.Issues do
           where: bb.blocking_issue_id == type(^blocker_issue_id, Ecto.UUID),
           select: bb.blocked_issue_id
       )
-      |> Enum.map(fn id ->
-        if is_binary(id) and byte_size(id) == 16, do: Ecto.UUID.load!(id), else: id
-      end)
+      |> Enum.map(&load_uuid/1)
 
     Enum.each(dependent_ids, fn dependent_id ->
       case get_issue(dependent_id) do
@@ -214,9 +306,16 @@ defmodule Cympho.Issues do
   defp wake_assignee(%Issue{} = issue) do
     if issue.assignee_id do
       try do
-        :ok = Cympho.AgentHeartbeat.set_working(issue.assignee_id, issue.id)
+        case Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id) do
+          :ok -> :ok
+          {:error, reason} ->
+            Logger.warning("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
+              error: inspect(reason)
+            )
+            :ok
+        end
       rescue
-        e in [Ecto.QueryError, DBConnection.Error, ArgumentError] ->
+        e ->
           _ =
             Logger.warning("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
               error: inspect(e)
@@ -236,18 +335,35 @@ defmodule Cympho.Issues do
     })
   end
 
-  def checkout_issue(%Issue{} = issue, %Agent{} = agent) do
-    checkout_issue(issue, agent.id)
+  @spec load_uuid(binary()) :: binary()
+  defp load_uuid(id) do
+    if is_binary(id) and byte_size(id) == 16 do
+      Ecto.UUID.load!(id)
+    else
+      id
+    end
   end
 
-  def checkout_issue(%Agent{} = agent, %Issue{} = issue) do
-    checkout_issue(issue, agent.id)
+  @spec dump_uuid(binary()) :: binary()
+  defp dump_uuid(id) do
+    Ecto.UUID.dump!(id)
   end
 
-  def checkout_issue(%Issue{} = issue, agent_id) do
+  def checkout_issue(issue, agent_id, required_role \\ nil)
+
+  def checkout_issue(%Issue{} = issue, %Agent{} = agent, required_role) do
+    checkout_issue(issue, agent.id, required_role)
+  end
+
+  def checkout_issue(%Agent{} = agent, %Issue{} = issue, required_role) do
+    checkout_issue(issue, agent.id, required_role)
+  end
+
+  def checkout_issue(%Issue{} = issue, agent_id, required_role) do
     # Only reload if issue appears unassigned — avoids N+1 on heartbeat ticks
     # when the issue was freshly fetched as unassigned.
     current_issue = if issue.assignee_id == nil, do: Repo.reload(issue), else: issue
+    agent = Agents.get_agent!(agent_id)
 
     cond do
       current_issue.assignee_id != nil and current_issue.assignee_id != agent_id ->
@@ -256,13 +372,21 @@ defmodule Cympho.Issues do
       current_issue.assignee_id == agent_id ->
         {:ok, current_issue}
 
+      Agents.is_agent_at_capacity?(agent) ->
+        {:error, :agent_at_capacity}
+
+      not Issue.role_authorized?(agent.role, required_role) ->
+        {:error, :chain_of_command_violation}
+
       true ->
         new_status =
           if current_issue.status in [:backlog, :todo],
             do: :in_progress,
             else: current_issue.status
 
-        update_issue(current_issue, %{assignee_id: agent_id, status: new_status})
+        attrs = %{assignee_id: agent_id, status: new_status}
+        attrs = if required_role, do: Map.put(attrs, :assigned_role, required_role), else: attrs
+        update_issue(current_issue, attrs)
         |> maybe_adjust_lock_version()
     end
   end
@@ -284,25 +408,26 @@ defmodule Cympho.Issues do
         {:error, :circular_blocker}
 
       true ->
-        blocked_binary = Ecto.UUID.dump!(blocked_issue.id)
-        blocker_binary = Ecto.UUID.dump!(blocker_issue.id)
         now = DateTime.utc_now()
 
         Repo.transaction(fn ->
-          Repo.query!(
-            """
-              INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
-              VALUES ($1, $2, $3, $4)
-              ON CONFLICT DO NOTHING
-            """,
-            [blocked_binary, blocker_binary, now, now]
-          )
+          Repo.query!("""
+            INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT DO NOTHING
+          """, [dump_uuid(blocked_issue.id), dump_uuid(blocker_issue.id), now, now])
 
           Repo.reload(blocked_issue)
         end)
         |> case do
-          {:ok, issue} -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks])}
-          {:error, reason} -> {:error, reason}
+          {:ok, issue} ->
+            issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
+            Activities.log_activity(%{issue_id: blocked_issue.id, actor_type: "system", action: "blocker_added", metadata: %{blocker_id: blocker_issue.id}})
+            Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
+            {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
+
+          {:error, reason} ->
+            {:error, reason}
         end
     end
   end
@@ -326,12 +451,7 @@ defmodule Cympho.Issues do
         )
 
       Enum.any?(blocker_ids, fn blocker_id ->
-        blocker_string =
-          if is_binary(blocker_id) and byte_size(blocker_id) == 16 do
-            Ecto.UUID.load!(blocker_id)
-          else
-            blocker_id
-          end
+        blocker_string = load_uuid(blocker_id)
 
         if blocker_string == target_id do
           true
@@ -354,15 +474,43 @@ defmodule Cympho.Issues do
     if count == 0 do
       {:error, :not_found}
     else
-      {:ok, Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks])}
+      issue = Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks, :labels])
+      Activities.log_activity(%{issue_id: blocked_issue.id, actor_type: "system", action: "blocker_removed", metadata: %{blocker_id: blocker_issue.id}})
+      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
+      {:ok, issue}
     end
   end
 
+  def add_label_to_issue(%Issue{} = issue, %Label{} = label) do
+    issue = Repo.preload(issue, :labels)
+    labels = issue.labels ++ [label]
+    issue
+    |> cast(%{}, [])
+    |> put_assoc(:labels, labels)
+    |> Repo.update()
+  end
+
+  def remove_label_from_issue(%Issue{} = issue, %Label{} = label) do
+    issue = Repo.preload(issue, :labels)
+    labels = Enum.reject(issue.labels, &(&1.id == label.id))
+    issue
+    |> cast(%{}, [])
+    |> put_assoc(:labels, labels)
+    |> Repo.update()
+  end
+
+  def set_issue_labels(%Issue{} = issue, label_ids) when is_list(label_ids) do
+    labels = Labels.list_labels() |> Enum.filter(&(&1.id in label_ids))
+    issue = Repo.preload(issue, :labels)
+    issue
+    |> cast(%{}, [])
+    |> put_assoc(:labels, labels)
+    |> Repo.update()
+  end
+
   def delete_issue(%Issue{} = issue) do
-    Approvals.cancel_pending_for_issue(issue.id)
     case Repo.delete(issue) do
       {:ok, _issue} ->
-        Approvals.cancel_pending_for_issue(issue.id)
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_deleted, issue.id})
         :ok
 

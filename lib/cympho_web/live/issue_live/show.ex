@@ -63,7 +63,7 @@ defmodule CymphoWeb.IssueLive.Show do
   @impl true
   def handle_info({:issue_updated, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      {:noreply, assign(socket, :issue, updated_issue)}
+      {:noreply, socket |> assign(:issue, updated_issue) |> assign(:activities, Activities.list_activities(updated_issue.id))}
     else
       {:noreply, socket}
     end
@@ -75,7 +75,7 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:comment_created, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      {:noreply, assign(socket, :issue, updated_issue)}
+      {:noreply, socket |> assign(:issue, updated_issue) |> assign(:activities, Activities.list_activities(updated_issue.id))}
     else
       {:noreply, socket}
     end
@@ -83,7 +83,7 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:comment_updated, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      {:noreply, assign(socket, :issue, updated_issue)}
+      {:noreply, socket |> assign(:issue, updated_issue) |> assign(:activities, Activities.list_activities(updated_issue.id))}
     else
       {:noreply, socket}
     end
@@ -91,7 +91,7 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:comment_deleted, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      {:noreply, assign(socket, :issue, updated_issue)}
+      {:noreply, socket |> assign(:issue, updated_issue) |> assign(:activities, Activities.list_activities(updated_issue.id))}
     else
       {:noreply, socket}
     end

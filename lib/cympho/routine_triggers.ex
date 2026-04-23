@@ -343,6 +343,94 @@ defmodule Cympho.RoutineTriggers do
     end
   end
 
+  # --- Manual Run ---
+
+  @doc """
+  Manually triggers a routine run without requiring a trigger.
+
+  Creates a RoutineRun with trigger_type "manual", an Issue, and wakes the agent.
+  """
+  def manual_run(routine, opts \\ [])
+
+  def manual_run(%Routine{} = routine, opts) do
+    routine = Repo.preload(routine, [:agent, :project])
+
+    cond do
+      routine.status != :active and routine.status != "active" ->
+        {:error, :routine_paused}
+
+      true ->
+        do_manual_run(routine, opts)
+    end
+  end
+
+  def manual_run(routine_id, opts) when is_binary(routine_id) do
+    case Repo.get(Routine, routine_id) do
+      nil -> {:error, :not_found}
+      routine -> manual_run(routine, opts)
+    end
+  end
+
+  defp do_manual_run(routine, _opts) do
+    now = DateTime.utc_now()
+
+    run_attrs = %{
+      "trigger_type" => "manual",
+      "triggered_at" => now,
+      "routine_id" => routine.id,
+      "trigger_id" => nil,
+      "status" => "pending"
+    }
+
+    multi =
+      Ecto.Multi.new()
+      |> Ecto.Multi.insert(:run, RoutineRun.changeset(%RoutineRun{}, run_attrs))
+      |> Ecto.Multi.run(:issue, fn repo, %{run: run} ->
+        create_manual_run_issue(repo, run, routine, now)
+      end)
+      |> Ecto.Multi.run(:update_run, fn repo, %{issue: issue, run: run} ->
+        run
+        |> Ecto.Changeset.change(%{
+          issue_id: issue.id,
+          status: "running"
+        })
+        |> repo.update()
+      end)
+
+    case Repo.transaction(multi) do
+      {:ok, %{issue: issue, run: run}} ->
+        wake_routine_agent(routine)
+        {:ok, %{issue: issue, run: run}}
+
+      {:error, step, changeset, _} ->
+        Logger.error("manual_run failed at #{step}: #{inspect(changeset)}")
+        {:error, {step, changeset}}
+    end
+  end
+
+  defp create_manual_run_issue(repo, _run, routine, now) do
+    issue_attrs = %{
+      "title" => "[Routine] #{routine.name} — Manual run #{Calendar.strftime(now, "%Y-%m-%d %H:%M")}",
+      "description" => """
+      Manually triggered routine run.
+
+      - Trigger type: manual
+      - Triggered at: #{DateTime.to_iso8601(now)}
+      """,
+      "status" => "todo",
+      "priority" => routine_priority(routine),
+      "assignee_id" => routine.agent_id,
+      "project_id" => routine.project_id
+    }
+
+    case %Cympho.Issues.Issue{}
+         |> Cympho.Issues.Issue.changeset(issue_attrs)
+         |> repo.insert() do
+      {:ok, issue} -> {:ok, issue}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
   # --- Run Queries ---
 
   def list_runs(routine_id, opts \\ []) do
@@ -353,6 +441,15 @@ defmodule Cympho.RoutineTriggers do
 
     query = if limit = opts[:limit], do: limit(query, ^limit), else: query
     Repo.all(query)
+  end
+
+  def get_run!(id), do: Repo.get!(RoutineRun, id)
+
+  def get_run(id) do
+    case Repo.get(RoutineRun, id) do
+      nil -> {:error, :not_found}
+      run -> {:ok, run}
+    end
   end
 
   def complete_run(%RoutineRun{} = run) do
