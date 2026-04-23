@@ -98,20 +98,47 @@ defmodule Cympho.Workspace do
   end
 
   defp clone_repo(project_id, path) do
-    # TODO: Look up repo URL from project_id when project repository is available
-    # For now, this is a placeholder that can be replaced with actual repo cloning
-    repo_url = get_repo_url(project_id)
+    case get_repo_url(project_id) do
+      {:ok, repo_url} ->
+        System.cmd("git", ["clone", "--quiet", repo_url, path])
+        |> case do
+          {_output, 0} -> {:ok, path}
+          {error, exit_code} -> {:error, {:git_clone_failed, exit_code, error}}
+        end
 
-    System.cmd("git", ["clone", "--quiet", repo_url, path])
-    |> case do
-      {_output, 0} -> {:ok, path}
-      {error, exit_code} -> {:error, {:git_clone_failed, exit_code, error}}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  defp get_repo_url(_project_id) do
-    # Placeholder: in production, look up the project's repo URL from the database
-    # For now, return an empty repo or the configured default
-    Application.get_env(:cympho, :workspace_default_repo, "")
+  @doc """
+  Resolves the repository URL for a project.
+
+  Looks up the project's settings map for a `repo_url` key, falling back to
+  the `:workspace_default_repo` application env. Returns `{:ok, url}` or
+  `{:error, :no_repo_configured}`.
+  """
+  def get_repo_url(project_id) when is_binary(project_id) do
+    case Cympho.Projects.get_project(project_id) do
+      {:ok, project} ->
+        case project.settings do
+          %{"repo_url" => url} when is_binary(url) and url != "" ->
+            {:ok, url}
+
+          _ ->
+            fallback_repo_url()
+        end
+
+      {:error, :not_found} ->
+        fallback_repo_url()
+    end
+  end
+
+  defp fallback_repo_url do
+    case Application.get_env(:cympho, :workspace_default_repo) do
+      nil -> {:error, :no_repo_configured}
+      "" -> {:error, :no_repo_configured}
+      url -> {:ok, url}
+    end
   end
 end
