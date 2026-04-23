@@ -5,7 +5,12 @@ defmodule Cympho.Notifications.Dispatcher do
   Uses an ETS cache (:notification_preferences_cache) to avoid repeated DB reads.
   Cache is populated on first lookup (cache-aside pattern) and can be warmed
   via warm_cache/0 or invalidated via invalidate_cache/1.
+
+  Channel delivery runs concurrently via Task.Supervisor.async_nolink/2
+  for fan-out parallelism across enabled channels.
   """
+
+  use GenServer
 
   import Ecto.Query, warn: false
   alias Cympho.Notifications.{Channel, EmailChannel, Message, TelegramChannel, WebhookChannel}
@@ -19,21 +24,17 @@ defmodule Cympho.Notifications.Dispatcher do
     webhook: WebhookChannel
   }
 
-  # --- Cache setup ---
-
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
   @impl true
-  def init(opts) do
+  def init(_opts) do
     table_opts = [:set, :named_table, :public, read_concurrency: true, write_concurrency: true]
     :ets.new(@cache_table, table_opts)
     warm_cache()
     {:ok, %{}}
   end
-
-  # --- Client API ---
 
   @doc """
   Dispatch a notification to all enabled channels for a user.
@@ -76,25 +77,35 @@ defmodule Cympho.Notifications.Dispatcher do
     :ok
   end
 
-  # --- Server ---
-
   @impl true
   def handle_info(:warm_cache, state) do
     warm_cache()
     {:noreply, state}
   end
 
-  # --- Internal ---
-
   defp dispatch_to_user(%Message{} = message, user) do
     channel_configs = lookup_preferences(user.id) |> Enum.filter(& &1.enabled)
 
-    results =
+    tasks =
       Enum.map(channel_configs, fn pref ->
         type = String.to_existing_atom(pref.channel_type)
         channel_module = Map.fetch!(@channels, type)
-        result = deliver_via(channel_module, message, pref.config)
-        {type, result}
+
+        task =
+          Task.Supervisor.async_nolink(Cympho.TaskSupervisor, fn ->
+            {type, deliver_via(channel_module, message, pref.config)}
+          end)
+
+        {type, task}
+      end)
+
+    results =
+      Enum.map(tasks, fn {type, task} ->
+        case Task.yield(task, 5_000) || Task.shutdown(task) do
+          {:ok, result} -> result
+          nil -> {type, {:error, :timeout}}
+          {:exit, reason} -> {type, {:error, {:exit, reason}}}
+        end
       end)
 
     failed = Enum.filter(results, fn {_type, result} -> result != :ok end)
@@ -114,7 +125,6 @@ defmodule Cympho.Notifications.Dispatcher do
     end
   end
 
-  # Cache-aside pattern: check ETS first, fall back to DB
   defp lookup_preferences(user_id) do
     case :ets.lookup(@cache_table, user_id) do
       [{^user_id, prefs}] when is_list(prefs) ->
@@ -135,7 +145,11 @@ defmodule Cympho.Notifications.Dispatcher do
   end
 
   defp cache_preference(%NotificationPreference{} = pref) do
-    existing = :ets.lookup(@cache_table, pref.user_id) |> List.wrap() |> Enum.flat_map(fn {_, ps} -> ps end)
+    existing =
+      :ets.lookup(@cache_table, pref.user_id)
+      |> List.wrap()
+      |> Enum.flat_map(fn {_, ps} -> ps end)
+
     new_prefs = Enum.reject(existing ++ [pref], fn p -> p.id == pref.id end)
     :ets.insert(@cache_table, {pref.user_id, new_prefs})
   end
