@@ -43,10 +43,10 @@ defmodule CymphoWeb.KanbanLive.Components do
     """
   end
 
-  defp priority_class(:high), do: "bg-red-500/20 text-red-400"
-  defp priority_class(:medium), do: "bg-yellow-500/20 text-yellow-400"
-  defp priority_class(:low), do: "bg-emerald-500/20 text-emerald-400"
-  defp priority_class(_), do: "bg-white/[0.05] text-text-quaternary"
+  def priority_class(:high), do: "bg-red-500/20 text-red-400"
+  def priority_class(:medium), do: "bg-yellow-500/20 text-yellow-400"
+  def priority_class(:low), do: "bg-emerald-500/20 text-emerald-400"
+  def priority_class(_), do: "bg-white/[0.05] text-text-quaternary"
 
   defp heartbeat_dot_color(:idle), do: "bg-emerald-400"
   defp heartbeat_dot_color(:working), do: "bg-yellow-400 animate-pulse"
