@@ -1,0 +1,67 @@
+<.header>
+  {@routine.name}
+  <:actions>
+    <.link navigate={~p"/routines"} class="phx-btn-secondary">
+      Back
+    </.link>
+    <.link navigate={~p"/routines/#{@routine.id}/edit"} class="phx-btn-secondary">
+      Edit
+    </.link>
+  </:actions>
+</.header>
+
+<div class="routine-detail">
+  <div class="routine-info">
+    <div class="status-row">
+      <span class={"badge status-#{@routine.status}"}>{@routine.status}</span>
+      <span class="priority-badge priority-{@routine.priority}">{@routine.priority}</span>
+    </div>
+
+    <p class="description">{@routine.description}</p>
+
+    <div class="meta-grid">
+      <div class="meta-item">
+        <label>Concurrency Policy</label>
+        <span>{@routine.concurrency_policy}</span>
+      </div>
+      <div class="meta-item">
+        <label>Catch-Up Policy</label>
+        <span>{@routine.catch_up_policy}</span>
+      </div>
+    </div>
+
+    <div class="meta">
+      <span>Created {@routine.inserted_at}</span>
+    </div>
+  </div>
+
+  <div class="routine-actions">
+    <button
+      :if={@routine.status == :active}
+      type="button"
+      class="pause-btn"
+      phx-click="pause_routine"
+      data-confirm="Pause this routine?"
+    >
+      Pause
+    </button>
+    <button
+      :if={@routine.status == :paused}
+      type="button"
+      class="resume-btn"
+      phx-click="resume_routine"
+      data-confirm="Resume this routine?"
+    >
+      Resume
+    </button>
+    <button
+      :if={@routine.status != :archived}
+      type="button"
+      class="delete-btn"
+      phx-click="archive_routine"
+      data-confirm="Archive this routine? This cannot be undone."
+    >
+      Archive
+    </button>
+  </div>
+</div>
