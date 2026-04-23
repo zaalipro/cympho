@@ -211,6 +211,7 @@ defmodule Cympho.AgentHeartbeat do
                  state
                  | status: :running,
                    current_issue_id: checked_out_issue.id,
+                   started_at: DateTime.utc_now(),
                    timer_ref: timer_ref
                }}
 
