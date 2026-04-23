@@ -4,18 +4,21 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.Comments
   alias Cympho.Agents
   alias Cympho.Labels
+  alias Cympho.Activities
   alias Cympho.Orchestrator
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     Issues.subscribe()
     Comments.subscribe()
+    Activities.subscribe()
 
     case Issues.get_issue(id) do
       {:ok, issue} ->
         {:ok,
          assign(socket,
            issue: issue,
+           activities: Activities.list_activities(issue.id),
            comment_changeset: Comments.Comment.changeset(%Comments.Comment{}, %{}),
            agents: Agents.list_agents_by_status(:idle),
            show_agent_panel: false,
@@ -39,6 +42,7 @@ defmodule CymphoWeb.IssueLive.Show do
         socket
         |> assign(:page_title, issue.title)
         |> assign(:issue, issue)
+        |> assign(:activities, Activities.list_activities(issue.id))
 
       {:error, :not_found} ->
         socket
@@ -83,6 +87,14 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:comment_deleted, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
       {:noreply, socket |> assign(:issue, updated_issue) |> assign(:activities, Activities.list_activities(updated_issue.id))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:activity_created, activity}, socket) do
+    if socket.assigns.issue.id == activity.issue_id do
+      {:noreply, assign(socket, :activities, Activities.list_activities(socket.assigns.issue.id))}
     else
       {:noreply, socket}
     end

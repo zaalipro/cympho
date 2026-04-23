@@ -124,4 +124,16 @@
       </form>
     </div>
   </div>
+
+  <div class="activity-section">
+    <h3>Activity</h3>
+    <div :if={Enum.empty?(@activities)} class="no-activities">No activity yet.</div>
+    <div class="activity-timeline">
+      <div :for={activity <- @activities} class="activity-item">
+        <span class="activity-action">{String.replace(activity.action, "_", " ")}</span>
+        <span class="activity-actor">{activity.actor_type}: {activity.actor_id}</span>
+        <span class="activity-time">{activity.inserted_at}</span>
+      </div>
+    </div>
+  </div>
 </div>
