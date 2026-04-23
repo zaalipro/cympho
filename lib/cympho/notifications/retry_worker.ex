@@ -68,8 +68,27 @@ defmodule Cympho.Notifications.RetryWorker do
 
   @impl GenServer
   def handle_info({:retry_notification, message, attempt}, state) do
-    retry(message, attempt)
+    case Dispatcher.dispatch(message) do
+      :ok ->
+        :ok
+
+      {:partial_failure, _} ->
+        maybe_schedule_next_retry(message, attempt)
+
+      {:error, _} ->
+        maybe_schedule_next_retry(message, attempt)
+    end
+
     {:noreply, state}
+  end
+
+  defp maybe_schedule_next_retry(_message, attempt) when attempt >= @max_retries do
+    :logger.warning("RetryWorker: max retries exceeded")
+  end
+
+  defp maybe_schedule_next_retry(message, attempt) do
+    delay = calculate_delay(attempt + 1)
+    Process.send_after(self(), {:retry_notification, message, attempt + 1}, delay)
   end
 
   defp calculate_delay(attempt) do

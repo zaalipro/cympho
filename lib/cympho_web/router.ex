@@ -41,7 +41,13 @@ defmodule CymphoWeb.Router do
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
     live "/agents/:id/edit", AgentLive.Edit
+    live "/routines", RoutineLive.Index
+    live "/routines/new", RoutineLive.New
     live "/routines/:id", RoutineLive.Show
+    live "/routines/:id/edit", RoutineLive.Edit
+    live "/approvals", ApprovalLive.Index
+    live "/approvals/:id", ApprovalLive.Show
+    live "/settings", SettingsLive.Index
     live "/execution-policies", ExecutionPolicyLive.Index
     live "/execution-policies/new", ExecutionPolicyLive.New
     live "/execution-policies/:id", ExecutionPolicyLive.Show

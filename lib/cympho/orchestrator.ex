@@ -126,17 +126,6 @@ defmodule Cympho.Orchestrator do
   end
 
   @impl true
-  def handle_call(:get_session_state, _from, %Session{} = session) do
-    {:reply, %{
-      issue_id: session.issue.id,
-      agent_id: session.agent_id,
-      session_id: session.session_id,
-      status: session.status,
-      turn_count: session.turn_count
-    }, session}
-  end
-
-  @impl true
   def handle_info({:turn_completed, _session_id, result}, %Session{} = session) do
     issue = session.issue
     agent_id = session.agent_id
@@ -198,6 +187,17 @@ defmodule Cympho.Orchestrator do
     set_agent_idle(agent_id)
 
     {:stop, :normal, session}
+  end
+
+  @impl true
+  def handle_call(:get_session_state, _from, %Session{} = session) do
+    {:reply, %{
+      issue_id: session.issue.id,
+      agent_id: session.agent_id,
+      session_id: session.session_id,
+      status: session.status,
+      turn_count: session.turn_count
+    }, session}
   end
 
   @impl true

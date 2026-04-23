@@ -1,7 +1,7 @@
 defmodule CymphoWeb.Components do
   use Phoenix.Component
 
-  attr :title, :string, required: false
+  attr :title, :string, default: nil
   attr :rest, :global
   slot :inner_block
   slot :actions
@@ -57,18 +57,26 @@ defmodule CymphoWeb.Components do
   attr :field, :any, required: true
   attr :label, :string, required: true
   attr :type, :string, default: "text"
+  attr :required, :boolean, default: false
+  attr :rows, :integer, default: nil
   attr :rest, :global
 
   def input(assigns) do
     ~H"""
     <div class="form-group">
       <label>{@label}</label>
-      <textarea :if={@type == "textarea"} name={input_name(@field)} {@rest}><%= input_value(@field) %></textarea>
+      <textarea
+        :if={@type == "textarea"}
+        name={input_name(@field)}
+        rows={@rows}
+        {@rest}
+      ><%= input_value(@field) %></textarea>
       <input
         :if={@type != "textarea"}
         type={@type}
         name={input_name(@field)}
         value={input_value(@field)}
+        required={@required}
         {@rest}
       />
     </div>
@@ -76,6 +84,7 @@ defmodule CymphoWeb.Components do
   end
 
   attr :type, :string, default: "submit"
+  attr :variant, :string, default: nil
   attr :rest, :global
   slot :inner_block, required: true
 

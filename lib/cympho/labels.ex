@@ -1,11 +1,8 @@
 defmodule Cympho.Labels do
   @moduledoc "Labels context."
-  import Ecto.Query
-  import Ecto.Changeset
 
   alias Cympho.Repo
   alias Cympho.Labels.Label
-  alias Cympho.Issues.Issue
 
   def list_labels, do: Repo.all(Label)
 

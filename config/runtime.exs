@@ -16,9 +16,12 @@ if database_url = System.get_env("DATABASE_URL") do
   end
 end
 
+if secret_key_base = System.get_env("SECRET_KEY_BASE") do
+  config :cympho, CymphoWeb.Endpoint, secret_key_base: secret_key_base
+end
+
 config :cympho, CymphoWeb.Endpoint,
-  secret_key_base: System.get_env("SECRET_KEY_BASE"),
-  live_view: [signing_salt: System.get_env("LIVE_VIEW_SALT") || "cympho"],
+  live_view: [signing_salt: System.get_env("LIVE_VIEW_SALT") || "cympho_live_view_signing_salt"],
   check_origin: ["//" <> (System.get_env("APP_HOST") || "localhost")]
 
 # Session secret for AgentAuth plug

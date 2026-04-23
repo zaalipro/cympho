@@ -1,7 +1,6 @@
 defmodule CymphoWeb.AgentLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Agents
-  alias Cympho.Wakes
 
   @impl true
   def mount(_params, session, socket) do

@@ -237,12 +237,9 @@ defmodule Cympho.RoutineTriggers do
   defp wake_routine_agent(%Routine{agent_id: nil}), do: :ok
 
   defp wake_routine_agent(%Routine{agent_id: agent_id}) do
-    try do
-      :ok = Cympho.AgentHeartbeat.set_working(agent_id, nil)
-    rescue
-      e ->
-        Logger.warning("wake_routine_agent failed for #{agent_id}: #{inspect(e)}")
-        :ok
+    case Cympho.AgentHeartbeat.set_working(agent_id, nil) do
+      :ok -> :ok
+      {:error, :not_found} -> :ok
     end
   end
 

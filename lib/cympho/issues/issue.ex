@@ -62,7 +62,7 @@ defmodule Cympho.Issues.Issue do
       :execution_policy_id,
       :execution_state
     ])
-    |> validate_required([:title, :description])
+    |> validate_required([:title])
     |> validate_length(:title, min: 1, max: 255)
     |> validate_length(:description, min: 1)
     |> unique_constraint(:identifier, name: :issues_project_id_identifier_index)

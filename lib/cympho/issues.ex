@@ -8,12 +8,9 @@ defmodule Cympho.Issues do
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
-  alias Cympho.Issues.AutoAssignment
   alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Comments
-  alias Cympho.Labels
-  alias Cympho.Labels.Label
   alias Cympho.Activities
   alias Cympho.Wakes
   alias Cympho.ExecutionPolicies
@@ -170,19 +167,6 @@ defmodule Cympho.Issues do
 
       {:error, changeset} ->
         {:error, changeset}
-    end
-  end
-
-  defp maybe_auto_assign(%Issue{} = issue) do
-    case AutoAssignment.assign_issue(issue) do
-      {:ok, assigned} ->
-        assigned
-
-      {:error, :no_eligible_agent, _} ->
-        case AutoAssignment.queue_for_assignment(issue) do
-          {:ok, _} -> issue
-          {:error, _} -> issue
-        end
     end
   end
 
@@ -716,6 +700,52 @@ defmodule Cympho.Issues do
         nil,
         %{stage_type: "executor", decision: "changes_requested"}
       )
+    end
+  end
+
+  def add_label_to_issue(%Issue{} = issue, %Cympho.Labels.Label{} = label) do
+    issue = Repo.preload(issue, :labels)
+
+    if Enum.any?(issue.labels, &(&1.id == label.id)) do
+      {:ok, issue}
+    else
+      issue
+      |> Ecto.Changeset.change()
+      |> Ecto.Changeset.put_assoc(:labels, issue.labels ++ [label])
+      |> Repo.update()
+      |> case do
+        {:ok, updated} -> {:ok, Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])}
+        {:error, changeset} -> {:error, changeset}
+      end
+    end
+  end
+
+  def remove_label_from_issue(%Issue{} = issue, %Cympho.Labels.Label{} = label) do
+    issue = Repo.preload(issue, :labels)
+
+    new_labels = Enum.reject(issue.labels, &(&1.id == label.id))
+
+    issue
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.put_assoc(:labels, new_labels)
+    |> Repo.update()
+    |> case do
+      {:ok, updated} -> {:ok, Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  def set_issue_labels(%Issue{} = issue, label_ids) when is_list(label_ids) do
+    issue = Repo.preload(issue, :labels)
+    labels = Cympho.Repo.all(from l in Cympho.Labels.Label, where: l.id in ^label_ids)
+
+    issue
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.put_assoc(:labels, labels)
+    |> Repo.update()
+    |> case do
+      {:ok, updated} -> {:ok, Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])}
+      {:error, changeset} -> {:error, changeset}
     end
   end
 

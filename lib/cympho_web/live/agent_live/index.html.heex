@@ -100,7 +100,7 @@
           Role: {role_label(agent.role)}
         </p>
         <div class="flex items-center gap-2">
-          <.badge variant="pill" value={agent.adapter || "No adapter"} />
+          <.badge variant="pill" value={Map.get(agent, :adapter) || "No adapter"} />
         </div>
         <div class="flex items-center gap-2 pt-2">
           <.app_link navigate={~p"/agents/#{agent.id}"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-md transition-colors">

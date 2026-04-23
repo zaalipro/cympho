@@ -162,7 +162,9 @@ defmodule Cympho.AgentHeartbeat do
 
   @impl true
   def init(agent_id) do
-    timer_ref = schedule_heartbeat(agent_id)
+    # Use default interval in init to avoid DB queries during startup.
+    # Tests often exit before init completes, causing sandbox disconnect errors.
+    timer_ref = Process.send_after(self(), :heartbeat, @default_heartbeat_interval)
     state = %{agent_id: agent_id, status: :idle, current_issue_id: nil, started_at: nil, timer_ref: timer_ref}
     {:ok, state}
   end

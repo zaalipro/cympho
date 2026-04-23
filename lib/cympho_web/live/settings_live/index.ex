@@ -40,6 +40,10 @@ defmodule CymphoWeb.SettingsLive.Index do
     assign(socket, :page_title, "Notification Settings")
   end
 
+  defp apply_action(socket, nil, _params) do
+    assign(socket, :page_title, "Notification Settings")
+  end
+
   @impl true
   def handle_event("toggle_channel", %{"channel" => channel}, socket) do
     pref = pref_for_channel(socket.assigns.prefs, channel)

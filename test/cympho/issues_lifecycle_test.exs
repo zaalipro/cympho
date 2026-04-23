@@ -58,7 +58,7 @@ defmodule Cympho.IssuesLifecycleTest do
         })
 
       # Add blocker relationship
-      assert {:ok, updated} = Issues.add_blocker(child_issue, parent_issue)
+      assert {:ok, _updated} = Issues.add_blocker(child_issue, parent_issue)
       # Reload to get updated blocked_by association
       reloaded_child = Issues.get_issue!(child_issue.id)
       assert Issues.is_blocked?(reloaded_child)

@@ -36,7 +36,7 @@
       <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider">Configuration</h3>
       <div class="flex items-center gap-4">
         <span class="text-sm text-text-secondary">Max concurrent jobs: <span class="text-brand">{@agent.max_concurrent_jobs}</span></span>
-        <.badge variant="pill" value={@agent.adapter || "No adapter"} />
+        <.badge variant="pill" value={Map.get(@agent, :adapter) || "No adapter"} />
       </div>
     </div>
 

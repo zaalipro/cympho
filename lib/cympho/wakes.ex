@@ -12,7 +12,6 @@ defmodule Cympho.Wakes do
   alias Cympho.Repo
   alias Cympho.Wakes.AgentWake
   alias Cympho.Issues.Issue
-  alias Cympho.Agents.Agent
   alias Cympho.AgentHeartbeat
   alias Cympho.Comments.Comment
   require Logger
