@@ -322,7 +322,6 @@ defmodule Cympho.Agents do
         {:error, changeset}
     end
   end
-end
 
   @doc """
   Returns a map with counts of agents by status.
@@ -404,3 +403,5 @@ end
       {:ok, _} -> {:error, :not_running}
       {:error, reason} -> {:error, reason}
     end
+  end
+end
