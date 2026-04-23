@@ -11,67 +11,41 @@ defmodule CymphoWeb.KanbanLive.Components do
 
   def issue_card(assigns) do
     ~H"""
-    <div class="bg-white/[0.02] border border-border rounded-md p-3 space-y-2 hover:bg-white/[0.04] transition-colors relative" data-issue-id={@issue.id}>
-      <%!-- Title / inline edit --%>
+    <div class="bg-white/[0.02] border border-border rounded-md p-3 space-y-2 hover:bg-white/[0.04] transition-colors relative cursor-grab active:cursor-grabbing" data-issue-id={@issue.id}>
       <%= if @editing_card_id == {:edit_title, @issue.id} do %>
         <form phx-submit="save_title" phx-click-away="cancel_edit_title" phx-value-issue-id={@issue.id} class="space-y-1">
-          <input
-            type="text"
-            name="title"
-            value={@issue.title}
-            class="w-full bg-white/[0.08] border border-accent/40 rounded px-2 py-1 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
-            autofocus
-          />
+          <input type="text" name="title" value={@issue.title} class="w-full bg-white/[0.08] border border-accent/40 rounded px-2 py-1 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent" autofocus />
           <div class="flex gap-1">
             <button type="submit" class="text-[10px] bg-accent/20 text-accent px-2 py-0.5 rounded">Save</button>
             <button type="button" phx-click="cancel_edit_title" class="text-[10px] bg-white/[0.05] text-text-secondary px-2 py-0.5 rounded">Cancel</button>
           </div>
         </form>
       <% else %>
-        <div class="text-sm font-510 text-text-primary leading-snug"><%= @issue.title %></div>
+        <div class="text-sm font-510 text-text-primary leading-snug line-clamp-1"><%= @issue.title %></div>
       <% end %>
 
       <div class="flex items-center gap-2 flex-wrap">
-        <.badge variant="priority" value={to_string(@issue.priority)} />
-        <span class="text-xs text-text-quaternary flex items-center gap-1">
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
-          <%= length(@issue.comments) %>
-        </span>
+        <span class={"text-[10px] font-510 px-2 py-0.5 rounded-full " <> priority_class(@issue.priority)}><%= @issue.priority %></span>
+        <span class="text-xs text-text-quaternary"><%= length(@issue.comments) %> comments</span>
         <%= if @issue.assignee do %>
-          <% _hb_state = Index.get_heartbeat_state(@agent_heartbeat_states, @issue.assignee.id) %>
-          <span class="text-xs text-text-quaternary truncate max-w-[140px]">
-            <%= @issue.assignee.name %>
-          </span>
+          <span class="text-xs text-text-quaternary truncate max-w-[100px]"><%= @issue.assignee.name %></span>
         <% end %>
         <%= if @issue.github_pr_url do %>
           <a href={@issue.github_pr_url} target="_blank" class="text-xs text-accent hover:text-accent-hover transition-colors" title="GitHub PR">PR</a>
         <% end %>
       </div>
 
-      <%!-- Transitions + quick actions row --%>
       <div class="flex items-center justify-between pt-1">
         <div class="flex flex-wrap gap-1.5">
           <%= for next_status <- Index.valid_next_statuses(@status) do %>
-            <button
-              type="button"
-              class="text-[10px] font-510 bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-tertiary hover:text-text-secondary px-2 py-1 rounded transition-colors"
-              phx-click="transition_issue"
-              phx-value-id={@issue.id}
-              phx-value-to_status={to_string(next_status)}
-            >
+            <button type="button" class="text-[10px] font-510 bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-tertiary hover:text-text-secondary px-2 py-1 rounded transition-colors" phx-click="transition_issue" phx-value-id={@issue.id} phx-value-to_status={to_string(next_status)}>
               <%= Index.status_label(next_status) %>
             </button>
           <% end %>
         </div>
 
         <div class="relative">
-          <button
-            type="button"
-            phx-click="open_card_action"
-            phx-value-issue-id={@issue.id}
-            class="text-text-quaternary hover:text-text-secondary transition-colors p-1 rounded hover:bg-white/[0.05]"
-            title="Quick actions"
-          >
+          <button type="button" phx-click="open_card_action" phx-value-issue-id={@issue.id} class="text-text-quaternary hover:text-text-secondary transition-colors p-1 rounded hover:bg-white/[0.05]" title="Quick actions">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"/></svg>
           </button>
 
@@ -123,4 +97,9 @@ defmodule CymphoWeb.KanbanLive.Components do
     </div>
     """
   end
+
+  defp priority_class(:high), do: "bg-red-500/20 text-red-400"
+  defp priority_class(:medium), do: "bg-yellow-500/20 text-yellow-400"
+  defp priority_class(:low), do: "bg-emerald-500/20 text-emerald-400"
+  defp priority_class(_), do: "bg-white/[0.05] text-text-quaternary"
 end
