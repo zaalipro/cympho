@@ -18,7 +18,13 @@ defmodule CymphoWeb.DashboardLiveTest do
     end
 
     test "shows agent count from database", %{conn: conn} do
-      {:ok, _} = Agents.create_agent(%{name: "Test Agent", role: :engineer, status: :idle, url_key: "test1"})
+      {:ok, _} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer,
+          status: :idle,
+          url_key: "test1"
+        })
 
       {:ok, _view, html} = live(conn, "/dashboard")
 

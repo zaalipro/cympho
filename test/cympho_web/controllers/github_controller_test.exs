@@ -136,7 +136,11 @@ defmodule CymphoWeb.GithubControllerTest do
     end
 
     test "PR synchronize adds a system comment", %{conn: conn, issue: issue, project: project} do
-      payload = build_pr_payload("synchronize", issue.github_pr_url, %{"head" => %{"ref" => "feature-branch"}})
+      payload =
+        build_pr_payload("synchronize", issue.github_pr_url, %{
+          "head" => %{"ref" => "feature-branch"}
+        })
+
       signature = compute_signature(payload, project.github_webhook_secret)
 
       conn =
@@ -151,7 +155,11 @@ defmodule CymphoWeb.GithubControllerTest do
       assert length(updated_issue.comments) > 0
     end
 
-    test "PR merged (closed with merged=true) transitions issue to done", %{conn: conn, issue: issue, project: project} do
+    test "PR merged (closed with merged=true) transitions issue to done", %{
+      conn: conn,
+      issue: issue,
+      project: project
+    } do
       payload = build_pr_payload("closed", issue.github_pr_url, %{"merged" => true})
       signature = compute_signature(payload, project.github_webhook_secret)
 
@@ -167,7 +175,11 @@ defmodule CymphoWeb.GithubControllerTest do
       assert updated_issue.status == :done
     end
 
-    test "PR closed without merge transitions issue to blocked", %{conn: conn, issue: issue, project: project} do
+    test "PR closed without merge transitions issue to blocked", %{
+      conn: conn,
+      issue: issue,
+      project: project
+    } do
       payload = build_pr_payload("closed", issue.github_pr_url, %{"merged" => false})
       signature = compute_signature(payload, project.github_webhook_secret)
 
@@ -265,12 +277,16 @@ defmodule CymphoWeb.GithubControllerTest do
   # Helper functions
 
   defp build_pr_payload(action, pr_url, extra_pr_attrs \\ %{}) do
-    pr_attrs = Map.merge(%{
-      "html_url" => pr_url,
-      "title" => "Test PR",
-      "merged" => false,
-      "head" => %{"ref" => "test-branch"}
-    }, extra_pr_attrs)
+    pr_attrs =
+      Map.merge(
+        %{
+          "html_url" => pr_url,
+          "title" => "Test PR",
+          "merged" => false,
+          "head" => %{"ref" => "test-branch"}
+        },
+        extra_pr_attrs
+      )
 
     %{
       "action" => action,

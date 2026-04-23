@@ -64,9 +64,11 @@ defmodule Cympho.ApprovalsTest do
       agent = insert_agent()
       {:ok, approval} = create_test_approval(agent)
 
-      assert {:ok, updated} = Approvals.resolve_approval(approval.id, :approved, %{
-        resolution_reason: "Looks good"
-      })
+      assert {:ok, updated} =
+               Approvals.resolve_approval(approval.id, :approved, %{
+                 resolution_reason: "Looks good"
+               })
+
       assert updated.status == :approved
       assert updated.resolution_reason == "Looks good"
     end
@@ -75,9 +77,11 @@ defmodule Cympho.ApprovalsTest do
       agent = insert_agent()
       {:ok, approval} = create_test_approval(agent)
 
-      assert {:ok, updated} = Approvals.resolve_approval(approval.id, :denied, %{
-        resolution_reason: "Too expensive"
-      })
+      assert {:ok, updated} =
+               Approvals.resolve_approval(approval.id, :denied, %{
+                 resolution_reason: "Too expensive"
+               })
+
       assert updated.status == :denied
     end
 
@@ -124,11 +128,12 @@ defmodule Cympho.ApprovalsTest do
       agent = insert_agent()
       issue = insert_issue()
 
-      {:ok, _approval} = Approvals.create_approval(%{
-        type: "request_board_approval",
-        requested_by_agent_id: agent.id,
-        issue_ids: [issue.id]
-      })
+      {:ok, _approval} =
+        Approvals.create_approval(%{
+          type: "request_board_approval",
+          requested_by_agent_id: agent.id,
+          issue_ids: [issue.id]
+        })
 
       assert {:ok, 1} = Approvals.cancel_pending_for_issue(issue.id)
     end
@@ -137,11 +142,12 @@ defmodule Cympho.ApprovalsTest do
       agent = insert_agent()
       issue = insert_issue()
 
-      {:ok, approval} = Approvals.create_approval(%{
-        type: "request_board_approval",
-        requested_by_agent_id: agent.id,
-        issue_ids: [issue.id]
-      })
+      {:ok, approval} =
+        Approvals.create_approval(%{
+          type: "request_board_approval",
+          requested_by_agent_id: agent.id,
+          issue_ids: [issue.id]
+        })
 
       {:ok, _} = Approvals.resolve_approval(approval.id, :approved, %{})
       assert {:ok, 0} = Approvals.cancel_pending_for_issue(issue.id)
@@ -186,46 +192,53 @@ defmodule Cympho.ApprovalsTest do
 
   describe "Approval changeset validations" do
     test "create_changeset validates status is valid" do
-      changeset = Approval.create_changeset(%Approval{}, %{
-        type: "test",
-        requested_by_agent_id: Ecto.UUID.generate(),
-        status: :invalid_status
-      })
+      changeset =
+        Approval.create_changeset(%Approval{}, %{
+          type: "test",
+          requested_by_agent_id: Ecto.UUID.generate(),
+          status: :invalid_status
+        })
 
       assert %{status: _} = errors_on(changeset)
     end
 
     test "resolve_changeset prevents non-pending transitions" do
       approval = %Approval{status: :approved}
-      changeset = Approval.resolve_changeset(approval, %{
-        status: :denied,
-        resolved_by_user_id: Ecto.UUID.generate()
-      })
+
+      changeset =
+        Approval.resolve_changeset(approval, %{
+          status: :denied,
+          resolved_by_user_id: Ecto.UUID.generate()
+        })
 
       assert %{status: _} = errors_on(changeset)
     end
   end
 
   defp insert_agent do
-    %{id: id} = Cympho.Repo.insert!(%Cympho.Agents.Agent{
-      name: "Test Agent #{System.unique_integer()}",
-      role: :engineer,
-      status: :idle
-    })
+    %{id: id} =
+      Cympho.Repo.insert!(%Cympho.Agents.Agent{
+        name: "Test Agent #{System.unique_integer()}",
+        role: :engineer,
+        status: :idle
+      })
+
     Cympho.Repo.get!(Cympho.Agents.Agent, id)
   end
 
   defp insert_issue do
-    project = Cympho.Repo.insert!(%Cympho.Projects.Project{
-      name: "Test Project #{System.unique_integer()}",
-      prefix: "TST"
-    })
+    project =
+      Cympho.Repo.insert!(%Cympho.Projects.Project{
+        name: "Test Project #{System.unique_integer()}",
+        prefix: "TST"
+      })
 
-    {:ok, issue} = Cympho.Issues.create_issue(%{
-      title: "Test Issue",
-      description: "Test description",
-      project_id: project.id
-    })
+    {:ok, issue} =
+      Cympho.Issues.create_issue(%{
+        title: "Test Issue",
+        description: "Test description",
+        project_id: project.id
+      })
 
     issue
   end

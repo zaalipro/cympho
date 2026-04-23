@@ -93,15 +93,20 @@ defmodule Cympho.RoutineTriggersTest do
   describe "update_trigger/2" do
     setup do
       {:ok, routine} = Routines.create_routine(%{name: "Test"})
-      {:ok, trigger} = RoutineTriggers.create_schedule_trigger(%{
-        "routine_id" => routine.id,
-        "cron_expression" => "0 9 * * *"
-      })
+
+      {:ok, trigger} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "0 9 * * *"
+        })
+
       %{trigger: trigger, routine: routine}
     end
 
     test "updates cron expression", %{trigger: trigger} do
-      assert {:ok, updated} = RoutineTriggers.update_trigger(trigger, %{"cron_expression" => "0 10 * * *"})
+      assert {:ok, updated} =
+               RoutineTriggers.update_trigger(trigger, %{"cron_expression" => "0 10 * * *"})
+
       assert updated.cron_expression == "0 10 * * *"
     end
 
@@ -123,10 +128,11 @@ defmodule Cympho.RoutineTriggersTest do
     end
 
     test "deletes a schedule trigger", %{routine: routine} do
-      {:ok, trigger} = RoutineTriggers.create_schedule_trigger(%{
-        "routine_id" => routine.id,
-        "cron_expression" => "0 9 * * *"
-      })
+      {:ok, trigger} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "0 9 * * *"
+        })
 
       assert {:ok, _} = RoutineTriggers.delete_trigger(trigger)
 
@@ -136,7 +142,8 @@ defmodule Cympho.RoutineTriggersTest do
     end
 
     test "deletes a webhook trigger", %{routine: routine} do
-      {:ok, trigger, _secret} = RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
+      {:ok, trigger, _secret} =
+        RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
 
       assert {:ok, _} = RoutineTriggers.delete_trigger(trigger)
 
@@ -147,10 +154,13 @@ defmodule Cympho.RoutineTriggersTest do
   describe "get_trigger/1 and get_trigger!/1" do
     setup do
       {:ok, routine} = Routines.create_routine(%{name: "Test"})
-      {:ok, trigger} = RoutineTriggers.create_schedule_trigger(%{
-        "routine_id" => routine.id,
-        "cron_expression" => "0 9 * * *"
-      })
+
+      {:ok, trigger} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "0 9 * * *"
+        })
+
       %{trigger: trigger}
     end
 
@@ -159,24 +169,32 @@ defmodule Cympho.RoutineTriggersTest do
       assert found.id == trigger.id
     end
 
-    test "get_trigger returns error for missing", do:
-      assert {:error, :not_found} = RoutineTriggers.get_trigger("00000000-0000-0000-0000-000000000000")
+    test "get_trigger returns error for missing",
+      do:
+        assert(
+          {:error, :not_found} =
+            RoutineTriggers.get_trigger("00000000-0000-0000-0000-000000000000")
+        )
 
     test "get_trigger! returns the trigger", %{trigger: trigger} do
       found = RoutineTriggers.get_trigger!(trigger.id)
       assert found.id == trigger.id
     end
 
-    test "get_trigger! raises for missing", do:
-      assert_raise Ecto.NoResultsError, fn ->
-        RoutineTriggers.get_trigger!("00000000-0000-0000-0000-000000000000")
-      end
+    test "get_trigger! raises for missing",
+      do:
+        assert_raise(Ecto.NoResultsError, fn ->
+          RoutineTriggers.get_trigger!("00000000-0000-0000-0000-000000000000")
+        end)
   end
 
   describe "get_trigger_by_public_id/1" do
     setup do
       {:ok, routine} = Routines.create_routine(%{name: "Test"})
-      {:ok, trigger, _secret} = RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
+
+      {:ok, trigger, _secret} =
+        RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
+
       %{trigger: trigger}
     end
 
@@ -193,11 +211,16 @@ defmodule Cympho.RoutineTriggersTest do
   describe "list_triggers/1" do
     setup do
       {:ok, routine} = Routines.create_routine(%{name: "Test"})
-      {:ok, schedule} = RoutineTriggers.create_schedule_trigger(%{
-        "routine_id" => routine.id,
-        "cron_expression" => "0 9 * * *"
-      })
-      {:ok, webhook, _secret} = RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
+
+      {:ok, schedule} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "0 9 * * *"
+        })
+
+      {:ok, webhook, _secret} =
+        RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
+
       %{routine: routine, schedule: schedule, webhook: webhook}
     end
 
@@ -309,12 +332,17 @@ defmodule Cympho.RoutineTriggersTest do
   describe "rotate_webhook_secret/1" do
     setup do
       {:ok, routine} = Routines.create_routine(%{name: "Test"})
+
       {:ok, trigger, original_secret} =
         RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
+
       %{trigger: trigger, routine: routine, original_secret: original_secret}
     end
 
-    test "generates new secret and updates hash", %{trigger: trigger, original_secret: original_secret} do
+    test "generates new secret and updates hash", %{
+      trigger: trigger,
+      original_secret: original_secret
+    } do
       assert {:ok, updated_trigger, new_secret} = RoutineTriggers.rotate_webhook_secret(trigger)
 
       assert new_secret != original_secret
@@ -326,7 +354,10 @@ defmodule Cympho.RoutineTriggersTest do
       assert updated_trigger.secret_hash != trigger.secret_hash
     end
 
-    test "old secret no longer works after rotation", %{trigger: trigger, original_secret: original_secret} do
+    test "old secret no longer works after rotation", %{
+      trigger: trigger,
+      original_secret: original_secret
+    } do
       {:ok, _updated, _new_secret} = RoutineTriggers.rotate_webhook_secret(trigger)
 
       assert {:error, :invalid_secret} =
@@ -337,20 +368,24 @@ defmodule Cympho.RoutineTriggersTest do
     end
 
     test "returns error for non-webhook trigger", %{routine: routine} do
-      {:ok, schedule_trigger} = RoutineTriggers.create_schedule_trigger(%{
-        "routine_id" => routine.id,
-        "cron_expression" => "0 9 * * *"
-      })
+      {:ok, schedule_trigger} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "0 9 * * *"
+        })
 
-      assert {:error, :not_webhook_trigger} = RoutineTriggers.rotate_webhook_secret(schedule_trigger)
+      assert {:error, :not_webhook_trigger} =
+               RoutineTriggers.rotate_webhook_secret(schedule_trigger)
     end
   end
 
   describe "verify_webhook_secret/2" do
     setup do
       {:ok, routine} = Routines.create_routine(%{name: "Test"})
+
       {:ok, trigger, secret} =
         RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
+
       %{trigger: trigger, secret: secret}
     end
 
@@ -373,10 +408,13 @@ defmodule Cympho.RoutineTriggersTest do
         })
 
       {:ok, routine} = Routines.create_routine(%{name: "Run Test", agent_id: agent.id})
-      {:ok, trigger} = RoutineTriggers.create_schedule_trigger(%{
-        "routine_id" => routine.id,
-        "cron_expression" => "0 9 * * *"
-      })
+
+      {:ok, trigger} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "0 9 * * *"
+        })
+
       %{routine: routine, trigger: trigger}
     end
 
@@ -413,10 +451,13 @@ defmodule Cympho.RoutineTriggersTest do
         })
 
       {:ok, routine} = Routines.create_routine(%{name: "Status Test", agent_id: agent.id})
-      {:ok, trigger} = RoutineTriggers.create_schedule_trigger(%{
-        "routine_id" => routine.id,
-        "cron_expression" => "0 9 * * *"
-      })
+
+      {:ok, trigger} =
+        RoutineTriggers.create_schedule_trigger(%{
+          "routine_id" => routine.id,
+          "cron_expression" => "0 9 * * *"
+        })
+
       {:ok, %{run: run}} = RoutineTriggers.fire_trigger(trigger)
       %{run: run}
     end

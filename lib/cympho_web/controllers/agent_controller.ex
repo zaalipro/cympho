@@ -31,7 +31,7 @@ defmodule CymphoWeb.AgentController do
     conn
     |> put_status(:bad_request)
     |> put_view(json: CymphoWeb.ErrorJSON)
-    |> render(:"error", message: "Missing required field: status")
+    |> render(:error, message: "Missing required field: status")
   end
 
   defp authorize_status_update(conn, target_id) do

@@ -17,7 +17,13 @@ defmodule Cympho.Notifications.TelegramLink do
 
   def changeset(link, attrs) do
     link
-    |> cast(attrs, [:user_id, :telegram_chat_id, :telegram_username, :verified, :verification_token])
+    |> cast(attrs, [
+      :user_id,
+      :telegram_chat_id,
+      :telegram_username,
+      :verified,
+      :verification_token
+    ])
     |> validate_required([:user_id, :telegram_chat_id])
     |> unique_constraint(:telegram_chat_id)
   end

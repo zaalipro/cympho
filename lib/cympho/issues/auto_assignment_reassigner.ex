@@ -33,7 +33,12 @@ defmodule Cympho.Issues.AutoAssignmentReassigner do
     if state.status == :idle do
       Task.Supervisor.async_nolink(Cympho.TaskSupervisor, fn ->
         {:ok, assigned, queued} = AutoAssignment.reassign_backlog()
-        _ = :logger.debug("[AutoAssignmentReassigner] agent #{agent_id} idle → reassigned #{assigned}, queued #{queued}")
+
+        _ =
+          :logger.debug(
+            "[AutoAssignmentReassigner] agent #{agent_id} idle → reassigned #{assigned}, queued #{queued}"
+          )
+
         {:ok, assigned, queued}
       end)
     end

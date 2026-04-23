@@ -42,17 +42,19 @@ defmodule CymphoWeb.ProjectLive.Index do
   end
 
   def handle_info({:project_updated, updated_project}, socket) do
-    {:noreply, update(socket, :projects, fn projects ->
-      Enum.map(projects, fn project ->
-        if project.id == updated_project.id, do: updated_project, else: project
-      end)
-    end)}
+    {:noreply,
+     update(socket, :projects, fn projects ->
+       Enum.map(projects, fn project ->
+         if project.id == updated_project.id, do: updated_project, else: project
+       end)
+     end)}
   end
 
   def handle_info({:project_deleted, deleted_id}, socket) do
-    {:noreply, update(socket, :projects, fn projects ->
-      Enum.filter(projects, fn project -> project.id != deleted_id end)
-    end)}
+    {:noreply,
+     update(socket, :projects, fn projects ->
+       Enum.filter(projects, fn project -> project.id != deleted_id end)
+     end)}
   end
 
   @impl true

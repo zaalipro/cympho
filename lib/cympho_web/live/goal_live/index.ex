@@ -1,7 +1,6 @@
 defmodule CymphoWeb.GoalLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Goals
-  alias Cympho.Goals.Goal
 
   @impl true
   def mount(_params, _session, socket) do

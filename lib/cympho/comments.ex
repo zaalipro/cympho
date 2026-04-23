@@ -33,9 +33,18 @@ defmodule Cympho.Comments do
          |> Comment.changeset(attrs)
          |> Repo.insert() do
       {:ok, comment} ->
-        Activities.log_activity(%{issue_id: comment.issue_id, actor_type: comment.author_type, actor_id: comment.author_id, action: "comment_added", metadata: %{comment_id: comment.id}})
+        Activities.log_activity(%{
+          issue_id: comment.issue_id,
+          actor_type: comment.author_type,
+          actor_id: comment.author_id,
+          action: "comment_added",
+          metadata: %{comment_id: comment.id}
+        })
+
         case Repo.get(Issue, comment.issue_id) do
-          nil -> :ok
+          nil ->
+            :ok
+
           issue ->
             issue = Repo.preload(issue, :comments)
             Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_created, issue})
@@ -60,7 +69,9 @@ defmodule Cympho.Comments do
          |> Repo.update() do
       {:ok, comment} ->
         case Repo.get(Issue, comment.issue_id) do
-          nil -> :ok
+          nil ->
+            :ok
+
           issue ->
             issue = Repo.preload(issue, :comments)
             Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_updated, issue})
@@ -82,7 +93,9 @@ defmodule Cympho.Comments do
     case Repo.delete(comment) do
       {:ok, _comment} ->
         case Repo.get(Issue, issue_id) do
-          nil -> :ok
+          nil ->
+            :ok
+
           issue ->
             issue = Repo.preload(issue, :comments)
             Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_deleted, issue})

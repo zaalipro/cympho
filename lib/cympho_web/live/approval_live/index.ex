@@ -16,11 +16,12 @@ defmodule CymphoWeb.ApprovalLive.Index do
 
   @impl true
   def handle_params(params, _url, socket) do
-    status = case Map.get(params, "status") do
-      nil -> nil
-      "" -> nil
-      s -> String.to_existing_atom(s)
-    end
+    status =
+      case Map.get(params, "status") do
+        nil -> nil
+        "" -> nil
+        s -> String.to_existing_atom(s)
+      end
 
     {:noreply,
      socket

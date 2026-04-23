@@ -73,6 +73,6 @@ defmodule Cympho.Notifications.RetryWorker do
   end
 
   defp calculate_delay(attempt) do
-    @base_delay * :math.pow(2, attempt - 1) |> round()
+    (@base_delay * :math.pow(2, attempt - 1)) |> round()
   end
 end

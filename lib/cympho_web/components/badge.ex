@@ -11,20 +11,20 @@ defmodule CymphoWeb.Components.Badge do
     "open" => "bg-accent/20 text-accent",
     "closed" => "bg-success/20 text-success",
     "active" => "bg-success/20 text-success",
-    "archived" => "bg-text-quaternary/20 text-text-quaternary",
+    "archived" => "bg-text-quaternary/20 text-text-quaternary"
   }
 
   @priority_colors %{
     "low" => "bg-text-tertiary",
     "medium" => "bg-amber-500",
-    "high" => "bg-red-500",
+    "high" => "bg-red-500"
   }
 
   @agent_colors %{
     "idle" => "bg-text-tertiary/20 text-text-tertiary",
     "running" => "bg-brand/20 text-brand",
     "error" => "bg-red-500/20 text-red-400",
-    "offline" => "bg-text-quaternary/20 text-text-quaternary",
+    "offline" => "bg-text-quaternary/20 text-text-quaternary"
   }
 
   attr :variant, :string, default: "status"
@@ -53,11 +53,14 @@ defmodule CymphoWeb.Components.Badge do
       |> assign(:label, label)
 
     ~H"""
-    <span class={["inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-510", @class]} {@rest}>
+    <span
+      class={["inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-510", @class]}
+      {@rest}
+    >
       <%= if @variant == "priority" do %>
         <span class={["w-1.5 h-1.5 rounded-full", @dot_class]}></span>
       <% end %>
-      <%= @label %>
+      {@label}
     </span>
     """
   end

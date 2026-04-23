@@ -35,16 +35,19 @@ defmodule Cympho.Routines do
   def pause_routine(%Routine{status: :active} = routine) do
     routine |> Routine.changeset(%{status: :paused}) |> Repo.update()
   end
+
   def pause_routine(%Routine{}), do: {:error, :invalid_transition}
 
   def resume_routine(%Routine{status: :paused} = routine) do
     routine |> Routine.changeset(%{status: :active}) |> Repo.update()
   end
+
   def resume_routine(%Routine{}), do: {:error, :invalid_transition}
 
   def archive_routine(%Routine{status: status} = routine) when status in [:active, :paused] do
     routine |> Routine.changeset(%{status: :archived}) |> Repo.update()
   end
+
   def archive_routine(%Routine{status: :archived}), do: {:error, :invalid_transition}
 
   def delete_routine(%Routine{} = routine), do: Repo.delete(routine)

@@ -25,5 +25,4 @@ defmodule Cympho.AgentRunnerTest do
       assert_receive {:turn_ended_with_error, ^session_id, :test_error}
     end
   end
-
 end

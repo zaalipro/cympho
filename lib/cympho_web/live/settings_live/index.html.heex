@@ -17,7 +17,9 @@
         <div class="channel-header">
           <div class="channel-info">
             <h3>Email</h3>
-            <span class="channel-status">{if channel_enabled?(@prefs, "email"), do: "Enabled", else: "Disabled"}</span>
+            <span class="channel-status">
+              {if channel_enabled?(@prefs, "email"), do: "Enabled", else: "Disabled"}
+            </span>
           </div>
           <button
             type="button"
@@ -30,13 +32,15 @@
         </div>
         <p class="channel-detail">Notifications sent to: {@user.email}</p>
       </div>
-
-      <!-- Telegram Channel -->
+      
+<!-- Telegram Channel -->
       <div class="channel-card" id="channel-telegram">
         <div class="channel-header">
           <div class="channel-info">
             <h3>Telegram</h3>
-            <span class="channel-status">{if channel_enabled?(@prefs, "telegram"), do: "Enabled", else: "Disabled"}</span>
+            <span class="channel-status">
+              {if channel_enabled?(@prefs, "telegram"), do: "Enabled", else: "Disabled"}
+            </span>
           </div>
           <button
             type="button"
@@ -50,11 +54,19 @@
         <div class="channel-detail">
           <div :if={telegram_chat_id(@prefs, @user) != ""}>
             <p>Linked chat ID: <code>{telegram_chat_id(@prefs, @user)}</code></p>
-            <span :if={@telegram_verify_status == :verified} class="badge badge-success">Verified</span>
+            <span :if={@telegram_verify_status == :verified} class="badge badge-success">
+              Verified
+            </span>
             <span :if={@telegram_verify_status == :linked} class="badge badge-info">Linked</span>
-            <button type="button" class="phx-btn-secondary" phx-click="verify_telegram">Verify Connection</button>
+            <button type="button" class="phx-btn-secondary" phx-click="verify_telegram">
+              Verify Connection
+            </button>
           </div>
-          <form :if={telegram_chat_id(@prefs, @user) == ""} phx-submit="link_telegram" class="inline-form">
+          <form
+            :if={telegram_chat_id(@prefs, @user) == ""}
+            phx-submit="link_telegram"
+            class="inline-form"
+          >
             <input
               type="text"
               name="telegram_chat_id"
@@ -66,13 +78,15 @@
           </form>
         </div>
       </div>
-
-      <!-- Webhook Channel -->
+      
+<!-- Webhook Channel -->
       <div class="channel-card" id="channel-webhook">
         <div class="channel-header">
           <div class="channel-info">
             <h3>Webhook</h3>
-            <span class="channel-status">{if channel_enabled?(@prefs, "webhook"), do: "Enabled", else: "Disabled"}</span>
+            <span class="channel-status">
+              {if channel_enabled?(@prefs, "webhook"), do: "Enabled", else: "Disabled"}
+            </span>
           </div>
           <button
             type="button"
@@ -116,7 +130,9 @@
 
   <div class="settings-section">
     <h2>Event Notifications</h2>
-    <p class="settings-description">Choose which events trigger notifications for each channel.</p>
+    <p class="settings-description">
+      Choose which events trigger notifications for each channel.
+    </p>
 
     <div class="event-grid">
       <div :for={pref <- @prefs} class="event-channel-group" id={"events-#{pref.channel_type}"}>
@@ -132,7 +148,7 @@
           </button>
         </div>
         <div class="event-toggles">
-          <div class="event-toggle" :for={event <- ~w(issue_assigned comment status_change)}>
+          <div :for={event <- ~w(issue_assigned comment status_change)} class="event-toggle">
             <button
               type="button"
               class={"event-toggle-btn #{if event_enabled?(pref, event), do: "event-on", else: "event-off"}"}

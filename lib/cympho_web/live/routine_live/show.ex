@@ -20,6 +20,7 @@ defmodule CymphoWeb.RoutineLive.Show do
     case Routines.get_routine(id) do
       {:ok, routine} ->
         runs = RoutineTriggers.list_runs(routine.id, limit: 50)
+
         {:noreply,
          socket
          |> assign(:page_title, routine.name)
@@ -41,6 +42,7 @@ defmodule CymphoWeb.RoutineLive.Show do
     case RoutineTriggers.manual_run(routine) do
       {:ok, %{run: _run}} ->
         runs = RoutineTriggers.list_runs(routine.id, limit: 50)
+
         {:noreply,
          socket
          |> assign(:runs, runs)

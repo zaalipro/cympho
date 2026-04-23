@@ -20,12 +20,18 @@ defmodule Cympho.Orchestrator.Dispatcher do
   alias Cympho.Issues
   alias Cympho.Agents
 
-  @poll_interval    Application.compile_env(:cympho, [:orchestrator, :poll_interval], 30_000)
-  @max_concurrent   Application.compile_env(:cympho, [:orchestrator, :max_concurrent_agents], 3)
-  @active_states    Application.compile_env(:cympho, [:orchestrator, :active_states], [:todo, :in_progress])
-  @terminal_states   Application.compile_env(:cympho, [:orchestrator, :terminal_states], [:done, :cancelled])
-  @max_retries      Application.compile_env(:cympho, [:orchestrator, :max_retries], 5)
-  @base_backoff_ms  Application.compile_env(:cympho, [:orchestrator, :base_backoff_ms], 30_000)
+  @poll_interval Application.compile_env(:cympho, [:orchestrator, :poll_interval], 30_000)
+  @max_concurrent Application.compile_env(:cympho, [:orchestrator, :max_concurrent_agents], 3)
+  @active_states Application.compile_env(:cympho, [:orchestrator, :active_states], [
+                   :todo,
+                   :in_progress
+                 ])
+  @terminal_states Application.compile_env(:cympho, [:orchestrator, :terminal_states], [
+                     :done,
+                     :cancelled
+                   ])
+  @max_retries Application.compile_env(:cympho, [:orchestrator, :max_retries], 5)
+  @base_backoff_ms Application.compile_env(:cympho, [:orchestrator, :base_backoff_ms], 30_000)
 
   # Client
 
@@ -87,7 +93,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
     |> fetch_and_dispatch()
   end
 
-  defp reconcile_running(%State{running_issue_ids: running} = state) when map_size(running) == 0 do
+  defp reconcile_running(%State{running_issue_ids: running} = state)
+       when map_size(running) == 0 do
     state
   end
 
@@ -105,7 +112,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
       end)
 
     case stopped_ids do
-      [] -> state
+      [] ->
+        state
+
       ids ->
         new_running = MapSet.difference(state.running_issue_ids, MapSet.new(ids))
         %{state | running_issue_ids: new_running}
@@ -138,7 +147,13 @@ defmodule Cympho.Orchestrator.Dispatcher do
     Cympho.Issues.Issue
     |> where([i], i.status in ^active_states and is_nil(i.assignee_id))
     |> preload([:blocked_by])
-    |> order_by([i], asc: fragment("CASE ? WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END", i.priority))
+    |> order_by([i],
+      asc:
+        fragment(
+          "CASE ? WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END",
+          i.priority
+        )
+    )
     |> order_by([i], asc: i.inserted_at)
     |> limit(^limit)
     |> Cympho.Repo.all()
@@ -152,27 +167,43 @@ defmodule Cympho.Orchestrator.Dispatcher do
       case agent_for_issue(issue) do
         {:ok, agent} ->
           required_role = Router.infer_role(issue)
+
           case Issues.checkout_issue(issue, agent, required_role) do
             {:ok, checked_out} ->
               case Orchestrator.start_and_run(checked_out, agent.id) do
                 {:ok, _pid} ->
                   new_running = MapSet.put(state.running_issue_ids, issue.id)
                   new_retries = Map.delete(state.retry_attempts, issue.id)
-                  new_state = %{state | running_issue_ids: new_running, retry_attempts: new_retries}
+
+                  new_state = %{
+                    state
+                    | running_issue_ids: new_running,
+                      retry_attempts: new_retries
+                  }
+
                   broadcast_state(new_state)
                   new_state
 
                 {:error, reason} ->
-                  :logger.warning("[Dispatcher] Failed to start orchestrator for issue #{issue.id}: #{inspect(reason)}")
+                  :logger.warning(
+                    "[Dispatcher] Failed to start orchestrator for issue #{issue.id}: #{inspect(reason)}"
+                  )
+
                   record_dispatch_failure(issue, state, :orchestrator_start_failed)
               end
 
             {:error, :already_assigned} ->
-              :logger.info("[Dispatcher] Issue #{issue.id} already assigned by another process (race condition handled)")
+              :logger.info(
+                "[Dispatcher] Issue #{issue.id} already assigned by another process (race condition handled)"
+              )
+
               state
 
             {:error, reason} ->
-              :logger.warning("[Dispatcher] Failed to checkout issue #{issue.id}: #{inspect(reason)}")
+              :logger.warning(
+                "[Dispatcher] Failed to checkout issue #{issue.id}: #{inspect(reason)}"
+              )
+
               record_dispatch_failure(issue, state, :checkout_failed)
           end
 
@@ -188,17 +219,22 @@ defmodule Cympho.Orchestrator.Dispatcher do
     attempts = if current_entry, do: current_entry.attempts, else: 0
 
     if attempts >= @max_retries do
-      :logger.error("[Dispatcher] Issue #{issue.id} exceeded max retries (#{@max_retries}) for #{reason}, will not retry")
+      :logger.error(
+        "[Dispatcher] Issue #{issue.id} exceeded max retries (#{@max_retries}) for #{reason}, will not retry"
+      )
+
       state
     else
       next_attempts = attempts + 1
-      backoff_ms = @base_backoff_ms * :math.pow(2, attempts) |> round()
+      backoff_ms = (@base_backoff_ms * :math.pow(2, attempts)) |> round()
       next_retry_at = :os.system_time(:millisecond) + backoff_ms
 
       new_retry_entry = %{attempts: next_attempts, next_retry_at: next_retry_at}
       new_retries = Map.put(state.retry_attempts, issue.id, new_retry_entry)
 
-      :logger.info("[Dispatcher] Scheduling retry #{next_attempts}/#{@max_retries} for issue #{issue.id} in #{backoff_ms}ms (reason: #{reason})")
+      :logger.info(
+        "[Dispatcher] Scheduling retry #{next_attempts}/#{@max_retries} for issue #{issue.id} in #{backoff_ms}ms (reason: #{reason})"
+      )
 
       %{state | retry_attempts: new_retries}
     end
@@ -211,6 +247,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
     Enum.each(all_roles, fn role ->
       eligible = Agents.list_eligible_agents(role)
+
       case Router.select_agent(role, eligible) do
         {:ok, agent} -> throw({:found, agent})
         {:error, _} -> :continue

@@ -42,27 +42,43 @@ defmodule CymphoWeb.KanbanLive.Index do
     |> Enum.uniq_by(& &1.id)
     |> Enum.reduce(%{}, fn agent, acc ->
       case AgentHeartbeat.get_state(agent.id) do
-        {:ok, state} -> Map.put(acc, agent.id, state)
-        {:error, _} -> Map.put(acc, agent.id, %{agent_id: agent.id, status: :offline, current_issue_id: nil, eta_ms: nil})
+        {:ok, state} ->
+          Map.put(acc, agent.id, state)
+
+        {:error, _} ->
+          Map.put(acc, agent.id, %{
+            agent_id: agent.id,
+            status: :offline,
+            current_issue_id: nil,
+            eta_ms: nil
+          })
       end
     end)
   end
 
   def get_heartbeat_state(agent_heartbeat_states, agent_id) do
-    Map.get(agent_heartbeat_states, agent_id, %{status: :offline, current_issue_id: nil, eta_ms: nil})
+    Map.get(agent_heartbeat_states, agent_id, %{
+      status: :offline,
+      current_issue_id: nil,
+      eta_ms: nil
+    })
   end
 
   @impl true
   def handle_params(params, _url, socket) do
     project_id = params["project_id"]
 
-    selected_project = case project_id do
-      nil -> nil
-      id -> case Projects.get_project(id) do
-        {:ok, project} -> project
-        {:error, _} -> nil
+    selected_project =
+      case project_id do
+        nil ->
+          nil
+
+        id ->
+          case Projects.get_project(id) do
+            {:ok, project} -> project
+            {:error, _} -> nil
+          end
       end
-    end
 
     socket =
       socket
@@ -177,11 +193,17 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   def handle_event("filter_assignee", %{"assignee_id" => assignee_id}, socket) do
-    {:noreply, assign(socket, :filter_assignee_id, if(assignee_id == "", do: nil, else: assignee_id))}
+    {:noreply,
+     assign(socket, :filter_assignee_id, if(assignee_id == "", do: nil, else: assignee_id))}
   end
 
   def handle_event("filter_priority", %{"priority" => priority}, socket) do
-    {:noreply, assign(socket, :filter_priority, if(priority == "", do: nil, else: String.to_existing_atom(priority)))}
+    {:noreply,
+     assign(
+       socket,
+       :filter_priority,
+       if(priority == "", do: nil, else: String.to_existing_atom(priority))
+     )}
   end
 
   def handle_event("filter_search", %{"query" => query}, socket) do
@@ -189,10 +211,11 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   def handle_event("clear_filters", _params, socket) do
-    {:noreply, socket
-    |> assign(:filter_assignee_id, nil)
-    |> assign(:filter_priority, nil)
-    |> assign(:filter_search, "")}
+    {:noreply,
+     socket
+     |> assign(:filter_assignee_id, nil)
+     |> assign(:filter_priority, nil)
+     |> assign(:filter_search, "")}
   end
 
   def handle_event("cancel_comment", _params, socket) do
@@ -235,6 +258,7 @@ defmodule CymphoWeb.KanbanLive.Index do
   def status_columns, do: @status_columns
 
   def wip_limit(nil, _status), do: nil
+
   def wip_limit(project, status) when is_map(project) do
     settings = project.settings || %{}
     wip_limits = Map.get(settings, "wip_limits", %{})
@@ -257,7 +281,12 @@ defmodule CymphoWeb.KanbanLive.Index do
     count = 0
     count = if assigns[:filter_assignee_id], do: count + 1, else: count
     count = if assigns[:filter_priority], do: count + 1, else: count
-    count = if assigns[:filter_search] != "" and assigns[:filter_search] != nil, do: count + 1, else: count
+
+    count =
+      if assigns[:filter_search] != "" and assigns[:filter_search] != nil,
+        do: count + 1,
+        else: count
+
     count
   end
 
@@ -270,12 +299,14 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   defp filter_by_assignee(issues, nil), do: issues
   defp filter_by_assignee(issues, ""), do: issues
+
   defp filter_by_assignee(issues, assignee_id) do
     Enum.filter(issues, fn issue -> issue.assignee && issue.assignee.id == assignee_id end)
   end
 
   defp filter_by_priority(issues, nil), do: issues
   defp filter_by_priority(issues, ""), do: issues
+
   defp filter_by_priority(issues, priority) do
     priority_atom = if is_binary(priority), do: String.to_existing_atom(priority), else: priority
     Enum.filter(issues, fn issue -> issue.priority == priority_atom end)
@@ -283,8 +314,10 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   defp filter_by_search(issues, ""), do: issues
   defp filter_by_search(issues, nil), do: issues
+
   defp filter_by_search(issues, search) do
     lower_search = String.downcase(search)
+
     Enum.filter(issues, fn issue ->
       String.contains?(String.downcase(issue.title || ""), lower_search)
     end)

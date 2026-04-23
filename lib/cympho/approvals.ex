@@ -45,7 +45,7 @@ defmodule Cympho.Approvals do
         Enum.map(issue_ids, fn issue_id ->
           %{
             approval_id: approval.id,
-            issue_id: issue_id,
+            issue_id: issue_id
           }
         end)
 
@@ -137,14 +137,19 @@ defmodule Cympho.Approvals do
   def cancel_pending_for_issue(issue_id) do
     query =
       from(a in Approval,
-        join: ai in ApprovalIssue, on: ai.approval_id == a.id,
+        join: ai in ApprovalIssue,
+        on: ai.approval_id == a.id,
         where: ai.issue_id == ^issue_id and a.status == :pending
       )
 
     {count, _} = Repo.update_all(query, set: [status: :cancelled])
 
     if count > 0 do
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "approvals", {:approvals_cancelled_for_issue, issue_id})
+      Phoenix.PubSub.broadcast(
+        Cympho.PubSub,
+        "approvals",
+        {:approvals_cancelled_for_issue, issue_id}
+      )
     end
 
     {:ok, count}

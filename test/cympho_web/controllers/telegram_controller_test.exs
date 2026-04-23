@@ -20,10 +20,11 @@ defmodule CymphoWeb.TelegramControllerTest do
     test "returns 200 when secret token is correct" do
       Application.put_env(:cympho, :telegram_webhook_secret, "my-secret-token")
 
-      conn = build_conn(:post, "/api/telegram/webhook", %{
-        "secret_token" => "my-secret-token",
-        "message" => %{"chat" => %{"id" => 123}, "text" => "/help"}
-      })
+      conn =
+        build_conn(:post, "/api/telegram/webhook", %{
+          "secret_token" => "my-secret-token",
+          "message" => %{"chat" => %{"id" => 123}, "text" => "/help"}
+        })
 
       conn = CymphoWeb.TelegramController.webhook(conn, %{})
 
@@ -36,7 +37,8 @@ defmodule CymphoWeb.TelegramControllerTest do
     test "returns 200 when no secret token is configured (webhook not protected)" do
       Application.delete_env(:cympho, :telegram_webhook_secret)
 
-      conn = build_conn(:post, "/api/telegram/webhook", %{"message" => %{"chat" => %{"id" => 123}}})
+      conn =
+        build_conn(:post, "/api/telegram/webhook", %{"message" => %{"chat" => %{"id" => 123}}})
 
       conn = CymphoWeb.TelegramController.webhook(conn, %{})
 

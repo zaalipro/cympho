@@ -216,10 +216,20 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
 
       {:ok, assigned} = Issues.assign_execution_policy(issue, policy.id, executor.id)
 
-      %{executor: executor, reviewer: reviewer, approver: approver, policy: policy, issue: assigned}
+      %{
+        executor: executor,
+        reviewer: reviewer,
+        approver: approver,
+        policy: policy,
+        issue: assigned
+      }
     end
 
-    test "executor submits work -> advances to reviewer stage", %{executor: executor, reviewer: reviewer, issue: issue} do
+    test "executor submits work -> advances to reviewer stage", %{
+      executor: executor,
+      reviewer: reviewer,
+      issue: issue
+    } do
       assert {:ok, advanced} = Issues.transition_issue(issue, :in_review, executor.id)
       assert advanced.status == :in_review
       assert advanced.execution_state.current_stage_type == :reviewer
@@ -246,10 +256,16 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
       assert length(done.execution_state.history) == 3
     end
 
-    test "reviewer requests changes -> returns to executor", %{executor: executor, reviewer: reviewer, issue: issue} do
+    test "reviewer requests changes -> returns to executor", %{
+      executor: executor,
+      reviewer: reviewer,
+      issue: issue
+    } do
       {:ok, at_reviewer} = Issues.transition_issue(issue, :in_review, executor.id)
 
-      {:ok, returned} = Issues.execution_policy_decision(at_reviewer, :request_changes, reviewer.id)
+      {:ok, returned} =
+        Issues.execution_policy_decision(at_reviewer, :request_changes, reviewer.id)
+
       assert returned.status == :in_progress
       assert returned.execution_state.last_decision_outcome == :changes_requested
       assert returned.assignee_id == executor.id
@@ -265,15 +281,22 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
 
       {:ok, at_approver} = Issues.execution_policy_decision(at_reviewer, :approve, reviewer.id)
 
-      {:ok, returned} = Issues.execution_policy_decision(at_approver, :request_changes, approver.id)
+      {:ok, returned} =
+        Issues.execution_policy_decision(at_approver, :request_changes, approver.id)
+
       assert returned.status == :in_progress
       assert returned.execution_state.last_decision_outcome == :changes_requested
       assert returned.assignee_id == executor.id
     end
 
-    test "cannot directly mark done when not at approver stage", %{executor: executor, issue: issue} do
+    test "cannot directly mark done when not at approver stage", %{
+      executor: executor,
+      issue: issue
+    } do
       {:ok, at_reviewer} = Issues.transition_issue(issue, :in_review, executor.id)
-      assert {:error, :execution_policy_not_complete} = Issues.transition_issue(at_reviewer, :done)
+
+      assert {:error, :execution_policy_not_complete} =
+               Issues.transition_issue(at_reviewer, :done)
     end
 
     test "history tracks all stage transitions", %{
@@ -325,7 +348,11 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
       %{executor: executor, approver: approver, issue: assigned}
     end
 
-    test "executor submits -> approver approves -> done", %{executor: executor, approver: approver, issue: issue} do
+    test "executor submits -> approver approves -> done", %{
+      executor: executor,
+      approver: approver,
+      issue: issue
+    } do
       {:ok, at_approver} = Issues.transition_issue(issue, :in_review, executor.id)
       assert at_approver.execution_state.current_stage_type == :approver
 
@@ -377,7 +404,9 @@ defmodule Cympho.ExecutionPolicyLifecycleTest do
 
       {:ok, at_reviewer} = Issues.transition_issue(assigned, :in_review, executor.id)
 
-      {:ok, returned} = Issues.execution_policy_decision(at_reviewer, :request_changes, reviewer.id)
+      {:ok, returned} =
+        Issues.execution_policy_decision(at_reviewer, :request_changes, reviewer.id)
+
       assert returned.status == :in_progress
 
       {:ok, resubmitted} = Issues.transition_issue(returned, :in_review, executor.id)

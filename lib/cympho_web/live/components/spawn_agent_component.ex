@@ -21,7 +21,7 @@ defmodule CymphoWeb.SpawnAgentComponent do
             <.select
               name="agent[role]"
               label="Role"
-              options={Enum.map(@spawnable_roles, &({role_label(&1), to_string(&1)}))}
+              options={Enum.map(@spawnable_roles, &{role_label(&1), to_string(&1)})}
               value={to_string(@prefilled_role)}
             />
 
@@ -30,7 +30,7 @@ defmodule CymphoWeb.SpawnAgentComponent do
 
             <:actions>
               <.button type="submit" phx-disable-with="Spawning...">Spawn Agent</.button>
-              <.button type="button" variant="ghost" phx-click="hide_form" phx-target={@myself}>
+              <.button type="button" phx-click="hide_form" phx-target={@myself}>
                 Cancel
               </.button>
             </:actions>
@@ -43,7 +43,9 @@ defmodule CymphoWeb.SpawnAgentComponent do
           phx-click="show_form"
           phx-target={@myself}
         >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
           Spawn Agent
         </button>
       <% end %>

@@ -50,8 +50,7 @@ config :cympho, Cympho.Scheduler,
 
 config :swoosh, :api_client, Swoosh.ApiClient.Finch
 
-config :cympho, Cympho.Mailer,
-  finch_name: Cympho.Finch
+config :cympho, Cympho.Mailer, finch_name: Cympho.Finch
 
 config :cympho, Cympho.Finch,
   pools: [
