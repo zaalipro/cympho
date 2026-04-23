@@ -75,6 +75,10 @@ defmodule Cympho.Orchestrator do
   """
   @spec stop(String.t()) :: :ok
   def stop(issue_id) do
+    case whereis(issue_id) do
+      nil -> :ok
+      pid -> GenServer.stop(pid)
+    end
   end
 
   @doc """
@@ -91,11 +95,6 @@ defmodule Cympho.Orchestrator do
         catch
           :exit, _ -> nil
         end
-    end
-
-    case whereis(issue_id) do
-      nil -> :ok
-      pid -> GenServer.stop(pid)
     end
   end
 
