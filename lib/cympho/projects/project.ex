@@ -11,13 +11,14 @@ defmodule Cympho.Projects.Project do
     field :status, Ecto.Enum, values: [:active, :archived], default: :active
     field :prefix, :string
     field :github_webhook_secret, :string
+    field :settings, :map, default: %{}
 
     timestamps(type: :utc_datetime)
   end
 
   def changeset(project, attrs) do
     project
-    |> cast(attrs, [:name, :description, :status, :prefix, :github_webhook_secret])
+    |> cast(attrs, [:name, :description, :status, :prefix, :github_webhook_secret, :settings])
     |> validate_required([:name, :prefix])
     |> validate_length(:name, min: 1, max: 255)
     |> validate_length(:prefix, min: 2, max: 10)

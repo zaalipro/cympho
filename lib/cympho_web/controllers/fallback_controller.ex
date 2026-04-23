@@ -8,6 +8,13 @@ defmodule CymphoWeb.FallbackController do
     |> render(:"404")
   end
 
+  def call(conn, {:error, :forbidden}) do
+    conn
+    |> put_status(:forbidden)
+    |> put_view(json: CymphoWeb.ErrorJSON)
+    |> render(:error, message: "Forbidden")
+  end
+
   def call(conn, {:error, %Ecto.Changeset{} = changeset}) do
     conn
     |> put_status(:unprocessable_entity)

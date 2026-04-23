@@ -3,30 +3,27 @@ defmodule CymphoWeb.KanbanLive.Index do
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.AgentHeartbeat
-  alias Cympho.Agents
-  alias Cympho.Comments
+  alias Cympho.Projects
+
+  @status_columns [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
 
   @impl true
   def mount(_params, _session, socket) do
     Issues.subscribe()
     Cympho.Agents.subscribe()
     Phoenix.PubSub.subscribe(Cympho.PubSub, "agent_heartbeats")
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "comments")
 
+    projects = Projects.list_projects()
     issues = Issues.list_issues()
-    agents = Agents.list_agents()
     agent_heartbeat_states = load_heartbeat_states(issues)
 
     socket =
       socket
       |> assign(:issues, issues)
-      |> assign(:agents, agents)
       |> assign(:agent_heartbeat_states, agent_heartbeat_states)
-      |> assign(:filter_assignee_id, nil)
-      |> assign(:filter_priority, nil)
-      |> assign(:filter_search, "")
-      |> assign(:editing_card_id, nil)
-      |> assign(:card_action_open, nil)
+      |> assign(:projects, projects)
+      |> assign(:collapsed_columns, MapSet.new())
+      |> assign(:swimlane_mode, false)
 
     {:ok, socket}
   end
@@ -44,60 +41,38 @@ defmodule CymphoWeb.KanbanLive.Index do
     end)
   end
 
-  @doc """
-  Returns the heartbeat state for a given agent_id, or a default offline state.
-  """
   def get_heartbeat_state(agent_heartbeat_states, agent_id) do
     Map.get(agent_heartbeat_states, agent_id, %{status: :offline, current_issue_id: nil, eta_ms: nil})
   end
 
-  @doc """
-  Returns a human-readable heartbeat status label.
-  """
-  def heartbeat_status_label(%{status: :idle, eta_ms: eta_ms}, _issues) do
-    if eta_ms do
-      seconds = div(eta_ms, 1000)
-      "Next heartbeat in #{seconds}s"
-    else
-      "Idle"
-    end
-  end
-
-  def heartbeat_status_label(%{status: :working, current_issue_id: issue_id, eta_ms: eta_ms}, issues) do
-    issue_title = if issue_id do
-      case Enum.find(issues, fn i -> i.id == issue_id end) do
-        nil -> nil
-        issue -> String.slice(issue.title, 0, 20)
-      end
-    else
-      nil
-    end
-
-    base = if issue_title, do: "Working: #{issue_title}", else: "Working"
-    if eta_ms do
-      seconds = div(eta_ms, 1000)
-      "#{base} (#{seconds}s)"
-    else
-      base
-    end
-  end
-
-  def heartbeat_status_label(%{status: :error}, _issues), do: "Error"
-  def heartbeat_status_label(%{status: :offline}, _issues), do: "Offline"
-  def heartbeat_status_label(_, _issues), do: "Unknown"
-
   @impl true
   def handle_params(params, _url, socket) do
-    {:noreply, apply_action(socket, socket.assigns.live_action, params)}
+    project_id = params["project_id"]
+
+    selected_project = case project_id do
+      nil -> nil
+      id -> case Projects.get_project(id) do
+        {:ok, project} -> project
+        {:error, _} -> nil
+      end
+    end
+
+    socket =
+      socket
+      |> assign(:selected_project_id, project_id)
+      |> assign(:selected_project, selected_project)
+      |> assign(:page_title, "Kanban Board")
+      |> apply_project_filter(project_id)
+
+    {:noreply, socket}
   end
 
-  defp apply_action(socket, :index, _params) do
-    socket
-    |> assign(:page_title, "Kanban Board")
+  defp apply_project_filter(socket, nil) do
+    assign(socket, :issues, Issues.list_issues())
   end
 
-  defp apply_action(socket, nil, params) do
-    apply_action(socket, :index, params)
+  defp apply_project_filter(socket, project_id) do
+    assign(socket, :issues, Issues.list_issues(%{project_id: project_id}))
   end
 
   @impl true
@@ -141,100 +116,6 @@ defmodule CymphoWeb.KanbanLive.Index do
      end)}
   end
 
-  def handle_info({:comment_created, _comment}, socket) do
-    {:noreply, socket}
-  end
-
-  # --- Filter handlers ---
-
-  def handle_event("filter_assignee", %{"assignee_id" => ""}, socket) do
-    {:noreply, assign(socket, :filter_assignee_id, nil)}
-  end
-
-  def handle_event("filter_assignee", %{"assignee_id" => aid}, socket) do
-    {:noreply, assign(socket, :filter_assignee_id, aid)}
-  end
-
-  def handle_event("filter_priority", %{"priority" => ""}, socket) do
-    {:noreply, assign(socket, :filter_priority, nil)}
-  end
-
-  def handle_event("filter_priority", %{"priority" => p}, socket) do
-    {:noreply, assign(socket, :filter_priority, String.to_existing_atom(p))}
-  end
-
-  def handle_event("filter_search", %{"query" => query}, socket) do
-    {:noreply, assign(socket, :filter_search, String.trim(query))}
-  end
-
-  def handle_event("clear_filters", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:filter_assignee_id, nil)
-     |> assign(:filter_priority, nil)
-     |> assign(:filter_search, "")}
-  end
-
-  # --- Quick action handlers ---
-
-  def handle_event("open_card_action", %{"issue_id" => id}, socket) do
-    current = socket.assigns[:card_action_open]
-    {:noreply, assign(socket, :card_action_open, if(current == id, do: nil, else: id))}
-  end
-
-  def handle_event("start_edit_title", %{"issue_id" => id}, socket) do
-    {:noreply, socket |> assign(:editing_card_id, {:edit_title, id}) |> assign(:card_action_open, nil)}
-  end
-
-  def handle_event("save_title", %{"issue_id" => id, "title" => title}, socket) do
-    title = String.trim(title)
-    if title != "" do
-      issue = Issues.get_issue!(id)
-      Issues.update_issue(issue, %{title: title})
-    end
-    {:noreply, assign(socket, :editing_card_id, nil)}
-  end
-
-  def handle_event("cancel_edit_title", _params, socket) do
-    {:noreply, assign(socket, :editing_card_id, nil)}
-  end
-
-  def handle_event("quick_assign", %{"issue_id" => id, "agent_id" => agent_id}, socket) do
-    issue = Issues.get_issue!(id)
-    Issues.update_issue(issue, %{assignee_id: agent_id})
-    {:noreply, assign(socket, :card_action_open, nil)}
-  end
-
-  def handle_event("quick_unassign", %{"issue_id" => id}, socket) do
-    issue = Issues.get_issue!(id)
-    Issues.update_issue(issue, %{assignee_id: nil})
-    {:noreply, assign(socket, :card_action_open, nil)}
-  end
-
-  def handle_event("quick_priority", %{"issue_id" => id, "priority" => priority}, socket) do
-    issue = Issues.get_issue!(id)
-    Issues.update_issue(issue, %{priority: String.to_existing_atom(priority)})
-    {:noreply, assign(socket, :card_action_open, nil)}
-  end
-
-  def handle_event("open_add_comment", %{"issue_id" => id}, socket) do
-    {:noreply, socket |> assign(:editing_card_id, {:add_comment, id}) |> assign(:card_action_open, nil)}
-  end
-
-  def handle_event("submit_comment", %{"issue_id" => id, "comment" => body}, socket) do
-    body = String.trim(body)
-    if body != "" do
-      Comments.create_comment(%{issue_id: id, body: body})
-    end
-    {:noreply, assign(socket, :editing_card_id, nil)}
-  end
-
-  def handle_event("cancel_comment", _params, socket) do
-    {:noreply, assign(socket, :editing_card_id, nil)}
-  end
-
-  # --- Transition handler ---
-
   @impl true
   def handle_event("transition_issue", %{"id" => id, "to_status" => to_status_string}, socket) do
     to_status = try_string_to_status(to_status_string)
@@ -249,11 +130,42 @@ defmodule CymphoWeb.KanbanLive.Index do
           {:noreply, socket}
 
         {:error, :invalid_transition} ->
-          {:noreply, put_flash(socket, :error, "Invalid status transition")}
+          {:noreply,
+           socket
+           |> put_flash(:error, "Invalid status transition from #{issue.status} to #{to_status}")
+           |> push_event("shake_card", %{issue_id: id})}
 
         {:error, :blocked_by_active_issues} ->
-          {:noreply, put_flash(socket, :error, "Cannot complete - issue is blocked")}
+          {:noreply,
+           socket
+           |> put_flash(:error, "Cannot complete - issue is blocked by active issues")
+           |> push_event("shake_card", %{issue_id: id})}
       end
+    end
+  end
+
+  def handle_event("toggle_column", %{"status" => status_str}, socket) do
+    status = String.to_existing_atom(status_str)
+
+    {:noreply,
+     update(socket, :collapsed_columns, fn collapsed ->
+       if MapSet.member?(collapsed, status) do
+         MapSet.delete(collapsed, status)
+       else
+         MapSet.put(collapsed, status)
+       end
+     end)}
+  end
+
+  def handle_event("toggle_swimlanes", _params, socket) do
+    {:noreply, update(socket, :swimlane_mode, fn mode -> not mode end)}
+  end
+
+  def handle_event("filter_project", %{"project_id" => project_id}, socket) do
+    if project_id == "" do
+      {:noreply, push_patch(socket, to: ~p"/kanban")}
+    else
+      {:noreply, push_patch(socket, to: ~p"/kanban?project_id=#{project_id}")}
     end
   end
 
@@ -267,46 +179,7 @@ defmodule CymphoWeb.KanbanLive.Index do
     ArgumentError -> nil
   end
 
-  # --- Filtered issues ---
-
-  def apply_filters(issues, filters) do
-    issues
-    |> filter_by_assignee(filters.assignee_id)
-    |> filter_by_priority(filters.priority)
-    |> filter_by_search(filters.search)
-  end
-
-  defp filter_by_assignee(issues, nil), do: issues
-  defp filter_by_assignee(issues, assignee_id) do
-    Enum.filter(issues, fn issue ->
-      issue.assignee && issue.assignee.id == assignee_id
-    end)
-  end
-
-  defp filter_by_priority(issues, nil), do: issues
-  defp filter_by_priority(issues, priority) do
-    Enum.filter(issues, &(&1.priority == priority))
-  end
-
-  defp filter_by_search(issues, ""), do: issues
-  defp filter_by_search(issues, query) do
-    lower = String.downcase(query)
-    Enum.filter(issues, fn issue ->
-      String.downcase(issue.title) =~ lower ||
-        (issue.assignee && String.downcase(issue.assignee.name) =~ lower) ||
-        String.downcase(to_string(issue.priority)) =~ lower ||
-        String.downcase(to_string(issue.status)) =~ lower
-    end)
-  end
-
-  def backlog_issues(issues), do: Enum.filter(issues, &(&1.status == :backlog))
-  def todo_issues(issues), do: Enum.filter(issues, &(&1.status == :todo))
-  def in_progress_issues(issues), do: Enum.filter(issues, &(&1.status == :in_progress))
-  def in_review_issues(issues), do: Enum.filter(issues, &(&1.status == :in_review))
-  def done_issues(issues), do: Enum.filter(issues, &(&1.status == :done))
-  def blocked_issues(issues), do: Enum.filter(issues, &(&1.status == :blocked))
-  def open_issues(issues), do: Enum.filter(issues, &(&1.status != :done))
-  def closed_issues(issues), do: Enum.filter(issues, &(&1.status == :done))
+  def issues_for_status(issues, status), do: Enum.filter(issues, &(&1.status == status))
 
   def valid_next_statuses(:backlog), do: [:todo, :in_progress, :blocked]
   def valid_next_statuses(:todo), do: [:in_progress, :blocked]
@@ -322,11 +195,24 @@ defmodule CymphoWeb.KanbanLive.Index do
   def status_label(:done), do: "Done"
   def status_label(:blocked), do: "Blocked"
 
-  def active_filter_count(assigns) do
-    count = 0
-    count = if assigns.filter_assignee_id, do: count + 1, else: count
-    count = if assigns.filter_priority, do: count + 1, else: count
-    count = if assigns.filter_search != "", do: count + 1, else: count
-    count
+  def status_columns, do: @status_columns
+
+  def wip_limit(nil, _status), do: nil
+  def wip_limit(project, status) when is_map(project) do
+    settings = project.settings || %{}
+    wip_limits = Map.get(settings, "wip_limits", %{})
+    Map.get(wip_limits, to_string(status))
+  end
+
+  def wip_exceeded?(nil, _count), do: false
+  def wip_exceeded?(limit, count) when is_integer(limit), do: count > limit
+  def wip_exceeded?(_, _), do: false
+
+  def assignee_groups(issues) do
+    issues
+    |> Enum.group_by(fn issue ->
+      if issue.assignee, do: issue.assignee.name, else: "Unassigned"
+    end)
+    |> Enum.sort_by(fn {name, _} -> name end)
   end
 end

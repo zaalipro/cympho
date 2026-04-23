@@ -273,4 +273,45 @@ defmodule Cympho.Agents do
         {:error, changeset}
     end
   end
+
+  @doc """
+  Returns the inbox for an agent: issues assigned to them, sorted by priority (high first)
+  then by insertion date (oldest first). Returns compact maps with id, title, status, priority.
+  """
+  def list_agent_inbox(agent_id) when is_binary(agent_id) do
+    from(i in Issue,
+      where: i.assignee_id == ^agent_id and i.status in [:todo, :in_progress, :in_review, :blocked],
+      select: %{
+        id: i.id,
+        title: i.title,
+        status: i.status,
+        priority: i.priority,
+        assignee_id: i.assignee_id
+      },
+      order_by: [
+        fragment("CASE ? WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 3 END", i.priority),
+        asc: i.inserted_at
+      ]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Updates an agent's own status and last_heartbeat_at.
+  Uses the restricted status_changeset that only allows status and last_heartbeat_at.
+  """
+  def update_agent_status(%Agent{} = agent, attrs) do
+    agent
+    |> Agent.status_changeset(Map.put(attrs, "last_heartbeat_at", DateTime.utc_now()))
+    |> Repo.update()
+    |> case do
+      {:ok, updated} ->
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_updated, updated})
+        {:ok, updated}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
 end
