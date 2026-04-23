@@ -55,7 +55,8 @@ defmodule CymphoWeb.Components do
     ~H"""
     <div class="form-group">
       <label>{@label}</label>
-      <input type={@type} name={input_name(@field)} value={input_value(@field)} {@rest} />
+      <textarea :if={@type == "textarea"} name={input_name(@field)} {@rest}><%= input_value(@field) %></textarea>
+      <input :if={@type != "textarea"} type={@type} name={input_name(@field)} value={input_value(@field)} {@rest} />
     </div>
     """
   end

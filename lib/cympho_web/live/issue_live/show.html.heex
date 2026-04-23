@@ -1,17 +1,21 @@
 <div class="p-6 lg:p-8 max-w-6xl mx-auto">
   <.header title={@issue.title}>
     <:actions>
-      <.app_link navigate={~p"/issues"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
+      <.link navigate={~p"/issues"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
         Back
-      </.app_link>
+      </.link>
     </:actions>
   </.header>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <div class="lg:col-span-2 space-y-6">
       <div class="flex items-center gap-3">
-        <.badge variant="status" value={to_string(@issue.status)} />
-        <.badge variant="priority" value={to_string(@issue.priority)} />
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-510 bg-blue-500/20 text-blue-400">
+          {@issue.status}
+        </span>
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-510 bg-yellow-500/20 text-yellow-400">
+          {@issue.priority}
+        </span>
       </div>
 
       <p class="text-sm text-text-secondary leading-relaxed">
@@ -20,6 +24,17 @@
 
       <div class="text-xs text-text-quaternary">
         Created {@issue.inserted_at}
+      </div>
+
+      <div class="bg-surface border border-border rounded-card p-5 space-y-4">
+        <h3 class="text-sm font-510 text-text-primary">GitHub PR Link</h3>
+        <form phx-submit="update_github_pr_url" class="space-y-3">
+          <input type="text" name="github_pr_url" value={@issue.github_pr_url || ""} placeholder="https://github.com/owner/repo/pull/123" class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors" />
+          <div class="flex items-center gap-3">
+            <.button type="submit">Save PR URL</.button>
+            <.button type="button" phx-click="clear_github_pr_url">Clear</.button>
+          </div>
+        </form>
       </div>
 
       <div class="bg-surface border border-border rounded-card p-5 space-y-4">
@@ -51,16 +66,10 @@
             <span class="text-xs text-text-quaternary shrink-0">({attachment.file_size} bytes)</span>
           </div>
           <div class="flex items-center gap-2 shrink-0">
-            <.app_link href={~p"/api/attachments/#{attachment.id}/download"} target="_blank" class="text-xs text-accent hover:text-accent/80 transition-colors">
+            <a href={~p"/api/attachments/#{attachment.id}/download"} target="_blank" class="text-xs text-accent hover:text-accent/80 transition-colors">
               Download
-            </.app_link>
-            <button
-              type="button"
-              class="text-xs text-text-quaternary hover:text-red-400 transition-colors"
-              phx-click="delete_attachment"
-              phx-value-id={attachment.id}
-              data-confirm="Delete this attachment?"
-            >
+            </a>
+            <button type="button" class="text-xs text-text-quaternary hover:text-red-400 transition-colors" phx-click="delete_attachment" phx-value-id={attachment.id} data-confirm="Delete this attachment?">
               Delete
             </button>
           </div>
@@ -92,13 +101,7 @@
               <span class="text-xs text-text-quaternary">{comment.inserted_at}</span>
             </div>
             <p class="text-sm text-text-secondary">{comment.body}</p>
-            <button
-              type="button"
-              class="mt-2 text-xs text-text-quaternary hover:text-red-400 transition-colors"
-              phx-click="delete_comment"
-              phx-value-id={comment.id}
-              data-confirm="Delete this comment?"
-            >
+            <button type="button" class="mt-2 text-xs text-text-quaternary hover:text-red-400 transition-colors" phx-click="delete_comment" phx-value-id={comment.id} data-confirm="Delete this comment?">
               Delete
             </button>
           </div>
@@ -107,9 +110,15 @@
         <div class="bg-surface border border-border rounded-card p-5 space-y-4">
           <h4 class="text-sm font-510 text-text-primary">Add Comment</h4>
           <form id="comment-form" phx-submit="add_comment" class="space-y-4">
-            <.select name="comment[author_type]" label="Author Type" options={[User: "user", Agent: "agent"]} />
-            <.input field={@comment_changeset.params && @comment_changeset.params["author_id"] || nil} name="comment[author_id]" label="Author ID" />
-            <.input field={@comment_changeset.params && @comment_changeset.params["body"] || nil} name="comment[body]" label="Comment" type="textarea" />
+            <div class="form-group">
+              <label>Author Type</label>
+              <select name="comment[author_type]" class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary">
+                <option value="user">User</option>
+                <option value="agent">Agent</option>
+              </select>
+            </div>
+            <.input field={@comment_form[:author_id]} label="Author ID" />
+            <.input field={@comment_form[:body]} label="Comment" type="textarea" />
             <.button type="submit">Add Comment</.button>
           </form>
         </div>
@@ -122,11 +131,15 @@
         <div class="space-y-3 text-sm">
           <div class="flex justify-between">
             <span class="text-text-tertiary">Status</span>
-            <.badge variant="status" value={to_string(@issue.status)} />
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-510 bg-blue-500/20 text-blue-400">
+              {@issue.status}
+            </span>
           </div>
           <div class="flex justify-between">
             <span class="text-text-tertiary">Priority</span>
-            <.badge variant="priority" value={to_string(@issue.priority)} />
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-510 bg-yellow-500/20 text-yellow-400">
+              {@issue.priority}
+            </span>
           </div>
           <div class="flex justify-between">
             <span class="text-text-tertiary">Comments</span>
