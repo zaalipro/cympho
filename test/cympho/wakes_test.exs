@@ -190,6 +190,31 @@ defmodule Cympho.WakesTest do
       assert {:error, :no_assignee} = Wakes.notify_children_completed(child)
     end
 
+    test "wakes parent when single child completes", %{agent: agent, project: project} do
+      {:ok, parent} = Issues.create_issue(%{
+        title: "Parent Issue",
+        project_id: project.id,
+        assignee_id: agent.id,
+        status: :in_progress
+      })
+
+      {:ok, child} = Issues.create_issue(%{
+        title: "Only Child",
+        project_id: project.id,
+        parent_id: parent.id,
+        status: :todo
+      })
+
+      {:ok, child_done} = Issues.transition_issue(child, :done)
+
+      result = Wakes.notify_children_completed(child_done)
+
+      assert {:ok, agent_wake} = result
+      assert agent_wake.agent_id == agent.id
+      assert agent_wake.issue_id == parent.id
+      assert agent_wake.reason == "issue_children_completed"
+    end
+
     test "returns error when not all children are done", %{agent: agent, project: project} do
       {:ok, parent} = Issues.create_issue(%{
         title: "Parent Issue",
