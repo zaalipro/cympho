@@ -15,6 +15,7 @@ defmodule Cympho.Agents.Agent do
 
     field :config, :map, default: %{}
     field :instructions, :string
+    field :instructions_path, :string
     field :max_concurrent_jobs, :integer, default: 3
     field :last_heartbeat_at, :utc_datetime
 
