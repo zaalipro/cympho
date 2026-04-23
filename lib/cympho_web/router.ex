@@ -28,6 +28,8 @@ defmodule CymphoWeb.Router do
     live "/projects/:id/edit", ProjectLive.Edit
     live "/kanban", KanbanLive.Index
     live "/labels", LabelLive.Index
+    live "/approvals", ApprovalLive.Index
+    live "/approvals/:id", ApprovalLive.Show
     live "/agents", AgentLive.Index
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
@@ -49,6 +51,7 @@ defmodule CymphoWeb.Router do
     post "/github/webhook", GithubController, :webhook
 
     resources "/labels", LabelController, only: [:index, :show, :create, :update, :delete]
+    resources "/approvals", ApprovalController, only: [:index, :show, :create, :update]
 
     get "/issues/:issue_id/labels", IssueLabelController, :index
     post "/issues/:issue_id/labels", IssueLabelController, :add

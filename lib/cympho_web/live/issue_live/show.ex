@@ -1,10 +1,19 @@
 defmodule CymphoWeb.IssueLive.Show do
   use CymphoWeb, :live_view
+  use CymphoWeb, :html
   alias Cympho.Issues
   alias Cympho.Comments
   alias Cympho.Agents
   alias Cympho.Documents
+  alias Cympho.Attachments
   alias Cympho.Orchestrator
+
+  @impl true
+  def mount(params, session, socket) do
+    socket = socket
+      |> assign(:uploads, attachment: [])
+    {:ok, socket}
+  end
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -14,9 +23,11 @@ defmodule CymphoWeb.IssueLive.Show do
 
     case Issues.get_issue(id) do
       {:ok, issue} ->
+        attachments = Attachments.list_attachments(id)
         {:ok,
          assign(socket,
            issue: issue,
+           attachments: attachments,
            comment_changeset: Comments.Comment.changeset(%Comments.Comment{}, %{}),
            agents: Agents.list_agents_by_status(:idle),
            show_agent_panel: false
@@ -81,7 +92,26 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:comment_deleted, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      {:noreply, assign(socket, :issue, updated_issue)}
+      attachments = Attachments.list_attachments(updated_issue.id)
+      {:noreply, assign(socket, attachments: attachments)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:attachment_created, updated_issue}, socket) do
+    if socket.assigns.issue.id == updated_issue.id do
+      attachments = Attachments.list_attachments(updated_issue.id)
+      {:noreply, assign(socket, attachments: attachments)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:attachment_deleted, updated_issue}, socket) do
+    if socket.assigns.issue.id == updated_issue.id do
+      attachments = Attachments.list_attachments(updated_issue.id)
+      {:noreply, assign(socket, attachments: attachments)}
     else
       {:noreply, socket}
     end
@@ -153,6 +183,92 @@ defmodule CymphoWeb.IssueLive.Show do
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Failed to spawn agent: #{inspect(reason)}")}
     end
+  end
+
+  def handle_event("upload_attachment", _params, socket) do
+    uploaded_files = socket.assigns.uploads.attachment.entries
+
+    Enum.reduce(uploaded_files, socket, fn entry, socket ->
+      case entry do
+        %{action: :done, status: :ok, ref: ref} ->
+          file = entry.client_name
+          tmp_path = entry.path
+
+          case Attachments.store_file(%Plug.Upload{filename: file, path: tmp_path}, socket.assigns.issue.id) do
+            {:ok, relative_path} ->
+              attrs = %{
+                filename: file,
+                content_type: get_content_type(file),
+                file_size: entry.file_size,
+                path: relative_path,
+                issue_id: socket.assigns.issue.id
+              }
+
+              case Attachments.create_attachment(attrs) do
+                {:ok, _attachment} ->
+                  socket
+                  |> put_flash(:info, "File uploaded successfully")
+                  |> cancel_upload(ref)
+
+                {:error, _changeset} ->
+                  socket
+                  |> put_flash(:error, "Failed to save attachment")
+                  |> cancel_upload(ref)
+              end
+
+            {:error, _reason} ->
+              socket
+              |> put_flash(:error, "Failed to store file")
+              |> cancel_upload(ref)
+          end
+
+        %{action: :error} ->
+          socket
+          |> put_flash(:error, "Upload failed: #{entry.error}")
+
+        _ ->
+          socket
+      end
+    end)
+  end
+
+  def handle_event("delete_attachment", %{"id" => id}, socket) do
+    attachment = Attachments.get_attachment!(id)
+
+    case Attachments.delete_attachment(attachment) do
+      {:ok, _attachment} ->
+        attachments = Attachments.list_attachments(socket.assigns.issue.id)
+        {:noreply, assign(socket, attachments: attachments)}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Failed to delete attachment")}
+    end
+  end
+
+  def handle_event("cancel_upload", %{"ref" => ref}, socket) do
+    {:noreply, cancel_upload(socket, ref)}
+  end
+
+  defp get_content_type(filename) do
+    case Path.extname(filename) do
+      ".jpg" -> "image/jpeg"
+      ".jpeg" -> "image/jpeg"
+      ".png" -> "image/png"
+      ".gif" -> "image/gif"
+      ".pdf" -> "application/pdf"
+      ".txt" -> "text/plain"
+      ".doc" -> "application/msword"
+      ".docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      ".xls" -> "application/vnd.ms-excel"
+      ".xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      ".zip" -> "application/zip"
+      _ -> "application/octet-stream"
+    end
+  end
+
+  defp error_to_string(:too_large), do: "File is too large"
+  defp error_to_string(:not_accepted), do: "File type not supported"
+  defp error_to_string(_), do: "Failed to upload file"
   end
 
   def handle_info({:session_started, session_id}, socket) do
