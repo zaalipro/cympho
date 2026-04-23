@@ -1,0 +1,103 @@
+<div class="p-6 max-w-7xl mx-auto space-y-6">
+  <.header title={@page_title} />
+
+  <!-- Agent & Issue Summary Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="bg-panel rounded-lg border border-border-subtle p-4">
+      <p class="text-sm text-text-secondary">Active Agents</p>
+      <p class="text-3xl font-590 text-text-primary mt-1">{@active_agents}<span class="text-base text-text-secondary"> / {@total_agents}</span></p>
+    </div>
+    <div class="bg-panel rounded-lg border border-border-subtle p-4">
+      <p class="text-sm text-text-secondary">Total Issues</p>
+      <p class="text-3xl font-590 text-text-primary mt-1">{total_issues(@issue_status_counts)}</p>
+    </div>
+    <div class="bg-panel rounded-lg border border-border-subtle p-4">
+      <p class="text-sm text-text-secondary">Created (7d)</p>
+      <p class="text-3xl font-590 text-text-primary mt-1">{throughput_total(@throughput.created)}</p>
+    </div>
+    <div class="bg-panel rounded-lg border border-border-subtle p-4">
+      <p class="text-sm text-text-secondary">Closed (7d)</p>
+      <p class="text-3xl font-590 text-text-primary mt-1">{throughput_total(@throughput.closed)}</p>
+    </div>
+  </div>
+
+  <!-- Issue Status Breakdown + Agent Status -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="bg-panel rounded-lg border border-border-subtle p-5">
+      <h3 class="text-base font-590 text-text-primary mb-4">Issues by Status</h3>
+      <div class="space-y-3">
+        <div :for={%{status: status, count: count} <- @issue_status_counts} class="flex items-center gap-3">
+          <span class={"w-3 h-3 rounded-full flex-shrink-0 #{status_dot_color(status)}"}></span>
+          <span class="text-sm text-text-secondary w-28">{status_label(status)}</span>
+          <div class="flex-1 bg-canvas rounded-full h-2">
+            <div class={"h-2 rounded-full #{status_bar_color(status)}"} style={"width: #{bar_percent(count, total_issues(@issue_status_counts))}%"}></div>
+          </div>
+          <span class="text-sm font-510 text-text-primary w-8 text-right">{count}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-panel rounded-lg border border-border-subtle p-5">
+      <h3 class="text-base font-590 text-text-primary mb-4">Agents by Status</h3>
+      <div class="space-y-3">
+        <div :for={%{status: status, count: count} <- @agent_status_counts} class="flex items-center gap-3">
+          <span class={"w-3 h-3 rounded-full flex-shrink-0 #{agent_status_dot(status)}"}></span>
+          <span class="text-sm text-text-secondary w-28">{status_label(status)}</span>
+          <div class="flex-1 bg-canvas rounded-full h-2">
+            <div class={"h-2 rounded-full #{agent_status_bar(status)}"} style={"width: #{bar_percent(count, @total_agents)}%"}></div>
+          </div>
+          <span class="text-sm font-510 text-text-primary w-8 text-right">{count}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Throughput Chart -->
+  <div class="bg-panel rounded-lg border border-border-subtle p-5">
+    <h3 class="text-base font-590 text-text-primary mb-4">Issue Throughput (Last 7 Days)</h3>
+    <div class="flex items-end gap-1 h-40">
+      <div :for={%{date: date, count: count} <- @throughput.created} class="flex-1 flex flex-col items-center gap-1">
+        <span class="text-xs text-text-secondary">{count}</span>
+        <div class="w-full bg-blue-500/60 rounded-t" style={"height: #{chart_height(count, @throughput.created)}%"}></div>
+        <span class="text-xs text-text-secondary truncate w-full text-center">{format_date(date)}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottleneck Alerts -->
+  <div class="bg-panel rounded-lg border border-border-subtle p-5">
+    <h3 class="text-base font-590 text-text-primary mb-4">
+      Bottleneck Alerts
+      <span :if={Enum.any?(@bottlenecks)} class="ml-2 text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">
+        {length(@bottlenecks)} stuck
+      </span>
+    </h3>
+    <div :if={Enum.empty?(@bottlenecks)} class="text-sm text-text-secondary">
+      No bottleneck issues detected. All issues in review are progressing normally.
+    </div>
+    <div :if={Enum.any?(@bottlenecks)} class="space-y-2">
+      <div :for={issue <- @bottlenecks} class="flex items-center justify-between p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+        <div>
+          <p class="text-sm font-510 text-text-primary">{issue.title}</p>
+          <p class="text-xs text-text-secondary">
+            In review since {Calendar.strftime(issue.updated_at, "%b %d, %H:%M")}
+            <span :if={issue.assignee}> &mdash; {issue.assignee}</span>
+            <span :if={issue.project}> &mdash; {issue.project}</span>
+          </p>
+        </div>
+        <.link navigate={~p"/issues/#{issue.id}"} class="text-xs text-text-secondary hover:text-text-primary">
+          View
+        </.link>
+      </div>
+    </div>
+  </div>
+
+  <!-- Routine Health -->
+  <div class="bg-panel rounded-lg border border-border-subtle p-5">
+    <h3 class="text-base font-590 text-text-primary mb-4">Routine Health</h3>
+    <div class="flex items-center gap-3">
+      <span class="w-3 h-3 rounded-full bg-yellow-400 flex-shrink-0"></span>
+      <span class="text-sm text-text-secondary">{@routine_health.message}</span>
+    </div>
+  </div>
+</div>

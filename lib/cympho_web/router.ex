@@ -23,7 +23,7 @@ defmodule CymphoWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
-
+    live "/dashboard", DashboardLive.Index
     live "/issues", IssueLive.Index
     live "/issues/new", IssueLive.New
     live "/issues/:id", IssueLive.Show
@@ -36,11 +36,15 @@ defmodule CymphoWeb.Router do
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
     live "/agents/:id/edit", AgentLive.Edit
+    live "/approvals", ApprovalLive.Index
+    live "/approvals/:id", ApprovalLive.Show
   end
 
   scope "/api", CymphoWeb do
     pipe_through :api
 
+    get "/dashboard", DashboardController, :index
+    resources "/approvals", ApprovalController, only: [:index, :show, :create, :update]
     resources "/users", UserController, only: [:index, :show, :create, :update, :delete]
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
 
@@ -52,5 +56,4 @@ defmodule CymphoWeb.Router do
 
     post "/github/webhook", GithubController, :webhook
   end
-    resources "/approvals", ApprovalController, only: [:index, :show, :create, :update]
 end
