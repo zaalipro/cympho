@@ -24,6 +24,9 @@ defmodule CymphoWeb.LabelController do
   end
 
   def create(conn, %{"label" => label_params}) do
+    # TODO: Add project ownership/membership authorization check before creating labels.
+    # Currently any authenticated user can create labels on any project by passing any project_id.
+    # Once user-project membership is implemented, verify the user has access to label_params["project_id"].
     with {:ok, label} <- Labels.create_label(label_params) do
       conn
       |> put_status(:created)

@@ -3,7 +3,7 @@ defmodule Cympho.Issues do
   The Issues context for managing issues and their CRUD operations.
   """
   import Ecto.Query, warn: false
-  import Ecto.Changeset, only: [optimistic_lock: 2, cast: 3, put_assoc: 3]
+  import Ecto.Changeset, only: [optimistic_lock: 2]
   require Logger
   alias Cympho.Repo
   alias Cympho.Issues.Issue
@@ -230,10 +230,9 @@ defmodule Cympho.Issues do
   end
 
   defp validate_reviewer_role(%Agent{} = agent) do
-    if agent.role in [:cto, :ceo] do
-      :ok
-    else
-      {:error, :chain_of_command_violation}
+    case Issue.role_authorized?(agent.role, :reviewer) do
+      true -> :ok
+      false -> {:error, :chain_of_command_violation}
     end
   end
 
@@ -473,33 +472,6 @@ defmodule Cympho.Issues do
       Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
       {:ok, issue}
     end
-  end
-
-  def add_label_to_issue(%Issue{} = issue, %Label{} = label) do
-    issue = Repo.preload(issue, :labels)
-    labels = issue.labels ++ [label]
-    issue
-    |> cast(%{}, [])
-    |> put_assoc(:labels, labels)
-    |> Repo.update()
-  end
-
-  def remove_label_from_issue(%Issue{} = issue, %Label{} = label) do
-    issue = Repo.preload(issue, :labels)
-    labels = Enum.reject(issue.labels, &(&1.id == label.id))
-    issue
-    |> cast(%{}, [])
-    |> put_assoc(:labels, labels)
-    |> Repo.update()
-  end
-
-  def set_issue_labels(%Issue{} = issue, label_ids) when is_list(label_ids) do
-    labels = Labels.list_labels() |> Enum.filter(&(&1.id in label_ids))
-    issue = Repo.preload(issue, :labels)
-    issue
-    |> cast(%{}, [])
-    |> put_assoc(:labels, labels)
-    |> Repo.update()
   end
 
   def delete_issue(%Issue{} = issue) do
