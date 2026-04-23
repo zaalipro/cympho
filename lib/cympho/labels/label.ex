@@ -2,10 +2,7 @@ defmodule Cympho.Labels.Label do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Cympho.Projects.Project
-  alias Cympho.Issues.Issue
-
-  @primary_key {:id, :binary_id, autogenerate: true}
+@primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
   schema "labels" do

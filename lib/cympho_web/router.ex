@@ -68,9 +68,17 @@ defmodule CymphoWeb.Router do
       only: [:index, :create, :show, :update, :delete],
       name: "routine_trigger"
 
-    post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_secret
+post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_secret
 
     # Public webhook endpoint (no auth, validates via secret header)
     post "/routine-triggers/:public_id/fire", RoutineTriggerController, :fire
+
+    resources "/issues", IssueController, only: [:create, :show]
+
+    get "/issues/:issue_id/documents", DocumentController, :index
+    get "/issues/:issue_id/documents/:key", DocumentController, :show
+    put "/issues/:issue_id/documents/:key", DocumentController, :upsert
+    delete "/issues/:issue_id/documents/:key", DocumentController, :delete
+    get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
   end
 end
