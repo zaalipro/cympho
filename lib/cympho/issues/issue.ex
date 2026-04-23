@@ -2,6 +2,7 @@ defmodule Cympho.Issues.Issue do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Cympho.Attachments.Attachment
   alias Cympho.Comments.Comment
   alias Cympho.Labels.Label
   alias Cympho.Projects.Project
@@ -22,6 +23,7 @@ defmodule Cympho.Issues.Issue do
     belongs_to :parent, __MODULE__, foreign_key: :parent_id
 
     has_many :comments, Comment, foreign_key: :issue_id
+    has_many :attachments, Attachment, foreign_key: :issue_id
     has_many :children, __MODULE__, foreign_key: :parent_id
 
     many_to_many :blocked_by, Cympho.Issues.Issue,

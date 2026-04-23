@@ -14,11 +14,6 @@ defmodule CymphoWeb.Router do
     plug :accepts, ["json"]
   end
 
-  pipeline :github_webhook do
-    plug :accepts, ["json"]
-    plug CymphoWeb.Plugs.GithubWebhookVerification
-  end
-
   scope "/", CymphoWeb do
     pipe_through :browser
 
@@ -33,8 +28,6 @@ defmodule CymphoWeb.Router do
     live "/projects/:id/edit", ProjectLive.Edit
     live "/kanban", KanbanLive.Index
     live "/labels", LabelLive.Index
-    live "/labels/new", LabelLive.Index, :new
-    live "/labels/:id/edit", LabelLive.Index, :edit
     live "/agents", AgentLive.Index
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
@@ -47,9 +40,13 @@ defmodule CymphoWeb.Router do
     resources "/users", UserController, only: [:index, :show, :create, :update, :delete]
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
 
-    get "/search", SearchController, :search
+    get "/agents/:id/inbox", AgentController, :inbox
+    patch "/agents/:id/status", AgentController, :update_status
+
+    resources "/issues", IssueController, only: [:create, :show]
 
     post "/telegram/webhook", TelegramController, :webhook
+    post "/github/webhook", GithubController, :webhook
 
     resources "/labels", LabelController, only: [:index, :show, :create, :update, :delete]
 
@@ -57,11 +54,11 @@ defmodule CymphoWeb.Router do
     post "/issues/:issue_id/labels", IssueLabelController, :add
     delete "/issues/:issue_id/labels/:label_id", IssueLabelController, :remove
     put "/issues/:issue_id/labels", IssueLabelController, :set
-  end
 
-  scope "/api", CymphoWeb do
-    pipe_through :github_webhook
-
-    post "/github/webhook", GithubController, :webhook
+    get "/issues/:issue_id/attachments", AttachmentController, :index
+    post "/issues/:issue_id/attachments", AttachmentController, :create
+    get "/attachments/:id", AttachmentController, :show
+    get "/attachments/:id/download", AttachmentController, :download
+    delete "/attachments/:id", AttachmentController, :delete
   end
 end
