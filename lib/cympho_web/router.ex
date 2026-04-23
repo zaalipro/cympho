@@ -45,6 +45,12 @@ defmodule CymphoWeb.Router do
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
 
     post "/telegram/webhook", TelegramController, :webhook
+
+    get "/issues/:issue_id/attachments", AttachmentController, :index
+    post "/issues/:issue_id/attachments", AttachmentController, :create
+    get "/attachments/:id", AttachmentController, :show
+    get "/attachments/:id/download", AttachmentController, :download
+    delete "/attachments/:id", AttachmentController, :delete
   end
 
   scope "/api", CymphoWeb do
