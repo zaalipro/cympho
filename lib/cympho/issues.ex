@@ -230,10 +230,9 @@ defmodule Cympho.Issues do
   end
 
   defp validate_reviewer_role(%Agent{} = agent) do
-    if agent.role in [:cto, :ceo] do
-      :ok
-    else
-      {:error, :chain_of_command_violation}
+    case Issue.role_authorized?(agent.role, :reviewer) do
+      true -> :ok
+      false -> {:error, :chain_of_command_violation}
     end
   end
 
@@ -532,6 +531,7 @@ defmodule Cympho.Issues do
     |> put_assoc(:labels, labels)
     |> Repo.update()
   end
+
 
   def delete_issue(%Issue{} = issue) do
     case Repo.delete(issue) do

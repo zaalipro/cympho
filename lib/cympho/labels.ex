@@ -30,5 +30,7 @@ defmodule Cympho.Labels do
     |> Repo.insert()
   end
 
-  def delete_label(%Label{} = label), do: Repo.delete(label)
+  def delete_label(%Label{} = label) do
+    Repo.delete(label)
+  end
 end

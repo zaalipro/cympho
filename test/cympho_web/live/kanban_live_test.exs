@@ -126,6 +126,65 @@ defmodule CymphoWeb.KanbanLiveTest do
     end
   end
 
+  describe "Responsive layout" do
+    test "renders responsive column container classes" do
+      {:ok, _view, html} = live(conn(), "/kanban")
+      assert html =~ "flex-col lg:flex-row"
+      assert html =~ "overflow-y-auto lg:overflow-x-auto"
+    end
+
+    test "renders responsive column width classes" do
+      {:ok, _view, html} = live(conn(), "/kanban")
+      assert html =~ "w-full lg:w-72"
+    end
+
+    test "renders responsive padding on board container" do
+      {:ok, _view, html} = live(conn(), "/kanban")
+      assert html =~ "p-4 sm:p-6 lg:p-8"
+    end
+
+    test "collapsed columns only visible on desktop" do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("toggle_column", %{"status" => "backlog"})
+      html = render(view)
+      assert html =~ "hidden lg:flex"
+    end
+  end
+
+  describe "Empty column states" do
+    test "shows contextual empty state message for empty columns" do
+      {:ok, _view, html} = live(conn(), "/kanban")
+      assert html =~ "Nothing queued up"
+      assert html =~ "Nothing in flight"
+      assert html =~ "Nothing to review"
+      assert html =~ "No completed work yet"
+    end
+
+    test "empty backlog column shows no unplanned work message" do
+      {:ok, _view, html} = live(conn(), "/kanban")
+      assert html =~ "No unplanned work"
+    end
+
+    test "empty blocked column shows no blockers message" do
+      {:ok, _view, html} = live(conn(), "/kanban")
+      assert html =~ "No blockers"
+    end
+  end
+
+  describe "Card animations" do
+    test "renders card animation styles" do
+      {:ok, _view, html} = live(conn(), "/kanban")
+      assert html =~ "kanban-card-enter"
+      assert html =~ "card-enter"
+    end
+
+    test "renders skeleton animation styles" do
+      {:ok, _view, html} = live(conn(), "/kanban")
+      assert html =~ "kanban-skeleton"
+      assert html =~ "skeleton-pulse"
+    end
+  end
+
   describe "Project filter" do
     test "shows All Projects",
       do:
