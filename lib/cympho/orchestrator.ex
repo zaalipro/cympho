@@ -75,6 +75,24 @@ defmodule Cympho.Orchestrator do
   """
   @spec stop(String.t()) :: :ok
   def stop(issue_id) do
+  end
+
+  @doc """
+  Gets the current session state for a given issue.
+  Returns nil if no orchestrator is running for the issue.
+  """
+  @spec get_session_state(String.t()) :: map() | nil
+  def get_session_state(issue_id) do
+    case whereis(issue_id) do
+      nil -> nil
+      pid ->
+        try do
+          GenServer.call(pid, :get_session_state, 5000)
+        catch
+          :exit, _ -> nil
+        end
+    end
+
     case whereis(issue_id) do
       nil -> :ok
       pid -> GenServer.stop(pid)
@@ -105,6 +123,19 @@ defmodule Cympho.Orchestrator do
 
   @impl true
   def handle_info({:session_started, session_id}, %Session{} = session) do
+    {:noreply, %{session | session_id: session_id}}
+  end
+
+  @impl true
+  def handle_call(:get_session_state, _from, %Session{} = session) do
+    {:reply, %{
+      issue_id: session.issue.id,
+      agent_id: session.agent_id,
+      session_id: session.session_id,
+      status: session.status,
+      turn_count: session.turn_count
+    }, session}
+
     # AgentRunner confirmed the session started
     {:noreply, %{session | session_id: session_id}}
   end
