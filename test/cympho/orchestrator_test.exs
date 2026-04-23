@@ -133,4 +133,33 @@ defmodule Cympho.OrchestratorTest do
       Orchestrator.stop("nonexistent-issue")
     end
   end
+  describe "terminate/2 notifies Dispatcher" do
+    @tag :capture_log
+    test "stop/1 sends session_ended to Dispatcher and removes from running_issue_ids" do
+      unless Process.whereis(Cympho.Orchestrator.Dispatcher) do
+        start_supervised!(Cympho.Orchestrator.Dispatcher)
+      end
+
+      issue_id = "orch-dispatcher-cleanup-test"
+      issue = %{id: issue_id, title: "Test", description: "Desc"}
+      agent_id = "agent-dispatch-cleanup"
+
+      dispatcher_state = Cympho.Orchestrator.Dispatcher.state()
+      new_running = MapSet.put(dispatcher_state.running_issue_ids, issue_id)
+      :sys.replace_state(Cympho.Orchestrator.Dispatcher, fn state ->
+        %{state | running_issue_ids: new_running}
+      end)
+
+      state_before = Cympho.Orchestrator.Dispatcher.state()
+      assert MapSet.member?(state_before.running_issue_ids, issue_id)
+
+      {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+      assert :ok = Orchestrator.stop(issue_id)
+      :timer.sleep(100)
+
+      state_after = Cympho.Orchestrator.Dispatcher.state()
+      refute MapSet.member?(state_after.running_issue_ids, issue_id)
+    end
+  end
+
 end
