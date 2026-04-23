@@ -1,0 +1,64 @@
+<.header>
+  {@page_title}
+  <:actions>
+    <.link navigate={~p"/routines/new"} class="phx-btn">
+      New Routine
+    </.link>
+  </:actions>
+</.header>
+
+<div class="routines-grid">
+  <div :for={routine <- @routines} class="routine-card" id={"routine-#{routine.id}"}>
+    <div class="card-header">
+      <h3>{routine.name}</h3>
+      <span class={"status-badge status-#{routine.status}"}>{routine.status}</span>
+    </div>
+    <p class="card-description">{routine.description}</p>
+    <div class="card-meta">
+      <span class="priority-badge priority-{routine.priority}">{routine.priority}</span>
+      <span class="policy-badge">{routine.concurrency_policy}</span>
+    </div>
+    <div class="card-actions">
+      <.link navigate={~p"/routines/#{routine.id}"} class="phx-btn-secondary">
+        View
+      </.link>
+      <.link navigate={~p"/routines/#{routine.id}/edit"} class="phx-btn-secondary">
+        Edit
+      </.link>
+      <button
+        :if={routine.status == :active}
+        type="button"
+        class="pause-btn"
+        phx-click="pause_routine"
+        phx-value-id={routine.id}
+        data-confirm="Pause this routine?"
+      >
+        Pause
+      </button>
+      <button
+        :if={routine.status == :paused}
+        type="button"
+        class="resume-btn"
+        phx-click="resume_routine"
+        phx-value-id={routine.id}
+        data-confirm="Resume this routine?"
+      >
+        Resume
+      </button>
+      <button
+        :if={routine.status != :archived}
+        type="button"
+        class="delete-btn"
+        phx-click="delete_routine"
+        phx-value-id={routine.id}
+        data-confirm="Archive this routine?"
+      >
+        Archive
+      </button>
+    </div>
+  </div>
+</div>
+
+<div :if={Enum.empty?(@routines)} class="empty-state">
+  <p>No routines yet. Create your first routine to get started.</p>
+</div>

@@ -14,7 +14,6 @@
   </head>
   <body class="bg-canvas text-text-primary font-inter antialiased min-h-screen">
     <div class="flex min-h-screen">
-      <!-- Sidebar -->
       <aside class="w-60 bg-panel border-r border-border-subtle flex flex-col fixed inset-y-0 left-0 z-50 lg:translate-x-0 -translate-x-full transition-transform duration-200" id="sidebar">
         <div class="h-14 flex items-center px-4 border-b border-border-subtle">
           <a href="/" class="text-lg font-590 tracking-tight text-text-primary">Cympho</a>
@@ -38,15 +37,11 @@
           </a>
         </nav>
       </aside>
-
-      <!-- Mobile menu button -->
       <div class="lg:hidden fixed top-3 left-3 z-50">
         <button type="button" onclick="document.getElementById('sidebar').classList.toggle('-translate-x-full')" class="p-2 rounded-md bg-panel border border-border text-text-secondary hover:text-text-primary">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
       </div>
-
-      <!-- Main content -->
       <main class="flex-1 lg:ml-60 min-h-screen">
         <%= @inner_content %>
       </main>

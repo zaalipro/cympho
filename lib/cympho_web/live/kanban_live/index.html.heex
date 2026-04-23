@@ -10,33 +10,60 @@
 <div id="kanban-board" class="p-6 lg:p-8 h-[calc(100vh-64px)] flex flex-col" phx-hook="KanbanSortable">
   <.header title={@page_title}>
     <:actions>
-      <div class="flex items-center gap-3">
-        <form phx-change="filter_project">
-          <select name="project_id" class="bg-white/[0.05] border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors">
-            <option value="" selected={is_nil(@selected_project_id)}>All Projects</option>
-            <%= for project <- @projects do %>
-              <option value={project.id} selected={@selected_project_id == to_string(project.id)}>
-                <%= project.name %>
-              </option>
-            <% end %>
-          </select>
-        </form>
-
-        <button
-          type="button"
-          phx-click="toggle_swimlanes"
-          class={"text-xs font-510 px-3 py-1.5 rounded-md border transition-colors " <> if(@swimlane_mode, do: "bg-accent/20 border-accent/30 text-accent", else: "bg-white/[0.05] border-border text-text-secondary hover:text-text-primary hover:bg-white/[0.08]")}
-        >
-          <%= if @swimlane_mode, do: "Flat View", else: "Swimlanes" %>
-        </button>
-
-        <.app_link navigate={~p"/issues/new"} class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-          New Issue
-        </.app_link>
-      </div>
+      <.app_link navigate={~p"/issues/new"} class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        New Issue
+      </.app_link>
     </:actions>
   </.header>
+
+  <%!-- Filter bar --%>
+  <div class="flex items-center gap-2 mt-3 mb-4 flex-wrap">
+    <form phx-change="filter_assignee" class="flex-shrink-0">
+      <select name="assignee_id" class="bg-white/[0.05] border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors">
+        <option value="">Assignee</option>
+        <%= for agent <- @agents do %>
+          <option value={agent.id} selected={@filter_assignee_id == agent.id}><%= agent.name %></option>
+        <% end %>
+      </select>
+    </form>
+
+    <form phx-change="filter_priority" class="flex-shrink-0">
+      <select name="priority" class="bg-white/[0.05] border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors">
+        <option value="">Priority</option>
+        <option value="high" selected={@filter_priority == :high}>High</option>
+        <option value="medium" selected={@filter_priority == :medium}>Medium</option>
+        <option value="low" selected={@filter_priority == :low}>Low</option>
+      </select>
+    </form>
+
+    <form phx-change="filter_search" class="flex-1 min-w-[160px] max-w-xs">
+      <div class="relative">
+        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-quaternary pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <input
+          type="text"
+          name="query"
+          value={@filter_search}
+          placeholder="Search title, assignee, priority..."
+          class="w-full bg-white/[0.05] border border-border rounded-md pl-9 pr-8 py-1.5 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+        />
+        <%= if @filter_search != "" do %>
+          <button type="button" phx-click="clear_filters" class="absolute right-2 top-1/2 -translate-y-1/2 text-text-quaternary hover:text-text-secondary">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        <% end %>
+      </div>
+    </form>
+
+    <%= if active_filter_count(@assigns) > 0 do %>
+      <button type="button" phx-click="clear_filters" class="text-xs font-510 px-3 py-1.5 rounded-md border border-border text-text-secondary hover:text-text-primary hover:bg-white/[0.08] transition-colors flex-shrink-0">
+        Clear filters
+        <span class="ml-1.5 bg-accent/20 text-accent px-1.5 rounded-full"><%= active_filter_count(@assigns) %></span>
+      </button>
+    <% end %>
+  </div>
+
+  <% computed = apply_filters(@issues, %{assignee_id: @filter_assignee_id, priority: @filter_priority, search: @filter_search}) %>
 
   <%= if Enum.empty?(@issues) do %>
     <div class="flex flex-col items-center justify-center py-20 text-center">
@@ -49,91 +76,74 @@
       </.app_link>
     </div>
   <% else %>
-    <div class="flex-1 overflow-x-auto overflow-y-hidden">
-      <div class="flex gap-4 h-full min-w-max">
-        <%= for status <- status_columns() do %>
-          <% issues = issues_for_status(@issues, status) %>
-          <% limit = wip_limit(@selected_project, status) %>
-          <% count = length(issues) %>
-          <% exceeded = wip_exceeded?(limit, count) %>
-          <% collapsed = MapSet.member?(@collapsed_columns, status) %>
-
-          <%= if collapsed do %>
-            <div class="w-12 flex flex-col bg-panel border border-border rounded-card h-full items-center pt-4 cursor-pointer hover:bg-white/[0.02] transition-colors" phx-click="toggle_column" phx-value-status={status}>
-              <span class="text-[10px] font-510 text-text-secondary" style="writing-mode: vertical-rl; transform: rotate(180deg);">
-                <%= status_label(status) %>
-              </span>
-              <span class="text-xs text-text-quaternary mt-2"><%= count %></span>
-            </div>
-          <% else %>
-            <div class="w-72 flex flex-col bg-panel border rounded-card h-full <%= if exceeded, do: "border-red-500/50", else: "border-border" %>">
-              <div class="px-4 py-3 border-b border-border-subtle flex items-center justify-between bg-panel rounded-t-card">
-                <div class="flex items-center gap-2">
-                  <button type="button" phx-click="toggle_column" phx-value-status={status} class="text-text-quaternary hover:text-text-secondary transition-colors" title="Collapse column">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-                  </button>
-                  <h2 class="text-sm font-510 text-text-primary"><%= status_label(status) %></h2>
-                </div>
-                <span class={"text-xs px-2 py-0.5 rounded-full font-510 " <> if(exceeded, do: "bg-red-500/20 text-red-400", else: "bg-white/[0.05] text-text-quaternary")}>
-                  <%= count %><%= if limit, do: "/#{limit}", else: "" %>
-                </span>
+    <%= if Enum.empty?(computed) do %>
+      <div class="flex-1 flex items-center justify-center">
+        <div class="text-center">
+          <svg class="w-8 h-8 mx-auto mb-3 text-text-quaternary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          <p class="text-sm text-text-quaternary">No issues match the current filters.</p>
+          <button type="button" phx-click="clear_filters" class="mt-2 text-xs text-accent hover:text-accent-hover font-510">Clear filters</button>
+        </div>
+      </div>
+    <% else %>
+      <div class="flex-1 overflow-x-auto overflow-y-hidden">
+        <div class="flex gap-4 h-full min-w-max">
+          <% columns = [
+            {:backlog, backlog_issues(computed)},
+            {:todo, todo_issues(computed)},
+            {:in_progress, in_progress_issues(computed)},
+            {:in_review, in_review_issues(computed)},
+            {:done, done_issues(computed)},
+            {:blocked, blocked_issues(computed)}
+          ] %>
+          <%= for {status, issues} <- columns do %>
+            <div class="w-72 flex flex-col bg-panel border border-border rounded-card h-full">
+              <div class="px-4 py-3 border-b border-border-subtle flex items-center justify-between sticky top-0 bg-panel rounded-t-card">
+                <h2 class="text-sm font-510 text-text-primary"><%= status_label(status) %></h2>
+                <span class="text-xs text-text-quaternary bg-white/[0.05] px-2 py-0.5 rounded-full"><%= length(issues) %></span>
               </div>
-              <div class="kanban-column-cards flex-1 overflow-y-auto p-3 space-y-3" data-kanban-column={status}>
-                <%= if @swimlane_mode do %>
-                  <%= for {assignee_name, group_issues} <- assignee_groups(issues) do %>
-                    <div class="mb-3">
-                      <div class="text-[10px] font-510 text-text-quaternary uppercase tracking-wider mb-2 px-1">
-                        <%= assignee_name %>
-                      </div>
-                      <%= for issue <- group_issues do %>
-                        <div class="bg-white/[0.02] border border-border rounded-md p-3 space-y-2 hover:bg-white/[0.04] transition-colors cursor-grab active:cursor-grabbing mb-2" data-issue-id={issue.id}>
-                          <div class="text-sm font-510 text-text-primary leading-snug line-clamp-1"><%= issue.title %></div>
-                          <div class="flex items-center gap-2 flex-wrap">
-                            <span class={"text-[10px] font-510 px-2 py-0.5 rounded-full " <> priority_class(issue.priority)}><%= issue.priority %></span>
-                            <span class="text-xs text-text-quaternary"><%= length(issue.comments) %> comments</span>
-                            <%= if issue.assignee do %>
-                              <span class="text-xs text-text-quaternary truncate max-w-[100px]"><%= issue.assignee.name %></span>
-                            <% end %>
-                            <%= if issue.github_pr_url do %>
-                              <a href={issue.github_pr_url} target="_blank" class="text-xs text-accent hover:text-accent-hover">PR</a>
-                            <% end %>
-                          </div>
-                        </div>
-                      <% end %>
-                    </div>
-                  <% end %>
-                  <%= if Enum.empty?(issues) do %>
-                    <div class="text-center py-8">
-                      <p class="text-xs text-text-quaternary">No issues</p>
-                    </div>
-                  <% end %>
-                <% else %>
-                  <%= if Enum.empty?(issues) do %>
-                    <div class="text-center py-8">
-                      <p class="text-xs text-text-quaternary">No issues</p>
-                    </div>
-                  <% end %>
-                  <%= for issue <- issues do %>
-                    <div class="bg-white/[0.02] border border-border rounded-md p-3 space-y-2 hover:bg-white/[0.04] transition-colors cursor-grab active:cursor-grabbing" data-issue-id={issue.id}>
-                      <div class="text-sm font-510 text-text-primary leading-snug line-clamp-1"><%= issue.title %></div>
-                      <div class="flex items-center gap-2 flex-wrap">
-                        <span class={"text-[10px] font-510 px-2 py-0.5 rounded-full " <> priority_class(issue.priority)}><%= issue.priority %></span>
-                        <span class="text-xs text-text-quaternary"><%= length(issue.comments) %> comments</span>
-                        <%= if issue.assignee do %>
-                          <span class="text-xs text-text-quaternary truncate max-w-[100px]"><%= issue.assignee.name %></span>
-                        <% end %>
-                        <%= if issue.github_pr_url do %>
-                          <a href={issue.github_pr_url} target="_blank" class="text-xs text-accent hover:text-accent-hover">PR</a>
-                        <% end %>
-                      </div>
-                    </div>
-                  <% end %>
+              <div class="flex-1 overflow-y-auto p-3 space-y-3">
+                <%= if Enum.empty?(issues) do %>
+                  <div class="text-center py-8">
+                    <p class="text-xs text-text-quaternary">No issues</p>
+                  </div>
+                <% end %>
+                <%= for issue <- issues do %>
+                  <.issue_card
+                    issue={issue}
+                    status={status}
+                    agents={@agents}
+                    agent_heartbeat_states={@agent_heartbeat_states}
+                    editing_card_id={@editing_card_id}
+                    card_action_open={@card_action_open}
+                  />
                 <% end %>
               </div>
             </div>
           <% end %>
-        <% end %>
+        </div>
       </div>
-    </div>
+    <% end %>
   <% end %>
 </div>
+
+<%!-- Comment modal --%>
+<%= if match?({:add_comment, _}, @editing_card_id) do %>
+  <% comment_issue_id = elem(@editing_card_id, 1) %>
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" phx-click="cancel_comment">
+    <div class="bg-panel border border-border rounded-lg shadow-xl w-full max-w-md mx-4 p-4" phx-click-away="cancel_comment">
+      <h3 class="text-sm font-510 text-text-primary mb-3">Add comment</h3>
+      <form phx-submit="submit_comment" phx-value-issue-id={comment_issue_id}>
+        <textarea
+          name="comment"
+          rows="3"
+          placeholder="Write a comment..."
+          class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent resize-none"
+        ></textarea>
+        <div class="flex justify-end gap-2 mt-2">
+          <button type="button" phx-click="cancel_comment" class="text-sm px-3 py-1.5 rounded-md border border-border text-text-secondary hover:text-text-primary hover:bg-white/[0.08] transition-colors">Cancel</button>
+          <button type="submit" class="text-sm px-3 py-1.5 rounded-md bg-accent text-white font-510 hover:bg-accent/80 transition-colors">Submit</button>
+        </div>
+      </form>
+    </div>
+  </div>
+<% end %>

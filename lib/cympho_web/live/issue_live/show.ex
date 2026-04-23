@@ -3,12 +3,14 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.Issues
   alias Cympho.Comments
   alias Cympho.Agents
+  alias Cympho.Documents
   alias Cympho.Orchestrator
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     Issues.subscribe()
     Comments.subscribe()
+    Documents.subscribe()
 
     case Issues.get_issue(id) do
       {:ok, issue} ->
@@ -17,7 +19,11 @@ defmodule CymphoWeb.IssueLive.Show do
            issue: issue,
            comment_form: to_form(Comments.Comment.changeset(%Comments.Comment{}, %{})),
            agents: Agents.list_agents_by_status(:idle),
-           show_agent_panel: false
+           show_agent_panel: false,
+           documents: Documents.list_documents(id),
+           document_form: to_form(Documents.change_document(%Documents.IssueDocument{}, %{})),
+           show_document_form: false,
+           editing_document: nil
          )}
 
       {:error, :not_found} ->
@@ -34,9 +40,11 @@ defmodule CymphoWeb.IssueLive.Show do
     case Issues.get_issue(id) do
       {:ok, issue} ->
         Orchestrator.subscribe(issue.id)
+
         socket
         |> assign(:page_title, issue.title)
         |> assign(:issue, issue)
+        |> assign(:documents, Documents.list_documents(id))
 
       {:error, :not_found} ->
         socket
@@ -84,6 +92,18 @@ defmodule CymphoWeb.IssueLive.Show do
     else
       {:noreply, socket}
     end
+  end
+
+  def handle_info({:document_created, _document}, socket) do
+    {:noreply, assign(socket, :documents, Documents.list_documents(socket.assigns.issue.id))}
+  end
+
+  def handle_info({:document_updated, _document}, socket) do
+    {:noreply, assign(socket, :documents, Documents.list_documents(socket.assigns.issue.id))}
+  end
+
+  def handle_info({:document_deleted, _document}, socket) do
+    {:noreply, assign(socket, :documents, Documents.list_documents(socket.assigns.issue.id))}
   end
 
   def handle_info({:session_started, session_id}, socket) do
@@ -195,5 +215,74 @@ defmodule CymphoWeb.IssueLive.Show do
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to clear PR URL")}
     end
+  end
+
+  @impl true
+  def handle_event("toggle_document_form", _, socket) do
+    {:noreply,
+     socket
+     |> update(:show_document_form, &(!&1))
+     |> assign(:editing_document, nil)
+     |> assign(:document_form, to_form(Documents.change_document(%Documents.IssueDocument{}, %{})))}
+  end
+
+  @impl true
+  def handle_event("create_document", %{"document" => doc_params}, socket) do
+    doc_params = Map.put(doc_params, "issue_id", socket.assigns.issue.id)
+
+    case Documents.create_document(doc_params) do
+      {:ok, _document} ->
+        {:noreply,
+         socket
+         |> assign(:show_document_form, false)
+         |> assign(:document_form, to_form(Documents.change_document(%Documents.IssueDocument{}, %{})))}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :document_form, to_form(changeset))}
+    end
+  end
+
+  @impl true
+  def handle_event("edit_document", %{"id" => id}, socket) do
+    document = Documents.get_document!(id)
+
+    {:noreply,
+     socket
+     |> assign(:editing_document, document)
+     |> assign(:show_document_form, true)
+     |> assign(:document_form, to_form(Documents.change_document(document, %{})))}
+  end
+
+  @impl true
+  def handle_event("update_document", %{"document" => doc_params}, socket) do
+    document = socket.assigns.editing_document
+
+    case Documents.update_document(document, doc_params) do
+      {:ok, _document} ->
+        {:noreply,
+         socket
+         |> assign(:show_document_form, false)
+         |> assign(:editing_document, nil)
+         |> assign(:document_form, to_form(Documents.change_document(%Documents.IssueDocument{}, %{})))}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, :document_form, to_form(changeset))}
+    end
+  end
+
+  @impl true
+  def handle_event("delete_document", %{"id" => id}, socket) do
+    document = Documents.get_document!(id)
+    {:ok, _} = Documents.delete_document(document)
+    {:noreply, assign(socket, :documents, Documents.list_documents(socket.assigns.issue.id))}
+  end
+
+  @impl true
+  def handle_event("cancel_document_edit", _, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_document_form, false)
+     |> assign(:editing_document, nil)
+     |> assign(:document_form, to_form(Documents.change_document(%Documents.IssueDocument{}, %{})))}
   end
 end

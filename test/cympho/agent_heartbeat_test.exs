@@ -66,13 +66,13 @@ defmodule Cympho.AgentHeartbeatTest do
   end
 
   describe "set_working/2" do
-    test "transitions agent to working status" do
+    test "transitions agent to running status" do
       agent_id = "agent-#{:rand.uniform(10_000)}"
       issue_id = "issue-#{:rand.uniform(10_000)}"
 
       {:ok, _pid} = AgentHeartbeat.start_for_agent(agent_id)
       assert :ok = AgentHeartbeat.set_working(agent_id, issue_id)
-      assert {:ok, :working} = AgentHeartbeat.status(agent_id)
+      assert {:ok, :running} = AgentHeartbeat.status(agent_id)
 
       # Clean up
       AgentHeartbeat.stop_for_agent(agent_id)
