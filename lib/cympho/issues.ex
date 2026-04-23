@@ -58,11 +58,19 @@ defmodule Cympho.Issues do
     per_page = Map.get(params, "per_page", "#{@default_page_size}") |> to_int_max(1, 100)
     status = Map.get(params, "status")
     priority = Map.get(params, "priority")
+    search = Map.get(params, "search")
+    assignee_id = Map.get(params, "assignee_id")
+    project_id = Map.get(params, "project_id")
+    label_id = Map.get(params, "label_id")
 
     query =
       Issue
       |> maybe_filter_by_status(status)
       |> maybe_filter_by_priority(priority)
+      |> maybe_filter_by_search(search)
+      |> maybe_filter_by_assignee(assignee_id)
+      |> maybe_filter_by_project_id_filter(project_id)
+      |> maybe_filter_by_label_id(label_id)
       |> order_by(desc: :updated_at)
 
     total = Repo.aggregate(query, :count)
@@ -75,7 +83,7 @@ defmodule Cympho.Issues do
       |> limit(^per_page)
       |> offset(^offset)
       |> Repo.all()
-      |> Repo.preload([:comments, :blocked_by, :blocks, :assignee])
+      |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels, :project])
 
     %{
       issues: issues,
@@ -93,6 +101,28 @@ defmodule Cympho.Issues do
   defp maybe_filter_by_priority(query, nil), do: query
   defp maybe_filter_by_priority(query, ""), do: query
   defp maybe_filter_by_priority(query, priority), do: where(query, priority: ^priority)
+
+  defp maybe_filter_by_search(query, nil), do: query
+  defp maybe_filter_by_search(query, ""), do: query
+  defp maybe_filter_by_search(query, search) do
+    where(query, fragment("search_vector @@ plainto_tsquery('english', ?)", ^search))
+  end
+
+  defp maybe_filter_by_assignee(query, nil), do: query
+  defp maybe_filter_by_assignee(query, ""), do: query
+  defp maybe_filter_by_assignee(query, assignee_id), do: where(query, assignee_id: ^assignee_id)
+
+  defp maybe_filter_by_project_id_filter(query, nil), do: query
+  defp maybe_filter_by_project_id_filter(query, ""), do: query
+  defp maybe_filter_by_project_id_filter(query, project_id), do: where(query, project_id: ^project_id)
+
+  defp maybe_filter_by_label_id(query, nil), do: query
+  defp maybe_filter_by_label_id(query, ""), do: query
+  defp maybe_filter_by_label_id(query, label_id) do
+    query
+    |> join(:inner, [i], l in "issue_labels", on: i.id == l.issue_id)
+    |> where([_, l], l.label_id == ^label_id)
+  end
 
   defp to_int_max(value, min, max) when is_binary(value) do
     case Integer.parse(value) do

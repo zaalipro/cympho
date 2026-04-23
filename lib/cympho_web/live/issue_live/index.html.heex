@@ -18,36 +18,106 @@
     </:actions>
   </.header>
 
-  <div class="flex items-center gap-3 mb-4">
-    <form phx-change="filter_status">
-      <select
-        name="status"
-        class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
-      >
-        <option value="">All Statuses</option>
-        <%= for status <- Cympho.Issues.Issue.status_options() do %>
-          <option value={status} selected={@current_status == to_string(status)}>
-            {status_label(status)}
-          </option>
-        <% end %>
-      </select>
-    </form>
+  <div class="space-y-3 mb-4">
+    <div class="flex items-center gap-3">
+      <form phx-submit="search" class="flex-1 max-w-md">
+        <div class="relative">
+          <input
+            type="text"
+            name="search"
+            value={@current_search}
+            placeholder="Search issues..."
+            class="w-full bg-white/[0.05] border border-border text-text-primary text-sm rounded-md pl-9 pr-3 py-1.5 placeholder:text-text-quaternary"
+          />
+          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-quaternary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+      </form>
 
-    <form phx-change="filter_priority">
-      <select
-        name="priority"
-        class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
-      >
-        <option value="">All Priorities</option>
-        <%= for priority <- Cympho.Issues.Issue.priority_options() do %>
-          <option value={priority} selected={@current_priority == to_string(priority)}>
-            {priority}
-          </option>
-        <% end %>
-      </select>
-    </form>
+      <span class="text-xs text-text-quaternary ml-auto">{@total} issue(s)</span>
+    </div>
 
-    <span class="text-xs text-text-quaternary ml-auto">{@total} issue(s)</span>
+    <div class="flex items-center gap-3 flex-wrap">
+      <form phx-change="filter_status">
+        <select
+          name="status"
+          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+        >
+          <option value="">All Statuses</option>
+          <%= for status <- Cympho.Issues.Issue.status_options() do %>
+            <option value={status} selected={@current_status == to_string(status)}>
+              {status_label(status)}
+            </option>
+          <% end %>
+        </select>
+      </form>
+
+      <form phx-change="filter_priority">
+        <select
+          name="priority"
+          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+        >
+          <option value="">All Priorities</option>
+          <%= for priority <- Cympho.Issues.Issue.priority_options() do %>
+            <option value={priority} selected={@current_priority == to_string(priority)}>
+              {priority}
+            </option>
+          <% end %>
+        </select>
+      </form>
+
+      <form phx-change="filter_assignee">
+        <select
+          name="assignee_id"
+          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+        >
+          <option value="">All Assignees</option>
+          <%= for agent <- @agents do %>
+            <option value={agent.id} selected={@current_assignee_id == agent.id}>
+              {agent.name}
+            </option>
+          <% end %>
+        </select>
+      </form>
+
+      <form phx-change="filter_project">
+        <select
+          name="project_id"
+          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+        >
+          <option value="">All Projects</option>
+          <%= for project <- @projects do %>
+            <option value={project.id} selected={@current_project_id == project.id}>
+              {project.name}
+            </option>
+          <% end %>
+        </select>
+      </form>
+
+      <form phx-change="filter_label">
+        <select
+          name="label_id"
+          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+        >
+          <option value="">All Labels</option>
+          <%= for label <- @labels do %>
+            <option value={label.id} selected={@current_label_id == label.id}>
+              {label.name}
+            </option>
+          <% end %>
+        </select>
+      </form>
+
+      <button
+        :if={filters_active?(@__assigns__)}
+        type="button"
+        phx-click="clear_filters"
+        class="text-xs text-text-quaternary hover:text-text-secondary transition-colors"
+      >
+        Clear all
+      </button>
+    </div>
   </div>
 
   <div class="space-y-2">
@@ -60,10 +130,16 @@
         <div class="flex items-center gap-3">
           <span class="text-sm font-510 text-text-primary truncate">{issue.title}</span>
           <.badge variant="status" value={issue.status} />
+          <span :if={issue.project} class="text-xs text-text-quaternary">
+            {issue.project.prefix}
+          </span>
         </div>
         <p class="text-xs text-text-tertiary mt-1 truncate">{issue.description}</p>
       </div>
       <div class="flex items-center gap-3 shrink-0">
+        <span :if={issue.assignee} class="text-xs text-text-quaternary">
+          {issue.assignee.name}
+        </span>
         <.badge variant="priority" value={issue.priority} />
         <span class="text-xs text-text-quaternary flex items-center gap-1">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
