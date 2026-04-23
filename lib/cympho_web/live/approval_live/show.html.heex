@@ -1,0 +1,84 @@
+<div class="p-6 lg:p-8 max-w-3xl">
+  <.header title={"Approval " <> String.slice(@approval.id, 0..7)}>
+    <:actions>
+      <.link navigate={~p"/approvals"} class="text-sm text-text-secondary hover:text-text-primary transition-colors">Back to Approvals</.link>
+    </:actions>
+  </.header>
+
+  <div class="mt-6 space-y-6">
+    <div class="bg-panel border border-border rounded-card p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-510 text-text-secondary">Type</h3>
+        <span class="text-sm text-text-primary"><%= @approval.type %></span>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-510 text-text-secondary">Status</h3>
+        <span class={"text-xs font-510 px-2 py-0.5 rounded-full " <> status_badge_class(@approval.status)}>
+          <%= @approval.status %>
+        </span>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-510 text-text-secondary">Requested By</h3>
+        <span class="text-sm text-text-primary">
+          <%= if @approval.requested_by, do: @approval.requested_by.name, else: "-" %>
+        </span>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-510 text-text-secondary">Created</h3>
+        <span class="text-xs text-text-quaternary"><%= Calendar.strftime(@approval.inserted_at, "%b %d, %Y %H:%M") %></span>
+      </div>
+
+      <%= if @approval.resolved_by do %>
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-510 text-text-secondary">Resolved By</h3>
+          <span class="text-sm text-text-primary"><%= @approval.resolved_by.email %></span>
+        </div>
+      <% end %>
+
+      <%= if @approval.resolution_reason do %>
+        <div>
+          <h3 class="text-sm font-510 text-text-secondary mb-1">Resolution Reason</h3>
+          <p class="text-sm text-text-primary"><%= @approval.resolution_reason %></p>
+        </div>
+      <% end %>
+
+      <%= if @approval.payload do %>
+        <div>
+          <h3 class="text-sm font-510 text-text-secondary mb-1">Payload</h3>
+          <pre class="text-xs text-text-quaternary bg-white/[0.02] rounded-md p-3 overflow-x-auto"><%= Jason.encode!(@approval.payload, pretty: true) %></pre>
+        </div>
+      <% end %>
+    </div>
+
+    <div class="bg-panel border border-border rounded-card p-6">
+      <h3 class="text-sm font-510 text-text-secondary mb-3">Linked Issues</h3>
+      <%= if Enum.empty?(@approval.issues) do %>
+        <p class="text-sm text-text-quaternary">No linked issues.</p>
+      <% else %>
+        <ul class="space-y-2">
+          <%= for issue <- @approval.issues do %>
+            <li>
+              <.link navigate={~p"/issues/#{issue.id}"} class="text-sm text-accent hover:text-accent-hover">
+                <%= issue.title %>
+              </.link>
+            </li>
+          <% end %>
+        </ul>
+      <% end %>
+    </div>
+
+    <%= if @approval.status == :pending do %>
+      <div class="flex gap-3">
+        <button type="button" phx-click="approve" class="bg-green-600 hover:bg-green-700 text-white font-510 text-sm px-4 py-2 rounded-md transition-colors">
+          Approve
+        </button>
+        <button type="button" phx-click="deny" class="bg-red-600 hover:bg-red-700 text-white font-510 text-sm px-4 py-2 rounded-md transition-colors">
+          Deny
+        </button>
+      </div>
+    <% end %>
+  </div>
+</div>
