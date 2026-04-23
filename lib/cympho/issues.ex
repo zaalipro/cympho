@@ -750,14 +750,4 @@ defmodule Cympho.Issues do
   def change_issue(%Issue{} = issue, attrs \\ %{}) do
     Issue.changeset(issue, attrs)
   end
-
-  def assign_execution_policy(%Issue{} = issue, _policy_id, _executor_id) do
-    # Stub: business logic to be defined
-    {:ok, issue}
-  end
-
-  def execution_policy_decision(%Issue{} = issue, _decision, _decided_by) do
-    # Stub: business logic to be defined
-    {:ok, issue}
-  end
 end
