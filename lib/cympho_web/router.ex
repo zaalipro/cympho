@@ -84,6 +84,9 @@ post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_se
 
     resources "/issues", IssueController, only: [:create, :show]
 
+    post "/issues/:issue_id/execution-policy/assign", IssueExecutionPolicyController, :assign
+    post "/issues/:issue_id/execution-policy/decide", IssueExecutionPolicyController, :decide
+
     get "/issues/:issue_id/documents", DocumentController, :index
     get "/issues/:issue_id/documents/:key", DocumentController, :show
     put "/issues/:issue_id/documents/:key", DocumentController, :upsert
