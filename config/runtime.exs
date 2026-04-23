@@ -4,14 +4,12 @@ config :cympho, CymphoWeb.Endpoint,
   url: [host: System.get_env("APP_HOST") || "localhost", port: 443],
   cache_static_manifest: "priv/static/cache_manifest.json"
 
-if config_env() == :prod do
-  config :cympho, Cympho.Repo,
-    url: System.get_env("DATABASE_URL"),
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
-    ssl: true,
-    ssl_opts: [verify: :verify_peer],
-    ssl_verify_host: true
-end
+config :cympho, Cympho.Repo,
+  url: System.get_env("DATABASE_URL"),
+  pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+  ssl: true,
+  ssl_opts: [verify: :verify_peer],
+  ssl_verify_host: true
 
 config :cympho, CymphoWeb.Endpoint,
   secret_key_base: System.get_env("SECRET_KEY_BASE"),

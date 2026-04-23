@@ -215,17 +215,4 @@ defmodule CymphoWeb.KanbanLive.Index do
     end)
     |> Enum.sort_by(fn {name, _} -> name end)
   end
-
-  def backlog_issues(issues), do: issues_for_status(issues, :backlog)
-  def todo_issues(issues), do: issues_for_status(issues, :todo)
-  def in_progress_issues(issues), do: issues_for_status(issues, :in_progress)
-  def in_review_issues(issues), do: issues_for_status(issues, :in_review)
-  def done_issues(issues), do: issues_for_status(issues, :done)
-  def blocked_issues(issues), do: issues_for_status(issues, :blocked)
-
-  def priority_class(:critical), do: "bg-red-500/20 text-red-400"
-  def priority_class(:high), do: "bg-orange-500/20 text-orange-400"
-  def priority_class(:medium), do: "bg-yellow-500/20 text-yellow-400"
-  def priority_class(:low), do: "bg-green-500/20 text-green-400"
-  def priority_class(_), do: "bg-gray-500/20 text-gray-400"
 end
