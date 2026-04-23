@@ -23,12 +23,48 @@
       </p>
     </div>
 
-    <div class="flex items-center gap-2">
-      <.badge variant="pill" value={@agent.adapter || "No adapter"} />
+    <%= if @agent.instructions_path do %>
+      <div class="bg-surface border border-border rounded-card p-5 space-y-2">
+        <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider">Instructions File</h3>
+        <p class="text-sm text-text-secondary">
+          <span class="text-brand">{@agent.instructions_path}</span>
+        </p>
+      </div>
+    <% end %>
+
+    <div class="bg-surface border border-border rounded-card p-5 space-y-2">
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider">Configuration</h3>
+      <div class="flex items-center gap-4">
+        <span class="text-sm text-text-secondary">Max concurrent jobs: <span class="text-brand">{@agent.max_concurrent_jobs}</span></span>
+        <.badge variant="pill" value={@agent.adapter || "No adapter"} />
+      </div>
+    </div>
+
+    <!-- Wake History -->
+    <div class="bg-surface border border-border rounded-card p-5 space-y-4">
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider">Wake History</h3>
+      <div :if={Enum.empty?(@wake_history)} class="text-sm text-text-tertiary py-4 text-center">
+        No wake history available.
+      </div>
+      <div :if={not Enum.empty?(@wake_history)} class="space-y-2">
+        <%= for wake <- Enum.take(@wake_history, 10) do %>
+          <div class="flex items-center justify-between text-xs border-b border-border/50 pb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-text-secondary">{wake_reason_label(wake.reason)}</span>
+              <%= if wake.issue_id do %>
+                <.app_link navigate={~p"/issues/#{wake.issue_id}"} class="text-brand hover:text-accent">
+                  Issue
+                </.app_link>
+              <% end %>
+            </div>
+            <span class="text-text-quaternary">{format_datetime(wake.inserted_at)}</span>
+          </div>
+        <% end %>
+      </div>
     </div>
 
     <div class="text-xs text-text-quaternary">
-      Created {@agent.inserted_at}
+      Created {format_datetime(@agent.inserted_at)}
     </div>
   </div>
 </div>

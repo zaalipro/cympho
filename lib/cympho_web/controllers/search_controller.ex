@@ -12,6 +12,6 @@ defmodule CymphoWeb.SearchController do
     conn
     |> put_status(:bad_request)
     |> put_view(json: CymphoWeb.ErrorJSON)
-    |> render(:"error", message: "Missing or empty query parameter 'q'")
+    |> render(:error, message: "Missing or empty query parameter 'q'")
   end
 end

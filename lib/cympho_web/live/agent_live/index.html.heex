@@ -20,6 +20,75 @@
     <%= @flash[:info] %>
   </div>
 
+  <div :if={@flash && @flash[:error]} class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-md">
+    <%= @flash[:error] %>
+  </div>
+
+  <!-- Status Dashboard -->
+  <div class="mb-6 bg-surface border border-border rounded-card p-4">
+    <h2 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-4">Agent Status Overview</h2>
+    <div class="grid grid-cols-5 gap-4">
+      <div class="text-center">
+        <div class="text-2xl font-510 text-text-tertiary">{@status_counts[:idle] || 0}</div>
+        <div class="text-xs text-text-quaternary mt-1">Idle</div>
+      </div>
+      <div class="text-center">
+        <div class="text-2xl font-510 text-brand">{@status_counts[:running] || 0}</div>
+        <div class="text-xs text-text-quaternary mt-1">Running</div>
+      </div>
+      <div class="text-center">
+        <div class="text-2xl font-510 text-red-400">{@status_counts[:error] || 0}</div>
+        <div class="text-xs text-text-quaternary mt-1">Error</div>
+      </div>
+      <div class="text-center">
+        <div class="text-2xl font-510 text-amber-400">{@status_counts[:sleeping] || 0}</div>
+        <div class="text-xs text-text-quaternary mt-1">Sleeping</div>
+      </div>
+      <div class="text-center">
+        <div class="text-2xl font-510 text-text-quaternary">{@status_counts[:offline] || 0}</div>
+        <div class="text-xs text-text-quaternary mt-1">Offline</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Running Agents Session Progress -->
+  <div :if={(@status_counts[:running] || 0) > 0} class="mb-6 bg-brand/5 border border-brand/20 rounded-card p-4">
+    <h2 class="text-xs font-510 text-brand uppercase tracking-wider mb-4">Active Sessions</h2>
+    <div class="space-y-3">
+      <%= for agent <- Enum.filter(@agents, fn a -> a.status == :running end) do %>
+        <% progress = @session_progress[agent.id] %>
+        <div class="flex items-center justify-between bg-white/[0.02] border border-border rounded-md p-3">
+          <div class="flex-1">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-510 text-text-primary">{agent.name}</span>
+              <.badge variant="agent" value={to_string(agent.status)} />
+            </div>
+            <%= if progress && progress.issue do %>
+              <div class="text-xs text-text-secondary mt-1">
+                Working on: <.app_link navigate={~p"/issues/#{progress.issue.id}"} class="text-brand hover:text-accent">{progress.issue.title}</.app_link>
+              </div>
+              <div class="flex items-center gap-4 text-xs text-text-tertiary mt-2">
+                <span>Turns: {progress.turn_count}</span>
+                <span>Elapsed: {format_elapsed(progress.elapsed_seconds)}</span>
+              </div>
+            <% else %>
+              <div class="text-xs text-text-tertiary mt-1">Loading session info...</div>
+            <% end %>
+          </div>
+          <button
+            type="button"
+            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+            phx-click="kill_session"
+            phx-value-id={agent.id}
+            data-confirm="Stop this agent's session?"
+          >
+            Stop Session
+          </button>
+        </div>
+      <% end %>
+    </div>
+  </div>
+
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
     <.card :for={agent <- @agents} id={"agent-#{agent.id}"}>
       <div class="p-5 space-y-3">
@@ -37,6 +106,17 @@
           <.app_link navigate={~p"/agents/#{agent.id}"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-md transition-colors">
             View
           </.app_link>
+          <%= if agent.status == :running do %>
+            <button
+              type="button"
+              class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+              phx-click="kill_session"
+              phx-value-id={agent.id}
+              data-confirm="Stop this agent's session?"
+            >
+              Stop
+            </button>
+          <% end %>
           <button
             type="button"
             class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"

@@ -6,11 +6,15 @@ defmodule Cympho.Orchestrator.DispatcherTest do
 
   setup do
     # Ensure registries are started (they may already be started by the app supervisor)
-    for {name, keys} <- [{Cympho.OrchestratorRegistry, :unique}, {Cympho.AgentHeartbeat.Registry, :unique}] do
+    for {name, keys} <- [
+          {Cympho.OrchestratorRegistry, :unique},
+          {Cympho.AgentHeartbeat.Registry, :unique}
+        ] do
       unless Process.whereis(name) do
         start_supervised!({Registry, keys: keys, name: name})
       end
     end
+
     :ok
   end
 

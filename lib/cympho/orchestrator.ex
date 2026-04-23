@@ -43,6 +43,7 @@ defmodule Cympho.Orchestrator do
 
       [] ->
         name = via_tuple(issue_id)
+
         case GenServer.start_link(__MODULE__, {issue, agent_id}, name: name) do
           {:ok, pid} -> {:ok, pid}
           {:error, {:already_started, _pid}} -> {:error, :already_started}
@@ -56,7 +57,7 @@ defmodule Cympho.Orchestrator do
   """
   @spec whereis(String.t()) :: pid() | nil
   def whereis(issue_id) do
-    case Registry.lookup(Cympho.Orchestrator.Registry, issue_id) do
+    case Registry.lookup(@registry, issue_id) do
       [{pid, _}] -> pid
       [] -> nil
     end
@@ -80,8 +81,25 @@ defmodule Cympho.Orchestrator do
     end
   end
 
+  @doc """
+  Gets the current session state for a given issue.
+  Returns nil if no orchestrator is running for the issue.
+  """
+  @spec get_session_state(String.t()) :: map() | nil
+  def get_session_state(issue_id) do
+    case whereis(issue_id) do
+      nil -> nil
+      pid ->
+        try do
+          GenServer.call(pid, :get_session_state, 5000)
+        catch
+          :exit, _ -> nil
+        end
+    end
+  end
+
   defp via_tuple(issue_id) do
-    {:via, Registry, {Cympho.Orchestrator.Registry, issue_id}}
+    {:via, Registry, {@registry, issue_id}}
   end
 
   @impl true
@@ -104,8 +122,18 @@ defmodule Cympho.Orchestrator do
 
   @impl true
   def handle_info({:session_started, session_id}, %Session{} = session) do
-    # AgentRunner confirmed the session started
     {:noreply, %{session | session_id: session_id}}
+  end
+
+  @impl true
+  def handle_call(:get_session_state, _from, %Session{} = session) do
+    {:reply, %{
+      issue_id: session.issue.id,
+      agent_id: session.agent_id,
+      session_id: session.session_id,
+      status: session.status,
+      turn_count: session.turn_count
+    }, session}
   end
 
   @impl true
@@ -140,10 +168,13 @@ defmodule Cympho.Orchestrator do
     issue = session.issue
     agent_id = session.agent_id
 
-    :logger.warning("[Orchestrator] Session ended with error for issue #{issue.id}, agent #{agent_id}: #{inspect(reason)}")
+    :logger.warning(
+      "[Orchestrator] Session ended with error for issue #{issue.id}, agent #{agent_id}: #{inspect(reason)}"
+    )
 
     # Create error comment
     error_body = "Agent work error: #{inspect(reason)}"
+
     {:ok, _comment} =
       Comments.create_comment(%{
         body: error_body,
@@ -156,8 +187,11 @@ defmodule Cympho.Orchestrator do
     case Issues.transition_issue(issue, :blocked) do
       {:ok, _} ->
         :logger.info("[Orchestrator] Issue #{issue.id} transitioned to :blocked after error")
+
       {:error, reason} ->
-        :logger.error("[Orchestrator] Failed to transition issue #{issue.id} to :blocked: #{inspect(reason)}")
+        :logger.error(
+          "[Orchestrator] Failed to transition issue #{issue.id} to :blocked: #{inspect(reason)}"
+        )
     end
 
     # Keep agent idle

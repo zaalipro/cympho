@@ -56,7 +56,6 @@ defmodule Cympho.OrchestratorTest do
 
       {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
       assert Orchestrator.whereis(issue.id) == pid
-
     after
       if pid = Orchestrator.whereis("orch-test-2") do
         GenServer.stop(pid)
@@ -69,7 +68,6 @@ defmodule Cympho.OrchestratorTest do
 
       {:ok, pid1} = Orchestrator.start_and_run(issue, agent_id)
       {:error, :already_started} = Orchestrator.start_and_run(issue, agent_id)
-
     after
       if pid = Orchestrator.whereis("orch-test-3") do
         GenServer.stop(pid)
@@ -107,7 +105,6 @@ defmodule Cympho.OrchestratorTest do
 
       {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
       assert Orchestrator.whereis(issue.id) == pid
-
     after
       if pid = Orchestrator.whereis("orch-test-4") do
         GenServer.stop(pid)

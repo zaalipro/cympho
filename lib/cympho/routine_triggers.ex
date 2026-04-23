@@ -17,8 +17,6 @@ defmodule Cympho.RoutineTriggers do
   alias Cympho.RoutineTriggers.RoutineTrigger
   alias Cympho.RoutineTriggers.RoutineRun
   alias Cympho.Routines.Routine
-  alias Cympho.Issues
-  alias Cympho.Agents
 
   # --- Trigger CRUD ---
 
@@ -154,7 +152,7 @@ defmodule Cympho.RoutineTriggers do
   end
 
   defp do_fire_trigger(trigger, routine, opts) do
-    trigger_type = Map.get(opts, :trigger_type, trigger.type)
+    trigger_type = Keyword.get(opts, :trigger_type, trigger.type)
     now = DateTime.utc_now()
 
     run_attrs = %{
@@ -193,7 +191,8 @@ defmodule Cympho.RoutineTriggers do
 
   defp create_run_issue(repo, run, trigger, routine, now) do
     issue_attrs = %{
-      "title" => "[Routine] #{routine.name} — #{format_trigger_type(run.trigger_type)} #{Calendar.strftime(now, "%Y-%m-%d %H:%M")}",
+      "title" =>
+        "[Routine] #{routine.name} — #{format_trigger_type(run.trigger_type)} #{Calendar.strftime(now, "%Y-%m-%d %H:%M")}",
       "description" => build_run_description(run, trigger, routine, now),
       "status" => "todo",
       "priority" => routine_priority(routine),
@@ -309,10 +308,11 @@ defmodule Cympho.RoutineTriggers do
   """
   def maybe_schedule_quantum_job(%RoutineTrigger{type: "schedule", enabled: true} = trigger) do
     job_name = quantum_job_name(trigger)
+    schedule = Crontab.CronExpression.Parser.parse!(trigger.cron_expression)
 
     Cympho.Scheduler.new_job()
     |> Quantum.Job.set_name(job_name)
-    |> Quantum.Job.set_cron(trigger.cron_expression)
+    |> Quantum.Job.set_schedule(schedule)
     |> Quantum.Job.set_task(fn -> execute_scheduled_trigger(trigger.id) end)
     |> Quantum.Job.set_state(:active)
     |> Cympho.Scheduler.add_job()
@@ -330,7 +330,7 @@ defmodule Cympho.RoutineTriggers do
     _ -> :ok
   end
 
-  defp quantum_job_name(%RoutineTrigger{id: id}), do: {:routine_trigger, id}
+  defp quantum_job_name(%RoutineTrigger{id: id}), do: String.to_atom("routine_trigger_" <> id)
 
   def execute_scheduled_trigger(trigger_id) do
     case get_trigger(trigger_id) do
@@ -410,7 +410,8 @@ defmodule Cympho.RoutineTriggers do
 
   defp create_manual_run_issue(repo, _run, routine, now) do
     issue_attrs = %{
-      "title" => "[Routine] #{routine.name} — Manual run #{Calendar.strftime(now, "%Y-%m-%d %H:%M")}",
+      "title" =>
+        "[Routine] #{routine.name} — Manual run #{Calendar.strftime(now, "%Y-%m-%d %H:%M")}",
       "description" => """
       Manually triggered routine run.
 

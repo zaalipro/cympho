@@ -44,6 +44,7 @@ defmodule Cympho.Notifications.TelegramBot do
     /status - Check your linked account
     /link <token> - Link your Telegram to your account
     """)
+
     :ok
   end
 
@@ -76,9 +77,10 @@ defmodule Cympho.Notifications.TelegramBot do
 
   defp link_account(chat_id, token) do
     # Find pending link with this verification token
-    link = TelegramLink
-           |> Cympho.Repo.all()
-           |> Enum.find(fn l -> l.verification_token == token end)
+    link =
+      TelegramLink
+      |> Cympho.Repo.all()
+      |> Enum.find(fn l -> l.verification_token == token end)
 
     case link do
       nil ->

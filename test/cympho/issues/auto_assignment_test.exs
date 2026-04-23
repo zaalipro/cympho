@@ -28,10 +28,11 @@ defmodule Cympho.Issues.AutoAssignmentTest do
     end
 
     test "assigns issue to eligible idle agent when no assignee set", %{agent: agent} do
-      issue = create_issue_direct(%{
-        title: "Implement login feature",
-        description: "Build the login flow"
-      })
+      issue =
+        create_issue_direct(%{
+          title: "Implement login feature",
+          description: "Build the login flow"
+        })
 
       assert is_nil(issue.assignee_id)
 
@@ -48,11 +49,12 @@ defmodule Cympho.Issues.AutoAssignmentTest do
           max_concurrent_jobs: 3
         })
 
-      issue = create_issue_direct(%{
-        title: "Implement login feature",
-        description: "Build the login flow",
-        assignee_id: other_agent.id
-      })
+      issue =
+        create_issue_direct(%{
+          title: "Implement login feature",
+          description: "Build the login flow",
+          assignee_id: other_agent.id
+        })
 
       {:ok, assigned} = AutoAssignment.assign_issue(issue)
       assert assigned.assignee_id == other_agent.id
@@ -61,10 +63,11 @@ defmodule Cympho.Issues.AutoAssignmentTest do
     test "returns error tuple when no eligible agent available for inferred role" do
       # Create an issue with technical keywords → routes to :cto
       # No :cto agent exists in this test's context
-      issue = create_issue_direct(%{
-        title: "Architecture review",
-        description: "System design patterns"
-      })
+      issue =
+        create_issue_direct(%{
+          title: "Architecture review",
+          description: "System design patterns"
+        })
 
       assert is_nil(issue.assignee_id)
 
@@ -91,18 +94,20 @@ defmodule Cympho.Issues.AutoAssignmentTest do
         })
 
       # Give the busier agent one in_progress issue
-      {:ok, _busy_issue} = Issues.create_issue(%{
-        title: "Busy Issue",
-        description: "Counts toward load",
-        status: :in_progress,
-        priority: :high,
-        assignee_id: busier.id
-      })
+      {:ok, _busy_issue} =
+        Issues.create_issue(%{
+          title: "Busy Issue",
+          description: "Counts toward load",
+          status: :in_progress,
+          priority: :high,
+          assignee_id: busier.id
+        })
 
-      issue = create_issue_direct(%{
-        title: "Implement login feature",
-        description: "Build the login flow"
-      })
+      issue =
+        create_issue_direct(%{
+          title: "Implement login feature",
+          description: "Build the login flow"
+        })
 
       {:ok, assigned} = AutoAssignment.assign_issue(issue)
       assert assigned.assignee_id == freer.id
@@ -117,10 +122,11 @@ defmodule Cympho.Issues.AutoAssignmentTest do
           max_concurrent_jobs: 3
         })
 
-      issue = create_issue_direct(%{
-        title: "Strategic roadmap planning",
-        description: "Look at market trends"
-      })
+      issue =
+        create_issue_direct(%{
+          title: "Strategic roadmap planning",
+          description: "Look at market trends"
+        })
 
       {:ok, assigned} = AutoAssignment.assign_issue(issue)
       assert assigned.assignee_id == ceo.id
@@ -135,10 +141,11 @@ defmodule Cympho.Issues.AutoAssignmentTest do
           max_concurrent_jobs: 3
         })
 
-      issue = create_issue_direct(%{
-        title: "Architecture review",
-        description: "System design patterns"
-      })
+      issue =
+        create_issue_direct(%{
+          title: "Architecture review",
+          description: "System design patterns"
+        })
 
       {:ok, assigned} = AutoAssignment.assign_issue(issue)
       assert assigned.assignee_id == cto.id
@@ -159,13 +166,14 @@ defmodule Cympho.Issues.AutoAssignmentTest do
       assert Agents.is_agent_at_capacity?(agent) == false
 
       # Give the agent one in_progress issue — now at capacity
-      {:ok, _running_issue} = Issues.create_issue(%{
-        title: "Running Issue",
-        description: "Takes up capacity",
-        status: :in_progress,
-        priority: :high,
-        assignee_id: agent.id
-      })
+      {:ok, _running_issue} =
+        Issues.create_issue(%{
+          title: "Running Issue",
+          description: "Takes up capacity",
+          status: :in_progress,
+          priority: :high,
+          assignee_id: agent.id
+        })
 
       # Now the agent should be at capacity (struct-based check)
       assert Agents.is_agent_at_capacity?(agent) == true
@@ -222,10 +230,11 @@ defmodule Cympho.Issues.AutoAssignmentTest do
 
   describe "queue_for_assignment/1" do
     test "creates a system comment on the issue" do
-      issue = create_issue_direct(%{
-        title: "Queued Issue",
-        description: "No agents available"
-      })
+      issue =
+        create_issue_direct(%{
+          title: "Queued Issue",
+          description: "No agents available"
+        })
 
       assert {:ok, comment} = AutoAssignment.queue_for_assignment(issue)
       assert comment.author_type == "system"
@@ -244,12 +253,13 @@ defmodule Cympho.Issues.AutoAssignmentTest do
           max_concurrent_jobs: 3
         })
 
-      {:ok, issue} = Issues.create_issue(%{
-        title: "Implement login feature",
-        description: "Build the login flow",
-        status: :backlog,
-        priority: :medium
-      })
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Implement login feature",
+          description: "Build the login flow",
+          status: :backlog,
+          priority: :medium
+        })
 
       # Should have been auto-assigned to the engineer agent
       assert issue.assignee_id == agent.id
@@ -265,12 +275,13 @@ defmodule Cympho.Issues.AutoAssignmentTest do
         })
 
       # Create issue with strategic keyword but only engineer agent available (no CEO)
-      {:ok, issue} = Issues.create_issue(%{
-        title: "Strategic roadmap planning",
-        description: "Look at market trends",
-        status: :backlog,
-        priority: :high
-      })
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Strategic roadmap planning",
+          description: "Look at market trends",
+          status: :backlog,
+          priority: :high
+        })
 
       # Issue should be in backlog without assignee (no CEO available)
       assert is_nil(issue.assignee_id)

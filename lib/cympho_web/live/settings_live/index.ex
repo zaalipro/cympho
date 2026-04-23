@@ -4,8 +4,6 @@ defmodule CymphoWeb.SettingsLive.Index do
   alias Cympho.Users
   alias Cympho.Notifications
 
-  @event_types ~w(issue_assigned comment status_change)
-
   @impl true
   def mount(%{"user_id" => user_id}, _session, socket) do
     case Users.get_user(user_id) do
@@ -50,10 +48,14 @@ defmodule CymphoWeb.SettingsLive.Index do
     case Users.upsert_notification_pref(socket.assigns.user_id, channel, %{enabled: new_enabled}) do
       {:ok, _} ->
         prefs = Users.list_notification_prefs(socket.assigns.user_id)
+
         {:noreply,
          socket
          |> assign(:prefs, prefs)
-         |> put_flash(:info, "#{String.capitalize(channel)} #{if(new_enabled, do: "enabled", else: "disabled")}")}
+         |> put_flash(
+           :info,
+           "#{String.capitalize(channel)} #{if(new_enabled, do: "enabled", else: "disabled")}"
+         )}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to update #{channel} setting")}
@@ -64,7 +66,9 @@ defmodule CymphoWeb.SettingsLive.Index do
     pref = Enum.find(socket.assigns.prefs, &(&1.id == pref_id))
     new_enabled = not pref.enabled
 
-    case Users.upsert_notification_pref(socket.assigns.user_id, pref.channel_type, %{enabled: new_enabled}) do
+    case Users.upsert_notification_pref(socket.assigns.user_id, pref.channel_type, %{
+           enabled: new_enabled
+         }) do
       {:ok, _} ->
         prefs = Users.list_notification_prefs(socket.assigns.user_id)
         {:noreply, assign(socket, :prefs, prefs)}
@@ -113,7 +117,10 @@ defmodule CymphoWeb.SettingsLive.Index do
 
   def handle_event("test_webhook", _params, socket) do
     webhook_pref = pref_for_channel(socket.assigns.prefs, "webhook")
-    url = (webhook_pref && webhook_pref.config && webhook_pref.config["url"]) || socket.assigns.user.webhook_url
+
+    url =
+      (webhook_pref && webhook_pref.config && webhook_pref.config["url"]) ||
+        socket.assigns.user.webhook_url
 
     if is_binary(url) and url != "" do
       result = Notifications.test_webhook(url)

@@ -32,6 +32,7 @@ defmodule Cympho.Attachments do
       {:ok, attachment} ->
         delete_file(attachment.path)
         {:ok, attachment}
+
       {:error, changeset} ->
         {:error, changeset}
     end
@@ -43,6 +44,7 @@ defmodule Cympho.Attachments do
       unique_name = "#{Ecto.UUID.generate()}#{ext}"
       dest_dir = Path.join(@upload_dir, safe_id)
       dest_path = Path.join(dest_dir, unique_name)
+
       with :ok <- File.mkdir_p(dest_dir),
            {:ok, _} <- File.copy(tmp_path, dest_path) do
         {:ok, Path.join(safe_id, unique_name)}
@@ -66,5 +68,6 @@ defmodule Cympho.Attachments do
       :error -> {:error, :invalid_issue_id}
     end
   end
+
   defp validate_uuid(_), do: {:error, :invalid_issue_id}
 end

@@ -1,7 +1,6 @@
 defmodule CymphoWeb.IssueLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Issues
-  alias Cympho.Issues.Issue
 
   @impl true
   def mount(_params, _session, socket) do
@@ -34,7 +33,7 @@ defmodule CymphoWeb.IssueLive.Index do
   @impl true
   def handle_event("delete_issue", %{"id" => id}, socket) do
     issue = Issues.get_issue!(id)
-    {:ok, _} = Issues.delete_issue(issue)
+    :ok = Issues.delete_issue(issue)
     {:noreply, reload(socket)}
   end
 
@@ -43,7 +42,8 @@ defmodule CymphoWeb.IssueLive.Index do
   end
 
   def handle_event("filter_priority", %{"priority" => priority}, socket) do
-    {:noreply, push_patch(socket, to: build_url(socket, %{"priority" => priority, "page" => "1"}))}
+    {:noreply,
+     push_patch(socket, to: build_url(socket, %{"priority" => priority, "page" => "1"}))}
   end
 
   def handle_event("change_page", %{"page" => page}, socket) do
@@ -56,7 +56,9 @@ defmodule CymphoWeb.IssueLive.Index do
       "priority" => socket.assigns.current_priority,
       "page" => to_string(socket.assigns.page)
     }
+
     paginated = Issues.list_issues_paginated(params)
+
     socket
     |> assign(:issues, paginated.issues)
     |> assign(:total, paginated.total)
@@ -68,9 +70,10 @@ defmodule CymphoWeb.IssueLive.Index do
     priority = Map.get(overrides, "priority", socket.assigns.current_priority)
     page = Map.get(overrides, "page", to_string(socket.assigns.page))
 
-    query = %{status: status, priority: priority, page: page}
-    |> Enum.reject(fn {_k, v} -> v in ["", nil] end)
-    |> Enum.into(%{})
+    query =
+      %{status: status, priority: priority, page: page}
+      |> Enum.reject(fn {_k, v} -> v in ["", nil] end)
+      |> Enum.into(%{})
 
     ~p"/issues?#{query}"
   end

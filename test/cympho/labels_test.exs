@@ -5,7 +5,9 @@ defmodule Cympho.LabelsTest do
 
   describe "create_label/1" do
     test "creates a label with valid attrs" do
-      assert {:ok, %Label{} = label} = Labels.create_label(%{name: "Bug", color: "#FF0000", description: "Bug reports"})
+      assert {:ok, %Label{} = label} =
+               Labels.create_label(%{name: "Bug", color: "#FF0000", description: "Bug reports"})
+
       assert label.name == "Bug"
     end
 

@@ -24,6 +24,7 @@ defmodule Cympho.AgentHeartbeat do
           agent_id: String.t(),
           status: status(),
           current_issue_id: String.t() | nil,
+          started_at: DateTime.t() | nil,
           timer_ref: reference() | nil
         }
 
@@ -124,6 +125,37 @@ defmodule Cympho.AgentHeartbeat do
     end
   end
 
+  @doc """
+  Gets the full state of the heartbeat for the given agent_id.
+  """
+  @spec get_state(String.t()) :: {:ok, map()} | {:error, :not_found}
+  def get_state(agent_id) do
+    case HeartbeatRegistry.lookup(agent_id) do
+      {:ok, pid} ->
+        {:ok, GenServer.call(pid, :get_state)}
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Triggers an immediate heartbeat for the given agent_id.
+  Sends a :heartbeat message to the GenServer to check for work immediately.
+  Used by Wakes context to wake agents on comments, blocker resolution, and child completion.
+  """
+  @spec trigger_heartbeat(String.t()) :: :ok | {:error, :not_found}
+  def trigger_heartbeat(agent_id) when is_binary(agent_id) do
+    case HeartbeatRegistry.lookup(agent_id) do
+      {:ok, pid} ->
+        send(pid, :heartbeat)
+        :ok
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Callbacks
   # ---------------------------------------------------------------------------
@@ -131,7 +163,7 @@ defmodule Cympho.AgentHeartbeat do
   @impl true
   def init(agent_id) do
     timer_ref = schedule_heartbeat(agent_id)
-    state = %{agent_id: agent_id, status: :idle, current_issue_id: nil, timer_ref: timer_ref}
+    state = %{agent_id: agent_id, status: :idle, current_issue_id: nil, started_at: nil, timer_ref: timer_ref}
     {:ok, state}
   end
 
@@ -146,6 +178,11 @@ defmodule Cympho.AgentHeartbeat do
     else
       do_heartbeat(state)
     end
+  end
+
+  @impl true
+  def handle_info(:shutdown, state) do
+    {:stop, :normal, state}
   end
 
   defp do_heartbeat(state) do
@@ -168,13 +205,23 @@ defmodule Cympho.AgentHeartbeat do
           case Orchestrator.start_and_run(checked_out_issue, agent_id) do
             {:ok, _pid} ->
               timer_ref = schedule_heartbeat(agent_id)
-              {:noreply, %{state | status: :running, current_issue_id: checked_out_issue.id, timer_ref: timer_ref}}
+
+              {:noreply,
+               %{
+                 state
+                 | status: :running,
+                   current_issue_id: checked_out_issue.id,
+                   started_at: DateTime.utc_now(),
+                   timer_ref: timer_ref
+               }}
 
             {:error, reason} ->
-              _ = :logger.error("[AgentHeartbeat] failed to start orchestrator: #{inspect(reason)}")
+              _ =
+                :logger.error("[AgentHeartbeat] failed to start orchestrator: #{inspect(reason)}")
+
               _ = maybe_update_agent_status(agent_id, :error)
               timer_ref = schedule_heartbeat(agent_id)
-              {:noreply, %{state | status: :idle, current_issue_id: nil, timer_ref: timer_ref}}
+              {:noreply, %{state | status: :idle, current_issue_id: nil, started_at: nil, timer_ref: timer_ref}}
           end
 
         {:error, _reason} ->
@@ -190,29 +237,34 @@ defmodule Cympho.AgentHeartbeat do
   end
 
   @impl true
-  def handle_info(:shutdown, state) do
-    {:stop, :normal, state}
-  end
-
-  @impl true
   def handle_call(:get_status, _from, state) do
     {:reply, state.status, state}
   end
 
   @impl true
+  def handle_call(:get_state, _from, state) do
+    {:reply, state, state}
+  end
+
+  @impl true
   def handle_call({:set_working, issue_id}, _from, state) do
-    {:reply, :ok, %{state | status: :running, current_issue_id: issue_id}}
+    {:reply, :ok, %{state | status: :running, current_issue_id: issue_id, started_at: DateTime.utc_now()}}
   end
 
   @impl true
   def handle_call(:set_idle, _from, state) do
-    {:reply, :ok, %{state | status: :idle, current_issue_id: nil}}
+    {:reply, :ok, %{state | status: :idle, current_issue_id: nil, started_at: nil}}
   end
 
   @impl true
   def terminate(reason, state) do
     if state.timer_ref, do: Process.cancel_timer(state.timer_ref)
-    _ = :logger.info("[AgentHeartbeat] terminated for agent #{state.agent_id}, reason: #{inspect(reason)}")
+
+    _ =
+      :logger.info(
+        "[AgentHeartbeat] terminated for agent #{state.agent_id}, reason: #{inspect(reason)}"
+      )
+
     :ok
   end
 
@@ -250,7 +302,7 @@ defmodule Cympho.AgentHeartbeat do
         |> first()
         |> Repo.one()
 
-      :error ->
+      {:error, _} ->
         nil
     end
   end
@@ -265,7 +317,7 @@ defmodule Cympho.AgentHeartbeat do
           Agents.update_agent(agent, %{status: new_status})
         end
 
-      :error ->
+      {:error, _} ->
         :error
     end
   end

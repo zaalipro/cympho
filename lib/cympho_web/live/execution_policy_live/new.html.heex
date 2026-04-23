@@ -1,0 +1,25 @@
+<.header>
+  {@page_title}
+</.header>
+
+<.simple_form for={@changeset} phx-submit="save">
+  <.input field={@changeset[:name]} label="Name" type="text" required />
+
+  <div class="form-group">
+    <label class="block text-sm font-medium mb-1">Stage Configs (JSON array)</label>
+    <p class="text-xs text-zinc-500 mb-2">
+      Example: <%= ~s|[{"type": "executor", "participant_id": "agent-id"}, {"type": "reviewer", "participant_id": "agent-id"}]| %>
+    </p>
+    <.input field={@changeset[:stage_configs]} label="Stage Configs" type="textarea" rows="4" />
+  </div>
+
+  <:actions>
+    <.button phx-disable-with="Saving...">
+      Save Execution Policy
+    </.button>
+  </:actions>
+</.simple_form>
+
+<.link navigate={~p"/execution-policies"} class="mt-4 phx-btn-secondary">
+  Back to Execution Policies
+</.link>

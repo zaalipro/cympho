@@ -15,27 +15,63 @@
     <div class="form-group">
       <label>Priority</label>
       <select name="routine[priority]">
-        <option value="critical" {if @routine.priority == :critical, do: [selected: true], else: []}>Critical</option>
-        <option value="high" {if @routine.priority == :high, do: [selected: true], else: []}>High</option>
-        <option value="medium" {if @routine.priority == :medium, do: [selected: true], else: []}>Medium</option>
-        <option value="low" {if @routine.priority == :low, do: [selected: true], else: []}>Low</option>
+        <option
+          value="critical"
+          {if @routine.priority == :critical, do: [selected: true], else: []}
+        >
+          Critical
+        </option>
+        <option value="high" {if @routine.priority == :high, do: [selected: true], else: []}>
+          High
+        </option>
+        <option value="medium" {if @routine.priority == :medium, do: [selected: true], else: []}>
+          Medium
+        </option>
+        <option value="low" {if @routine.priority == :low, do: [selected: true], else: []}>
+          Low
+        </option>
       </select>
     </div>
 
     <div class="form-group">
       <label>Concurrency Policy</label>
       <select name="routine[concurrency_policy]">
-        <option value="coalesce_if_active" {if @routine.concurrency_policy == :coalesce_if_active, do: [selected: true], else: []}>Coalesce if active</option>
-        <option value="skip_if_active" {if @routine.concurrency_policy == :skip_if_active, do: [selected: true], else: []}>Skip if active</option>
-        <option value="always_enqueue" {if @routine.concurrency_policy == :always_enqueue, do: [selected: true], else: []}>Always enqueue</option>
+        <option
+          value="coalesce_if_active"
+          {if @routine.concurrency_policy == :coalesce_if_active, do: [selected: true], else: []}
+        >
+          Coalesce if active
+        </option>
+        <option
+          value="skip_if_active"
+          {if @routine.concurrency_policy == :skip_if_active, do: [selected: true], else: []}
+        >
+          Skip if active
+        </option>
+        <option
+          value="always_enqueue"
+          {if @routine.concurrency_policy == :always_enqueue, do: [selected: true], else: []}
+        >
+          Always enqueue
+        </option>
       </select>
     </div>
 
     <div class="form-group">
       <label>Catch-Up Policy</label>
       <select name="routine[catch_up_policy]">
-        <option value="skip_missed" {if @routine.catch_up_policy == :skip_missed, do: [selected: true], else: []}>Skip missed</option>
-        <option value="enqueue_missed_with_cap" {if @routine.catch_up_policy == :enqueue_missed_with_cap, do: [selected: true], else: []}>Enqueue missed with cap</option>
+        <option
+          value="skip_missed"
+          {if @routine.catch_up_policy == :skip_missed, do: [selected: true], else: []}
+        >
+          Skip missed
+        </option>
+        <option
+          value="enqueue_missed_with_cap"
+          {if @routine.catch_up_policy == :enqueue_missed_with_cap, do: [selected: true], else: []}
+        >
+          Enqueue missed with cap
+        </option>
       </select>
     </div>
 

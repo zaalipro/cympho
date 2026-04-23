@@ -1,9 +1,14 @@
 defmodule Cympho.Labels do
-  import Ecto.Query, warn: false
+  @moduledoc "Labels context."
+  import Ecto.Query
+  import Ecto.Changeset
+
   alias Cympho.Repo
   alias Cympho.Labels.Label
+  alias Cympho.Issues.Issue
 
   def list_labels, do: Repo.all(Label)
+
   def get_label!(id), do: Repo.get!(Label, id)
 
   def get_label(id) do
@@ -13,14 +18,23 @@ defmodule Cympho.Labels do
     end
   end
 
-  def create_label(attrs \\ %{}) do
-    %Label{} |> Label.changeset(attrs) |> Repo.insert()
+  def change_label(%Label{} = label, attrs \\ %{}) do
+    Label.changeset(label, attrs)
   end
 
   def update_label(%Label{} = label, attrs) do
-    label |> Label.changeset(attrs) |> Repo.update()
+    label
+    |> Label.changeset(attrs)
+    |> Repo.update()
   end
 
-  def delete_label(%Label{} = label), do: Repo.delete(label)
-  def change_label(%Label{} = label, attrs \\ %{}), do: Label.changeset(label, attrs)
+  def create_label(attrs) do
+    %Label{}
+    |> Label.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def delete_label(%Label{} = label) do
+    Repo.delete(label)
+  end
 end
