@@ -14,11 +14,6 @@ defmodule CymphoWeb.Router do
     plug :accepts, ["json"]
   end
 
-  pipeline :github_webhook do
-    plug :accepts, ["json"]
-    plug CymphoWeb.Plugs.GithubWebhookVerification
-  end
-
   scope "/", CymphoWeb do
     pipe_through :browser
 
@@ -31,12 +26,10 @@ defmodule CymphoWeb.Router do
     live "/projects/new", ProjectLive.New
     live "/projects/:id", ProjectLive.Show
     live "/projects/:id/edit", ProjectLive.Edit
-    live "/goals", GoalLive.Index
-    live "/goals/new", GoalLive.New
-    live "/goals/:id", GoalLive.Show
-    live "/goals/:id/edit", GoalLive.Edit
     live "/kanban", KanbanLive.Index
     live "/labels", LabelLive.Index
+    live "/approvals", ApprovalLive.Index
+    live "/approvals/:id", ApprovalLive.Show
     live "/agents", AgentLive.Index
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
@@ -45,8 +38,6 @@ defmodule CymphoWeb.Router do
     live "/routines/new", RoutineLive.New
     live "/routines/:id", RoutineLive.Show
     live "/routines/:id/edit", RoutineLive.Edit
-    live "/approvals", ApprovalLive.Index
-    live "/approvals/:id", ApprovalLive.Show
     live "/settings", SettingsLive.Index
     live "/execution-policies", ExecutionPolicyLive.Index
     live "/execution-policies/new", ExecutionPolicyLive.New
@@ -101,8 +92,6 @@ defmodule CymphoWeb.Router do
     put "/issues/:issue_id/documents/:key", DocumentController, :upsert
     delete "/issues/:issue_id/documents/:key", DocumentController, :delete
     get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
-
-    resources "/approvals", ApprovalController, only: [:index, :show, :create, :update]
   end
 
   scope "/api", CymphoWeb do
