@@ -1,5 +1,6 @@
 defmodule CymphoWeb.KanbanLive.Index do
   use CymphoWeb, :live_view
+  import CymphoWeb.KanbanLive.Components
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.AgentHeartbeat
@@ -24,6 +25,9 @@ defmodule CymphoWeb.KanbanLive.Index do
       |> assign(:projects, projects)
       |> assign(:collapsed_columns, MapSet.new())
       |> assign(:swimlane_mode, false)
+      |> assign(:filter_assignee_id, nil)
+      |> assign(:filter_priority, nil)
+      |> assign(:filter_search, nil)
 
     {:ok, socket}
   end
@@ -180,6 +184,16 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   def issues_for_status(issues, status), do: Enum.filter(issues, &(&1.status == status))
+
+  def backlog_issues(issues), do: issues_for_status(issues, :backlog)
+  def todo_issues(issues), do: issues_for_status(issues, :todo)
+  def in_progress_issues(issues), do: issues_for_status(issues, :in_progress)
+  def in_review_issues(issues), do: issues_for_status(issues, :in_review)
+  def done_issues(issues), do: issues_for_status(issues, :done)
+  def blocked_issues(issues), do: issues_for_status(issues, :blocked)
+
+  def apply_filters(issues, _filters), do: issues
+  def active_filter_count(_assigns), do: 0
 
   def valid_next_statuses(:backlog), do: [:todo, :in_progress, :blocked]
   def valid_next_statuses(:todo), do: [:in_progress, :blocked]
