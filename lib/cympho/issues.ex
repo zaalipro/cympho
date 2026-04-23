@@ -12,6 +12,7 @@ defmodule Cympho.Issues do
   alias Cympho.Agents
   alias Cympho.Approvals
   alias Cympho.Comments
+  alias Cympho.Approvals
 
   def list_issues(opts \\ %{}) do
     Issue
@@ -146,6 +147,7 @@ defmodule Cympho.Issues do
 
   defp do_transition(%Issue{} = issue, new_status) do
     with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
+      if new_status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
       if new_status == :done, do: unblock_dependents(issue.id)
       if new_status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
       {:ok, updated}
@@ -357,6 +359,7 @@ defmodule Cympho.Issues do
   end
 
   def delete_issue(%Issue{} = issue) do
+    Approvals.cancel_pending_for_issue(issue.id)
     case Repo.delete(issue) do
       {:ok, _issue} ->
         Approvals.cancel_pending_for_issue(issue.id)
