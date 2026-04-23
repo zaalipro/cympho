@@ -29,10 +29,13 @@ defmodule CymphoWeb.Router do
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
     live "/agents/:id/edit", AgentLive.Edit
+    live "/approvals", ApprovalLive.Index
+    live "/approvals/:id", ApprovalLive.Show
   end
 
   scope "/api", CymphoWeb do
     pipe_through :api
+    resources "/approvals", ApprovalController, only: [:index, :show, :create, :update]
     resources "/users", UserController, only: [:index, :show, :create, :update, :delete]
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
     post "/telegram/webhook", TelegramController, :webhook
