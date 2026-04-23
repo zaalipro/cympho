@@ -1,45 +1,31 @@
 <.header>
   {@page_title}
-  <:actions>
-    <.link patch={~p"/labels/new"} class="phx-btn">
-      New Label
-    </.link>
-  </:actions>
 </.header>
+
+<div class="label-form">
+  <h3 :if={@editing_label}>Editing: {@editing_label.name}</h3>
+  <h3 :if={!@editing_label}>Create New Label</h3>
+  <.simple_form for={@label_changeset} phx-submit={@editing_label && "update_label" || "create_label"}>
+    <.input field={@label_changeset[:name]} name="label[name]" placeholder="Label name" />
+    <.input field={@label_changeset[:color]} name="label[color]" placeholder="#FF0000" />
+    <.input field={@label_changeset[:description]} name="label[description]" placeholder="Description (optional)" />
+    <:actions>
+      <button type="submit" class="phx-btn">{@editing_label && "Update" || "Create"} Label</button>
+      <button :if={@editing_label} type="button" class="phx-btn-secondary" phx-click="cancel_edit">Cancel</button>
+    </:actions>
+  </.simple_form>
+</div>
 
 <div class="label-list">
   <div :for={label <- @labels} class="label-card" id={"label-#{label.id}"}>
-    <div class="label-header">
-      <span class="label-color-swatch" style={"background-color: #{label.color}"}></span>
-      <h3>{label.name}</h3>
+    <div class="label-info">
+      <span class="label-badge" style={"background-color: #{label.color}; color: #{text_color(label.color)}"}>{label.name}</span>
+      <span :if={label.description} class="label-description">{label.description}</span>
     </div>
     <div class="label-actions">
-      <.link patch={~p"/labels/#{label.id}/edit"} class="phx-btn-secondary">
-        Edit
-      </.link>
-      <button
-        type="button"
-        class="delete-btn"
-        phx-click="delete_label"
-        phx-value-id={label.id}
-        data-confirm="Delete this label?"
-      >
-        Delete
-      </button>
+      <button type="button" class="phx-btn-secondary" phx-click="edit_label" phx-value-id={label.id}>Edit</button>
+      <button type="button" class="delete-btn" phx-click="delete_label" phx-value-id={label.id} data-confirm="Delete this label?">Delete</button>
     </div>
   </div>
+  <div :if={Enum.empty?(@labels)} class="empty-state"><p>No labels yet. Create your first label above.</p></div>
 </div>
-
-<div :if={Enum.empty?(@labels)} class="empty-state">
-  <p>No labels yet. Create your first label to get started.</p>
-</div>
-
-<.modal :if={@live_action in [:new, :edit]} id="label-modal" show on_cancel={JS.patch(~p"/labels")}>
-  <.live_component
-    module={CymphoWeb.LabelLive.FormComponent}
-    id={@label.id || :new}
-    title={@page_title}
-    action={@live_action}
-    label={@label}
-  />
-</.modal>

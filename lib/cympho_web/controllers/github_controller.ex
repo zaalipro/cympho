@@ -2,7 +2,6 @@ defmodule CymphoWeb.GithubController do
   use CymphoWeb, :controller
   import Ecto.Query, warn: false
   alias Cympho.Issues
-  import Ecto.Query
   require Logger
 
   @doc """
