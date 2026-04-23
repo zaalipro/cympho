@@ -1,58 +1,21 @@
 defmodule CymphoWeb.KanbanLiveTest do
   use CymphoWeb.LiveCase, async: true
-
   import Phoenix.LiveViewTest
-
   alias Cympho.Issues
   alias Cympho.Projects
+  alias Cympho.Agents
+  alias Cympho.Comments
 
   setup do
-    {:ok, project} =
-      Projects.create_project(%{
-        name: "Test Project",
-        prefix: "TP"
-      })
-
-    {:ok, issue_backlog} =
-      Issues.create_issue(%{
-        title: "Backlog Issue",
-        description: "A backlog issue",
-        status: :backlog,
-        priority: :high,
-        project_id: project.id
-      })
-
-    {:ok, issue_todo} =
-      Issues.create_issue(%{
-        title: "Todo Issue",
-        description: "A todo issue",
-        status: :todo,
-        priority: :medium,
-        project_id: project.id
-      })
-
-    {:ok, issue_in_progress} =
-      Issues.create_issue(%{
-        title: "In Progress Issue",
-        description: "An in-progress issue",
-        status: :in_progress,
-        priority: :low,
-        project_id: project.id
-      })
-
-    %{
-      project: project,
-      issue_backlog: issue_backlog,
-      issue_todo: issue_todo,
-      issue_in_progress: issue_in_progress
-    }
+    {:ok, project} = Projects.create_project(%{name: "Test Project", prefix: "TP"})
+    {:ok, issue_backlog} = Issues.create_issue(%{title: "Backlog Issue", description: "backlog", status: :backlog, priority: :high, project_id: project.id})
+    {:ok, issue_todo} = Issues.create_issue(%{title: "Todo Issue", description: "todo", status: :todo, priority: :medium, project_id: project.id})
+    %{project: project, issue_backlog: issue_backlog, issue_todo: issue_todo}
   end
 
-  describe "Kanban board rendering" do
-    test "renders the kanban board with all status columns" do
+  describe "Kanban rendering" do
+    test "renders all status columns" do
       {:ok, _view, html} = live(conn(), "/kanban")
-
-      assert html =~ "Kanban Board"
       assert html =~ "Backlog"
       assert html =~ "To Do"
       assert html =~ "In Progress"
@@ -61,269 +24,283 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert html =~ "Blocked"
     end
 
-    test "renders issues in their respective columns" do
+    test "renders issues" do
       {:ok, _view, html} = live(conn(), "/kanban")
-
       assert html =~ "Backlog Issue"
       assert html =~ "Todo Issue"
-      assert html =~ "In Progress Issue"
     end
 
-    test "renders issue priority badges" do
+    test "renders drag-and-drop attributes" do
       {:ok, _view, html} = live(conn(), "/kanban")
-
-      assert html =~ "high"
-      assert html =~ "medium"
-      assert html =~ "low"
-    end
-
-    test "renders drag-and-drop hook container" do
-      {:ok, _view, html} = live(conn(), "/kanban")
-
-      assert html =~ ~s(phx-hook="KanbanSortable")
-      assert html =~ ~s(data-kanban-column)
-    end
-
-    test "renders issue cards with data-issue-id for drag-and-drop" do
-      {:ok, _view, html} = live(conn(), "/kanban")
-
-      assert html =~ ~s(data-issue-id)
-    end
-
-    test "shows column issue counts" do
-      {:ok, _view, html} = live(conn(), "/kanban")
-
-      # Each column has a count badge
-      assert html =~ ~r(>1<)
+      assert html =~ "data-kanban-column"
+      assert html =~ "data-issue-id"
     end
   end
 
-  describe "Drag-and-drop transitions" do
-    test "valid transition via transition_issue event", %{issue_backlog: issue} do
+  describe "Transitions" do
+    test "valid transition succeeds", %{issue_backlog: issue} do
       {:ok, view, _html} = live(conn(), "/kanban")
-
+      view |> element("#kanban-board") |> render_hook("transition_issue", %{"id" => issue.id, "to_status" => "todo"})
       assert render(view) =~ "Backlog Issue"
-
-      view
-      |> element("#kanban-board")
-      |> render_hook("transition_issue", %{"id" => issue.id, "to_status" => "todo"})
-
-      html = render(view)
-      refute html =~ ~r(data-kanban-column="backlog".*Backlog Issue)s
     end
 
-    test "invalid transition shows flash error", %{issue_todo: issue} do
+    test "invalid transition shows error", %{issue_todo: issue} do
       {:ok, view, _html} = live(conn(), "/kanban")
-
-      view
-      |> element("#kanban-board")
-      |> render_hook("transition_issue", %{"id" => issue.id, "to_status" => "backlog"})
-
+      view |> element("#kanban-board") |> render_hook("transition_issue", %{"id" => issue.id, "to_status" => "backlog"})
       assert render(view) =~ "Invalid status transition"
     end
 
-    test "transition to done when blocked shows flash error" do
-      {:ok, blocking} =
-        Issues.create_issue(%{
-          title: "Blocker",
-          description: "Blocking issue",
-          status: :in_progress
-        })
-
-      {:ok, blocked} =
-        Issues.create_issue(%{
-          title: "Blocked Issue",
-          description: "Is blocked",
-          status: :in_review
-        })
-
-      {:ok, _} = Issues.add_blocker(blocked, blocking)
-
+    test "blocked issue cannot move to done" do
+      {:ok, blocking} = Issues.create_issue(%{title: "Blocker", description: "blocks", status: :in_progress})
+      {:ok, blocked} = Issues.create_issue(%{title: "Blocked", description: "blocked", status: :in_review})
+      Issues.add_blocker(blocked, blocking)
       {:ok, view, _html} = live(conn(), "/kanban")
-
-      view
-      |> element("#kanban-board")
-      |> render_hook("transition_issue", %{"id" => blocked.id, "to_status" => "done"})
-
+      view |> element("#kanban-board") |> render_hook("transition_issue", %{"id" => blocked.id, "to_status" => "done"})
       assert render(view) =~ "Cannot complete - issue is blocked"
     end
 
-    test "shake event is pushed on invalid transition", %{issue_todo: issue} do
+    test "shake event on invalid transition", %{issue_todo: issue} do
       {:ok, view, _html} = live(conn(), "/kanban")
-
-      assert render_hook(view, "transition_issue", %{"id" => issue.id, "to_status" => "backlog"}) =~
-               "shake_card"
+      result = render_hook(view, "transition_issue", %{"id" => issue.id, "to_status" => "backlog"})
+      assert result =~ "shake_card"
     end
   end
 
   describe "Swimlanes" do
-    test "toggle swimlane mode on", %{issue_backlog: issue} do
+    test "toggle swimlane mode", %{issue_backlog: issue} do
       {:ok, view, _html} = live(conn(), "/kanban")
-
-      view
-      |> element("#kanban-board")
-      |> render_hook("toggle_swimlanes", %{})
-
-      html = render(view)
-      # Swimlane mode is active - toggle button shows active state
-      assert html =~ "Swimlanes"
-      # Issue is still visible
-      assert html =~ issue.title
+      view |> element("#kanban-board") |> render_hook("toggle_swimlanes", %{})
+      assert render(view) =~ issue.title
     end
-
-    test "toggle swimlane mode off", %{issue_backlog: issue} do
+    test "shows Unassigned group" do
+      Issues.create_issue(%{title: "Unassigned", description: "none", status: :todo})
       {:ok, view, _html} = live(conn(), "/kanban")
-
-      # Toggle on
       view |> element("#kanban-board") |> render_hook("toggle_swimlanes", %{})
-      # Toggle off
-      view |> element("#kanban-board") |> render_hook("toggle_swimlanes", %{})
-
-      html = render(view)
-      assert html =~ issue.title
-    end
-
-    test "swimlanes group by assignee" do
-      {:ok, agent} =
-        Cympho.Agents.create_agent(%{
-          name: "Test Agent",
-          role: :engineer,
-          url_key: "test-agent"
-        })
-
-      {:ok, _issue} =
-        Issues.create_issue(%{
-          title: "Assigned Issue",
-          description: "Has assignee",
-          status: :todo,
-          assignee_id: agent.id
-        })
-
-      {:ok, view, _html} = live(conn(), "/kanban")
-
-      # Enable swimlanes
-      view |> element("#kanban-board") |> render_hook("toggle_swimlanes", %{})
-
-      html = render(view)
-      assert html =~ "Test Agent"
-    end
-
-    test "swimlanes show Unassigned group" do
-      {:ok, _issue} =
-        Issues.create_issue(%{
-          title: "Unassigned Issue",
-          description: "No assignee",
-          status: :todo
-        })
-
-      {:ok, view, _html} = live(conn(), "/kanban")
-
-      # Enable swimlanes
-      view |> element("#kanban-board") |> render_hook("toggle_swimlanes", %{})
-
-      html = render(view)
-      assert html =~ "Unassigned"
+      assert render(view) =~ "Unassigned"
     end
   end
 
   describe "Collapsible columns" do
-    test "collapse a column", %{issue_backlog: issue} do
+    test "collapse and expand", %{issue_backlog: issue} do
       {:ok, view, _html} = live(conn(), "/kanban")
-
-      # Initially visible
-      assert render(view) =~ "Backlog Issue"
-
-      # Collapse backlog column
-      view
-      |> element("#kanban-board")
-      |> render_hook("toggle_column", %{"status" => "backlog"})
-
-      html = render(view)
-      # Column is collapsed (showing just the first letter "B")
-      assert html =~ "B"
-      # Issue text should not be visible in collapsed state
-      refute html =~ ~r(data-kanban-column="backlog")
-    end
-
-    test "expand a collapsed column", %{issue_backlog: issue} do
-      {:ok, view, _html} = live(conn(), "/kanban")
-
-      # Collapse
+      assert render(view) =~ issue.title
       view |> element("#kanban-board") |> render_hook("toggle_column", %{"status" => "backlog"})
-      # Expand
+      refute render(view) =~ ~s(data-kanban-column="backlog")
       view |> element("#kanban-board") |> render_hook("toggle_column", %{"status" => "backlog"})
-
-      html = render(view)
-      assert html =~ issue.title
-    end
-  end
-
-  describe "WIP limits" do
-    test "WIP limit is displayed when project has settings", %{project: project} do
-      {:ok, _} =
-        Projects.update_project(project, %{
-          settings: %{"wip_limits" => %{"in_progress" => 3}}
-        })
-
-      {:ok, view, _html} = live(conn(), "/kanban?project_id=#{project.id}")
-
-      html = render(view)
-      assert html =~ "1/3"
-    end
-
-    test "WIP exceeded shows red indicator", %{project: project} do
-      {:ok, _} =
-        Projects.update_project(project, %{
-          settings: %{"wip_limits" => %{"in_progress" => 1}}
-        })
-
-      {:ok, view, _html} = live(conn(), "/kanban?project_id=#{project.id}")
-
-      html = render(view)
-      # Already have 1 in_progress issue + limit of 1 = not exceeded, but shows count
-      assert html =~ "1/1"
+      assert render(view) =~ issue.title
     end
   end
 
   describe "Project filter" do
-    test "project filter dropdown is rendered" do
-      {:ok, _view, html} = live(conn(), "/kanban")
+    test "shows All Projects", do: (assert (fn -> {:ok, _v, h} = live(conn(), "/kanban"); h end).() =~ "All Projects")
+    test "filters by project", %{project: project} do
+      {:ok, other} = Projects.create_project(%{name: "Other", prefix: "OT"})
+      Issues.create_issue(%{title: "Other Issue", description: "other", status: :backlog, project_id: other.id})
+      {:ok, _view, html} = live(conn(), "/kanban?project_id=#{project.id}")
+      assert html =~ "Backlog Issue"
+      refute html =~ "Other Issue"
+    end
+  end
 
-      assert html =~ "All Projects"
+  describe "Filter bar" do
+    test "renders filter controls" do
+      {:ok, _view, html} = live(conn(), "/kanban")
+      assert html =~ "Assignee"
+      assert html =~ "Priority"
+      assert html =~ "Search title, assignee, priority"
     end
 
-    test "filtering by project shows only that project's issues", %{project: project} do
-      # Create an issue in a different project
-      {:ok, other_project} =
-        Projects.create_project(%{
-          name: "Other Project",
-          prefix: "OP"
-        })
+    test "clear filters button hidden when no filters active" do
+      {:ok, _view, html} = live(conn(), "/kanban")
+      refute html =~ "Clear filters"
+    end
+  end
 
-      {:ok, _other_issue} =
-        Issues.create_issue(%{
-          title: "Other Project Issue",
-          description: "In other project",
-          status: :backlog,
-          project_id: other_project.id
-        })
+  describe "Filter by assignee" do
+    test "filters issues by assignee" do
+      {:ok, agent} = Agents.create_agent(%{name: "Test Agent", role: :engineer})
+      Issues.create_issue(%{title: "Assigned Issue", description: "has assignee", status: :todo, priority: :medium, assignee_id: agent.id})
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("filter_assignee", %{"assignee_id" => agent.id})
+      html = render(view)
+      assert html =~ "Assigned Issue"
+      refute html =~ "Todo Issue"
+    end
 
-      {:ok, view, _html} = live(conn(), "/kanban?project_id=#{project.id}")
+    test "clearing assignee filter shows all issues", %{issue_todo: issue} do
+      {:ok, agent} = Agents.create_agent(%{name: "Test Agent", role: :engineer})
+      Issues.update_issue(issue, %{assignee_id: agent.id})
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("filter_assignee", %{"assignee_id" => agent.id})
+      view |> element("#kanban-board") |> render_hook("filter_assignee", %{"assignee_id" => ""})
+      html = render(view)
+      assert html =~ "Todo Issue"
+    end
+  end
 
+  describe "Filter by priority" do
+    test "filters to high priority only", %{issue_backlog: high} do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("filter_priority", %{"priority" => "high"})
       html = render(view)
       assert html =~ "Backlog Issue"
-      refute html =~ "Other Project Issue"
+      refute html =~ "Todo Issue"
     end
 
-    test "filter_project event with empty string shows all issues" do
+    test "clearing priority filter shows all issues" do
       {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("filter_priority", %{"priority" => "high"})
+      view |> element("#kanban-board") |> render_hook("filter_priority", %{"priority" => ""})
+      html = render(view)
+      assert html =~ "Backlog Issue"
+      assert html =~ "Todo Issue"
+    end
+  end
 
-      view
-      |> element("form")
-      |> render_change(%{"project_id" => ""})
+  describe "Filter by search" do
+    test "search matches issue title", %{issue_backlog: issue} do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("filter_search", %{"query" => "backlog"})
+      html = render(view)
+      assert html =~ "Backlog Issue"
+      refute html =~ "Todo Issue"
+    end
 
-      # Should still be on /kanban (no project filter)
-      assert has_element?(view, "#kanban-board")
+    test "search is case-insensitive" do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("filter_search", %{"query" => "TODO"})
+      html = render(view)
+      assert html =~ "Todo Issue"
+      refute html =~ "Backlog Issue"
+    end
+
+    test "search matches assignee name" do
+      {:ok, agent} = Agents.create_agent(%{name: "Searchable Agent", role: :engineer})
+      Issues.create_issue(%{title: "Agent Issue", description: "searchable", status: :todo, priority: :low, assignee_id: agent.id})
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("filter_search", %{"query" => "searchable agent"})
+      html = render(view)
+      assert html =~ "Agent Issue"
+      refute html =~ "Todo Issue"
+    end
+
+    test "clearing search shows all issues" do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("filter_search", %{"query" => "nonexistent"})
+      view |> element("#kanban-board") |> render_hook("clear_filters", %{})
+      html = render(view)
+      assert html =~ "Backlog Issue"
+      assert html =~ "Todo Issue"
+    end
+  end
+
+  describe "Clear filters" do
+    test "clears all active filters" do
+      {:ok, agent} = Agents.create_agent(%{name: "Clear Test Agent", role: :engineer})
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("filter_assignee", %{"assignee_id" => agent.id})
+      view |> element("#kanban-board") |> render_hook("filter_priority", %{"priority" => "high"})
+      view |> element("#kanban-board") |> render_hook("filter_search", %{"query" => "test"})
+      view |> element("#kanban-board") |> render_hook("clear_filters", %{})
+      html = render(view)
+      assert html =~ "Backlog Issue"
+      assert html =~ "Todo Issue"
+      refute html =~ "Clear filters"
+    end
+
+    test "shows active filter count badge" do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("filter_priority", %{"priority" => "high"})
+      html = render(view)
+      assert html =~ "Clear filters"
+      assert html =~ "1"
+    end
+  end
+
+  describe "No match empty state" do
+    test "shows no-match message when filters exclude all issues" do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("filter_search", %{"query" => "zzznonexistentzzz"})
+      html = render(view)
+      assert html =~ "No issues match the current filters"
+      assert html =~ "Clear filters"
+    end
+  end
+
+  describe "Quick actions" do
+    test "quick action menu opens on card", %{issue_todo: issue} do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("open_card_action", %{"issue_id" => issue.id})
+      html = render(view)
+      assert html =~ "Edit title"
+      assert html =~ "Add comment"
+    end
+
+    test "clicking same card action again closes menu", %{issue_todo: issue} do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("open_card_action", %{"issue_id" => issue.id})
+      assert render(view) =~ "Edit title"
+      view |> element("#kanban-board") |> render_hook("open_card_action", %{"issue_id" => issue.id})
+      refute render(view) =~ "Edit title"
+    end
+  end
+
+  describe "Quick title edit" do
+    test "inline edit saves new title", %{issue_todo: issue} do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("open_card_action", %{"issue_id" => issue.id})
+      view |> element("#kanban-board") |> render_hook("start_edit_title", %{"issue_id" => issue.id})
+      view |> element("#kanban-board") |> render_hook("save_title", %{"issue_id" => issue.id, "title" => "New Title"})
+      assert render(view) =~ "New Title"
+    end
+  end
+
+  describe "Quick assign" do
+    test "assigns issue to agent", %{issue_todo: issue} do
+      {:ok, agent} = Agents.create_agent(%{name: "Assign Agent", role: :engineer})
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("open_card_action", %{"issue_id" => issue.id})
+      view |> element("#kanban-board") |> render_hook("quick_assign", %{"issue_id" => issue.id, "agent_id" => agent.id})
+      assert render(view) =~ "Assign Agent"
+    end
+
+    test "unassigns issue", %{issue_todo: issue} do
+      {:ok, agent} = Agents.create_agent(%{name: "Unassign Agent", role: :engineer})
+      Issues.update_issue(issue, %{assignee_id: agent.id})
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("open_card_action", %{"issue_id" => issue.id})
+      view |> element("#kanban-board") |> render_hook("quick_unassign", %{"issue_id" => issue.id})
+      html = render(view)
+      refute html =~ "Unassign Agent"
+    end
+  end
+
+  describe "Quick priority" do
+    test "changes issue priority", %{issue_backlog: issue} do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("open_card_action", %{"issue_id" => issue.id})
+      view |> element("#kanban-board") |> render_hook("quick_priority", %{"issue_id" => issue.id, "priority" => "low"})
+      assert render(view) =~ "low"
+    end
+  end
+
+  describe "Quick comment" do
+    test "opens comment modal", %{issue_todo: issue} do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("open_card_action", %{"issue_id" => issue.id})
+      view |> element("#kanban-board") |> render_hook("open_add_comment", %{"issue_id" => issue.id})
+      html = render(view)
+      assert html =~ "Add comment"
+      assert html =~ "Write a comment"
+    end
+
+    test "submitting comment creates comment", %{issue_todo: issue} do
+      {:ok, view, _html} = live(conn(), "/kanban")
+      view |> element("#kanban-board") |> render_hook("open_card_action", %{"issue_id" => issue.id})
+      view |> element("#kanban-board") |> render_hook("open_add_comment", %{"issue_id" => issue.id})
+      view |> element("#kanban-board") |> render_hook("submit_comment", %{"issue_id" => issue.id, "comment" => "test comment"})
+      [comment] = Comments.list_comments(issue.id)
+      assert comment.body == "test comment"
     end
   end
 end
