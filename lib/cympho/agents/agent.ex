@@ -32,6 +32,7 @@ defmodule Cympho.Agents.Agent do
       :status,
       :config,
       :instructions,
+      :instructions_path,
       :max_concurrent_jobs,
       :last_heartbeat_at
     ])

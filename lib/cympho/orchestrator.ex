@@ -135,9 +135,6 @@ defmodule Cympho.Orchestrator do
       status: session.status,
       turn_count: session.turn_count
     }, session}
-
-    # AgentRunner confirmed the session started
-    {:noreply, %{session | session_id: session_id}}
   end
 
   @impl true
