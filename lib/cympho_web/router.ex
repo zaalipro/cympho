@@ -48,5 +48,11 @@ defmodule CymphoWeb.Router do
     patch "/agents/:id/status", AgentController, :update_status
 
     resources "/issues", IssueController, only: [:create, :show]
+
+    get "/issues/:issue_id/documents", DocumentController, :index
+    get "/issues/:issue_id/documents/:key", DocumentController, :show
+    put "/issues/:issue_id/documents/:key", DocumentController, :upsert
+    delete "/issues/:issue_id/documents/:key", DocumentController, :delete
+    get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
   end
 end
