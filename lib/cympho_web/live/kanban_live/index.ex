@@ -3,18 +3,32 @@ defmodule CymphoWeb.KanbanLive.Index do
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.AgentHeartbeat
+  alias Cympho.Agents
+  alias Cympho.Comments
 
   @impl true
   def mount(_params, _session, socket) do
     Issues.subscribe()
     Cympho.Agents.subscribe()
     Phoenix.PubSub.subscribe(Cympho.PubSub, "agent_heartbeats")
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "comments")
 
-    # Load initial heartbeat states for all agents assigned to issues
     issues = Issues.list_issues()
+    agents = Agents.list_agents()
     agent_heartbeat_states = load_heartbeat_states(issues)
 
-    {:ok, assign(socket, :issues, issues) |> assign(:agent_heartbeat_states, agent_heartbeat_states)}
+    socket =
+      socket
+      |> assign(:issues, issues)
+      |> assign(:agents, agents)
+      |> assign(:agent_heartbeat_states, agent_heartbeat_states)
+      |> assign(:filter_assignee_id, nil)
+      |> assign(:filter_priority, nil)
+      |> assign(:filter_search, "")
+      |> assign(:editing_card_id, nil)
+      |> assign(:card_action_open, nil)
+
+    {:ok, socket}
   end
 
   defp load_heartbeat_states(issues) do
@@ -127,6 +141,100 @@ defmodule CymphoWeb.KanbanLive.Index do
      end)}
   end
 
+  def handle_info({:comment_created, _comment}, socket) do
+    {:noreply, socket}
+  end
+
+  # --- Filter handlers ---
+
+  def handle_event("filter_assignee", %{"assignee_id" => ""}, socket) do
+    {:noreply, assign(socket, :filter_assignee_id, nil)}
+  end
+
+  def handle_event("filter_assignee", %{"assignee_id" => aid}, socket) do
+    {:noreply, assign(socket, :filter_assignee_id, aid)}
+  end
+
+  def handle_event("filter_priority", %{"priority" => ""}, socket) do
+    {:noreply, assign(socket, :filter_priority, nil)}
+  end
+
+  def handle_event("filter_priority", %{"priority" => p}, socket) do
+    {:noreply, assign(socket, :filter_priority, String.to_existing_atom(p))}
+  end
+
+  def handle_event("filter_search", %{"query" => query}, socket) do
+    {:noreply, assign(socket, :filter_search, String.trim(query))}
+  end
+
+  def handle_event("clear_filters", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:filter_assignee_id, nil)
+     |> assign(:filter_priority, nil)
+     |> assign(:filter_search, "")}
+  end
+
+  # --- Quick action handlers ---
+
+  def handle_event("open_card_action", %{"issue_id" => id}, socket) do
+    current = socket.assigns[:card_action_open]
+    {:noreply, assign(socket, :card_action_open, if(current == id, do: nil, else: id))}
+  end
+
+  def handle_event("start_edit_title", %{"issue_id" => id}, socket) do
+    {:noreply, socket |> assign(:editing_card_id, {:edit_title, id}) |> assign(:card_action_open, nil)}
+  end
+
+  def handle_event("save_title", %{"issue_id" => id, "title" => title}, socket) do
+    title = String.trim(title)
+    if title != "" do
+      issue = Issues.get_issue!(id)
+      Issues.update_issue(issue, %{title: title})
+    end
+    {:noreply, assign(socket, :editing_card_id, nil)}
+  end
+
+  def handle_event("cancel_edit_title", _params, socket) do
+    {:noreply, assign(socket, :editing_card_id, nil)}
+  end
+
+  def handle_event("quick_assign", %{"issue_id" => id, "agent_id" => agent_id}, socket) do
+    issue = Issues.get_issue!(id)
+    Issues.update_issue(issue, %{assignee_id: agent_id})
+    {:noreply, assign(socket, :card_action_open, nil)}
+  end
+
+  def handle_event("quick_unassign", %{"issue_id" => id}, socket) do
+    issue = Issues.get_issue!(id)
+    Issues.update_issue(issue, %{assignee_id: nil})
+    {:noreply, assign(socket, :card_action_open, nil)}
+  end
+
+  def handle_event("quick_priority", %{"issue_id" => id, "priority" => priority}, socket) do
+    issue = Issues.get_issue!(id)
+    Issues.update_issue(issue, %{priority: String.to_existing_atom(priority)})
+    {:noreply, assign(socket, :card_action_open, nil)}
+  end
+
+  def handle_event("open_add_comment", %{"issue_id" => id}, socket) do
+    {:noreply, socket |> assign(:editing_card_id, {:add_comment, id}) |> assign(:card_action_open, nil)}
+  end
+
+  def handle_event("submit_comment", %{"issue_id" => id, "comment" => body}, socket) do
+    body = String.trim(body)
+    if body != "" do
+      Comments.create_comment(%{issue_id: id, body: body})
+    end
+    {:noreply, assign(socket, :editing_card_id, nil)}
+  end
+
+  def handle_event("cancel_comment", _params, socket) do
+    {:noreply, assign(socket, :editing_card_id, nil)}
+  end
+
+  # --- Transition handler ---
+
   @impl true
   def handle_event("transition_issue", %{"id" => id, "to_status" => to_status_string}, socket) do
     to_status = try_string_to_status(to_status_string)
@@ -159,6 +267,38 @@ defmodule CymphoWeb.KanbanLive.Index do
     ArgumentError -> nil
   end
 
+  # --- Filtered issues ---
+
+  def apply_filters(issues, filters) do
+    issues
+    |> filter_by_assignee(filters.assignee_id)
+    |> filter_by_priority(filters.priority)
+    |> filter_by_search(filters.search)
+  end
+
+  defp filter_by_assignee(issues, nil), do: issues
+  defp filter_by_assignee(issues, assignee_id) do
+    Enum.filter(issues, fn issue ->
+      issue.assignee && issue.assignee.id == assignee_id
+    end)
+  end
+
+  defp filter_by_priority(issues, nil), do: issues
+  defp filter_by_priority(issues, priority) do
+    Enum.filter(issues, &(&1.priority == priority))
+  end
+
+  defp filter_by_search(issues, ""), do: issues
+  defp filter_by_search(issues, query) do
+    lower = String.downcase(query)
+    Enum.filter(issues, fn issue ->
+      String.downcase(issue.title) =~ lower ||
+        (issue.assignee && String.downcase(issue.assignee.name) =~ lower) ||
+        String.downcase(to_string(issue.priority)) =~ lower ||
+        String.downcase(to_string(issue.status)) =~ lower
+    end)
+  end
+
   def backlog_issues(issues), do: Enum.filter(issues, &(&1.status == :backlog))
   def todo_issues(issues), do: Enum.filter(issues, &(&1.status == :todo))
   def in_progress_issues(issues), do: Enum.filter(issues, &(&1.status == :in_progress))
@@ -181,4 +321,12 @@ defmodule CymphoWeb.KanbanLive.Index do
   def status_label(:in_review), do: "In Review"
   def status_label(:done), do: "Done"
   def status_label(:blocked), do: "Blocked"
+
+  def active_filter_count(assigns) do
+    count = 0
+    count = if assigns.filter_assignee_id, do: count + 1, else: count
+    count = if assigns.filter_priority, do: count + 1, else: count
+    count = if assigns.filter_search != "", do: count + 1, else: count
+    count
+  end
 end
