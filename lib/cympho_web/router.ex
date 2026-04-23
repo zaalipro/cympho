@@ -99,5 +99,8 @@ defmodule CymphoWeb.Router do
     put "/issues/:issue_id/documents/:key", DocumentController, :upsert
     delete "/issues/:issue_id/documents/:key", DocumentController, :delete
     get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
+
+    post "/issues/:issue_id/execution-policy/assign", IssueExecutionPolicyController, :assign
+    post "/issues/:issue_id/execution-policy/decide", IssueExecutionPolicyController, :decide
   end
 end

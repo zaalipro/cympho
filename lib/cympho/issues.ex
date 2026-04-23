@@ -253,6 +253,14 @@ defmodule Cympho.Issues do
   end
 
   defp do_executor_submit(%Issue{} = issue, executor_id) do
+    if executor_id != nil and executor_id != issue.execution_state.current_participant do
+      {:error, :unauthorized}
+    else
+      do_executor_submit_authorized(issue, executor_id)
+    end
+  end
+
+  defp do_executor_submit_authorized(%Issue{} = issue, executor_id) do
     policy = ExecutionPolicies.get_execution_policy!(issue.execution_policy_id)
     approved_state = ExecutionState.approve(issue.execution_state, executor_id)
 
@@ -637,12 +645,22 @@ defmodule Cympho.Issues do
   @spec execution_policy_decision(Issue.t(), :approve | :request_changes, binary()) ::
           {:ok, Issue.t()} | {:error, atom() | Ecto.Changeset.t()}
   def execution_policy_decision(%Issue{} = issue, decision, decided_by) do
-    if not ExecutionState.active?(issue.execution_state) do
-      {:error, :execution_policy_not_active}
-    else
-      policy = ExecutionPolicies.get_execution_policy!(issue.execution_policy_id)
+    cond do
+      not ExecutionState.active?(issue.execution_state) ->
+        {:error, :execution_policy_not_active}
 
-      case decision do
+      decided_by != issue.execution_state.current_participant ->
+        {:error, :unauthorized}
+
+      true ->
+        do_execution_policy_decision(issue, decision, decided_by)
+    end
+  end
+
+  defp do_execution_policy_decision(%Issue{} = issue, decision, decided_by) do
+    policy = ExecutionPolicies.get_execution_policy!(issue.execution_policy_id)
+
+    case decision do
         :approve ->
           approved_state = ExecutionState.approve(issue.execution_state, decided_by)
 
@@ -684,7 +702,6 @@ defmodule Cympho.Issues do
             wake_executor(executor_id, issue.id)
           end)
       end
-    end
   end
 
   defp wake_next_participant(assignee_id, issue_id) do
@@ -721,13 +738,4 @@ defmodule Cympho.Issues do
     Issue.changeset(issue, attrs)
   end
 
-  def assign_execution_policy(%Issue{} = issue, _policy_id, _executor_id) do
-    # Stub: business logic to be defined
-    {:ok, issue}
-  end
-
-  def execution_policy_decision(%Issue{} = issue, _decision, _decided_by) do
-    # Stub: business logic to be defined
-    {:ok, issue}
-  end
 end
