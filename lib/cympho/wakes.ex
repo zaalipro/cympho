@@ -198,6 +198,11 @@ defmodule Cympho.Wakes do
 
   defp all_children_done?(%Issue{} = issue) do
     children = issue.children || []
+
+    if children == [] do
+      Logger.warning("all_children_done?: children not preloaded for issue #{issue.id}")
+    end
+
     Enum.all?(children, fn child -> child.status == :done end)
   end
 

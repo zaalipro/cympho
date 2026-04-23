@@ -207,7 +207,6 @@ defmodule Cympho.Orchestrator do
         "[Orchestrator] terminated for issue #{session.issue.id}, agent #{session.agent_id}, reason: #{inspect(reason)}"
       )
 
-    send(Cympho.Orchestrator.Dispatcher, {:session_ended, session.issue.id, reason})
     :ok
   end
 
