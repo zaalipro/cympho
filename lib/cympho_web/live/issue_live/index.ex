@@ -1,11 +1,22 @@
 defmodule CymphoWeb.IssueLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Issues
+  alias Cympho.Agents
+  alias Cympho.Projects
+  alias Cympho.Labels
 
   @impl true
   def mount(_params, _session, socket) do
     Issues.subscribe()
-    {:ok, assign(socket, :page_title, "All Issues")}
+
+    socket =
+      socket
+      |> assign(:page_title, "All Issues")
+      |> assign(:agents, Agents.list_agents())
+      |> assign(:projects, Projects.list_projects())
+      |> assign(:labels, Labels.list_labels())
+
+    {:ok, socket}
   end
 
   @impl true
@@ -21,6 +32,10 @@ defmodule CymphoWeb.IssueLive.Index do
       |> assign(:total_pages, paginated.total_pages)
       |> assign(:current_status, params["status"] || "")
       |> assign(:current_priority, params["priority"] || "")
+      |> assign(:current_search, params["search"] || "")
+      |> assign(:current_assignee_id, params["assignee_id"] || "")
+      |> assign(:current_project_id, params["project_id"] || "")
+      |> assign(:current_label_id, params["label_id"] || "")
 
     {:noreply, socket}
   end
@@ -46,14 +61,41 @@ defmodule CymphoWeb.IssueLive.Index do
      push_patch(socket, to: build_url(socket, %{"priority" => priority, "page" => "1"}))}
   end
 
+  def handle_event("search", %{"search" => search}, socket) do
+    {:noreply, push_patch(socket, to: build_url(socket, %{"search" => search, "page" => "1"}))}
+  end
+
+  def handle_event("filter_assignee", %{"assignee_id" => assignee_id}, socket) do
+    {:noreply,
+     push_patch(socket, to: build_url(socket, %{"assignee_id" => assignee_id, "page" => "1"}))}
+  end
+
+  def handle_event("filter_project", %{"project_id" => project_id}, socket) do
+    {:noreply,
+     push_patch(socket, to: build_url(socket, %{"project_id" => project_id, "page" => "1"}))}
+  end
+
+  def handle_event("filter_label", %{"label_id" => label_id}, socket) do
+    {:noreply,
+     push_patch(socket, to: build_url(socket, %{"label_id" => label_id, "page" => "1"}))}
+  end
+
   def handle_event("change_page", %{"page" => page}, socket) do
     {:noreply, push_patch(socket, to: build_url(socket, %{"page" => page}))}
+  end
+
+  def handle_event("clear_filters", _params, socket) do
+    {:noreply, push_patch(socket, to: ~p"/issues")}
   end
 
   defp reload(socket) do
     params = %{
       "status" => socket.assigns.current_status,
       "priority" => socket.assigns.current_priority,
+      "search" => socket.assigns.current_search,
+      "assignee_id" => socket.assigns.current_assignee_id,
+      "project_id" => socket.assigns.current_project_id,
+      "label_id" => socket.assigns.current_label_id,
       "page" => to_string(socket.assigns.page)
     }
 
@@ -68,10 +110,22 @@ defmodule CymphoWeb.IssueLive.Index do
   defp build_url(socket, overrides) do
     status = Map.get(overrides, "status", socket.assigns.current_status)
     priority = Map.get(overrides, "priority", socket.assigns.current_priority)
+    search = Map.get(overrides, "search", socket.assigns.current_search)
+    assignee_id = Map.get(overrides, "assignee_id", socket.assigns.current_assignee_id)
+    project_id = Map.get(overrides, "project_id", socket.assigns.current_project_id)
+    label_id = Map.get(overrides, "label_id", socket.assigns.current_label_id)
     page = Map.get(overrides, "page", to_string(socket.assigns.page))
 
     query =
-      %{status: status, priority: priority, page: page}
+      %{
+        status: status,
+        priority: priority,
+        search: search,
+        assignee_id: assignee_id,
+        project_id: project_id,
+        label_id: label_id,
+        page: page
+      }
       |> Enum.reject(fn {_k, v} -> v in ["", nil] end)
       |> Enum.into(%{})
 
@@ -85,4 +139,10 @@ defmodule CymphoWeb.IssueLive.Index do
   defp status_label(:done), do: "Done"
   defp status_label(:blocked), do: "Blocked"
   defp status_label(other), do: String.capitalize(to_string(other))
+
+  defp filters_active?(assigns) do
+    assigns.current_status != "" or assigns.current_priority != "" or
+      assigns.current_search != "" or assigns.current_assignee_id != "" or
+      assigns.current_project_id != "" or assigns.current_label_id != ""
+  end
 end
