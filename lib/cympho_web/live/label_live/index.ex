@@ -1,48 +1,62 @@
 defmodule CymphoWeb.LabelLive.Index do
   use CymphoWeb, :live_view
+
   alias Cympho.Labels
   alias Cympho.Labels.Label
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, socket |> assign(:labels, Labels.list_labels()) |> assign(:label_changeset, Labels.change_label(%Label{})) |> assign(:editing_label, nil)}
+    {:ok, assign(socket, :labels, Labels.list_labels())}
   end
 
   @impl true
-  def handle_params(params, _url, socket), do: {:noreply, apply_action(socket, socket.assigns.live_action, params)}
-  defp apply_action(socket, :index, _params), do: assign(socket, :page_title, "Labels")
+  def handle_params(params, _url, socket) do
+    {:noreply, apply_action(socket, socket.assigns.live_action, params)}
+  end
+
+  defp apply_action(socket, :index, _params) do
+    socket
+    |> assign(:page_title, "Labels")
+    |> assign(:label, nil)
+  end
+
+  defp apply_action(socket, :new, _params) do
+    socket
+    |> assign(:page_title, "New Label")
+    |> assign(:label, %Label{})
+  end
+
+  defp apply_action(socket, :edit, %{"id" => id}) do
+    socket
+    |> assign(:page_title, "Edit Label")
+    |> assign(:label, Labels.get_label!(id))
+  end
 
   @impl true
-  def handle_event("create_label", %{"label" => label_params}, socket) do
-    case Labels.create_label(label_params) do
-      {:ok, _} -> {:noreply, socket |> assign(:labels, Labels.list_labels()) |> assign(:label_changeset, Labels.change_label(%Label{})) |> put_flash(:info, "Label created")}
-      {:error, cs} -> {:noreply, assign(socket, :label_changeset, cs)}
-    end
+  def handle_info({:label_created, label}, socket) do
+    {:noreply, update(socket, :labels, fn labels -> [label | labels] end)}
   end
 
-  def handle_event("edit_label", %{"id" => id}, socket) do
-    label = Labels.get_label!(id)
-    {:noreply, socket |> assign(:editing_label, label) |> assign(:label_changeset, Labels.change_label(label))}
+  def handle_info({:label_updated, updated_label}, socket) do
+    {:noreply,
+     update(socket, :labels, fn labels ->
+       Enum.map(labels, fn label ->
+         if label.id == updated_label.id, do: updated_label, else: label
+       end)
+     end)}
   end
 
-  def handle_event("update_label", %{"label" => params}, socket) do
-    case Labels.update_label(socket.assigns.editing_label, params) do
-      {:ok, _} -> {:noreply, socket |> assign(:labels, Labels.list_labels()) |> assign(:editing_label, nil) |> assign(:label_changeset, Labels.change_label(%Label{})) |> put_flash(:info, "Label updated")}
-      {:error, cs} -> {:noreply, assign(socket, :label_changeset, cs)}
-    end
+  def handle_info({:label_deleted, deleted_id}, socket) do
+    {:noreply,
+     update(socket, :labels, fn labels ->
+       Enum.filter(labels, fn label -> label.id != deleted_id end)
+     end)}
   end
 
-  def handle_event("cancel_edit", _, socket), do: {:noreply, socket |> assign(:editing_label, nil) |> assign(:label_changeset, Labels.change_label(%Label{}))}
-
+  @impl true
   def handle_event("delete_label", %{"id" => id}, socket) do
     label = Labels.get_label!(id)
     {:ok, _} = Labels.delete_label(label)
-    {:noreply, socket |> assign(:labels, Labels.list_labels()) |> put_flash(:info, "Label deleted")}
+    {:noreply, socket}
   end
-
-  defp text_color("#" <> hex) do
-    {:ok, <<r, g, b>>} = Base.decode16(String.upcase(hex))
-    if (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5, do: "#000000", else: "#FFFFFF"
-  end
-  defp text_color(_), do: "#FFFFFF"
 end
