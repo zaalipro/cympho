@@ -4,16 +4,9 @@ defmodule CymphoWeb.ApprovalController do
 
   action_fallback CymphoWeb.FallbackController
 
-  @valid_statuses %{
-    "pending" => :pending,
-    "approved" => :approved,
-    "denied" => :denied,
-    "cancelled" => :cancelled
-  }
-
   def index(conn, params) do
     status = Map.get(params, "status")
-    approvals = Approvals.list_approvals(%{status: parse_status(status)})
+    approvals = Approvals.list_approvals(%{status: status && String.to_existing_atom(status)})
     json(conn, %{data: approvals})
   end
 
@@ -59,7 +52,7 @@ defmodule CymphoWeb.ApprovalController do
         resolution_reason: approval_params["resolution_reason"]
       }
 
-      case Approvals.resolve_approval(id, parse_status(status), opts) do
+      case Approvals.resolve_approval(id, String.to_existing_atom(status), opts) do
         {:ok, approval} ->
           json(conn, %{data: approval})
 
@@ -74,11 +67,6 @@ defmodule CymphoWeb.ApprovalController do
       |> json(%{error: "status must be approved or denied"})
     end
   end
-
-  defp parse_status(nil), do: nil
-  defp parse_status(""), do: nil
-  defp parse_status(s) when is_binary(s), do: Map.get(@valid_statuses, String.downcase(s))
-  defp parse_status(_), do: nil
 
   defp format_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
