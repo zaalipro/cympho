@@ -24,6 +24,7 @@ defmodule Cympho.AgentHeartbeat do
           agent_id: String.t(),
           status: status(),
           current_issue_id: String.t() | nil,
+          started_at: DateTime.t() | nil,
           timer_ref: reference() | nil
         }
 
@@ -162,7 +163,7 @@ defmodule Cympho.AgentHeartbeat do
   @impl true
   def init(agent_id) do
     timer_ref = schedule_heartbeat(agent_id)
-    state = %{agent_id: agent_id, status: :idle, current_issue_id: nil, timer_ref: timer_ref}
+    state = %{agent_id: agent_id, status: :idle, current_issue_id: nil, started_at: nil, timer_ref: timer_ref}
     {:ok, state}
   end
 
@@ -219,7 +220,7 @@ defmodule Cympho.AgentHeartbeat do
 
               _ = maybe_update_agent_status(agent_id, :error)
               timer_ref = schedule_heartbeat(agent_id)
-              {:noreply, %{state | status: :idle, current_issue_id: nil, timer_ref: timer_ref}}
+              {:noreply, %{state | status: :idle, current_issue_id: nil, started_at: nil, timer_ref: timer_ref}}
           end
 
         {:error, _reason} ->
@@ -246,12 +247,12 @@ defmodule Cympho.AgentHeartbeat do
 
   @impl true
   def handle_call({:set_working, issue_id}, _from, state) do
-    {:reply, :ok, %{state | status: :running, current_issue_id: issue_id}}
+    {:reply, :ok, %{state | status: :running, current_issue_id: issue_id, started_at: DateTime.utc_now()}}
   end
 
   @impl true
   def handle_call(:set_idle, _from, state) do
-    {:reply, :ok, %{state | status: :idle, current_issue_id: nil}}
+    {:reply, :ok, %{state | status: :idle, current_issue_id: nil, started_at: nil}}
   end
 
   @impl true
