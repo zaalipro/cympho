@@ -6,7 +6,8 @@ defmodule CymphoWeb.ApprovalController do
 
   def index(conn, params) do
     status = Map.get(params, "status")
-    approvals = Approvals.list_approvals(%{status: status && String.to_existing_atom(status)})
+    parsed_status = parse_status(status)
+    approvals = Approvals.list_approvals(%{status: parsed_status})
     json(conn, %{data: approvals})
   end
 
@@ -52,7 +53,7 @@ defmodule CymphoWeb.ApprovalController do
         resolution_reason: approval_params["resolution_reason"]
       }
 
-      case Approvals.resolve_approval(id, String.to_existing_atom(status), opts) do
+      case Approvals.resolve_approval(id, String.to_atom(status), opts) do
         {:ok, approval} ->
           json(conn, %{data: approval})
 
@@ -75,4 +76,14 @@ defmodule CymphoWeb.ApprovalController do
       end)
     end)
   end
+
+  defp parse_status(nil), do: nil
+  defp parse_status(""), do: nil
+  defp parse_status(s) when is_binary(s) do
+    case s |> String.downcase() |> String.to_atom() do
+      status when status in [:pending, :approved, :denied, :cancelled] -> status
+      _ -> nil
+    end
+  end
+  defp parse_status(_), do: nil
 end

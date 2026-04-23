@@ -42,6 +42,8 @@ defmodule CymphoWeb.Router do
     live "/agents/:id", AgentLive.Show
     live "/agents/:id/edit", AgentLive.Edit
     live "/routines/:id", RoutineLive.Show
+    live "/approvals", ApprovalLive.Index
+    live "/approvals/:id", ApprovalLive.Show
   end
 
   scope "/api", CymphoWeb do
@@ -80,5 +82,7 @@ post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_se
     put "/issues/:issue_id/documents/:key", DocumentController, :upsert
     delete "/issues/:issue_id/documents/:key", DocumentController, :delete
     get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
+
+    resources "/approvals", ApprovalController, only: [:index, :show, :create, :update]
   end
 end
