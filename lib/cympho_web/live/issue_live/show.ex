@@ -150,7 +150,6 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
-  @impl true
   def handle_event("delete_comment", %{"id" => id}, socket) do
     comment = Comments.get_comment!(id)
     {:ok, _} = Comments.delete_comment(comment)
@@ -243,6 +242,18 @@ defmodule CymphoWeb.IssueLive.Show do
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Failed to spawn agent: #{inspect(reason)}")}
     end
+  end
+
+  defp valid_status_options(current_status) do
+    Cympho.Issues.StateMachine.valid_transitions(current_status)
+    |> Enum.map(fn status -> {String.capitalize(to_string(status)), to_string(status)} end)
+  end
+
+  defp filtered_agents(agents, search) do
+    search = String.downcase(search)
+    Enum.filter(agents, fn agent ->
+      String.contains?(String.downcase(agent.name), search)
+    end)
   end
 
   defp valid_status_options(current_status) do

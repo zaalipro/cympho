@@ -238,12 +238,9 @@ defmodule Cympho.Issues do
   end
 
   defp do_transition(%Issue{} = issue, new_status) do
-    with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
-      if new_status == :done do
-        unblock_dependents(issue.id)
-        Cympho.Approvals.cancel_pending_for_issue(issue.id)
-      end
-
+    fresh = Repo.get!(Issue, issue.id)
+    with {:ok, updated} <- update_issue(fresh, %{status: new_status}) do
+      if new_status == :done, do: unblock_dependents(issue.id)
       {:ok, updated}
     end
   end
@@ -421,9 +418,9 @@ defmodule Cympho.Issues do
         end)
         |> case do
           {:ok, issue} ->
-            issue = Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])
+            issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
             Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
-            {:ok, issue}
+            {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
           {:error, reason} ->
             {:error, reason}
