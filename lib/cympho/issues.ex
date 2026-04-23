@@ -244,7 +244,20 @@ defmodule Cympho.Issues do
   defp do_transition(%Issue{} = issue, new_status) do
     with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
       if new_status == :done, do: unblock_dependents(issue.id)
+      if new_status in [:done, :cancelled], do: cancel_pending_approvals(issue.id)
       {:ok, updated}
+    end
+  end
+
+  defp cancel_pending_approvals(issue_id) do
+    try do
+      Cympho.Approvals.cancel_pending_for_issue(issue_id)
+    rescue
+      e ->
+        Logger.warning("cancel_pending_approvals: failed for issue #{issue_id}",
+          error: inspect(e)
+        )
+        :ok
     end
   end
 
@@ -509,6 +522,8 @@ defmodule Cympho.Issues do
   end
 
   def delete_issue(%Issue{} = issue) do
+    cancel_pending_approvals(issue.id)
+
     case Repo.delete(issue) do
       {:ok, _issue} ->
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_deleted, issue.id})

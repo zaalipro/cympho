@@ -961,4 +961,117 @@ defmodule Cympho.IssuesTest do
     end
   end
 
+  describe "cascade-cancel approvals on issue state change" do
+    test "transitioning issue to :done cancels pending approvals" do
+      agent = insert_agent()
+      issue = insert_issue()
+
+      {:ok, _approval} =
+        Cympho.Approvals.create_approval(%{
+          type: "request_board_approval",
+          requested_by_agent_id: agent.id,
+          issue_ids: [issue.id]
+        })
+
+      issue = Issues.get_issue!(issue.id)
+      {:ok, in_progress} = Issues.transition_issue(issue, :in_progress)
+      {:ok, in_review} = Issues.transition_issue(in_progress, :in_review)
+      {:ok, _done} = Issues.transition_issue(in_review, :done)
+
+      approvals = Cympho.Approvals.list_approvals(%{status: :cancelled})
+      assert Enum.any?(approvals, fn a ->
+        Enum.any?(a.issues, fn i -> i.id == issue.id end)
+      end)
+    end
+
+    test "transitioning issue to :cancelled cancels pending approvals" do
+      agent = insert_agent()
+      issue = insert_issue()
+
+      {:ok, _approval} =
+        Cympho.Approvals.create_approval(%{
+          type: "request_board_approval",
+          requested_by_agent_id: agent.id,
+          issue_ids: [issue.id]
+        })
+
+      issue = Issues.get_issue!(issue.id)
+      {:ok, in_progress} = Issues.transition_issue(issue, :in_progress)
+      {:ok, blocked} = Issues.transition_issue(in_progress, :blocked)
+      {:ok, _cancelled} = Issues.transition_issue(blocked, :cancelled)
+
+      approvals = Cympho.Approvals.list_approvals(%{status: :cancelled})
+      assert Enum.any?(approvals, fn a ->
+        Enum.any?(a.issues, fn i -> i.id == issue.id end)
+      end)
+    end
+
+    test "deleting an issue cancels pending approvals" do
+      agent = insert_agent()
+      issue = insert_issue()
+
+      {:ok, _approval} =
+        Cympho.Approvals.create_approval(%{
+          type: "request_board_approval",
+          requested_by_agent_id: agent.id,
+          issue_ids: [issue.id]
+        })
+
+      assert :ok = Issues.delete_issue(issue)
+
+      {:ok, count} = Cympho.Approvals.cancel_pending_for_issue(issue.id)
+      assert count == 0
+    end
+
+    test "does not cancel already-resolved approvals on done transition" do
+      agent = insert_agent()
+      issue = insert_issue()
+
+      {:ok, approval} =
+        Cympho.Approvals.create_approval(%{
+          type: "request_board_approval",
+          requested_by_agent_id: agent.id,
+          issue_ids: [issue.id]
+        })
+
+      {:ok, _} = Cympho.Approvals.resolve_approval(approval.id, :approved, %{})
+
+      issue = Issues.get_issue!(issue.id)
+      {:ok, in_progress} = Issues.transition_issue(issue, :in_progress)
+      {:ok, in_review} = Issues.transition_issue(in_progress, :in_review)
+      {:ok, _done} = Issues.transition_issue(in_review, :done)
+
+      {:ok, found} = Cympho.Approvals.get_approval(approval.id)
+      assert found.status == :approved
+    end
+  end
+
+  defp insert_agent do
+    %{id: id} =
+      Cympho.Repo.insert!(%Cympho.Agents.Agent{
+        name: "Test Agent #{System.unique_integer()}",
+        role: :engineer,
+        status: :idle
+      })
+
+    Cympho.Repo.get!(Cympho.Agents.Agent, id)
+  end
+
+  defp insert_issue do
+    project =
+      Cympho.Repo.insert!(%Cympho.Projects.Project{
+        name: "Test Project #{System.unique_integer()}",
+        prefix: "TST"
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Test Issue",
+        description: "Test description",
+        project_id: project.id
+      })
+
+    issue
+  end
+
 end
