@@ -3,9 +3,11 @@ defmodule Cympho.Issues.Issue do
   import Ecto.Changeset
 
   alias Cympho.Comments.Comment
+  alias Cympho.Documents.IssueDocument
   alias Cympho.Labels.Label
   alias Cympho.Projects.Project
   alias Cympho.Agents.Agent
+  alias Cympho.ExecutionPolicies.ExecutionPolicy
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -16,13 +18,16 @@ defmodule Cympho.Issues.Issue do
     field :priority, Ecto.Enum, values: [:low, :medium, :high], default: :medium
     field :lock_version, :integer, default: 0
     field :github_pr_url, :string
+    field :execution_state, :map, default: %{}
 
     belongs_to :project, Project
     belongs_to :assignee, Agent, foreign_key: :assignee_id
     belongs_to :parent, __MODULE__, foreign_key: :parent_id
+    belongs_to :execution_policy, ExecutionPolicy
 
     has_many :comments, Comment, foreign_key: :issue_id
     has_many :children, __MODULE__, foreign_key: :parent_id
+    has_many :documents, IssueDocument, foreign_key: :issue_id
 
     many_to_many :blocked_by, Cympho.Issues.Issue,
       join_through: "issue_blockers",
@@ -41,7 +46,7 @@ defmodule Cympho.Issues.Issue do
 
   def changeset(issue, attrs) do
     issue
-    |> cast(attrs, [:title, :description, :status, :priority, :assignee_id, :project_id, :github_pr_url, :parent_id])
+    |> cast(attrs, [:title, :description, :status, :priority, :assignee_id, :project_id, :github_pr_url, :parent_id, :execution_policy_id, :execution_state])
     |> validate_required([:title, :description])
     |> validate_length(:title, min: 1, max: 255)
     |> validate_length(:description, min: 1)
