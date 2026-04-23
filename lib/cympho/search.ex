@@ -16,23 +16,22 @@ defmodule Cympho.Search do
   """
   def search(query, opts \\ []) do
     limit = Keyword.get(opts, :limit, 20)
-    tsquery = build_tsquery(query)
 
     issues =
-      from i in Issue,
-        where: fragment("search_vector @@ ?", ^tsquery),
-        order_by: fragment("ts_rank(search_vector, ?) DESC", ^tsquery),
+      from(i in Issue,
+        where: fragment("search_vector @@ plainto_tsquery('english', ?)", ^query),
+        order_by: fragment("ts_rank(search_vector, plainto_tsquery('english', ?)) DESC", ^query),
         limit: ^limit,
         preload: [:comments, :blocked_by, :blocks, :assignee]
-      |> Repo.all()
+      ) |> Repo.all()
 
     comments =
-      from c in Comment,
-        where: fragment("search_vector @@ ?", ^tsquery),
-        order_by: fragment("ts_rank(search_vector, ?) DESC", ^tsquery),
+      from(c in Comment,
+        where: fragment("search_vector @@ plainto_tsquery('english', ?)", ^query),
+        order_by: fragment("ts_rank(search_vector, plainto_tsquery('english', ?)) DESC", ^query),
         limit: ^limit,
         preload: [:issue]
-      |> Repo.all()
+      ) |> Repo.all()
 
     %{issues: issues, comments: comments}
   end
@@ -43,22 +42,12 @@ defmodule Cympho.Search do
   """
   def search_issues(query, opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
-    tsquery = build_tsquery(query)
 
-    from i in Issue,
-      where: fragment("search_vector @@ ?", ^tsquery),
-      order_by: fragment("ts_rank(search_vector, ?) DESC", ^tsquery),
+    from(i in Issue,
+      where: fragment("search_vector @@ plainto_tsquery('english', ?)", ^query),
+      order_by: fragment("ts_rank(search_vector, plainto_tsquery('english', ?)) DESC", ^query),
       limit: ^limit,
       preload: [:comments, :blocked_by, :blocks, :assignee]
-    |> Repo.all()
+    ) |> Repo.all()
   end
-
-  @doc """
-  Build a plainto_tsquery from user input.
-  """
-  def build_tsquery(query) when is_binary(query) and byte_size(query) > 0 do
-    fragment("plainto_tsquery('english', ?)", ^query)
-  end
-
-  def build_tsquery(_), do: fragment("''::tsquery")
 end

@@ -21,11 +21,11 @@ defmodule CymphoWeb.Components do
   attr :rest, :global
   slot :inner_block, required: true
 
-  def link(assigns) do
+  def app_link(assigns) do
     ~H"""
-    <a navigate={@navigate} class={@class} {@rest}>
+    <.link navigate={@navigate} class={["text-text-secondary hover:text-text-primary transition-colors", @class]} {@rest}>
       {render_slot(@inner_block)}
-    </a>
+    </.link>
     """
   end
 
@@ -70,6 +70,29 @@ defmodule CymphoWeb.Components do
     <button type={@type} {@rest}>
       {render_slot(@inner_block)}
     </button>
+    """
+  end
+
+  attr :name, :string, required: true
+  attr :label, :string, required: true
+  attr :options, :list, required: true
+  attr :value, :string, default: nil
+  attr :rest, :global
+
+  def select(assigns) do
+    ~H"""
+    <div class="space-y-1.5">
+      <label class="block text-xs font-510 text-text-secondary">{@label}</label>
+      <select
+        name={@name}
+        class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
+        {@rest}
+      >
+        <option :for={{label, value} <- Enum.map(@options, fn {k, v} -> {to_string(k), v} end)} value={value} selected={@value == value}>
+          {label}
+        </option>
+      </select>
+    </div>
     """
   end
 

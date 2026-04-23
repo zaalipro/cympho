@@ -4,6 +4,7 @@ defmodule CymphoWeb.KanbanLive.Index do
   alias Cympho.Issues.Issue
   alias Cympho.AgentHeartbeat
   alias Cympho.Projects
+  import CymphoWeb.KanbanLive.Components
 
   @status_columns [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
 
@@ -62,8 +63,8 @@ defmodule CymphoWeb.KanbanLive.Index do
   @impl true
   def handle_info({:issue_created, issue}, socket), do: {:noreply, update(socket, :issues, &[issue | &1])}
   def handle_info({:issue_updated, updated}, socket), do: {:noreply, update(socket, :issues, &Enum.map(&1, fn i -> if i.id == updated.id, do: updated, else: i end))}
-  def handle_info({:issue_deleted, id}, socket), do: {:noreply, update(socket, :issues, &Enum.reject(&1, fn i -> i.id == id end) end)}
-  def handle_info({:agent_updated, agent}, socket), do: {:noreply, update(socket, :issues, &Enum.map(&1, fn i -> if i.assignee && i.assignee.id == agent.id, do: %{i | assignee: agent}, else: i end) end)}
+  def handle_info({:issue_deleted, id}, socket), do: {:noreply, update(socket, :issues, &Enum.reject(&1, fn i -> i.id == id end))}
+  def handle_info({:agent_updated, agent}, socket), do: {:noreply, update(socket, :issues, &Enum.map(&1, fn i -> if i.assignee && i.assignee.id == agent.id, do: %{i | assignee: agent}, else: i end))}
   def handle_info({:agent_heartbeat_updated, agent_id, state}, socket), do: {:noreply, update(socket, :agent_heartbeat_states, &Map.put(&1, agent_id, state))}
 
   @impl true
@@ -85,7 +86,7 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   def handle_event("toggle_column", %{"status" => status_str}, socket) do
     status = String.to_existing_atom(status_str)
-    {:noreply, update(socket, :collapsed_columns, fn c -> if MapSet.member?(c, status), do: MapSet.delete(c, status), else: MapSet.put(c, status) end) end}
+    {:noreply, update(socket, :collapsed_columns, fn c -> if MapSet.member?(c, status), do: MapSet.delete(c, status), else: MapSet.put(c, status) end)}
   end
 
   def handle_event("toggle_swimlanes", _, socket), do: {:noreply, update(socket, :swimlane_mode, &(!&1))}
@@ -127,5 +128,48 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   def assignee_groups(issues) do
     issues |> Enum.group_by(fn i -> if i.assignee, do: i.assignee.name, else: "Unassigned" end) |> Enum.sort_by(&elem(&1, 0))
+  end
+
+  def apply_filters(issues, filters) do
+    issues
+    |> filter_by_assignee(filters.assignee_id)
+    |> filter_by_priority(filters.priority)
+    |> filter_by_search(filters.search)
+  end
+
+  defp filter_by_assignee(issues, nil), do: issues
+  defp filter_by_assignee(issues, assignee_id) do
+    Enum.filter(issues, fn issue ->
+      issue.assignee && issue.assignee.id == assignee_id
+    end)
+  end
+
+  defp filter_by_priority(issues, nil), do: issues
+  defp filter_by_priority(issues, priority) do
+    Enum.filter(issues, &(&1.priority == priority))
+  end
+
+  defp filter_by_search(issues, ""), do: issues
+  defp filter_by_search(issues, query) do
+    lower = String.downcase(query)
+    Enum.filter(issues, fn issue ->
+      String.downcase(issue.title) =~ lower ||
+        (issue.assignee && String.downcase(issue.assignee.name) =~ lower) ||
+        String.downcase(to_string(issue.priority)) =~ lower ||
+        String.downcase(to_string(issue.status)) =~ lower
+    end)
+  end
+
+  def priority_class(:high), do: "bg-red-500/20 text-red-400"
+  def priority_class(:medium), do: "bg-yellow-500/20 text-yellow-400"
+  def priority_class(:low), do: "bg-emerald-500/20 text-emerald-400"
+  def priority_class(_), do: "bg-white/[0.05] text-text-quaternary"
+
+  def active_filter_count(assigns) do
+    count = 0
+    count = if assigns.filter_assignee_id, do: count + 1, else: count
+    count = if assigns.filter_priority, do: count + 1, else: count
+    count = if assigns.filter_search != "", do: count + 1, else: count
+    count
   end
 end
