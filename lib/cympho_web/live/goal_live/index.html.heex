@@ -1,0 +1,52 @@
+<div class="p-6 lg:p-8 max-w-6xl mx-auto">
+  <.header title={@page_title}>
+    <:actions>
+      <.app_link navigate={~p"/goals/new"} class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        New Goal
+      </.app_link>
+    </:actions>
+  </.header>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <.card :for={goal <- @goals} id={"goal-#{goal.id}"}>
+      <div class="p-5 space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-510 text-text-primary truncate">{goal.title}</h3>
+          <.badge variant="status" value={goal.status} />
+        </div>
+        <p class="text-xs text-text-tertiary line-clamp-2">{goal.description}</p>
+        <div class="flex items-center gap-2">
+          <.badge variant="priority" value={goal.priority} />
+        </div>
+        <div class="flex items-center gap-2 pt-2">
+          <.app_link navigate={~p"/goals/#{goal.id}"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-md transition-colors">
+            View
+          </.app_link>
+          <.app_link navigate={~p"/goals/#{goal.id}/edit"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-md transition-colors">
+            Edit
+          </.app_link>
+          <button
+            type="button"
+            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+            phx-click="delete_goal"
+            phx-value-id={goal.id}
+            data-confirm="Delete this goal?"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </.card>
+  </div>
+
+  <div :if={Enum.empty?(@goals)} class="flex flex-col items-center justify-center py-20 text-center">
+    <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
+      <svg class="w-6 h-6 text-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+    </div>
+    <p class="text-sm text-text-tertiary mb-4">No goals yet.</p>
+    <.app_link navigate={~p"/goals/new"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
+      Create your first goal
+    </.app_link>
+  </div>
+</div>

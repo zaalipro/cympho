@@ -3,7 +3,7 @@ defmodule Cympho.Issues do
   The Issues context for managing issues and their CRUD operations.
   """
   import Ecto.Query, warn: false
-  import Ecto.Changeset, only: [optimistic_lock: 2]
+  import Ecto.Changeset, only: [optimistic_lock: 2, cast: 3, put_assoc: 3]
   require Logger
   alias Cympho.Repo
   alias Cympho.Issues.Issue
@@ -12,12 +12,15 @@ defmodule Cympho.Issues do
   alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Comments
+  alias Cympho.Labels
+  alias Cympho.Labels.Label
 
   def list_issues(opts \\ %{}) do
     Issue
     |> maybe_filter_by_project(opts)
+    |> maybe_filter_by_labels(opts)
     |> Repo.all()
-    |> Repo.preload([:comments, :blocked_by, :blocks, :assignee])
+    |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
   end
 
   defp maybe_filter_by_project(query, %{project_id: project_id}) do
@@ -26,20 +29,89 @@ defmodule Cympho.Issues do
 
   defp maybe_filter_by_project(query, _opts), do: query
 
+  defp maybe_filter_by_labels(query, %{label_id: label_id}) do
+    query
+    |> join(:inner, [i], l in "issue_labels", on: i.id == l.issue_id)
+    |> where([_, l], l.label_id == ^label_id)
+  end
+
+  defp maybe_filter_by_labels(query, %{label_ids: label_ids}) when is_list(label_ids) and length(label_ids) > 0 do
+    query
+    |> join(:inner, [i], l in "issue_labels", on: i.id == l.issue_id)
+    |> where([_, l], l.label_id in ^label_ids)
+    |> group_by([i], i.id)
+    |> having([_, l], count(l.label_id) == ^length(label_ids))
+  end
+
+  defp maybe_filter_by_labels(query, _opts), do: query
+
+
+  @default_page_size 25
+
+  def list_issues_paginated(params \\ %{}) do
+    page = Map.get(params, "page", "1") |> to_int_max(1, 1)
+    per_page = Map.get(params, "per_page", "#{@default_page_size}") |> to_int_max(1, 100)
+    status = Map.get(params, "status")
+    priority = Map.get(params, "priority")
+
+    query =
+      Issue
+      |> maybe_filter_by_status(status)
+      |> maybe_filter_by_priority(priority)
+      |> order_by(desc: :updated_at)
+
+    total = Repo.aggregate(query, :count)
+    total_pages = max(1, ceil(total / per_page))
+    page = min(page, total_pages)
+    offset = (page - 1) * per_page
+
+    issues =
+      query
+      |> limit(^per_page)
+      |> offset(^offset)
+      |> Repo.all()
+      |> Repo.preload([:comments, :blocked_by, :blocks, :assignee])
+
+    %{
+      issues: issues,
+      page: page,
+      per_page: per_page,
+      total: total,
+      total_pages: total_pages
+    }
+  end
+
+  defp maybe_filter_by_status(query, nil), do: query
+  defp maybe_filter_by_status(query, ""), do: query
+  defp maybe_filter_by_status(query, status), do: where(query, status: ^status)
+
+  defp maybe_filter_by_priority(query, nil), do: query
+  defp maybe_filter_by_priority(query, ""), do: query
+  defp maybe_filter_by_priority(query, priority), do: where(query, priority: ^priority)
+
+  defp to_int_max(value, min, max) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, _} -> n |> max(min) |> min(max)
+      :error -> min
+    end
+  end
+
+  defp to_int_max(value, min, max) when is_integer(value), do: value |> max(min) |> min(max)
+
   def list_issues_by_project(project_id) do
     Issue
     |> where(project_id: ^project_id)
     |> Repo.all()
-    |> Repo.preload([:comments, :blocked_by, :blocks])
+    |> Repo.preload([:comments, :blocked_by, :blocks, :labels])
   end
 
   def get_issue!(id),
-    do: Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee])
+    do: Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
 
   def get_issue(id) do
     case Repo.get(Issue, id) do
       nil -> {:error, :not_found}
-      issue -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee])}
+      issue -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee, :labels])}
     end
   end
 
@@ -58,14 +130,7 @@ defmodule Cympho.Issues do
          |> Repo.insert() do
       {:ok, issue} ->
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
-        issue = Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee])
-
-        if is_nil(issue.assignee_id) do
-          issue = maybe_auto_assign(issue)
-          {:ok, issue}
-        else
-          {:ok, issue}
-        end
+        {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
       {:error, changeset} ->
         {:error, changeset}
@@ -107,7 +172,7 @@ defmodule Cympho.Issues do
 
   def update_issue(%Issue{} = issue, attrs) do
     with {:ok, issue} <- do_update_issue(issue, attrs) do
-      issue = Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee])
+      issue = Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])
       Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
       {:ok, issue}
     end
@@ -354,7 +419,7 @@ defmodule Cympho.Issues do
           {:ok, issue} ->
             issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
             Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
-            {:ok, issue}
+            {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
           {:error, reason} ->
             {:error, reason}
@@ -404,10 +469,37 @@ defmodule Cympho.Issues do
     if count == 0 do
       {:error, :not_found}
     else
-      issue = Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks])
+      issue = Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks, :labels])
       Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
       {:ok, issue}
     end
+  end
+
+  def add_label_to_issue(%Issue{} = issue, %Label{} = label) do
+    issue = Repo.preload(issue, :labels)
+    labels = issue.labels ++ [label]
+    issue
+    |> cast(%{}, [])
+    |> put_assoc(:labels, labels)
+    |> Repo.update()
+  end
+
+  def remove_label_from_issue(%Issue{} = issue, %Label{} = label) do
+    issue = Repo.preload(issue, :labels)
+    labels = Enum.reject(issue.labels, &(&1.id == label.id))
+    issue
+    |> cast(%{}, [])
+    |> put_assoc(:labels, labels)
+    |> Repo.update()
+  end
+
+  def set_issue_labels(%Issue{} = issue, label_ids) when is_list(label_ids) do
+    labels = Labels.list_labels() |> Enum.filter(&(&1.id in label_ids))
+    issue = Repo.preload(issue, :labels)
+    issue
+    |> cast(%{}, [])
+    |> put_assoc(:labels, labels)
+    |> Repo.update()
   end
 
   def delete_issue(%Issue{} = issue) do
