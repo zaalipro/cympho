@@ -288,34 +288,41 @@ defmodule Cympho.Issues do
   end
 
   defp do_executor_submit(%Issue{} = issue, executor_id) do
-    with {:ok, policy} <- ExecutionPolicies.get_execution_policy(issue.execution_policy_id) do
-      approved_state = ExecutionState.approve(issue.execution_state, executor_id)
+    if executor_id != nil and executor_id != issue.execution_state.current_participant do
+      {:error, :unauthorized}
+    else
+      do_executor_submit_authorized(issue, executor_id)
+    end
+  end
 
-      case ExecutionState.advance(approved_state, policy, executor_id) do
-        {:done, final_state} ->
-          # Single-stage policy (executor only) - can mark done
-          update_issue(issue, %{
-            status: :done,
-            execution_state: final_state,
-            assignee_id: nil
-          })
-          |> tap(fn {:ok, _} ->
-            unblock_dependents(issue.id)
-            _ = Wakes.notify_children_completed(issue)
-          end)
+  defp do_executor_submit_authorized(%Issue{} = issue, executor_id) do
+    policy = ExecutionPolicies.get_execution_policy!(issue.execution_policy_id)
+    approved_state = ExecutionState.approve(issue.execution_state, executor_id)
 
-        {:ok, next_state} ->
-          next_assignee = next_state.current_participant
+    case ExecutionState.advance(approved_state, policy, executor_id) do
+      {:done, final_state} ->
+        # Single-stage policy (executor only) - can mark done
+        update_issue(issue, %{
+          status: :done,
+          execution_state: final_state,
+          assignee_id: nil
+        })
+        |> tap(fn {:ok, _} ->
+          unblock_dependents(issue.id)
+          _ = Wakes.notify_children_completed(issue)
+        end)
 
-          update_issue(issue, %{
-            status: :in_review,
-            execution_state: next_state,
-            assignee_id: next_assignee
-          })
-          |> tap(fn {:ok, _} ->
-            wake_next_participant(next_assignee, issue.id)
-          end)
-      end
+      {:ok, next_state} ->
+        next_assignee = next_state.current_participant
+
+        update_issue(issue, %{
+          status: :in_review,
+          execution_state: next_state,
+          assignee_id: next_assignee
+        })
+        |> tap(fn {:ok, _} ->
+          wake_next_participant(next_assignee, issue.id)
+        end)
     end
   end
 
@@ -627,53 +634,62 @@ defmodule Cympho.Issues do
   @spec execution_policy_decision(Issue.t(), :approve | :request_changes, binary()) ::
           {:ok, Issue.t()} | {:error, atom() | Ecto.Changeset.t()}
   def execution_policy_decision(%Issue{} = issue, decision, decided_by) do
-    if not ExecutionState.active?(issue.execution_state) do
-      {:error, :execution_policy_not_active}
-    else
-      with {:ok, policy} <- ExecutionPolicies.get_execution_policy(issue.execution_policy_id) do
-        case decision do
-          :approve ->
-            approved_state = ExecutionState.approve(issue.execution_state, decided_by)
+    cond do
+      not ExecutionState.active?(issue.execution_state) ->
+        {:error, :execution_policy_not_active}
 
-            case ExecutionState.advance(approved_state, policy, decided_by) do
-              {:done, final_state} ->
-                update_issue(issue, %{
-                  status: :done,
-                  execution_state: final_state,
-                  assignee_id: nil
-                })
-                |> tap(fn {:ok, _} ->
-                  unblock_dependents(issue.id)
-                  _ = Wakes.notify_children_completed(issue)
-                end)
+      decided_by != issue.execution_state.current_participant ->
+        {:error, :unauthorized}
 
-              {:ok, next_state} ->
-                next_assignee = next_state.current_participant
+      true ->
+        do_execution_policy_decision(issue, decision, decided_by)
+    end
+  end
 
-                update_issue(issue, %{
-                  execution_state: next_state,
-                  assignee_id: next_assignee,
-                  status: :in_review
-                })
-                |> tap(fn {:ok, _} ->
-                  wake_next_participant(next_assignee, issue.id)
-                end)
-            end
+  defp do_execution_policy_decision(%Issue{} = issue, decision, decided_by) do
+    policy = ExecutionPolicies.get_execution_policy!(issue.execution_policy_id)
 
-          :request_changes ->
-            changes_state = ExecutionState.request_changes(issue.execution_state, decided_by)
-            executor_id = issue.execution_state.return_assignee || changes_state.current_participant
+    case decision do
+      :approve ->
+        approved_state = ExecutionState.approve(issue.execution_state, decided_by)
 
+        case ExecutionState.advance(approved_state, policy, decided_by) do
+          {:done, final_state} ->
             update_issue(issue, %{
-              execution_state: changes_state,
-              assignee_id: executor_id,
-              status: :in_progress
+              status: :done,
+              execution_state: final_state,
+              assignee_id: nil
             })
             |> tap(fn {:ok, _} ->
-              wake_executor(executor_id, issue.id)
+              unblock_dependents(issue.id)
+              _ = Wakes.notify_children_completed(issue)
+            end)
+
+          {:ok, next_state} ->
+            next_assignee = next_state.current_participant
+
+            update_issue(issue, %{
+              execution_state: next_state,
+              assignee_id: next_assignee,
+              status: :in_review
+            })
+            |> tap(fn {:ok, _} ->
+              wake_next_participant(next_assignee, issue.id)
             end)
         end
-      end
+
+      :request_changes ->
+        changes_state = ExecutionState.request_changes(issue.execution_state, decided_by)
+        executor_id = issue.execution_state.return_assignee || changes_state.current_participant
+
+        update_issue(issue, %{
+          execution_state: changes_state,
+          assignee_id: executor_id,
+          status: :in_progress
+        })
+        |> tap(fn {:ok, _} ->
+          wake_executor(executor_id, issue.id)
+        end)
     end
   end
 
