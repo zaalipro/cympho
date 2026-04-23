@@ -99,7 +99,13 @@ defmodule Cympho.Issues do
   defp maybe_filter_by_search(query, nil), do: query
   defp maybe_filter_by_search(query, ""), do: query
   defp maybe_filter_by_search(query, search) do
-    where(query, fragment("search_vector @@ plainto_tsquery('english', ?)", ^search))
+    try do
+      where(query, fragment("search_vector @@ plainto_tsquery('english', ?)", ^search))
+    rescue
+      e in [Postgrex.Error, Ecto.Query.CompileError] ->
+        Logger.warning("Search query invalid, degrading to unfiltered", search: search)
+        query
+    end
   end
 
   defp maybe_filter_by_assignee(query, nil), do: query
