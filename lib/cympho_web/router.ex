@@ -41,7 +41,13 @@ defmodule CymphoWeb.Router do
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
     live "/agents/:id/edit", AgentLive.Edit
+    live "/routines", RoutineLive.Index
+    live "/routines/new", RoutineLive.New
     live "/routines/:id", RoutineLive.Show
+    live "/routines/:id/edit", RoutineLive.Edit
+    live "/approvals", ApprovalLive.Index
+    live "/approvals/:id", ApprovalLive.Show
+    live "/settings", SettingsLive.Index
     live "/execution-policies", ExecutionPolicyLive.Index
     live "/execution-policies/new", ExecutionPolicyLive.New
     live "/execution-policies/:id", ExecutionPolicyLive.Show
@@ -55,6 +61,7 @@ defmodule CymphoWeb.Router do
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
 
     get "/search", SearchController, :search
+    get "/dashboard", DashboardController, :index
 
     resources "/goals", GoalController, only: [:index, :show, :create, :update, :delete]
 
@@ -65,6 +72,9 @@ defmodule CymphoWeb.Router do
 
     post "/telegram/webhook", TelegramController, :webhook
     post "/github/webhook", GithubController, :webhook
+
+    resources "/labels", LabelController, only: [:index, :show, :create, :update, :delete]
+    resources "/approvals", ApprovalController, only: [:index, :show, :create, :update]
 
     resources "/routines", RoutineController, only: [:index, :show, :create, :update, :delete]
     patch "/routines/:id/pause", RoutineController, :pause
@@ -77,12 +87,17 @@ defmodule CymphoWeb.Router do
       only: [:index, :create, :show, :update, :delete],
       name: "routine_trigger"
 
-post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_secret
+    post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_secret
 
     # Public webhook endpoint (no auth, validates via secret header)
     post "/routine-triggers/:public_id/fire", RoutineTriggerController, :fire
 
     resources "/issues", IssueController, only: [:create, :show]
+
+    get "/issues/:issue_id/labels", IssueLabelController, :index
+    post "/issues/:issue_id/labels", IssueLabelController, :add
+    delete "/issues/:issue_id/labels/:label_id", IssueLabelController, :remove
+    put "/issues/:issue_id/labels", IssueLabelController, :set
 
     post "/issues/:issue_id/execution-policy/assign", IssueExecutionPolicyController, :assign
     post "/issues/:issue_id/execution-policy/decide", IssueExecutionPolicyController, :decide
@@ -92,5 +107,18 @@ post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_se
     put "/issues/:issue_id/documents/:key", DocumentController, :upsert
     delete "/issues/:issue_id/documents/:key", DocumentController, :delete
     get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
+  end
+
+  scope "/api", CymphoWeb do
+    pipe_through [:api, CymphoWeb.Plugs.AgentAuth]
+
+    get "/agents/:id/inbox", AgentController, :inbox
+    patch "/agents/:id/status", AgentController, :update_status
+
+    get "/issues/:issue_id/attachments", AttachmentController, :index
+    post "/issues/:issue_id/attachments", AttachmentController, :create
+    get "/attachments/:id", AttachmentController, :show
+    get "/attachments/:id/download", AttachmentController, :download
+    delete "/attachments/:id", AttachmentController, :delete
   end
 end
