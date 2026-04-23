@@ -12,8 +12,15 @@ defmodule CymphoWeb.LabelController do
     end
   end
 
-  def show(conn, %{"id" => id}) do
-    with {:ok, %Label{} = label} <- Labels.get_label(id), do: render(conn, :show, label: label)
+  def create(conn, %{"label" => label_params}) do
+    # TODO: Add project ownership/membership authorization check before creating labels.
+    # Currently any authenticated user can create labels on any project by passing any project_id.
+    # Once user-project membership is implemented, verify the user has access to label_params["project_id"].
+    with {:ok, label} <- Labels.create_label(label_params) do
+      conn
+      |> put_status(:created)
+      |> json(%{data: CymphoWeb.LabelJSON.label_data(label)})
+    end
   end
 
   def update(conn, %{"id" => id, "label" => label_params}) do

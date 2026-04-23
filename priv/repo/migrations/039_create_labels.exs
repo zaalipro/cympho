@@ -22,5 +22,7 @@ defmodule Cympho.Repo.Migrations.CreateLabels do
     end
 
     create unique_index(:issue_labels, [:issue_id, :label_id], name: :issue_labels_unique_index)
+    create index(:issue_labels, [:issue_id])
+    create index(:issue_labels, [:label_id])
   end
 end
