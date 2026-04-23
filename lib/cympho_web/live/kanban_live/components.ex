@@ -4,24 +4,39 @@ defmodule CymphoWeb.KanbanLive.Components do
 
   attr :issue, :map, required: true
   attr :status, :atom, required: true
+  attr :agents, :list, default: []
   attr :agent_heartbeat_states, :map, default: %{}
+  attr :editing_card_id, :any, default: nil
+  attr :card_action_open, :any, default: nil
 
   def issue_card(assigns) do
     ~H"""
-    <div class="kanban-card-enter bg-white/[0.02] border border-border rounded-md p-3 space-y-2 hover:bg-white/[0.04] transition-colors cursor-grab active:cursor-grabbing" data-issue-id={@issue.id}>
+    <div
+      class="kanban-card-enter bg-white/[0.02] border border-border rounded-md p-3 space-y-2 hover:bg-white/[0.04] transition-colors cursor-grab active:cursor-grabbing"
+      data-issue-id={@issue.id}
+    >
       <div class="text-sm font-510 text-text-primary leading-snug line-clamp-1"><%= @issue.title %></div>
       <div class="flex items-center gap-2 flex-wrap">
-        <span class={"text-[10px] font-510 px-2 py-0.5 rounded-full " <> priority_class(@issue.priority)}><%= @issue.priority %></span>
-        <span class="text-xs text-text-quaternary"><%= length(@issue.comments) %> comments</span>
+        <span class={"text-[10px] font-510 px-2 py-0.5 rounded-full " <> priority_class(@issue.priority)}>
+          <%= @issue.priority %>
+        </span>
+        <span class="text-xs text-text-quaternary flex items-center gap-1">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
+          <%= length(@issue.comments) %>
+        </span>
         <%= if @issue.assignee do %>
           <% hb_state = Index.get_heartbeat_state(@agent_heartbeat_states, @issue.assignee.id) %>
           <span class="flex items-center gap-1">
             <span class={"w-1.5 h-1.5 rounded-full " <> heartbeat_dot_color(hb_state.status)}></span>
-            <span class="text-xs text-text-quaternary truncate max-w-[100px]"><%= @issue.assignee.name %></span>
+            <span class="text-xs text-text-quaternary truncate max-w-[100px]">
+              <%= @issue.assignee.name %>
+            </span>
           </span>
         <% end %>
         <%= if @issue.github_pr_url do %>
-          <a href={@issue.github_pr_url} target="_blank" class="text-xs text-accent hover:text-accent-hover">PR</a>
+          <a href={@issue.github_pr_url} target="_blank" class="text-xs text-accent hover:text-accent-hover transition-colors" title="GitHub PR">
+            PR
+          </a>
         <% end %>
       </div>
     </div>
