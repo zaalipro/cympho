@@ -42,6 +42,10 @@ defmodule CymphoWeb.Router do
     live "/agents/:id", AgentLive.Show
     live "/agents/:id/edit", AgentLive.Edit
     live "/routines/:id", RoutineLive.Show
+    live "/execution-policies", ExecutionPolicyLive.Index
+    live "/execution-policies/new", ExecutionPolicyLive.New
+    live "/execution-policies/:id", ExecutionPolicyLive.Show
+    live "/execution-policies/:id/edit", ExecutionPolicyLive.Edit
   end
 
   scope "/api", CymphoWeb do
@@ -53,6 +57,11 @@ defmodule CymphoWeb.Router do
     get "/search", SearchController, :search
 
     resources "/goals", GoalController, only: [:index, :show, :create, :update, :delete]
+
+    resources "/execution-policies", ExecutionPolicyController, only: [:index, :show, :create, :update, :delete]
+    patch "/execution-policies/:id/archive", ExecutionPolicyController, :archive
+    patch "/execution-policies/:id/restore", ExecutionPolicyController, :restore
+    patch "/execution-policies/:id/set-default", ExecutionPolicyController, :set_default
 
     post "/telegram/webhook", TelegramController, :webhook
     post "/github/webhook", GithubController, :webhook
