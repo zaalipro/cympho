@@ -202,6 +202,7 @@ defmodule Cympho.Orchestrator do
 
   @impl true
   def terminate(reason, %Session{} = session) do
+    send(Cympho.Orchestrator.Dispatcher, {:session_ended, session.issue.id, reason})
     _ =
       :logger.info(
         "[Orchestrator] terminated for issue #{session.issue.id}, agent #{session.agent_id}, reason: #{inspect(reason)}"
