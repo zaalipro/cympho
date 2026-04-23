@@ -17,7 +17,10 @@ defmodule CymphoWeb.IssueLive.Show do
            issue: issue,
            comment_form: to_form(Comments.Comment.changeset(%Comments.Comment{}, %{})),
            agents: Agents.list_agents_by_status(:idle),
-           show_agent_panel: false
+           all_agents: Agents.list_agents(),
+           assignee_search: "",
+           show_agent_panel: false,
+           editing: nil
          )}
 
       {:error, :not_found} ->
@@ -101,6 +104,38 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   @impl true
+  def handle_event("start_editing", %{"field" => field}, socket) do
+    {:noreply, assign(socket, :editing, field)}
+  end
+
+  def handle_event("cancel_editing", _, socket) do
+    {:noreply, assign(socket, :editing, nil)}
+  end
+
+  def handle_event("save_title", %{"title" => title}, socket) do
+    title = String.trim(title)
+    if title == "" do
+      {:noreply, put_flash(socket, :error, "Title cannot be empty")}
+    else
+      case Issues.update_issue(socket.assigns.issue, %{title: title}) do
+        {:ok, _issue} ->
+          {:noreply, assign(socket, :editing, nil)}
+        {:error, _changeset} ->
+          {:noreply, put_flash(socket, :error, "Failed to update title")}
+      end
+    end
+  end
+
+  def handle_event("save_description", %{"description" => description}, socket) do
+    case Issues.update_issue(socket.assigns.issue, %{description: description}) do
+      {:ok, _issue} ->
+        {:noreply, assign(socket, :editing, nil)}
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Failed to update description")}
+    end
+  end
+
+  @impl true
   def handle_event("add_comment", %{"comment" => comment_params}, socket) do
     comment_params = Map.put(comment_params, "issue_id", socket.assigns.issue.id)
 
@@ -114,15 +149,13 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
-  @impl true
   def handle_event("delete_comment", %{"id" => id}, socket) do
     comment = Comments.get_comment!(id)
     _ = Comments.delete_comment(comment)
     {:noreply, socket}
   end
 
-  @impl true
-  def handle_event("update_issue_status", %{"status" => status}, socket) do
+  def handle_event("update_status", %{"status" => status}, socket) do
     status_atoms = %{
       "backlog" => :backlog,
       "todo" => :todo,
@@ -142,6 +175,48 @@ defmodule CymphoWeb.IssueLive.Show do
         end
       :error ->
         {:noreply, put_flash(socket, :error, "Invalid status")}
+    end
+  end
+
+  def handle_event("update_priority", %{"priority" => priority}, socket) do
+    priority_atoms = %{
+      "low" => :low,
+      "medium" => :medium,
+      "high" => :high
+    }
+
+    case Map.fetch(priority_atoms, priority) do
+      {:ok, priority_atom} ->
+        case Issues.update_issue(socket.assigns.issue, %{priority: priority_atom}) do
+          {:ok, _issue} ->
+            {:noreply, socket}
+          {:error, _changeset} ->
+            {:noreply, put_flash(socket, :error, "Failed to update priority")}
+        end
+      :error ->
+        {:noreply, put_flash(socket, :error, "Invalid priority")}
+    end
+  end
+
+  def handle_event("search_assignee", %{"q" => query}, socket) do
+    {:noreply, assign(socket, :assignee_search, query)}
+  end
+
+  def handle_event("assign_issue", %{"agent_id" => agent_id}, socket) do
+    case Issues.update_issue(socket.assigns.issue, %{assignee_id: agent_id}) do
+      {:ok, _issue} ->
+        {:noreply, assign(socket, :assignee_search, "")}
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Failed to assign agent")}
+    end
+  end
+
+  def handle_event("unassign_issue", _, socket) do
+    case Issues.update_issue(socket.assigns.issue, %{assignee_id: nil}) do
+      {:ok, _issue} ->
+        {:noreply, socket}
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Failed to unassign")}
     end
   end
 
@@ -195,5 +270,17 @@ defmodule CymphoWeb.IssueLive.Show do
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to clear PR URL")}
     end
+  end
+
+  defp valid_status_options(current_status) do
+    Cympho.Issues.StateMachine.valid_transitions(current_status)
+    |> Enum.map(fn status -> {String.capitalize(to_string(status)), to_string(status)} end)
+  end
+
+  defp filtered_agents(agents, search) do
+    search = String.downcase(search)
+    Enum.filter(agents, fn agent ->
+      String.contains?(String.downcase(agent.name), search)
+    end)
   end
 end
