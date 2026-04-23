@@ -5,13 +5,26 @@
     20%, 40%, 60%, 80% { transform: translateX(4px); }
   }
   .phx-error-shake { animation: phx-error-shake 0.4s ease-in-out; }
+
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 0.15; }
+  }
+  .kanban-skeleton { animation: skeleton-pulse 1.5s ease-in-out infinite; background: rgba(255,255,255,0.06); border-radius: 6px; }
+
+  @keyframes card-enter {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .kanban-card-enter { animation: card-enter 0.2s ease-out; }
 </style>
 
 <div
   id="kanban-board"
-  class="p-6 lg:p-8 h-[calc(100vh-64px)] flex flex-col"
+  class="p-4 sm:p-6 lg:p-8 h-[calc(100vh-64px)] flex flex-col"
   phx-hook="KanbanSortable"
 >
+
   <.header title={@page_title}>
     <:actions>
       <div class="flex items-center gap-3">
@@ -198,8 +211,8 @@
         </div>
       </div>
     <% else %>
-      <div class="flex-1 overflow-x-auto overflow-y-hidden">
-        <div class="flex gap-4 h-full min-w-max">
+      <div class="flex-1 overflow-y-auto lg:overflow-x-auto lg:overflow-y-hidden">
+        <div class="flex flex-col lg:flex-row gap-3 sm:gap-4 lg:h-full">
           <%= for status <- status_columns() do %>
             <% issues = issues_for_status(computed, status) %>
             <% limit = wip_limit(@selected_project, status) %>
@@ -208,8 +221,9 @@
             <% collapsed = MapSet.member?(@collapsed_columns, status) %>
 
             <%= if collapsed do %>
+              <%!-- Collapsed column - only visible on desktop --%>
               <div
-                class="w-12 flex flex-col bg-panel border border-border rounded-card h-full items-center pt-4 cursor-pointer hover:bg-white/[0.02] transition-colors"
+                class="hidden lg:flex w-12 flex-col bg-panel border border-border rounded-card h-full items-center pt-4 cursor-pointer hover:bg-white/[0.02] transition-colors"
                 phx-click="toggle_column"
                 phx-value-status={status}
               >
@@ -218,18 +232,19 @@
                   style="writing-mode: vertical-rl; transform: rotate(180deg);"
                 >
                   {status_label(status)}
+
                 </span>
                 <span class="text-xs text-text-quaternary mt-2">{count}</span>
               </div>
             <% else %>
-              <div class={"w-72 flex flex-col bg-panel border rounded-card h-full " <> if(exceeded, do: "border-red-500/50", else: "border-border")}>
-                <div class="px-4 py-3 border-b border-border-subtle flex items-center justify-between bg-panel rounded-t-card">
+              <div class={"w-full lg:w-72 flex flex-col bg-panel border rounded-card min-h-[180px] lg:h-full " <> if(exceeded, do: "border-red-500/50", else: "border-border")}>
+                <div class="px-3 sm:px-4 py-3 border-b border-border-subtle flex items-center justify-between bg-panel rounded-t-card">
                   <div class="flex items-center gap-2">
                     <button
                       type="button"
                       phx-click="toggle_column"
                       phx-value-status={status}
-                      class="text-text-quaternary hover:text-text-secondary transition-colors"
+                      class="hidden lg:block text-text-quaternary hover:text-text-secondary transition-colors"
                       title="Collapse column"
                     >
                       <svg
@@ -245,6 +260,7 @@
                           d="M15 19l-7-7 7-7"
                         />
                       </svg>
+
                     </button>
                     <h2 class="text-sm font-510 text-text-primary">{status_label(status)}</h2>
                   </div>
@@ -303,18 +319,13 @@
                     <% end %>
                   <% else %>
                     <%= if Enum.empty?(issues) do %>
-                      <div class="text-center py-8">
-                        <p class="text-xs text-text-quaternary">No issues</p>
-                      </div>
+                      <.empty_column_state status={status} />
                     <% end %>
                     <%= for issue <- issues do %>
                       <.issue_card
                         issue={issue}
                         status={status}
-                        agents={@agents}
                         agent_heartbeat_states={@agent_heartbeat_states}
-                        editing_card_id={@editing_card_id}
-                        card_action_open={@card_action_open}
                       />
                     <% end %>
                   <% end %>

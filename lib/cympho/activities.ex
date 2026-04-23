@@ -7,8 +7,19 @@ defmodule Cympho.Activities do
     Activity |> where(issue_id: ^issue_id) |> order_by(asc: :inserted_at) |> Repo.all()
   end
 
+  def subscribe do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "activities")
+  end
+
   def log_activity(attrs) when is_map(attrs) do
-    %Activity{} |> Activity.changeset(attrs) |> Repo.insert()
+    case %Activity{} |> Activity.changeset(attrs) |> Repo.insert() do
+      {:ok, activity} ->
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "activities", {:activity_created, activity})
+        {:ok, activity}
+
+      error ->
+        error
+    end
   end
 
   def log_issue_changes(old_issue, new_issue, attrs) do

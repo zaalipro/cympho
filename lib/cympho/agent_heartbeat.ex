@@ -139,10 +139,12 @@ defmodule Cympho.AgentHeartbeat do
   end
 
   @doc """
-  Triggers a heartbeat for the given agent_id.
+  Triggers an immediate heartbeat for the given agent_id.
+  Sends a :heartbeat message to the GenServer to check for work immediately.
+  Used by Wakes context to wake agents on comments, blocker resolution, and child completion.
   """
   @spec trigger_heartbeat(String.t()) :: :ok | {:error, :not_found}
-  def trigger_heartbeat(agent_id) do
+  def trigger_heartbeat(agent_id) when is_binary(agent_id) do
     case HeartbeatRegistry.lookup(agent_id) do
       {:ok, pid} ->
         send(pid, :heartbeat)

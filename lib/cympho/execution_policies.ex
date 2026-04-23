@@ -7,7 +7,7 @@ defmodule Cympho.ExecutionPolicies do
   alias Cympho.ExecutionPolicies.ExecutionPolicy
 
   def list_execution_policies do
-    Repo.all(ExecutionPolicy)
+    Repo.all(from p in ExecutionPolicy, order_by: [desc: p.inserted_at])
   end
 
   def get_execution_policy!(id), do: Repo.get!(ExecutionPolicy, id)
