@@ -4,8 +4,10 @@ defmodule CymphoWeb.KanbanLive.Components do
 
   attr :issue, :map, required: true
   attr :status, :atom, required: true
-  attr :agent_heartbeat_states, :map, required: true
-  attr :issues, :list, required: true
+  attr :agents, :list, default: []
+  attr :agent_heartbeat_states, :map, default: %{}
+  attr :editing_card_id, :any, default: nil
+  attr :card_action_open, :any, default: nil
 
   def issue_card(assigns) do
     ~H"""

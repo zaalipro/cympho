@@ -1,3 +1,16 @@
+#!/usr/bin/env elixir
+# Standalone test runner for Cympho.Github — no database required.
+# Usage: elixir test/cympho/github_test_standalone.exs
+
+# Add compiled deps to path
+paths = Path.wildcard("_build/test/lib/*/ebin")
+Enum.each(paths, &Code.append_path/1)
+
+# Compile the module under test
+Code.compile_file("lib/cympho/github.ex")
+
+ExUnit.start()
+
 defmodule Cympho.GithubTest do
   use ExUnit.Case, async: true
 
