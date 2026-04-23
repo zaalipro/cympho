@@ -6,6 +6,7 @@ defmodule Cympho.Comments do
   alias Cympho.Repo
   alias Cympho.Comments.Comment
   alias Cympho.Issues.Issue
+  alias Cympho.Activities
 
   @doc """
   Returns the list of comments for a given issue.
@@ -30,6 +31,7 @@ defmodule Cympho.Comments do
          |> Comment.changeset(attrs)
          |> Repo.insert() do
       {:ok, comment} ->
+        Activities.log_activity(%{issue_id: comment.issue_id, actor_type: comment.author_type, actor_id: comment.author_id, action: "comment_added", metadata: %{comment_id: comment.id}})
         case Repo.get(Issue, comment.issue_id) do
           nil -> :ok
           issue ->
