@@ -25,6 +25,10 @@ defmodule Cympho.Notifications do
   Send a test ping to a webhook URL.
   """
   def test_webhook(url) do
+    unless is_binary(url) and String.match?(url, ~r/^https:\/\/.+/) do
+      {:error, :invalid_url}
+    end
+
     payload = %{
       event: "test_ping",
       message: "Test notification from Cympho",
