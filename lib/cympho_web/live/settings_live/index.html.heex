@@ -17,15 +17,15 @@
         <div class="channel-header">
           <div class="channel-info">
             <h3>Email</h3>
-            <span class="channel-status">{if @user.email_enabled, do: "Enabled", else: "Disabled"}</span>
+            <span class="channel-status">{if channel_enabled?(@prefs, "email"), do: "Enabled", else: "Disabled"}</span>
           </div>
           <button
             type="button"
-            class={"toggle-btn #{if @user.email_enabled, do: "toggle-on", else: "toggle-off"}"}
+            class={"toggle-btn #{if channel_enabled?(@prefs, "email"), do: "toggle-on", else: "toggle-off"}"}
             phx-click="toggle_channel"
             phx-value-channel="email"
           >
-            {if @user.email_enabled, do: "ON", else: "OFF"}
+            {if channel_enabled?(@prefs, "email"), do: "ON", else: "OFF"}
           </button>
         </div>
         <p class="channel-detail">Notifications sent to: {@user.email}</p>
@@ -36,25 +36,25 @@
         <div class="channel-header">
           <div class="channel-info">
             <h3>Telegram</h3>
-            <span class="channel-status">{if @user.telegram_enabled, do: "Enabled", else: "Disabled"}</span>
+            <span class="channel-status">{if channel_enabled?(@prefs, "telegram"), do: "Enabled", else: "Disabled"}</span>
           </div>
           <button
             type="button"
-            class={"toggle-btn #{if @user.telegram_enabled, do: "toggle-on", else: "toggle-off"}"}
+            class={"toggle-btn #{if channel_enabled?(@prefs, "telegram"), do: "toggle-on", else: "toggle-off"}"}
             phx-click="toggle_channel"
             phx-value-channel="telegram"
           >
-            {if @user.telegram_enabled, do: "ON", else: "OFF"}
+            {if channel_enabled?(@prefs, "telegram"), do: "ON", else: "OFF"}
           </button>
         </div>
         <div class="channel-detail">
-          <div :if={@user.telegram_chat_id && @user.telegram_chat_id != ""}>
-            <p>Linked chat ID: <code>{@user.telegram_chat_id}</code></p>
+          <div :if={telegram_chat_id(@prefs, @user) != ""}>
+            <p>Linked chat ID: <code>{telegram_chat_id(@prefs, @user)}</code></p>
             <span :if={@telegram_verify_status == :verified} class="badge badge-success">Verified</span>
             <span :if={@telegram_verify_status == :linked} class="badge badge-info">Linked</span>
             <button type="button" class="phx-btn-secondary" phx-click="verify_telegram">Verify Connection</button>
           </div>
-          <form :if={!(@user.telegram_chat_id && @user.telegram_chat_id != "")} phx-submit="link_telegram" class="inline-form">
+          <form :if={telegram_chat_id(@prefs, @user) == ""} phx-submit="link_telegram" class="inline-form">
             <input
               type="text"
               name="telegram_chat_id"
@@ -72,15 +72,15 @@
         <div class="channel-header">
           <div class="channel-info">
             <h3>Webhook</h3>
-            <span class="channel-status">{if @user.webhook_enabled, do: "Enabled", else: "Disabled"}</span>
+            <span class="channel-status">{if channel_enabled?(@prefs, "webhook"), do: "Enabled", else: "Disabled"}</span>
           </div>
           <button
             type="button"
-            class={"toggle-btn #{if @user.webhook_enabled, do: "toggle-on", else: "toggle-off"}"}
+            class={"toggle-btn #{if channel_enabled?(@prefs, "webhook"), do: "toggle-on", else: "toggle-off"}"}
             phx-click="toggle_channel"
             phx-value-channel="webhook"
           >
-            {if @user.webhook_enabled, do: "ON", else: "OFF"}
+            {if channel_enabled?(@prefs, "webhook"), do: "ON", else: "OFF"}
           </button>
         </div>
         <div class="channel-detail">
@@ -89,12 +89,12 @@
               type="url"
               name="webhook_url"
               placeholder="https://example.com/webhook"
-              value={@user.webhook_url || ""}
+              value={webhook_url(@prefs, @user)}
             />
             <button type="submit" class="phx-btn">Save URL</button>
           </form>
           <button
-            :if={@user.webhook_url && @user.webhook_url != ""}
+            :if={webhook_url(@prefs, @user) != ""}
             type="button"
             class="phx-btn-secondary"
             phx-click="test_webhook"

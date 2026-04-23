@@ -74,18 +74,18 @@ defmodule CymphoWeb.SettingsLive.Index do
 
   @impl true
   def handle_event("toggle_channel", %{"channel" => channel}, socket) do
-    field = String.to_existing_atom("#{channel}_enabled")
-    user = socket.assigns.user
-    new_value = not Map.get(user, field)
+    pref = pref_for_channel(socket.assigns.prefs, channel)
+    new_enabled = if pref, do: not pref.enabled, else: true
 
-    case Users.update_notification_prefs(user, %{field => new_value}) do
-      {:ok, updated_user} ->
+    case Users.upsert_notification_pref(socket.assigns.user_id, channel, %{enabled: new_enabled}) do
+      {:ok, _} ->
+        prefs = Users.list_notification_prefs(socket.assigns.user_id)
         {:noreply,
          socket
-         |> assign(:user, updated_user)
-         |> put_flash(:info, "#{String.capitalize(channel)} #{if(new_value, do: "enabled", else: "disabled")}")}
+         |> assign(:prefs, prefs)
+         |> put_flash(:info, "#{String.capitalize(channel)} #{if(new_enabled, do: "enabled", else: "disabled")}")}
 
-      {:error, _changeset} ->
+      {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to update #{channel} setting")}
     end
   end
@@ -122,9 +122,17 @@ defmodule CymphoWeb.SettingsLive.Index do
   def handle_event("update_webhook_url", %{"webhook_url" => url}, socket) do
     case Users.update_notification_prefs(socket.assigns.user, %{webhook_url: url}) do
       {:ok, updated_user} ->
+        # Also persist to notification_preferences so dispatcher can find it
+        Users.upsert_notification_pref(socket.assigns.user_id, "webhook", %{
+          "url" => url
+        })
+
+        prefs = Users.list_notification_prefs(socket.assigns.user_id)
+
         {:noreply,
          socket
          |> assign(:user, updated_user)
+         |> assign(:prefs, prefs)
          |> assign(:webhook_url_input, url)
          |> put_flash(:info, "Webhook URL saved")}
 
@@ -134,7 +142,8 @@ defmodule CymphoWeb.SettingsLive.Index do
   end
 
   def handle_event("test_webhook", _params, socket) do
-    url = socket.assigns.user.webhook_url
+    webhook_pref = pref_for_channel(socket.assigns.prefs, "webhook")
+    url = (webhook_pref && webhook_pref.config && webhook_pref.config["url"]) || socket.assigns.user.webhook_url
 
     if is_binary(url) and url != "" do
       result = Notifications.test_webhook(url)
@@ -158,20 +167,29 @@ defmodule CymphoWeb.SettingsLive.Index do
   end
 
   def handle_event("link_telegram", %{"telegram_chat_id" => chat_id}, socket) do
-    case Users.update_notification_prefs(socket.assigns.user, %{
-           telegram_chat_id: chat_id,
-           telegram_enabled: true
+    # Persist to notification_preferences so dispatcher can find the chat_id
+    case Users.upsert_notification_pref(socket.assigns.user_id, "telegram", %{
+           "telegram_chat_id" => chat_id,
+           "enabled" => true
          }) do
-      {:ok, updated_user} ->
+      {:ok, _} ->
+        # Also keep the user record in sync for the UI
+        Users.update_notification_prefs(socket.assigns.user, %{
+          telegram_chat_id: chat_id,
+          telegram_enabled: true
+        })
+
+        prefs = Users.list_notification_prefs(socket.assigns.user_id)
+
         {:noreply,
          socket
-         |> assign(:user, updated_user)
+         |> assign(:prefs, prefs)
          |> assign(:telegram_chat_id_input, chat_id)
          |> assign(:telegram_verify_status, :linked)
          |> put_flash(:info, "Telegram chat ID linked")}
 
-      {:error, changeset} ->
-        {:noreply, put_flash(socket, :error, format_changeset_errors(changeset))}
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to link Telegram")}
     end
   end
 
@@ -213,6 +231,23 @@ defmodule CymphoWeb.SettingsLive.Index do
 
   defp pref_for_channel(prefs, channel_type) do
     Enum.find(prefs, &(&1.channel_type == channel_type))
+  end
+
+  defp channel_enabled?(prefs, channel_type) do
+    case pref_for_channel(prefs, channel_type) do
+      nil -> false
+      pref -> pref.enabled
+    end
+  end
+
+  defp telegram_chat_id(prefs, user) do
+    pref = pref_for_channel(prefs, "telegram")
+    (pref && pref.config && pref.config["telegram_chat_id"]) || user.telegram_chat_id || ""
+  end
+
+  defp webhook_url(prefs, user) do
+    pref = pref_for_channel(prefs, "webhook")
+    (pref && pref.config && pref.config["url"]) || user.webhook_url || ""
   end
 
   defp event_enabled?(pref, event) do
