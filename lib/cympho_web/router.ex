@@ -41,6 +41,7 @@ defmodule CymphoWeb.Router do
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
     live "/agents/:id/edit", AgentLive.Edit
+    live "/routines/:id", RoutineLive.Show
   end
 
   scope "/api", CymphoWeb do
@@ -60,6 +61,8 @@ defmodule CymphoWeb.Router do
     patch "/routines/:id/pause", RoutineController, :pause
     patch "/routines/:id/resume", RoutineController, :resume
     patch "/routines/:id/archive", RoutineController, :archive
+    post "/routines/:id/run", RoutineController, :run
+    get "/routines/:id/runs", RoutineController, :runs
 
     resources "/routines/:routine_id/triggers", RoutineTriggerController,
       only: [:index, :create, :show, :update, :delete],
