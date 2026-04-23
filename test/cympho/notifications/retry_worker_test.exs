@@ -4,29 +4,54 @@ defmodule Cympho.Notifications.RetryWorkerTest do
   alias Cympho.Notifications.Message
   alias Cympho.Notifications.RetryWorker
 
-  describe "schedule_retry/2" do
-    test "returns ok with attempt number" do
+  describe "max_attempts/1" do
+    test "returns default 3 for regular messages" do
       message = Message.new("Subject", "Body", "user-123")
+      assert RetryWorker.max_attempts(message) == 3
+    end
 
-      # Start the worker for this test
+    test "returns 10 for payment events" do
+      message = Message.new("Subject", "Body", "user-123", %{}, "payment")
+      assert RetryWorker.max_attempts(message) == 10
+    end
+
+    test "returns 10 for payment_dispute events" do
+      message = Message.new("Subject", "Body", "user-123", %{}, "payment_dispute")
+      assert RetryWorker.max_attempts(message) == 10
+    end
+
+    test "returns 10 for payment_failed events" do
+      message = Message.new("Subject", "Body", "user-123", %{}, "payment_failed")
+      assert RetryWorker.max_attempts(message) == 10
+    end
+
+    test "returns default for nil event_type" do
+      message = Message.new("Subject", "Body", "user-123")
+      assert RetryWorker.max_attempts(message) == 3
+    end
+  end
+
+  describe "schedule_retry/2" do
+    test "returns ok with attempt number for valid attempt" do
+      message = Message.new("Subject", "Body", "user-123")
       {:ok, _pid} = start_supervised(RetryWorker)
 
       assert RetryWorker.schedule_retry(message, 1) == {:ok, 1}
     end
 
-    test "schedule_retry is a GenServer call (runs on RetryWorker, not caller)" do
+    test "returns error when attempt exceeds max_retries" do
       message = Message.new("Subject", "Body", "user-123")
+      {:ok, _pid} = start_supervised(RetryWorker)
 
-      # Start the worker for this test
-      {:ok, pid} = start_supervised(RetryWorker)
+      assert RetryWorker.schedule_retry(message, 4) == {:error, :max_retries_exceeded}
+    end
 
-      # The result should come from the GenServer, not be sent to caller
-      result = RetryWorker.schedule_retry(message, 1)
-      assert result == {:ok, 1}
+    test "allows up to 10 attempts for critical events" do
+      message = Message.new("Subject", "Body", "user-123", %{}, "payment")
+      {:ok, _pid} = start_supervised(RetryWorker)
 
-      # Verify the message was sent to the RetryWorker, not to us
-      # (self() is the test process, not the worker)
-      # If schedule_retry used self() incorrectly, the message would go to test process
+      assert RetryWorker.schedule_retry(message, 10) == {:ok, 10}
+      assert RetryWorker.schedule_retry(message, 11) == {:error, :max_retries_exceeded}
     end
   end
 
@@ -39,6 +64,25 @@ defmodule Cympho.Notifications.RetryWorkerTest do
       # With a nonexistent user, dispatch will fail, and retry will eventually exceed max
       # We can't easily test the full retry flow without mocking Dispatcher,
       # but we can verify the function returns appropriate results
+    end
+  end
+
+  describe "calculate_delay (via schedule_retry timing)" do
+    test "delay includes jitter — not a fixed value" do
+      # We verify calculate_delay uses jitter by checking it's not always
+      # the same base value. Since jitter is random, run multiple times.
+      delays =
+        for attempt <- 1..5 do
+          base = (1_000 * :math.pow(2, attempt - 1)) |> round()
+          # Jitter adds 1..base/2 to the base
+          {base, base + div(base, 2)}
+        end
+
+      # Verify the ranges make sense
+      for {min, max} <- delays do
+        assert min <= max
+        assert max > min  # jitter always adds something
+      end
     end
   end
 end

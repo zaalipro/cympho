@@ -8,7 +8,6 @@ defmodule Cympho.Issues do
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
-  alias Cympho.Issues.AutoAssignment
   alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Comments
@@ -136,19 +135,6 @@ defmodule Cympho.Issues do
 
       {:error, changeset} ->
         {:error, changeset}
-    end
-  end
-
-  defp maybe_auto_assign(%Issue{} = issue) do
-    case AutoAssignment.assign_issue(issue) do
-      {:ok, assigned} ->
-        assigned
-
-      {:error, :no_eligible_agent, _} ->
-        case AutoAssignment.queue_for_assignment(issue) do
-          {:ok, _} -> issue
-          {:error, _} -> issue
-        end
     end
   end
 
@@ -531,6 +517,136 @@ defmodule Cympho.Issues do
 
       {:error, changeset} ->
         {:error, changeset}
+    end
+  end
+
+  @doc """
+  Assigns an execution policy to an issue and initializes the execution state.
+  Sets the issue assignee to the executor_id.
+  """
+  @spec assign_execution_policy(Issue.t(), binary(), binary()) ::
+          {:ok, Issue.t()} | {:error, :not_found | :invalid_policy_stages | :invalid_executor | Ecto.Changeset.t()}
+  def assign_execution_policy(%Issue{} = issue, policy_id, executor_id) do
+    case ExecutionPolicies.get_execution_policy(policy_id) do
+      {:ok, %ExecutionPolicy{stage_configs: stage_configs} = policy} ->
+        if length(stage_configs) == 0 do
+          {:error, :invalid_policy_stages}
+        else
+          case Agents.get_agent(executor_id) do
+            {:ok, _agent} ->
+              state = ExecutionState.initialize(policy, executor_id)
+
+              attrs = %{
+                execution_policy_id: policy_id,
+                execution_state: state,
+                assignee_id: executor_id,
+                status: :in_progress
+              }
+
+              update_issue(issue, attrs)
+
+            {:error, _} ->
+              {:error, :invalid_executor}
+          end
+        end
+
+      {:error, :not_found} ->
+        {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Handles a decision (approve/request_changes) for an issue with an execution policy.
+  Advances the execution state and assigns the issue to the next participant.
+
+  - :approve - advances to next stage or marks done if final stage
+  - :request_changes - returns to executor with in_progress status
+  """
+  @spec execution_policy_decision(Issue.t(), :approve | :request_changes, binary()) ::
+          {:ok, Issue.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def execution_policy_decision(%Issue{} = issue, decision, decided_by) do
+    cond do
+      not ExecutionState.active?(issue.execution_state) ->
+        {:error, :execution_policy_not_active}
+
+      decided_by != issue.execution_state.current_participant ->
+        {:error, :unauthorized}
+
+      true ->
+        do_execution_policy_decision(issue, decision, decided_by)
+    end
+  end
+
+  defp do_execution_policy_decision(%Issue{} = issue, decision, decided_by) do
+    policy = ExecutionPolicies.get_execution_policy!(issue.execution_policy_id)
+
+    case decision do
+      :approve ->
+        approved_state = ExecutionState.approve(issue.execution_state, decided_by)
+
+        case ExecutionState.advance(approved_state, policy, decided_by) do
+          {:done, final_state} ->
+            update_issue(issue, %{
+              status: :done,
+              execution_state: final_state,
+              assignee_id: nil
+            })
+            |> tap(fn {:ok, _} ->
+              unblock_dependents(issue.id)
+              _ = Wakes.notify_children_completed(issue)
+            end)
+
+          {:ok, next_state} ->
+            next_assignee = next_state.current_participant
+
+            update_issue(issue, %{
+              execution_state: next_state,
+              assignee_id: next_assignee,
+              status: :in_review
+            })
+            |> tap(fn {:ok, _} ->
+              wake_next_participant(next_assignee, issue.id)
+            end)
+        end
+
+      :request_changes ->
+        changes_state = ExecutionState.request_changes(issue.execution_state, decided_by)
+        executor_id = issue.execution_state.return_assignee || changes_state.current_participant
+
+        update_issue(issue, %{
+          execution_state: changes_state,
+          assignee_id: executor_id,
+          status: :in_progress
+        })
+        |> tap(fn {:ok, _} ->
+          wake_executor(executor_id, issue.id)
+        end)
+    end
+  end
+
+  defp wake_next_participant(assignee_id, issue_id) do
+    if assignee_id do
+      _ = Wakes.do_wake_agent(
+        assignee_id,
+        issue_id,
+        "execution_policy_stage_transition",
+        "system",
+        nil,
+        %{stage_type: "reviewer"}
+      )
+    end
+  end
+
+  defp wake_executor(executor_id, issue_id) do
+    if executor_id do
+      _ = Wakes.do_wake_agent(
+        executor_id,
+        issue_id,
+        "execution_policy_stage_transition",
+        "system",
+        nil,
+        %{stage_type: "executor", decision: "changes_requested"}
+      )
     end
   end
 
