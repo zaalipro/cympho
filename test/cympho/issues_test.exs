@@ -36,13 +36,7 @@ defmodule Cympho.IssuesTest do
 
     test "filters by project_id" do
       {:ok, project} = Projects.create_project(%{name: "Filter Project", prefix: "FP"})
-
-      {:ok, project_issue} =
-        Issues.create_issue(%{
-          title: "Project Issue",
-          description: "In project",
-          project_id: project.id
-        })
+      {:ok, project_issue} = Issues.create_issue(%{title: "Project Issue", description: "In project", project_id: project.id})
 
       issues = Issues.list_issues(%{project_id: project.id})
       assert length(issues) >= 1
@@ -913,26 +907,14 @@ defmodule Cympho.IssuesTest do
     end
 
     test "blocked transitions (can go anywhere)" do
-      assert StateMachine.valid_transitions(:blocked) == [
-               :backlog,
-               :todo,
-               :in_progress,
-               :in_review,
-               :done
-             ]
+      assert StateMachine.valid_transitions(:blocked) == [:backlog, :todo, :in_progress, :in_review, :done]
     end
   end
 
   describe "transition_issue/3 chain-of-command for in_review" do
     test "cto can transition issue to in_review with agent_id" do
       {:ok, cto} = Agents.create_agent(%{name: "CTO", role: :cto})
-
-      {:ok, issue} =
-        Issues.create_issue(%{
-          title: "CTO Review Task",
-          description: "Test",
-          status: :in_progress
-        })
+      {:ok, issue} = Issues.create_issue(%{title: "CTO Review Task", description: "Test", status: :in_progress})
 
       assert {:ok, updated} = Issues.transition_issue(issue, :in_review, cto.id)
       assert updated.status == :in_review
@@ -940,13 +922,7 @@ defmodule Cympho.IssuesTest do
 
     test "ceo can transition issue to in_review with agent_id" do
       {:ok, ceo} = Agents.create_agent(%{name: "CEO", role: :ceo})
-
-      {:ok, issue} =
-        Issues.create_issue(%{
-          title: "CEO Review Task",
-          description: "Test",
-          status: :in_progress
-        })
+      {:ok, issue} = Issues.create_issue(%{title: "CEO Review Task", description: "Test", status: :in_progress})
 
       assert {:ok, updated} = Issues.transition_issue(issue, :in_review, ceo.id)
       assert updated.status == :in_review
@@ -954,27 +930,20 @@ defmodule Cympho.IssuesTest do
 
     test "engineer cannot transition issue to in_review with agent_id" do
       {:ok, engineer} = Agents.create_agent(%{name: "Engineer", role: :engineer})
+      {:ok, issue} = Issues.create_issue(%{title: "Engineer Task", description: "Test", status: :in_progress})
 
-      {:ok, issue} =
-        Issues.create_issue(%{title: "Engineer Task", description: "Test", status: :in_progress})
-
-      assert {:error, :chain_of_command_violation} =
-               Issues.transition_issue(issue, :in_review, engineer.id)
+      assert {:error, :chain_of_command_violation} = Issues.transition_issue(issue, :in_review, engineer.id)
     end
 
     test "product_manager cannot transition issue to in_review with agent_id" do
       {:ok, pm} = Agents.create_agent(%{name: "Product Manager", role: :product_manager})
+      {:ok, issue} = Issues.create_issue(%{title: "PM Task", description: "Test", status: :in_progress})
 
-      {:ok, issue} =
-        Issues.create_issue(%{title: "PM Task", description: "Test", status: :in_progress})
-
-      assert {:error, :chain_of_command_violation} =
-               Issues.transition_issue(issue, :in_review, pm.id)
+      assert {:error, :chain_of_command_violation} = Issues.transition_issue(issue, :in_review, pm.id)
     end
 
     test "transition to in_review without agent_id succeeds (backward compatibility)" do
-      {:ok, issue} =
-        Issues.create_issue(%{title: "System Task", description: "Test", status: :in_progress})
+      {:ok, issue} = Issues.create_issue(%{title: "System Task", description: "Test", status: :in_progress})
 
       assert {:ok, updated} = Issues.transition_issue(issue, :in_review, nil)
       assert updated.status == :in_review
@@ -982,22 +951,127 @@ defmodule Cympho.IssuesTest do
 
     test "cto cannot transition blocked issue to done" do
       {:ok, cto} = Agents.create_agent(%{name: "CTO", role: :cto})
-
-      {:ok, blocker} =
-        Issues.create_issue(%{
-          title: "Blocker",
-          description: "Blocks other issue",
-          status: :in_progress
-        })
-
-      {:ok, issue} =
-        Issues.create_issue(%{title: "Blocked Task", description: "Test", status: :in_progress})
+      {:ok, blocker} = Issues.create_issue(%{title: "Blocker", description: "Blocks other issue", status: :in_progress})
+      {:ok, issue} = Issues.create_issue(%{title: "Blocked Task", description: "Test", status: :in_progress})
 
       {:ok, blocked_issue} = Issues.add_blocker(issue, blocker)
       {:ok, in_review_issue} = Issues.transition_issue(blocked_issue, :in_review, cto.id)
 
-      assert {:error, :blocked_by_active_issues} =
-               Issues.transition_issue(in_review_issue, :done, cto.id)
+      assert {:error, :blocked_by_active_issues} = Issues.transition_issue(in_review_issue, :done, cto.id)
     end
   end
+
+  describe "cascade-cancel approvals on issue state change" do
+    test "transitioning issue to :done cancels pending approvals" do
+      agent = insert_agent()
+      issue = insert_issue()
+
+      {:ok, _approval} =
+        Cympho.Approvals.create_approval(%{
+          type: "request_board_approval",
+          requested_by_agent_id: agent.id,
+          issue_ids: [issue.id]
+        })
+
+      issue = Issues.get_issue!(issue.id)
+      {:ok, in_progress} = Issues.transition_issue(issue, :in_progress)
+      {:ok, in_review} = Issues.transition_issue(in_progress, :in_review)
+      {:ok, _done} = Issues.transition_issue(in_review, :done)
+
+      approvals = Cympho.Approvals.list_approvals(%{status: :cancelled})
+      assert Enum.any?(approvals, fn a ->
+        Enum.any?(a.issues, fn i -> i.id == issue.id end)
+      end)
+    end
+
+    test "transitioning issue to :cancelled cancels pending approvals" do
+      agent = insert_agent()
+      issue = insert_issue()
+
+      {:ok, _approval} =
+        Cympho.Approvals.create_approval(%{
+          type: "request_board_approval",
+          requested_by_agent_id: agent.id,
+          issue_ids: [issue.id]
+        })
+
+      issue = Issues.get_issue!(issue.id)
+      {:ok, in_progress} = Issues.transition_issue(issue, :in_progress)
+      {:ok, blocked} = Issues.transition_issue(in_progress, :blocked)
+      {:ok, _cancelled} = Issues.transition_issue(blocked, :cancelled)
+
+      approvals = Cympho.Approvals.list_approvals(%{status: :cancelled})
+      assert Enum.any?(approvals, fn a ->
+        Enum.any?(a.issues, fn i -> i.id == issue.id end)
+      end)
+    end
+
+    test "deleting an issue cancels pending approvals" do
+      agent = insert_agent()
+      issue = insert_issue()
+
+      {:ok, _approval} =
+        Cympho.Approvals.create_approval(%{
+          type: "request_board_approval",
+          requested_by_agent_id: agent.id,
+          issue_ids: [issue.id]
+        })
+
+      assert :ok = Issues.delete_issue(issue)
+
+      {:ok, count} = Cympho.Approvals.cancel_pending_for_issue(issue.id)
+      assert count == 0
+    end
+
+    test "does not cancel already-resolved approvals on done transition" do
+      agent = insert_agent()
+      issue = insert_issue()
+
+      {:ok, approval} =
+        Cympho.Approvals.create_approval(%{
+          type: "request_board_approval",
+          requested_by_agent_id: agent.id,
+          issue_ids: [issue.id]
+        })
+
+      {:ok, _} = Cympho.Approvals.resolve_approval(approval.id, :approved, %{})
+
+      issue = Issues.get_issue!(issue.id)
+      {:ok, in_progress} = Issues.transition_issue(issue, :in_progress)
+      {:ok, in_review} = Issues.transition_issue(in_progress, :in_review)
+      {:ok, _done} = Issues.transition_issue(in_review, :done)
+
+      {:ok, found} = Cympho.Approvals.get_approval(approval.id)
+      assert found.status == :approved
+    end
+  end
+
+  defp insert_agent do
+    %{id: id} =
+      Cympho.Repo.insert!(%Cympho.Agents.Agent{
+        name: "Test Agent #{System.unique_integer()}",
+        role: :engineer,
+        status: :idle
+      })
+
+    Cympho.Repo.get!(Cympho.Agents.Agent, id)
+  end
+
+  defp insert_issue do
+    project =
+      Cympho.Repo.insert!(%Cympho.Projects.Project{
+        name: "Test Project #{System.unique_integer()}",
+        prefix: "TST"
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Test Issue",
+        description: "Test description",
+        project_id: project.id
+      })
+
+    issue
+  end
+
 end

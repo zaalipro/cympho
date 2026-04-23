@@ -65,11 +65,6 @@ defmodule CymphoWeb.Router do
 
     resources "/goals", GoalController, only: [:index, :show, :create, :update, :delete]
 
-    resources "/execution-policies", ExecutionPolicyController, only: [:index, :show, :create, :update, :delete]
-    patch "/execution-policies/:id/archive", ExecutionPolicyController, :archive
-    patch "/execution-policies/:id/restore", ExecutionPolicyController, :restore
-    patch "/execution-policies/:id/set-default", ExecutionPolicyController, :set_default
-
     post "/telegram/webhook", TelegramController, :webhook
     post "/github/webhook", GithubController, :webhook
 
@@ -101,12 +96,13 @@ defmodule CymphoWeb.Router do
 
     post "/issues/:issue_id/execution-policy/assign", IssueExecutionPolicyController, :assign
     post "/issues/:issue_id/execution-policy/decide", IssueExecutionPolicyController, :decide
-
     get "/issues/:issue_id/documents", DocumentController, :index
     get "/issues/:issue_id/documents/:key", DocumentController, :show
     put "/issues/:issue_id/documents/:key", DocumentController, :upsert
     delete "/issues/:issue_id/documents/:key", DocumentController, :delete
     get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
+
+    resources "/approvals", ApprovalController, only: [:index, :show, :create, :update]
   end
 
   scope "/api", CymphoWeb do

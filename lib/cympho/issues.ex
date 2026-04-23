@@ -3,7 +3,7 @@ defmodule Cympho.Issues do
   The Issues context for managing issues and their CRUD operations.
   """
   import Ecto.Query, warn: false
-  import Ecto.Changeset, only: [optimistic_lock: 2]
+  import Ecto.Changeset, only: [optimistic_lock: 2, cast: 3, put_assoc: 3]
   require Logger
   alias Cympho.Repo
   alias Cympho.Issues.Issue
@@ -12,10 +12,6 @@ defmodule Cympho.Issues do
   alias Cympho.Agents.Agent
   alias Cympho.Comments
   alias Cympho.Activities
-  alias Cympho.Wakes
-  alias Cympho.ExecutionPolicies
-  alias Cympho.ExecutionPolicies.ExecutionPolicy
-  alias Cympho.Issues.ExecutionState
 
   def list_issues(opts \\ %{}) do
     Issue
@@ -216,16 +212,6 @@ defmodule Cympho.Issues do
 
   def transition_issue(%Issue{} = issue, new_status, agent_id) when is_binary(agent_id) do
     cond do
-      # Execution policy is active and executor submits work
-      ExecutionState.active?(issue.execution_state) and
-      new_status == :in_review and
-      issue.execution_state.current_stage_type == :executor ->
-        do_executor_submit(issue, agent_id)
-
-      # Execution policy is active - only allow done via execution_policy_decision
-      ExecutionState.active?(issue.execution_state) and new_status == :done ->
-        {:error, :execution_policy_not_complete}
-
       new_status == :in_review ->
         with {:ok, agent} <- Agents.get_agent(agent_id),
              :ok <- validate_reviewer_role(agent),
@@ -246,16 +232,6 @@ defmodule Cympho.Issues do
 
   def transition_issue(%Issue{} = issue, new_status, nil) do
     cond do
-      # Execution policy is active and executor submits work (nil agent_id)
-      ExecutionState.active?(issue.execution_state) and
-      new_status == :in_review and
-      issue.execution_state.current_stage_type == :executor ->
-        do_executor_submit(issue, nil)
-
-      # Execution policy is active - only allow done via execution_policy_decision
-      ExecutionState.active?(issue.execution_state) and new_status == :done ->
-        {:error, :execution_policy_not_complete}
-
       new_status == :done and is_blocked?(issue) ->
         {:error, :blocked_by_active_issues}
 
@@ -309,23 +285,31 @@ defmodule Cympho.Issues do
         end)
     end
   end
-
   defp validate_reviewer_role(%Agent{} = agent) do
-    case Issue.role_authorized?(agent.role, :reviewer) do
-      true -> :ok
-      false -> {:error, :chain_of_command_violation}
+    if agent.role in [:cto, :ceo] do
+      :ok
+    else
+      {:error, :chain_of_command_violation}
     end
   end
 
   defp do_transition(%Issue{} = issue, new_status) do
     with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
-      if new_status == :done do
-        # Unblock dependent issues and wake their assignees
-        unblock_dependents(issue.id)
-        # Notify parent's assignee if all children are done
-        _ = Wakes.notify_children_completed(updated)
-      end
+      if new_status == :done, do: unblock_dependents(issue.id)
+      if new_status in [:done, :cancelled], do: cancel_pending_approvals(issue.id)
       {:ok, updated}
+    end
+  end
+
+  defp cancel_pending_approvals(issue_id) do
+    try do
+      Cympho.Approvals.cancel_pending_for_issue(issue_id)
+    rescue
+      e ->
+        Logger.warning("cancel_pending_approvals: failed for issue #{issue_id}",
+          error: inspect(e)
+        )
+        :ok
     end
   end
 
@@ -562,7 +546,36 @@ defmodule Cympho.Issues do
     end
   end
 
+  def add_label_to_issue(%Issue{} = issue, %Label{} = label) do
+    issue = Repo.preload(issue, :labels)
+    labels = issue.labels ++ [label]
+    issue
+    |> cast(%{}, [])
+    |> put_assoc(:labels, labels)
+    |> Repo.update()
+  end
+
+  def remove_label_from_issue(%Issue{} = issue, %Label{} = label) do
+    issue = Repo.preload(issue, :labels)
+    labels = Enum.reject(issue.labels, &(&1.id == label.id))
+    issue
+    |> cast(%{}, [])
+    |> put_assoc(:labels, labels)
+    |> Repo.update()
+  end
+
+  def set_issue_labels(%Issue{} = issue, label_ids) when is_list(label_ids) do
+    labels = Labels.list_labels() |> Enum.filter(&(&1.id in label_ids))
+    issue = Repo.preload(issue, :labels)
+    issue
+    |> cast(%{}, [])
+    |> put_assoc(:labels, labels)
+    |> Repo.update()
+  end
+
   def delete_issue(%Issue{} = issue) do
+    cancel_pending_approvals(issue.id)
+
     case Repo.delete(issue) do
       {:ok, _issue} ->
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_deleted, issue.id})
