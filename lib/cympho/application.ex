@@ -16,11 +16,20 @@ defmodule Cympho.Application do
       # Layer 2: NotificationSupervisor
       {Cympho.Notifications.NotificationSupervisor, []},
       Cympho.Orchestrator.Dispatcher,
+      Cympho.Scheduler,
       CymphoWeb.Endpoint
     ]
 
     opts = [strategy: :one_for_one, name: Cympho.Supervisor]
-    Supervisor.start_link(children, opts)
+
+    case Supervisor.start_link(children, opts) do
+      {:ok, pid} ->
+        Cympho.RoutineTriggers.schedule_all_triggers()
+        {:ok, pid}
+
+      error ->
+        error
+    end
   end
 
   @impl true
