@@ -73,6 +73,9 @@ defmodule CymphoWeb.Router do
     post "/telegram/webhook", TelegramController, :webhook
     post "/github/webhook", GithubController, :webhook
 
+    resources "/labels", LabelController, only: [:index, :show, :create, :update, :delete]
+    resources "/approvals", ApprovalController, only: [:index, :show, :create, :update]
+
     resources "/routines", RoutineController, only: [:index, :show, :create, :update, :delete]
     patch "/routines/:id/pause", RoutineController, :pause
     patch "/routines/:id/resume", RoutineController, :resume
@@ -91,13 +94,31 @@ defmodule CymphoWeb.Router do
 
     resources "/issues", IssueController, only: [:create, :show]
 
-    patch "/agents/:id/status", AgentController, :update_status
-    get "/agents/:id/inbox", AgentController, :inbox
+    get "/issues/:issue_id/labels", IssueLabelController, :index
+    post "/issues/:issue_id/labels", IssueLabelController, :add
+    delete "/issues/:issue_id/labels/:label_id", IssueLabelController, :remove
+    put "/issues/:issue_id/labels", IssueLabelController, :set
+
+    post "/issues/:issue_id/execution-policy/assign", IssueExecutionPolicyController, :assign
+    post "/issues/:issue_id/execution-policy/decide", IssueExecutionPolicyController, :decide
 
     get "/issues/:issue_id/documents", DocumentController, :index
     get "/issues/:issue_id/documents/:key", DocumentController, :show
     put "/issues/:issue_id/documents/:key", DocumentController, :upsert
     delete "/issues/:issue_id/documents/:key", DocumentController, :delete
     get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
+  end
+
+  scope "/api", CymphoWeb do
+    pipe_through [:api, CymphoWeb.Plugs.AgentAuth]
+
+    get "/agents/:id/inbox", AgentController, :inbox
+    patch "/agents/:id/status", AgentController, :update_status
+
+    get "/issues/:issue_id/attachments", AttachmentController, :index
+    post "/issues/:issue_id/attachments", AttachmentController, :create
+    get "/attachments/:id", AttachmentController, :show
+    get "/attachments/:id/download", AttachmentController, :download
+    delete "/attachments/:id", AttachmentController, :delete
   end
 end

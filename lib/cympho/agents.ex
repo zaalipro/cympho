@@ -215,8 +215,7 @@ defmodule Cympho.Agents do
   Returns true if parent_agent can spawn an agent with child_role.
   Parent must have role_rank >= child_rank (allows peer spawning for redundancy).
   """
-  @spec spawn_authorized?(Agent.t(), :designer | :product_manager | :engineer | :cto | :ceo) ::
-          boolean()
+  @spec spawn_authorized?(Agent.t(), :designer | :product_manager | :engineer | :cto | :ceo) :: boolean()
   def spawn_authorized?(%Agent{} = parent_agent, child_role) do
     role_rank(parent_agent.role) >= role_rank(child_role)
   end
@@ -224,13 +223,9 @@ defmodule Cympho.Agents do
   @doc """
   Returns the list of roles that the given agent is authorized to spawn.
   """
-  @spec spawnable_roles(Agent.t()) :: [
-          :designer | :product_manager | :engineer | :cto | :ceo,
-          ...
-        ]
+  @spec spawnable_roles(Agent.t()) :: [:designer | :product_manager | :engineer | :cto | :ceo, ...]
   def spawnable_roles(%Agent{} = parent_agent) do
     parent_rank = role_rank(parent_agent.role)
-
     [:designer, :product_manager, :engineer, :cto, :ceo]
     |> Enum.filter(fn role -> role_rank(role) <= parent_rank end)
   end
@@ -285,8 +280,7 @@ defmodule Cympho.Agents do
   """
   def list_agent_inbox(agent_id) when is_binary(agent_id) do
     from(i in Issue,
-      where:
-        i.assignee_id == ^agent_id and i.status in [:todo, :in_progress, :in_review, :blocked],
+      where: i.assignee_id == ^agent_id and i.status in [:todo, :in_progress, :in_review, :blocked],
       select: %{
         id: i.id,
         title: i.title,
@@ -295,10 +289,7 @@ defmodule Cympho.Agents do
         assignee_id: i.assignee_id
       },
       order_by: [
-        fragment(
-          "CASE ? WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 3 END",
-          i.priority
-        ),
+        fragment("CASE ? WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 3 END", i.priority),
         asc: i.inserted_at
       ]
     )
@@ -338,6 +329,7 @@ defmodule Cympho.Agents do
 
   @doc """
   Returns session progress for a running agent.
+  Gets current issue, turn count, and elapsed time from AgentHeartbeat and Orchestrator.
   """
   @spec get_session_progress(String.t()) :: {:ok, map()} | {:error, :not_running}
   def get_session_progress(agent_id) when is_binary(agent_id) do
@@ -345,15 +337,19 @@ defmodule Cympho.Agents do
       {:ok, :running} ->
         heartbeat_state = get_heartbeat_state(agent_id)
         issue_id = heartbeat_state[:current_issue_id]
-        issue_info = if issue_id do
-          case Repo.get(Issue, issue_id) do
-            nil -> nil
-            issue -> %{id: issue.id, title: issue.title, identifier: issue.identifier}
+
+        issue_info =
+          if issue_id do
+            case Repo.get(Issue, issue_id) do
+              nil -> nil
+              issue -> %{id: issue.id, title: issue.title, identifier: issue.identifier}
+            end
+          else
+            nil
           end
-        else
-          nil
-        end
+
         orchestrator_info = get_orchestrator_info(issue_id)
+
         {:ok, %{
           agent_id: agent_id,
           issue: issue_info,
@@ -361,19 +357,31 @@ defmodule Cympho.Agents do
           started_at: heartbeat_state[:started_at],
           elapsed_seconds: calculate_elapsed(heartbeat_state[:started_at])
         }}
-      {:ok, _} -> {:error, :not_running}
-      {:error, reason} -> {:error, reason}
+
+      {:ok, _} ->
+        {:error, :not_running}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
   defp get_heartbeat_state(agent_id) do
     case Cympho.AgentHeartbeat.Registry.lookup(agent_id) do
-      {:ok, pid} -> try do GenServer.call(pid, :get_state, 5000) catch :exit, _ -> %{status: :unknown} end
-      :error -> %{status: :unknown}
+      {:ok, pid} ->
+        try do
+          GenServer.call(pid, :get_full_state, 5000)
+        catch
+          :exit, _ -> %{status: :unknown}
+        end
+
+      :error ->
+        %{status: :unknown}
     end
   end
 
   defp get_orchestrator_info(nil), do: %{turn_count: 0}
+
   defp get_orchestrator_info(issue_id) do
     case Cympho.Orchestrator.get_session_state(issue_id) do
       nil -> %{turn_count: 0}
@@ -382,10 +390,13 @@ defmodule Cympho.Agents do
   end
 
   defp calculate_elapsed(nil), do: 0
-  defp calculate_elapsed(started_at), do: DateTime.diff(DateTime.utc_now(), started_at, :second)
+  defp calculate_elapsed(started_at) do
+    DateTime.diff(DateTime.utc_now(), started_at, :second)
+  end
 
   @doc """
   Kills the running session for an agent.
+  Stops the Orchestrator session gracefully and resets agent to idle.
   """
   @spec kill_session(String.t()) :: :ok | {:error, :not_running | :not_found}
   def kill_session(agent_id) when is_binary(agent_id) do
@@ -393,15 +404,28 @@ defmodule Cympho.Agents do
       {:ok, :running} ->
         heartbeat_state = get_heartbeat_state(agent_id)
         issue_id = heartbeat_state[:current_issue_id]
-        if issue_id, do: Cympho.Orchestrator.stop(issue_id)
-        _ = Cympho.AgentHeartbeat.set_idle(agent_id)
-        case get_agent(agent_id) do
-          {:ok, agent} -> update_agent(agent, %{status: :idle})
-          {:error, _} -> :error
+
+        if issue_id do
+          Cympho.Orchestrator.stop(issue_id)
         end
+
+        _ = Cympho.AgentHeartbeat.set_idle(agent_id)
+
+        case get_agent(agent_id) do
+          {:ok, agent} ->
+            update_agent(agent, %{status: :idle})
+          {:error, _} ->
+            :error
+        end
+
         :ok
-      {:ok, _} -> {:error, :not_running}
-      {:error, reason} -> {:error, reason}
+
+      {:ok, _} ->
+        {:error, :not_running}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
+
 end

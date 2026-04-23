@@ -15,6 +15,13 @@ defmodule CymphoWeb.FallbackController do
     |> render(:error, message: "Forbidden")
   end
 
+  def call(conn, {:error, :unauthorized}) do
+    conn
+    |> put_status(:unauthorized)
+    |> put_view(json: CymphoWeb.ErrorJSON)
+    |> render(:error, message: "Unauthorized")
+  end
+
   def call(conn, {:error, %Ecto.Changeset{} = changeset}) do
     conn
     |> put_status(:unprocessable_entity)
