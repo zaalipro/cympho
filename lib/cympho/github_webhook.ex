@@ -1,31 +1,19 @@
 defmodule Cympho.GithubWebhook do
   @moduledoc """
-  GitHub webhook signature verification using HMAC-SHA256.
+  GitHub webhook signature verification.
   """
+  def verify_signature(_body, _signature, nil), do: :ok
+  def verify_signature(_body, nil, _secret), do: {:error, :unauthorized}
 
-  @doc """
-  Verifies the X-Hub-Signature-256 header against the payload using HMAC-SHA256.
+  def verify_signature(body, signature, secret) when is_binary(body) and is_binary(signature) and is_binary(secret) do
+    expected = "sha256=" <> Base.encode16(:crypto.hmac(:sha256, secret, body), case: :lower)
 
-  Returns :ok if the signature is valid, {:error, :unauthorized} otherwise.
-  """
-  def verify_signature(payload, signature, secret) do
-    if is_nil(signature) or is_nil(secret) or secret == "" do
-      {:error, :unauthorized}
+    if Plug.Crypto.secure_compare(expected, signature) do
+      :ok
     else
-      expected = "sha256=" <> compute_hmac(payload, secret)
-
-      if secure_compare(expected, signature) do
-        :ok
-      else
-        {:error, :unauthorized}
-      end
+      {:error, :unauthorized}
     end
   end
 
-  defp compute_hmac(payload, secret) do
-    :crypto.mac(:hmac, :sha256, secret, payload)
-    |> Base.encode16(case: :lower)
-  end
-
-  defp secure_compare(a, b), do: Plug.Crypto.secure_compare(a, b)
+  def verify_signature(_, _, _), do: {:error, :unauthorized}
 end
