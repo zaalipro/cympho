@@ -15,6 +15,7 @@ defmodule Cympho.Issues do
   alias Cympho.Labels
   alias Cympho.Labels.Label
   alias Cympho.Activities
+  alias Cympho.Wakes
 
   def list_issues(opts \\ %{}) do
     Issue
@@ -243,7 +244,12 @@ defmodule Cympho.Issues do
 
   defp do_transition(%Issue{} = issue, new_status) do
     with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
-      if new_status == :done, do: unblock_dependents(issue.id)
+      if new_status == :done do
+        # Unblock dependent issues and wake their assignees
+        unblock_dependents(issue.id)
+        # Notify parent's assignee if all children are done
+        _ = Wakes.notify_children_completed(updated)
+      end
       {:ok, updated}
     end
   end
