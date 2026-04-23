@@ -28,10 +28,6 @@ defmodule CymphoWeb.Router do
     live "/projects/:id/edit", ProjectLive.Edit
     live "/kanban", KanbanLive.Index
     live "/labels", LabelLive.Index
-    live "/agents", AgentLive.Index
-    live "/agents/new", AgentLive.New
-    live "/agents/:id", AgentLive.Show
-    live "/agents/:id/edit", AgentLive.Edit
   end
 
   scope "/api", CymphoWeb do
@@ -42,22 +38,6 @@ defmodule CymphoWeb.Router do
 
     post "/telegram/webhook", TelegramController, :webhook
     post "/github/webhook", GithubController, :webhook
-
-    resources "/routines", RoutineController, only: [:index, :show, :create, :update, :delete]
-    patch "/routines/:id/pause", RoutineController, :pause
-    patch "/routines/:id/resume", RoutineController, :resume
-    patch "/routines/:id/archive", RoutineController, :archive
-
-    resources "/routines/:routine_id/triggers", RoutineTriggerController,
-      only: [:index, :create, :show, :update, :delete],
-      name: "routine_trigger"
-
-    post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_secret
-
-    post "/routine-triggers/:public_id/fire", RoutineTriggerController, :fire
-
-    post "/issues/:issue_id/execution-policy/assign", IssueExecutionPolicyController, :assign
-    post "/issues/:issue_id/execution-policy/decide", IssueExecutionPolicyController, :decide
   end
 
   scope "/api", CymphoWeb do
@@ -66,5 +46,7 @@ defmodule CymphoWeb.Router do
 
     get "/agents/:id/inbox", AgentController, :inbox
     patch "/agents/:id/status", AgentController, :update_status
+
+    resources "/issues", IssueController, only: [:create, :show]
   end
 end
