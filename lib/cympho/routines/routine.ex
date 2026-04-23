@@ -37,6 +37,21 @@ defmodule Cympho.Routines.Routine do
     timestamps(type: :utc_datetime)
   end
 
+
+  @status_transitions %{
+    active: [:paused, :archived],
+    paused: [:active, :archived],
+    archived: []
+  }
+
+  def valid_next_statuses(%__MODULE__{status: status}) do
+    Map.get(@status_transitions, status, [])
+  end
+
+  def transition_allowed?(%__MODULE__{status: current}, target) do
+    target in Map.get(@status_transitions, current, [])
+  end
+
   def changeset(routine, attrs) do
     routine
     |> cast(attrs, [

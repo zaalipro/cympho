@@ -53,7 +53,7 @@ defmodule CymphoWeb.RoutineController do
   def delete(conn, %{"id" => id}) do
     routine = Routines.get_routine!(id)
     {:ok, _} = Routines.delete_routine(routine)
-    json(conn, %{message: "deleted"})
+    send_resp(conn, :no_content, "")
   end
 
   def pause(conn, %{"id" => id}) do
@@ -61,7 +61,7 @@ defmodule CymphoWeb.RoutineController do
 
     case Routines.pause_routine(routine) do
       {:ok, paused} -> json(conn, %{data: serialize(paused)})
-      {:error, reason} -> conn |> put_status(:conflict) |> json(%{error: reason})
+      {:error, reason} -> conn |> put_status(:unprocessable_entity) |> json(%{error: reason})
     end
   end
 
@@ -70,7 +70,7 @@ defmodule CymphoWeb.RoutineController do
 
     case Routines.resume_routine(routine) do
       {:ok, resumed} -> json(conn, %{data: serialize(resumed)})
-      {:error, reason} -> conn |> put_status(:conflict) |> json(%{error: reason})
+      {:error, reason} -> conn |> put_status(:unprocessable_entity) |> json(%{error: reason})
     end
   end
 
@@ -79,7 +79,7 @@ defmodule CymphoWeb.RoutineController do
 
     case Routines.archive_routine(routine) do
       {:ok, archived} -> json(conn, %{data: serialize(archived)})
-      {:error, reason} -> conn |> put_status(:conflict) |> json(%{error: reason})
+      {:error, reason} -> conn |> put_status(:unprocessable_entity) |> json(%{error: reason})
     end
   end
 
