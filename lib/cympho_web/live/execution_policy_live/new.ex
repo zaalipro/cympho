@@ -6,7 +6,7 @@ defmodule CymphoWeb.ExecutionPolicyLive.New do
   @impl true
   def mount(_params, _session, socket) do
     changeset = ExecutionPolicies.change_execution_policy(%ExecutionPolicy{})
-    socket = assign(socket, changeset: changeset, page_title: "New Execution Policy")
+    socket = assign(socket, changeset: changeset, form: to_form(changeset), page_title: "New Execution Policy")
     {:ok, socket}
   end
 
@@ -22,7 +22,7 @@ defmodule CymphoWeb.ExecutionPolicyLive.New do
         {:noreply, push_navigate(socket, to: ~p"/execution-policies/#{policy.id}")}
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign(socket, changeset: changeset)}
+        {:noreply, assign(socket, changeset: changeset, form: to_form(changeset))}
     end
   end
 end

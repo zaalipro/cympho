@@ -5,15 +5,7 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.Comments
   alias Cympho.Agents
   alias Cympho.Documents
-  alias Cympho.Attachments
   alias Cympho.Orchestrator
-
-  @impl true
-  def mount(params, session, socket) do
-    socket = socket
-      |> assign(:uploads, attachment: [])
-    {:ok, socket}
-  end
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -23,14 +15,18 @@ defmodule CymphoWeb.IssueLive.Show do
 
     case Issues.get_issue(id) do
       {:ok, issue} ->
-        attachments = Attachments.list_attachments(id)
+        comment_changeset = Comments.Comment.changeset(%Comments.Comment{}, %{})
+
         {:ok,
          assign(socket,
            issue: issue,
-           attachments: attachments,
-           comment_changeset: Comments.Comment.changeset(%Comments.Comment{}, %{}),
+           comment_changeset: comment_changeset,
+           comment_form: to_form(comment_changeset),
            agents: Agents.list_agents_by_status(:idle),
-           show_agent_panel: false
+           all_agents: Agents.list_agents(),
+           show_agent_panel: false,
+           editing: nil,
+           assignee_search: ""
          )}
 
       {:error, :not_found} ->
@@ -59,6 +55,151 @@ defmodule CymphoWeb.IssueLive.Show do
 
   defp apply_action(socket, nil, id) do
     apply_action(socket, :show, id)
+  end
+
+  @impl true
+  def handle_event("add_comment", %{"comment" => comment_params}, socket) do
+    comment_params = Map.put(comment_params, "issue_id", socket.assigns.issue.id)
+
+    case Comments.create_comment(comment_params) do
+      {:ok, _comment} ->
+        changeset = Comments.Comment.changeset(%Comments.Comment{}, %{})
+        {:noreply,
+         assign(socket,
+           comment_changeset: changeset,
+           comment_form: to_form(changeset)
+         )}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, comment_changeset: changeset, comment_form: to_form(changeset))}
+    end
+  end
+
+  @impl true
+  def handle_event("delete_comment", %{"id" => id}, socket) do
+    comment = Comments.get_comment!(id)
+    _ = Comments.delete_comment(comment)
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("update_status", %{"status" => status}, socket) do
+    status_atoms = %{
+      "backlog" => :backlog,
+      "todo" => :todo,
+      "in_progress" => :in_progress,
+      "in_review" => :in_review,
+      "done" => :done,
+      "blocked" => :blocked
+    }
+
+    case Map.fetch(status_atoms, status) do
+      {:ok, status_atom} ->
+        case Issues.update_issue(socket.assigns.issue, %{status: status_atom}) do
+          {:ok, _issue} ->
+            {:noreply, socket}
+          {:error, _changeset} ->
+            {:noreply, put_flash(socket, :error, "Failed to update status")}
+        end
+      :error ->
+        {:noreply, put_flash(socket, :error, "Invalid status")}
+    end
+  end
+
+  @impl true
+  def handle_event("update_priority", %{"priority" => priority}, socket) do
+    priority_atom = String.to_existing_atom(priority)
+
+    case Issues.update_issue(socket.assigns.issue, %{priority: priority_atom}) do
+      {:ok, _issue} -> {:noreply, socket}
+      {:error, _changeset} -> {:noreply, put_flash(socket, :error, "Failed to update priority")}
+    end
+  end
+
+  @impl true
+  def handle_event("start_editing", %{"field" => field}, socket) do
+    {:noreply, assign(socket, :editing, field)}
+  end
+
+  @impl true
+  def handle_event("cancel_editing", _params, socket) do
+    {:noreply, assign(socket, :editing, nil)}
+  end
+
+  @impl true
+  def handle_event("save_title", %{"title" => title}, socket) do
+    case Issues.update_issue(socket.assigns.issue, %{title: title}) do
+      {:ok, issue} -> {:noreply, assign(socket, issue: issue, editing: nil)}
+      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update title")}
+    end
+  end
+
+  @impl true
+  def handle_event("save_description", %{"description" => description}, socket) do
+    case Issues.update_issue(socket.assigns.issue, %{description: description}) do
+      {:ok, issue} -> {:noreply, assign(socket, issue: issue, editing: nil)}
+      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update description")}
+    end
+  end
+
+  @impl true
+  def handle_event("update_github_pr_url", %{"github_pr_url" => url}, socket) do
+    case Issues.update_issue(socket.assigns.issue, %{github_pr_url: url}) do
+      {:ok, issue} -> {:noreply, assign(socket, issue: issue)}
+      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update PR URL")}
+    end
+  end
+
+  @impl true
+  def handle_event("clear_github_pr_url", _params, socket) do
+    case Issues.update_issue(socket.assigns.issue, %{github_pr_url: nil}) do
+      {:ok, issue} -> {:noreply, assign(socket, issue: issue)}
+      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to clear PR URL")}
+    end
+  end
+
+  @impl true
+  def handle_event("search_assignee", %{"q" => q}, socket) do
+    {:noreply, assign(socket, assignee_search: q)}
+  end
+
+  @impl true
+  def handle_event("assign_issue", %{"agent_id" => agent_id}, socket) do
+    case Issues.update_issue(socket.assigns.issue, %{assignee_id: agent_id}) do
+      {:ok, issue} -> {:noreply, assign(socket, issue: issue, assignee_search: "")}
+      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to assign issue")}
+    end
+  end
+
+  @impl true
+  def handle_event("unassign_issue", _params, socket) do
+    case Issues.update_issue(socket.assigns.issue, %{assignee_id: nil}) do
+      {:ok, issue} -> {:noreply, assign(socket, issue: issue)}
+      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to unassign issue")}
+    end
+  end
+
+  @impl true
+  def handle_event("toggle_agent_panel", _, socket) do
+    {:noreply, update(socket, :show_agent_panel, &(!&1))}
+  end
+
+  @impl true
+  def handle_event("spawn_agent", %{"agent_id" => agent_id}, socket) do
+    issue = socket.assigns.issue
+
+    case Orchestrator.start_and_run(issue, agent_id) do
+      {:ok, _pid} ->
+        {:ok, _updated_agent} = Agents.update_agent(%Agents.Agent{id: agent_id}, %{status: :running})
+        {:noreply,
+         socket
+         |> put_flash(:info, "Agent spawned successfully")
+         |> assign(:show_agent_panel, false)
+         |> assign(:agents, Agents.list_agents_by_status(:idle))}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to spawn agent: #{inspect(reason)}")}
+    end
   end
 
   @impl true
@@ -92,183 +233,10 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:comment_deleted, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      attachments = Attachments.list_attachments(updated_issue.id)
-      {:noreply, assign(socket, attachments: attachments)}
+      {:noreply, assign(socket, :issue, updated_issue)}
     else
       {:noreply, socket}
     end
-  end
-
-  def handle_info({:attachment_created, updated_issue}, socket) do
-    if socket.assigns.issue.id == updated_issue.id do
-      attachments = Attachments.list_attachments(updated_issue.id)
-      {:noreply, assign(socket, attachments: attachments)}
-    else
-      {:noreply, socket}
-    end
-  end
-
-  def handle_info({:attachment_deleted, updated_issue}, socket) do
-    if socket.assigns.issue.id == updated_issue.id do
-      attachments = Attachments.list_attachments(updated_issue.id)
-      {:noreply, assign(socket, attachments: attachments)}
-    else
-      {:noreply, socket}
-    end
-  end
-
-  @impl true
-  def handle_event("add_comment", %{"comment" => comment_params}, socket) do
-    comment_params = Map.put(comment_params, "issue_id", socket.assigns.issue.id)
-
-    case Comments.create_comment(comment_params) do
-      {:ok, _comment} ->
-        {:noreply,
-         assign(socket, :comment_changeset, Comments.Comment.changeset(%Comments.Comment{}, %{}))}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, :comment_changeset, changeset)}
-    end
-  end
-
-  @impl true
-  def handle_event("delete_comment", %{"id" => id}, socket) do
-    comment = Comments.get_comment!(id)
-    {:ok, _} = Comments.delete_comment(comment)
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("update_issue_status", %{"status" => status}, socket) do
-    status_atoms = %{
-      "backlog" => :backlog,
-      "todo" => :todo,
-      "in_progress" => :in_progress,
-      "in_review" => :in_review,
-      "done" => :done,
-      "blocked" => :blocked
-    }
-
-    case Map.fetch(status_atoms, status) do
-      {:ok, status_atom} ->
-        case Issues.update_issue(socket.assigns.issue, %{status: status_atom}) do
-          {:ok, _issue} ->
-            {:noreply, socket}
-          {:error, _changeset} ->
-            {:noreply, put_flash(socket, :error, "Failed to update status")}
-        end
-      :error ->
-        {:noreply, put_flash(socket, :error, "Invalid status")}
-    end
-  end
-
-  @impl true
-  def handle_event("toggle_agent_panel", _, socket) do
-    {:noreply, update(socket, :show_agent_panel, &(!&1))}
-  end
-
-  @impl true
-  def handle_event("spawn_agent", %{"agent_id" => agent_id}, socket) do
-    issue = socket.assigns.issue
-
-    case Orchestrator.start_and_run(issue, agent_id) do
-      {:ok, _pid} ->
-        {:ok, _updated_agent} = Agents.update_agent(%Agents.Agent{id: agent_id}, %{status: :running})
-        {:noreply,
-         socket
-         |> put_flash(:info, "Agent spawned successfully")
-         |> assign(:show_agent_panel, false)
-         |> assign(:agents, Agents.list_agents_by_status(:idle))}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to spawn agent: #{inspect(reason)}")}
-    end
-  end
-
-  def handle_event("upload_attachment", _params, socket) do
-    uploaded_files = socket.assigns.uploads.attachment.entries
-
-    Enum.reduce(uploaded_files, socket, fn entry, socket ->
-      case entry do
-        %{action: :done, status: :ok, ref: ref} ->
-          file = entry.client_name
-          tmp_path = entry.path
-
-          case Attachments.store_file(%Plug.Upload{filename: file, path: tmp_path}, socket.assigns.issue.id) do
-            {:ok, relative_path} ->
-              attrs = %{
-                filename: file,
-                content_type: get_content_type(file),
-                file_size: entry.file_size,
-                path: relative_path,
-                issue_id: socket.assigns.issue.id
-              }
-
-              case Attachments.create_attachment(attrs) do
-                {:ok, _attachment} ->
-                  socket
-                  |> put_flash(:info, "File uploaded successfully")
-                  |> cancel_upload(ref)
-
-                {:error, _changeset} ->
-                  socket
-                  |> put_flash(:error, "Failed to save attachment")
-                  |> cancel_upload(ref)
-              end
-
-            {:error, _reason} ->
-              socket
-              |> put_flash(:error, "Failed to store file")
-              |> cancel_upload(ref)
-          end
-
-        %{action: :error} ->
-          socket
-          |> put_flash(:error, "Upload failed: #{entry.error}")
-
-        _ ->
-          socket
-      end
-    end)
-  end
-
-  def handle_event("delete_attachment", %{"id" => id}, socket) do
-    attachment = Attachments.get_attachment!(id)
-
-    case Attachments.delete_attachment(attachment) do
-      {:ok, _attachment} ->
-        attachments = Attachments.list_attachments(socket.assigns.issue.id)
-        {:noreply, assign(socket, attachments: attachments)}
-
-      {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Failed to delete attachment")}
-    end
-  end
-
-  def handle_event("cancel_upload", %{"ref" => ref}, socket) do
-    {:noreply, cancel_upload(socket, ref)}
-  end
-
-  defp get_content_type(filename) do
-    case Path.extname(filename) do
-      ".jpg" -> "image/jpeg"
-      ".jpeg" -> "image/jpeg"
-      ".png" -> "image/png"
-      ".gif" -> "image/gif"
-      ".pdf" -> "application/pdf"
-      ".txt" -> "text/plain"
-      ".doc" -> "application/msword"
-      ".docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-      ".xls" -> "application/vnd.ms-excel"
-      ".xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      ".zip" -> "application/zip"
-      _ -> "application/octet-stream"
-    end
-  end
-
-  defp error_to_string(:too_large), do: "File is too large"
-  defp error_to_string(:not_accepted), do: "File type not supported"
-  defp error_to_string(_), do: "Failed to upload file"
   end
 
   def handle_info({:session_started, session_id}, socket) do
@@ -283,5 +251,28 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:turn_ended_with_error, session_id, reason}, socket) do
     IO.inspect({:turn_ended_with_error, session_id, reason}, label: "Agent error")
     {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
+  end
+
+  defp valid_status_options(current_status) do
+    all = [
+      {"Backlog", "backlog"},
+      {"Todo", "todo"},
+      {"In progress", "in_progress"},
+      {"In review", "in_review"},
+      {"Done", "done"},
+      {"Blocked", "blocked"}
+    ]
+
+    current_str = to_string(current_status)
+    Enum.reject(all, fn {_, value} -> value == current_str end)
+  end
+
+  defp filtered_agents(all_agents, search) do
+    search = String.downcase(search)
+
+    Enum.filter(all_agents, fn agent ->
+      String.contains?(String.downcase(agent.name), search) or
+        String.contains?(String.downcase(to_string(agent.role)), search)
+    end)
   end
 end

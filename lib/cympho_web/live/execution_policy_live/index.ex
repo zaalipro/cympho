@@ -13,6 +13,8 @@ defmodule CymphoWeb.ExecutionPolicyLive.Index do
     {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
+  defp apply_action(socket, nil, _params), do: apply_action(socket, :index, %{})
+
   defp apply_action(socket, :index, _params) do
     socket
     |> assign(:page_title, "Execution Policies")

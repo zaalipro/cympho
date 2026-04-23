@@ -6,7 +6,7 @@ defmodule CymphoWeb.RoutineLive.New do
   @impl true
   def mount(_params, _session, socket) do
     changeset = Routines.change_routine(%Routine{})
-    socket = assign(socket, changeset: changeset, page_title: "New Routine")
+    socket = assign(socket, changeset: changeset, form: to_form(changeset), page_title: "New Routine")
     {:ok, socket}
   end
 
@@ -22,7 +22,7 @@ defmodule CymphoWeb.RoutineLive.New do
         {:noreply, push_navigate(socket, to: ~p"/routines/#{routine.id}")}
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign(socket, changeset: changeset)}
+        {:noreply, assign(socket, changeset: changeset, form: to_form(changeset))}
     end
   end
 end

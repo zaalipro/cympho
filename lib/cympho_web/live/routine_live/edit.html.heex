@@ -8,9 +8,9 @@
 </.header>
 
 <div class="routine-form">
-  <.simple_form for={@changeset} as={:routine} phx-submit="save">
-    <.input field={@changeset[:name]} label="Name" />
-    <.input field={@changeset[:description]} label="Description" type="textarea" />
+  <.simple_form for={@form} as={:routine} phx-submit="save">
+    <.input field={@form[:name]} label="Name" />
+    <.input field={@form[:description]} label="Description" type="textarea" />
 
     <div class="form-group">
       <label>Priority</label>

@@ -1,7 +1,9 @@
 import Config
 
+port = if config_env() == :prod, do: 443, else: String.to_integer(System.get_env("PORT") || "4000")
+
 config :cympho, CymphoWeb.Endpoint,
-  url: [host: System.get_env("APP_HOST") || "localhost", port: 443],
+  url: [host: System.get_env("APP_HOST") || "localhost", port: port],
   cache_static_manifest: "priv/static/cache_manifest.json"
 
 if database_url = System.get_env("DATABASE_URL") do

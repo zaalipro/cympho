@@ -110,7 +110,7 @@
       </form>
 
       <button
-        :if={filters_active?(@__assigns__)}
+        :if={filters_active?(assigns)}
         type="button"
         phx-click="clear_filters"
         class="text-xs text-text-quaternary hover:text-text-secondary transition-colors"

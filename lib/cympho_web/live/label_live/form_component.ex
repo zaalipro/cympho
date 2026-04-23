@@ -7,14 +7,14 @@ defmodule CymphoWeb.LabelLive.FormComponent do
     ~H"""
     <div class="label-form">
       <.simple_form
-        for={@changeset}
+        for={@form}
         as={:label}
         phx-submit="save"
         phx-target={@myself}
       >
-        <.input field={@changeset[:name]} label="Name" />
-        <.input field={@changeset[:color]} label="Color" placeholder="#FF0000" />
-        <.input field={@changeset[:project_id]} label="Project ID" />
+        <.input field={@form[:name]} label="Name" />
+        <.input field={@form[:color]} label="Color" placeholder="#FF0000" />
+        <.input field={@form[:project_id]} label="Project ID" />
 
         <:actions>
           <.button type="submit">{if @label.id, do: "Update Label", else: "Create Label"}</.button>
@@ -27,7 +27,7 @@ defmodule CymphoWeb.LabelLive.FormComponent do
   @impl true
   def update(assigns, socket) do
     changeset = Labels.change_label(assigns.label)
-    {:ok, assign(socket, assigns |> Map.put(:changeset, changeset))}
+    {:ok, assign(socket, label: assigns.label, action: assigns.action, changeset: changeset, form: to_form(changeset))}
   end
 
   @impl true
@@ -42,7 +42,7 @@ defmodule CymphoWeb.LabelLive.FormComponent do
         {:noreply, socket}
 
       {:error, changeset} ->
-        {:noreply, assign(socket, changeset: changeset)}
+        {:noreply, assign(socket, changeset: changeset, form: to_form(changeset))}
     end
   end
 
@@ -53,7 +53,7 @@ defmodule CymphoWeb.LabelLive.FormComponent do
         {:noreply, socket}
 
       {:error, changeset} ->
-        {:noreply, assign(socket, changeset: changeset)}
+        {:noreply, assign(socket, changeset: changeset, form: to_form(changeset))}
     end
   end
 end

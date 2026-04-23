@@ -21,6 +21,8 @@ defmodule CymphoWeb.AgentLive.Show do
     {:noreply, apply_action(socket, socket.assigns.live_action, id)}
   end
 
+  defp apply_action(socket, nil, id), do: apply_action(socket, :show, id)
+
   defp apply_action(socket, :show, id) do
     case Agents.get_agent(id) do
       {:ok, agent} ->

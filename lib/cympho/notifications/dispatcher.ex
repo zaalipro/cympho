@@ -13,7 +13,7 @@ defmodule Cympho.Notifications.Dispatcher do
   use GenServer
 
   import Ecto.Query, warn: false
-  alias Cympho.Notifications.{Channel, EmailChannel, Message, TelegramChannel, WebhookChannel}
+  alias Cympho.Notifications.{EmailChannel, Message, TelegramChannel, WebhookChannel}
   alias Cympho.Notifications.NotificationPreference
   alias Cympho.Users
 

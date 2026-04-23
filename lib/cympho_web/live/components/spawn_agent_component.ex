@@ -11,12 +11,12 @@ defmodule CymphoWeb.SpawnAgentComponent do
         <div class="bg-surface border border-border rounded-card p-5 mb-6">
           <h4 class="text-sm font-510 text-text-primary mb-4">Spawn New Agent</h4>
           <.simple_form
-            for={@changeset}
+            for={@form}
             as={:agent}
             phx-submit="spawn"
             phx-target={@myself}
           >
-            <.input field={@changeset[:name]} label="Name" />
+            <.input field={@form[:name]} label="Name" />
 
             <.select
               name="agent[role]"
@@ -25,8 +25,8 @@ defmodule CymphoWeb.SpawnAgentComponent do
               value={to_string(@prefilled_role)}
             />
 
-            <.input field={@changeset[:config]} label="Adapter Config" placeholder="{}" />
-            <.input field={@changeset[:instructions]} label="Instructions" type="textarea" />
+            <.input field={@form[:config]} label="Adapter Config" placeholder="{}" />
+            <.input field={@form[:instructions]} label="Instructions" type="textarea" />
 
             <:actions>
               <.button type="submit" phx-disable-with="Spawning...">Spawn Agent</.button>
@@ -61,6 +61,7 @@ defmodule CymphoWeb.SpawnAgentComponent do
       socket
       |> assign(assigns)
       |> assign(:changeset, changeset)
+      |> assign(:form, to_form(changeset))
       |> assign(:show_form, false)
       |> assign(:spawnable_roles, Agents.spawnable_roles(assigns.current_agent))
       |> assign(:prefilled_role, prefilled_role(assigns.current_agent.role))
@@ -75,7 +76,7 @@ defmodule CymphoWeb.SpawnAgentComponent do
 
   def handle_event("hide_form", _, socket) do
     changeset = Agents.change_agent(%Agent{})
-    {:noreply, assign(socket, show_form: false, changeset: changeset)}
+    {:noreply, assign(socket, show_form: false, changeset: changeset, form: to_form(changeset))}
   end
 
   def handle_event("spawn", %{"agent" => agent_params}, socket) do
@@ -93,7 +94,7 @@ defmodule CymphoWeb.SpawnAgentComponent do
          |> assign(:show_form, false)}
 
       {:error, changeset} ->
-        {:noreply, assign(socket, changeset: changeset)}
+        {:noreply, assign(socket, changeset: changeset, form: to_form(changeset))}
     end
   end
 

@@ -7,7 +7,7 @@ defmodule CymphoWeb.ExecutionPolicyLive.Edit do
     case ExecutionPolicies.get_execution_policy(id) do
       {:ok, policy} ->
         changeset = ExecutionPolicies.change_execution_policy(policy)
-        {:ok, assign(socket, execution_policy: policy, changeset: changeset)}
+        {:ok, assign(socket, execution_policy: policy, changeset: changeset, form: to_form(changeset))}
 
       {:error, :not_found} ->
         {:ok, push_navigate(socket, to: ~p"/execution-policies")}
@@ -23,7 +23,8 @@ defmodule CymphoWeb.ExecutionPolicyLive.Edit do
          socket
          |> assign(:page_title, "Edit #{policy.name}")
          |> assign(:execution_policy, policy)
-         |> assign(:changeset, changeset)}
+         |> assign(:changeset, changeset)
+         |> assign(:form, to_form(changeset))}
 
       {:error, :not_found} ->
         {:noreply,
@@ -40,7 +41,7 @@ defmodule CymphoWeb.ExecutionPolicyLive.Edit do
         {:noreply, push_navigate(socket, to: ~p"/execution-policies/#{policy.id}")}
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign(socket, changeset: changeset)}
+        {:noreply, assign(socket, changeset: changeset, form: to_form(changeset))}
     end
   end
 end

@@ -44,7 +44,6 @@ defmodule Cympho.Notifications.RetryWorker do
 
   @doc """
   Retry a failed notification delivery.
-  Handles rate-limiting by rescheduling without incrementing the attempt counter.
   Records dead-letter entries on final retry failure.
   """
   def retry(%Message{} = message, attempt) do
@@ -53,9 +52,6 @@ defmodule Cympho.Notifications.RetryWorker do
     case Dispatcher.dispatch(message) do
       :ok ->
         :ok
-
-      {:error, {:rate_limited, wait_ms}} ->
-        schedule_rate_limited_retry(message, attempt, wait_ms)
 
       {:partial_failure, _} ->
         if attempt < max do
@@ -104,12 +100,6 @@ defmodule Cympho.Notifications.RetryWorker do
     {:noreply, state}
   end
 
-  @impl GenServer
-  def handle_info({:rate_limited_retry, message, attempt}, state) do
-    retry(message, attempt)
-    {:noreply, state}
-  end
-
   defp maybe_schedule_next_retry(message, attempt) do
     if attempt >= max_attempts(message) do
       :logger.warning("RetryWorker: max retries exceeded")
@@ -117,16 +107,6 @@ defmodule Cympho.Notifications.RetryWorker do
       delay = calculate_delay(attempt + 1)
       Process.send_after(self(), {:retry_notification, message, attempt + 1}, delay)
     end
-  end
-
-  defp schedule_rate_limited_retry(message, attempt, wait_ms) do
-    Process.send_after(
-      self(),
-      {:rate_limited_retry, message, attempt},
-      wait_ms
-    )
-
-    {:ok, attempt}
   end
 
   defp calculate_delay(attempt) do

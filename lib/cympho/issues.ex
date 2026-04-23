@@ -3,16 +3,21 @@ defmodule Cympho.Issues do
   The Issues context for managing issues and their CRUD operations.
   """
   import Ecto.Query, warn: false
-  import Ecto.Changeset, only: [optimistic_lock: 2, cast: 3, put_assoc: 3]
+  import Ecto.Changeset, only: [optimistic_lock: 2]
   require Logger
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
+  alias Cympho.Issues.ExecutionState
   alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Approvals
   alias Cympho.Comments
   alias Cympho.Activities
+  alias Cympho.ExecutionPolicies
+  alias Cympho.ExecutionPolicies.ExecutionPolicy
+  alias Cympho.Wakes
+  alias Cympho.Labels.Label
 
   def list_issues(opts \\ %{}) do
     Issue
@@ -102,7 +107,7 @@ defmodule Cympho.Issues do
     try do
       where(query, fragment("search_vector @@ plainto_tsquery('english', ?)", ^search))
     rescue
-      e in [Postgrex.Error, Ecto.Query.CompileError] ->
+      _e in [Postgrex.Error, Ecto.Query.CompileError] ->
         Logger.warning("Search query invalid, degrading to unfiltered", search: search)
         query
     end
@@ -254,44 +259,6 @@ defmodule Cympho.Issues do
     transition_issue(issue, new_status, nil)
   end
 
-  defp do_executor_submit(%Issue{} = issue, executor_id) do
-    if executor_id != nil and executor_id != issue.execution_state.current_participant do
-      {:error, :unauthorized}
-    else
-      do_executor_submit_authorized(issue, executor_id)
-    end
-  end
-
-  defp do_executor_submit_authorized(%Issue{} = issue, executor_id) do
-    policy = ExecutionPolicies.get_execution_policy!(issue.execution_policy_id)
-    approved_state = ExecutionState.approve(issue.execution_state, executor_id)
-
-    case ExecutionState.advance(approved_state, policy, executor_id) do
-      {:done, final_state} ->
-        # Single-stage policy (executor only) - can mark done
-        update_issue(issue, %{
-          status: :done,
-          execution_state: final_state,
-          assignee_id: nil
-        })
-        |> tap(fn {:ok, _} ->
-          unblock_dependents(issue.id)
-          _ = Wakes.notify_children_completed(issue)
-        end)
-
-      {:ok, next_state} ->
-        next_assignee = next_state.current_participant
-
-        update_issue(issue, %{
-          status: :in_review,
-          execution_state: next_state,
-          assignee_id: next_assignee
-        })
-        |> tap(fn {:ok, _} ->
-          wake_next_participant(next_assignee, issue.id)
-        end)
-    end
-  end
   defp validate_reviewer_role(%Agent{} = agent) do
     if agent.role in [:cto, :ceo] do
       :ok
@@ -556,33 +523,6 @@ defmodule Cympho.Issues do
     end
   end
 
-  def add_label_to_issue(%Issue{} = issue, %Label{} = label) do
-    issue = Repo.preload(issue, :labels)
-    labels = issue.labels ++ [label]
-    issue
-    |> cast(%{}, [])
-    |> put_assoc(:labels, labels)
-    |> Repo.update()
-  end
-
-  def remove_label_from_issue(%Issue{} = issue, %Label{} = label) do
-    issue = Repo.preload(issue, :labels)
-    labels = Enum.reject(issue.labels, &(&1.id == label.id))
-    issue
-    |> cast(%{}, [])
-    |> put_assoc(:labels, labels)
-    |> Repo.update()
-  end
-
-  def set_issue_labels(%Issue{} = issue, label_ids) when is_list(label_ids) do
-    labels = Labels.list_labels() |> Enum.filter(&(&1.id in label_ids))
-    issue = Repo.preload(issue, :labels)
-    issue
-    |> cast(%{}, [])
-    |> put_assoc(:labels, labels)
-    |> Repo.update()
-  end
-
   def delete_issue(%Issue{} = issue) do
     cancel_pending_approvals(issue.id)
 
@@ -727,7 +667,7 @@ defmodule Cympho.Issues do
     end
   end
 
-  def add_label_to_issue(%Issue{} = issue, %Cympho.Labels.Label{} = label) do
+  def add_label_to_issue(%Issue{} = issue, %Label{} = label) do
     issue = Repo.preload(issue, :labels)
 
     if Enum.any?(issue.labels, &(&1.id == label.id)) do
@@ -744,7 +684,7 @@ defmodule Cympho.Issues do
     end
   end
 
-  def remove_label_from_issue(%Issue{} = issue, %Cympho.Labels.Label{} = label) do
+  def remove_label_from_issue(%Issue{} = issue, %Label{} = label) do
     issue = Repo.preload(issue, :labels)
 
     new_labels = Enum.reject(issue.labels, &(&1.id == label.id))
@@ -761,7 +701,7 @@ defmodule Cympho.Issues do
 
   def set_issue_labels(%Issue{} = issue, label_ids) when is_list(label_ids) do
     issue = Repo.preload(issue, :labels)
-    labels = Cympho.Repo.all(from l in Cympho.Labels.Label, where: l.id in ^label_ids)
+    labels = Repo.all(from l in Label, where: l.id in ^label_ids)
 
     issue
     |> Ecto.Changeset.change()

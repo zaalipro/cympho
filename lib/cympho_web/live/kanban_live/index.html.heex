@@ -137,7 +137,7 @@
       </div>
     </form>
 
-    <%= if active_filter_count(@assigns) > 0 do %>
+    <%= if active_filter_count(assigns) > 0 do %>
       <button
         type="button"
         phx-click="clear_filters"
@@ -145,7 +145,7 @@
       >
         Clear filters
         <span class="ml-1.5 bg-accent/20 text-accent px-1.5 rounded-full">
-          {active_filter_count(@assigns)}
+          {active_filter_count(assigns)}
         </span>
       </button>
     <% end %>

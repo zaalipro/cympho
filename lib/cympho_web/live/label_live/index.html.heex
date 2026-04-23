@@ -6,13 +6,13 @@
   <h3 :if={@editing_label}>Editing: {@editing_label.name}</h3>
   <h3 :if={!@editing_label}>Create New Label</h3>
   <.simple_form
-    for={@label_changeset}
+    for={@form}
     phx-submit={(@editing_label && "update_label") || "create_label"}
   >
-    <.input field={@label_changeset[:name]} label="Name" placeholder="Label name" />
-    <.input field={@label_changeset[:color]} label="Color" placeholder="#FF0000" />
+    <.input field={@form[:name]} label="Name" placeholder="Label name" />
+    <.input field={@form[:color]} label="Color" placeholder="#FF0000" />
     <.input
-      field={@label_changeset[:description]}
+      field={@form[:description]}
       label="Description"
       placeholder="Description (optional)"
     />

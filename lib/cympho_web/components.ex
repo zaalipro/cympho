@@ -125,6 +125,5 @@ defmodule CymphoWeb.Components do
 
   defp input_name(field), do: field.name
 
-  defp input_value(field),
-    do: Ecto.Changeset.get_change(field.source, field.name) || field.data[field.name]
+  defp input_value(field), do: field.value
 end

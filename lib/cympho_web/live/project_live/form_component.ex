@@ -3,18 +3,30 @@ defmodule CymphoWeb.ProjectLive.FormComponent do
   alias Cympho.Projects
 
   @impl true
+  def update(assigns, socket) do
+    changeset = Projects.change_project(assigns.project)
+
+    {:ok,
+     socket
+     |> assign(:project, assigns.project)
+     |> assign(:action, assigns.action)
+     |> assign(:changeset, changeset)
+     |> assign(:form, to_form(changeset))}
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <div class="p-6 lg:p-8 max-w-2xl mx-auto">
       <.simple_form
-        for={@changeset}
+        for={@form}
         as={:project}
         phx-submit="save"
         phx-target={@myself}
       >
-        <.input field={@changeset[:name]} label="Name" />
-        <.input field={@changeset[:description]} label="Description" type="textarea" />
-        <.input field={@changeset[:prefix]} label="Prefix" placeholder="e.g., PROJ" />
+        <.input field={@form[:name]} label="Name" />
+        <.input field={@form[:description]} label="Description" type="textarea" />
+        <.input field={@form[:prefix]} label="Prefix" placeholder="e.g., PROJ" />
         <.select
           name="project[status]"
           label="Status"
@@ -43,7 +55,7 @@ defmodule CymphoWeb.ProjectLive.FormComponent do
         {:noreply, socket}
 
       {:error, changeset} ->
-        {:noreply, assign(socket, changeset: changeset)}
+        {:noreply, assign(socket, changeset: changeset, form: to_form(changeset))}
     end
   end
 
@@ -54,7 +66,7 @@ defmodule CymphoWeb.ProjectLive.FormComponent do
         {:noreply, socket}
 
       {:error, changeset} ->
-        {:noreply, assign(socket, changeset: changeset)}
+        {:noreply, assign(socket, changeset: changeset, form: to_form(changeset))}
     end
   end
 end

@@ -20,6 +20,8 @@ defmodule CymphoWeb.ProjectLive.Show do
     {:noreply, apply_action(socket, socket.assigns.live_action, id)}
   end
 
+  defp apply_action(socket, nil, id), do: apply_action(socket, :show, id)
+
   defp apply_action(socket, :show, id) do
     case Projects.get_project(id) do
       {:ok, project} ->

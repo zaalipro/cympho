@@ -26,6 +26,10 @@ defmodule CymphoWeb.Router do
     live "/projects/new", ProjectLive.New
     live "/projects/:id", ProjectLive.Show
     live "/projects/:id/edit", ProjectLive.Edit
+    live "/goals", GoalLive.Index
+    live "/goals/new", GoalLive.New
+    live "/goals/:id", GoalLive.Show
+    live "/goals/:id/edit", GoalLive.Edit
     live "/kanban", KanbanLive.Index
     live "/labels", LabelLive.Index
     live "/approvals", ApprovalLive.Index
