@@ -10,12 +10,14 @@ defmodule CymphoWeb.Plugs.AgentAuth do
         case Agents.get_agent(id) do
           {:ok, agent} ->
             assign(conn, :current_agent, agent)
+
           {:error, :not_found} ->
             conn
             |> put_status(:unauthorized)
             |> Phoenix.Controller.json(%{errors: [%{detail: "Invalid agent identity"}]})
             |> halt()
         end
+
       _ ->
         conn
         |> put_status(:unauthorized)

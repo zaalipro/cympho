@@ -9,6 +9,7 @@ defmodule CymphoWeb.AgentLive.Show do
     case Agents.get_agent(id) do
       {:ok, agent} ->
         {:ok, assign(socket, agent: agent)}
+
       {:error, :not_found} ->
         {:ok, push_navigate(socket, to: ~p"/agents")}
     end
@@ -25,6 +26,7 @@ defmodule CymphoWeb.AgentLive.Show do
         socket
         |> assign(:page_title, agent.name)
         |> assign(:agent, agent)
+
       {:error, :not_found} ->
         socket
         |> put_flash(:error, "Agent not found")

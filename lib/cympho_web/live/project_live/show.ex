@@ -9,6 +9,7 @@ defmodule CymphoWeb.ProjectLive.Show do
     case Projects.get_project(id) do
       {:ok, project} ->
         {:ok, assign(socket, project: project)}
+
       {:error, :not_found} ->
         {:ok, push_navigate(socket, to: ~p"/projects")}
     end
@@ -25,6 +26,7 @@ defmodule CymphoWeb.ProjectLive.Show do
         socket
         |> assign(:page_title, project.name)
         |> assign(:project, project)
+
       {:error, :not_found} ->
         socket
         |> put_flash(:error, "Project not found")

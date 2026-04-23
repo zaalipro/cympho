@@ -11,9 +11,14 @@ defmodule Cympho.DashboardTest do
     end
 
     test "counts agents with idle or running status" do
-      {:ok, _} = Agents.create_agent(%{name: "Agent A", role: :engineer, status: :idle, url_key: "a1"})
-      {:ok, _} = Agents.create_agent(%{name: "Agent B", role: :engineer, status: :running, url_key: "b2"})
-      {:ok, _} = Agents.create_agent(%{name: "Agent C", role: :engineer, status: :error, url_key: "c3"})
+      {:ok, _} =
+        Agents.create_agent(%{name: "Agent A", role: :engineer, status: :idle, url_key: "a1"})
+
+      {:ok, _} =
+        Agents.create_agent(%{name: "Agent B", role: :engineer, status: :running, url_key: "b2"})
+
+      {:ok, _} =
+        Agents.create_agent(%{name: "Agent C", role: :engineer, status: :error, url_key: "c3"})
 
       assert Dashboard.active_agents_count() == 2
     end
@@ -94,6 +99,7 @@ defmodule Cympho.DashboardTest do
 
       # Set updated_at to 8 days ago to simulate staleness
       stale_time = DateTime.utc_now() |> DateTime.add(-8 * 86400, :second)
+
       Cympho.Repo.update_all(
         from(i in Cympho.Issues.Issue, where: i.id == ^issue.id),
         set: [updated_at: stale_time]

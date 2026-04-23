@@ -32,7 +32,7 @@ defmodule CymphoWeb.AttachmentController do
       conn
       |> put_status(:request_entity_too_large)
       |> put_view(json: CymphoWeb.ErrorJSON)
-      |> render(:"error", message: "File size exceeds 10MB limit")
+      |> render(:error, message: "File size exceeds 10MB limit")
     end
   end
 
@@ -40,7 +40,7 @@ defmodule CymphoWeb.AttachmentController do
     conn
     |> put_status(:bad_request)
     |> put_view(json: CymphoWeb.ErrorJSON)
-    |> render(:"error", message: "No file provided")
+    |> render(:error, message: "No file provided")
   end
 
   def show(conn, %{"id" => id}) do
@@ -55,7 +55,10 @@ defmodule CymphoWeb.AttachmentController do
         {:ok, binary} ->
           conn
           |> put_resp_content_type(attachment.content_type)
-          |> put_resp_header("content-disposition", "attachment; filename=\"#{attachment.filename}\"")
+          |> put_resp_header(
+            "content-disposition",
+            "attachment; filename=\"#{attachment.filename}\""
+          )
           |> send_resp(200, binary)
 
         {:error, :enoent} ->

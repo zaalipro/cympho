@@ -215,7 +215,8 @@ defmodule Cympho.Agents do
   Returns true if parent_agent can spawn an agent with child_role.
   Parent must have role_rank >= child_rank (allows peer spawning for redundancy).
   """
-  @spec spawn_authorized?(Agent.t(), :designer | :product_manager | :engineer | :cto | :ceo) :: boolean()
+  @spec spawn_authorized?(Agent.t(), :designer | :product_manager | :engineer | :cto | :ceo) ::
+          boolean()
   def spawn_authorized?(%Agent{} = parent_agent, child_role) do
     role_rank(parent_agent.role) >= role_rank(child_role)
   end
@@ -223,9 +224,13 @@ defmodule Cympho.Agents do
   @doc """
   Returns the list of roles that the given agent is authorized to spawn.
   """
-  @spec spawnable_roles(Agent.t()) :: [:designer | :product_manager | :engineer | :cto | :ceo, ...]
+  @spec spawnable_roles(Agent.t()) :: [
+          :designer | :product_manager | :engineer | :cto | :ceo,
+          ...
+        ]
   def spawnable_roles(%Agent{} = parent_agent) do
     parent_rank = role_rank(parent_agent.role)
+
     [:designer, :product_manager, :engineer, :cto, :ceo]
     |> Enum.filter(fn role -> role_rank(role) <= parent_rank end)
   end
@@ -280,7 +285,8 @@ defmodule Cympho.Agents do
   """
   def list_agent_inbox(agent_id) when is_binary(agent_id) do
     from(i in Issue,
-      where: i.assignee_id == ^agent_id and i.status in [:todo, :in_progress, :in_review, :blocked],
+      where:
+        i.assignee_id == ^agent_id and i.status in [:todo, :in_progress, :in_review, :blocked],
       select: %{
         id: i.id,
         title: i.title,
@@ -289,7 +295,10 @@ defmodule Cympho.Agents do
         assignee_id: i.assignee_id
       },
       order_by: [
-        fragment("CASE ? WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 3 END", i.priority),
+        fragment(
+          "CASE ? WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 3 END",
+          i.priority
+        ),
         asc: i.inserted_at
       ]
     )
@@ -313,5 +322,4 @@ defmodule Cympho.Agents do
         {:error, changeset}
     end
   end
-
 end

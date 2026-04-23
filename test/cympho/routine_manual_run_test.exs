@@ -109,7 +109,8 @@ defmodule Cympho.RoutineManualRunTest do
     end
 
     test "get_run returns error for missing" do
-      assert {:error, :not_found} = RoutineTriggers.get_run("00000000-0000-0000-0000-000000000000")
+      assert {:error, :not_found} =
+               RoutineTriggers.get_run("00000000-0000-0000-0000-000000000000")
     end
 
     test "get_run! returns the run", %{run: run} do

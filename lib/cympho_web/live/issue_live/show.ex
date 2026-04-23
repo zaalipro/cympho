@@ -4,6 +4,7 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.Comments
   alias Cympho.Agents
   alias Cympho.Labels
+  alias Cympho.Activities
   alias Cympho.Orchestrator
 
   @impl true
@@ -54,7 +55,10 @@ defmodule CymphoWeb.IssueLive.Show do
   @impl true
   def handle_info({:issue_updated, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      {:noreply, socket |> assign(:issue, updated_issue) |> assign(:activities, Activities.list_activities(updated_issue.id))}
+      {:noreply,
+       socket
+       |> assign(:issue, updated_issue)
+       |> assign(:activities, Activities.list_activities(updated_issue.id))}
     else
       {:noreply, socket}
     end
@@ -66,7 +70,10 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:comment_created, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      {:noreply, socket |> assign(:issue, updated_issue) |> assign(:activities, Activities.list_activities(updated_issue.id))}
+      {:noreply,
+       socket
+       |> assign(:issue, updated_issue)
+       |> assign(:activities, Activities.list_activities(updated_issue.id))}
     else
       {:noreply, socket}
     end
@@ -74,7 +81,10 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:comment_updated, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      {:noreply, socket |> assign(:issue, updated_issue) |> assign(:activities, Activities.list_activities(updated_issue.id))}
+      {:noreply,
+       socket
+       |> assign(:issue, updated_issue)
+       |> assign(:activities, Activities.list_activities(updated_issue.id))}
     else
       {:noreply, socket}
     end
@@ -82,10 +92,27 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:comment_deleted, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      {:noreply, socket |> assign(:issue, updated_issue) |> assign(:activities, Activities.list_activities(updated_issue.id))}
+      {:noreply,
+       socket
+       |> assign(:issue, updated_issue)
+       |> assign(:activities, Activities.list_activities(updated_issue.id))}
     else
       {:noreply, socket}
     end
+  end
+
+  def handle_info({:session_started, session_id}, socket) do
+    {:noreply, assign(socket, :agent_session_id, session_id)}
+  end
+
+  def handle_info({:turn_completed, session_id, result}, socket) do
+    IO.inspect({:turn_completed, session_id, result}, label: "Agent turn completed")
+    {:noreply, socket}
+  end
+
+  def handle_info({:turn_ended_with_error, session_id, reason}, socket) do
+    IO.inspect({:turn_ended_with_error, session_id, reason}, label: "Agent error")
+    {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
   end
 
   @impl true
@@ -105,7 +132,7 @@ defmodule CymphoWeb.IssueLive.Show do
   @impl true
   def handle_event("delete_comment", %{"id" => id}, socket) do
     comment = Comments.get_comment!(id)
-    {:ok, _} = Comments.delete_comment(comment)
+    :ok = Comments.delete_comment(comment)
     {:noreply, socket}
   end
 
@@ -125,9 +152,11 @@ defmodule CymphoWeb.IssueLive.Show do
         case Issues.update_issue(socket.assigns.issue, %{status: status_atom}) do
           {:ok, _issue} ->
             {:noreply, socket}
+
           {:error, _changeset} ->
             {:noreply, put_flash(socket, :error, "Failed to update status")}
         end
+
       :error ->
         {:noreply, put_flash(socket, :error, "Invalid status")}
     end
@@ -144,7 +173,9 @@ defmodule CymphoWeb.IssueLive.Show do
 
     case Orchestrator.start_and_run(issue, agent_id) do
       {:ok, _pid} ->
-        {:ok, _updated_agent} = Agents.update_agent(%Agents.Agent{id: agent_id}, %{status: :running})
+        {:ok, _updated_agent} =
+          Agents.update_agent(%Agents.Agent{id: agent_id}, %{status: :running})
+
         {:noreply,
          socket
          |> put_flash(:info, "Agent spawned successfully")
@@ -156,24 +187,12 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
-  def handle_info({:session_started, session_id}, socket) do
-    {:noreply, assign(socket, :agent_session_id, session_id)}
-  end
-
-  def handle_info({:turn_completed, session_id, result}, socket) do
-    IO.inspect({:turn_completed, session_id, result}, label: "Agent turn completed")
-    {:noreply, socket}
-  end
-
-  def handle_info({:turn_ended_with_error, session_id, reason}, socket) do
-    IO.inspect({:turn_ended_with_error, session_id, reason}, label: "Agent error")
-    {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
-  end
-
+  @impl true
   def handle_event("toggle_label_picker", _, socket) do
     {:noreply, update(socket, :show_label_picker, &(!&1))}
   end
 
+  @impl true
   def handle_event("add_label", %{"label_id" => label_id}, socket) do
     issue = socket.assigns.issue
     label = Labels.get_label!(label_id)
@@ -187,6 +206,7 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
+  @impl true
   def handle_event("remove_label", %{"label_id" => label_id}, socket) do
     issue = socket.assigns.issue
     label = Labels.get_label!(label_id)
@@ -204,6 +224,6 @@ defmodule CymphoWeb.IssueLive.Show do
     {:ok, <<r, g, b>>} = Base.decode16(String.upcase(hex))
     if (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5, do: "#000000", else: "#FFFFFF"
   end
-  defp text_color(_), do: "#FFFFFF"
 
+  defp text_color(_), do: "#FFFFFF"
 end

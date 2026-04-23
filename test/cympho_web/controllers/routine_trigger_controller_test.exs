@@ -22,7 +22,11 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
       %{trigger: trigger, secret: secret, routine: routine}
     end
 
-    test "fires trigger with valid secret in header", %{conn: conn, trigger: trigger, secret: secret} do
+    test "fires trigger with valid secret in header", %{
+      conn: conn,
+      trigger: trigger,
+      secret: secret
+    } do
       conn =
         conn
         |> put_req_header("x-webhook-secret", secret)
@@ -32,7 +36,11 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
                json_response(conn, 200)
     end
 
-    test "fires trigger with valid secret in body", %{conn: conn, trigger: trigger, secret: secret} do
+    test "fires trigger with valid secret in body", %{
+      conn: conn,
+      trigger: trigger,
+      secret: secret
+    } do
       conn =
         post(conn, ~p"/api/routine-triggers/#{trigger.public_id}/fire", %{"secret" => secret})
 
@@ -66,7 +74,10 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
   describe "rotate_secret (POST /api/routine-triggers/:id/rotate-secret)" do
     setup do
       {:ok, routine} = Routines.create_routine(%{name: "Rotate Test"})
-      {:ok, trigger, _secret} = RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
+
+      {:ok, trigger, _secret} =
+        RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
+
       %{trigger: trigger, routine: routine}
     end
 
@@ -78,7 +89,9 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
     end
 
     test "returns 404 for non-existent trigger", %{conn: conn} do
-      conn = post(conn, ~p"/api/routine-triggers/00000000-0000-0000-0000-000000000000/rotate-secret")
+      conn =
+        post(conn, ~p"/api/routine-triggers/00000000-0000-0000-0000-000000000000/rotate-secret")
+
       assert %{"error" => "trigger not found"} = json_response(conn, 404)
     end
   end
@@ -106,6 +119,7 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
   describe "show (GET /api/routines/:routine_id/triggers/:id)" do
     setup do
       {:ok, routine} = Routines.create_routine(%{name: "Show Test"})
+
       {:ok, trigger} =
         RoutineTriggers.create_schedule_trigger(%{
           "routine_id" => routine.id,
@@ -123,7 +137,9 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
     end
 
     test "returns 404 for non-existent trigger", %{conn: conn, routine: routine} do
-      conn = get(conn, ~p"/api/routines/#{routine.id}/triggers/00000000-0000-0000-0000-000000000000")
+      conn =
+        get(conn, ~p"/api/routines/#{routine.id}/triggers/00000000-0000-0000-0000-000000000000")
+
       assert %{"error" => "trigger not found"} = json_response(conn, 404)
     end
   end
@@ -171,6 +187,7 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
   describe "update trigger" do
     setup do
       {:ok, routine} = Routines.create_routine(%{name: "Update Test"})
+
       {:ok, trigger} =
         RoutineTriggers.create_schedule_trigger(%{
           "routine_id" => routine.id,
@@ -188,7 +205,9 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
 
     test "returns 404 for non-existent trigger", %{conn: conn} do
       conn =
-        patch(conn, ~p"/api/routine-triggers/00000000-0000-0000-0000-000000000000", %{"enabled" => false})
+        patch(conn, ~p"/api/routine-triggers/00000000-0000-0000-0000-000000000000", %{
+          "enabled" => false
+        })
 
       assert %{"error" => "trigger not found"} = json_response(conn, 404)
     end
@@ -197,6 +216,7 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
   describe "delete trigger" do
     setup do
       {:ok, routine} = Routines.create_routine(%{name: "Delete Test"})
+
       {:ok, trigger} =
         RoutineTriggers.create_schedule_trigger(%{
           "routine_id" => routine.id,

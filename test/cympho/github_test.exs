@@ -9,15 +9,18 @@ defmodule Cympho.GithubTest do
 
   describe "parse_repo_url/1 — HTTPS format" do
     test "parses https://github.com/owner/repo" do
-      assert {:ok, {"zaalipro", "cympho"}} = Github.parse_repo_url("https://github.com/zaalipro/cympho")
+      assert {:ok, {"zaalipro", "cympho"}} =
+               Github.parse_repo_url("https://github.com/zaalipro/cympho")
     end
 
     test "parses https://github.com/owner/repo.git" do
-      assert {:ok, {"zaalipro", "cympho"}} = Github.parse_repo_url("https://github.com/zaalipro/cympho.git")
+      assert {:ok, {"zaalipro", "cympho"}} =
+               Github.parse_repo_url("https://github.com/zaalipro/cympho.git")
     end
 
     test "parses with different owner and repo" do
-      assert {:ok, {"elixir-lang", "elixir"}} = Github.parse_repo_url("https://github.com/elixir-lang/elixir")
+      assert {:ok, {"elixir-lang", "elixir"}} =
+               Github.parse_repo_url("https://github.com/elixir-lang/elixir")
     end
 
     test "parses repo with hyphens" do
@@ -28,15 +31,18 @@ defmodule Cympho.GithubTest do
 
   describe "parse_repo_url/1 — SSH format" do
     test "parses git@github.com:owner/repo.git" do
-      assert {:ok, {"zaalipro", "cympho"}} = Github.parse_repo_url("git@github.com:zaalipro/cympho.git")
+      assert {:ok, {"zaalipro", "cympho"}} =
+               Github.parse_repo_url("git@github.com:zaalipro/cympho.git")
     end
 
     test "parses git@github.com:owner/repo without .git suffix" do
-      assert {:ok, {"zaalipro", "cympho"}} = Github.parse_repo_url("git@github.com:zaalipro/cympho")
+      assert {:ok, {"zaalipro", "cympho"}} =
+               Github.parse_repo_url("git@github.com:zaalipro/cympho")
     end
 
     test "parses with different owner and repo" do
-      assert {:ok, {"elixir-lang", "elixir"}} = Github.parse_repo_url("git@github.com:elixir-lang/elixir.git")
+      assert {:ok, {"elixir-lang", "elixir"}} =
+               Github.parse_repo_url("git@github.com:elixir-lang/elixir.git")
     end
   end
 
@@ -76,7 +82,8 @@ defmodule Cympho.GithubTest do
         {:ok, %Finch.Response{status: 200, body: "{}"}}
       end
 
-      assert {:ok, true} = Github.branch_exists?("owner", "repo", "main", http_fn: http_fn, token: "test")
+      assert {:ok, true} =
+               Github.branch_exists?("owner", "repo", "main", http_fn: http_fn, token: "test")
     end
 
     test "returns {:ok, false} when API responds 404" do
@@ -84,7 +91,11 @@ defmodule Cympho.GithubTest do
         {:ok, %Finch.Response{status: 404, body: "{\"message\": \"Not Found\"}"}}
       end
 
-      assert {:ok, false} = Github.branch_exists?("owner", "repo", "nonexistent", http_fn: http_fn, token: "test")
+      assert {:ok, false} =
+               Github.branch_exists?("owner", "repo", "nonexistent",
+                 http_fn: http_fn,
+                 token: "test"
+               )
     end
 
     test "returns {:error, {:unexpected_status, 500, _}} for 500 response" do
@@ -120,12 +131,17 @@ defmodule Cympho.GithubTest do
         {:ok, %Finch.Response{status: 200, body: "{}"}}
       end
 
-      Github.branch_exists?("test-org", "test-repo", "feature-branch", http_fn: http_fn, token: "test")
+      Github.branch_exists?("test-org", "test-repo", "feature-branch",
+        http_fn: http_fn,
+        token: "test"
+      )
     end
 
     test "passes authorization header to http_fn" do
       http_fn = fn _url, headers, _finch ->
-        assert List.keyfind(headers, "authorization", 0) == {"authorization", "Bearer my-secret-token"}
+        assert List.keyfind(headers, "authorization", 0) ==
+                 {"authorization", "Bearer my-secret-token"}
+
         {:ok, %Finch.Response{status: 200, body: "{}"}}
       end
 

@@ -40,7 +40,11 @@ defmodule CymphoWeb.RoutineRunControllerTest do
       assert %{"error" => "routine is paused"} = json_response(conn, 409)
     end
 
-    test "creates issue assigned to routine's agent", %{conn: conn, routine: routine, agent: agent} do
+    test "creates issue assigned to routine's agent", %{
+      conn: conn,
+      routine: routine,
+      agent: agent
+    } do
       conn = post(conn, ~p"/api/routines/#{routine.id}/run")
       assert %{"data" => %{"issue_id" => issue_id}} = json_response(conn, 201)
 

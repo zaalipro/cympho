@@ -8,12 +8,14 @@ defmodule Cympho.ActivitiesTest do
   describe "log_activity/1" do
     test "creates an activity record" do
       {:ok, issue} = Issues.create_issue(%{title: "Test Issue", description: "Test desc"})
-      {:ok, activity} = Activities.log_activity(%{
-        issue_id: issue.id,
-        actor_type: "system",
-        action: "status_changed",
-        metadata: %{"from" => "backlog", "to" => "todo"}
-      })
+
+      {:ok, activity} =
+        Activities.log_activity(%{
+          issue_id: issue.id,
+          actor_type: "system",
+          action: "status_changed",
+          metadata: %{"from" => "backlog", "to" => "todo"}
+        })
 
       assert activity.issue_id == issue.id
       assert activity.actor_type == "system"
@@ -29,21 +31,27 @@ defmodule Cympho.ActivitiesTest do
 
     test "validates actor_type inclusion" do
       {:ok, issue} = Issues.create_issue(%{title: "T", description: "D"})
-      {:error, changeset} = Activities.log_activity(%{
-        issue_id: issue.id,
-        actor_type: "invalid",
-        action: "created"
-      })
+
+      {:error, changeset} =
+        Activities.log_activity(%{
+          issue_id: issue.id,
+          actor_type: "invalid",
+          action: "created"
+        })
+
       assert errors_on(changeset)[:actor_type]
     end
 
     test "validates action inclusion" do
       {:ok, issue} = Issues.create_issue(%{title: "T", description: "D"})
-      {:error, changeset} = Activities.log_activity(%{
-        issue_id: issue.id,
-        actor_type: "system",
-        action: "invalid_action"
-      })
+
+      {:error, changeset} =
+        Activities.log_activity(%{
+          issue_id: issue.id,
+          actor_type: "system",
+          action: "invalid_action"
+        })
+
       assert errors_on(changeset)[:action]
     end
   end
@@ -120,12 +128,14 @@ defmodule Cympho.ActivitiesTest do
   describe "activity logging on comment creation" do
     test "create_comment logs 'comment_added'" do
       {:ok, issue} = Issues.create_issue(%{title: "Test Issue", description: "Test desc"})
-      {:ok, _comment} = Comments.create_comment(%{
-        body: "Test comment",
-        author_type: "agent",
-        author_id: "agent-1",
-        issue_id: issue.id
-      })
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body: "Test comment",
+          author_type: "agent",
+          author_id: "agent-1",
+          issue_id: issue.id
+        })
 
       activities = Activities.list_activities(issue.id)
       comment_added = Enum.find(activities, &(&1.action == "comment_added"))

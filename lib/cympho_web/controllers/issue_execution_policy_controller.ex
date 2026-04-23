@@ -5,7 +5,11 @@ defmodule CymphoWeb.IssueExecutionPolicyController do
 
   action_fallback CymphoWeb.FallbackController
 
-  def assign(conn, %{"issue_id" => issue_id, "execution_policy_id" => policy_id, "executor_id" => executor_id}) do
+  def assign(conn, %{
+        "issue_id" => issue_id,
+        "execution_policy_id" => policy_id,
+        "executor_id" => executor_id
+      }) do
     with {:ok, issue} <- Issues.get_issue(issue_id),
          {:ok, updated} <- Issues.assign_execution_policy(issue, policy_id, executor_id) do
       conn

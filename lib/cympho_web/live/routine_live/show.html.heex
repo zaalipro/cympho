@@ -1,5 +1,5 @@
 <.header>
-  Routine: <%= @routine.name %>
+  Routine: {@routine.name}
   <:actions>
     <.button phx-click="manual_run" phx-disable-with="Starting...">
       Run Now
@@ -8,9 +8,9 @@
 </.header>
 
 <div class="mt-4">
-  <p class="text-sm text-zinc-500">Status: <span class="font-medium"><%= @routine.status %></span></p>
+  <p class="text-sm text-zinc-500">Status: <span class="font-medium">{@routine.status}</span></p>
   <%= if @routine.description do %>
-    <p class="mt-2"><%= @routine.description %></p>
+    <p class="mt-2">{@routine.description}</p>
   <% end %>
 </div>
 
@@ -40,13 +40,15 @@
                 _ -> "bg-zinc-100 text-zinc-800"
               end
             }>
-              <%= run.status %>
+              {run.status}
             </span>
           </td>
-          <td class="py-2"><%= run.trigger_type %></td>
-          <td class="py-2"><%= Calendar.strftime(run.triggered_at, "%Y-%m-%d %H:%M") %></td>
+          <td class="py-2">{run.trigger_type}</td>
+          <td class="py-2">{Calendar.strftime(run.triggered_at, "%Y-%m-%d %H:%M")}</td>
           <td class="py-2">
-            <%= if run.completed_at, do: Calendar.strftime(run.completed_at, "%Y-%m-%d %H:%M"), else: raw("&mdash;") %>
+            {if run.completed_at,
+              do: Calendar.strftime(run.completed_at, "%Y-%m-%d %H:%M"),
+              else: raw("&mdash;")}
           </td>
         </tr>
       <% end %>

@@ -1,16 +1,20 @@
 defmodule CymphoWeb.Components do
   use Phoenix.Component
 
-  attr :title, :string, required: true
+  attr :title, :string, required: false
   attr :rest, :global
   slot :inner_block
+  slot :actions
 
   def header(assigns) do
     ~H"""
     <header {@rest}>
-      <h1>{@title}</h1>
+      <h1 :if={@title}>{@title}</h1>
       <div class="header-actions">
         {render_slot(@inner_block)}
+      </div>
+      <div :if={@actions != []} class="header-actions">
+        {render_slot(@actions)}
       </div>
     </header>
     """
@@ -23,7 +27,11 @@ defmodule CymphoWeb.Components do
 
   def app_link(assigns) do
     ~H"""
-    <.link navigate={@navigate} class={["text-text-secondary hover:text-text-primary transition-colors", @class]} {@rest}>
+    <.link
+      navigate={@navigate}
+      class={["text-text-secondary hover:text-text-primary transition-colors", @class]}
+      {@rest}
+    >
       {render_slot(@inner_block)}
     </.link>
     """
@@ -56,7 +64,13 @@ defmodule CymphoWeb.Components do
     <div class="form-group">
       <label>{@label}</label>
       <textarea :if={@type == "textarea"} name={input_name(@field)} {@rest}><%= input_value(@field) %></textarea>
-      <input :if={@type != "textarea"} type={@type} name={input_name(@field)} value={input_value(@field)} {@rest} />
+      <input
+        :if={@type != "textarea"}
+        type={@type}
+        name={input_name(@field)}
+        value={input_value(@field)}
+        {@rest}
+      />
     </div>
     """
   end
@@ -88,7 +102,11 @@ defmodule CymphoWeb.Components do
         class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
         {@rest}
       >
-        <option :for={{label, value} <- Enum.map(@options, fn {k, v} -> {to_string(k), v} end)} value={value} selected={@value == value}>
+        <option
+          :for={{label, value} <- Enum.map(@options, fn {k, v} -> {to_string(k), v} end)}
+          value={value}
+          selected={@value == value}
+        >
           {label}
         </option>
       </select>

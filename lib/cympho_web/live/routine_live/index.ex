@@ -60,7 +60,8 @@ defmodule CymphoWeb.RoutineLive.Index do
         {:noreply, assign(socket, :routines, Routines.list_routines())}
 
       {:error, :invalid_transition} ->
-        {:noreply, put_flash(socket, :error, "Cannot resume a routine in #{routine.status} state")}
+        {:noreply,
+         put_flash(socket, :error, "Cannot resume a routine in #{routine.status} state")}
     end
   end
 end

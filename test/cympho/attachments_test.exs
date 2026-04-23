@@ -129,7 +129,8 @@ defmodule Cympho.AttachmentsTest do
     end
 
     test "get_attachment returns {:error, :not_found} for missing id" do
-      assert {:error, :not_found} = Attachments.get_attachment("00000000-0000-0000-0000-000000000000")
+      assert {:error, :not_found} =
+               Attachments.get_attachment("00000000-0000-0000-0000-000000000000")
     end
   end
 

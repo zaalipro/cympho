@@ -41,7 +41,8 @@ defmodule Cympho.AgentRunner do
       "claude",
       "-p",
       "--bare",
-      "--output-format", "json",
+      "--output-format",
+      "json",
       "--no-input"
     ]
 
@@ -149,7 +150,7 @@ defmodule Cympho.AgentRunner do
   end
 
   defp api_key do
-    Application.fetch_env!(:cympho, :anthropic_api_key) ||
+    Application.get_env(:cympho, :anthropic_api_key) ||
       System.get_env("ANTHROPIC_API_KEY") ||
       ""
   end

@@ -1,7 +1,10 @@
 <div class="p-6 lg:p-8 max-w-2xl mx-auto">
   <.header title="Edit Project">
     <:actions>
-      <.app_link navigate={~p"/projects"} class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors">
+      <.app_link
+        navigate={~p"/projects"}
+        class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors"
+      >
         Cancel
       </.app_link>
     </:actions>
@@ -11,7 +14,11 @@
     <.input field={@form[:name]} label="Name" />
     <.input field={@form[:description]} label="Description" type="textarea" />
     <.input field={@form[:prefix]} label="Prefix" placeholder="e.g., PROJ" />
-    <.select name="project[status]" label="Status" options={[Active: "active", Archived: "archived"]} />
+    <.select
+      name="project[status]"
+      label="Status"
+      options={[Active: "active", Archived: "archived"]}
+    />
 
     <:actions>
       <.button type="submit">Update Project</.button>

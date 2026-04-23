@@ -19,7 +19,15 @@ defmodule Cympho.Notifications.NotificationDeliveryFailure do
 
   def changeset(failure, attrs) do
     failure
-    |> cast(attrs, [:user_id, :event_type, :channel_type, :payload, :attempt, :error_reason, :failed_at])
+    |> cast(attrs, [
+      :user_id,
+      :event_type,
+      :channel_type,
+      :payload,
+      :attempt,
+      :error_reason,
+      :failed_at
+    ])
     |> validate_required([:user_id, :event_type, :channel_type, :failed_at])
     |> validate_inclusion(:channel_type, ["email", "telegram", "webhook"])
   end

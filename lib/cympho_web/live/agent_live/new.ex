@@ -14,6 +14,7 @@ defmodule CymphoWeb.AgentLive.New do
     case Agents.create_agent(agent_params) do
       {:ok, _agent} ->
         {:noreply, push_navigate(socket, to: ~p"/agents")}
+
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
     end

@@ -8,7 +8,6 @@ defmodule Cympho.Issues do
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
-  alias Cympho.Issues.AutoAssignment
   alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Comments
@@ -36,7 +35,8 @@ defmodule Cympho.Issues do
     |> where([_, l], l.label_id == ^label_id)
   end
 
-  defp maybe_filter_by_labels(query, %{label_ids: label_ids}) when is_list(label_ids) and length(label_ids) > 0 do
+  defp maybe_filter_by_labels(query, %{label_ids: label_ids})
+       when is_list(label_ids) and length(label_ids) > 0 do
     query
     |> join(:inner, [i], l in "issue_labels", on: i.id == l.issue_id)
     |> where([_, l], l.label_id in ^label_ids)
@@ -45,7 +45,6 @@ defmodule Cympho.Issues do
   end
 
   defp maybe_filter_by_labels(query, _opts), do: query
-
 
   @default_page_size 25
 
@@ -107,7 +106,8 @@ defmodule Cympho.Issues do
   end
 
   def get_issue!(id),
-    do: Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
+    do:
+      Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
 
   def get_issue(id) do
     case Repo.get(Issue, id) do
@@ -130,25 +130,19 @@ defmodule Cympho.Issues do
          |> Issue.changeset(attrs)
          |> Repo.insert() do
       {:ok, issue} ->
-        Activities.log_activity(%{issue_id: issue.id, actor_type: Map.get(attrs, :actor_type, "system"), actor_id: Map.get(attrs, :actor_id), action: "created", metadata: %{title: issue.title}})
+        Activities.log_activity(%{
+          issue_id: issue.id,
+          actor_type: Map.get(attrs, :actor_type, "system"),
+          actor_id: Map.get(attrs, :actor_id),
+          action: "created",
+          metadata: %{title: issue.title}
+        })
+
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
         {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
       {:error, changeset} ->
         {:error, changeset}
-    end
-  end
-
-  defp maybe_auto_assign(%Issue{} = issue) do
-    case AutoAssignment.assign_issue(issue) do
-      {:ok, assigned} ->
-        assigned
-
-      {:error, :no_eligible_agent, _} ->
-        case AutoAssignment.queue_for_assignment(issue) do
-          {:ok, _} -> issue
-          {:error, _} -> issue
-        end
     end
   end
 
@@ -174,6 +168,7 @@ defmodule Cympho.Issues do
 
   def update_issue(%Issue{} = issue, attrs) do
     old_issue = issue
+
     with {:ok, updated} <- do_update_issue(issue, attrs) do
       updated = Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])
       Activities.log_issue_changes(old_issue, updated, attrs)
@@ -307,11 +302,14 @@ defmodule Cympho.Issues do
     if issue.assignee_id do
       try do
         case Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id) do
-          :ok -> :ok
+          :ok ->
+            :ok
+
           {:error, reason} ->
             Logger.warning("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
               error: inspect(reason)
             )
+
             :ok
         end
       rescue
@@ -386,6 +384,7 @@ defmodule Cympho.Issues do
 
         attrs = %{assignee_id: agent_id, status: new_status}
         attrs = if required_role, do: Map.put(attrs, :assigned_role, required_role), else: attrs
+
         update_issue(current_issue, attrs)
         |> maybe_adjust_lock_version()
     end
@@ -411,18 +410,28 @@ defmodule Cympho.Issues do
         now = DateTime.utc_now()
 
         Repo.transaction(fn ->
-          Repo.query!("""
-            INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT DO NOTHING
-          """, [dump_uuid(blocked_issue.id), dump_uuid(blocker_issue.id), now, now])
+          Repo.query!(
+            """
+              INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
+              VALUES ($1, $2, $3, $4)
+              ON CONFLICT DO NOTHING
+            """,
+            [dump_uuid(blocked_issue.id), dump_uuid(blocker_issue.id), now, now]
+          )
 
           Repo.reload(blocked_issue)
         end)
         |> case do
           {:ok, issue} ->
             issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
-            Activities.log_activity(%{issue_id: blocked_issue.id, actor_type: "system", action: "blocker_added", metadata: %{blocker_id: blocker_issue.id}})
+
+            Activities.log_activity(%{
+              issue_id: blocked_issue.id,
+              actor_type: "system",
+              action: "blocker_added",
+              metadata: %{blocker_id: blocker_issue.id}
+            })
+
             Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
             {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
@@ -475,7 +484,14 @@ defmodule Cympho.Issues do
       {:error, :not_found}
     else
       issue = Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks, :labels])
-      Activities.log_activity(%{issue_id: blocked_issue.id, actor_type: "system", action: "blocker_removed", metadata: %{blocker_id: blocker_issue.id}})
+
+      Activities.log_activity(%{
+        issue_id: blocked_issue.id,
+        actor_type: "system",
+        action: "blocker_removed",
+        metadata: %{blocker_id: blocker_issue.id}
+      })
+
       Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
       {:ok, issue}
     end
@@ -484,6 +500,7 @@ defmodule Cympho.Issues do
   def add_label_to_issue(%Issue{} = issue, %Label{} = label) do
     issue = Repo.preload(issue, :labels)
     labels = issue.labels ++ [label]
+
     issue
     |> cast(%{}, [])
     |> put_assoc(:labels, labels)
@@ -493,6 +510,7 @@ defmodule Cympho.Issues do
   def remove_label_from_issue(%Issue{} = issue, %Label{} = label) do
     issue = Repo.preload(issue, :labels)
     labels = Enum.reject(issue.labels, &(&1.id == label.id))
+
     issue
     |> cast(%{}, [])
     |> put_assoc(:labels, labels)
@@ -502,6 +520,7 @@ defmodule Cympho.Issues do
   def set_issue_labels(%Issue{} = issue, label_ids) when is_list(label_ids) do
     labels = Labels.list_labels() |> Enum.filter(&(&1.id in label_ids))
     issue = Repo.preload(issue, :labels)
+
     issue
     |> cast(%{}, [])
     |> put_assoc(:labels, labels)
@@ -525,5 +544,15 @@ defmodule Cympho.Issues do
 
   def change_issue(%Issue{} = issue, attrs \\ %{}) do
     Issue.changeset(issue, attrs)
+  end
+
+  def assign_execution_policy(%Issue{} = issue, _policy_id, _executor_id) do
+    # Stub: business logic to be defined
+    {:ok, issue}
+  end
+
+  def execution_policy_decision(%Issue{} = issue, _decision, _decided_by) do
+    # Stub: business logic to be defined
+    {:ok, issue}
   end
 end
