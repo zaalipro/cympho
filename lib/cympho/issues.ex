@@ -239,7 +239,11 @@ defmodule Cympho.Issues do
 
   defp do_transition(%Issue{} = issue, new_status) do
     with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
-      if new_status == :done, do: unblock_dependents(issue.id)
+      if new_status == :done do
+        unblock_dependents(issue.id)
+        Cympho.Approvals.cancel_pending_for_issue(issue.id)
+      end
+
       {:ok, updated}
     end
   end
