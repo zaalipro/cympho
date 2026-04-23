@@ -7,7 +7,8 @@ config :cympho, Cympho.Repo,
   database: "cympho_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: 10,
-  template: "template0"
+  template: "template0",
+  ssl: false
 
 config :cympho, CymphoWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],

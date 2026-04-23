@@ -44,6 +44,7 @@ defmodule Cympho.MixProject do
       {:gettext, "~> 0.20"},
       {:jason, "~> 1.4"},
       {:dns_cluster, "~> 0.1.1"},
+      {:quantum, "~> 3.5"},
       {:bandit, "~> 1.5"},
       {:floki, ">= 0.30.0", only: :test},
       {:lazy_html, "~> 0.1", only: :test}

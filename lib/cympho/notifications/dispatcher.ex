@@ -8,11 +8,9 @@ defmodule Cympho.Notifications.Dispatcher do
   """
 
   import Ecto.Query, warn: false
-  alias Cympho.Notifications.{EmailChannel, Message, TelegramChannel, WebhookChannel}
+  alias Cympho.Notifications.{Channel, EmailChannel, Message, TelegramChannel, WebhookChannel}
   alias Cympho.Notifications.NotificationPreference
   alias Cympho.Users
-
-  use GenServer
 
   @cache_table :notification_preferences_cache
   @channels %{
@@ -28,7 +26,7 @@ defmodule Cympho.Notifications.Dispatcher do
   end
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
     table_opts = [:set, :named_table, :public, read_concurrency: true, write_concurrency: true]
     :ets.new(@cache_table, table_opts)
     warm_cache()
@@ -95,7 +93,7 @@ defmodule Cympho.Notifications.Dispatcher do
       Enum.map(channel_configs, fn pref ->
         type = String.to_existing_atom(pref.channel_type)
         channel_module = Map.fetch!(@channels, type)
-        result = deliver_via(channel_module, message, pref.config, user, type)
+        result = deliver_via(channel_module, message, pref.config)
         {type, result}
       end)
 
@@ -108,19 +106,11 @@ defmodule Cympho.Notifications.Dispatcher do
     end
   end
 
-  defp deliver_via(channel_module, message, config, user, type) do
-    if channel_enabled?(user, type) and channel_module.available?(config) do
+  defp deliver_via(channel_module, message, config) do
+    if channel_module.available?(config) do
       channel_module.deliver(message, config)
     else
       {:error, :channel_unavailable}
-    end
-  end
-
-  defp channel_enabled?(user, type) do
-    case type do
-      :email -> user.email_enabled
-      :telegram -> user.telegram_enabled
-      :webhook -> user.webhook_enabled
     end
   end
 

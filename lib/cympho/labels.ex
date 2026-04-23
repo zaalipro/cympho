@@ -1,35 +1,13 @@
 defmodule Cympho.Labels do
-  @moduledoc """
-  The Labels context for managing labels and their CRUD operations.
-  """
-  import Ecto.Query, warn: false
-
+  @moduledoc "Labels context."
   alias Cympho.Repo
   alias Cympho.Labels.Label
-  alias Cympho.Issues.Issue
 
-  def list_labels(opts \\ []) do
-    Label
-    |> maybe_filter_by_project(opts)
-    |> Repo.all()
-  end
-
-  defp maybe_filter_by_project(query, [project_id: project_id]) do
-    where(query, project_id: ^project_id)
-  end
-
-  defp maybe_filter_by_project(query, _opts), do: query
+  def list_labels, do: Repo.all(Label)
 
   def get_label!(id), do: Repo.get!(Label, id)
 
-  def get_label(id) do
-    case Repo.get(Label, id) do
-      nil -> {:error, :not_found}
-      label -> {:ok, label}
-    end
-  end
-
-  def create_label(attrs \\ %{}) do
+  def create_label(attrs) do
     %Label{}
     |> Label.changeset(attrs)
     |> Repo.insert()

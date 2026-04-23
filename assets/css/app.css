@@ -41,3 +41,255 @@
     background: rgba(255, 255, 255, 0.15);
   }
 }
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+  20%, 40%, 60%, 80% { transform: translateX(4px); }
+}
+
+.phx-error-shake {
+  animation: shake 0.5s ease-in-out;
+}
+
+/* Search bar */
+.search-bar {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+
+.search-bar input[type="text"] {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9em;
+  width: 220px;
+}
+
+.search-clear {
+  position: absolute;
+  right: 6px;
+  background: none;
+  border: none;
+  font-size: 1.2em;
+  cursor: pointer;
+  color: #999;
+  padding: 0 4px;
+}
+
+/* Search results dropdown */
+.search-results {
+  background: white;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.search-results h3 {
+  margin: 0 0 10px 0;
+  font-size: 1em;
+  color: #666;
+}
+
+.search-result-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.search-result-item:hover {
+  background: #f0f0f0;
+}
+
+/* Issue filters */
+.issue-filters {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 20px;
+  padding: 12px 15px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.filter-group select {
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.issue-count-label {
+  color: #888;
+  font-size: 0.9em;
+  margin-left: auto;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  margin-top: 20px;
+  padding: 15px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.pagination-btn {
+  background: #1976d2;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.pagination-btn:hover {
+  background: #1565c0;
+}
+
+.pagination-info {
+  color: #666;
+  font-size: 0.9em;
+}
+
+/* Settings page */
+.settings-container { max-width: 800px; }
+
+.settings-section {
+  background: white;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  margin-bottom: 20px;
+}
+
+.settings-section h2 { margin: 0 0 8px 0; }
+.settings-description { color: #666; margin: 0 0 20px 0; font-size: 0.95em; }
+
+.channel-cards { display: flex; flex-direction: column; gap: 12px; }
+
+.channel-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.channel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.channel-info h3 { margin: 0 0 4px 0; font-size: 1.1em; }
+
+.channel-status {
+  font-size: 0.85em;
+  color: #888;
+}
+
+.channel-detail {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 0.9em;
+  color: #666;
+}
+
+.channel-detail code {
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.toggle-btn {
+  width: 52px;
+  height: 28px;
+  border-radius: 14px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.75em;
+  font-weight: bold;
+  color: white;
+  transition: background 0.2s;
+}
+
+.toggle-on { background: #4caf50; }
+.toggle-off { background: #bdbdbd; }
+
+.inline-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-form input {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9em;
+  flex: 1;
+}
+
+.badge-success { background: #e8f5e9; color: #2e7d32; }
+.badge-info { background: #e3f2fd; color: #1565c0; }
+.badge-error { background: #ffebee; color: #c62828; }
+
+.test-result { margin-top: 8px; }
+
+.event-grid { display: flex; flex-direction: column; gap: 12px; }
+
+.event-channel-group {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.event-channel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.event-channel-header h3 { margin: 0; }
+
+.event-toggles { display: flex; gap: 16px; flex-wrap: wrap; }
+
+.event-toggle { display: flex; align-items: center; gap: 6px; }
+
+.event-toggle-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85em;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.event-on { background: #4caf50; }
+.event-off { background: #bdbdbd; }
+
+.event-label { font-size: 0.9em; color: #444; }
+
+.settings-empty {
+  text-align: center;
+  padding: 40px;
+  color: #888;
+}

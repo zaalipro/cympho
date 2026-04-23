@@ -14,6 +14,8 @@ defmodule Cympho.Issues do
   alias Cympho.Comments
   alias Cympho.Labels
   alias Cympho.Labels.Label
+  alias Cympho.Activities
+  alias Cympho.Wakes
 
   def list_issues(opts \\ %{}) do
     Issue
@@ -129,6 +131,7 @@ defmodule Cympho.Issues do
          |> Issue.changeset(attrs)
          |> Repo.insert() do
       {:ok, issue} ->
+        Activities.log_activity(%{issue_id: issue.id, actor_type: Map.get(attrs, :actor_type, "system"), actor_id: Map.get(attrs, :actor_id), action: "created", metadata: %{title: issue.title}})
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
         {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
@@ -171,10 +174,12 @@ defmodule Cympho.Issues do
   defp maybe_generate_identifier(attrs), do: attrs
 
   def update_issue(%Issue{} = issue, attrs) do
-    with {:ok, issue} <- do_update_issue(issue, attrs) do
-      issue = Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
-      {:ok, issue}
+    old_issue = issue
+    with {:ok, updated} <- do_update_issue(issue, attrs) do
+      updated = Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])
+      Activities.log_issue_changes(old_issue, updated, attrs)
+      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, updated})
+      {:ok, updated}
     end
   end
 
@@ -238,7 +243,12 @@ defmodule Cympho.Issues do
 
   defp do_transition(%Issue{} = issue, new_status) do
     with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
-      if new_status == :done, do: unblock_dependents(issue.id)
+      if new_status == :done do
+        # Unblock dependent issues and wake their assignees
+        unblock_dependents(issue.id)
+        # Notify parent's assignee if all children are done
+        _ = Wakes.notify_children_completed(updated)
+      end
       {:ok, updated}
     end
   end
@@ -417,6 +427,7 @@ defmodule Cympho.Issues do
         |> case do
           {:ok, issue} ->
             issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
+            Activities.log_activity(%{issue_id: blocked_issue.id, actor_type: "system", action: "blocker_added", metadata: %{blocker_id: blocker_issue.id}})
             Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
             {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
@@ -469,6 +480,7 @@ defmodule Cympho.Issues do
       {:error, :not_found}
     else
       issue = Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks, :labels])
+      Activities.log_activity(%{issue_id: blocked_issue.id, actor_type: "system", action: "blocker_removed", metadata: %{blocker_id: blocker_issue.id}})
       Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
       {:ok, issue}
     end

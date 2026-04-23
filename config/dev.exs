@@ -5,7 +5,8 @@ config :cympho, Cympho.Repo,
   password: "postgres",
   hostname: "localhost",
   database: "cympho_dev",
-  pool_size: 5
+  pool_size: 5,
+  ssl: false
 
 config :cympho, CymphoWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4000],

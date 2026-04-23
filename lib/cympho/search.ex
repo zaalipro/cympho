@@ -39,7 +39,7 @@ defmodule Cympho.Search do
   end
 
   def build_tsquery(query) when is_binary(query) and byte_size(query) > 0 do
-    fragment("plainto_tsquery('english', ?)", ^query)
+    dynamic(fragment("plainto_tsquery('english', ?)", ^query))
   end
-  def build_tsquery(_), do: fragment("''::tsquery")
+  def build_tsquery(_), do: dynamic(fragment("''::tsquery"))
 end

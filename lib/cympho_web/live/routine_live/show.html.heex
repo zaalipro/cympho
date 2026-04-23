@@ -1,0 +1,59 @@
+<.header>
+  Routine: <%= @routine.name %>
+  <:actions>
+    <.button phx-click="manual_run" phx-disable-with="Starting...">
+      Run Now
+    </.button>
+  </:actions>
+</.header>
+
+<div class="mt-4">
+  <p class="text-sm text-zinc-500">Status: <span class="font-medium"><%= @routine.status %></span></p>
+  <%= if @routine.description do %>
+    <p class="mt-2"><%= @routine.description %></p>
+  <% end %>
+</div>
+
+<.header class="mt-8">Run History</.header>
+
+<div class="mt-4 overflow-x-auto">
+  <table class="w-full text-sm text-left">
+    <thead>
+      <tr class="border-b border-zinc-200">
+        <th class="pb-2 font-medium">Status</th>
+        <th class="pb-2 font-medium">Trigger Type</th>
+        <th class="pb-2 font-medium">Triggered At</th>
+        <th class="pb-2 font-medium">Completed At</th>
+      </tr>
+    </thead>
+    <tbody>
+      <%= for run <- @runs do %>
+        <tr class="border-b border-zinc-100">
+          <td class="py-2">
+            <span class={
+              "inline-block px-2 py-0.5 text-xs rounded-full " <>
+              case run.status do
+                "pending" -> "bg-yellow-100 text-yellow-800"
+                "running" -> "bg-blue-100 text-blue-800"
+                "completed" -> "bg-green-100 text-green-800"
+                "failed" -> "bg-red-100 text-red-800"
+                _ -> "bg-zinc-100 text-zinc-800"
+              end
+            }>
+              <%= run.status %>
+            </span>
+          </td>
+          <td class="py-2"><%= run.trigger_type %></td>
+          <td class="py-2"><%= Calendar.strftime(run.triggered_at, "%Y-%m-%d %H:%M") %></td>
+          <td class="py-2">
+            <%= if run.completed_at, do: Calendar.strftime(run.completed_at, "%Y-%m-%d %H:%M"), else: raw("&mdash;") %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+
+  <%= if @runs == [] do %>
+    <p class="mt-4 text-sm text-zinc-500">No runs yet. Click "Run Now" to start a manual run.</p>
+  <% end %>
+</div>
