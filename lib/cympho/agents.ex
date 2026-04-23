@@ -323,3 +323,84 @@ defmodule Cympho.Agents do
     end
   end
 end
+
+  @doc """
+  Returns a map with counts of agents by status.
+  """
+  @spec count_by_status() :: %{idle: non_neg_integer(), running: non_neg_integer(), error: non_neg_integer(), sleeping: non_neg_integer(), offline: non_neg_integer()}
+  def count_by_status do
+    from(a in Agent,
+      group_by: a.status,
+      select: {a.status, count(a.id)}
+    )
+    |> Repo.all()
+    |> Enum.into(%{idle: 0, running: 0, error: 0, sleeping: 0, offline: 0})
+  end
+
+  @doc """
+  Returns session progress for a running agent.
+  """
+  @spec get_session_progress(String.t()) :: {:ok, map()} | {:error, :not_running}
+  def get_session_progress(agent_id) when is_binary(agent_id) do
+    case Cympho.AgentHeartbeat.status(agent_id) do
+      {:ok, :running} ->
+        heartbeat_state = get_heartbeat_state(agent_id)
+        issue_id = heartbeat_state[:current_issue_id]
+        issue_info = if issue_id do
+          case Repo.get(Issue, issue_id) do
+            nil -> nil
+            issue -> %{id: issue.id, title: issue.title, identifier: issue.identifier}
+          end
+        else
+          nil
+        end
+        orchestrator_info = get_orchestrator_info(issue_id)
+        {:ok, %{
+          agent_id: agent_id,
+          issue: issue_info,
+          turn_count: orchestrator_info[:turn_count] || 0,
+          started_at: heartbeat_state[:started_at],
+          elapsed_seconds: calculate_elapsed(heartbeat_state[:started_at])
+        }}
+      {:ok, _} -> {:error, :not_running}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp get_heartbeat_state(agent_id) do
+    case Cympho.AgentHeartbeat.Registry.lookup(agent_id) do
+      {:ok, pid} -> try do GenServer.call(pid, :get_state, 5000) catch :exit, _ -> %{status: :unknown} end
+      :error -> %{status: :unknown}
+    end
+  end
+
+  defp get_orchestrator_info(nil), do: %{turn_count: 0}
+  defp get_orchestrator_info(issue_id) do
+    case Cympho.Orchestrator.get_session_state(issue_id) do
+      nil -> %{turn_count: 0}
+      state -> %{turn_count: state[:turn_count]}
+    end
+  end
+
+  defp calculate_elapsed(nil), do: 0
+  defp calculate_elapsed(started_at), do: DateTime.diff(DateTime.utc_now(), started_at, :second)
+
+  @doc """
+  Kills the running session for an agent.
+  """
+  @spec kill_session(String.t()) :: :ok | {:error, :not_running | :not_found}
+  def kill_session(agent_id) when is_binary(agent_id) do
+    case Cympho.AgentHeartbeat.status(agent_id) do
+      {:ok, :running} ->
+        heartbeat_state = get_heartbeat_state(agent_id)
+        issue_id = heartbeat_state[:current_issue_id]
+        if issue_id, do: Cympho.Orchestrator.stop(issue_id)
+        _ = Cympho.AgentHeartbeat.set_idle(agent_id)
+        case get_agent(agent_id) do
+          {:ok, agent} -> update_agent(agent, %{status: :idle})
+          {:error, _} -> :error
+        end
+        :ok
+      {:ok, _} -> {:error, :not_running}
+      {:error, reason} -> {:error, reason}
+    end
