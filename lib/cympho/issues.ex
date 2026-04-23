@@ -11,6 +11,7 @@ defmodule Cympho.Issues do
   alias Cympho.Issues.AutoAssignment
   alias Cympho.Agents
   alias Cympho.Agents.Agent
+  alias Cympho.Approvals
   alias Cympho.Comments
   alias Cympho.Labels
   alias Cympho.Labels.Label
@@ -304,6 +305,7 @@ defmodule Cympho.Issues do
         # Notify parent's assignee if all children are done
         _ = Wakes.notify_children_completed(updated)
       end
+      if new_status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
       {:ok, updated}
     end
   end
@@ -544,6 +546,7 @@ defmodule Cympho.Issues do
   def delete_issue(%Issue{} = issue) do
     case Repo.delete(issue) do
       {:ok, _issue} ->
+        Approvals.cancel_pending_for_issue(issue.id)
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_deleted, issue.id})
         :ok
 
