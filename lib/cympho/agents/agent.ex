@@ -15,6 +15,8 @@ defmodule Cympho.Agents.Agent do
     field :max_concurrent_jobs, :integer, default: 3
     field :last_heartbeat_at, :utc_datetime
 
+    has_many :api_keys, Cympho.Agents.AgentApiKey
+
     timestamps(type: :utc_datetime)
   end
 
