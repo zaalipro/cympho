@@ -49,9 +49,17 @@ defmodule Cympho.Finances do
       })
     end)
     |> Multi.run(:check_budgets, fn _repo, %{token_usage: tu} ->
-      check_budget_thresholds(tu)
+      case check_budget_thresholds(tu) do
+        {:ok, :checked} -> {:ok, :checked}
+        {:error, :budget_blocked} -> {:error, :budget_blocked}
+      end
     end)
     |> Repo.transaction()
+    |> case do
+      {:ok, result} -> {:ok, result.token_usage}
+      {:error, :check_budgets, :budget_blocked, _changes} -> {:error, :budget_blocked}
+      {:error, failed_operation, failed_value, changes} -> {:error, failed_operation, failed_value, changes}
+    end
   end
 
   def aggregate_usage(company_id, opts \\ []) do
@@ -236,11 +244,19 @@ defmodule Cympho.Finances do
       |> where(is_active: true)
       |> Repo.all()
 
-    Enum.each(policies, fn policy ->
-      check_policy_threshold(policy, token_usage)
-    end)
+    results =
+      Enum.map(policies, fn policy ->
+        # Lock the policy row to prevent concurrent budget checks
+        locked_policy = Repo.lock!(BudgetPolicy, policy.id, for_update: true)
+        check_policy_threshold(locked_policy, token_usage)
+      end)
 
-    {:ok, :checked}
+    # If any policy blocked, return the error
+    if {:error, :budget_blocked} in results do
+      {:error, :budget_blocked}
+    else
+      {:ok, :checked}
+    end
   end
 
   defp check_policy_threshold(policy, token_usage) do
@@ -263,7 +279,14 @@ defmodule Cympho.Finances do
 
     cond do
       Decimal.gt?(current_spend, policy.budget_limit_usd) ->
-        create_incident(policy, token_usage, "budget_exceeded", current_spend, threshold_pct)
+        if policy.action_on_exceed == "block" do
+          # Block action: reject the token usage
+          {:error, :budget_blocked}
+        else
+          # Warn action: create incident and continue
+          create_incident(policy, token_usage, "budget_exceeded", current_spend, threshold_pct)
+          :ok
+        end
 
       Decimal.gt?(threshold_pct, policy.warning_threshold_pct) ->
         create_incident(policy, token_usage, "warning", current_spend, threshold_pct)
