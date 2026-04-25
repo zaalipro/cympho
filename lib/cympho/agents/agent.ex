@@ -19,8 +19,10 @@ defmodule Cympho.Agents.Agent do
     field :instructions_path, :string
     field :max_concurrent_jobs, :integer, default: 3
     field :last_heartbeat_at, :utc_datetime
+
     field :adapter, Ecto.Enum,
       values: [:claude_code, :codex, :cursor, :http, :process]
+
     field :heartbeat_config, :map, default: %{}
     field :permissions, :map, default: %{}
     field :budget, :map, default: %{}

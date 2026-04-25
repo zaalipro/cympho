@@ -8,6 +8,7 @@ defmodule Cympho.Companies.Company do
     field :name, :string
     field :slug, :string
     field :logo_url, :string
+    field :governance_config, :map, default: %{}
 
     has_many :memberships, Cympho.Companies.CompanyMembership
     has_many :users, through: [:memberships, :user]
@@ -21,7 +22,7 @@ defmodule Cympho.Companies.Company do
 
   def changeset(company, attrs) do
     company
-    |> cast(attrs, [:name, :slug, :logo_url])
+    |> cast(attrs, [:name, :slug, :logo_url, :governance_config])
     |> validate_required([:name, :slug])
     |> validate_format(:slug, ~r/^[a-z0-9-]+$/,
       message: "must contain only lowercase letters, numbers, and hyphens"

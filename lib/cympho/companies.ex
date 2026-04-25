@@ -115,6 +115,27 @@ defmodule Cympho.Companies do
     role in ["owner", "admin"]
   end
 
+  @doc """
+  Returns true if the user is a board member of the given company.
+  """
+  def is_board_member?(user_id, company_id) do
+    case get_membership(user_id, company_id) do
+      nil -> false
+      membership -> membership.is_board_member
+    end
+  end
+
+  @doc """
+  Lists all board members for a company.
+  """
+  def list_board_members(company_id) do
+    from(m in CompanyMembership,
+      where: m.company_id == ^company_id and m.is_board_member == true,
+      preload: [:user]
+    )
+    |> Repo.all()
+  end
+
   # ── Invites ──
 
   def create_invite(attrs) do

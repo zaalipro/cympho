@@ -83,7 +83,7 @@ defmodule CymphoWeb.CompanyController do
       membership ->
         case Companies.delete_membership(membership) do
           {:ok, _} -> send_resp(conn, :no_content, "")
-          {:error, changeset} -> json(%{errors: translate_errors(changeset)})
+          {:error, changeset} -> json(conn, %{errors: translate_errors(changeset)})
         end
     end
   end
