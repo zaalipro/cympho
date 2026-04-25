@@ -8,6 +8,7 @@ defmodule Cympho.AgentGovernance do
   alias Cympho.Agents.Agent
   alias Cympho.BoardApprovals
   alias Cympho.GovernanceAuditLogs
+  alias Cympho.Decisions
 
   @governance_statuses ["active", "paused", "terminated", "pending_approval"]
 
@@ -49,6 +50,8 @@ defmodule Cympho.AgentGovernance do
             resource: updated,
             reasoning: reason
           )
+
+          Decisions.record_governance_decision(updated, "resume", "approved", actor)
 
           Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_resumed, updated})
           {:ok, updated}
@@ -182,6 +185,8 @@ defmodule Cympho.AgentGovernance do
           reasoning: Keyword.get(opts, :reason)
         )
 
+        Decisions.record_governance_decision(updated, "pause", "approved", actor)
+
         Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_paused, updated})
         {:ok, updated}
 
@@ -206,6 +211,8 @@ defmodule Cympho.AgentGovernance do
           resource: updated,
           reasoning: reason
         )
+
+        Decisions.record_governance_decision(updated, "terminate", "approved", actor)
 
         Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_terminated, updated})
         {:ok, updated}

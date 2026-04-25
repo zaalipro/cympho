@@ -7,6 +7,7 @@ defmodule Cympho.BoardApprovals do
   alias Cympho.Repo
   alias Cympho.BoardApprovals.{BoardApproval, BoardApprovalVote}
   alias Cympho.GovernanceAuditLogs
+  alias Cympho.Decisions
 
   @doc """
   Returns the list of board approvals.
@@ -151,6 +152,8 @@ defmodule Cympho.BoardApprovals do
             vote_summary: BoardApproval.vote_summary(updated)
           }
         )
+
+        Decisions.record_board_decision(updated, actor)
 
         Phoenix.PubSub.broadcast(
           Cympho.PubSub,

@@ -7,6 +7,7 @@ defmodule Cympho.Approvals do
   alias Cympho.Approvals.Approval
   alias Cympho.Approvals.ApprovalIssue
   alias Cympho.Activities
+  alias Cympho.Decisions
 
   def list_approvals(opts \\ %{}) do
     query = from(a in Approval, order_by: [desc: a.inserted_at])
@@ -94,6 +95,9 @@ defmodule Cympho.Approvals do
     |> case do
       {:ok, updated} ->
         updated = Repo.preload(updated, [:requested_by, :resolved_by, :issues])
+
+        actor = {"user", Map.get(opts, :resolved_by_user_id)}
+        Decisions.record_issue_decision(updated, actor)
 
         Enum.each(updated.issues, fn issue ->
           Activities.log_activity(%{
