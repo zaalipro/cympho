@@ -392,14 +392,15 @@ defmodule Cympho.Agents do
       review_deadline: default_review_deadline()
     }
 
-    approval_attrs =
+    {approval_attrs, actor} =
       if requester_agent_id do
-        Map.put(approval_attrs, :requested_by_id, requester_agent_id)
+        {Map.put(approval_attrs, :requested_by_id, requester_agent_id),
+         %Agent{id: requester_agent_id}}
       else
-        approval_attrs
+        {approval_attrs, {"system", company_id}}
       end
 
-    case BoardApprovals.create_board_approval(approval_attrs) do
+    case BoardApprovals.create_board_approval(approval_attrs, actor) do
       {:ok, approval} -> {:error, :pending_board_approval, approval.id}
       {:error, changeset} -> {:error, changeset}
     end

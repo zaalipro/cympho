@@ -110,7 +110,7 @@ defmodule Cympho.GovernanceAuditLogs do
     {String.downcase(type), id}
   end
 
-  defp extract_actor_info(nil), do: {"system", "system"}
+  defp extract_actor_info(nil), do: {"system", "00000000-0000-0000-0000-000000000000"}
 
   defp extract_resource_info(nil), do: {nil, nil}
 
