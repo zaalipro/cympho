@@ -2,6 +2,36 @@
   <.header title={@company.name}>
     <:actions>
       <.app_link
+        navigate={~p"/companies/#{@company}/export"}
+        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+          />
+        </svg>
+        Export
+      </.app_link>
+
+      <.app_link
+        navigate={~p"/companies/import"}
+        class="bg-surface hover:bg-white/[0.05] border border-border text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+          />
+        </svg>
+        Import
+      </.app_link>
+
+      <.app_link
         navigate={~p"/companies/#{@company}/edit"}
         class="bg-surface hover:bg-white/[0.05] border border-border text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2"
       >

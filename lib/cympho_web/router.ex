@@ -89,6 +89,8 @@ defmodule CymphoWeb.Router do
       live "/budgets/:id", BudgetLive.Show
       live "/budgets/:id/edit", BudgetLive.Show, :edit
       live "/companies/:id/edit", CompanyLive.Show, :edit
+      live "/companies/:id/export", CompanyExportLive
+      live "/companies/import", CompanyImportLive
     end
   end
 
@@ -187,6 +189,11 @@ defmodule CymphoWeb.Router do
     get "/exec-workspaces/:id/operations", WorkspaceController, :list_operations
     post "/exec-workspaces/:id/leases", WorkspaceController, :create_lease
     delete "/leases/:id", WorkspaceController, :revoke_lease
+
+    # Preview URLs for runtime services
+    get "/preview/:service_id", PreviewController, :show
+    get "/preview/:service_id/proxy/*path", PreviewController, :proxy
+    get "/exec-workspaces/:id/previews", PreviewController, :index
   end
 
   scope "/api", CymphoWeb do
