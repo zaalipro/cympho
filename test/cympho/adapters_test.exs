@@ -35,7 +35,6 @@ defmodule Cympho.AdaptersTest do
       assert :http in adapter_keys
       assert :openclaw in adapter_keys
       assert :process in adapter_keys
-      assert :openclaw in adapter_keys
     end
   end
 
