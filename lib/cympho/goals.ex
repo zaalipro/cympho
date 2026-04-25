@@ -1,32 +1,22 @@
 defmodule Cympho.Goals do
-  @moduledoc """
-  The Goals context for managing goals and their CRUD operations,
-  including hierarchical trees and project-goal linking.
-  """
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Goals.Goal
+  alias Cympho.Issues.Issue
 
-  def list_goals do
-    Repo.all(Goal)
-  end
+  def list_goals, do: Repo.all(Goal)
 
   def list_goals_by_project(project_id) do
-    Goal
-    |> where(project_id: ^project_id)
-    |> Repo.all()
+    Goal |> where(project_id: ^project_id) |> Repo.all()
   end
 
   def list_goals_by_company(company_id) do
-    Goal
-    |> where(company_id: ^company_id)
-    |> Repo.all()
+    Goal |> where(company_id: ^company_id) |> Repo.all()
   end
 
-  def list_goals_by_company(company_id) do
-    Goal
-    |> where(company_id: ^company_id)
-    |> Repo.all()
+  def list_root_goals_by_project(project_id) do
+    Goal |> where([g], g.project_id == ^project_id and is_nil(g.parent_id))
+    |> order_by(asc: :priority) |> Repo.all()
   end
 
   def get_goal!(id), do: Repo.get!(Goal, id)
@@ -38,64 +28,61 @@ defmodule Cympho.Goals do
     end
   end
 
+  def get_goal_with_tree!(id) do
+    goal = Repo.get!(Goal, id) |> Repo.preload([:project, :children])
+    %{goal | children: load_tree(goal.children)}
+  end
+
+  defp load_tree(goals) do
+    goals |> Repo.preload([:children])
+    |> Enum.map(fn goal -> %{goal | children: load_tree(goal.children)} end)
+  end
+
   def create_goal(attrs \\ %{}) do
-    %Goal{}
-    |> Goal.changeset(attrs)
-    |> Repo.insert()
+    %Goal{} |> Goal.changeset(attrs) |> Repo.insert()
   end
 
   def update_goal(%Goal{} = goal, attrs) do
-    goal
-    |> Goal.changeset(attrs)
-    |> Repo.update()
+    goal |> Goal.changeset(attrs) |> Repo.update()
   end
 
-  def delete_goal(%Goal{} = goal) do
-    Repo.delete(goal)
-  end
+  def delete_goal(%Goal{} = goal), do: Repo.delete(goal)
 
   def change_goal(%Goal{} = goal, attrs \\ %{}) do
     Goal.changeset(goal, attrs)
   end
 
-  def get_goal_tree!(id) do
-    goal = Repo.get!(Goal, id) |> Repo.preload(children: from(g in Goal, order_by: g.title))
-    %{goal | children: Enum.map(goal.children, &Repo.preload(&1, children: from(g in Goal, order_by: g.title)))}
+  def goal_progress(goal_id) do
+    counts = Issue |> where(goal_id: ^goal_id) |> group_by([i], i.status)
+    |> select([i], {i.status, count(i.id)}) |> Repo.all() |> Map.new()
+    total = Enum.sum(Map.values(counts))
+    done = Map.get(counts, :done, 0)
+    %{total: total, done: done, counts: counts,
+      percent: if(total > 0, do: round(done / total * 100), else: 0)}
   end
 
-  def get_root_goals(company_id) do
-    Goal
-    |> where(company_id: ^company_id)
-    |> where([g], is_nil(g.parent_id))
-    |> order_by(asc: :title)
-    |> Repo.all()
-  end
-
-  def get_ancestors(%Goal{} = goal) do
-    walk_ancestors(goal.parent_id, [])
-  end
-
-  defp walk_ancestors(nil, acc), do: Enum.reverse(acc)
-
-  defp walk_ancestors(parent_id, acc) do
-    case Repo.get(Goal, parent_id) do
-      nil -> Enum.reverse(acc)
-      parent -> walk_ancestors(parent.parent_id, [parent | acc])
-    end
-  end
-
-  def get_descendants(%Goal{} = goal) do
-    collect_descendants(goal.id, [])
-  end
-
-  defp collect_descendants(parent_id, acc) do
-    children =
-      Goal
-      |> where(parent_id: ^parent_id)
-      |> Repo.all()
-
-    Enum.reduce(children, acc, fn child, inner_acc ->
-      collect_descendants(child.id, [child | inner_acc])
+  def list_goals_with_progress(project_id) do
+    Enum.map(list_root_goals_by_project(project_id), fn goal ->
+      {goal, goal_progress(goal.id)}
     end)
+  end
+
+  def would_create_cycle?(goal_id, parent_id) do
+    if goal_id == parent_id, do: true,
+    else: ancestor_reaches?(parent_id, goal_id, MapSet.new())
+  end
+
+  defp ancestor_reaches?(current_id, target_id, visited) do
+    if MapSet.member?(visited, current_id) do
+      false
+    else
+      visited = MapSet.put(visited, current_id)
+      case Repo.get(Goal, current_id) do
+        nil -> false
+        %{parent_id: nil} -> false
+        %{parent_id: ^target_id} -> true
+        %{parent_id: pid} -> ancestor_reaches?(pid, target_id, visited)
+      end
+    end
   end
 end

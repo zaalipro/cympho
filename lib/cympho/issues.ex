@@ -285,10 +285,27 @@ defmodule Cympho.Issues do
       if new_status == :done do
         unblock_dependents(issue.id)
         _ = Wakes.notify_children_completed(updated)
+        maybe_complete_parent(updated)
       end
 
       if new_status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
       {:ok, updated}
+    end
+  end
+
+  defp maybe_complete_parent(%Issue{parent_id: nil}), do: :ok
+
+  defp maybe_complete_parent(%Issue{parent_id: parent_id}) do
+    case Repo.get(Issue, parent_id) do
+      nil -> :ok
+      parent ->
+        siblings = from(i in Issue, where: i.parent_id == ^parent_id) |> Repo.all()
+        all_done? = Enum.all?(siblings, &(&1.status == :done))
+        if all_done? and parent.status != :done do
+          {:ok, _} = do_transition(parent, :done)
+          add_system_comment(parent, "Auto-completed: all sub-issues are done")
+        end
+        :ok
     end
   end
 

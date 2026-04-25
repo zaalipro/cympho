@@ -127,13 +127,16 @@ defmodule CymphoWeb.SpawnAgentComponent do
   defp adapter_label(:process), do: "Process"
 
   defp normalize_adapter_param(%{"adapter" => ""} = params), do: Map.delete(params, "adapter")
+
   defp normalize_adapter_param(%{"adapter" => adapter} = params) when is_binary(adapter) do
     Map.put(params, "adapter", String.to_existing_atom(adapter))
   end
+
   defp normalize_adapter_param(params), do: params
 
   defp normalize_role_param(%{"role" => role} = params) when is_binary(role) do
     Map.put(params, "role", String.to_existing_atom(role))
   end
+
   defp normalize_role_param(params), do: params
 end

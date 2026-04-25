@@ -9,13 +9,7 @@ defmodule Cympho.Inbox do
 
   def list_inbox_for_agent(agent_id, opts \\ []) do
     status = Keyword.get(opts, :status)
-
-    query =
-      from(s in InboxState,
-        where: s.agent_id == ^agent_id,
-        order_by: [desc: s.inserted_at]
-      )
-
+    query = from(s in InboxState, where: s.agent_id == ^agent_id, order_by: [desc: s.inserted_at])
     query = if status, do: where(query, status: ^status), else: query
     Repo.all(query) |> Repo.preload([:issue])
   end
@@ -54,9 +48,7 @@ defmodule Cympho.Inbox do
         %InboxState{}
         |> InboxState.changeset(%{issue_id: issue_id, agent_id: agent_id, status: "unread"})
         |> Repo.insert()
-
-      existing ->
-        {:ok, existing}
+      existing -> {:ok, existing}
     end
   end
 end

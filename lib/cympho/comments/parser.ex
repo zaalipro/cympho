@@ -7,7 +7,6 @@ defmodule Cympho.Comments.Parser do
     |> Enum.map(fn [_, mention] -> mention end)
     |> Enum.uniq()
   end
-
   def extract_mentions(_), do: []
 
   def extract_issue_refs(text) when is_binary(text) do
@@ -17,7 +16,6 @@ defmodule Cympho.Comments.Parser do
     end)
     |> Enum.uniq_by(& &1.ref)
   end
-
   def extract_issue_refs(_), do: []
 
   def resolve_issue_refs(refs) when is_list(refs) do
@@ -29,17 +27,12 @@ defmodule Cympho.Comments.Parser do
     end)
   end
 
-  defp find_issue_identifier(prefix, seq) do
+  defp find_issue_by_identifier(prefix, seq) do
     alias Cympho.Repo
     alias Cympho.Issues.Issue
     import Ecto.Query
 
     identifier = "#{prefix}-#{seq}"
-
     Repo.one(from i in Issue, where: i.identifier == ^identifier, limit: 1)
-  end
-
-  defp find_issue_by_identifier(prefix, seq) do
-    find_issue_identifier(prefix, seq)
   end
 end

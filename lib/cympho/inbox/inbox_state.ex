@@ -11,7 +11,6 @@ defmodule Cympho.Inbox.InboxState do
     field :read_at, :utc_datetime
     belongs_to :issue, Cympho.Issues.Issue
     belongs_to :agent, Cympho.Agents.Agent
-
     timestamps(type: :utc_datetime)
   end
 
@@ -26,22 +25,18 @@ defmodule Cympho.Inbox.InboxState do
   end
 
   def dismiss_changeset(inbox_state) do
-    inbox_state
-    |> change(%{status: "dismissed", dismissed_at: DateTime.utc_now()})
+    change(inbox_state, %{status: "dismissed", dismissed_at: DateTime.utc_now()})
   end
 
   def archive_changeset(inbox_state) do
-    inbox_state
-    |> change(%{status: "archived", archived_at: DateTime.utc_now()})
+    change(inbox_state, %{status: "archived", archived_at: DateTime.utc_now()})
   end
 
   def read_changeset(inbox_state) do
-    inbox_state
-    |> change(%{status: "read", read_at: DateTime.utc_now()})
+    change(inbox_state, %{status: "read", read_at: DateTime.utc_now()})
   end
 
   def restore_changeset(inbox_state) do
-    inbox_state
-    |> change(%{status: "unread", dismissed_at: nil, archived_at: nil, read_at: nil})
+    change(inbox_state, %{status: "unread", dismissed_at: nil, archived_at: nil, read_at: nil})
   end
 end

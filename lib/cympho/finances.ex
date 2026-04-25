@@ -236,11 +236,35 @@ defmodule Cympho.Finances do
       |> where(is_active: true)
       |> Repo.all()
 
-    Enum.each(policies, fn policy ->
-      check_policy_threshold(policy, token_usage)
+    results = Enum.map(policies, fn policy ->
+      acquire_budget_lock_and_check(policy, token_usage)
     end)
 
-    {:ok, :checked}
+    case Enum.find(results, fn
+      {:error, _} -> true
+      _ -> false
+    end) do
+      {:error, :budget_blocked} = error -> error
+      _ -> {:ok, :checked}
+    end
+  end
+
+  defp acquire_budget_lock_and_check(policy, token_usage) do
+    lock_key = build_advisory_lock_key(policy)
+
+    case Repo.query("SELECT pg_advisory_xact_lock($1)", [lock_key]) do
+      {:ok, _} ->
+        check_policy_threshold(policy, token_usage)
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp build_advisory_lock_key(%BudgetPolicy{id: id, company_id: company_id}) do
+    # Use a hash of company_id and policy_id to create a consistent lock key
+    # This ensures serial budget checks per policy
+    :erlang.phash2({company_id, id})
   end
 
   defp check_policy_threshold(policy, token_usage) do
@@ -263,7 +287,13 @@ defmodule Cympho.Finances do
 
     cond do
       Decimal.gt?(current_spend, policy.budget_limit_usd) ->
-        create_incident(policy, token_usage, "budget_exceeded", current_spend, threshold_pct)
+        if policy.action_on_exceed == "block" do
+          create_incident(policy, token_usage, "budget_exceeded", current_spend, threshold_pct)
+          {:error, :budget_blocked}
+        else
+          create_incident(policy, token_usage, "budget_exceeded", current_spend, threshold_pct)
+          :ok
+        end
 
       Decimal.gt?(threshold_pct, policy.warning_threshold_pct) ->
         create_incident(policy, token_usage, "warning", current_spend, threshold_pct)
