@@ -54,7 +54,7 @@ defmodule Cympho.BoardApprovals.BoardApproval do
       :proposal_data,
       :decision_reasoning,
       :review_deadline,
-      :requested_by_agent_id,
+      :requested_by_id,
       :company_id
     ])
     |> validate_required([:title, :category, :company_id])

@@ -6,7 +6,7 @@ defmodule Cympho.Budgets do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Budgets.Budget
-  alias Cympho.{GovernanceAuditLogs, Activities}
+  alias Cympho.{GovernanceAuditLogs, Activities, BoardApprovals}
 
   @doc """
   Returns the list of budgets.
@@ -58,10 +58,32 @@ defmodule Cympho.Budgets do
 
   @doc """
   Creates a budget.
+
+  If the company's governance config requires `budget_increase` approval and the
+  limit exceeds the configured budget threshold, a BoardApproval is created
+  instead and `{:pending_approval, approval}` is returned.
   """
   def create_budget(attrs, actor \\ nil) do
-    %Budget{}
-    |> Budget.changeset(attrs)
+    changeset = Budget.changeset(%Budget{}, attrs)
+
+    if changeset.valid? do
+      case check_budget_approval_needed(attrs, nil) do
+        {:ok, :approval_needed, company} ->
+          create_pending_budget_approval(company, attrs, actor)
+
+        {:ok, :not_needed} ->
+          do_create_budget(changeset, actor)
+
+        {:error, :company_not_found} ->
+          do_create_budget(changeset, actor)
+      end
+    else
+      {:error, changeset}
+    end
+  end
+
+  defp do_create_budget(changeset, actor) do
+    changeset
     |> Repo.insert()
     |> case do
       {:ok, budget} ->
@@ -87,8 +109,26 @@ defmodule Cympho.Budgets do
 
   @doc """
   Updates a budget.
+
+  If the company's governance config requires `budget_increase` approval and the
+  new limit exceeds the old limit, a BoardApproval is created instead and
+  `{:pending_approval, approval}` is returned.
   """
   def update_budget(%Budget{} = budget, attrs, actor \\ nil) do
+    if budget_increase_exceeds_threshold?(budget, attrs) do
+      company = Cympho.Repo.get(Cympho.Companies.Company, budget.company_id)
+
+      if company && BoardApprovals.governance_required?(company, "budget_increase") do
+        create_pending_budget_update_approval(company, budget, attrs, actor)
+      else
+        do_update_budget(budget, attrs, actor)
+      end
+    else
+      do_update_budget(budget, attrs, actor)
+    end
+  end
+
+  defp do_update_budget(budget, attrs, actor) do
     budget
     |> Budget.changeset(attrs)
     |> Repo.update()
@@ -272,5 +312,136 @@ defmodule Cympho.Budgets do
 
       Phoenix.PubSub.broadcast(Cympho.PubSub, "budgets", {:budget_hard_stop, budget})
     end
+  end
+
+  # ── Governance gate helpers ──
+
+  defp check_budget_approval_needed(attrs, nil) do
+    company_id = attrs[:company_id] || attrs["company_id"]
+
+    if company_id do
+      case Cympho.Repo.get(Cympho.Companies.Company, company_id) do
+        nil -> {:error, :company_not_found}
+        company -> check_budget_approval_needed(attrs, company)
+      end
+    else
+      {:error, :company_not_found}
+    end
+  end
+
+  defp check_budget_approval_needed(attrs, %Cympho.Companies.Company{} = company) do
+    if BoardApprovals.governance_required?(company, "budget_increase") do
+      threshold = get_budget_threshold(company)
+      limit = parse_decimal(attrs[:limit_amount] || attrs["limit_amount"])
+
+      if limit && Decimal.gt?(limit, threshold) do
+        {:ok, :approval_needed, company}
+      else
+        {:ok, :not_needed}
+      end
+    else
+      {:ok, :not_needed}
+    end
+  end
+
+  defp get_budget_threshold(%Cympho.Companies.Company{governance_config: config}) do
+    config
+    |> (fn c -> Map.get(c, "budget_limit_threshold") || Map.get(c, :budget_limit_threshold) end).()
+    |> parse_decimal()
+    |> case do
+      nil -> Decimal.new(0)
+      threshold -> threshold
+    end
+  end
+
+  defp parse_decimal(nil), do: nil
+  defp parse_decimal(%Decimal{} = d), do: d
+  defp parse_decimal(v) when is_integer(v), do: Decimal.new(v)
+  defp parse_decimal(v) when is_float(v), do: Decimal.from_float(v)
+  defp parse_decimal(v) when is_binary(v), do: Decimal.new(v)
+
+  defp budget_increase_exceeds_threshold?(%Budget{} = budget, attrs) do
+    new_limit = attrs[:limit_amount] || attrs["limit_amount"]
+
+    if new_limit do
+      new_dec = parse_decimal(new_limit)
+      new_dec && Decimal.gt?(new_dec, budget.limit_amount || Decimal.new(0))
+    else
+      false
+    end
+  end
+
+  defp create_pending_budget_approval(company, attrs, actor) do
+    approval_attrs = %{
+      title: "Budget creation approval: #{attrs[:name] || attrs["name"] || "Untitled"}",
+      description: "Budget creation requires board approval. Limit: #{attrs[:limit_amount] || attrs["limit_amount"]}",
+      category: "budget_increase",
+      company_id: company.id,
+      proposal_data: %{
+        action: "create_budget",
+        budget_attrs: stringify_keys(attrs)
+      }
+    }
+
+    BoardApprovals.create_board_approval(approval_attrs, actor)
+    |> case do
+      {:ok, approval} ->
+        GovernanceAuditLogs.log_action(
+          "budget_pending_approval",
+          actor || {"system", "system"},
+          "Budget creation pending board approval",
+          resource: approval,
+          metadata: %{limit: attrs[:limit_amount] || attrs["limit_amount"]}
+        )
+
+        {:pending_approval, approval}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  defp create_pending_budget_update_approval(company, budget, attrs, actor) do
+    approval_attrs = %{
+      title: "Budget increase approval: #{budget.name}",
+      description: "Budget limit increase from #{budget.limit_amount} to #{attrs[:limit_amount] || attrs["limit_amount"]} requires board approval.",
+      category: "budget_increase",
+      company_id: company.id,
+      proposal_data: %{
+        action: "update_budget",
+        budget_id: budget.id,
+        old_limit: Decimal.to_string(budget.limit_amount),
+        new_limit: to_string(attrs[:limit_amount] || attrs["limit_amount"]),
+        update_attrs: stringify_keys(attrs)
+      }
+    }
+
+    BoardApprovals.create_board_approval(approval_attrs, actor)
+    |> case do
+      {:ok, approval} ->
+        GovernanceAuditLogs.log_action(
+          "budget_update_pending_approval",
+          actor || {"system", "system"},
+          "Budget update pending board approval: #{budget.name}",
+          resource: approval,
+          metadata: %{
+            budget_id: budget.id,
+            old_limit: budget.limit_amount,
+            new_limit: attrs[:limit_amount] || attrs["limit_amount"]
+          }
+        )
+
+        {:pending_approval, approval}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  defp stringify_keys(attrs) when is_map(attrs) do
+    Map.new(attrs, fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+      {k, v} -> {k, v}
+    end)
   end
 end

@@ -137,10 +137,4 @@ defmodule CymphoWeb.Components do
     </div>
     """
   end
-
-  er_slot(@inner_block)}
-      </div>
-    </div>
-    """
-  end
 end

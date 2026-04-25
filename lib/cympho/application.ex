@@ -17,6 +17,7 @@ defmodule Cympho.Application do
       {Cympho.Notifications.NotificationSupervisor, []},
       Cympho.Orchestrator.Dispatcher,
       Cympho.HeartbeatEngine.Watchdog,
+      Cympho.BoardApprovals.BoardApprovalActionExecutor,
       Cympho.Scheduler,
       # Adapter system
       Cympho.Adapters.Registry,

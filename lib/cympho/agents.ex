@@ -7,6 +7,7 @@ defmodule Cympho.Agents do
   alias Cympho.Repo
   alias Cympho.Agents.Agent
   alias Cympho.Agents.AgentConfigRevision
+  alias Cympho.BoardApprovals
   alias Cympho.Issues.Issue
 
   @doc """
@@ -74,8 +75,16 @@ defmodule Cympho.Agents do
 
   @doc """
   Creates an agent.
+  If governance requires approval for agent_hire, creates a BoardApproval instead
+  and returns `{:error, :pending_board_approval, approval_id}`.
   """
   def create_agent(attrs \\ %{}) do
+    with :ok <- maybe_require_hire_approval(attrs) do
+      do_create_agent(attrs)
+    end
+  end
+
+  defp do_create_agent(attrs) do
     %Agent{}
     |> Agent.changeset(attrs)
     |> Repo.insert()
@@ -91,8 +100,16 @@ defmodule Cympho.Agents do
 
   @doc """
   Updates an agent.
+  If the role is changing and governance requires approval, creates a BoardApproval
+  and returns `{:error, :pending_board_approval, approval_id}`.
   """
   def update_agent(%Agent{} = agent, attrs) do
+    with :ok <- maybe_require_role_change_approval(agent, attrs) do
+      do_update_agent(agent, attrs)
+    end
+  end
+
+  defp do_update_agent(agent, attrs) do
     agent
     |> Agent.changeset(attrs)
     |> Repo.update()
@@ -261,14 +278,20 @@ defmodule Cympho.Agents do
 
   @doc """
   Spawns a new agent: creates the agent record and starts its heartbeat process.
+  If governance requires approval for agent_hire, creates a BoardApproval instead
+  and returns `{:error, :pending_board_approval, approval_id}`.
   Returns {:ok, agent} or {:error, reason}.
   """
-  @spec spawn_agent(map(), String.t()) :: {:ok, Agent.t()} | {:error, Ecto.Changeset.t() | atom()}
+  @spec spawn_agent(map(), String.t()) ::
+          {:ok, Agent.t()}
+          | {:error, Ecto.Changeset.t() | atom()}
+          | {:error, :pending_board_approval, String.t()}
   def spawn_agent(attrs \\ %{}, parent_agent_id) when is_binary(parent_agent_id) do
     with {:ok, parent_agent} <- get_agent(parent_agent_id),
-         {:ok, child_attrs} <- validate_spawn(parent_agent, attrs) do
+         {:ok, child_attrs} <- validate_spawn(parent_agent, attrs),
+         :ok <- maybe_require_spawn_hire_approval(parent_agent, child_attrs) do
       child_attrs_with_creator = Map.put(child_attrs, :created_by_agent_id, parent_agent_id)
-      do_spawn_agent(child_attrs_with_creator)
+      execute_spawn(child_attrs_with_creator)
     end
   end
 
@@ -286,8 +309,8 @@ defmodule Cympho.Agents do
     end
   end
 
-  defp do_spawn_agent(attrs) do
-    case create_agent(attrs) do
+  defp execute_spawn(attrs) do
+    case do_create_agent(attrs) do
       {:ok, agent} ->
         case Cympho.AgentHeartbeat.start_for_agent(agent.id) do
           {:ok, _pid} ->
@@ -301,6 +324,140 @@ defmodule Cympho.Agents do
       {:error, changeset} ->
         {:error, changeset}
     end
+  end
+
+  @doc """
+  Executes a pending agent hire after board approval.
+  Called by BoardApprovalActionExecutor.
+  """
+  def execute_approved_hire(proposal_data) do
+    attrs = proposal_data["attrs"] || %{}
+    parent_agent_id = proposal_data["parent_agent_id"]
+
+    child_attrs =
+      if parent_agent_id do
+        Map.put(attrs, :created_by_agent_id, parent_agent_id)
+      else
+        attrs
+      end
+
+    execute_spawn(child_attrs)
+  end
+
+  @doc """
+  Applies a role change directly, bypassing governance checks.
+  Called by BoardApprovalActionExecutor when an approval is granted.
+  """
+  def apply_role_change(agent_id, new_role) when is_binary(agent_id) do
+    with {:ok, agent} <- get_agent(agent_id) do
+      do_update_agent(agent, %{role: new_role})
+    end
+  end
+
+  # Governance check helpers
+
+  defp maybe_require_hire_approval(attrs) do
+    company_id = get_company_id(attrs)
+
+    if company_id && BoardApprovals.governance_required?(company_id, "agent_hire") do
+      create_hire_approval(company_id, nil, attrs)
+    else
+      :ok
+    end
+  end
+
+  defp maybe_require_spawn_hire_approval(%Agent{company_id: nil}, _attrs), do: :ok
+
+  defp maybe_require_spawn_hire_approval(%Agent{} = parent_agent, attrs) do
+    if BoardApprovals.governance_required?(parent_agent.company_id, "agent_hire") do
+      create_hire_approval(parent_agent.company_id, parent_agent.id, attrs)
+    else
+      :ok
+    end
+  end
+
+  defp create_hire_approval(company_id, requester_agent_id, attrs) do
+    role = attrs[:role] || attrs["role"]
+    name = attrs[:name] || attrs["name"] || "Unnamed Agent"
+
+    approval_attrs = %{
+      title: "Agent Hire: #{name} (#{role})",
+      description: "Request to hire new agent '#{name}' with role '#{role}'.",
+      category: "agent_hire",
+      company_id: company_id,
+      proposal_data: %{
+        "attrs" => stringify_map_keys(attrs),
+        "parent_agent_id" => requester_agent_id
+      },
+      review_deadline: default_review_deadline()
+    }
+
+    approval_attrs =
+      if requester_agent_id do
+        Map.put(approval_attrs, :requested_by_id, requester_agent_id)
+      else
+        approval_attrs
+      end
+
+    case BoardApprovals.create_board_approval(approval_attrs) do
+      {:ok, approval} -> {:error, :pending_board_approval, approval.id}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  defp maybe_require_role_change_approval(%Agent{} = agent, attrs) do
+    new_role = extract_role(attrs)
+
+    if new_role && new_role != agent.role && agent.company_id &&
+         BoardApprovals.governance_required?(agent.company_id, "agent_promotion") do
+      create_role_change_approval(agent, new_role)
+    else
+      :ok
+    end
+  end
+
+  defp create_role_change_approval(%Agent{} = agent, new_role) do
+    approval_attrs = %{
+      title: "Agent Role Change: #{agent.name} (#{agent.role} → #{new_role})",
+      description: "Request to change agent '#{agent.name}' role from '#{agent.role}' to '#{new_role}'.",
+      category: "agent_promotion",
+      company_id: agent.company_id,
+      requested_by_id: agent.id,
+      proposal_data: %{
+        "agent_id" => agent.id,
+        "current_role" => to_string(agent.role),
+        "new_role" => to_string(new_role)
+      },
+      review_deadline: default_review_deadline()
+    }
+
+    case BoardApprovals.create_board_approval(approval_attrs, agent) do
+      {:ok, approval} -> {:error, :pending_board_approval, approval.id}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  defp extract_role(attrs) when is_map(attrs) do
+    case attrs[:role] || attrs["role"] do
+      nil -> nil
+      role when is_atom(role) -> role
+      role when is_binary(role) -> String.to_existing_atom(role)
+    end
+  end
+
+  defp get_company_id(attrs) when is_map(attrs) do
+    attrs[:company_id] || attrs["company_id"]
+  end
+
+  defp default_review_deadline do
+    DateTime.add(DateTime.utc_now(), 7 * 24 * 3600, :second)
+  end
+
+  defp stringify_map_keys(map) when is_map(map) do
+    Map.new(map, fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+      {k, v} -> {k, v}
+    end)
   end
 
   @doc """

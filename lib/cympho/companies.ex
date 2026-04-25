@@ -5,6 +5,8 @@ defmodule Cympho.Companies do
   alias Cympho.Companies.CompanyMembership
   alias Cympho.Companies.CompanyInvite
   alias Cympho.Companies.JoinRequest
+  alias Cympho.BoardApprovals
+  alias Cympho.GovernanceAuditLogs
 
   # ── Company CRUD ──
 
@@ -25,9 +27,62 @@ defmodule Cympho.Companies do
   end
 
   def update_company(%Company{} = company, attrs) do
-    company
-    |> Company.changeset(attrs)
-    |> Repo.update()
+    if policy_change_needs_approval?(company, attrs) do
+      create_pending_policy_approval(company, attrs)
+    else
+      company
+      |> Company.changeset(attrs)
+      |> Repo.update()
+    end
+  end
+
+  defp policy_change_needs_approval?(%Company{} = company, attrs) do
+    governance_key_changing? =
+      Map.has_key?(attrs, :governance_config) or Map.has_key?(attrs, "governance_config")
+
+    governance_key_changing? and BoardApprovals.governance_required?(company, "policy_change")
+  end
+
+  defp create_pending_policy_approval(%Company{} = company, attrs) do
+    new_config = attrs[:governance_config] || attrs["governance_config"] || %{}
+
+    approval_attrs = %{
+      title: "Company policy change approval: #{company.name}",
+      description: "Governance config change requires board approval.",
+      category: "policy_change",
+      company_id: company.id,
+      proposal_data: %{
+        action: "update_company",
+        company_id: company.id,
+        old_governance_config: company.governance_config,
+        new_governance_config: new_config,
+        update_attrs: stringify_keys(attrs)
+      }
+    }
+
+    BoardApprovals.create_board_approval(approval_attrs)
+    |> case do
+      {:ok, approval} ->
+        GovernanceAuditLogs.log_action(
+          "policy_change_pending_approval",
+          {"system", "system"},
+          "Company config change pending board approval: #{company.name}",
+          resource: approval,
+          metadata: %{company_id: company.id}
+        )
+
+        {:pending_approval, approval}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
+  end
+
+  defp stringify_keys(attrs) when is_map(attrs) do
+    Map.new(attrs, fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+      {k, v} -> {k, v}
+    end)
   end
 
   def delete_company(%Company{} = company) do

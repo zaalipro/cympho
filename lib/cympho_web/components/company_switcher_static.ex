@@ -4,7 +4,7 @@ defmodule CymphoWeb.Components.CompanySwitcherStatic do
   attr :companies, :list, default: []
   attr :current_company_id, :string, default: nil
 
-  def company_switcher(assigns) do
+  def company_switcher_static(assigns) do
     ~H"""
     <div id="company-switcher-wrapper" data-companies={Jason.encode!(@companies)} data-current-company-id={@current_company_id}>
       <div id="company-switcher-modal" class="hidden fixed inset-0 z-[70] flex items-start justify-center pt-[15vh] bg-black/50">

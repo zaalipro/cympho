@@ -1,4 +1,18 @@
 <div class="p-6 lg:p-8 max-w-2xl mx-auto">
+  <%= if @pending_approval_id do %>
+    <div class="mb-4 p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+      <p class="text-sm text-blue-400">
+        Agent role change requires board approval. A request has been submitted and is pending review.
+        <.app_link
+          navigate={~p"/approvals/#{@pending_approval_id}"}
+          class="text-blue-400 underline hover:text-blue-300"
+        >
+          View approval request
+        </.app_link>
+      </p>
+    </div>
+  <% end %>
+
   <.header title="Edit Agent">
     <:actions>
       <.app_link

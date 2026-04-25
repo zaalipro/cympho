@@ -6,7 +6,7 @@ defmodule CymphoWeb.AgentLive.Edit do
   def mount(%{"id" => id}, _session, socket) do
     agent = Agents.get_agent!(id)
     changeset = Agents.change_agent(agent)
-    {:ok, assign(socket, agent: agent, form: to_form(changeset))}
+    {:ok, assign(socket, agent: agent, form: to_form(changeset), pending_approval_id: nil)}
   end
 
   @impl true
@@ -14,6 +14,18 @@ defmodule CymphoWeb.AgentLive.Edit do
     case Agents.update_agent(socket.assigns.agent, agent_params) do
       {:ok, _agent} ->
         {:noreply, push_navigate(socket, to: ~p"/agents")}
+
+      {:error, :pending_board_approval, approval_id} ->
+        socket =
+          socket
+          |> put_flash(
+            :info,
+            "Agent role change requires board approval. " <>
+              "A request has been submitted and is pending review."
+          )
+          |> assign(:pending_approval_id, approval_id)
+
+        {:noreply, socket}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}

@@ -35,6 +35,12 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
          |> put_flash(:info, "Budget updated successfully")
          |> push_navigate(to: ~p"/budgets/#{budget}")}
 
+      {:pending_approval, _approval} ->
+        {:noreply,
+         socket
+         |> put_flash(:warning, "Budget increase requires board approval. A proposal has been submitted.")
+         |> push_navigate(to: ~p"/budgets")}
+
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign(socket, :changeset, changeset)}
     end
@@ -47,6 +53,12 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
          socket
          |> put_flash(:info, "Budget created successfully")
          |> push_navigate(to: ~p"/budgets/#{budget}")}
+
+      {:pending_approval, _approval} ->
+        {:noreply,
+         socket
+         |> put_flash(:warning, "Budget creation requires board approval due to the limit amount. A proposal has been submitted.")
+         |> push_navigate(to: ~p"/budgets")}
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign(socket, :changeset, changeset)}

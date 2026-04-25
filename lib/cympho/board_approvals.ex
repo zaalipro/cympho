@@ -231,7 +231,10 @@ defmodule Cympho.BoardApprovals do
   """
   def governance_required?(%Cympho.Companies.Company{} = company, category) do
     config = Map.get(company, :governance_config) || %{}
-    required = Map.get(config, "required_approvals") || Map.get(config, :required_approvals) || []
+    required =
+      Map.get(config, "categories") ||
+      Map.get(config, "required_approvals") ||
+      Map.get(config, :required_approvals) || []
     category in required
   end
 
@@ -265,6 +268,9 @@ defmodule Cympho.BoardApprovals do
 
       "budget_increase" ->
         trigger_budget_increase(board_approval)
+
+      "policy_change" ->
+        trigger_policy_change(board_approval)
 
       "principal_permission" ->
         trigger_permission_grant(board_approval)
@@ -302,15 +308,84 @@ defmodule Cympho.BoardApprovals do
   end
 
   defp trigger_budget_increase(board_approval) do
-    budget_id = get_in(board_approval.proposal_data, ["budget_id"])
-    new_limit = get_in(board_approval.proposal_data, ["new_limit"])
+    action = get_in(board_approval.proposal_data, ["action"])
 
-    if budget_id and new_limit do
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        "governance",
-        {:budget_increase_approved, board_approval.id, budget_id, new_limit}
-      )
+    case action do
+      "create_budget" ->
+        attrs = get_in(board_approval.proposal_data, ["budget_attrs"]) || %{}
+        Cympho.Budgets.create_budget(attrs, {"board_approval", board_approval.id})
+
+      "update_budget" ->
+        budget_id = get_in(board_approval.proposal_data, ["budget_id"])
+        update_attrs = get_in(board_approval.proposal_data, ["update_attrs"]) || %{}
+
+        if budget_id do
+          case Cympho.Budgets.get_budget(budget_id) do
+            {:ok, budget} ->
+              Cympho.Budgets.update_budget(budget, update_attrs, {"board_approval", board_approval.id})
+
+            {:error, :not_found} ->
+              GovernanceAuditLogs.log_action(
+                "budget_increase_execution_failed",
+                {"system", "system"},
+                "Budget not found for approved increase",
+                resource: board_approval,
+                metadata: %{budget_id: budget_id}
+              )
+          end
+        end
+
+      _ ->
+        # Legacy: broadcast-only for backward compat
+        budget_id = get_in(board_approval.proposal_data, ["budget_id"])
+        new_limit = get_in(board_approval.proposal_data, ["new_limit"])
+
+        if budget_id and new_limit do
+          Phoenix.PubSub.broadcast(
+            Cympho.PubSub,
+            "governance",
+            {:budget_increase_approved, board_approval.id, budget_id, new_limit}
+          )
+        end
+    end
+  end
+
+  defp trigger_policy_change(board_approval) do
+    action = get_in(board_approval.proposal_data, ["action"])
+
+    if action == "update_company" do
+      company_id = get_in(board_approval.proposal_data, ["company_id"])
+      update_attrs = get_in(board_approval.proposal_data, ["update_attrs"]) || %{}
+
+      if company_id do
+        company = Cympho.Repo.get(Cympho.Companies.Company, company_id)
+
+        if company do
+          # Bypass the governance gate by applying directly
+          company
+          |> Cympho.Companies.Company.changeset(update_attrs)
+          |> Cympho.Repo.update()
+          |> case do
+            {:ok, updated} ->
+              GovernanceAuditLogs.log_action(
+                "policy_change_executed",
+                {"board_approval", board_approval.id},
+                "Company config update executed after board approval",
+                resource: updated,
+                metadata: %{board_approval_id: board_approval.id}
+              )
+
+            {:error, changeset} ->
+              GovernanceAuditLogs.log_action(
+                "policy_change_execution_failed",
+                {"system", "system"},
+                "Company config update failed after board approval",
+                resource: board_approval,
+                metadata: %{errors: traverse_errors(changeset)}
+              )
+          end
+        end
+      end
     end
   end
 
@@ -325,5 +400,13 @@ defmodule Cympho.BoardApprovals do
         {:permission_grant_approved, board_approval.id, principal_id, permission}
       )
     end
+  end
+
+  defp traverse_errors(changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {key, value}, acc ->
+        String.replace(acc, "%{#{key}}", to_string(value))
+      end)
+    end)
   end
 end

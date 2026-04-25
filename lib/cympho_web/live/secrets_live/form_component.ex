@@ -12,25 +12,27 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
         _ -> Secret.changeset(%Secret{}, %{})
       end
 
+    form = to_form(changeset, as: :secret)
+
     socket =
       socket
       |> assign(:secret, secret)
       |> assign(:form_mode, form_mode)
       |> assign(:company_id, company_id)
-      |> assign(:changeset, changeset)
-      |> assign(:trigger_action, false)
+      |> assign(:form, form)
 
     {:ok, socket}
   end
 
   @impl true
   def handle_event("validate", %{"secret" => secret_params}, socket) do
-    changeset =
+    form =
       %Secret{}
       |> Secret.changeset(secret_params)
       |> Map.put(:action, :validate)
+      |> to_form(as: :secret)
 
-    {:noreply, assign(socket, :changeset, changeset)}
+    {:noreply, assign(socket, :form, form)}
   end
 
   def handle_event("save", %{"secret" => secret_params}, socket) do
@@ -46,7 +48,6 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
           Secrets.update_secret(socket.assigns.secret, secret_params)
 
         :rotate ->
-          # For rotation, we need the new value
           case secret_params["value"] || secret_params[:value] do
             nil ->
               {:error, Secret.changeset(socket.assigns.secret, %{}) |> Ecto.Changeset.add_error(:value, "can't be blank")}
@@ -58,10 +59,10 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
 
     case result do
       {:ok, secret} ->
-        {:reply, {:ok, secret}, assign(socket, :trigger_action, true)}
+        {:reply, {:ok, secret}, socket}
 
       {:error, changeset} ->
-        {:noreply, assign(socket, :changeset, changeset)}
+        {:noreply, assign(socket, :form, to_form(changeset, as: :secret))}
     end
   end
 
@@ -69,71 +70,46 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
   def render(assigns) do
     ~H"""
     <div class="mb-6 p-4 bg-white/[0.02] border border-border rounded-md">
-      <.form
-        for={@changeset}
-        phx-target={@myself}
-        phx-change="validate"
-        phx-submit="save"
-        id="secret-form"
-      >
+      <.form for={@form} phx-target={@myself} phx-change="validate" phx-submit="save" id="secret-form">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="space-y-2">
-            <.label field={:key}>Key</.label>
-            <.input
-              field={:key}
-              type="text"
-              placeholder="API_KEY, DATABASE_URL, etc."
-              disabled={@form_mode == :edit}
-              required
-            />
-            <.error field={:key} />
-          </div>
+          <.input
+            field={@form[:key]}
+            label="Key"
+            placeholder="API_KEY, DATABASE_URL, etc."
+            disabled={@form_mode == :edit}
+            required
+          />
 
-          <div class="space-y-2">
-            <.label field={:scope}>Scope</.label>
-            <.input
-              field={:scope}
-              type="select"
-              options={[{"Company": "company"}, {"Instance": "instance"}, {"Agent": "agent"}, {"Project": "project"}]}
-              required
-            />
-            <.error field={:scope} />
-          </div>
+          <.select
+            name={@form[:scope].name}
+            label="Scope"
+            options={[{"Company", "company"}, {"Instance", "instance"}, {"Agent", "agent"}, {"Project", "project"}]}
+            value={@form[:scope].value}
+            required
+          />
 
-          <div :if={@changeset.data.scope in ["agent", "project"]} class="space-y-2">
-            <.label field={:scope_id}>Scope ID</.label>
+          <div :if={@form[:scope].value in ["agent", "project"]}>
             <.input
-              field={:scope_id}
-              type="text"
+              field={@form[:scope_id]}
+              label="Scope ID"
               placeholder="Agent or Project ID"
             />
-            <.error field={:scope_id} />
           </div>
 
-          <div class="space-y-2">
-            <.label field={:value}>
-              {if @form_mode == :rotate, do: "New Value", else: "Value"}
-            </.label>
-            <.input
-              field={:value}
-              type="password"
-              placeholder="Secret value"
-              required={@form_mode in [:create, :rotate]}
-            />
-            <.error field={:value} />
-            <p class="text-xs text-text-quaternary">
-              {if @form_mode == :rotate, do: "Enter the new secret value to create version #{(@secret.version || 0) + 1}", else: "The value will be encrypted and stored securely"}
-            </p>
-          </div>
+          <.input
+            field={@form[:value]}
+            label={if @form_mode == :rotate, do: "New Value", else: "Value"}
+            type="password"
+            placeholder="Secret value"
+            required={@form_mode in [:create, :rotate]}
+          />
 
-          <div class="space-y-2 md:col-span-2">
-            <.label field={:description}>Description</.label>
+          <div class="md:col-span-2">
             <.input
-              field={:description}
-              type="text"
+              field={@form[:description]}
+              label="Description"
               placeholder="Optional description of what this secret is for"
             />
-            <.error field={:description} />
           </div>
         </div>
 
