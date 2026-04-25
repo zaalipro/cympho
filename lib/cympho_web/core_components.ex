@@ -25,17 +25,4 @@ defmodule CymphoWeb.CoreComponents do
       String.replace(acc, "%{#{key}}", fn _ -> to_string(value) end)
     end)
   end
-
-  @doc """
-  Renders a label for form fields.
-  """
-  attr :field, :any, required: true
-  attr :rest, :global
-
-  def label(assigns) do
-    ~H"""
-    <label for={@field} class="block text-sm font-medium text-text-secondary mb-1">{render_slot(@inner_block)}</label>
-    """
-  end
-
 end
