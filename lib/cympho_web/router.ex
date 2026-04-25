@@ -19,7 +19,8 @@ defmodule CymphoWeb.Router do
 
     get "/", PageController, :home
 
-    live "/issues", IssueLive.Index
+    live_session :default, on_mount: [{CymphoWeb.UserAuth, :default}] do
+      live "/issues", IssueLive.Index
     live "/issues/new", IssueLive.New
     live "/issues/:id", IssueLive.Show
     live "/projects", ProjectLive.Index
@@ -69,6 +70,7 @@ defmodule CymphoWeb.Router do
     live "/workspace/:issue_id", WorkspaceLive.Show
     live "/profile/:id", ProfileLive.Show
     live "/profile/:id/edit", ProfileLive.Edit
+    end
   end
 
   scope "/api", CymphoWeb do
