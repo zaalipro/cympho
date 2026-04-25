@@ -28,6 +28,7 @@ defmodule Cympho.Agents.Agent do
     belongs_to :parent, __MODULE__, foreign_key: :parent_id
     has_many :children, __MODULE__, foreign_key: :parent_id
     has_many :api_keys, Cympho.Agents.AgentApiKey
+    has_many :agent_skills, Cympho.Skills.AgentSkill
 
     timestamps(type: :utc_datetime)
   end
