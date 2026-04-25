@@ -13,7 +13,8 @@ defmodule Cympho.Telemetry do
       [:cympho, :kanban, :card_moved],
       [:cympho, :command_palette, :opened],
       [:cympho, :onboarding, :completed],
-      [:cympho, :web, :request, :stop]
+      [:cympho, :web, :request, :stop],
+      [:cympho, :tool, :call]
     ]
 
     :telemetry.attach_many("cympho-metrics", events, &handle_event/4, nil)

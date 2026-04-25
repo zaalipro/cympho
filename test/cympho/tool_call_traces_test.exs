@@ -9,8 +9,7 @@ defmodule Cympho.ToolCallTracesTest do
     {:ok, company} =
       Companies.create_company(%{
         name: "Test Company",
-        prefix: "test-co",
-        default_role: "member"
+        slug: "test-company"
       })
 
     %{company: company}

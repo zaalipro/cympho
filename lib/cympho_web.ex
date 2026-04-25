@@ -65,6 +65,7 @@ defmodule CymphoWeb do
   defp html_helpers do
     quote do
       import Phoenix.HTML
+      import Phoenix.Component
       import CymphoWeb.CoreComponents
       import CymphoWeb.Components
       import CymphoWeb.Components.Badge

@@ -8,6 +8,7 @@ defmodule Cympho.AgentRunner do
   Messages sent to recipient_pid:
     - `{:session_started, session_id}` — when the Claude process starts
     - `{:turn_completed, session_id, result}` — when a turn completes with parsed result
+    - `{:tool_call_detected, session_id, tool_call}` — when a tool_use block is detected
     - `{:turn_ended_with_error, session_id, reason}` — when an error occurs
   """
 
@@ -101,6 +102,8 @@ defmodule Cympho.AgentRunner do
 
         case parse_json_output(output) do
           {:ok, result} ->
+            # Extract and send tool calls if present
+            extract_and_send_tool_calls(result, session_id, recipient_pid)
             send(recipient_pid, {:turn_completed, session_id, result})
             loop(port, session_id, recipient_pid, stall_timeout, new_last_output)
 
@@ -161,4 +164,24 @@ defmodule Cympho.AgentRunner do
     |> Enum.map(fn key -> {key, System.get_env(key)} end)
     |> Enum.reject(fn {_, val} -> is_nil(val) end)
   end
+
+  defp extract_and_send_tool_calls(result, session_id, recipient_pid) when is_map(result) do
+    content = result["content"] || []
+
+    Enum.each(content, fn item ->
+      if item["type"] == "tool_use" do
+        tool_call = %{
+          "type" => "tool_use",
+          "id" => item["id"],
+          "name" => item["name"],
+          "input" => item["input"],
+          "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
+        }
+
+        send(recipient_pid, {:tool_call_detected, session_id, tool_call})
+      end
+    end)
+  end
+
+  defp extract_and_send_tool_calls(_result, _session_id, _recipient_pid), do: :ok
 end

@@ -11,26 +11,56 @@ defmodule Cympho.AgentRunner.Mock do
 
   Immediately sends `{:session_started, session_id}` to recipient_pid,
   then `{:turn_completed, session_id, mock_result}` after a configurable delay.
+
+  Options:
+    - `:include_tool_calls` — if true, includes mock tool_use blocks in response
   """
   def run(_issue, _agent_id, recipient_pid, opts \\ []) when is_pid(recipient_pid) do
     session_id = make_ref()
     delay = Keyword.get(opts, :mock_delay, 10)
+    include_tool_calls = Keyword.get(opts, :include_tool_calls, false)
 
     spawn(fn ->
       send(recipient_pid, {:session_started, session_id})
 
       Process.sleep(delay)
 
-      result = %{
-        "type" => "mock_result",
-        "content" => [%{"type" => "text", "text" => "Mock Claude response"}],
-        "usage" => %{"input_tokens" => 100, "output_tokens" => 50}
-      }
+      result = build_mock_result(include_tool_calls)
 
       send(recipient_pid, {:turn_completed, session_id, result})
     end)
 
     session_id
+  end
+
+  defp build_mock_result(include_tool_calls) do
+    base_content = [%{"type" => "text", "text" => "Mock Claude response"}]
+
+    content = if include_tool_calls do
+      [
+        %{
+          "type" => "tool_use",
+          "id" => "toolu_0123456789",
+          "name" => "bash",
+          "input" => %{"command" => "echo 'test'"}
+        },
+        %{
+          "type" => "tool_use",
+          "id" => "toolu_9876543210",
+          "name" => "read_file",
+          "input" => %{"file_path" => "/tmp/test.txt"}
+        }
+        | base_content
+      ]
+    else
+      base_content
+    end
+
+    %{
+      "type" => "mock_result",
+      "content" => content,
+      "usage" => %{"input_tokens" => 100, "output_tokens" => 50}
+    }
   end
 
   @doc """

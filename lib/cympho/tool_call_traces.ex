@@ -60,25 +60,25 @@ defmodule Cympho.ToolCallTraces do
     company_id = Map.get(attrs, :company_id) || Map.get(attrs, "company_id")
 
     if !company_id do
-      return {:error, :company_id_required}
-    end
+      {:error, :company_id_required}
+    else
+      case get_next_sequence_number(company_id) do
+        {:error, reason} -> {:error, reason}
+        {:ok, sequence_number} ->
+          attrs = Map.put(attrs, :sequence_number, sequence_number)
 
-    case get_next_sequence_number(company_id) do
-      {:error, reason} -> {:error, reason}
-      {:ok, sequence_number} ->
-        attrs = Map.put(attrs, :sequence_number, sequence_number)
+          prev_chain_hash = case get_latest_trace(company_id) do
+            {:ok, latest} -> latest.chain_hash
+            {:error, :not_found} -> nil
+          end
 
-        prev_chain_hash = case get_latest_trace(company_id) do
-          {:ok, latest} -> latest.chain_hash
-          {:error, :not_found} -> nil
-        end
+          changeset = ToolCallTrace.creation_changeset(attrs, prev_chain_hash)
 
-        changeset = ToolCallTrace.creation_changeset(attrs, prev_chain_hash)
-
-        case Repo.insert(changeset) do
-          {:ok, trace} -> {:ok, Repo.preload(trace, [:agent, :issue, :company])}
-          error -> error
-        end
+          case Repo.insert(changeset) do
+            {:ok, trace} -> {:ok, Repo.preload(trace, [:agent, :issue, :company])}
+            error -> error
+          end
+      end
     end
   end
 
