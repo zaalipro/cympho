@@ -7,6 +7,7 @@ defmodule Cympho.Companies.CompanyMembership do
 
   schema "company_memberships" do
     field :role, :string
+    field :is_board_member, :boolean, default: false
 
     belongs_to :user, Cympho.Users.User
     belongs_to :company, Cympho.Companies.Company
@@ -16,7 +17,7 @@ defmodule Cympho.Companies.CompanyMembership do
 
   def changeset(membership, attrs) do
     membership
-    |> cast(attrs, [:role, :user_id, :company_id])
+    |> cast(attrs, [:role, :is_board_member, :user_id, :company_id])
     |> validate_required([:role, :user_id, :company_id])
     |> validate_inclusion(:role, ["owner", "admin", "member", "viewer"])
     |> unique_constraint([:user_id, :company_id])
