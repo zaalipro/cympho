@@ -62,6 +62,66 @@ defmodule Cympho.AgentsTest do
       assert agent.status == :idle
     end
 
+    test "creates agent with adapter" do
+      attrs = %{
+        name: "Claude Agent",
+        role: :engineer,
+        adapter: :claude_code
+      }
+
+      assert {:ok, %Agent{} = agent} = Agents.create_agent(attrs)
+      assert agent.adapter == :claude_code
+    end
+
+    test "creates agent without adapter (nil allowed)" do
+      attrs = %{
+        name: "No Adapter Agent",
+        role: :engineer
+      }
+
+      assert {:ok, %Agent{} = agent} = Agents.create_agent(attrs)
+      assert agent.adapter == nil
+    end
+
+    test "creates agent with heartbeat_config" do
+      attrs = %{
+        name: "Heartbeat Agent",
+        role: :engineer,
+        heartbeat_config: %{"interval_ms" => 30_000}
+      }
+
+      assert {:ok, %Agent{} = agent} = Agents.create_agent(attrs)
+      assert agent.heartbeat_config == %{"interval_ms" => 30_000}
+    end
+
+    test "creates agent with parent_id" do
+      {:ok, parent} =
+        Agents.create_agent(%{
+          name: "Parent Agent",
+          role: :cto
+        })
+
+      attrs = %{
+        name: "Child Agent",
+        role: :engineer,
+        parent_id: parent.id
+      }
+
+      assert {:ok, %Agent{} = agent} = Agents.create_agent(attrs)
+      assert agent.parent_id == parent.id
+    end
+
+    test "returns error for invalid adapter" do
+      attrs = %{
+        name: "Bad Adapter",
+        role: :engineer,
+        adapter: :invalid_adapter
+      }
+
+      assert {:error, %Ecto.Changeset{} = changeset} = Agents.create_agent(attrs)
+      assert %{adapter: ["is invalid"]} = errors_on(changeset)
+    end
+
     test "creates agent with config" do
       attrs = %{
         name: "Config Agent",
@@ -171,10 +231,71 @@ defmodule Cympho.AgentsTest do
     end
   end
 
+  describe "list_agents_by_adapter/1" do
+    test "returns agents with specified adapter" do
+      {:ok, _claude} =
+        Agents.create_agent(%{
+          name: "Claude Agent",
+          role: :engineer,
+          adapter: :claude_code
+        })
+
+      {:ok, _codex} =
+        Agents.create_agent(%{
+          name: "Codex Agent",
+          role: :engineer,
+          adapter: :codex
+        })
+
+      {:ok, _no_adapter} =
+        Agents.create_agent(%{
+          name: "Plain Agent",
+          role: :engineer
+        })
+
+      claude_agents = Agents.list_agents_by_adapter(:claude_code)
+      assert length(claude_agents) >= 1
+      assert Enum.all?(claude_agents, fn a -> a.adapter == :claude_code end)
+    end
+  end
+
+  describe "adapter_options/0" do
+    test "returns all valid adapter types" do
+      options = Agents.adapter_options()
+      assert :claude_code in options
+      assert :codex in options
+      assert :cursor in options
+      assert :http in options
+      assert :process in options
+    end
+  end
+
+  describe "Agent.adapter_options/0" do
+    test "returns valid adapter types from schema" do
+      options = Agent.adapter_options()
+      assert options == [:claude_code, :codex, :cursor, :http, :process]
+    end
+  end
+
   describe "change_agent/2" do
     test "returns a changeset for the agent", %{agent: agent} do
       changeset = Agents.change_agent(agent, %{name: "New Name"})
       assert changeset.changes[:name] == "New Name"
+    end
+
+    test "accepts all valid adapter values" do
+      for adapter <- [:claude_code, :codex, :cursor, :http, :process] do
+        changeset = Agents.change_agent(%Agent{}, %{name: "Test", role: :engineer, adapter: adapter})
+        assert changeset.valid?, "Expected adapter #{adapter} to be valid"
+      end
+    end
+
+    test "rejects invalid adapter value" do
+      changeset =
+        Agents.change_agent(%Agent{}, %{name: "Test", role: :engineer, adapter: :bogus})
+
+      refute changeset.valid?
+      assert %{adapter: ["is invalid"]} = errors_on(changeset)
     end
   end
 

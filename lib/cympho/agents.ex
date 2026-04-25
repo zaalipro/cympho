@@ -35,6 +35,20 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Returns agents with the specified adapter type.
+  """
+  def list_agents_by_adapter(adapter) when is_atom(adapter) do
+    Agent
+    |> where(adapter: ^adapter)
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns the list of valid adapter types.
+  """
+  def adapter_options, do: Agent.adapter_options()
+
+  @doc """
   Gets a single agent by id.
   """
   def get_agent!(id), do: Repo.get!(Agent, id)

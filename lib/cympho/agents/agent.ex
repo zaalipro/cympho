@@ -19,7 +19,10 @@ defmodule Cympho.Agents.Agent do
     field :instructions_path, :string
     field :max_concurrent_jobs, :integer, default: 3
     field :last_heartbeat_at, :utc_datetime
-    field :adapter, :string
+
+    field :adapter, Ecto.Enum,
+      values: [:claude_code, :codex, :cursor, :http, :process]
+
     field :heartbeat_config, :map, default: %{}
     field :permissions, :map, default: %{}
     field :budget, :map, default: %{}
@@ -63,6 +66,7 @@ defmodule Cympho.Agents.Agent do
 
   def status_options, do: [:idle, :running, :error, :sleeping, :offline]
   def role_options, do: [:engineer, :product_manager, :designer, :ceo, :cto]
+  def adapter_options, do: [:claude_code, :codex, :cursor, :http, :process]
 
   def status_changeset(agent, attrs) do
     agent
