@@ -84,7 +84,7 @@ defmodule Cympho.Agents do
     end
   end
 
-  defp do_create_agent(attrs) do
+  def do_create_agent(attrs) do
     %Agent{}
     |> Agent.changeset(attrs)
     |> Repo.insert()
@@ -109,7 +109,7 @@ defmodule Cympho.Agents do
     end
   end
 
-  defp do_update_agent(agent, attrs) do
+  def do_update_agent(agent, attrs) do
     agent
     |> Agent.changeset(attrs)
     |> Repo.update()

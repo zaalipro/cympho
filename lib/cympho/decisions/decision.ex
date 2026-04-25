@@ -90,7 +90,7 @@ defmodule Cympho.Decisions.Decision do
     decision
     |> changeset(attrs)
     |> put_change(:status, "reversed")
-    |> put_change(:reversed_at, DateTime.utc_now())
+    |> put_change(:reversed_at, DateTime.utc_now() |> DateTime.truncate(:second))
   end
 
   def active?(%Decision{status: "active"}), do: true

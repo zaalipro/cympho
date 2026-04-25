@@ -53,24 +53,20 @@ defmodule Cympho.AgentApprovalWorkflowTest do
   end
 
   defp create_agent_in_company(company, attrs \\ %{}) do
-    attrs =
-      Map.merge(
-        %{
-          name: "Test Agent",
-          role: :engineer,
-          company_id: company.id
-        },
-        attrs
-      )
+    merged = Map.merge(%{name: "Test Agent", role: :engineer, company_id: company.id}, attrs)
 
-    %Agent{}
-    |> Agent.changeset(attrs)
-    |> Cympho.Repo.insert!()
+    case Agents.create_agent(merged) do
+      {:ok, agent} -> agent
+      {:error, :pending_board_approval, _} ->
+        %Agent{}
+        |> Agent.changeset(merged)
+        |> Cympho.Repo.insert!()
+    end
   end
 
   defp start_heartbeat_supervisor(_context) do
     case start_supervised({Cympho.AgentHeartbeat.Supervisor, []}) do
-      {:ok, pid} -> Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), pid)
+      {:ok, _} -> :ok
       {:error, {:already_started, _}} -> :ok
     end
 
@@ -84,13 +80,8 @@ defmodule Cympho.AgentApprovalWorkflowTest do
 
   defp start_executor(_context) do
     case start_supervised(Cympho.BoardApprovals.BoardApprovalActionExecutor) do
-      {:ok, pid} ->
-        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), pid)
-        :ok
-
-      {:error, {:already_started, pid}} ->
-        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), pid)
-        :ok
+      {:ok, _} -> :ok
+      {:error, {:already_started, _}} -> :ok
     end
   end
 
@@ -392,7 +383,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
 
       logs =
         GovernanceAuditLogs.list_governance_audit_logs(
-          action_type: "agent_hired"
+          action_type: "agent_hire_approved_executed"
         )
 
       assert length(logs) >= 1
@@ -416,7 +407,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
 
       logs =
         GovernanceAuditLogs.list_governance_audit_logs(
-          action_type: "board_decision"
+          action_type: "board_approval_denied_noop"
         )
 
       assert length(logs) >= 1

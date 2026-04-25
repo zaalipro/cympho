@@ -385,6 +385,8 @@ defmodule Cympho.BoardApprovals do
   defp extract_agent_id({"agent", id}), do: id
   defp extract_agent_id(_), do: nil
 
+  @nil_uuid "00000000-0000-0000-0000-000000000000"
+
   defp check_auto_approve(%BoardApproval{} = board_approval) do
     if BoardApproval.approval_threshold_met?(board_approval) do
       resolve_board_approval(
@@ -393,7 +395,7 @@ defmodule Cympho.BoardApprovals do
         %{
           decision_reasoning: "Auto-approved based on board vote threshold"
         },
-        nil
+        {"system", @nil_uuid}
       )
     end
   end
@@ -427,9 +429,9 @@ defmodule Cympho.BoardApprovals do
 
   defp trigger_agent_hire(board_approval) do
     proposal_data = board_approval.proposal_data || %{}
-    agent_attrs = Map.get(proposal_data, "agent_attrs") || Map.get(proposal_data, "agent_params") || %{}
+    agent_attrs = Map.get(proposal_data, "attrs") || Map.get(proposal_data, "agent_attrs") || Map.get(proposal_data, "agent_params") || %{}
 
-    case Cympho.Agents.create_agent(agent_attrs) do
+    case Cympho.Agents.do_create_agent(agent_attrs) do
       {:ok, agent} ->
         GovernanceAuditLogs.log_action(
           "agent_hire_executed",
@@ -465,7 +467,7 @@ defmodule Cympho.BoardApprovals do
     if agent_id do
       case Cympho.Agents.get_agent(agent_id) do
         {:ok, agent} ->
-          Cympho.Agents.update_agent(agent, %{status: :offline})
+          Cympho.Agents.do_update_agent(agent, %{status: :offline})
 
           GovernanceAuditLogs.log_action(
             "agent_termination_executed",
@@ -496,7 +498,7 @@ defmodule Cympho.BoardApprovals do
     if agent_id != nil and new_role != nil do
       case Cympho.Agents.get_agent(agent_id) do
         {:ok, agent} ->
-          case Cympho.Agents.update_agent(agent, %{role: new_role}) do
+          case Cympho.Agents.do_update_agent(agent, %{role: new_role}) do
             {:ok, updated} ->
               GovernanceAuditLogs.log_action(
                 "agent_promotion_executed",
@@ -530,7 +532,7 @@ defmodule Cympho.BoardApprovals do
     case action do
       "create_budget" ->
         attrs = get_in(board_approval.proposal_data, ["budget_attrs"]) || %{}
-        Cympho.Budgets.execute_budget_creation(attrs, {"board_approval", board_approval.id})
+        Cympho.Budgets.create_budget(attrs, {"board_approval", board_approval.id}, skip_governance: true)
 
       "update_budget" ->
         budget_id = get_in(board_approval.proposal_data, ["budget_id"])
@@ -539,12 +541,12 @@ defmodule Cympho.BoardApprovals do
         if budget_id do
           case Cympho.Budgets.get_budget(budget_id) do
             {:ok, budget} ->
-              Cympho.Budgets.execute_budget_update(budget, update_attrs, {"board_approval", board_approval.id})
+              Cympho.Budgets.update_budget(budget, update_attrs, {"board_approval", board_approval.id}, skip_governance: true)
 
             {:error, :not_found} ->
               GovernanceAuditLogs.log_action(
                 "budget_increase_execution_failed",
-                nil,
+                {"system", @nil_uuid},
                 "Budget not found for approved increase",
                 resource: board_approval,
                 metadata: %{budget_id: budget_id}
@@ -557,7 +559,7 @@ defmodule Cympho.BoardApprovals do
         budget_id = get_in(board_approval.proposal_data, ["budget_id"])
         new_limit = get_in(board_approval.proposal_data, ["new_limit"])
 
-        if budget_id and new_limit do
+        if budget_id != nil and new_limit != nil do
           Phoenix.PubSub.broadcast(
             Cympho.PubSub,
             "governance",
@@ -595,7 +597,7 @@ defmodule Cympho.BoardApprovals do
             {:error, changeset} ->
               GovernanceAuditLogs.log_action(
                 "policy_change_execution_failed",
-                nil,
+                {"system", @nil_uuid},
                 "Company config update failed after board approval",
                 resource: board_approval,
                 metadata: %{errors: traverse_errors(changeset)}
@@ -610,7 +612,7 @@ defmodule Cympho.BoardApprovals do
     principal_id = get_in(board_approval.proposal_data, ["principal_id"])
     permission = get_in(board_approval.proposal_data, ["permission"])
 
-    if principal_id and permission do
+    if principal_id != nil and permission != nil do
       Phoenix.PubSub.broadcast(
         Cympho.PubSub,
         "governance",
