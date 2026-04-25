@@ -27,6 +27,13 @@ defmodule Cympho.Agents.Agent do
     field :permissions, :map, default: %{}
     field :budget, :map, default: %{}
 
+    field :governance_status, :string, default: "active"
+    field :governance_reasoning, :string
+    field :paused_at, :utc_datetime
+    field :paused_by_user_id, :binary_id
+    field :board_approval_id, :binary_id
+    field :requires_board_approval, :boolean, default: false
+
     belongs_to :company, Cympho.Companies.Company
     belongs_to :parent, __MODULE__, foreign_key: :parent_id
     has_many :children, __MODULE__, foreign_key: :parent_id
@@ -55,7 +62,13 @@ defmodule Cympho.Agents.Agent do
       :permissions,
       :budget,
       :company_id,
-      :parent_id
+      :parent_id,
+      :governance_status,
+      :governance_reasoning,
+      :paused_at,
+      :paused_by_user_id,
+      :board_approval_id,
+      :requires_board_approval
     ])
     |> validate_required([:name, :role])
     |> validate_inclusion(:role, [:engineer, :product_manager, :designer, :ceo, :cto])

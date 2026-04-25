@@ -105,10 +105,10 @@ defmodule Cympho.Plugins.HostServices do
 
       with {:ok, routine} <- Routines.create_routine(job_attrs),
            {:ok, _trigger} <-
-             RoutineTriggers.create_trigger(routine.id, %{
-               type: "cron",
-               config: %{expression: schedule},
-               enabled: true
+             RoutineTriggers.create_schedule_trigger(%{
+               "routine_id" => routine.id,
+               "cron_expression" => schedule,
+               "enabled" => true
              }) do
         {:ok, routine}
       end
