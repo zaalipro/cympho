@@ -19,8 +19,8 @@ defmodule Cympho.Repo.Migrations.CreateEnvironmentLeases do
       add :company_id, references(:companies, on_delete: :nothing, type: :binary_id)
       add :environment_id, references(:environments, on_delete: :nothing, type: :binary_id)
       add :execution_workspace_id, references(:execution_workspaces, on_delete: :nothing, type: :binary_id)
-      add :issue_id, references(:issues, on_delete: :nilify, type: :binary_id)
-      add :heartbeat_run_id, references(:agent_wakes, on_delete: :nilify, type: :binary_id)
+      add :issue_id, references(:issues, on_delete: :nilify_all, type: :binary_id)
+      add :heartbeat_run_id, references(:agent_wakes, on_delete: :nilify_all, type: :binary_id)
 
       timestamps(type: :utc_datetime)
     end

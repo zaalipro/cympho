@@ -24,6 +24,8 @@ defmodule Cympho.Routines.Routine do
       values: [:skip_missed, :enqueue_missed_with_cap],
       default: :skip_missed
 
+    field :catch_up_cap, :integer, default: 5
+
     field :priority, Ecto.Enum,
       values: [:critical, :high, :medium, :low],
       default: :medium
@@ -59,6 +61,7 @@ defmodule Cympho.Routines.Routine do
       :status,
       :concurrency_policy,
       :catch_up_policy,
+      :catch_up_cap,
       :priority,
       :agent_id,
       :project_id

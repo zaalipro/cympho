@@ -27,7 +27,7 @@ defmodule Cympho.Repo.Migrations.CreateWorkspaceRuntimeServices do
       add :company_id, references(:companies, on_delete: :nothing, type: :binary_id)
       add :project_id, references(:projects, on_delete: :nothing, type: :binary_id)
       add :project_workspace_id, references(:project_workspaces, on_delete: :nothing, type: :binary_id)
-      add :issue_id, references(:issues, on_delete: :nilify, type: :binary_id)
+      add :issue_id, references(:issues, on_delete: :nilify_all, type: :binary_id)
       add :execution_workspace_id, references(:execution_workspaces, on_delete: :nothing, type: :binary_id)
 
       timestamps(type: :utc_datetime)

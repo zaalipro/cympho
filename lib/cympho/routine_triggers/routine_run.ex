@@ -13,6 +13,8 @@ defmodule Cympho.RoutineTriggers.RoutineRun do
     field :trigger_type, :string
     field :triggered_at, :utc_datetime
     field :completed_at, :utc_datetime
+    field :variables, :map, default: %{}
+    field :failure_reason, :string
 
     belongs_to :issue, Issue
     belongs_to :routine, Routine
@@ -28,6 +30,8 @@ defmodule Cympho.RoutineTriggers.RoutineRun do
       :trigger_type,
       :triggered_at,
       :completed_at,
+      :variables,
+      :failure_reason,
       :issue_id,
       :routine_id,
       :trigger_id
