@@ -6,6 +6,7 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.Agents
   alias Cympho.Documents
   alias Cympho.Orchestrator
+  alias Cympho.HeartbeatEngine
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -16,6 +17,7 @@ defmodule CymphoWeb.IssueLive.Show do
     case Issues.get_issue(id) do
       {:ok, issue} ->
         comment_changeset = Comments.Comment.changeset(%Comments.Comment{}, %{})
+        runs = HeartbeatEngine.list_runs_for_issue(issue.id)
 
         {:ok,
          assign(socket,
@@ -26,7 +28,8 @@ defmodule CymphoWeb.IssueLive.Show do
            all_agents: Agents.list_agents(),
            show_agent_panel: false,
            editing: nil,
-           assignee_search: ""
+           assignee_search: "",
+           runs: runs
          )}
 
       {:error, :not_found} ->
@@ -210,7 +213,8 @@ defmodule CymphoWeb.IssueLive.Show do
   @impl true
   def handle_info({:issue_updated, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      {:noreply, assign(socket, :issue, updated_issue)}
+      runs = HeartbeatEngine.list_runs_for_issue(updated_issue.id)
+      {:noreply, assign(socket, issue: updated_issue, runs: runs)}
     else
       {:noreply, socket}
     end
@@ -280,4 +284,43 @@ defmodule CymphoWeb.IssueLive.Show do
         String.contains?(String.downcase(to_string(agent.role)), search)
     end)
   end
+
+  def run_status_color("completed"), do: "bg-green-400"
+  def run_status_color("running"), do: "bg-blue-400 animate-pulse"
+  def run_status_color("failed"), do: "bg-red-400"
+  def run_status_color("pending"), do: "bg-yellow-400"
+  def run_status_color("cancelled"), do: "bg-gray-400"
+  def run_status_color(_), do: "bg-gray-400"
+
+  def run_status_label("completed"), do: "Completed"
+  def run_status_label("running"), do: "Running"
+  def run_status_label("failed"), do: "Failed"
+  def run_status_label("pending"), do: "Pending"
+  def run_status_label("cancelled"), do: "Cancelled"
+  def run_status_label(other), do: String.capitalize(to_string(other))
+
+  def format_cost(cost) when not is_nil(cost) do
+    "$" <> (:erlang.float_to_binary(cost / 1, decimals: 4))
+  end
+  def format_cost(_), do: "$0.00"
+
+  def format_tokens(tokens) when is_integer(tokens), do: Number.Delimit.number_to_delimited(tokens)
+  def format_tokens(_), do: "0"
+
+  def format_run_duration(run) do
+    cond do
+      run.started_at && run.completed_at ->
+        diff = DateTime.diff(run.completed_at, run.started_at, :second)
+        format_seconds(diff)
+      run.started_at ->
+        diff = DateTime.diff(DateTime.utc_now(), run.started_at, :second)
+        format_seconds(diff)
+      true ->
+        "-"
+    end
+  end
+
+  defp format_seconds(s) when s < 60, do: "#{s}s"
+  defp format_seconds(s) when s < 3600, do: "#{div(s, 60)}m #{rem(s, 60)}s"
+  defp format_seconds(s), do: "#{div(s, 3600)}h #{div(rem(s, 3600), 60)}m"
 end

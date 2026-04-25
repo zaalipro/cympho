@@ -198,7 +198,7 @@ defmodule Cympho.AgentAuthJWT do
   end
 
   defp constant_time_compare(a, b) when byte_size(a) == byte_size(b) do
-    :crypto.exor(a, b) |> :binary.match(<<0>>) == :nomatch
+    Plug.Crypto.secure_compare(a, b)
   end
 
   defp constant_time_compare(_, _), do: false

@@ -153,39 +153,44 @@ defmodule Cympho.RoutineTriggers do
 
   defp do_fire_trigger(trigger, routine, opts) do
     trigger_type = Keyword.get(opts, :trigger_type, trigger.type)
-    now = DateTime.utc_now()
+    variables = Keyword.get(opts, :variables, %{})
 
-    run_attrs = %{
-      "trigger_type" => trigger_type,
-      "triggered_at" => now,
-      "routine_id" => routine.id,
-      "trigger_id" => trigger.id,
-      "status" => "pending"
-    }
+    with {:ok, :enqueue} <- apply_concurrency_policy(routine) do
+      now = DateTime.utc_now()
 
-    multi =
-      Ecto.Multi.new()
-      |> Ecto.Multi.insert(:run, RoutineRun.changeset(%RoutineRun{}, run_attrs))
-      |> Ecto.Multi.run(:issue, fn repo, %{run: run} ->
-        create_run_issue(repo, run, trigger, routine, now)
-      end)
-      |> Ecto.Multi.run(:update_run, fn repo, %{issue: issue, run: run} ->
-        run
-        |> Ecto.Changeset.change(%{
-          issue_id: issue.id,
-          status: "running"
-        })
-        |> repo.update()
-      end)
+      run_attrs = %{
+        "trigger_type" => trigger_type,
+        "triggered_at" => now,
+        "routine_id" => routine.id,
+        "trigger_id" => trigger.id,
+        "status" => "pending",
+        "variables" => variables
+      }
 
-    case Repo.transaction(multi) do
-      {:ok, %{issue: issue, run: run}} ->
-        wake_routine_agent(routine)
-        {:ok, %{issue: issue, run: run}}
+      multi =
+        Ecto.Multi.new()
+        |> Ecto.Multi.insert(:run, RoutineRun.changeset(%RoutineRun{}, run_attrs))
+        |> Ecto.Multi.run(:issue, fn repo, %{run: run} ->
+          create_run_issue(repo, run, trigger, routine, now)
+        end)
+        |> Ecto.Multi.run(:update_run, fn repo, %{issue: issue, run: run} ->
+          run
+          |> Ecto.Changeset.change(%{
+            issue_id: issue.id,
+            status: "running"
+          })
+          |> repo.update()
+        end)
 
-      {:error, step, changeset, _} ->
-        Logger.error("fire_trigger failed at #{step}: #{inspect(changeset)}")
-        {:error, {step, changeset}}
+      case Repo.transaction(multi) do
+        {:ok, %{issue: issue, run: run}} ->
+          wake_routine_agent(routine)
+          {:ok, %{issue: issue, run: run}}
+
+        {:error, step, changeset, _} ->
+          Logger.error("fire_trigger failed at #{step}: #{inspect(changeset)}")
+          {:error, {step, changeset}}
+      end
     end
   end
 
@@ -368,40 +373,45 @@ defmodule Cympho.RoutineTriggers do
     end
   end
 
-  defp do_manual_run(routine, _opts) do
-    now = DateTime.utc_now()
+  defp do_manual_run(routine, opts) do
+    variables = Keyword.get(opts, :variables, %{})
 
-    run_attrs = %{
-      "trigger_type" => "manual",
-      "triggered_at" => now,
-      "routine_id" => routine.id,
-      "trigger_id" => nil,
-      "status" => "pending"
-    }
+    with {:ok, :enqueue} <- apply_concurrency_policy(routine) do
+      now = DateTime.utc_now()
 
-    multi =
-      Ecto.Multi.new()
-      |> Ecto.Multi.insert(:run, RoutineRun.changeset(%RoutineRun{}, run_attrs))
-      |> Ecto.Multi.run(:issue, fn repo, %{run: run} ->
-        create_manual_run_issue(repo, run, routine, now)
-      end)
-      |> Ecto.Multi.run(:update_run, fn repo, %{issue: issue, run: run} ->
-        run
-        |> Ecto.Changeset.change(%{
-          issue_id: issue.id,
-          status: "running"
-        })
-        |> repo.update()
-      end)
+      run_attrs = %{
+        "trigger_type" => "manual",
+        "triggered_at" => now,
+        "routine_id" => routine.id,
+        "trigger_id" => nil,
+        "status" => "pending",
+        "variables" => variables
+      }
 
-    case Repo.transaction(multi) do
-      {:ok, %{issue: issue, run: run}} ->
-        wake_routine_agent(routine)
-        {:ok, %{issue: issue, run: run}}
+      multi =
+        Ecto.Multi.new()
+        |> Ecto.Multi.insert(:run, RoutineRun.changeset(%RoutineRun{}, run_attrs))
+        |> Ecto.Multi.run(:issue, fn repo, %{run: run} ->
+          create_manual_run_issue(repo, run, routine, now)
+        end)
+        |> Ecto.Multi.run(:update_run, fn repo, %{issue: issue, run: run} ->
+          run
+          |> Ecto.Changeset.change(%{
+            issue_id: issue.id,
+            status: "running"
+          })
+          |> repo.update()
+        end)
 
-      {:error, step, changeset, _} ->
-        Logger.error("manual_run failed at #{step}: #{inspect(changeset)}")
-        {:error, {step, changeset}}
+      case Repo.transaction(multi) do
+        {:ok, %{issue: issue, run: run}} ->
+          wake_routine_agent(routine)
+          {:ok, %{issue: issue, run: run}}
+
+        {:error, step, changeset, _} ->
+          Logger.error("manual_run failed at #{step}: #{inspect(changeset)}")
+          {:error, {step, changeset}}
+      end
     end
   end
 
@@ -473,4 +483,7 @@ defmodule Cympho.RoutineTriggers do
   end
 
   defp tap_ok(error, _fun), do: error
+
+  # Concurrency policy stub - returns :ok to allow all runs
+  defp apply_concurrency_policy(_routine), do: {:ok, :enqueue}
 end

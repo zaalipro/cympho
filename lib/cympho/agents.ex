@@ -17,6 +17,15 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Returns agents belonging to a company.
+  """
+  def list_agents_by_company(company_id) do
+    Agent
+    |> where(company_id: ^company_id)
+    |> Repo.all()
+  end
+
+  @doc """
   Returns agents with the specified role.
   """
   def list_agents_by_role(role) when is_atom(role) do

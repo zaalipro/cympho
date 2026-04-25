@@ -1,0 +1,143 @@
+<div class="p-6 lg:p-8 max-w-6xl mx-auto">
+  <.header title={@page_title}>
+    <:actions>
+      <span class="text-xs text-text-quaternary">{length(@inbox_items)} item(s)</span>
+    </:actions>
+  </.header>
+
+  <div class="space-y-3 mb-4">
+    <div class="flex items-center gap-3 flex-wrap">
+      <form phx-change="select_agent">
+        <select
+          name="agent_id"
+          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+        >
+          <option value="">Select Agent</option>
+          <%= for agent <- @agents do %>
+            <option value={agent.id} selected={@selected_agent_id == agent.id}>
+              {agent.name}
+            </option>
+          <% end %>
+        </select>
+      </form>
+
+      <form phx-change="filter_status">
+        <select
+          name="status"
+          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+        >
+          <option value="">All Statuses</option>
+          <option value="unread" selected={@current_status == "unread"}>Unread</option>
+          <option value="read" selected={@current_status == "read"}>Read</option>
+          <option value="dismissed" selected={@current_status == "dismissed"}>Dismissed</option>
+          <option value="archived" selected={@current_status == "archived"}>Archived</option>
+        </select>
+      </form>
+
+      <button
+        :if={@current_status != ""}
+        type="button"
+        phx-click="filter_status"
+        phx-value-status=""
+        class="text-xs text-text-quaternary hover:text-text-secondary transition-colors"
+      >
+        Clear filter
+      </button>
+    </div>
+  </div>
+
+  <div :if={@selected_agent_id == "" || is_nil(@selected_agent_id)} class="flex flex-col items-center justify-center py-20 text-center">
+    <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
+      <svg class="w-6 h-6 text-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+      </svg>
+    </div>
+    <p class="text-sm text-text-tertiary">Select an agent to view their inbox.</p>
+  </div>
+
+  <div :if={@selected_agent_id != "" && @selected_agent_id != nil} class="space-y-2">
+    <div :for={item <- @inbox_items} class="group flex items-center gap-4 p-3 rounded-md hover:bg-white/[0.04] transition-colors border border-transparent hover:border-border-subtle">
+      <div class="w-2 h-2 rounded-full shrink-0">
+        <span class={["inline-block w-2 h-2 rounded-full", unread_dot(item.status)]}></span>
+      </div>
+
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-3">
+          <%= if item.issue do %>
+            <.app_link navigate={issue_link(item.issue)} class="text-sm font-510 text-text-primary truncate hover:underline">
+              {item.issue.identifier || "Issue"}&mdash;{item.issue.title}
+            </.app_link>
+          <% else %>
+            <span class="text-sm font-510 text-text-tertiary truncate">Issue removed</span>
+          <% end %>
+          <span class={["text-xs px-2 py-0.5 rounded-full font-510", status_badge_class(item.status)]}>
+            {String.capitalize(item.status)}
+          </span>
+        </div>
+        <p class="text-xs text-text-quaternary mt-1">
+          {format_timestamp(item.inserted_at)}
+        </p>
+      </div>
+
+      <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          :if={item.status == "unread"}
+          type="button"
+          phx-click="mark_read"
+          phx-value-issue_id={item.issue_id}
+          class="p-1.5 rounded-md text-text-quaternary hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+          title="Mark as read"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+        </button>
+        <button
+          :if={item.status in ["unread", "read"]}
+          type="button"
+          phx-click="dismiss"
+          phx-value-issue_id={item.issue_id}
+          class="p-1.5 rounded-md text-text-quaternary hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
+          title="Dismiss"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+        <button
+          :if={item.status in ["unread", "read", "dismissed"]}
+          type="button"
+          phx-click="archive"
+          phx-value-issue_id={item.issue_id}
+          class="p-1.5 rounded-md text-text-quaternary hover:text-red-400 hover:bg-red-500/10 transition-colors"
+          title="Archive"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
+          </svg>
+        </button>
+        <button
+          :if={item.status in ["dismissed", "archived"]}
+          type="button"
+          phx-click="restore"
+          phx-value-issue_id={item.issue_id}
+          class="p-1.5 rounded-md text-text-quaternary hover:text-green-400 hover:bg-green-500/10 transition-colors"
+          title="Restore to unread"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div :if={@selected_agent_id != "" && @selected_agent_id != nil && Enum.empty?(@inbox_items)} class="flex flex-col items-center justify-center py-20 text-center">
+    <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
+      <svg class="w-6 h-6 text-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+      </svg>
+    </div>
+    <p class="text-sm text-text-tertiary mb-4">No inbox items found.</p>
+  </div>
+</div>
