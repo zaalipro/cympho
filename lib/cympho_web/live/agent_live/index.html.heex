@@ -3,7 +3,7 @@
     <:actions>
       <.app_link
         navigate={~p"/org-chart"}
-        class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2 mr-2"
+        class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-md transition-colors inline-flex items-center gap-2 mr-2"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -24,7 +24,7 @@
       <% else %>
         <.app_link
           navigate={~p"/agents/new"}
-          class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2"
+          class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 min-h-[44px] rounded-md transition-colors inline-flex items-center gap-2"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
