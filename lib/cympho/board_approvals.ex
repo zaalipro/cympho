@@ -234,6 +234,24 @@ defmodule Cympho.BoardApprovals do
       |> Map.get("categories", [])
 
     category in categories
+  Checks whether a given governance category requires board approval
+  for the company based on its governance_config.
+
+  Returns true if the category is listed in the company's required approvals.
+  Defaults to false when no governance_config is set.
+  """
+  def governance_required?(%Cympho.Companies.Company{} = company, category) do
+    config = Map.get(company, :governance_config) || %{}
+    required = Map.get(config, "required_approvals") || Map.get(config, :required_approvals) || []
+    category in required
+  end
+
+  def governance_required?(company_id, category) when is_binary(company_id) do
+    case Cympho.Repo.get(Cympho.Companies.Company, company_id) do
+      nil -> false
+      company -> governance_required?(company, category)
+    end
+>>>>>>> LLM-144/guard-database-url-test-env
   end
 
   defp check_auto_approve(%BoardApproval{} = board_approval) do

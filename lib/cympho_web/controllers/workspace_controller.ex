@@ -88,13 +88,13 @@ defmodule CymphoWeb.WorkspaceController do
 
   # --- Execution Workspaces ---
 
-  def list_execution_workspaces(conn, %{"project_workspace_id" => pw_id} = params) do
+  def list_exec_workspaces(conn, %{"id" => pw_id} = params) do
     opts = Keyword.take(params, [:status])
     workspaces = Workspaces.list_execution_workspaces(pw_id, opts)
     json(conn, %{data: workspaces})
   end
 
-  def show_execution_workspace(conn, %{"id" => id}) do
+  def show_exec_workspace(conn, %{"id" => id}) do
     case Workspaces.get_execution_workspace(id) do
       {:ok, workspace} ->
         json(conn, %{data: workspace})
@@ -107,8 +107,10 @@ defmodule CymphoWeb.WorkspaceController do
     end
   end
 
-  def create_execution_workspace(conn, %{"execution_workspace" => workspace_params}) do
-    case Workspaces.create_execution_workspace(workspace_params) do
+  def create_exec_workspace(conn, %{"id" => pw_id, "execution_workspace" => workspace_params}) do
+    params = Map.put(workspace_params, "project_workspace_id", pw_id)
+
+    case Workspaces.create_execution_workspace(params) do
       {:ok, workspace} ->
         conn
         |> put_status(:created)
@@ -118,6 +120,27 @@ defmodule CymphoWeb.WorkspaceController do
         conn
         |> put_status(:unprocessable_entity)
         |> json(%{errors: translate_errors(changeset)})
+    end
+  end
+
+  def update_exec_workspace(conn, %{"id" => id, "execution_workspace" => workspace_params}) do
+    case Workspaces.get_execution_workspace(id) do
+      {:ok, workspace} ->
+        case Workspaces.update_execution_workspace(workspace, workspace_params) do
+          {:ok, updated} ->
+            json(conn, %{data: updated})
+
+          {:error, changeset} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{errors: translate_errors(changeset)})
+        end
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> put_view(json: CymphoWeb.ErrorJSON)
+        |> render(:"404")
     end
   end
 
@@ -223,9 +246,25 @@ defmodule CymphoWeb.WorkspaceController do
 
   # --- Runtime Services ---
 
-  def list_runtime_services(conn, %{"execution_workspace_id" => ew_id}) do
+  def list_services(conn, %{"id" => ew_id}) do
     services = Workspaces.list_runtime_services(ew_id)
     json(conn, %{data: services})
+  end
+
+  def create_service(conn, %{"id" => ew_id, "runtime_service" => service_params}) do
+    params = Map.put(service_params, "execution_workspace_id", ew_id)
+
+    case Workspaces.create_runtime_service(params) do
+      {:ok, service} ->
+        conn
+        |> put_status(:created)
+        |> json(%{data: service})
+
+      {:error, changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: translate_errors(changeset)})
+    end
   end
 
   def show_runtime_service(conn, %{"id" => id}) do
@@ -238,20 +277,6 @@ defmodule CymphoWeb.WorkspaceController do
 
       service ->
         json(conn, %{data: service})
-    end
-  end
-
-  def create_runtime_service(conn, %{"runtime_service" => service_params}) do
-    case Workspaces.create_runtime_service(service_params) do
-      {:ok, service} ->
-        conn
-        |> put_status(:created)
-        |> json(%{data: service})
-
-      {:error, changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{errors: translate_errors(changeset)})
     end
   end
 
@@ -320,7 +345,7 @@ defmodule CymphoWeb.WorkspaceController do
 
   # --- Operations ---
 
-  def list_operations(conn, %{"execution_workspace_id" => ew_id} = params) do
+  def list_operations(conn, %{"id" => ew_id} = params) do
     opts = Keyword.take(params, [:limit])
     operations = Workspaces.list_operations(ew_id, opts)
     json(conn, %{data: operations})

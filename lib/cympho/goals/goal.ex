@@ -12,6 +12,9 @@ defmodule Cympho.Goals.Goal do
     field :priority, :string, default: "medium"
     belongs_to :project, Cympho.Projects.Project
     belongs_to :company, Cympho.Companies.Company
+    belongs_to :parent, __MODULE__, foreign_key: :parent_id
+
+    has_many :children, __MODULE__, foreign_key: :parent_id
 
     timestamps(type: :utc_datetime)
   end
@@ -21,11 +24,12 @@ defmodule Cympho.Goals.Goal do
 
   def changeset(goal, attrs) do
     goal
-    |> cast(attrs, [:title, :description, :status, :priority, :project_id, :company_id])
+    |> cast(attrs, [:title, :description, :status, :priority, :project_id, :company_id, :parent_id])
     |> validate_required([:title])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:priority, @priorities)
     |> validate_length(:title, min: 1, max: 255)
     |> foreign_key_constraint(:project_id)
+    |> foreign_key_constraint(:parent_id)
   end
 end

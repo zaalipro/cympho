@@ -14,18 +14,22 @@ defmodule Cympho.Issues.Issue do
   schema "issues" do
     field :title, :string
     field :description, :string
+    field :identifier, :string
 
     field :status, Ecto.Enum,
-      values: [:backlog, :todo, :in_progress, :in_review, :done, :blocked],
+      values: [:backlog, :todo, :in_progress, :in_review, :done, :blocked, :cancelled],
       default: :backlog
 
-    field :priority, Ecto.Enum, values: [:low, :medium, :high], default: :medium
+    field :priority, Ecto.Enum, values: [:low, :medium, :high, :critical], default: :medium
     field :lock_version, :integer, default: 0
     field :github_pr_url, :string
     field :execution_state, :map, default: %{}
+    field :assigned_role, :string
+    field :billing_code, :string
 
     belongs_to :project, Project
     belongs_to :company, Cympho.Companies.Company
+    belongs_to :goal, Cympho.Goals.Goal
     belongs_to :assignee, Agent, foreign_key: :assignee_id
     belongs_to :parent, __MODULE__, foreign_key: :parent_id
     belongs_to :execution_policy, ExecutionPolicy
@@ -54,29 +58,39 @@ defmodule Cympho.Issues.Issue do
     |> cast(attrs, [
       :title,
       :description,
+      :identifier,
       :status,
       :priority,
       :assignee_id,
       :project_id,
       :company_id,
+      :goal_id,
       :github_pr_url,
       :parent_id,
       :execution_policy_id,
-      :execution_state
+      :execution_state,
+      :assigned_role,
+      :billing_code
     ])
     |> validate_required([:title])
     |> validate_length(:title, min: 1, max: 255)
-    |> validate_length(:description, min: 1)
     |> unique_constraint(:identifier, name: :issues_project_id_identifier_index)
   end
 
-  def status_options, do: [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
-  def priority_options, do: [:low, :medium, :high]
+  def status_options, do: [:backlog, :todo, :in_progress, :in_review, :done, :blocked, :cancelled]
+  def priority_options, do: [:low, :medium, :high, :critical]
 
   def role_authorized?(_agent_role, nil), do: true
 
   def role_authorized?(agent_role, required_role) do
-    role_order = %{ceo: 3, cto: 2, engineer: 1, product_manager: 1, designer: 1}
-    Map.get(role_order, agent_role, 0) >= Map.get(role_order, required_role, 0)
+    role_rank(agent_role) >= role_rank(required_role)
   end
+
+  def role_rank(:ceo), do: 3
+  def role_rank(:cto), do: 2
+  def role_rank(:engineer), do: 1
+  def role_rank(:product_manager), do: 1
+  def role_rank(:designer), do: 1
+  def role_rank(_), do: 0
 end
+# TEST MARKER

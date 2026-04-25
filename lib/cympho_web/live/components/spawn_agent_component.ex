@@ -120,6 +120,22 @@ defmodule CymphoWeb.SpawnAgentComponent do
   defp role_label(:cto), do: "CTO"
   defp role_label(:ceo), do: "CEO"
 
+    case Map.get(params, "adapter") do
+      "" -> Map.delete(params, "adapter")
+      nil -> params
+      value -> Map.put(params, "adapter", String.to_existing_atom(value))
+    end
+  end
+
+  defp normalize_role_param(params) do
+    case Map.get(params, "role") do
+      nil -> params
+      value when is_binary(value) -> Map.put(params, "role", String.to_existing_atom(value))
+      _ -> params
+    end
+  end
+
+>>>>>>> LLM-144/guard-database-url-test-env
   defp adapter_label(:claude_code), do: "Claude Code"
   defp adapter_label(:codex), do: "Codex"
   defp adapter_label(:cursor), do: "Cursor"
