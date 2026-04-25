@@ -68,11 +68,11 @@
   </.header>
 
   <%!-- Filter bar --%>
-  <div class="flex items-center gap-2 mt-3 mb-4 flex-wrap">
-    <form phx-change="filter_assignee" class="flex-shrink-0">
+  <div class="flex flex-col sm:flex-row sm:items-center gap-2 mt-3 mb-4">
+    <form phx-change="filter_assignee" class="flex-shrink-0 w-full sm:w-auto">
       <select
         name="assignee_id"
-        class="bg-white/[0.05] border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+        class="w-full sm:w-auto bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[44px]"
       >
         <option value="">Assignee</option>
         <%= for agent <- @agents do %>
@@ -83,10 +83,10 @@
       </select>
     </form>
 
-    <form phx-change="filter_priority" class="flex-shrink-0">
+    <form phx-change="filter_priority" class="flex-shrink-0 w-full sm:w-auto">
       <select
         name="priority"
-        class="bg-white/[0.05] border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+        class="w-full sm:w-auto bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[44px]"
       >
         <option value="">Priority</option>
         <option value="high" selected={@filter_priority == :high}>High</option>
@@ -95,7 +95,7 @@
       </select>
     </form>
 
-    <form phx-change="filter_search" class="flex-1 min-w-[160px] max-w-xs">
+    <form phx-change="filter_search" class="flex-1 w-full sm:min-w-[160px] sm:max-w-xs">
       <div class="relative">
         <svg
           class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-quaternary pointer-events-none"
@@ -115,13 +115,13 @@
           name="query"
           value={@filter_search}
           placeholder="Search title, assignee, priority..."
-          class="w-full bg-white/[0.05] border border-border rounded-md pl-9 pr-8 py-1.5 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+          class="w-full bg-white/[0.05] border border-border rounded-md pl-9 pr-8 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[44px]"
         />
         <%= if @filter_search != "" do %>
           <button
             type="button"
             phx-click="clear_filters"
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-text-quaternary hover:text-text-secondary"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-text-quaternary hover:text-text-secondary p-1"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -140,7 +140,7 @@
       <button
         type="button"
         phx-click="clear_filters"
-        class="text-xs font-510 px-3 py-1.5 rounded-md border border-border text-text-secondary hover:text-text-primary hover:bg-white/[0.08] transition-colors flex-shrink-0"
+        class="text-xs font-510 px-3 py-2 min-h-[44px] rounded-md border border-border text-text-secondary hover:text-text-primary hover:bg-white/[0.08] transition-colors flex-shrink-0 w-full sm:w-auto"
       >
         Clear filters
         <span class="ml-1.5 bg-accent/20 text-accent px-1.5 rounded-full">
@@ -277,14 +277,14 @@
                         </div>
                         <%= for issue <- group_issues do %>
                           <div
-                            class="bg-white/[0.02] border border-border rounded-md p-3 space-y-2 hover:bg-white/[0.04] transition-colors cursor-grab active:cursor-grabbing mb-2"
+                            class="bg-white/[0.02] border border-border rounded-md p-3 sm:p-4 space-y-2 hover:bg-white/[0.04] transition-colors cursor-grab active:cursor-grabbing mb-2 min-h-[60px] sm:min-h-0"
                             data-issue-id={issue.id}
                           >
-                            <div class="text-sm font-510 text-text-primary leading-snug line-clamp-1">
+                            <div class="text-sm font-510 text-text-primary leading-snug line-clamp-2 sm:line-clamp-1">
                               {issue.title}
                             </div>
                             <div class="flex items-center gap-2 flex-wrap">
-                              <span class={"text-[10px] font-510 px-2 py-0.5 rounded-full " <> priority_class(issue.priority)}>
+                              <span class={"text-[10px] font-510 px-2 py-1 rounded-full " <> priority_class(issue.priority)}>
                                 {issue.priority}
                               </span>
                               <span class="text-xs text-text-quaternary">

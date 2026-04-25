@@ -118,7 +118,7 @@
           </div>
           <button
             type="button"
-            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
             phx-click="kill_session"
             phx-value-id={agent.id}
             data-confirm="Stop this agent's session?"
@@ -143,17 +143,17 @@
         <div class="flex items-center gap-2">
           <.badge variant="pill" value={Map.get(agent, :adapter) || "No adapter"} />
         </div>
-        <div class="flex items-center gap-2 pt-2">
+        <div class="flex flex-wrap items-center gap-2 pt-2">
           <.app_link
             navigate={~p"/agents/#{agent.id}"}
-            class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+            class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors inline-flex items-center justify-center"
           >
             View
           </.app_link>
           <%= if agent.status == :running do %>
             <button
               type="button"
-              class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+              class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
               phx-click="kill_session"
               phx-value-id={agent.id}
               data-confirm="Stop this agent's session?"
@@ -164,7 +164,7 @@
           <%= if agent.status == :idle do %>
             <button
               type="button"
-              class="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+              class="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
               phx-click="pause_agent"
               phx-value-id={agent.id}
             >
@@ -174,7 +174,7 @@
           <%= if agent.status == :sleeping do %>
             <button
               type="button"
-              class="bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+              class="bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
               phx-click="resume_agent"
               phx-value-id={agent.id}
             >
@@ -183,7 +183,7 @@
           <% end %>
           <button
             type="button"
-            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
             phx-click="terminate_agent"
             phx-value-id={agent.id}
             data-confirm="Terminate this agent? This will stop any running sessions and mark the agent as offline."
@@ -192,7 +192,7 @@
           </button>
           <button
             type="button"
-            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
             phx-click="delete_agent"
             phx-value-id={agent.id}
             data-confirm="Delete this agent?"

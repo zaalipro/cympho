@@ -61,6 +61,7 @@ defmodule CymphoWeb.Router do
       live "/companies/new", CompanyLive.Index, :new
       live "/companies/:id", CompanyLive.Show
       live "/companies/:id/secrets", SecretsLive.Index
+      live "/costs", CostLive.Index
       live "/skills", SkillLive.Index
       live "/skills/new", SkillLive.New
       live "/skills/:id", SkillLive.Show

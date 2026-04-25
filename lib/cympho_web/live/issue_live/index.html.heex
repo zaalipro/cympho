@@ -19,15 +19,15 @@
   </.header>
 
   <div class="space-y-3 mb-4">
-    <div class="flex items-center gap-3">
-      <form phx-submit="search" class="flex-1 max-w-md">
+    <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+      <form phx-submit="search" class="flex-1 w-full sm:max-w-md">
         <div class="relative">
           <input
             type="text"
             name="search"
             value={@current_search}
             placeholder="Search issues..."
-            class="w-full bg-white/[0.05] border border-border text-text-primary text-sm rounded-md pl-9 pr-3 py-1.5 placeholder:text-text-quaternary"
+            class="w-full bg-white/[0.05] border border-border text-text-primary text-sm rounded-md pl-9 pr-3 py-2 min-h-[44px] placeholder:text-text-quaternary"
           />
           <svg
             class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-quaternary"
@@ -45,14 +45,14 @@
         </div>
       </form>
 
-      <span class="text-xs text-text-quaternary ml-auto">{@total} issue(s)</span>
+      <span class="text-xs text-text-quaternary sm:ml-auto">{@total} issue(s)</span>
     </div>
 
-    <div class="flex items-center gap-3 flex-wrap">
-      <form phx-change="filter_status">
+    <div class="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
+      <form phx-change="filter_status" class="col-span-1">
         <select
           name="status"
-          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
         >
           <option value="">All Statuses</option>
           <%= for status <- Cympho.Issues.Issue.status_options() do %>
@@ -63,10 +63,10 @@
         </select>
       </form>
 
-      <form phx-change="filter_priority">
+      <form phx-change="filter_priority" class="col-span-1">
         <select
           name="priority"
-          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
         >
           <option value="">All Priorities</option>
           <%= for priority <- Cympho.Issues.Issue.priority_options() do %>
@@ -77,10 +77,10 @@
         </select>
       </form>
 
-      <form phx-change="filter_assignee">
+      <form phx-change="filter_assignee" class="col-span-2 sm:col-span-auto">
         <select
           name="assignee_id"
-          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
         >
           <option value="">All Assignees</option>
           <%= for agent <- @agents do %>
@@ -91,10 +91,10 @@
         </select>
       </form>
 
-      <form phx-change="filter_project">
+      <form phx-change="filter_project" class="col-span-2 sm:col-span-auto">
         <select
           name="project_id"
-          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
         >
           <option value="">All Projects</option>
           <%= for project <- @projects do %>
@@ -105,10 +105,10 @@
         </select>
       </form>
 
-      <form phx-change="filter_label">
+      <form phx-change="filter_label" class="col-span-2 sm:col-span-auto">
         <select
           name="label_id"
-          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
         >
           <option value="">All Labels</option>
           <%= for label <- @labels do %>
@@ -123,7 +123,7 @@
         :if={filters_active?(assigns)}
         type="button"
         phx-click="clear_filters"
-        class="text-xs text-text-quaternary hover:text-text-secondary transition-colors"
+        class="col-span-2 sm:col-span-auto text-xs font-510 px-3 py-2 min-h-[44px] rounded-md border border-border text-text-secondary hover:text-text-primary hover:bg-white/[0.08] transition-colors"
       >
         Clear all
       </button>

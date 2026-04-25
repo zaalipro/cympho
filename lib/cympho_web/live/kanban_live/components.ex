@@ -12,12 +12,12 @@ defmodule CymphoWeb.KanbanLive.Components do
   def issue_card(assigns) do
     ~H"""
     <div
-      class="kanban-card-enter bg-white/[0.02] border border-border rounded-md p-3 space-y-2 hover:bg-white/[0.04] transition-colors cursor-grab active:cursor-grabbing"
+      class="kanban-card-enter bg-white/[0.02] border border-border rounded-md p-3 sm:p-4 space-y-2 hover:bg-white/[0.04] transition-colors cursor-grab active:cursor-grabbing min-h-[60px] sm:min-h-0"
       data-issue-id={@issue.id}
     >
-      <div class="text-sm font-510 text-text-primary leading-snug line-clamp-1">{@issue.title}</div>
+      <div class="text-sm font-510 text-text-primary leading-snug line-clamp-2 sm:line-clamp-1">{@issue.title}</div>
       <div class="flex items-center gap-2 flex-wrap">
-        <span class={"text-[10px] font-510 px-2 py-0.5 rounded-full " <> priority_class(@issue.priority)}>
+        <span class={"text-[10px] font-510 px-2 py-1 rounded-full " <> priority_class(@issue.priority)}>
           {@issue.priority}
         </span>
         <span class="text-xs text-text-quaternary flex items-center gap-1">

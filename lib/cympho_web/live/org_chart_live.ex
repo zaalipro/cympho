@@ -33,12 +33,12 @@ defmodule CymphoWeb.OrgChartLive do
   def render_tree(assigns) do
     ~H"""
     <div class="flex flex-col items-center">
-      <div class="flex gap-8">
+      <div class="flex gap-2 sm:gap-4 lg:gap-8 flex-wrap justify-center">
         <%= for node <- @nodes do %>
           <div class="flex flex-col items-center">
             <.agent_card node={node} />
             <%= if not Enum.empty?(node.children) do %>
-              <div class="mt-4">
+              <div class="mt-2 sm:mt-4">
                 <.render_tree nodes={node.children} level={@level + 1} />
               </div>
             <% end %>
@@ -54,12 +54,12 @@ defmodule CymphoWeb.OrgChartLive do
   def agent_card(assigns) do
     ~H"""
     <div class="relative group">
-      <div class="w-48 bg-surface border border-border rounded-lg p-4 hover:border-brand/50 transition-colors cursor-pointer">
+      <div class="w-36 sm:w-44 lg:w-48 bg-surface border border-border rounded-lg p-3 sm:p-4 hover:border-brand/50 transition-colors cursor-pointer">
         <.app_link navigate={~p"/agents/#{@node.id}"} class="block">
           <div class="flex items-center justify-between mb-2">
-            <h3 class="text-sm font-510 text-text-primary truncate flex-1">{@node.name}</h3>
+            <h3 class="text-xs sm:text-sm font-510 text-text-primary truncate flex-1">{@node.name}</h3>
             <div
-              class="w-2 h-2 rounded-full ml-2"
+              class="w-2 h-2 rounded-full ml-2 flex-shrink-0"
               style={"background-color: #{status_color(@node.status)}"}
             >
             </div>
@@ -67,11 +67,11 @@ defmodule CymphoWeb.OrgChartLive do
 
           <div class="flex items-center gap-2 mb-2">
             <div
-              class="w-1 h-4 rounded"
+              class="w-1 h-4 rounded flex-shrink-0"
               style={"background-color: #{role_color(@node.role)}"}
             >
             </div>
-            <span class="text-xs text-text-secondary">
+            <span class="text-xs text-text-secondary truncate">
               {role_label(@node.role)}
             </span>
           </div>
@@ -80,10 +80,10 @@ defmodule CymphoWeb.OrgChartLive do
             <p class="text-xs text-text-tertiary mb-2 truncate">{@node.title}</p>
           <% end %>
 
-          <div class="flex items-center justify-between text-xs text-text-tertiary">
-            <span class="capitalize">{@node.status}</span>
+          <div class="flex items-center justify-between text-xs text-text-tertiary gap-2">
+            <span class="capitalize flex-shrink-0">{@node.status}</span>
             <%= if @node.adapter do %>
-              <span class="truncate ml-2">{@node.adapter}</span>
+              <span class="truncate">{@node.adapter}</span>
             <% end %>
           </div>
 
@@ -94,10 +94,10 @@ defmodule CymphoWeb.OrgChartLive do
           </div>
         </.app_link>
 
-        <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity sm:opacity-0">
           <button
             type="button"
-            class="p-1 hover:bg-white/[0.1] rounded"
+            class="p-1 hover:bg-white/[0.1] rounded min-w-[32px] min-h-[32px] sm:min-w-0 sm:min-h-0"
             phx-click={JS.push("show_actions", value: %{agent_id: @node.id})}
             data-agent-id={@node.id}
           >

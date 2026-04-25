@@ -1,0 +1,344 @@
+<div class="p-6 lg:p-8 max-w-7xl mx-auto">
+  <.header title={@page_title}>
+    <:actions>
+      <.form
+        for={%{}}
+        as={:days}
+        phx-change="change_days"
+        phx-submit="change_days"
+        class="inline-flex"
+      >
+        <.input
+          type="select"
+          name="days"
+          options={[{"7 days", "7"}, {"30 days", "30"}, {"90 days", "90"}]}
+          value={to_string(@days)}
+          class="text-sm"
+        />
+      </.form>
+    </:actions>
+  </.header>
+
+  <!-- Budget Alerts -->
+  <div :if={not Enum.empty?(@exceeded_budgets)} class="mb-6 bg-red-500/10 border border-red-500/20 rounded-card p-4">
+    <h3 class="text-sm font-510 text-red-400 mb-2">
+      <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+      Exceeded Budgets
+    </h3>
+    <div class="space-y-2">
+      <%= for budget <- @exceeded_budgets do %>
+        <div class="flex items-center justify-between text-sm">
+          <span class="text-text-primary">{budget.name}</span>
+          <span class="text-red-400 font-510">{budget_utilization_pct(budget)} used</span>
+        </div>
+      <% end %>
+    </div>
+  </div>
+
+  <div :if={not Enum.empty?(@approaching_budgets)} class="mb-6 bg-amber-500/10 border border-amber-500/20 rounded-card p-4">
+    <h3 class="text-sm font-510 text-amber-400 mb-2">
+      <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      Approaching Budget Limits
+    </h3>
+    <div class="space-y-2">
+      <%= for budget <- @approaching_budgets do %>
+        <div class="flex items-center justify-between text-sm">
+          <span class="text-text-primary">{budget.name}</span>
+          <span class="text-amber-400 font-510">{budget_utilization_pct(budget)} used</span>
+        </div>
+      <% end %>
+    </div>
+  </div>
+
+  <!-- Summary Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div class="bg-surface border border-border rounded-card p-5">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-text-secondary text-xs uppercase tracking-wider">Total Cost</span>
+        <svg class="w-5 h-5 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </div>
+      <div class="text-2xl font-510 text-text-primary">{format_cost(@summary.total_cost)}</div>
+      <div class="text-xs text-text-quaternary mt-1">Last {@days} days</div>
+    </div>
+
+    <div class="bg-surface border border-border rounded-card p-5">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-text-secondary text-xs uppercase tracking-wider">Total Tokens</span>
+        <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        </svg>
+      </div>
+      <div class="text-2xl font-510 text-text-primary">{format_tokens(@summary.total_tokens)}</div>
+      <div class="text-xs text-text-quaternary mt-1">Last {@days} days</div>
+    </div>
+
+    <div class="bg-surface border border-border rounded-card p-5">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-text-secondary text-xs uppercase tracking-wider">Budget Limit</span>
+        <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+        </svg>
+      </div>
+      <div class="text-2xl font-510 text-text-primary">{format_cost(@summary.budget_limit)}</div>
+      <div class="text-xs text-text-quaternary mt-1">Active budgets</div>
+    </div>
+
+    <div class="bg-surface border border-border rounded-card p-5">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-text-secondary text-xs uppercase tracking-wider">Budget Spent</span>
+        <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+        </svg>
+      </div>
+      <div class="text-2xl font-510 text-text-primary">{format_cost(@summary.budget_spent)}</div>
+      <div class="text-xs text-text-quaternary mt-1">
+        <%= if Decimal.gt?(@summary.budget_limit, 0) do %>
+          <%= Decimal.to_string(Decimal.mult(Decimal.div(@summary.budget_spent, @summary.budget_limit), 100), :normal) %>%
+        <% else %>
+          N/A
+        <% end %>
+      </div>
+    </div>
+  </div>
+
+  <!-- Daily Cost Chart -->
+  <div class="bg-surface border border-border rounded-card p-6 mb-6">
+    <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">Daily Cost Trend</h2>
+    <div class="h-40 flex items-end gap-1">
+      <%= max_cost = max_daily_cost(@daily_costs) %>
+      <%= for day <- @daily_costs do %>
+        <div class="flex-1 group relative">
+          <div
+            class="absolute bottom-0 w-full bg-brand hover:bg-accent transition-colors rounded-t-sm"
+            style={"height: #{daily_bar_height(day.total_cost, max_cost)}"}
+            title={"#{day.date}: #{format_cost(day.total_cost)}"}
+          >
+          </div>
+        </div>
+      <% end %>
+    </div>
+    <div :if={Enum.empty?(@daily_costs)} class="text-center py-12">
+      <div class="text-text-tertiary text-sm">No cost data for the selected period</div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <!-- Costs by Agent -->
+    <div class="bg-surface border border-border rounded-card p-6">
+      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+        Top Agents by Cost
+      </h2>
+      <div class="space-y-3">
+        <%= for item <- @by_agent do %>
+          <div class="flex items-center justify-between">
+            <div class="flex-1">
+              <div class="flex items-center justify-between mb-1">
+                <.app_link
+                  navigate={~p"/agents/#{item.agent.id}"}
+                  class="text-sm font-510 text-brand hover:text-accent"
+                >
+                  {item.agent.name}
+                </.app_link>
+                <span class="text-sm text-text-primary">{format_cost(item.total_cost)}</span>
+              </div>
+              <div class="w-full bg-black/20 rounded-full h-1.5">
+                <div
+                  class="bg-brand h-1.5 rounded-full"
+                  style={"width: #{bar_width(item.total_cost, hd(@by_agent).total_cost)}"}
+                >
+                </div>
+              </div>
+              <div class="flex justify-between mt-1 text-xs text-text-quaternary">
+                <span>{format_tokens(item.total_tokens)} tokens</span>
+                <span>{item.request_count} requests</span>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+      <div :if={Enum.empty?(@by_agent)} class="text-center py-8">
+        <div class="text-text-tertiary text-sm">No agent cost data for the selected period</div>
+      </div>
+    </div>
+
+    <!-- Costs by Issue -->
+    <div class="bg-surface border border-border rounded-card p-6">
+      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+        Top Issues by Cost
+      </h2>
+      <div class="space-y-3">
+        <%= for item <- @by_issue do %>
+          <div class="flex items-center justify-between">
+            <div class="flex-1">
+              <div class="flex items-center justify-between mb-1">
+                <.app_link
+                  navigate={~p"/workspace/#{item.issue.id}"}
+                  class="text-sm font-510 text-brand hover:text-accent truncate"
+                >
+                  {item.issue.title}
+                </.app_link>
+                <span class="text-sm text-text-primary ml-2">{format_cost(item.total_cost)}</span>
+              </div>
+              <div class="w-full bg-black/20 rounded-full h-1.5">
+                <div
+                  class="bg-purple-400 h-1.5 rounded-full"
+                  style={"width: #{bar_width(item.total_cost, hd(@by_issue).total_cost)}"}
+                >
+                </div>
+              </div>
+              <div class="flex justify-between mt-1 text-xs text-text-quaternary">
+                <span>{format_tokens(item.total_tokens)} tokens</span>
+                <span>{item.request_count} requests</span>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+      <div :if={Enum.empty?(@by_issue)} class="text-center py-8">
+        <div class="text-text-tertiary text-sm">No issue cost data for the selected period</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <!-- Costs by Model -->
+    <div class="bg-surface border border-border rounded-card p-6">
+      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+        Cost by Model
+      </h2>
+      <div class="space-y-3">
+        <%= for item <- @by_model do %>
+          <div class="flex items-center justify-between text-sm">
+            <div class="flex-1">
+              <div class="flex items-center justify-between mb-1">
+                <div>
+                  <span class="text-text-primary">{item.provider}</span>
+                  <span class="text-text-quaternary mx-1">/</span>
+                  <span class="text-text-secondary">{item.model}</span>
+                </div>
+                <span class="text-text-primary font-510">{format_cost(item.total_cost)}</span>
+              </div>
+              <div class="w-full bg-black/20 rounded-full h-1.5">
+                <div
+                  class="bg-green-400 h-1.5 rounded-full"
+                  style={"width: #{bar_width(item.total_cost, hd(@by_model).total_cost)}"}
+                >
+                </div>
+              </div>
+              <div class="flex justify-between mt-1 text-xs text-text-quaternary">
+                <span>{format_tokens(item.total_tokens)} tokens</span>
+                <span>{item.request_count} requests</span>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+      <div :if={Enum.empty?(@by_model)} class="text-center py-8">
+        <div class="text-text-tertiary text-sm">No model cost data for the selected period</div>
+      </div>
+    </div>
+
+    <!-- Costs by Provider -->
+    <div class="bg-surface border border-border rounded-card p-6">
+      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+        Cost by Provider
+      </h2>
+      <div class="space-y-3">
+        <%= for item <- @by_provider do %>
+          <div class="flex items-center justify-between text-sm">
+            <div class="flex-1">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-text-primary">{item.provider}</span>
+                <span class="text-text-primary font-510">{format_cost(item.total_cost)}</span>
+              </div>
+              <div class="w-full bg-black/20 rounded-full h-1.5">
+                <div
+                  class="bg-blue-400 h-1.5 rounded-full"
+                  style={"width: #{bar_width(item.total_cost, hd(@by_provider).total_cost)}"}
+                >
+                </div>
+              </div>
+              <div class="flex justify-between mt-1 text-xs text-text-quaternary">
+                <span>{format_tokens(item.total_tokens)} tokens</span>
+                <span>{item.request_count} requests</span>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+      <div :if={Enum.empty?(@by_provider)} class="text-center py-8">
+        <div class="text-text-tertiary text-sm">No provider cost data for the selected period</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active Budgets -->
+  <div class="bg-surface border border-border rounded-card p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider">
+        Active Budgets
+      </h2>
+      <.app_link
+        navigate={~p"/budgets"}
+        class="text-brand hover:text-accent text-sm"
+      >
+        Manage Budgets →
+      </.app_link>
+    </div>
+    <div class="space-y-4">
+      <%= for budget <- @active_budgets do %>
+        <% {status_class, status_label} = budget_status_badge(budget) %>
+        <div class="border border-border rounded-lg p-4">
+          <div class="flex items-start justify-between mb-3">
+            <div>
+              <.app_link
+                navigate={~p"/budgets/#{budget.id}"}
+                class="text-brand hover:text-accent font-510"
+              >
+                {budget.name}
+              </.app_link>
+              <div class="text-xs text-text-quaternary mt-1">
+                {budget.scope_type} scope
+              </div>
+            </div>
+            <span class={"inline-flex items-center px-2 py-1 rounded text-xs font-510 border #{status_class}"}>
+              {status_label}
+            </span>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center justify-between text-sm">
+              <span class="text-text-secondary">
+                {format_cost(budget.spent_amount)} of {format_cost(budget.limit_amount)}
+              </span>
+              <span class="text-text-primary font-510">
+                {budget_utilization_pct(budget)}
+              </span>
+            </div>
+            <div class="w-full bg-black/20 rounded-full h-2">
+              <div
+                class={"h-2 rounded-full #{budget_progress_color(budget)}"}
+                style={"width: #{budget_utilization_pct(budget)}"}
+              >
+              </div>
+            </div>
+          </div>
+        </div>
+      <% end %>
+    </div>
+    <div :if={Enum.empty?(@active_budgets)} class="text-center py-8">
+      <div class="text-text-tertiary text-sm mb-2">No active budgets</div>
+      <.app_link
+        navigate={~p"/budgets/new"}
+        class="text-brand hover:text-accent text-sm"
+      >
+        Create a budget →
+      </.app_link>
+    </div>
+  </div>
+</div>
