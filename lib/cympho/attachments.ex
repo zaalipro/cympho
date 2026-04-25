@@ -2,8 +2,9 @@ defmodule Cympho.Attachments do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Attachments.Attachment
+  alias Cympho.Attachments.Storage
 
-  @upload_dir Application.compile_env(:cympho, :uploads_dir, "priv/static/uploads")
+  @storage_backend Storage.backend()
 
   def list_attachments(issue_id) do
     Attachment
@@ -30,7 +31,7 @@ defmodule Cympho.Attachments do
   def delete_attachment(%Attachment{} = attachment) do
     case Repo.delete(attachment) do
       {:ok, attachment} ->
-        delete_file(attachment.path)
+        @storage_backend.delete_file(attachment.path)
         {:ok, attachment}
 
       {:error, changeset} ->
@@ -38,36 +39,15 @@ defmodule Cympho.Attachments do
     end
   end
 
-  def store_file(%Plug.Upload{filename: filename, path: tmp_path}, issue_id) do
-    with {:ok, safe_id} <- validate_uuid(issue_id) do
-      ext = Path.extname(filename)
-      unique_name = "#{Ecto.UUID.generate()}#{ext}"
-      dest_dir = Path.join(@upload_dir, safe_id)
-      dest_path = Path.join(dest_dir, unique_name)
-
-      with :ok <- File.mkdir_p(dest_dir),
-           {:ok, _} <- File.copy(tmp_path, dest_path) do
-        {:ok, Path.join(safe_id, unique_name)}
-      end
-    end
+  def store_file(%Plug.Upload{} = upload, issue_id) do
+    @storage_backend.store_file(upload, issue_id)
   end
 
   def read_file(%Attachment{} = attachment) do
-    full_path = Path.join(@upload_dir, attachment.path)
-    File.read(full_path)
+    @storage_backend.read_file(attachment.path)
   end
 
-  defp delete_file(relative_path) do
-    full_path = Path.join(@upload_dir, relative_path)
-    File.rm(full_path)
+  def public_url(%Attachment{} = attachment) do
+    @storage_backend.public_url(attachment.path)
   end
-
-  defp validate_uuid(id) when is_binary(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> {:ok, uuid}
-      :error -> {:error, :invalid_issue_id}
-    end
-  end
-
-  defp validate_uuid(_), do: {:error, :invalid_issue_id}
 end

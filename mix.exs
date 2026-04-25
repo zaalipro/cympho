@@ -49,7 +49,10 @@ defmodule Cympho.MixProject do
       {:floki, ">= 0.30.0", only: :test},
       {:lazy_html, "~> 0.1", only: :test},
       {:argon2_elixir, "~> 4.0"},
-      {:guardian, "~> 2.3"}
+      {:guardian, "~> 2.3"},
+      {:ex_aws, "~> 2.5"},
+      {:ex_aws_s3, "~> 2.5"},
+      {:sweet_xml, "~> 0.7"}
     ]
   end
 

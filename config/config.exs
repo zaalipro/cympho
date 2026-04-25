@@ -52,6 +52,10 @@ config :swoosh, :api_client, Swoosh.ApiClient.Finch
 
 config :cympho, Cympho.Mailer, finch_name: Cympho.Finch
 
+config :cympho,
+  uploads_dir: "priv/static/uploads",
+  storage_backend: Cympho.Attachments.Storage.LocalStorage
+
 config :cympho, Cympho.Finch,
   pools: [
     default: [
