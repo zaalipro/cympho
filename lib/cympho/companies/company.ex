@@ -8,6 +8,7 @@ defmodule Cympho.Companies.Company do
     field :name, :string
     field :slug, :string
     field :logo_url, :string
+    field :governance_config, :map, default: %{}
 
     has_many :memberships, Cympho.Companies.CompanyMembership
     has_many :users, through: [:memberships, :user]
@@ -21,7 +22,7 @@ defmodule Cympho.Companies.Company do
 
   def changeset(company, attrs) do
     company
-    |> cast(attrs, [:name, :slug, :logo_url])
+    |> cast(attrs, [:name, :slug, :logo_url, :governance_config])
     |> validate_required([:name, :slug])
     |> validate_format(:slug, ~r/^[a-z0-9-]+$/,
       message: "must contain only lowercase letters, numbers, and hyphens"
@@ -29,6 +30,7 @@ defmodule Cympho.Companies.Company do
     |> validate_length(:slug, min: 3, max: 50)
     |> unique_constraint(:slug)
     |> validate_logo_url()
+    |> validate_governance_config()
   end
 
   defp validate_logo_url(changeset) do
@@ -36,6 +38,35 @@ defmodule Cympho.Companies.Company do
       nil -> changeset
       "" -> changeset
       url -> validate_format(changeset, :logo_url, ~r/^https?:\/\/.+/, message: "must be a valid URL")
+    end
+  end
+
+  defp validate_governance_config(changeset) do
+    case get_change(changeset, :governance_config) do
+      nil ->
+        changeset
+
+      config when is_map(config) ->
+        categories = Map.get(config, "categories")
+        threshold_type = Map.get(config, "threshold_type")
+        threshold_value = Map.get(config, "threshold_value")
+
+        cond do
+          not is_nil(categories) and not is_list(categories) ->
+            add_error(changeset, :governance_config, "categories must be a list")
+
+          threshold_type not in [nil, "percentage", "count"] ->
+            add_error(changeset, :governance_config, "threshold_type must be percentage or count")
+
+          not is_nil(threshold_value) and not is_number(threshold_value) ->
+            add_error(changeset, :governance_config, "threshold_value must be a number")
+
+          true ->
+            changeset
+        end
+
+      _ ->
+        add_error(changeset, :governance_config, "must be a map")
     end
   end
 end
