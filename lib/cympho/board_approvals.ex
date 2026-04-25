@@ -9,6 +9,8 @@ defmodule Cympho.BoardApprovals do
   alias Cympho.GovernanceAuditLogs
   alias Cympho.Decisions
 
+  @nil_uuid "00000000-0000-0000-0000-000000000000"
+
   @doc """
   Returns the list of board approvals.
   """
@@ -311,7 +313,7 @@ defmodule Cympho.BoardApprovals do
   pending proposal. Otherwise, applies the change directly.
   """
   def propose_budget_change(company_id, budget_id, new_limit, requested_by \\ nil) do
-    if governance_required?(company_id, "budget_increase") do
+    if governance_required?(company_id, "budget_increase") and budget_is_increase?(budget_id, new_limit) do
       create_board_approval(
         %{
           title: "Budget Increase: #{budget_id}",
@@ -320,8 +322,10 @@ defmodule Cympho.BoardApprovals do
           company_id: company_id,
           requested_by_agent_id: extract_agent_id(requested_by),
           proposal_data: %{
+            "action" => "update_budget",
             "budget_id" => budget_id,
-            "new_limit" => new_limit
+            "new_limit" => new_limit,
+            "update_attrs" => %{"limit_amount" => new_limit}
           },
           review_deadline: DateTime.utc_now() |> DateTime.add(7 * 24 * 3600, :second)
         },
@@ -332,10 +336,29 @@ defmodule Cympho.BoardApprovals do
     end
   end
 
+  defp budget_is_increase?(budget_id, new_limit) do
+    case Cympho.Budgets.get_budget(budget_id) do
+      {:ok, budget} ->
+        new_dec = parse_decimal(new_limit)
+        new_dec != nil and Decimal.gt?(new_dec, budget.limit_amount || Decimal.new(0))
+
+      {:error, :not_found} ->
+        true
+    end
+  end
+
+  defp parse_decimal(nil), do: nil
+  defp parse_decimal(%Decimal{} = d), do: d
+  defp parse_decimal(v) when is_integer(v), do: Decimal.new(v)
+  defp parse_decimal(v) when is_float(v), do: Decimal.from_float(v)
+  defp parse_decimal(v) when is_binary(v), do: Decimal.new(v)
+
   @doc """
   Proposes a company config change requiring board approval.
   """
   def propose_config_change(company_id, config_key, config_value, requested_by \\ nil) do
+    update_attrs = %{String.to_atom(config_key) => config_value}
+
     if governance_required?(company_id, "policy_change") do
       create_board_approval(
         %{
@@ -345,8 +368,11 @@ defmodule Cympho.BoardApprovals do
           company_id: company_id,
           requested_by_agent_id: extract_agent_id(requested_by),
           proposal_data: %{
+            "action" => "update_company",
+            "company_id" => company_id,
             "config_key" => config_key,
-            "config_value" => config_value
+            "config_value" => config_value,
+            "update_attrs" => stringify_keys(update_attrs)
           },
           review_deadline: DateTime.utc_now() |> DateTime.add(7 * 24 * 3600, :second)
         },
@@ -382,16 +408,32 @@ defmodule Cympho.BoardApprovals do
   end
 
   defp apply_budget_change(company_id, budget_id, new_limit) do
-    # Update company budget config
     company = Cympho.Repo.get!(Cympho.Companies.Company, company_id)
     config = company.governance_config || %{}
     budgets = Map.get(config, "budgets", %{})
     updated_budgets = Map.put(budgets, budget_id, new_limit)
     updated_config = Map.put(config, "budgets", updated_budgets)
 
-    company
-    |> Ecto.Changeset.change(%{governance_config: updated_config})
-    |> Cympho.Repo.update()
+    result =
+      company
+      |> Ecto.Changeset.change(%{governance_config: updated_config})
+      |> Cympho.Repo.update()
+
+    case result do
+      {:ok, updated} ->
+        GovernanceAuditLogs.log_action(
+          "budget_change_applied_directly",
+          {"system", @nil_uuid},
+          "Budget config applied directly (no governance required): #{budget_id}",
+          resource: updated,
+          metadata: %{budget_id: budget_id, new_limit: new_limit}
+        )
+
+        {:ok, updated}
+
+      error ->
+        error
+    end
   end
 
   defp apply_config_change(company_id, config_key, config_value) do
@@ -399,9 +441,26 @@ defmodule Cympho.BoardApprovals do
     config = company.governance_config || %{}
     updated_config = Map.put(config, config_key, config_value)
 
-    company
-    |> Ecto.Changeset.change(%{governance_config: updated_config})
-    |> Cympho.Repo.update()
+    result =
+      company
+      |> Ecto.Changeset.change(%{governance_config: updated_config})
+      |> Cympho.Repo.update()
+
+    case result do
+      {:ok, updated} ->
+        GovernanceAuditLogs.log_action(
+          "config_change_applied_directly",
+          {"system", @nil_uuid},
+          "Company config applied directly (no governance required): #{config_key}",
+          resource: updated,
+          metadata: %{config_key: config_key}
+        )
+
+        {:ok, updated}
+
+      error ->
+        error
+    end
   end
 
   defp extract_agent_id(nil), do: nil
@@ -409,8 +468,6 @@ defmodule Cympho.BoardApprovals do
   defp extract_agent_id(id) when is_binary(id), do: id
   defp extract_agent_id({"agent", id}), do: id
   defp extract_agent_id(_), do: nil
-
-  @nil_uuid "00000000-0000-0000-0000-000000000000"
 
   defp check_auto_approve(%BoardApproval{} = board_approval) do
     threshold_opts = load_threshold_opts(board_approval.company_id)
@@ -568,11 +625,42 @@ defmodule Cympho.BoardApprovals do
 
   defp trigger_budget_increase(board_approval) do
     action = get_in(board_approval.proposal_data, ["action"])
+    actor = nil
+    meta = %{board_approval_id: board_approval.id}
 
     case action do
       "create_budget" ->
         attrs = get_in(board_approval.proposal_data, ["budget_attrs"]) || %{}
-        Cympho.Budgets.create_budget(attrs, {"board_approval", board_approval.id}, skip_governance: true)
+
+        case Cympho.Budgets.create_budget(attrs, actor, skip_governance: true) do
+          {:ok, budget} ->
+            GovernanceAuditLogs.log_action(
+              "budget_creation_executed",
+              actor,
+              "Budget created via board approval: #{budget.name}",
+              resource: budget,
+              metadata: Map.put(meta, :budget_id, budget.id)
+            )
+
+            Phoenix.PubSub.broadcast(
+              Cympho.PubSub,
+              "governance",
+              {:budget_creation_approved, board_approval.id, budget}
+            )
+
+            {:ok, budget}
+
+          {:error, changeset} ->
+            GovernanceAuditLogs.log_action(
+              "budget_creation_execution_failed",
+              actor,
+              "Budget creation failed after board approval",
+              resource: board_approval,
+              metadata: Map.put(meta, :errors, traverse_errors(changeset))
+            )
+
+            {:error, changeset}
+        end
 
       "update_budget" ->
         budget_id = get_in(board_approval.proposal_data, ["budget_id"])
@@ -581,17 +669,49 @@ defmodule Cympho.BoardApprovals do
         if budget_id do
           case Cympho.Budgets.get_budget(budget_id) do
             {:ok, budget} ->
-              Cympho.Budgets.update_budget(budget, update_attrs, {"board_approval", board_approval.id}, skip_governance: true)
+              case Cympho.Budgets.update_budget(budget, update_attrs, actor, skip_governance: true) do
+                {:ok, updated} ->
+                  GovernanceAuditLogs.log_action(
+                    "budget_increase_executed",
+                    actor,
+                    "Budget limit increased via board approval: #{updated.name}",
+                    resource: updated,
+                    metadata: Map.put(meta, :budget_id, budget_id)
+                  )
+
+                  Phoenix.PubSub.broadcast(
+                    Cympho.PubSub,
+                    "governance",
+                    {:budget_increase_approved, board_approval.id, budget_id, updated.limit_amount}
+                  )
+
+                  {:ok, updated}
+
+                {:error, changeset} ->
+                  GovernanceAuditLogs.log_action(
+                    "budget_increase_execution_failed",
+                    actor,
+                    "Budget update failed after board approval",
+                    resource: board_approval,
+                    metadata: Map.merge(meta, %{budget_id: budget_id, errors: traverse_errors(changeset)})
+                  )
+
+                  {:error, changeset}
+              end
 
             {:error, :not_found} ->
               GovernanceAuditLogs.log_action(
                 "budget_increase_execution_failed",
-                {"system", @nil_uuid},
+                nil,
                 "Budget not found for approved increase",
                 resource: board_approval,
                 metadata: %{budget_id: budget_id}
               )
+
+              {:error, :not_found}
           end
+        else
+          {:error, :missing_budget_id}
         end
 
       _ ->
@@ -611,40 +731,61 @@ defmodule Cympho.BoardApprovals do
 
   defp trigger_policy_change(board_approval) do
     action = get_in(board_approval.proposal_data, ["action"])
+    meta = %{board_approval_id: board_approval.id}
 
     if action == "update_company" do
       company_id = get_in(board_approval.proposal_data, ["company_id"])
       update_attrs = get_in(board_approval.proposal_data, ["update_attrs"]) || %{}
 
       if company_id do
-        company = Cympho.Repo.get(Cympho.Companies.Company, company_id)
+        case Cympho.Repo.get(Cympho.Companies.Company, company_id) do
+          nil ->
+            GovernanceAuditLogs.log_action(
+              "policy_change_execution_failed",
+              nil,
+              "Company not found for approved policy change",
+              resource: board_approval,
+              metadata: Map.put(meta, :company_id, company_id)
+            )
 
-        if company do
-          # Bypass the governance gate by applying directly
-          company
-          |> Cympho.Companies.Company.changeset(update_attrs)
-          |> Cympho.Repo.update()
-          |> case do
-            {:ok, updated} ->
-              GovernanceAuditLogs.log_action(
-                "policy_change_executed",
-                {"board_approval", board_approval.id},
-                "Company config update executed after board approval",
-                resource: updated,
-                metadata: %{board_approval_id: board_approval.id}
-              )
+            {:error, :not_found}
 
-            {:error, changeset} ->
-              GovernanceAuditLogs.log_action(
-                "policy_change_execution_failed",
-                {"system", @nil_uuid},
-                "Company config update failed after board approval",
-                resource: board_approval,
-                metadata: %{errors: traverse_errors(changeset)}
-              )
-          end
+          company ->
+            case Cympho.Companies.update_company(company, update_attrs, skip_governance: true) do
+              {:ok, updated} ->
+                GovernanceAuditLogs.log_action(
+                  "policy_change_executed",
+                  nil,
+                  "Company config update executed after board approval",
+                  resource: updated,
+                  metadata: meta
+                )
+
+                Phoenix.PubSub.broadcast(
+                  Cympho.PubSub,
+                  "governance",
+                  {:policy_change_approved, board_approval.id, updated}
+                )
+
+                {:ok, updated}
+
+              {:error, changeset} ->
+                GovernanceAuditLogs.log_action(
+                  "policy_change_execution_failed",
+                  nil,
+                  "Company config update failed after board approval",
+                  resource: board_approval,
+                  metadata: Map.put(meta, :errors, traverse_errors(changeset))
+                )
+
+                {:error, changeset}
+            end
         end
+      else
+        {:error, :missing_company_id}
       end
+    else
+      {:error, :unknown_action}
     end
   end
 
@@ -688,6 +829,13 @@ defmodule Cympho.BoardApprovals do
       Enum.reduce(opts, msg, fn {key, value}, acc ->
         String.replace(acc, "%{#{key}}", to_string(value))
       end)
+    end)
+  end
+
+  defp stringify_keys(attrs) when is_map(attrs) do
+    Map.new(attrs, fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+      {k, v} -> {k, v}
     end)
   end
 end

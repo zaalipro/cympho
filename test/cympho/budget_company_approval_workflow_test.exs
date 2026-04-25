@@ -59,7 +59,8 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       currency: "USD"
     }
 
-    {:ok, budget} = Budgets.create_budget(Map.merge(defaults, attrs))
+    merged = Map.merge(defaults, attrs)
+    {:ok, budget} = Budgets.execute_budget_creation(merged)
     budget
   end
 
@@ -414,6 +415,181 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
 
       assert BoardApprovals.governance_required?(company, "policy_change")
       refute BoardApprovals.governance_required?(company, "budget_increase")
+    end
+  end
+
+  # ── Direct-apply paths (no governance required) ──
+
+  describe "propose_budget_change/4 direct-apply path" do
+    test "applies budget change directly when governance not required" do
+      company = create_test_company(%{governance_config: %{"categories" => []}})
+      budget = create_test_budget(company, %{limit_amount: Decimal.new("400")})
+
+      assert {:ok, _} = BoardApprovals.propose_budget_change(company.id, budget.id, Decimal.new("5000"))
+
+      updated_company = Companies.get_company!(company.id)
+      budgets_map = get_in(updated_company.governance_config, ["budgets"]) || %{}
+      stored = budgets_map[budget.id]
+      assert stored != nil
+      assert Decimal.eq?(Decimal.new(stored), Decimal.new("5000"))
+    end
+
+    test "applies budget change directly when limit is a decrease even with governance" do
+      company = company_with_governance(["budget_increase"])
+      budget = create_test_budget(company, %{limit_amount: Decimal.new("1000")})
+
+      assert {:ok, _} = BoardApprovals.propose_budget_change(company.id, budget.id, Decimal.new("500"))
+
+      # Should NOT create a board approval for a decrease
+      approvals = BoardApprovals.list_board_approvals(%{company_id: company.id, category: "budget_increase"})
+      assert Enum.empty?(approvals)
+    end
+
+    test "creates board approval only when limit is an increase with governance required" do
+      company = company_with_governance(["budget_increase"])
+      budget = create_test_budget(company, %{limit_amount: Decimal.new("400")})
+
+      assert {:ok, %BoardApproval{category: "budget_increase"}} =
+               BoardApprovals.propose_budget_change(company.id, budget.id, Decimal.new("5000"))
+    end
+
+    test "logs audit event on direct apply" do
+      company = create_test_company(%{governance_config: %{"categories" => []}})
+      budget = create_test_budget(company, %{limit_amount: Decimal.new("400")})
+
+      BoardApprovals.propose_budget_change(company.id, budget.id, Decimal.new("5000"))
+
+      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "budget_change_applied_directly")
+      assert length(logs) >= 1
+    end
+  end
+
+  describe "propose_config_change/4 direct-apply path" do
+    test "applies config change directly when governance not required" do
+      company = create_test_company(%{governance_config: %{"categories" => []}})
+
+      assert {:ok, _} = BoardApprovals.propose_config_change(company.id, "some_key", "some_value")
+
+      updated_company = Companies.get_company!(company.id)
+      assert updated_company.governance_config["some_key"] == "some_value"
+    end
+
+    test "creates board approval with correct action when governance required" do
+      company = company_with_governance(["policy_change"])
+
+      assert {:ok, %BoardApproval{category: "policy_change"} = approval} =
+               BoardApprovals.propose_config_change(company.id, "governance_config", %{"new_key" => "val"})
+
+      assert get_in(approval.proposal_data, ["action"]) == "update_company"
+      assert get_in(approval.proposal_data, ["company_id"]) == company.id
+    end
+
+    test "logs audit event on direct apply" do
+      company = create_test_company(%{governance_config: %{"categories" => []}})
+
+      BoardApprovals.propose_config_change(company.id, "some_key", "some_value")
+
+      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "config_change_applied_directly")
+      assert length(logs) >= 1
+    end
+  end
+
+  # ── trigger_budget_increase execution result handling ──
+
+  describe "budget_increase executor result handling" do
+    test "logs audit on successful budget creation via approval" do
+      company = company_with_governance(["budget_increase"])
+
+      {:pending_approval, approval} =
+        Budgets.create_budget(%{
+          name: "Audit Budget",
+          scope_type: "company",
+          scope_id: company.id,
+          company_id: company.id,
+          limit_amount: Decimal.new("1000")
+        })
+
+      user = create_test_user()
+      Companies.create_membership(%{
+        user_id: user.id,
+        company_id: company.id,
+        role: "admin",
+        is_board_member: true
+      })
+
+      {:ok, _} = BoardApprovals.cast_vote(approval.id, user.id, "approve", "Approved")
+
+      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "budget_creation_executed")
+      assert length(logs) >= 1
+    end
+
+    test "logs audit on successful budget update via approval" do
+      company = company_with_governance(["budget_increase"])
+      budget = create_test_budget(company, %{limit_amount: Decimal.new("400")})
+
+      {:pending_approval, approval} =
+        Budgets.update_budget(budget, %{limit_amount: Decimal.new("5000")})
+
+      user = create_test_user()
+      Companies.create_membership(%{
+        user_id: user.id,
+        company_id: company.id,
+        role: "admin",
+        is_board_member: true
+      })
+
+      {:ok, _} = BoardApprovals.cast_vote(approval.id, user.id, "approve", "Approved")
+
+      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "budget_increase_executed")
+      assert length(logs) >= 1
+    end
+  end
+
+  # ── trigger_policy_change uses Companies.update_company context ──
+
+  describe "policy_change executor uses Companies context" do
+    test "applies policy change through Companies.update_company on approval" do
+      company = company_with_governance(["policy_change"])
+
+      new_config = %{
+        "categories" => ["policy_change", "budget_increase"],
+        "threshold_type" => "percentage",
+        "threshold_value" => 0.9
+      }
+
+      {:pending_approval, approval} =
+        Companies.update_company(company, %{governance_config: new_config})
+
+      user = create_test_user()
+      Companies.create_membership(%{
+        user_id: user.id,
+        company_id: company.id,
+        role: "admin",
+        is_board_member: true
+      })
+
+      {:ok, _} = BoardApprovals.cast_vote(approval.id, user.id, "approve", "Approved")
+
+      updated_approval = BoardApprovals.get_board_approval!(approval.id)
+      assert updated_approval.status == "approved"
+
+      # Verify the config was applied through the context
+      updated_company = Companies.get_company!(company.id)
+      assert updated_company.governance_config["threshold_value"] == 0.9
+      assert "budget_increase" in updated_company.governance_config["categories"]
+
+      # Verify audit was logged
+      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "policy_change_executed")
+      assert length(logs) >= 1
+    end
+
+    test "update_company with skip_governance bypasses approval gate" do
+      company = company_with_governance(["policy_change"])
+
+      new_config = %{"categories" => ["policy_change"], "threshold_value" => 0.5}
+
+      assert {:ok, updated} = Companies.update_company(company, %{governance_config: new_config}, skip_governance: true)
+      assert updated.governance_config["threshold_value"] == 0.5
     end
   end
 end
