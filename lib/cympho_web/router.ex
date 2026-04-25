@@ -21,6 +21,8 @@ defmodule CymphoWeb.Router do
   scope "/", CymphoWeb do
     pipe_through :browser
 
+    get "/switch-company/:id", CompanySwitcherController, :switch
+
     live_session :default, on_mount: [{CymphoWeb.UserAuth, :default}] do
       live "/", DashboardLive.Index, :home
       live "/dashboard", DashboardLive.Index
@@ -68,6 +70,7 @@ defmodule CymphoWeb.Router do
       live "/plugins/:id", PluginLive.Show
       live "/plugins/:id/edit", PluginLive.Edit
       live "/plugins/:id/settings", PluginLive.Show, :settings
+      live "/plugins/marketplace", PluginMarketplaceLive.Index
       live "/search", SearchLive.Index
       live "/workspace/:issue_id", WorkspaceLive.Show
     live "/workspaces", WorkspaceLive.Index
