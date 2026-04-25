@@ -8,6 +8,7 @@ defmodule Cympho.Comments do
   alias Cympho.Issues.Issue
   alias Cympho.Activities
   alias Cympho.Wakes
+  alias Cympho.IssueReadStates
 
   @doc """
   Returns the list of comments for a given issue.
@@ -51,6 +52,9 @@ defmodule Cympho.Comments do
         end
 
         CymphoWeb.Events.broadcast_comment(comment, :comment_created)
+
+        # Notify users with read state about the new comment for unread tracking
+        _ = IssueReadStates.notify_new_comment(comment.issue_id, comment.id)
 
         # Wake the assigned agent if the issue is active
         _ = Wakes.notify_comment(comment)
