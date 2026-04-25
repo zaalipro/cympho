@@ -66,6 +66,7 @@ defmodule CymphoWeb.Router do
       live "/plugins/:id", PluginLive.Show
       live "/plugins/:id/edit", PluginLive.Edit
       live "/plugins/:id/settings", PluginLive.Show, :settings
+      live "/search", SearchLive.Index
       live "/workspace/:issue_id", WorkspaceLive.Show
     live "/workspaces", WorkspaceLive.Index
     live "/workspaces/:id", WorkspaceLive.ShowWorkspace

@@ -1,0 +1,489 @@
+<div class="container mx-auto px-4 py-8">
+  <.header>
+    Search
+    <:subtitle>Search across issues, agents, projects, and goals</:subtitle>
+  </.header>
+
+  <!-- Search Input -->
+  <div class="mb-6">
+    <form phx-submit="search" class="flex gap-4">
+      <div class="flex-1">
+        <input
+          type="text"
+          name="search[query]"
+          value={@query}
+          placeholder="Search..."
+          class="w-full px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand/50"
+          autocomplete="off"
+        />
+      </div>
+      <button
+        type="submit"
+        class="px-6 py-2 bg-brand text-white rounded-lg hover:bg-brand/90 transition-colors"
+      >
+        Search
+      </button>
+    </form>
+  </div>
+
+  <!-- Recent Searches -->
+  <%= if @recent_searches != [] do %>
+    <div class="mb-6 p-4 bg-surface border border-border rounded-lg">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-medium text-text-primary">Recent Searches</h3>
+        <button
+          type="button"
+          phx-click="clear_recent_searches"
+          class="text-xs text-text-secondary hover:text-text-primary"
+        >
+          Clear All
+        </button>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <%= for recent_search <- @recent_searches do %>
+          <button
+            type="button"
+            phx-click="recent_search"
+            phx-value-query={recent_search.query}
+            class="px-3 py-1 text-sm bg-white/[0.05] hover:bg-white/[0.1] rounded-md transition-colors"
+          >
+            {recent_search.query}
+            <span class="ml-1 text-xs text-text-tertiary">{recent_search.search_count}</span>
+          </button>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+
+  <!-- Filters -->
+  <div class="mb-6 p-4 bg-surface border border-border rounded-lg">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-medium text-text-primary">Filters</h3>
+      <%= if filters_active?(@filters) do %>
+        <button
+          type="button"
+          phx-click="clear_filters"
+          class="text-xs text-text-secondary hover:text-text-primary"
+        >
+          Clear Filters
+        </button>
+      <% end %>
+    </div>
+
+    <form phx-change="filter" phx-submit="filter" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <!-- Status Filter -->
+      <div>
+        <label class="block text-xs text-text-secondary mb-1">Issue Status</label>
+        <select
+          name="filter[status]"
+          class="w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand/50"
+        >
+          <option value="">All</option>
+          <option value="backlog" selected={@filters["status"] == "backlog"}>Backlog</option>
+          <option value="todo" selected={@filters["status"] == "todo"}>To Do</option>
+          <option value="in_progress" selected={@filters["status"] == "in_progress"}>In Progress
+          </option>
+          <option value="in_review" selected={@filters["status"] == "in_review"}>In Review</option>
+          <option value="done" selected={@filters["status"] == "done"}>Done</option>
+          <option value="blocked" selected={@filters["status"] == "blocked"}>Blocked</option>
+          <option value="cancelled" selected={@filters["status"] == "cancelled"}>Cancelled</option>
+        </select>
+      </div>
+
+      <!-- Assignee Filter -->
+      <div>
+        <label class="block text-xs text-text-secondary mb-1">Assignee</label>
+        <select
+          name="filter[assignee_id]"
+          class="w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand/50"
+        >
+          <option value="">All</option>
+          <%= for agent <- @agents do %>
+            <option value={agent.id} selected={@filters["assignee_id"] == agent.id}>
+              {agent.name}
+            </option>
+          <% end %>
+        </select>
+      </div>
+
+      <!-- Label Filter -->
+      <div>
+        <label class="block text-xs text-text-secondary mb-1">Label</label>
+        <select
+          name="filter[label_id]"
+          class="w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand/50"
+        >
+          <option value="">All</option>
+          <%= for label <- @labels do %>
+            <option value={label.id} selected={@filters["label_id"] == label.id}>
+              {label.name}
+            </option>
+          <% end %>
+        </select>
+      </div>
+
+      <!-- Project Filter -->
+      <div>
+        <label class="block text-xs text-text-secondary mb-1">Project</label>
+        <select
+          name="filter[project_id]"
+          class="w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand/50"
+        >
+          <option value="">All</option>
+          <%= for project <- @projects do %>
+            <option value={project.id} selected={@filters["project_id"] == project.id}>
+              {project.name}
+            </option>
+          <% end %>
+        </select>
+      </div>
+    </form>
+  </div>
+
+  <!-- Results Tabs -->
+  <div class="mb-4">
+    <div class="border-b border-border">
+      <nav class="-mb-px flex space-x-8">
+        <%= for tab <- [:all, :issues, :agents, :projects, :goals] do %>
+          <button
+            type="button"
+            phx-click="change_tab"
+            phx-value-tab={tab}
+            class={
+              [
+                "whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors",
+                active_tab?(@socket, tab) &&
+                  "border-brand text-brand",
+                !active_tab?(@socket, tab) && "border-transparent text-text-secondary hover:text-text-primary hover:border-border"
+              ]
+            }
+          >
+            {String.capitalize(to_string(tab))}
+            <%= tab_count = tab_count(@results, tab) do %>
+              <span class="ml-2 text-xs text-text-tertiary">{tab_count}</span>
+            <% end %>
+          </button>
+        <% end %>
+      </nav>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div class="space-y-4">
+    <%= if @query != "" and @total_count == 0 do %>
+      <div class="text-center py-12">
+        <p class="text-text-secondary">No results found for "{@query}"</p>
+        <p class="text-sm text-text-tertiary mt-2">Try adjusting your search or filters</p>
+      </div>
+    <% else %>
+      <%= if @query == "" do %>
+        <div class="text-center py-12">
+          <p class="text-text-secondary">Enter a search query to get started</p>
+        </div>
+      <% else %>
+        <!-- All Tab -->
+        <%= if @active_tab == :all do %>
+          <div class="space-y-6">
+            <%= render_issues(assigns, @results.issues, "Issues") %>
+            <%= render_agents(assigns, @results.agents, "Agents") %>
+            <%= render_projects(assigns, @results.projects, "Projects") %>
+            <%= render_goals(assigns, @results.goals, "Goals") %>
+          </div>
+        <% end %>
+
+        <!-- Issues Tab -->
+        <%= if @active_tab == :issues do %>
+          <%= render_issues(assigns, @results.issues, nil) %>
+        <% end %>
+
+        <!-- Agents Tab -->
+        <%= if @active_tab == :agents do %>
+          <%= render_agents(assigns, @results.agents, nil) %>
+        <% end %>
+
+        <!-- Projects Tab -->
+        <%= if @active_tab == :projects do %>
+          <%= render_projects(assigns, @results.projects, nil) %>
+        <% end %>
+
+        <!-- Goals Tab -->
+        <%= if @active_tab == :goals do %>
+          <%= render_goals(assigns, @results.goals, nil) %>
+        <% end %>
+      <% end %>
+    <% end %>
+  </div>
+</div>
+
+<!-- All Tab -->
+<%= if @active_tab == :all do %>
+  <div class="space-y-6">
+    <%= if @results.issues != [] do %>
+      <div>
+        <h2 class="text-lg font-medium text-text-primary mb-3">Issues</h2>
+        <div class="space-y-2">
+          <%= for issue <- @results.issues do %>
+            <.link
+              navigate={~p"/issues/#{issue.id}"}
+              class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+            >
+              <div class="flex items-start justify-between">
+                <div class="flex-1">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="text-sm font-medium text-text-primary">{issue.identifier}</span>
+                    <span class={"px-2 py-0.5 text-xs rounded-full #{status_color(issue.status)}"}>
+                      {status_label(issue.status)}
+                    </span>
+                    <span class={"text-xs font-medium #{priority_color(issue.priority)}"}>
+                      {priority_label(issue.priority)} priority
+                    </span>
+                  </div>
+                  <h3 class="text-base font-medium text-text-primary mb-1">{issue.title}</h3>
+                  <p class="text-sm text-text-secondary line-clamp-2">{issue.description}</p>
+                  <div class="flex items-center gap-4 mt-2 text-xs text-text-tertiary">
+                    <%= if issue.assignee do %>
+                      <span>Assignee: {issue.assignee.name}</span>
+                    <% end %>
+                    <%= if issue.project do %>
+                      <span>Project: {issue.project.name}</span>
+                    <% end %>
+                    <%= if issue.labels != [] do %>
+                      <span>
+                        Labels: {Enum.map_join(issue.labels, ", ", & &1.name)}
+                      </span>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
+            </.link>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <%= if @results.agents != [] do %>
+      <div>
+        <h2 class="text-lg font-medium text-text-primary mb-3">Agents</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <%= for agent <- @results.agents do %>
+            <.link
+              navigate={~p"/agents/#{agent.id}"}
+              class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+            >
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="text-base font-medium text-text-primary">{agent.name}</h3>
+                <span
+                  class="w-2 h-2 rounded-full"
+                  style={"background-color: #{agent_status_color(agent.status)}"}
+                >
+                </span>
+              </div>
+              <p class="text-sm text-text-secondary mb-2">{agent.title}</p>
+              <div class="flex items-center gap-2 text-xs text-text-tertiary">
+                <span class="capitalize">{agent.role}</span>
+                <span>•</span>
+                <span class="capitalize">{agent.status}</span>
+              </div>
+            </.link>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <%= if @results.projects != [] do %>
+      <div>
+        <h2 class="text-lg font-medium text-text-primary mb-3">Projects</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <%= for project <- @results.projects do %>
+            <.link
+              navigate={~p"/projects/#{project.id}"}
+              class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+            >
+              <h3 class="text-base font-medium text-text-primary mb-1">{project.name}</h3>
+              <p class="text-sm text-text-secondary line-clamp-2 mb-2">{project.description}</p>
+              <div class="flex items-center gap-2 text-xs text-text-tertiary">
+                <span class="capitalize">{project.status}</span>
+                <span>•</span>
+                <span>{project.prefix}</span>
+              </div>
+            </.link>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <%= if @results.goals != [] do %>
+      <div>
+        <h2 class="text-lg font-medium text-text-primary mb-3">Goals</h2>
+        <div class="space-y-2">
+          <%= for goal <- @results.goals do %>
+            <.link
+              navigate={~p"/goals/#{goal.id}"}
+              class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+            >
+              <div class="flex items-start justify-between">
+                <div class="flex-1">
+                  <div class="flex items-center gap-2 mb-1">
+                    <h3 class="text-base font-medium text-text-primary">{goal.title}</h3>
+                    <span class={"text-xs font-medium #{priority_color(String.to_existing_atom(goal.priority))}"}>
+                      {String.capitalize(goal.priority)} priority
+                    </span>
+                  </div>
+                  <p class="text-sm text-text-secondary line-clamp-2">{goal.description}</p>
+                  <div class="flex items-center gap-4 mt-2 text-xs text-text-tertiary">
+                    <span class="capitalize">{goal.status}</span>
+                    <%= if goal.project do %>
+                      <span>Project: {goal.project.name}</span>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
+            </.link>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  </div>
+<% end %>
+
+<!-- Issues Tab -->
+<%= if @active_tab == :issues do %>
+  <%= if @results.issues != [] do %>
+    <div class="space-y-2">
+      <%= for issue <- @results.issues do %>
+        <.link
+          navigate={~p"/issues/#{issue.id}"}
+          class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+        >
+          <div class="flex items-start justify-between">
+            <div class="flex-1">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-sm font-medium text-text-primary">{issue.identifier}</span>
+                <span class={"px-2 py-0.5 text-xs rounded-full #{status_color(issue.status)}"}>
+                  {status_label(issue.status)}
+                </span>
+                <span class={"text-xs font-medium #{priority_color(issue.priority)}"}>
+                  {priority_label(issue.priority)} priority
+                </span>
+              </div>
+              <h3 class="text-base font-medium text-text-primary mb-1">{issue.title}</h3>
+              <p class="text-sm text-text-secondary line-clamp-2">{issue.description}</p>
+              <div class="flex items-center gap-4 mt-2 text-xs text-text-tertiary">
+                <%= if issue.assignee do %>
+                  <span>Assignee: {issue.assignee.name}</span>
+                <% end %>
+                <%= if issue.project do %>
+                  <span>Project: {issue.project.name}</span>
+                <% end %>
+                <%= if issue.labels != [] do %>
+                  <span>
+                    Labels: {Enum.map_join(issue.labels, ", ", & &1.name)}
+                  </span>
+                <% end %>
+              </div>
+            </div>
+          </div>
+        </.link>
+      <% end %>
+    </div>
+  <% else %>
+    <div class="text-center py-12">
+      <p class="text-text-secondary">No issues found</p>
+    </div>
+  <% end %>
+<% end %>
+
+<!-- Agents Tab -->
+<%= if @active_tab == :agents do %>
+  <%= if @results.agents != [] do %>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <%= for agent <- @results.agents do %>
+        <.link
+          navigate={~p"/agents/#{agent.id}"}
+          class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+        >
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-base font-medium text-text-primary">{agent.name}</h3>
+            <span
+              class="w-2 h-2 rounded-full"
+              style={"background-color: #{agent_status_color(agent.status)}"}
+            >
+            </span>
+          </div>
+          <p class="text-sm text-text-secondary mb-2">{agent.title}</p>
+          <div class="flex items-center gap-2 text-xs text-text-tertiary">
+            <span class="capitalize">{agent.role}</span>
+            <span>•</span>
+            <span class="capitalize">{agent.status}</span>
+          </div>
+        </.link>
+      <% end %>
+    </div>
+  <% else %>
+    <div class="text-center py-12">
+      <p class="text-text-secondary">No agents found</p>
+    </div>
+  <% end %>
+<% end %>
+
+<!-- Projects Tab -->
+<%= if @active_tab == :projects do %>
+  <%= if @results.projects != [] do %>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <%= for project <- @results.projects do %>
+        <.link
+          navigate={~p"/projects/#{project.id}"}
+          class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+        >
+          <h3 class="text-base font-medium text-text-primary mb-1">{project.name}</h3>
+          <p class="text-sm text-text-secondary line-clamp-2 mb-2">{project.description}</p>
+          <div class="flex items-center gap-2 text-xs text-text-tertiary">
+            <span class="capitalize">{project.status}</span>
+            <span>•</span>
+            <span>{project.prefix}</span>
+          </div>
+        </.link>
+      <% end %>
+    </div>
+  <% else %>
+    <div class="text-center py-12">
+      <p class="text-text-secondary">No projects found</p>
+    </div>
+  <% end %>
+<% end %>
+
+<!-- Goals Tab -->
+<%= if @active_tab == :goals do %>
+  <%= if @results.goals != [] do %>
+    <div class="space-y-2">
+      <%= for goal <- @results.goals do %>
+        <.link
+          navigate={~p"/goals/#{goal.id}"}
+          class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+        >
+          <div class="flex items-start justify-between">
+            <div class="flex-1">
+              <div class="flex items-center gap-2 mb-1">
+                <h3 class="text-base font-medium text-text-primary">{goal.title}</h3>
+                <span class={"text-xs font-medium #{priority_color(String.to_existing_atom(goal.priority))}"}>
+                  {String.capitalize(goal.priority)} priority
+                </span>
+              </div>
+              <p class="text-sm text-text-secondary line-clamp-2">{goal.description}</p>
+              <div class="flex items-center gap-4 mt-2 text-xs text-text-tertiary">
+                <span class="capitalize">{goal.status}</span>
+                <%= if goal.project do %>
+                  <span>Project: {goal.project.name}</span>
+                <% end %>
+              </div>
+            </div>
+          </div>
+        </.link>
+      <% end %>
+    </div>
+  <% else %>
+    <div class="text-center py-12">
+      <p class="text-text-secondary">No goals found</p>
+    </div>
+  <% end %>
+<% end %>

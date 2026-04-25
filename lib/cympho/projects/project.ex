@@ -12,6 +12,7 @@ defmodule Cympho.Projects.Project do
     field :prefix, :string
     field :github_webhook_secret, :string
     field :settings, :map, default: %{}
+    field :search_vector, :tsvector
 
     belongs_to :company, Cympho.Companies.Company
 
