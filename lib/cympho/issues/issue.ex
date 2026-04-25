@@ -5,6 +5,7 @@ defmodule Cympho.Issues.Issue do
   alias Cympho.Comments.Comment
   alias Cympho.Documents.IssueDocument
   alias Cympho.Labels.Label
+  alias Cympho.WorkProducts.IssueWorkProduct
   alias Cympho.Projects.Project
   alias Cympho.Agents.Agent
   alias Cympho.ExecutionPolicies.ExecutionPolicy
@@ -37,6 +38,7 @@ defmodule Cympho.Issues.Issue do
     has_many :comments, Comment, foreign_key: :issue_id
     has_many :children, __MODULE__, foreign_key: :parent_id
     has_many :documents, IssueDocument, foreign_key: :issue_id
+    has_many :work_products, IssueWorkProduct, foreign_key: :issue_id
 
     many_to_many :blocked_by, Cympho.Issues.Issue,
       join_through: "issue_blockers",

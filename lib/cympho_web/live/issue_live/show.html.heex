@@ -1,327 +1,378 @@
-<div class="p-6 lg:p-8 max-w-6xl mx-auto">
-  <div class="group flex items-start gap-2 mb-6">
-    <div class="flex-1">
-      <div :if={@editing != "title"} class="flex items-center gap-2">
-        <h1 class="text-2xl font-510 tracking-tight text-text-primary">{@issue.title}</h1>
-        <button
-          type="button"
-          phx-click="start_editing"
-          phx-value-field="title"
-          class="opacity-0 group-hover:opacity-100 text-text-quaternary hover:text-text-secondary transition-opacity text-xs"
+<div class="flex flex-col lg:flex-row min-h-screen bg-background">
+  <!-- Main Timeline Column -->
+  <div class="flex-1 flex flex-col min-w-0">
+    <!-- Header -->
+    <div class="p-4 lg:p-6 border-b border-border bg-surface/50">
+      <div class="flex items-start gap-3">
+        <.app_link
+          navigate={~p"/issues"}
+          class="text-text-quaternary hover:text-text-secondary transition-colors"
         >
-          Edit
-        </button>
+          <.icon name="hero-arrow-left" class="w-5 h-5" />
+        </.app_link>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-2">
+            <.badge variant="status" value={to_string(@issue.status)} />
+            <.badge variant="priority" value={to_string(@issue.priority)} />
+          </div>
+          <div :if={@editing != "title"} class="flex items-center gap-2">
+            <h1 class="text-xl lg:text-2xl font-510 tracking-tight text-text-primary">{@issue.title}</h1>
+            <button
+              type="button"
+              phx-click="start_editing"
+              phx-value-field="title"
+              class="opacity-0 group-hover:opacity-100 text-text-quaternary hover:text-text-secondary transition-colors text-xs"
+            >
+              <.icon name="hero-pencil" class="w-4 h-4" />
+            </button>
+          </div>
+          <form :if={@editing == "title"} phx-submit="save_title" class="flex items-center gap-2">
+            <input
+              type="text"
+              name="title"
+              value={@issue.title}
+              class="flex-1 bg-white/[0.05] border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              autofocus
+            />
+            <.button type="submit" size="sm">Save</.button>
+            <.button type="button" variant="ghost" size="sm" phx-click="cancel_editing">Cancel</.button>
+          </form>
+        </div>
       </div>
-      <form :if={@editing == "title"} phx-submit="save_title" class="flex items-center gap-2">
-        <input
-          type="text"
-          name="title"
-          value={@issue.title}
-          class="flex-1 bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
-          autofocus
-        />
-        <.button type="submit">Save</.button>
-        <.button type="button" variant="ghost" phx-click="cancel_editing">Cancel</.button>
-      </form>
     </div>
-    <div>
-      <.app_link
-        navigate={~p"/issues"}
-        class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors"
-      >
-        Back
-      </.app_link>
+
+    <!-- Timeline Stream -->
+    <div id="timeline-stream" class="flex-1 overflow-y-auto px-4 lg:px-6 py-6 space-y-4" phx-hook="TimelineScroll">
+      <div :for={entry <- @timeline} id={"entry-#{entry.type}-#{entry.id}"} class="flex gap-3">
+        <!-- Avatar/Icon Column -->
+        <div class="flex-shrink-0 flex flex-col items-center gap-1">
+          <div class={
+            case entry.type do
+              :comment ->
+                author_type = get_in(entry.data, [:author_type])
+                cond do
+                  author_type == "agent" -> "w-8 h-8 rounded-full bg-brand/20 text-brand flex items-center justify-center text-xs font-510"
+                  author_type == "system" -> "w-8 h-8 rounded-full bg-white/[0.03] border border-dashed border-border/50 flex items-center justify-center text-text-quaternary"
+                  true -> "w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-510"
+                end
+
+              :run ->
+                "w-8 h-8 rounded-full bg-white/[0.05] border border-border flex items-center justify-center text-text-quaternary"
+
+              _ ->
+                "w-8 h-8 rounded-full bg-white/[0.05] border border-border flex items-center justify-center text-text-quaternary"
+            end
+          }>
+            {case entry.type do
+              :comment ->
+                author_type = get_in(entry.data, [:author_type])
+                cond do
+                  author_type == "agent" ->
+                    agent = Enum.find(@all_agents, &(&1.id == entry.data.author_id))
+                    String.first((agent && agent.name) || "A")
+
+                  author_type == "system" ->
+                    "⚙️"
+
+                  true ->
+                    "U"
+                end
+
+              :run ->
+                status = entry.data.status || "pending"
+                case status do
+                  "completed" -> "✓"
+                  "failed" -> "✕"
+                  "running" -> "▶"
+                  _ -> "○"
+                end
+
+              _ ->
+                "•"
+            end}
+          </div>
+          <!-- Vertical line connector -->
+          <div class="w-0.5 flex-1 bg-border/30 min-h-[8px]"></div>
+        </div>
+
+        <!-- Content Column -->
+        <div class="flex-1 min-w-0">
+          {case entry.type do
+            :comment ->
+              ~H"""
+              <div class={"bg-surface border border-border rounded-lg p-4 #{if entry.data.author_type == "system", do: "bg-white/[0.03] border-dashed", else: ""}"}>
+                <div :if={entry.data.author_type != "system"} class="flex items-center justify-between mb-2">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs font-510 text-text-secondary">
+                      {case entry.data.author_type do
+                        "agent" ->
+                          agent = Enum.find(@all_agents, &(&1.id == entry.data.author_id))
+                          if agent, do: agent.name, else: "Agent"
+
+                        true ->
+                          "User"
+                      end}
+                    </span>
+                    <span :if={entry.data.author_type == "agent"} class="text-[10px] bg-brand/10 text-brand px-1.5 py-0.5 rounded">Agent</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-text-quaternary">{format_timeline_timestamp(entry.timestamp)}</span>
+                    <button
+                      type="button"
+                      class="text-text-quaternary hover:text-red-400 transition-colors text-xs opacity-0 group-hover:opacity-100"
+                      phx-click="delete_comment"
+                      phx-value-id={entry.data.id}
+                      data-confirm="Delete this comment?"
+                    >
+                      <.icon name="hero-x-mark" class="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+                <p class={if entry.data.author_type == "system", do: "text-xs text-text-quaternary", else: "text-sm text-text-secondary whitespace-pre-wrap"}>
+                  {entry.data.body}
+                </p>
+              </div>
+              """
+
+            :run ->
+              ~H"""
+              <div class="bg-white/[0.02] border border-border/50 rounded-lg p-3">
+                <div class="flex items-center justify-between mb-2">
+                  <div class="flex items-center gap-2">
+                    <span class={"w-2 h-2 rounded-full #{run_status_color(entry.data.status)}"}></span>
+                    <span class="text-xs font-510 text-text-primary">{run_status_label(entry.data.status)}</span>
+                    <span class="text-xs text-text-quaternary">{entry.data.adapter || "unknown"}</span>
+                  </div>
+                  <span class="text-xs text-text-quaternary">{format_timeline_timestamp(entry.timestamp)}</span>
+                </div>
+                <div class="flex items-center gap-3 text-xs text-text-quaternary">
+                  <span>{format_run_duration(entry.data)}</span>
+                  <span :if={entry.data.input_tokens > 0 or entry.data.output_tokens > 0}>
+                    {format_tokens(entry.data.input_tokens + entry.data.output_tokens)} tokens
+                  </span>
+                  <span :if={entry.data.cost_usd && entry.data.cost_usd > 0}>
+                    {format_cost(entry.data.cost_usd)}
+                  </span>
+                </div>
+              </div>
+              """
+
+            _ ->
+              ~H"""
+              <div class="text-xs text-text-quaternary">
+                Unknown entry type
+              </div>
+              """
+          end}
+        </div>
+      </div>
+    </div>
+
+    <!-- Sticky Composer -->
+    <div class="p-4 lg:p-6 border-t border-border bg-surface/50">
+      <form id="comment-form" phx-submit="add_comment" class="space-y-3">
+        <div class="flex gap-2">
+          <div class="flex-1">
+            <.input
+              field={@comment_form[:body]}
+              type="textarea"
+              placeholder="Add a comment..."
+              class="min-h-[60px] max-h-[200px] resize-y"
+              rows="2"
+            />
+          </div>
+          <.button type="submit" class="self-end" aria-label="Send comment">
+            <.icon name="hero-paper-airplane" class="w-4 h-4" />
+          </.button>
+        </div>
+      </form>
     </div>
   </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <div class="lg:col-span-2 space-y-6">
-      <div class="flex items-center gap-3">
-        <.badge variant="status" value={to_string(@issue.status)} />
-        <.badge variant="priority" value={to_string(@issue.priority)} />
+  <!-- Sidebar (Metadata Rail) -->
+  <div class="w-full lg:w-80 border-t lg:border-t-0 lg:border-l border-border bg-surface/30 p-4 lg:p-6 space-y-6">
+    <!-- Description -->
+    <div class="group">
+      <div :if={@editing != "description"} class="relative">
+        <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Description</h3>
+        <p class="text-sm text-text-secondary whitespace-pre-wrap leading-relaxed">
+          {@issue.description}
+        </p>
+        <button
+          type="button"
+          phx-click="start_editing"
+          phx-value-field="description"
+          class="absolute top-0 right-0 opacity-0 group-hover:opacity-100 text-text-quaternary hover:text-text-secondary transition-opacity text-xs"
+        >
+          <.icon name="hero-pencil" class="w-4 h-4" />
+        </button>
       </div>
+      <form :if={@editing == "description"} phx-submit="save_description" class="space-y-3">
+        <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Description</h3>
+        <textarea
+          name="description"
+          class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[120px] resize-y"
+          autofocus
+        ><%= @issue.description %></textarea>
+        <div class="flex items-center gap-2">
+          <.button type="submit" size="sm">Save</.button>
+          <.button type="button" variant="ghost" size="sm" phx-click="cancel_editing">Cancel</.button>
+        </div>
+      </form>
+    </div>
 
-      <div class="group">
-        <div :if={@editing != "description"} class="relative">
-          <p class="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">
-            {@issue.description}
-          </p>
+    <!-- GitHub PR Link -->
+    <div>
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">GitHub PR</h3>
+      <form phx-submit="update_github_pr_url" class="space-y-2">
+        <input
+          type="text"
+          name="github_pr_url"
+          value={@issue.github_pr_url || ""}
+          placeholder="https://github.com/owner/repo/pull/123"
+          class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+        />
+        <div class="flex items-center gap-2">
+          <.button type="submit" size="sm">Save</.button>
           <button
             type="button"
-            phx-click="start_editing"
-            phx-value-field="description"
-            class="absolute top-0 right-0 opacity-0 group-hover:opacity-100 text-text-quaternary hover:text-text-secondary transition-opacity text-xs"
+            class="text-text-quaternary hover:text-text-secondary transition-colors text-xs"
+            phx-click="clear_github_pr_url"
+            data-confirm="Clear the PR URL?"
           >
-            Edit
+            Clear
           </button>
         </div>
-        <form :if={@editing == "description"} phx-submit="save_description" class="space-y-3">
-          <textarea
-            name="description"
-            class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[120px] resize-y"
-            autofocus
-          ><%= @issue.description %></textarea>
+      </form>
+    </div>
+
+    <!-- Status -->
+    <div>
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Status</h3>
+      <form phx-change="update_status">
+        <select
+          name="status"
+          class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
+        >
+          <option value={to_string(@issue.status)} selected>
+            {@issue.status |> to_string() |> String.replace("_", " ") |> String.capitalize()} (current)
+          </option>
+          <option :for={{label, value} <- valid_status_options(@issue.status)} value={value}>
+            {label}
+          </option>
+        </select>
+      </form>
+    </div>
+
+    <!-- Priority -->
+    <div>
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Priority</h3>
+      <form phx-change="update_priority">
+        <select
+          name="priority"
+          class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
+        >
+          <option
+            :for={p <- [:low, :medium, :high]}
+            value={to_string(p)}
+            selected={@issue.priority == p}
+          >
+            {p |> to_string() |> String.capitalize()}
+          </option>
+        </select>
+      </form>
+    </div>
+
+    <!-- Assignee -->
+    <div>
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Assignee</h3>
+      <div :if={@issue.assignee} class="space-y-2">
+        <div class="flex items-center justify-between bg-white/[0.05] rounded-md px-3 py-2">
           <div class="flex items-center gap-2">
-            <.button type="submit">Save</.button>
-            <.button type="button" variant="ghost" phx-click="cancel_editing">Cancel</.button>
+            <div class="w-6 h-6 rounded-full bg-brand/20 flex items-center justify-center text-xs font-510 text-brand">
+              {String.first(@issue.assignee.name) || "?"}
+            </div>
+            <span class="text-sm text-text-secondary">{@issue.assignee.name}</span>
+            <.badge variant="agent" value={to_string(@issue.assignee.status)} />
           </div>
-        </form>
-      </div>
-
-      <div class="text-xs text-text-quaternary">
-        Created {@issue.inserted_at}
-      </div>
-
-      <div class="bg-surface border border-border rounded-card p-5 space-y-4">
-        <h3 class="text-sm font-510 text-text-primary">GitHub PR Link</h3>
-        <form phx-submit="update_github_pr_url" class="space-y-3">
-          <input
-            type="text"
-            name="github_pr_url"
-            value={@issue.github_pr_url || ""}
-            placeholder="https://github.com/owner/repo/pull/123"
-            class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
-          />
-          <div class="flex items-center gap-3">
-            <.button type="submit">Save PR URL</.button>
-            <.button
-              type="button"
-              variant="ghost"
-              phx-click="clear_github_pr_url"
-              data-confirm="Clear the PR URL?"
-            >
-              Clear
-            </.button>
-          </div>
-        </form>
-      </div>
-
-      <div class="bg-surface border border-border rounded-card p-5 space-y-4">
-        <.button type="button" phx-click="toggle_agent_panel">
-          {(@show_agent_panel && "Hide") || "Spawn"} Agent
-        </.button>
-
-        <div :if={@show_agent_panel} class="space-y-3 pt-2">
-          <h4 class="text-sm font-510 text-text-primary">Select an Agent</h4>
-          <p :if={Enum.empty?(@agents)} class="text-sm text-text-tertiary">
-            No idle agents available.
-          </p>
-          <form :if={!Enum.empty?(@agents)} phx-submit="spawn_agent" class="space-y-3">
-            <select
-              name="agent_id"
-              required
-              class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
-            >
-              <option value="">Choose an agent...</option>
-              <option :for={agent <- @agents} value={agent.id}>
-                {agent.name} ({agent.role})
-              </option>
-            </select>
-            <.button type="submit">Start Agent</.button>
-          </form>
-        </div>
-      </div>
-
-      <div class="border-t border-border pt-6 space-y-4">
-        <h3 class="text-sm font-510 text-text-primary">Thread ({length(@issue.comments)})</h3>
-
-        <div class="space-y-4">
-          <div
-            :for={comment <- @issue.comments}
-            id={"comment-#{comment.id}"}
-            class={
-              "flex gap-3 #{if comment.author_type == "system", do: "justify-center", else: ""}"
-            }
+          <button
+            type="button"
+            phx-click="unassign_issue"
+            class="text-text-quaternary hover:text-red-400 transition-colors text-xs"
+            data-confirm="Unassign this issue?"
           >
-            <div :if={comment.author_type != "system"} class="flex-shrink-0">
-              <div class={
-                "w-8 h-8 rounded-full flex items-center justify-center text-xs font-510 #{if comment.author_type == "agent", do: "bg-brand/20 text-brand", else: "bg-blue-500/20 text-blue-400"}"
-              }>
-                {String.first(case comment.author_type do
-                  "agent" -> (Enum.find(@all_agents, &(&1.id == comment.author_id)) || %{name: "A"}).name
-                  _ -> "U"
-                end) || "?"}
-              </div>
-            </div>
-            <div class={
-              "flex-1 #{if comment.author_type == "system", do: "bg-white/[0.03] border border-dashed border-border/50 rounded-lg px-4 py-2 text-center", else: "bg-surface border border-border rounded-lg p-4"}"
-            }>
-              <div :if={comment.author_type != "system"} class="flex items-center justify-between mb-2">
-                <div class="flex items-center gap-2">
-                  <span class="text-xs font-510 text-text-secondary">
-                    {case comment.author_type do
-                      "agent" ->
-                        agent = Enum.find(@all_agents, &(&1.id == comment.author_id))
-                        if agent, do: agent.name, else: "Agent"
-                      _ ->
-                        "User"
-                    end}
-                  </span>
-                  <span :if={comment.author_type == "agent"} class="text-[10px] bg-brand/10 text-brand px-1.5 py-0.5 rounded">Agent</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-xs text-text-quaternary">{comment.inserted_at}</span>
-                  <button
-                    type="button"
-                    class="text-text-quaternary hover:text-red-400 transition-colors text-xs opacity-0 group-hover:opacity-100"
-                    phx-click="delete_comment"
-                    phx-value-id={comment.id}
-                    data-confirm="Delete this comment?"
-                  >
-                    x
-                  </button>
-                </div>
-              </div>
-              <p class={if comment.author_type == "system", do: "text-xs text-text-quaternary", else: "text-sm text-text-secondary whitespace-pre-wrap"}>
-                {comment.body}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div class="bg-surface border border-border rounded-lg p-4 space-y-3">
-          <form id="comment-form" phx-submit="add_comment" class="space-y-3">
-            <.select
-              name="comment[author_type]"
-              label="Author Type"
-              options={[User: "user", Agent: "agent"]}
-            />
-            <.input field={@comment_form[:author_id]} label="Author ID" />
-            <.input field={@comment_form[:body]} label="Comment" type="textarea" />
-            <.button type="submit">Add Comment</.button>
-          </form>
+            <.icon name="hero-x-mark" class="w-3 h-3" />
+          </button>
         </div>
       </div>
-
-      <div :if={!Enum.empty?(@runs)} class="bg-surface border border-border rounded-lg p-5 space-y-4">
-        <h3 class="text-sm font-510 text-text-primary">Run Ledger ({length(@runs)})</h3>
-        <div class="space-y-2">
-          <div
-            :for={run <- @runs}
-            class="flex items-center gap-3 p-3 bg-white/[0.02] border border-border/50 rounded-lg"
+      <div :if={!@issue.assignee} class="space-y-2">
+        <input
+          type="text"
+          phx-change="search_assignee"
+          name="q"
+          value={@assignee_search}
+          placeholder="Search agents..."
+          class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+        />
+        <div :if={@assignee_search != ""} class="max-h-40 overflow-y-auto space-y-1">
+          <button
+            :for={agent <- filtered_agents(@all_agents, @assignee_search)}
+            type="button"
+            phx-click="assign_issue"
+            phx-value-agent_id={agent.id}
+            class="w-full flex items-center gap-2 bg-white/[0.05] hover:bg-white/[0.08] rounded-md px-3 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors text-left"
           >
-            <span class={"w-2.5 h-2.5 rounded-full flex-shrink-0 #{run_status_color(run.status)}"}></span>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="text-xs font-510 text-text-primary">{run_status_label(run.status)}</span>
-                <span class="text-xs text-text-quaternary">
-                  {run.adapter || "unknown"}
-                </span>
-              </div>
-              <div class="flex items-center gap-3 mt-1 text-xs text-text-quaternary">
-                <span>{format_run_duration(run)}</span>
-                <span :if={run.input_tokens > 0 or run.output_tokens > 0}>
-                  {format_tokens(run.input_tokens + run.output_tokens)} tokens
-                </span>
-                <span :if={run.cost_usd && run.cost_usd > 0}>
-                  {format_cost(run.cost_usd)}
-                </span>
-              </div>
+            <div class="w-5 h-5 rounded-full bg-brand/20 flex items-center justify-center text-[10px] font-510 text-brand">
+              {String.first(agent.name) || "?"}
             </div>
-            <span class="text-xs text-text-quaternary flex-shrink-0">
-              {Calendar.strftime(run.inserted_at, "%b %d, %H:%M")}
-            </span>
-          </div>
+            <span>{agent.name}</span>
+            <span class="text-text-quaternary text-xs">({agent.role})</span>
+          </button>
         </div>
       </div>
     </div>
 
-    <div class="space-y-4">
-      <div class="bg-surface border border-border rounded-card p-5 space-y-4">
-        <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider">Details</h3>
-        <div class="space-y-4 text-sm">
-          <div>
-            <span class="block text-text-tertiary text-xs mb-1.5">Status</span>
-            <form phx-change="update_status">
-              <select
-                name="status"
-                class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
-              >
-                <option value={to_string(@issue.status)} selected>
-                  {@issue.status |> to_string() |> String.replace("_", " ") |> String.capitalize()} (current)
-                </option>
-                <option :for={{label, value} <- valid_status_options(@issue.status)} value={value}>
-                  {label}
-                </option>
-              </select>
-            </form>
-          </div>
+    <!-- Agent Spawn -->
+    <div>
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Agent</h3>
+      <.button type="button" phx-click="toggle_agent_panel" size="sm" variant="ghost">
+        {(@show_agent_panel && "Hide") || "Spawn"} Agent
+      </.button>
 
-          <div>
-            <span class="block text-text-tertiary text-xs mb-1.5">Priority</span>
-            <form phx-change="update_priority">
-              <select
-                name="priority"
-                class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
-              >
-                <option
-                  :for={p <- [:low, :medium, :high]}
-                  value={to_string(p)}
-                  selected={@issue.priority == p}
-                >
-                  {p |> to_string() |> String.capitalize()}
-                </option>
-              </select>
-            </form>
-          </div>
+      <div :if={@show_agent_panel} class="space-y-3 mt-3">
+        <p :if={Enum.empty?(@agents)} class="text-sm text-text-tertiary">
+          No idle agents available.
+        </p>
+        <form :if={!Enum.empty?(@agents)} phx-submit="spawn_agent" class="space-y-3">
+          <select
+            name="agent_id"
+            required
+            class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
+          >
+            <option value="">Choose an agent...</option>
+            <option :for={agent <- @agents} value={agent.id}>
+              {agent.name} ({agent.role})
+            </option>
+          </select>
+          <.button type="submit" size="sm">Start Agent</.button>
+        </form>
+      </div>
+    </div>
 
-          <div>
-            <span class="block text-text-tertiary text-xs mb-1.5">Assignee</span>
-            <div :if={@issue.assignee} class="space-y-2">
-              <div class="flex items-center justify-between bg-white/[0.05] rounded-md px-3 py-2">
-                <div class="flex items-center gap-2">
-                  <div class="w-6 h-6 rounded-full bg-brand/20 flex items-center justify-center text-xs font-510 text-brand">
-                    {String.first(@issue.assignee.name) || "?"}
-                  </div>
-                  <span class="text-sm text-text-secondary">{@issue.assignee.name}</span>
-                  <.badge variant="agent" value={to_string(@issue.assignee.status)} />
-                </div>
-                <button
-                  type="button"
-                  phx-click="unassign_issue"
-                  class="text-text-quaternary hover:text-red-400 transition-colors text-xs"
-                  data-confirm="Unassign this issue?"
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-            <div :if={!@issue.assignee} class="space-y-2">
-              <input
-                type="text"
-                phx-change="search_assignee"
-                name="q"
-                value={@assignee_search}
-                placeholder="Search agents..."
-                class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
-              />
-              <div :if={@assignee_search != ""} class="max-h-40 overflow-y-auto space-y-1">
-                <button
-                  :for={agent <- filtered_agents(@all_agents, @assignee_search)}
-                  type="button"
-                  phx-click="assign_issue"
-                  phx-value-agent_id={agent.id}
-                  class="w-full flex items-center gap-2 bg-white/[0.05] hover:bg-white/[0.08] rounded-md px-3 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors text-left"
-                >
-                  <div class="w-5 h-5 rounded-full bg-brand/20 flex items-center justify-center text-[10px] font-510 text-brand">
-                    {String.first(agent.name) || "?"}
-                  </div>
-                  <span>{agent.name}</span>
-                  <span class="text-text-quaternary text-xs">({agent.role})</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex justify-between">
-            <span class="text-text-tertiary">Comments</span>
-            <span class="text-text-secondary">{length(@issue.comments)}</span>
-          </div>
-          <div class="flex justify-between">
-            <span class="text-text-tertiary">Created</span>
-            <span class="text-text-secondary">{@issue.inserted_at}</span>
-          </div>
-        </div>
+    <!-- Metadata -->
+    <div class="space-y-2 text-sm">
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Details</h3>
+      <div class="flex justify-between">
+        <span class="text-text-tertiary">Comments</span>
+        <span class="text-text-secondary">{length(@issue.comments)}</span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-text-tertiary">Runs</span>
+        <span class="text-text-secondary">{length(@runs)}</span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-text-tertiary">Created</span>
+        <span class="text-text-secondary">{@issue.inserted_at}</span>
       </div>
     </div>
   </div>

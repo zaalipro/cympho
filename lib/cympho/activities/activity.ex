@@ -34,6 +34,7 @@ defmodule Cympho.Activities.Activity do
     budget_threshold_exceeded
     feedback_submitted
     feedback_exported
+    work_product_created
   )
 
   def changeset(activity, attrs) do

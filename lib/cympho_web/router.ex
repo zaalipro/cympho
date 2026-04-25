@@ -47,6 +47,8 @@ defmodule CymphoWeb.Router do
       live "/board-approvals/:id", BoardApprovalLive.Show
       live "/agents", AgentLive.Index
       live "/agents/:id", AgentLive.Show
+      live "/adapters", AdapterLive.Index
+      live "/adapters/:key", AdapterLive.Show
       live "/org-chart", OrgChartLive
       live "/routines", RoutineLive.Index
       live "/routines/new", RoutineLive.New
@@ -139,6 +141,19 @@ defmodule CymphoWeb.Router do
     delete "/issues/:issue_id/labels/:label_id", IssueLabelController, :remove
     put "/issues/:issue_id/labels", IssueLabelController, :set
 
+    # Issue read states
+    get "/issues/:issue_id/read-state", IssueReadStateController, :get_read_state
+    post "/issues/:issue_id/mark-read", IssueReadStateController, :mark_read
+
+    # Inbox
+    post "/inbox/mark-all-read", IssueReadStateController, :mark_all_read
+
+    # Issue thread interactions
+    get "/issues/:issue_id/interactions", IssueInteractionController, :index
+    post "/issues/:issue_id/interactions", IssueInteractionController, :create
+    get "/issues/:issue_id/interactions/:id", IssueInteractionController, :show
+    post "/issues/:issue_id/interactions/:id/resolve", IssueInteractionController, :resolve
+
     post "/issues/:issue_id/execution-policy/assign", IssueExecutionPolicyController, :assign
     post "/issues/:issue_id/execution-policy/decide", IssueExecutionPolicyController, :decide
     get "/issues/:issue_id/documents", DocumentController, :index
@@ -146,6 +161,8 @@ defmodule CymphoWeb.Router do
     put "/issues/:issue_id/documents/:key", DocumentController, :upsert
     delete "/issues/:issue_id/documents/:key", DocumentController, :delete
     get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
+
+    resources "/issues/:issue_id/work-products", WorkProductController, only: [:index, :create, :show, :update, :delete], name: "issue_work_product"
 
     get "/issues/:issue_id/activities", ActivityController, :index
     get "/issues/:issue_id/activities/statistics", ActivityController, :statistics

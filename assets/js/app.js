@@ -2,6 +2,31 @@ import "phoenix_html"
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 
+// Timeline scroll hook for chat-style auto-scroll
+const TimelineScroll = {
+  mounted() {
+    this.el.addEventListener("phx:update", () => {
+      this.maybeScrollToBottom();
+    });
+    this.maybeScrollToBottom();
+
+    // Track scroll position
+    this.el.addEventListener("scroll", () => {
+      const isAtBottom = this.el.scrollTop + this.el.clientHeight >= this.el.scrollHeight - 50;
+      // Optional: push scroll position to server if needed
+      // this.pushEvent("scroll_position", {is_at_bottom: isAtBottom});
+    });
+  },
+
+  maybeScrollToBottom() {
+    // Only auto-scroll if already near bottom or on initial load
+    const isAtBottom = this.el.scrollTop + this.el.clientHeight >= this.el.scrollHeight - 100;
+    if (isAtBottom || this.el.scrollTop === 0) {
+      this.el.scrollTop = this.el.scrollHeight;
+    }
+  }
+};
+
 // Kanban drag-and-drop hook
 const KanbanSortable = {
   mounted() {
@@ -277,7 +302,7 @@ const CompanySwitcher = {
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
 const liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
-  hooks: {KanbanSortable, CompanySwitcher}
+  hooks: {TimelineScroll, KanbanSortable, CompanySwitcher}
 });
 
 liveSocket.connect();

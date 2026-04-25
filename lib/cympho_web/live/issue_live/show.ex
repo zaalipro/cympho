@@ -7,6 +7,8 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.Documents
   alias Cympho.Orchestrator
   alias Cympho.HeartbeatEngine
+  alias Cympho.IssueReadStates
+  alias Cympho.IssueThreadInteractions
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -14,10 +16,22 @@ defmodule CymphoWeb.IssueLive.Show do
     Comments.subscribe()
     Documents.subscribe()
 
+    # Subscribe to read state updates if user is logged in
+    current_user = socket.assigns[:current_user]
+    if current_user do
+      IssueReadStates.subscribe(current_user.id)
+    end
+
     case Issues.get_issue(id) do
       {:ok, issue} ->
+        # Auto-mark as read for the current user
+        if current_user do
+          IssueReadStates.ensure_read(current_user.id, issue.id)
+        end
+
         comment_changeset = Comments.Comment.changeset(%Comments.Comment{}, %{})
         runs = HeartbeatEngine.list_runs_for_issue(issue.id)
+        timeline = build_timeline(issue, runs)
 
         {:ok,
          assign(socket,
@@ -29,7 +43,9 @@ defmodule CymphoWeb.IssueLive.Show do
            show_agent_panel: false,
            editing: nil,
            assignee_search: "",
-           runs: runs
+           runs: runs,
+           timeline: timeline,
+           scrolled_to_bottom: true
          )}
 
       {:error, :not_found} ->
@@ -220,7 +236,8 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:issue_updated, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
       runs = HeartbeatEngine.list_runs_for_issue(updated_issue.id)
-      {:noreply, assign(socket, issue: updated_issue, runs: runs)}
+      socket = assign(socket, issue: updated_issue, runs: runs)
+      {:noreply, maybe_rebuild_timeline(socket)}
     else
       {:noreply, socket}
     end
@@ -232,7 +249,8 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:comment_created, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      {:noreply, assign(socket, :issue, updated_issue)}
+      socket = assign(socket, :issue, updated_issue)
+      {:noreply, maybe_rebuild_timeline(socket)}
     else
       {:noreply, socket}
     end
@@ -240,7 +258,8 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:comment_updated, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      {:noreply, assign(socket, :issue, updated_issue)}
+      socket = assign(socket, :issue, updated_issue)
+      {:noreply, maybe_rebuild_timeline(socket)}
     else
       {:noreply, socket}
     end
@@ -248,9 +267,20 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:comment_deleted, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      {:noreply, assign(socket, :issue, updated_issue)}
+      socket = assign(socket, :issue, updated_issue)
+      {:noreply, maybe_rebuild_timeline(socket)}
     else
       {:noreply, socket}
+    end
+  end
+
+  def handle_info({:issue_read_state_updated, _issue_id}, socket) do
+    # Refresh the issue to update unread indicators
+    case Issues.get_issue(socket.assigns.issue.id) do
+      {:ok, issue} ->
+        {:noreply, assign(socket, :issue, issue)}
+      {:error, _} ->
+        {:noreply, socket}
     end
   end
 
@@ -341,4 +371,52 @@ defmodule CymphoWeb.IssueLive.Show do
   defp try_string_to_priority("high"), do: :high
   defp try_string_to_priority("critical"), do: :critical
   defp try_string_to_priority(_), do: nil
+
+  # Build a unified timeline of comments, status changes, and runs
+  defp build_timeline(issue, runs) do
+    comments_timeline =
+      Enum.map(issue.comments, fn comment ->
+        %{
+          type: :comment,
+          id: comment.id,
+          timestamp: comment.inserted_at,
+          data: comment
+        }
+      end)
+
+    runs_timeline =
+      Enum.map(runs, fn run ->
+        %{
+          type: :run,
+          id: run.id,
+          timestamp: run.inserted_at,
+          data: run
+        }
+      end)
+
+    # Combine and sort by timestamp (newest last for chat view)
+    (comments_timeline ++ runs_timeline)
+    |> Enum.sort_by(& &1.timestamp, DateTime)
+  end
+
+  # Rebuild timeline when issue updates (status changes, etc.)
+  defp maybe_rebuild_timeline(socket) do
+    timeline = build_timeline(socket.assigns.issue, socket.assigns.runs)
+    assign(socket, :timeline, timeline)
+  end
+
+  # Format timestamp for timeline entries
+  def format_timeline_timestamp(%DateTime{} = dt) do
+    now = DateTime.utc_now()
+    diff = DateTime.diff(now, dt, :second)
+
+    cond do
+      diff < 60 -> "just now"
+      diff < 3600 -> "#{div(diff, 60)}m ago"
+      diff < 86400 -> "#{div(diff, 3600)}h ago"
+      diff < 604800 -> "#{div(diff, 86400)}d ago"
+      true -> Calendar.strftime(dt, "%b %d, %Y")
+    end
+  end
+  def format_timeline_timestamp(_), do: ""
 end
