@@ -79,11 +79,13 @@ defmodule CymphoWeb.ApprovalController do
 
   defp parse_status(nil), do: nil
   defp parse_status(""), do: nil
+
   defp parse_status(s) when is_binary(s) do
     case s |> String.downcase() |> String.to_atom() do
       status when status in [:pending, :approved, :denied, :cancelled] -> status
       _ -> nil
     end
   end
+
   defp parse_status(_), do: nil
 end

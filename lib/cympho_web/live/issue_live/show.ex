@@ -64,6 +64,7 @@ defmodule CymphoWeb.IssueLive.Show do
     case Comments.create_comment(comment_params) do
       {:ok, _comment} ->
         changeset = Comments.Comment.changeset(%Comments.Comment{}, %{})
+
         {:noreply,
          assign(socket,
            comment_changeset: changeset,
@@ -98,9 +99,11 @@ defmodule CymphoWeb.IssueLive.Show do
         case Issues.update_issue(socket.assigns.issue, %{status: status_atom}) do
           {:ok, _issue} ->
             {:noreply, socket}
+
           {:error, _changeset} ->
             {:noreply, put_flash(socket, :error, "Failed to update status")}
         end
+
       :error ->
         {:noreply, put_flash(socket, :error, "Invalid status")}
     end
@@ -190,7 +193,9 @@ defmodule CymphoWeb.IssueLive.Show do
 
     case Orchestrator.start_and_run(issue, agent_id) do
       {:ok, _pid} ->
-        {:ok, _updated_agent} = Agents.update_agent(%Agents.Agent{id: agent_id}, %{status: :running})
+        {:ok, _updated_agent} =
+          Agents.update_agent(%Agents.Agent{id: agent_id}, %{status: :running})
+
         {:noreply,
          socket
          |> put_flash(:info, "Agent spawned successfully")

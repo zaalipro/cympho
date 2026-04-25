@@ -28,7 +28,13 @@ defmodule Cympho.ExecutionPolicyAuthTest do
 
       {:ok, assigned} = Issues.assign_execution_policy(issue, policy.id, executor.id)
 
-      %{executor: executor, impostor: impostor, reviewer: reviewer, policy: policy, issue: assigned}
+      %{
+        executor: executor,
+        impostor: impostor,
+        reviewer: reviewer,
+        policy: policy,
+        issue: assigned
+      }
     end
 
     test "authorized executor can submit work", %{executor: executor, issue: issue} do
@@ -81,17 +87,23 @@ defmodule Cympho.ExecutionPolicyAuthTest do
     end
 
     test "unauthorized agent cannot make decisions", %{impostor: impostor, issue: issue} do
-      assert {:error, :unauthorized} = Issues.execution_policy_decision(issue, :approve, impostor.id)
+      assert {:error, :unauthorized} =
+               Issues.execution_policy_decision(issue, :approve, impostor.id)
     end
 
-    test "executor cannot approve their own work at reviewer stage", %{executor: executor, issue: issue} do
-      assert {:error, :unauthorized} = Issues.execution_policy_decision(issue, :approve, executor.id)
+    test "executor cannot approve their own work at reviewer stage", %{
+      executor: executor,
+      issue: issue
+    } do
+      assert {:error, :unauthorized} =
+               Issues.execution_policy_decision(issue, :approve, executor.id)
     end
 
     test "decision on issue without execution policy returns error" do
       {:ok, plain_issue} = Issues.create_issue(%{title: "No Policy", description: "Test"})
+
       assert {:error, :execution_policy_not_active} =
-        Issues.execution_policy_decision(plain_issue, :approve, "anyone")
+               Issues.execution_policy_decision(plain_issue, :approve, "anyone")
     end
   end
 
@@ -122,16 +134,19 @@ defmodule Cympho.ExecutionPolicyAuthTest do
       {:ok, at_reviewer} = Issues.transition_issue(assigned, :in_review, executor.id)
 
       # Outsider cannot review
-      assert {:error, :unauthorized} = Issues.execution_policy_decision(at_reviewer, :approve, outsider.id)
+      assert {:error, :unauthorized} =
+               Issues.execution_policy_decision(at_reviewer, :approve, outsider.id)
 
       # Executor cannot review their own work
-      assert {:error, :unauthorized} = Issues.execution_policy_decision(at_reviewer, :approve, executor.id)
+      assert {:error, :unauthorized} =
+               Issues.execution_policy_decision(at_reviewer, :approve, executor.id)
 
       # Reviewer approves
       {:ok, at_approver} = Issues.execution_policy_decision(at_reviewer, :approve, reviewer.id)
 
       # Outsider cannot approve
-      assert {:error, :unauthorized} = Issues.execution_policy_decision(at_approver, :approve, outsider.id)
+      assert {:error, :unauthorized} =
+               Issues.execution_policy_decision(at_approver, :approve, outsider.id)
 
       # Approver approves
       {:ok, done} = Issues.execution_policy_decision(at_approver, :approve, approver.id)

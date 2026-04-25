@@ -215,7 +215,8 @@ defmodule Cympho.Agents do
   Returns true if parent_agent can spawn an agent with child_role.
   Parent must have role_rank >= child_rank (allows peer spawning for redundancy).
   """
-  @spec spawn_authorized?(Agent.t(), :designer | :product_manager | :engineer | :cto | :ceo) :: boolean()
+  @spec spawn_authorized?(Agent.t(), :designer | :product_manager | :engineer | :cto | :ceo) ::
+          boolean()
   def spawn_authorized?(%Agent{} = parent_agent, child_role) do
     role_rank(parent_agent.role) >= role_rank(child_role)
   end
@@ -223,9 +224,13 @@ defmodule Cympho.Agents do
   @doc """
   Returns the list of roles that the given agent is authorized to spawn.
   """
-  @spec spawnable_roles(Agent.t()) :: [:designer | :product_manager | :engineer | :cto | :ceo, ...]
+  @spec spawnable_roles(Agent.t()) :: [
+          :designer | :product_manager | :engineer | :cto | :ceo,
+          ...
+        ]
   def spawnable_roles(%Agent{} = parent_agent) do
     parent_rank = role_rank(parent_agent.role)
+
     [:designer, :product_manager, :engineer, :cto, :ceo]
     |> Enum.filter(fn role -> role_rank(role) <= parent_rank end)
   end
@@ -280,7 +285,8 @@ defmodule Cympho.Agents do
   """
   def list_agent_inbox(agent_id) when is_binary(agent_id) do
     from(i in Issue,
-      where: i.assignee_id == ^agent_id and i.status in [:todo, :in_progress, :in_review, :blocked],
+      where:
+        i.assignee_id == ^agent_id and i.status in [:todo, :in_progress, :in_review, :blocked],
       select: %{
         id: i.id,
         title: i.title,
@@ -289,7 +295,10 @@ defmodule Cympho.Agents do
         assignee_id: i.assignee_id
       },
       order_by: [
-        fragment("CASE ? WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 3 END", i.priority),
+        fragment(
+          "CASE ? WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 3 END",
+          i.priority
+        ),
         asc: i.inserted_at
       ]
     )
@@ -317,7 +326,13 @@ defmodule Cympho.Agents do
   @doc """
   Returns a map with counts of agents by status.
   """
-  @spec count_by_status() :: %{idle: non_neg_integer(), running: non_neg_integer(), error: non_neg_integer(), sleeping: non_neg_integer(), offline: non_neg_integer()}
+  @spec count_by_status() :: %{
+          idle: non_neg_integer(),
+          running: non_neg_integer(),
+          error: non_neg_integer(),
+          sleeping: non_neg_integer(),
+          offline: non_neg_integer()
+        }
   def count_by_status do
     from(a in Agent,
       group_by: a.status,
@@ -350,13 +365,14 @@ defmodule Cympho.Agents do
 
         orchestrator_info = get_orchestrator_info(issue_id)
 
-        {:ok, %{
-          agent_id: agent_id,
-          issue: issue_info,
-          turn_count: orchestrator_info[:turn_count] || 0,
-          started_at: heartbeat_state[:started_at],
-          elapsed_seconds: calculate_elapsed(heartbeat_state[:started_at])
-        }}
+        {:ok,
+         %{
+           agent_id: agent_id,
+           issue: issue_info,
+           turn_count: orchestrator_info[:turn_count] || 0,
+           started_at: heartbeat_state[:started_at],
+           elapsed_seconds: calculate_elapsed(heartbeat_state[:started_at])
+         }}
 
       {:ok, _} ->
         {:error, :not_running}
@@ -390,6 +406,7 @@ defmodule Cympho.Agents do
   end
 
   defp calculate_elapsed(nil), do: 0
+
   defp calculate_elapsed(started_at) do
     DateTime.diff(DateTime.utc_now(), started_at, :second)
   end
@@ -414,6 +431,7 @@ defmodule Cympho.Agents do
         case get_agent(agent_id) do
           {:ok, agent} ->
             update_agent(agent, %{status: :idle})
+
           {:error, _} ->
             :error
         end
@@ -427,5 +445,4 @@ defmodule Cympho.Agents do
         {:error, reason}
     end
   end
-
 end

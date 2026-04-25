@@ -122,8 +122,10 @@ defmodule CymphoWeb.AgentLive.Index do
     case Agents.kill_session(agent_id) do
       :ok ->
         {:noreply, put_flash(socket, :info, "Agent session stopped successfully")}
+
       {:error, :not_running} ->
         {:noreply, put_flash(socket, :error, "Agent is not currently running")}
+
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Agent heartbeat not found")}
     end
@@ -144,6 +146,7 @@ defmodule CymphoWeb.AgentLive.Index do
   def show_spawn_button?(%Agents.Agent{} = agent) do
     Agents.spawnable_roles(agent) |> length() > 1
   end
+
   def show_spawn_button?(_), do: false
 
   def format_elapsed(seconds) when is_integer(seconds) do
@@ -157,5 +160,6 @@ defmodule CymphoWeb.AgentLive.Index do
       "#{minutes}m #{secs}s"
     end
   end
+
   def format_elapsed(_), do: "0s"
 end

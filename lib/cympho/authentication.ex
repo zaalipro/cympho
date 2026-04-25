@@ -149,7 +149,8 @@ defmodule Cympho.Authentication do
       from(ak in AgentApiKey,
         where: ak.key_hash == ^key_hash,
         where: is_nil(ak.expires_at) or ak.expires_at > ^DateTime.utc_now(),
-        preload: [:agent])
+        preload: [:agent]
+      )
 
     case Repo.one(query) do
       nil -> {:error, :invalid_api_key}

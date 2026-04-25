@@ -37,7 +37,6 @@ defmodule Cympho.Routines.Routine do
     timestamps(type: :utc_datetime)
   end
 
-
   @status_transitions %{
     active: [:paused, :archived],
     paused: [:active, :archived],

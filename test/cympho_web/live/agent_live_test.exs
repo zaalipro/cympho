@@ -27,7 +27,9 @@ defmodule CymphoWeb.AgentLiveTest do
     test "renders status dashboard with counts", %{conn: conn} do
       {:ok, _idle1} = Agents.create_agent(%{name: "Idle Agent 1", role: :engineer, status: :idle})
       {:ok, _idle2} = Agents.create_agent(%{name: "Idle Agent 2", role: :engineer, status: :idle})
-      {:ok, _running} = Agents.create_agent(%{name: "Running Agent", role: :cto, status: :running})
+
+      {:ok, _running} =
+        Agents.create_agent(%{name: "Running Agent", role: :cto, status: :running})
 
       {:ok, _view, html} = live(conn, "/agents")
       assert html =~ "Agent Status Overview"
@@ -50,7 +52,8 @@ defmodule CymphoWeb.AgentLiveTest do
 
   describe "Index - Kill Session" do
     test "shows stop button for running agents", %{conn: conn} do
-      {:ok, agent} = Agents.create_agent(%{name: "Running Agent", role: :engineer, status: :running})
+      {:ok, agent} =
+        Agents.create_agent(%{name: "Running Agent", role: :engineer, status: :running})
 
       {:ok, view, _html} = live(conn, "/agents")
 
@@ -72,7 +75,9 @@ defmodule CymphoWeb.AgentLiveTest do
 
       {:ok, view, _html} = live(conn, "/agents")
 
-      view |> element("button[phx-click='delete_agent'][phx-value-id='#{agent.id}']") |> render_click()
+      view
+      |> element("button[phx-click='delete_agent'][phx-value-id='#{agent.id}']")
+      |> render_click()
 
       # After delete, the agent should be gone
       refute has_element?(view, "#agent-#{agent.id}")
@@ -126,12 +131,13 @@ defmodule CymphoWeb.AgentLiveTest do
 
   describe "Show - Agent Details" do
     test "renders agent details page", %{conn: conn} do
-      {:ok, agent} = Agents.create_agent(%{
-        name: "Test Agent",
-        role: :engineer,
-        status: :idle,
-        instructions: "Do good work"
-      })
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer,
+          status: :idle,
+          instructions: "Do good work"
+        })
 
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
       assert html =~ "Test Agent"
@@ -139,12 +145,13 @@ defmodule CymphoWeb.AgentLiveTest do
     end
 
     test "shows instructions path when set", %{conn: conn} do
-      {:ok, agent} = Agents.create_agent(%{
-        name: "Agent with Path",
-        role: :engineer,
-        status: :idle,
-        instructions_path: "agents/engineer/AGENTS.md"
-      })
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Agent with Path",
+          role: :engineer,
+          status: :idle,
+          instructions_path: "agents/engineer/AGENTS.md"
+        })
 
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
       assert html =~ "Instructions File"
@@ -152,34 +159,37 @@ defmodule CymphoWeb.AgentLiveTest do
     end
 
     test "hides instructions path section when not set", %{conn: conn} do
-      {:ok, agent} = Agents.create_agent(%{
-        name: "Agent No Path",
-        role: :engineer,
-        status: :idle
-      })
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Agent No Path",
+          role: :engineer,
+          status: :idle
+        })
 
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
       refute html =~ "Instructions File"
     end
 
     test "shows wake history section", %{conn: conn} do
-      {:ok, agent} = Agents.create_agent(%{
-        name: "Agent with History",
-        role: :engineer,
-        status: :idle
-      })
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Agent with History",
+          role: :engineer,
+          status: :idle
+        })
 
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
       assert html =~ "Wake History"
     end
 
     test "shows max concurrent jobs in configuration", %{conn: conn} do
-      {:ok, agent} = Agents.create_agent(%{
-        name: "Agent",
-        role: :engineer,
-        status: :idle,
-        max_concurrent_jobs: 5
-      })
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Agent",
+          role: :engineer,
+          status: :idle,
+          max_concurrent_jobs: 5
+        })
 
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
       assert html =~ "Max concurrent jobs"
@@ -189,12 +199,13 @@ defmodule CymphoWeb.AgentLiveTest do
 
   describe "Edit - Agent Configuration" do
     test "renders edit page with max concurrent jobs slider", %{conn: conn} do
-      {:ok, agent} = Agents.create_agent(%{
-        name: "Editable Agent",
-        role: :engineer,
-        status: :idle,
-        max_concurrent_jobs: 3
-      })
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Editable Agent",
+          role: :engineer,
+          status: :idle,
+          max_concurrent_jobs: 3
+        })
 
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}/edit")
       assert html =~ "Max Concurrent Jobs"
@@ -202,11 +213,12 @@ defmodule CymphoWeb.AgentLiveTest do
     end
 
     test "renders instructions path input", %{conn: conn} do
-      {:ok, agent} = Agents.create_agent(%{
-        name: "Editable Agent",
-        role: :engineer,
-        status: :idle
-      })
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Editable Agent",
+          role: :engineer,
+          status: :idle
+        })
 
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}/edit")
       assert html =~ "Instructions File Path"

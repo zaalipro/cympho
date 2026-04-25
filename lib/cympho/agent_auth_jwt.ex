@@ -95,6 +95,7 @@ defmodule Cympho.AgentAuthJWT do
     trimmed = String.trim(token)
     if byte_size(trimmed) > 0, do: {:ok, trimmed}, else: {:error, :empty_token}
   end
+
   defp trim_token(_), do: {:error, :invalid_token_format}
 
   defp sign(claims, secret) do
@@ -131,6 +132,7 @@ defmodule Cympho.AgentAuthJWT do
     case base64_url_decode(encoded_signature) do
       {:ok, signature} ->
         expected_signature = hmac_sha256(signing_input, secret)
+
         if constant_time_compare(signature, expected_signature) do
           :ok
         else
@@ -149,6 +151,7 @@ defmodule Cympho.AgentAuthJWT do
     current_time = System.system_time(:second)
     if exp > current_time, do: :ok, else: {:error, :token_expired}
   end
+
   defp validate_expiration(_), do: {:error, :missing_expiration}
 
   defp validate_future_token(%{"iat" => iat}) when is_integer(iat) do
@@ -156,6 +159,7 @@ defmodule Cympho.AgentAuthJWT do
     # Allow for some clock skew (up to 60 seconds in the future)
     if iat <= current_time + 60, do: :ok, else: {:error, :token_from_future}
   end
+
   defp validate_future_token(_), do: {:error, :missing_issued_at}
 
   defp get_secret_key do
@@ -196,5 +200,6 @@ defmodule Cympho.AgentAuthJWT do
   defp constant_time_compare(a, b) when byte_size(a) == byte_size(b) do
     :crypto.exor(a, b) |> :binary.match(<<0>>) == :nomatch
   end
+
   defp constant_time_compare(_, _), do: false
 end

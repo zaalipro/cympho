@@ -88,7 +88,9 @@ defmodule Cympho.Orchestrator do
   @spec get_session_state(String.t()) :: map() | nil
   def get_session_state(issue_id) do
     case whereis(issue_id) do
-      nil -> nil
+      nil ->
+        nil
+
       pid ->
         try do
           GenServer.call(pid, :get_session_state, 5000)
@@ -191,18 +193,20 @@ defmodule Cympho.Orchestrator do
 
   @impl true
   def handle_call(:get_session_state, _from, %Session{} = session) do
-    {:reply, %{
-      issue_id: session.issue.id,
-      agent_id: session.agent_id,
-      session_id: session.session_id,
-      status: session.status,
-      turn_count: session.turn_count
-    }, session}
+    {:reply,
+     %{
+       issue_id: session.issue.id,
+       agent_id: session.agent_id,
+       session_id: session.session_id,
+       status: session.status,
+       turn_count: session.turn_count
+     }, session}
   end
 
   @impl true
   def terminate(reason, %Session{} = session) do
     send(Cympho.Orchestrator.Dispatcher, {:session_ended, session.issue.id, reason})
+
     _ =
       :logger.info(
         "[Orchestrator] terminated for issue #{session.issue.id}, agent #{session.agent_id}, reason: #{inspect(reason)}"

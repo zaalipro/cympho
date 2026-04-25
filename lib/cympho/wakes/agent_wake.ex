@@ -24,7 +24,14 @@ defmodule Cympho.Wakes.AgentWake do
 
   def changeset(agent_wake, attrs) do
     agent_wake
-    |> cast(attrs, [:agent_id, :issue_id, :reason, :triggered_by_type, :triggered_by_id, :metadata])
+    |> cast(attrs, [
+      :agent_id,
+      :issue_id,
+      :reason,
+      :triggered_by_type,
+      :triggered_by_id,
+      :metadata
+    ])
     |> validate_required([:agent_id, :reason])
     |> validate_inclusion(:reason, @reasons)
     |> validate_inclusion(:triggered_by_type, ["agent", "user", "system"])

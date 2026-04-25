@@ -102,7 +102,8 @@ defmodule CymphoWeb.Plugs.AgentAuth do
       from(ak in Cympho.Agents.AgentApiKey,
         where: ak.key_hash == ^key_hash,
         where: is_nil(ak.expires_at) or ak.expires_at > ^DateTime.utc_now(),
-        preload: [:agent])
+        preload: [:agent]
+      )
 
     case Cympho.Repo.one(query) do
       nil -> {:error, :not_found}

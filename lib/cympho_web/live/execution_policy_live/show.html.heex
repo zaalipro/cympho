@@ -1,14 +1,19 @@
 <.header>
-  Execution Policy: <%= @execution_policy.name %>
+  Execution Policy: {@execution_policy.name}
   <:actions>
-    <.link navigate={~p"/execution-policies/#{@execution_policy.id}/edit"} class="phx-btn-secondary">
+    <.link
+      navigate={~p"/execution-policies/#{@execution_policy.id}/edit"}
+      class="phx-btn-secondary"
+    >
       Edit
     </.link>
   </:actions>
 </.header>
 
 <div class="mt-4">
-  <p class="text-sm text-zinc-500">Stages: <span class="font-medium">{length(@execution_policy.stage_configs)}</span></p>
+  <p class="text-sm text-zinc-500">
+    Stages: <span class="font-medium">{length(@execution_policy.stage_configs)}</span>
+  </p>
 </div>
 
 <.header class="mt-8">Stage Configs</.header>
@@ -25,12 +30,12 @@
     <tbody>
       <%= for {stage, idx} <- Enum.with_index(@execution_policy.stage_configs) do %>
         <tr class="border-b border-zinc-100">
-          <td class="py-2"><%= idx + 1 %></td>
+          <td class="py-2">{idx + 1}</td>
           <td class="py-2">
-            <%= stage["type"] || stage[:type] %>
+            {stage["type"] || stage[:type]}
           </td>
           <td class="py-2">
-            <%= stage["participant_id"] || stage[:participant_id] || raw("&mdash;") %>
+            {stage["participant_id"] || stage[:participant_id] || raw("&mdash;")}
           </td>
         </tr>
       <% end %>

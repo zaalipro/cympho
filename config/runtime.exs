@@ -1,6 +1,7 @@
 import Config
 
-port = if config_env() == :prod, do: 443, else: String.to_integer(System.get_env("PORT") || "4000")
+port =
+  if config_env() == :prod, do: 443, else: String.to_integer(System.get_env("PORT") || "4000")
 
 config :cympho, CymphoWeb.Endpoint,
   url: [host: System.get_env("APP_HOST") || "localhost", port: port],

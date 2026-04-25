@@ -11,6 +11,7 @@ defmodule CymphoWeb.AgentLive.Show do
       {:ok, agent} ->
         wake_history = Wakes.list_agent_wakes(agent.id)
         {:ok, assign(socket, agent: agent, wake_history: wake_history)}
+
       {:error, :not_found} ->
         {:ok, push_navigate(socket, to: ~p"/agents")}
     end
@@ -27,10 +28,12 @@ defmodule CymphoWeb.AgentLive.Show do
     case Agents.get_agent(id) do
       {:ok, agent} ->
         wake_history = Wakes.list_agent_wakes(agent.id)
+
         socket
         |> assign(:page_title, agent.name)
         |> assign(:agent, agent)
         |> assign(:wake_history, wake_history)
+
       {:error, :not_found} ->
         socket
         |> put_flash(:error, "Agent not found")
@@ -75,5 +78,6 @@ defmodule CymphoWeb.AgentLive.Show do
     |> String.replace("Z", "")
     |> String.slice(0, 19)
   end
+
   def format_datetime(_), do: "N/A"
 end

@@ -39,7 +39,8 @@ defmodule Cympho.Issues do
     |> where([_, l], l.label_id == ^label_id)
   end
 
-  defp maybe_filter_by_labels(query, %{label_ids: label_ids}) when is_list(label_ids) and length(label_ids) > 0 do
+  defp maybe_filter_by_labels(query, %{label_ids: label_ids})
+       when is_list(label_ids) and length(label_ids) > 0 do
     query
     |> join(:inner, [i], l in "issue_labels", on: i.id == l.issue_id)
     |> where([_, l], l.label_id in ^label_ids)
@@ -48,7 +49,6 @@ defmodule Cympho.Issues do
   end
 
   defp maybe_filter_by_labels(query, _opts), do: query
-
 
   @default_page_size 25
 
@@ -103,6 +103,7 @@ defmodule Cympho.Issues do
 
   defp maybe_filter_by_search(query, nil), do: query
   defp maybe_filter_by_search(query, ""), do: query
+
   defp maybe_filter_by_search(query, search) do
     try do
       where(query, fragment("search_vector @@ plainto_tsquery('english', ?)", ^search))
@@ -119,10 +120,13 @@ defmodule Cympho.Issues do
 
   defp maybe_filter_by_project_id_filter(query, nil), do: query
   defp maybe_filter_by_project_id_filter(query, ""), do: query
-  defp maybe_filter_by_project_id_filter(query, project_id), do: where(query, project_id: ^project_id)
+
+  defp maybe_filter_by_project_id_filter(query, project_id),
+    do: where(query, project_id: ^project_id)
 
   defp maybe_filter_by_label_id(query, nil), do: query
   defp maybe_filter_by_label_id(query, ""), do: query
+
   defp maybe_filter_by_label_id(query, label_id) do
     query
     |> join(:inner, [i], l in "issue_labels", on: i.id == l.issue_id)
@@ -146,7 +150,8 @@ defmodule Cympho.Issues do
   end
 
   def get_issue!(id),
-    do: Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
+    do:
+      Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
 
   def get_issue(id) do
     case Repo.get(Issue, id) do
@@ -169,7 +174,14 @@ defmodule Cympho.Issues do
          |> Issue.changeset(attrs)
          |> Repo.insert() do
       {:ok, issue} ->
-        Activities.log_activity(%{issue_id: issue.id, actor_type: Map.get(attrs, :actor_type, "system"), actor_id: Map.get(attrs, :actor_id), action: "created", metadata: %{title: issue.title}})
+        Activities.log_activity(%{
+          issue_id: issue.id,
+          actor_type: Map.get(attrs, :actor_type, "system"),
+          actor_id: Map.get(attrs, :actor_id),
+          action: "created",
+          metadata: %{title: issue.title}
+        })
+
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
         {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
@@ -200,6 +212,7 @@ defmodule Cympho.Issues do
 
   def update_issue(%Issue{} = issue, attrs) do
     old_issue = issue
+
     with {:ok, updated} <- do_update_issue(issue, attrs) do
       updated = Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])
       Activities.log_issue_changes(old_issue, updated, attrs)
@@ -273,6 +286,7 @@ defmodule Cympho.Issues do
         unblock_dependents(issue.id)
         _ = Wakes.notify_children_completed(updated)
       end
+
       if new_status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
       {:ok, updated}
     end
@@ -286,6 +300,7 @@ defmodule Cympho.Issues do
         Logger.warning("cancel_pending_approvals: failed for issue #{issue_id}",
           error: inspect(e)
         )
+
         :ok
     end
   end
@@ -349,11 +364,14 @@ defmodule Cympho.Issues do
     if issue.assignee_id do
       try do
         case Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id) do
-          :ok -> :ok
+          :ok ->
+            :ok
+
           {:error, reason} ->
             Logger.warning("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
               error: inspect(reason)
             )
+
             :ok
         end
       rescue
@@ -428,6 +446,7 @@ defmodule Cympho.Issues do
 
         attrs = %{assignee_id: agent_id, status: new_status}
         attrs = if required_role, do: Map.put(attrs, :assigned_role, required_role), else: attrs
+
         update_issue(current_issue, attrs)
         |> maybe_adjust_lock_version()
     end
@@ -453,18 +472,28 @@ defmodule Cympho.Issues do
         now = DateTime.utc_now()
 
         Repo.transaction(fn ->
-          Repo.query!("""
-            INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT DO NOTHING
-          """, [dump_uuid(blocked_issue.id), dump_uuid(blocker_issue.id), now, now])
+          Repo.query!(
+            """
+              INSERT INTO issue_blockers (blocked_issue_id, blocking_issue_id, inserted_at, updated_at)
+              VALUES ($1, $2, $3, $4)
+              ON CONFLICT DO NOTHING
+            """,
+            [dump_uuid(blocked_issue.id), dump_uuid(blocker_issue.id), now, now]
+          )
 
           Repo.reload(blocked_issue)
         end)
         |> case do
           {:ok, issue} ->
             issue = Repo.preload(issue, [:comments, :blocked_by, :blocks])
-            Activities.log_activity(%{issue_id: blocked_issue.id, actor_type: "system", action: "blocker_added", metadata: %{blocker_id: blocker_issue.id}})
+
+            Activities.log_activity(%{
+              issue_id: blocked_issue.id,
+              actor_type: "system",
+              action: "blocker_added",
+              metadata: %{blocker_id: blocker_issue.id}
+            })
+
             Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
             {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
@@ -517,7 +546,14 @@ defmodule Cympho.Issues do
       {:error, :not_found}
     else
       issue = Repo.preload(Repo.reload(blocked_issue), [:comments, :blocked_by, :blocks, :labels])
-      Activities.log_activity(%{issue_id: blocked_issue.id, actor_type: "system", action: "blocker_removed", metadata: %{blocker_id: blocker_issue.id}})
+
+      Activities.log_activity(%{
+        issue_id: blocked_issue.id,
+        actor_type: "system",
+        action: "blocker_removed",
+        metadata: %{blocker_id: blocker_issue.id}
+      })
+
       Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
       {:ok, issue}
     end
@@ -542,7 +578,8 @@ defmodule Cympho.Issues do
   Sets the issue assignee to the executor_id.
   """
   @spec assign_execution_policy(Issue.t(), binary(), binary()) ::
-          {:ok, Issue.t()} | {:error, :not_found | :invalid_policy_stages | :invalid_executor | Ecto.Changeset.t()}
+          {:ok, Issue.t()}
+          | {:error, :not_found | :invalid_policy_stages | :invalid_executor | Ecto.Changeset.t()}
   def assign_execution_policy(%Issue{} = issue, policy_id, executor_id) do
     case ExecutionPolicies.get_execution_policy(policy_id) do
       {:ok, %ExecutionPolicy{stage_configs: stage_configs} = policy} ->
@@ -643,27 +680,29 @@ defmodule Cympho.Issues do
 
   defp wake_next_participant(assignee_id, issue_id) do
     if assignee_id do
-      _ = Wakes.do_wake_agent(
-        assignee_id,
-        issue_id,
-        "execution_policy_stage_transition",
-        "system",
-        nil,
-        %{stage_type: "reviewer"}
-      )
+      _ =
+        Wakes.do_wake_agent(
+          assignee_id,
+          issue_id,
+          "execution_policy_stage_transition",
+          "system",
+          nil,
+          %{stage_type: "reviewer"}
+        )
     end
   end
 
   defp wake_executor(executor_id, issue_id) do
     if executor_id do
-      _ = Wakes.do_wake_agent(
-        executor_id,
-        issue_id,
-        "execution_policy_stage_transition",
-        "system",
-        nil,
-        %{stage_type: "executor", decision: "changes_requested"}
-      )
+      _ =
+        Wakes.do_wake_agent(
+          executor_id,
+          issue_id,
+          "execution_policy_stage_transition",
+          "system",
+          nil,
+          %{stage_type: "executor", decision: "changes_requested"}
+        )
     end
   end
 

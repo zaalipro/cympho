@@ -7,7 +7,14 @@ defmodule CymphoWeb.RoutineLive.Edit do
     case Routines.get_routine(id) do
       {:ok, routine} ->
         changeset = Routines.change_routine(routine)
-        {:ok, assign(socket, routine: routine, changeset: changeset, form: to_form(changeset), page_title: "Edit Routine")}
+
+        {:ok,
+         assign(socket,
+           routine: routine,
+           changeset: changeset,
+           form: to_form(changeset),
+           page_title: "Edit Routine"
+         )}
 
       {:error, :not_found} ->
         {:ok, push_navigate(socket, to: ~p"/routines")}

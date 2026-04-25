@@ -12,7 +12,8 @@ defmodule CymphoWeb.ExecutionPolicyController do
   end
 
   def create(conn, %{"execution_policy" => policy_params}) do
-    with {:ok, %ExecutionPolicy{} = policy} <- ExecutionPolicies.create_execution_policy(policy_params) do
+    with {:ok, %ExecutionPolicy{} = policy} <-
+           ExecutionPolicies.create_execution_policy(policy_params) do
       conn
       |> put_status(:created)
       |> render(:show, execution_policy: policy)
@@ -35,7 +36,8 @@ defmodule CymphoWeb.ExecutionPolicyController do
   def update(conn, %{"id" => id, "execution_policy" => policy_params}) do
     case ExecutionPolicies.get_execution_policy(id) do
       {:ok, policy} ->
-        with {:ok, %ExecutionPolicy{} = policy} <- ExecutionPolicies.update_execution_policy(policy, policy_params) do
+        with {:ok, %ExecutionPolicy{} = policy} <-
+               ExecutionPolicies.update_execution_policy(policy, policy_params) do
           render(conn, :show, execution_policy: policy)
         end
 

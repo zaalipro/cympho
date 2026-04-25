@@ -27,7 +27,8 @@ defmodule Cympho.Wakes do
 
   Returns {:ok, agent_wake} if wake was triggered, {:error, reason} otherwise.
   """
-  @spec notify_comment(Comment.t()) :: {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  @spec notify_comment(Comment.t()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
   def notify_comment(%Comment{} = comment) do
     issue = Repo.get!(Issue, comment.issue_id) |> Repo.preload(:assignee)
 
@@ -40,6 +41,7 @@ defmodule Cympho.Wakes do
 
       true ->
         reason = determine_comment_reason(comment, issue)
+
         do_wake_agent(
           issue.assignee_id,
           issue.id,
@@ -66,7 +68,9 @@ defmodule Cympho.Wakes do
   Called after an issue transitions to :done - checks if any dependent issues
   had this issue as a blocker and all their blockers are now done.
   """
-  @spec notify_blockers_resolved(Issue.t()) :: [{:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}]
+  @spec notify_blockers_resolved(Issue.t()) :: [
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+        ]
   def notify_blockers_resolved(%Issue{} = blocker_issue) do
     dependent_ids =
       Repo.all(
@@ -84,7 +88,8 @@ defmodule Cympho.Wakes do
         dependent ->
           dependent = Repo.preload(dependent, [:assignee, :blocked_by])
 
-          if all_blockers_done?(dependent) and dependent.status == :blocked and dependent.assignee_id do
+          if all_blockers_done?(dependent) and dependent.status == :blocked and
+               dependent.assignee_id do
             do_wake_agent(
               dependent.assignee_id,
               dependent.id,
@@ -104,7 +109,8 @@ defmodule Cympho.Wakes do
   Notifies the agent assigned to a parent issue when all children are completed.
   Called after a child issue transitions to :done.
   """
-  @spec notify_children_completed(Issue.t()) :: {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  @spec notify_children_completed(Issue.t()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
   def notify_children_completed(%Issue{} = child_issue) do
     if is_nil(child_issue.parent_id) do
       {:error, :no_parent}
@@ -138,7 +144,14 @@ defmodule Cympho.Wakes do
   Low-level function to wake an agent directly.
   Logs the wake attempt and triggers an immediate heartbeat.
   """
-  @spec do_wake_agent(String.t(), String.t() | nil, String.t(), String.t() | nil, String.t() | nil, map()) ::
+  @spec do_wake_agent(
+          String.t(),
+          String.t() | nil,
+          String.t(),
+          String.t() | nil,
+          String.t() | nil,
+          map()
+        ) ::
           {:ok, AgentWake.t()} | {:error, Ecto.Changeset.t()}
   def do_wake_agent(agent_id, issue_id, reason, triggered_by_type, triggered_by_id, metadata) do
     attrs = %{

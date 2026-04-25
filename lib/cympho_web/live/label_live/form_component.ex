@@ -27,7 +27,14 @@ defmodule CymphoWeb.LabelLive.FormComponent do
   @impl true
   def update(assigns, socket) do
     changeset = Labels.change_label(assigns.label)
-    {:ok, assign(socket, label: assigns.label, action: assigns.action, changeset: changeset, form: to_form(changeset))}
+
+    {:ok,
+     assign(socket,
+       label: assigns.label,
+       action: assigns.action,
+       changeset: changeset,
+       form: to_form(changeset)
+     )}
   end
 
   @impl true

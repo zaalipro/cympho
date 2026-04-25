@@ -24,7 +24,6 @@
   class="p-4 sm:p-6 lg:p-8 h-[calc(100vh-64px)] flex flex-col"
   phx-hook="KanbanSortable"
 >
-
   <.header title={@page_title}>
     <:actions>
       <div class="flex items-center gap-3">
@@ -232,7 +231,6 @@
                   style="writing-mode: vertical-rl; transform: rotate(180deg);"
                 >
                   {status_label(status)}
-
                 </span>
                 <span class="text-xs text-text-quaternary mt-2">{count}</span>
               </div>
@@ -260,7 +258,6 @@
                           d="M15 19l-7-7 7-7"
                         />
                       </svg>
-
                     </button>
                     <h2 class="text-sm font-510 text-text-primary">{status_label(status)}</h2>
                   </div>
