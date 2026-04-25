@@ -2,7 +2,7 @@ defmodule CymphoWeb.Components.CompanyRail do
   use Phoenix.Component
   alias Cympho.Companies.Company
 
-  attr :company, Company, required: true
+  attr :company, :map, default: nil
   attr :collapsed, :boolean, default: false
   attr :rest, :global
 
