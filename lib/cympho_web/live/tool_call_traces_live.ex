@@ -61,6 +61,14 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   def handle_event("select_trace", %{"id" => id}, socket) do
     case ToolCallTraces.get_tool_call_trace(id) do
       {:ok, trace} ->
+        trace = case trace.agent_id do
+          nil -> trace
+          agent_id ->
+            case Cympho.Agents.get_agent(agent_id) do
+              {:ok, agent} -> %{trace | agent: agent}
+              {:error, _} -> trace
+            end
+        end
         {:noreply, assign(socket, :selected_trace, trace)}
 
       {:error, :not_found} ->
@@ -179,11 +187,24 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
       end
 
     traces = ToolCallTraces.list_tool_call_traces(opts)
+    |> Enum.map(fn trace ->
+      case trace.agent_id do
+        nil -> trace
+        agent_id ->
+          case Cympho.Agents.get_agent(agent_id) do
+            {:ok, agent} -> %{trace | agent: agent}
+            {:error, _} -> trace
+          end
+      end
+    end)
+
     statistics = ToolCallTraces.get_statistics(company_id)
 
     socket
     |> assign(:traces, traces)
     |> assign(:statistics, statistics)
+    |> assign(:export_data_json, nil)
+    |> assign(:export_data_csv, nil)
   end
 
   def status_color("success"), do: "text-green-400"
@@ -397,6 +418,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
                     <tr>
                       <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Seq</th>
                       <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Tool</th>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Actor</th>
                       <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Status</th>
                       <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Time</th>
                       <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Chain Hash</th>
@@ -415,6 +437,14 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
                         <td class="px-4 py-3 text-sm text-text-primary">
                           <div class="font-medium"><%= trace.tool_name %></div>
                           <div class="text-xs text-text-secondary"><%= trace.trace_type %></div>
+                        </td>
+                        <td class="px-4 py-3 text-sm text-text-secondary">
+                          <div class="flex items-center gap-1">
+                            <span class="text-xs capitalize"><%= trace.actor_type %></span>
+                            <%= if trace.actor_type == "agent" && trace.agent do %>
+                              <span class="text-xs text-text-tertiary">(<%= trace.agent.name %>)</span>
+                            <% end %>
+                          </div>
                         </td>
                         <td class={"px-4 py-3 whitespace-nowrap text-sm " <> status_color(trace.status)}>
                           <span class="inline-flex items-center">
@@ -501,9 +531,26 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
                   <div class="text-xs font-mono text-text-secondary break-all"><%= @selected_trace.chain_hash %></div>
                 </div>
 
+                <div>
+                  <div class="text-xs text-text-secondary mb-1">Actor Type</div>
+                  <div class="text-sm text-text-primary capitalize"><%= @selected_trace.actor_type %></div>
+                </div>
+
+                <div>
+                  <div class="text-xs text-text-secondary mb-1">Actor ID</div>
+                  <div class="text-sm font-mono text-text-primary"><%= @selected_trace.actor_id %></div>
+                </div>
+
+                <%= if @selected_trace.actor_type == "agent" && @selected_trace.agent do %>
+                  <div>
+                    <div class="text-xs text-text-secondary mb-1">Agent Name</div>
+                    <div class="text-sm text-text-primary"><%= @selected_trace.agent.name %></div>
+                  </div>
+                <% end %>
+
                 <%= if @selected_trace.agent_id do %>
                   <div>
-                    <div class="text-xs text-text-secondary mb-1">Agent ID</div>
+                    <div class="text-xs text-text-secondary mb-1">Original Agent ID</div>
                     <div class="text-sm font-mono text-text-primary"><%= @selected_trace.agent_id %></div>
                   </div>
                 <% end %>
