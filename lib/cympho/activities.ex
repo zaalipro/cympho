@@ -7,6 +7,54 @@ defmodule Cympho.Activities do
     Activity |> where(issue_id: ^issue_id) |> order_by(asc: :inserted_at) |> Repo.all()
   end
 
+  def list_company_activities(company_id, opts \\ []) do
+    action = Keyword.get(opts, :action)
+    actor_type = Keyword.get(opts, :actor_type)
+    limit = Keyword.get(opts, :limit, 50)
+    offset = Keyword.get(opts, :offset, 0)
+
+    # Build base query joining with issues to filter by company
+    query =
+      from(a in Activity,
+        join: i in "issues",
+        on: a.issue_id == i.id,
+        where: i.company_id == ^company_id,
+        order_by: [desc: a.inserted_at]
+      )
+
+    # Apply action filter
+    query =
+      if action && action != "" do
+        where(query, action: ^action)
+      else
+        query
+      end
+
+    # Apply actor_type filter
+    query =
+      if actor_type && actor_type != "" do
+        where(query, actor_type: ^actor_type)
+      else
+        query
+      end
+
+    # Get total count before pagination
+    total =
+      query
+      |> select([a], count(a.id))
+      |> Repo.one()
+
+    # Apply pagination and fetch results
+    activities =
+      query
+      |> limit(^limit)
+      |> offset(^offset)
+      |> preload([:issue])
+      |> Repo.all()
+
+    {activities, total || 0}
+  end
+
   def subscribe do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "activities")
   end

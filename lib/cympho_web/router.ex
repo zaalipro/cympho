@@ -29,6 +29,7 @@ defmodule CymphoWeb.Router do
       live "/issues/:id", IssueLive.Show
       live "/my-issues", IssueLive.MyIssues
       live "/inbox", InboxLive.Index
+      live "/activity", ActivityLive.Index
       live "/projects", ProjectLive.Index
       live "/projects/new", ProjectLive.New
       live "/projects/:id", ProjectLive.Show
@@ -57,6 +58,7 @@ defmodule CymphoWeb.Router do
       live "/companies", CompanyLive.Index
       live "/companies/new", CompanyLive.Index, :new
       live "/companies/:id", CompanyLive.Show
+      live "/companies/:id/secrets", SecretsLive.Index
       live "/skills", SkillLive.Index
       live "/skills/new", SkillLive.New
       live "/skills/:id", SkillLive.Show
