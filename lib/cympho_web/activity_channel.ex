@@ -1,11 +1,20 @@
 defmodule CymphoWeb.ActivityChannel do
   use CymphoWeb, :channel
-  alias Cympho.Activities
 
   @impl true
-  def join("activities:" <> _company_id, _payload, socket) do
-    send(self(), :after_join)
-    {:ok, socket}
+  def join("company:" <> rest, _payload, socket) do
+    case String.split(rest, ":", parts: 2) do
+      [company_id, "activities"] ->
+        if socket.assigns.company_id == company_id do
+          send(self(), :after_join)
+          {:ok, socket}
+        else
+          {:error, %{reason: "unauthorized"}}
+        end
+
+      _ ->
+        {:error, %{reason: "invalid_topic"}}
+    end
   end
 
   @impl true
