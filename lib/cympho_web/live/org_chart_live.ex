@@ -144,5 +144,4 @@ defmodule CymphoWeb.OrgChartLive do
   def status_color(:error), do: "#EF4444"
   def status_color(:sleeping), do: "#F59E0B"
   def status_color(:offline), do: "#374151"
->>>>>>> LLM-144/guard-database-url-test-env
 end
