@@ -38,6 +38,7 @@ defmodule CymphoWeb.Router do
     live "/agents/new", AgentLive.New
     live "/agents/:id", AgentLive.Show
     live "/agents/:id/edit", AgentLive.Edit
+    live "/org-chart", OrgChartLive
     live "/routines", RoutineLive.Index
     live "/routines/new", RoutineLive.New
     live "/routines/:id", RoutineLive.Show
@@ -56,6 +57,18 @@ defmodule CymphoWeb.Router do
     live "/budgets/new", BudgetLive.Index, :new
     live "/budgets/:id", BudgetLive.Show
     live "/budgets/:id/edit", BudgetLive.Show, :edit
+    live "/skills", SkillLive.Index
+    live "/skills/new", SkillLive.New
+    live "/skills/:id", SkillLive.Show
+    live "/skills/:id/edit", SkillLive.Edit
+    live "/plugins", PluginLive.Index
+    live "/plugins/new", PluginLive.New
+    live "/plugins/:id", PluginLive.Show
+    live "/plugins/:id/edit", PluginLive.Edit
+    live "/plugins/:id/settings", PluginLive.Show, :settings
+    live "/workspace/:issue_id", WorkspaceLive.Show
+    live "/profile/:id", ProfileLive.Show
+    live "/profile/:id/edit", ProfileLive.Edit
   end
 
   scope "/api", CymphoWeb do

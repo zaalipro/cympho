@@ -1,0 +1,47 @@
+<div>
+  <.header
+    title={@title}
+    class="mb-4"
+  >
+    <:actions>
+      <.link
+        patch={@patch || ~p"/companies"}
+        class="text-text-secondary hover:text-text-primary text-sm"
+      >
+        Cancel
+      </.link>
+    </:actions>
+  </.header>
+
+  <.simple_form
+    for={@changeset}
+    id="company-form"
+    phx-target={@myself}
+    phx-change="validate"
+    phx-submit="save"
+  >
+    <.input
+      field={@changeset[:name]}
+      type="text"
+      label="Company Name"
+      placeholder="Acme Corp"
+      required
+    />
+
+    <.input
+      field={@changeset[:slug]}
+      type="text"
+      label="Slug"
+      placeholder="acme-corp"
+      required
+    />
+
+    <div class="text-xs text-text-tertiary mt-2">
+      Slug must contain only lowercase letters, numbers, and hyphens.
+    </div>
+
+    <:actions>
+      <.button>Save Company</.button>
+    </:actions>
+  </.simple_form>
+</div>

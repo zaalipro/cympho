@@ -1,6 +1,20 @@
 <div class="p-6 lg:p-8 max-w-6xl mx-auto">
   <.header title={@page_title}>
     <:actions>
+      <.app_link
+        navigate={~p"/org-chart"}
+        class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2 mr-2"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+          />
+        </svg>
+        Org Chart
+      </.app_link>
       <%= if show_spawn_button?(@current_agent) do %>
         <.live_component
           module={CymphoWeb.SpawnAgentComponent}
@@ -147,6 +161,35 @@
               Stop
             </button>
           <% end %>
+          <%= if agent.status == :idle do %>
+            <button
+              type="button"
+              class="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+              phx-click="pause_agent"
+              phx-value-id={agent.id}
+            >
+              Pause
+            </button>
+          <% end %>
+          <%= if agent.status == :sleeping do %>
+            <button
+              type="button"
+              class="bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+              phx-click="resume_agent"
+              phx-value-id={agent.id}
+            >
+              Resume
+            </button>
+          <% end %>
+          <button
+            type="button"
+            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+            phx-click="terminate_agent"
+            phx-value-id={agent.id}
+            data-confirm="Terminate this agent? This will stop any running sessions and mark the agent as offline."
+          >
+            Terminate
+          </button>
           <button
             type="button"
             class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"

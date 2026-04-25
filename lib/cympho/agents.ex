@@ -6,6 +6,7 @@ defmodule Cympho.Agents do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Agents.Agent
+  alias Cympho.Agents.AgentConfigRevision
   alias Cympho.Issues.Issue
 
   @doc """
@@ -445,4 +446,262 @@ defmodule Cympho.Agents do
         {:error, reason}
     end
   end
+
+  @doc """
+  Returns all agents with their parent and children preloaded.
+  """
+  def list_agents_with_hierarchy do
+    Agent
+    |> preload([:parent, :children])
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns the org chart as a tree structure starting from root agents (no parent).
+  """
+  def get_org_chart do
+    roots =
+      Agent
+      |> where([a], is_nil(a.parent_id))
+      |> preload([:children])
+      |> Repo.all()
+
+    build_org_tree(roots)
+  end
+
+  defp build_org_tree(agents) when is_list(agents) do
+    Enum.map(agents, &build_org_tree/1)
+  end
+
+  defp build_org_tree(%Agent{} = agent) do
+    agent_with_children =
+      Agent
+      |> where([a], a.id == ^agent.id)
+      |> preload([:children, children: [:children]])
+      |> Repo.one()
+
+    %{
+      id: agent_with_children.id,
+      name: agent_with_children.name,
+      title: agent_with_children.title,
+      role: agent_with_children.role,
+      status: agent_with_children.status,
+      adapter: agent_with_children.adapter,
+      children: build_org_tree(agent_with_children.children)
+    }
+  end
+
+  @doc """
+  Returns all children of an agent (direct reports).
+  """
+  def list_children(agent_id) when is_binary(agent_id) do
+    Agent
+    |> where([a], a.parent_id == ^agent_id)
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns the parent of an agent.
+  """
+  def get_parent(agent_id) when is_binary(agent_id) do
+    case Repo.get(Agent, agent_id) do
+      nil -> {:error, :not_found}
+      %{parent: nil} -> {:ok, nil}
+      %{parent: parent} -> {:ok, parent}
+    end
+  end
+
+  @doc """
+  Returns all ancestors of an agent (parent chain to root).
+  """
+  def get_ancestors(agent_id) when is_binary(agent_id) do
+    case get_agent(agent_id) do
+      {:error, _} -> []
+      {:ok, agent} -> build_ancestors(agent)
+    end
+  end
+
+  defp build_ancestors(nil), do: []
+
+  defp build_ancestors(%Agent{parent: nil}), do: []
+
+  defp build_ancestors(%Agent{parent: parent} = agent) do
+    [parent | build_ancestors(parent)]
+  end
+
+  @doc """
+  Returns all descendants of an agent (all children, grandchildren, etc.).
+  """
+  def get_descendants(agent_id) when is_binary(agent_id) do
+    case get_agent(agent_id) do
+      {:error, _} -> []
+      {:ok, agent} -> build_descendants(agent)
+    end
+  end
+
+  defp build_descendants(%Agent{} = agent) do
+    children =
+      Agent
+      |> where([a], a.parent_id == ^agent.id)
+      |> Repo.all()
+
+    children ++ Enum.flat_map(children, &build_descendants/1)
+  end
+
+  @doc """
+  Pauses an agent by setting status to :sleeping.
+  """
+  def pause_agent(%Agent{} = agent) do
+    update_agent(agent, %{status: :sleeping})
+  end
+
+  def pause_agent(agent_id) when is_binary(agent_id) do
+    case get_agent(agent_id) do
+      {:ok, agent} -> pause_agent(agent)
+      error -> error
+    end
+  end
+
+  @doc """
+  Resumes a sleeping agent by setting status to :idle.
+  """
+  def resume_agent(%Agent{} = agent) do
+    update_agent(agent, %{status: :idle})
+  end
+
+  def resume_agent(agent_id) when is_binary(agent_id) do
+    case get_agent(agent_id) do
+      {:ok, agent} -> resume_agent(agent)
+      error -> error
+    end
+  end
+
+  @doc """
+  Terminates an agent by setting status to :offline.
+  """
+  def terminate_agent(%Agent{} = agent) do
+    case agent.status do
+      :running ->
+        case kill_session(agent.id) do
+          :ok -> update_agent(agent, %{status: :offline})
+          error -> error
+        end
+
+      _ ->
+        update_agent(agent, %{status: :offline})
+    end
+  end
+
+  def terminate_agent(agent_id) when is_binary(agent_id) do
+    case get_agent(agent_id) do
+      {:ok, agent} -> terminate_agent(agent)
+      error -> error
+    end
+  end
+
+  @doc """
+  Returns all config revisions for an agent, ordered by version (newest first).
+  """
+  def list_config_revisions(agent_id) when is_binary(agent_id) do
+    AgentConfigRevision
+    |> where(agent_id: ^agent_id)
+    |> order_by(desc: :version)
+    |> Repo.all()
+  end
+
+  @doc """
+  Gets the latest config revision for an agent.
+  """
+  def get_latest_config_revision(agent_id) when is_binary(agent_id) do
+    AgentConfigRevision
+    |> where(agent_id: ^agent_id)
+    |> order_by(desc: :version)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  @doc """
+  Creates a new config revision for an agent.
+  Automatically increments the version number.
+  """
+  def create_config_revision(agent_id, attrs \\ %{}) do
+    latest_version =
+      get_latest_version_number(agent_id)
+
+    new_attrs =
+      attrs
+      |> Map.put(:agent_id, agent_id)
+      |> Map.put(:version, latest_version + 1)
+
+    %AgentConfigRevision{}
+    |> AgentConfigRevision.changeset(new_attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Gets the current version number for an agent's config revisions.
+  Returns 0 if no revisions exist.
+  """
+  def get_latest_version_number(agent_id) when is_binary(agent_id) do
+    case get_latest_config_revision(agent_id) do
+      nil -> 0
+      revision -> revision.version
+    end
+  end
+
+  @doc """
+  Restores an agent to a specific config revision.
+  Creates a new revision with the restored content.
+  """
+  def restore_config_revision(agent_id, revision_id) do
+    case Repo.get(AgentConfigRevision, revision_id) do
+      nil ->
+        {:error, :not_found}
+
+      revision ->
+        case get_agent(agent_id) do
+          {:ok, agent} ->
+            attrs = %{
+              instructions: revision.instructions,
+              config: revision.config
+            }
+
+            with {:ok, _new_revision} <- create_config_revision(agent_id, attrs),
+                 {:ok, _updated_agent} <- update_agent(agent, attrs) do
+              {:ok, agent}
+            end
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  @doc """
+  Compares two config revisions and returns the differences.
+  """
+  def compare_config_revisions(revision1_id, revision2_id) do
+    revision1 = Repo.get(AgentConfigRevision, revision1_id)
+    revision2 = Repo.get(AgentConfigRevision, revision2_id)
+
+    cond do
+      is_nil(revision1) or is_nil(revision2) ->
+        {:error, :not_found}
+
+      true ->
+        %{
+          instructions_diff: compare_text(revision1.instructions, revision2.instructions),
+          config_diff: compare_maps(revision1.config, revision2.config)
+        }
+    end
+  end
+
+  defp compare_text(nil, nil), do: :unchanged
+  defp compare_text(text1, text2) when text1 == text2, do: :unchanged
+  defp compare_text(nil, _text2), do: :added
+  defp compare_text(_text1, nil), do: :removed
+  defp compare_text(_text1, _text2), do: :changed
+
+  defp compare_maps(map1, map2) when map1 == map2, do: :unchanged
+  defp compare_maps(_map1, _map2), do: :changed
 end

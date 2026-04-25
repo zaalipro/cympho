@@ -1,0 +1,138 @@
+<div class="p-6 lg:p-8 max-w-6xl mx-auto">
+  <.header title={@company.name}>
+    <:actions>
+      <.app_link
+        navigate={~p"/companies/#{@company}/edit"}
+        class="bg-surface hover:bg-white/[0.05] border border-border text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+          />
+        </svg>
+        Edit Company
+      </.app_link>
+
+      <.app_link
+        navigate={~p"/companies"}
+        class="text-text-secondary hover:text-text-primary text-sm"
+      >
+        Back to Companies
+      </.app_link>
+    </:actions>
+  </.header>
+
+  <div
+    :if={@flash && @flash[:info]}
+    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-md"
+  >
+    {@flash[:info]}
+  </div>
+
+  <div
+    :if={@flash && @flash[:error]}
+    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-md"
+  >
+    {@flash[:error]}
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+    <div class="bg-surface border border-border rounded-card p-6">
+      <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+        Company Slug
+      </div>
+      <div class="text-2xl font-510 text-text-primary">
+        <code class="bg-black/20 px-2 py-1 rounded">{@company.slug}</code>
+      </div>
+    </div>
+
+    <div class="bg-surface border border-border rounded-card p-6">
+      <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+        Members
+      </div>
+      <div class="text-2xl font-510 text-text-primary">
+        {Enum.count(@memberships)}
+      </div>
+    </div>
+
+    <div class="bg-surface border border-border rounded-card p-6">
+      <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+        Created
+      </div>
+      <div class="text-2xl font-510 text-text-primary">
+        {format_inserted_at(@company)}
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-surface border border-border rounded-card overflow-hidden">
+    <div class="px-6 py-4 border-b border-border">
+      <h2 class="text-lg font-510 text-text-primary">Company Members</h2>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-white/[0.02] border-b border-border">
+          <tr>
+            <th class="text-left text-xs font-510 text-text-secondary uppercase tracking-wider px-6 py-3">
+              User
+            </th>
+            <th class="text-left text-xs font-510 text-text-secondary uppercase tracking-wider px-6 py-3">
+              Email
+            </th>
+            <th class="text-left text-xs font-510 text-text-secondary uppercase tracking-wider px-6 py-3">
+              Role
+            </th>
+            <th class="text-right text-xs font-510 text-text-secondary uppercase tracking-wider px-6 py-3">
+              Actions
+            </th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-border">
+          <%= for membership <- @memberships do %>
+            <tr class="hover:bg-white/[0.02] transition-colors">
+              <td class="px-6 py-4 text-text-primary">
+                {membership.user.name}
+              </td>
+              <td class="px-6 py-4 text-text-secondary text-sm">
+                {membership.user.email}
+              </td>
+              <td class="px-6 py-4">
+                <span class="inline-flex items-center px-2 py-1 rounded text-xs font-510 bg-brand/10 text-brand">
+                  {role_label(membership.role)}
+                </span>
+              </td>
+              <td class="px-6 py-4 text-right">
+                <button
+                  phx-click="delete_membership"
+                  phx-value-id={membership.id}
+                  class="text-red-400 hover:text-red-300 text-sm"
+                  data-confirm="Are you sure you want to remove this member?"
+                >
+                  Remove
+                </button>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+
+    <div :if={Enum.empty?(@memberships)} class="text-center py-12">
+      <div class="text-text-tertiary text-sm">No members yet. Add users to this company!</div>
+    </div>
+  </div>
+
+  <.live_component
+    :if={@live_action in [:edit]}
+    module={CymphoWeb.CompanyLive.FormComponent}
+    id={@company.id}
+    title={@page_title}
+    action={@live_action}
+    company={@company}
+    patch={true}
+  />
+</div>

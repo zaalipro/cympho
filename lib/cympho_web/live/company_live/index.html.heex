@@ -1,0 +1,109 @@
+<div class="p-6 lg:p-8 max-w-6xl mx-auto">
+  <.header title={@page_title}>
+    <:actions>
+      <.app_link
+        navigate={~p"/companies/new"}
+        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M12 4v16m8-8H4"
+          />
+        </svg>
+        New Company
+      </.app_link>
+    </:actions>
+  </.header>
+
+  <div
+    :if={@flash && @flash[:info]}
+    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-md"
+  >
+    {@flash[:info]}
+  </div>
+
+  <div
+    :if={@flash && @flash[:error]}
+    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-md"
+  >
+    {@flash[:error]}
+  </div>
+
+  <div class="bg-surface border border-border rounded-card overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-white/[0.02] border-b border-border">
+          <tr>
+            <th class="text-left text-xs font-510 text-text-secondary uppercase tracking-wider px-6 py-3">
+              Name
+            </th>
+            <th class="text-left text-xs font-510 text-text-secondary uppercase tracking-wider px-6 py-3">
+              Slug
+            </th>
+            <th class="text-left text-xs font-510 text-text-secondary uppercase tracking-wider px-6 py-3">
+              Created
+            </th>
+            <th class="text-right text-xs font-510 text-text-secondary uppercase tracking-wider px-6 py-3">
+              Actions
+            </th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-border">
+          <%= for company <- @companies do %>
+            <tr class="hover:bg-white/[0.02] transition-colors">
+              <td class="px-6 py-4">
+                <.app_link
+                  navigate={~p"/companies/#{company}"}
+                  class="text-brand hover:text-accent font-510"
+                >
+                  {company.name}
+                </.app_link>
+              </td>
+              <td class="px-6 py-4 text-text-secondary text-sm">
+                <code class="bg-black/20 px-2 py-1 rounded text-xs">{company.slug}</code>
+              </td>
+              <td class="px-6 py-4 text-text-tertiary text-sm">
+                {format_inserted_at(company)}
+              </td>
+              <td class="px-6 py-4 text-right">
+                <div class="flex items-center justify-end gap-2">
+                  <.app_link
+                    navigate={~p"/companies/#{company}/edit"}
+                    class="text-text-secondary hover:text-text-primary text-sm"
+                  >
+                    Edit
+                  </.app_link>
+                  <button
+                    phx-click="delete_company"
+                    phx-value-id={company.id}
+                    class="text-red-400 hover:text-red-300 text-sm"
+                    data-confirm="Are you sure?"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+
+    <div :if={Enum.empty?(@companies)} class="text-center py-12">
+      <div class="text-text-tertiary text-sm">No companies yet. Create your first one!</div>
+    </div>
+  </div>
+
+  <.live_component
+    :if={@live_action in [:new, :edit]}
+    module={CymphoWeb.CompanyLive.FormComponent}
+    id={@company.id || :new}
+    title={@page_title}
+    action={@live_action}
+    company={@company}
+    patch={@live_action == :edit}
+  />
+</div>

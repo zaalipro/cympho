@@ -13,16 +13,19 @@ defmodule Cympho.Projects.Project do
     field :github_webhook_secret, :string
     field :settings, :map, default: %{}
 
+    belongs_to :company, Cympho.Companies.Company
+
     timestamps(type: :utc_datetime)
   end
 
   def changeset(project, attrs) do
     project
-    |> cast(attrs, [:name, :description, :status, :prefix, :github_webhook_secret, :settings])
+    |> cast(attrs, [:name, :description, :status, :prefix, :github_webhook_secret, :settings, :company_id])
     |> validate_required([:name, :prefix])
     |> validate_length(:name, min: 1, max: 255)
     |> validate_length(:prefix, min: 2, max: 10)
     |> validate_format(:prefix, ~r/^[A-Z]+$/, message: "must be uppercase, 2-10 characters")
     |> unique_constraint(:prefix)
+    |> assoc_constraint(:company)
   end
 end

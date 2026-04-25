@@ -9,12 +9,14 @@ defmodule Cympho.Labels.Label do
     field :color, :string, default: "#6B7280"
     field :description, :string
 
+    belongs_to :company, Cympho.Companies.Company
+
     timestamps(type: :utc_datetime)
   end
 
   def changeset(label, attrs) do
     label
-    |> cast(attrs, [:name, :color, :description])
+    |> cast(attrs, [:name, :color, :description, :company_id])
     |> validate_required([:name])
     |> validate_length(:name, min: 1, max: 50)
     |> validate_format(:color, ~r/^#[0-9A-Fa-f]{6}$/,

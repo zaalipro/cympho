@@ -19,17 +19,46 @@
   </head>
   <body class="bg-canvas text-text-primary font-inter antialiased min-h-screen">
     <div class="flex min-h-screen">
+      <!-- Sidebar overlay for mobile -->
+      <div
+        id="sidebar-overlay"
+        class="fixed inset-0 bg-black/50 z-40 lg:hidden hidden"
+        onclick="document.getElementById('sidebar').classList.add('-translate-x-full');document.getElementById('sidebar-overlay').classList.add('hidden')"
+      >
+      </div>
+
+      <!-- Desktop sidebar / Mobile drawer -->
       <aside
         class="w-60 bg-panel border-r border-border-subtle flex flex-col fixed inset-y-0 left-0 z-50 lg:translate-x-0 -translate-x-full transition-transform duration-200"
         id="sidebar"
       >
-        <div class="h-14 flex items-center px-4 border-b border-border-subtle">
+        <div class="h-14 flex items-center justify-between px-4 border-b border-border-subtle">
           <a href="/" class="text-lg font-590 tracking-tight text-text-primary">Cympho</a>
+          <button
+            type="button"
+            class="lg:hidden p-1.5 rounded-md text-text-quaternary hover:text-text-primary hover:bg-white/[0.04] transition-colors"
+            onclick="document.getElementById('sidebar').classList.add('-translate-x-full');document.getElementById('sidebar-overlay').classList.add('hidden')"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
         </div>
         <nav class="flex-1 py-4 px-3 space-y-1">
           <a
+            href="/dashboard"
+            class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-510 text-text-secondary hover:text-text-primary hover:bg-white/[0.04] active:bg-white/[0.08] transition-colors"
+            data-nav-path="/dashboard"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+            </svg>
+            Dashboard
+          </a>
+          <a
             href="/issues"
-            class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-510 text-text-secondary hover:text-text-primary hover:bg-white/[0.04] transition-colors"
+            class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-510 text-text-secondary hover:text-text-primary hover:bg-white/[0.04] active:bg-white/[0.08] transition-colors"
+            data-nav-path="/issues"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -43,7 +72,8 @@
           </a>
           <a
             href="/projects"
-            class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-510 text-text-secondary hover:text-text-primary hover:bg-white/[0.04] transition-colors"
+            class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-510 text-text-secondary hover:text-text-primary hover:bg-white/[0.04] active:bg-white/[0.08] transition-colors"
+            data-nav-path="/projects"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -57,7 +87,8 @@
           </a>
           <a
             href="/kanban"
-            class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-510 text-text-secondary hover:text-text-primary hover:bg-white/[0.04] transition-colors"
+            class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-510 text-text-secondary hover:text-text-primary hover:bg-white/[0.04] active:bg-white/[0.08] transition-colors"
+            data-nav-path="/kanban"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -71,7 +102,8 @@
           </a>
           <a
             href="/agents"
-            class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-510 text-text-secondary hover:text-text-primary hover:bg-white/[0.04] transition-colors"
+            class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-510 text-text-secondary hover:text-text-primary hover:bg-white/[0.04] active:bg-white/[0.08] transition-colors"
+            data-nav-path="/agents"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -83,27 +115,280 @@
             </svg>
             Agents
           </a>
+          <a
+            href="/goals"
+            class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-510 text-text-secondary hover:text-text-primary hover:bg-white/[0.04] active:bg-white/[0.08] transition-colors"
+            data-nav-path="/goals"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+            Goals
+          </a>
+          <a
+            href="/settings"
+            class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-510 text-text-secondary hover:text-text-primary hover:bg-white/[0.04] active:bg-white/[0.08] transition-colors"
+            data-nav-path="/settings"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+            Settings
+          </a>
         </nav>
+        <!-- Keyboard shortcuts hint -->
+        <div class="px-3 pb-4">
+          <button
+            type="button"
+            onclick="document.getElementById('shortcuts-modal').classList.remove('hidden')"
+            class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-510 text-text-quaternary hover:text-text-secondary hover:bg-white/[0.04] transition-colors"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707"/>
+            </svg>
+            Shortcuts
+            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">?</kbd>
+          </button>
+        </div>
       </aside>
-      <div class="lg:hidden fixed top-3 left-3 z-50">
+
+      <!-- Mobile top bar -->
+      <header class="lg:hidden fixed top-0 left-0 right-0 z-30 h-14 bg-panel border-b border-border-subtle flex items-center justify-between px-4">
         <button
           type="button"
-          onclick="document.getElementById('sidebar').classList.toggle('-translate-x-full')"
-          class="p-2 rounded-md bg-panel border border-border text-text-secondary hover:text-text-primary"
+          onclick="document.getElementById('sidebar').classList.remove('-translate-x-full');document.getElementById('sidebar-overlay').classList.remove('hidden')"
+          class="p-2 -ml-2 rounded-md text-text-secondary hover:text-text-primary active:bg-white/[0.08] transition-colors"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M4 6h16M4 12h16M4 18h16"
-            />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
           </svg>
         </button>
-      </div>
-      <main class="flex-1 lg:ml-60 min-h-screen">
+        <span class="text-sm font-590 text-text-primary">Cympho</span>
+        <button
+          type="button"
+          onclick="document.getElementById('command-palette').classList.remove('hidden');document.getElementById('command-input').focus()"
+          class="p-2 -mr-2 rounded-md text-text-secondary hover:text-text-primary active:bg-white/[0.08] transition-colors"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+        </button>
+      </header>
+
+      <!-- Main content -->
+      <main class="flex-1 lg:ml-60 min-h-screen pt-14 lg:pt-0 pb-16 lg:pb-0">
         {@inner_content}
       </main>
+    </div>
+
+    <!-- Mobile bottom navigation -->
+    <nav
+      class="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-panel border-t border-border-subtle safe-area-bottom"
+      id="mobile-nav"
+    >
+      <div class="flex items-center justify-around h-14">
+        <a
+          href="/dashboard"
+          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-accent transition-colors min-w-[48px] min-h-[44px] justify-center"
+          data-mobile-nav-path="/dashboard"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+          </svg>
+          <span class="text-[10px] font-510">Home</span>
+        </a>
+        <a
+          href="/issues"
+          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-accent transition-colors min-w-[48px] min-h-[44px] justify-center"
+          data-mobile-nav-path="/issues"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>
+          </svg>
+          <span class="text-[10px] font-510">Issues</span>
+        </a>
+        <a
+          href="/kanban"
+          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-accent transition-colors min-w-[48px] min-h-[44px] justify-center"
+          data-mobile-nav-path="/kanban"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>
+          </svg>
+          <span class="text-[10px] font-510">Board</span>
+        </a>
+        <a
+          href="/agents"
+          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-accent transition-colors min-w-[48px] min-h-[44px] justify-center"
+          data-mobile-nav-path="/agents"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.131A8 8 0 008 3.239c-4.828 4.596-5.212 11.611-.647 16.656A21.866 21.866 0 0012 21.942a21.866 21.866 0 003.99-.385M19.337 17.81a15.79 15.79 0 01-2.326 1.575"/>
+          </svg>
+          <span class="text-[10px] font-510">Agents</span>
+        </a>
+        <a
+          href="/projects"
+          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-accent transition-colors min-w-[48px] min-h-[44px] justify-center"
+          data-mobile-nav-path="/projects"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+          </svg>
+          <span class="text-[10px] font-510">Projects</span>
+        </a>
+      </div>
+    </nav>
+
+    <!-- Command palette -->
+    <div
+      id="command-palette"
+      class="hidden fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-black/50"
+      onclick="if(event.target===this){this.classList.add('hidden')}"
+    >
+      <div class="bg-panel border border-border rounded-panel shadow-dialog w-full max-w-lg mx-4 overflow-hidden">
+        <div class="flex items-center gap-3 px-4 border-b border-border-subtle">
+          <svg class="w-4 h-4 text-text-quaternary shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+          <input
+            id="command-input"
+            type="text"
+            placeholder="Type a command or search..."
+            class="flex-1 bg-transparent text-text-primary text-sm py-3.5 placeholder:text-text-quaternary focus:outline-none"
+            autocomplete="off"
+          />
+          <kbd class="text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary shrink-0">ESC</kbd>
+        </div>
+        <div id="command-results" class="max-h-72 overflow-y-auto p-2">
+          <div class="px-2 py-1.5 text-[10px] font-510 text-text-quaternary uppercase tracking-wider">Navigation</div>
+          <a href="/issues" class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+            <span>Go to Issues</span>
+            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">G I</kbd>
+          </a>
+          <a href="/projects" class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+            <span>Go to Projects</span>
+            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">G P</kbd>
+          </a>
+          <a href="/kanban" class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/></svg>
+            <span>Go to Kanban Board</span>
+            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">G K</kbd>
+          </a>
+          <a href="/agents" class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.131A8 8 0 008 3.239c-4.828 4.596-5.212 11.611-.647 16.656A21.866 21.866 0 0012 21.942a21.866 21.866 0 003.99-.385M19.337 17.81a15.79 15.79 0 01-2.326 1.575"/></svg>
+            <span>Go to Agents</span>
+            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">G A</kbd>
+          </a>
+          <a href="/goals" class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            <span>Go to Goals</span>
+            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">G G</kbd>
+          </a>
+          <a href="/dashboard" class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+            <span>Go to Dashboard</span>
+            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">G D</kbd>
+          </a>
+          <div class="px-2 py-1.5 mt-1 text-[10px] font-510 text-text-quaternary uppercase tracking-wider">Actions</div>
+          <a href="/issues/new" class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            <span>Create New Issue</span>
+            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">C</kbd>
+          </a>
+          <a href="/settings" class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            <span>Settings</span>
+            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">G S</kbd>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Keyboard shortcuts cheatsheet -->
+    <div
+      id="shortcuts-modal"
+      class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
+      onclick="if(event.target===this){this.classList.add('hidden')}"
+    >
+      <div class="bg-panel border border-border rounded-panel shadow-dialog w-full max-w-md mx-4 overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
+          <h2 class="text-sm font-510 text-text-primary">Keyboard Shortcuts</h2>
+          <button
+            type="button"
+            onclick="document.getElementById('shortcuts-modal').classList.add('hidden')"
+            class="p-1 rounded-md text-text-quaternary hover:text-text-primary transition-colors"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div class="p-5 space-y-5 max-h-[60vh] overflow-y-auto">
+          <div>
+            <h3 class="text-[10px] font-510 text-text-quaternary uppercase tracking-wider mb-2">General</h3>
+            <div class="space-y-2">
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Open command palette</span>
+                <div class="flex gap-1"><kbd class="kbd">Cmd</kbd><kbd class="kbd">K</kbd></div>
+              </div>
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Show shortcuts</span>
+                <kbd class="kbd">?</kbd>
+              </div>
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Close modal / dialog</span>
+                <kbd class="kbd">Esc</kbd>
+              </div>
+            </div>
+          </div>
+          <div>
+            <h3 class="text-[10px] font-510 text-text-quaternary uppercase tracking-wider mb-2">Navigation</h3>
+            <div class="space-y-2">
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Go to Issues</span>
+                <div class="flex gap-1"><kbd class="kbd">G</kbd><kbd class="kbd">I</kbd></div>
+              </div>
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Go to Projects</span>
+                <div class="flex gap-1"><kbd class="kbd">G</kbd><kbd class="kbd">P</kbd></div>
+              </div>
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Go to Kanban</span>
+                <div class="flex gap-1"><kbd class="kbd">G</kbd><kbd class="kbd">K</kbd></div>
+              </div>
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Go to Agents</span>
+                <div class="flex gap-1"><kbd class="kbd">G</kbd><kbd class="kbd">A</kbd></div>
+              </div>
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Go to Goals</span>
+                <div class="flex gap-1"><kbd class="kbd">G</kbd><kbd class="kbd">G</kbd></div>
+              </div>
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Go to Dashboard</span>
+                <div class="flex gap-1"><kbd class="kbd">G</kbd><kbd class="kbd">D</kbd></div>
+              </div>
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Go to Settings</span>
+                <div class="flex gap-1"><kbd class="kbd">G</kbd><kbd class="kbd">S</kbd></div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <h3 class="text-[10px] font-510 text-text-quaternary uppercase tracking-wider mb-2">Actions</h3>
+            <div class="space-y-2">
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Create new issue</span>
+                <div class="flex gap-1"><kbd class="kbd">C</kbd></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </body>
 </html>

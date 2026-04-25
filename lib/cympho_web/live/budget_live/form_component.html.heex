@@ -1,0 +1,96 @@
+<div>
+  <.header
+    title={@title}
+    class="mb-4"
+  >
+    <:actions>
+      <.link
+        patch={@patch || ~p"/budgets"}
+        class="text-text-secondary hover:text-text-primary text-sm"
+      >
+        Cancel
+      </.link>
+    </:actions>
+  </.header>
+
+  <.simple_form
+    for={@changeset}
+    id="budget-form"
+    phx-target={@myself}
+    phx-change="validate"
+    phx-submit="save"
+  >
+    <.input
+      field={@changeset[:name]}
+      type="text"
+      label="Budget Name"
+      placeholder="Monthly Budget"
+      required
+    />
+
+    <.input
+      field={@changeset[:scope_type]}
+      type="select"
+      label="Scope Type"
+      options={[
+        {"Company", "company"},
+        {"Project", "project"},
+        {"Agent", "agent"},
+        {"Custom", "custom"}
+      ]}
+      required
+    />
+
+    <.input
+      field={@changeset[:scope_id]}
+      type="text"
+      label="Scope ID"
+      placeholder="company-123"
+    />
+
+    <.input
+      field={@changeset[:limit_amount]}
+      type="number"
+      label="Limit Amount"
+      step="0.01"
+      required
+    />
+
+    <.input
+      field={@changeset[:currency]}
+      type="select"
+      label="Currency"
+      options={[{"USD", "USD"}, {"EUR", "EUR"}, {"GBP", "GBP"}]}
+    />
+
+    <.input
+      field={@changeset[:period_start]}
+      type="datetime-local"
+      label="Period Start"
+    />
+
+    <.input
+      field={@changeset[:period_end]}
+      type="datetime-local"
+      label="Period End"
+    />
+
+    <.input
+      field={@changeset[:hard_stop]}
+      type="checkbox"
+      label="Hard Stop (enforce limit)"
+    />
+
+    <.input
+      field={@changeset[:threshold_alert_percentage]}
+      type="number"
+      label="Alert Threshold (%)"
+      min="1"
+      max="100"
+    />
+
+    <:actions>
+      <.button>Save Budget</.button>
+    </:actions>
+  </.simple_form>
+</div>

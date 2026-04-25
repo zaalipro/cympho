@@ -11,6 +11,7 @@ defmodule Cympho.Goals.Goal do
     field :status, :string, default: "active"
     field :priority, :string, default: "medium"
     belongs_to :project, Cympho.Projects.Project
+    belongs_to :company, Cympho.Companies.Company
 
     timestamps(type: :utc_datetime)
   end
@@ -20,7 +21,7 @@ defmodule Cympho.Goals.Goal do
 
   def changeset(goal, attrs) do
     goal
-    |> cast(attrs, [:title, :description, :status, :priority, :project_id])
+    |> cast(attrs, [:title, :description, :status, :priority, :project_id, :company_id])
     |> validate_required([:title])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:priority, @priorities)

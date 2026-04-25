@@ -1,0 +1,166 @@
+<div class="p-6 lg:p-8 max-w-6xl mx-auto">
+  <.header title={@budget.name}>
+    <:actions>
+      <.app_link
+        navigate={~p"/budgets/#{@budget}/edit"}
+        class="bg-surface hover:bg-white/[0.05] border border-border text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+          />
+        </svg>
+        Edit Budget
+      </.app_link>
+
+      <.app_link
+        navigate={~p"/budgets"}
+        class="text-text-secondary hover:text-text-primary text-sm"
+      >
+        Back to Budgets
+      </.app_link>
+    </:actions>
+  </.header>
+
+  <div
+    :if={@flash && @flash[:info]}
+    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-md"
+  >
+    {@flash[:info]}
+  </div>
+
+  <div
+    :if={@flash && @flash[:error]}
+    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-md"
+  >
+    {@flash[:error]}
+  </div>
+  
+<!-- Status Badge -->
+  <div class="mb-6">
+    <% {status_class, status_label} = status_badge(@budget) %>
+    <span class={"inline-flex items-center px-3 py-1 rounded-md text-sm font-510 border #{status_class}"}>
+      {status_label}
+    </span>
+  </div>
+  
+<!-- Budget Overview Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <div class="bg-surface border border-border rounded-card p-6">
+      <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+        Budget Limit
+      </div>
+      <div class="text-2xl font-510 text-text-primary">
+        {format_currency(@budget.limit_amount, @budget.currency)}
+      </div>
+    </div>
+
+    <div class="bg-surface border border-border rounded-card p-6">
+      <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+        Amount Spent
+      </div>
+      <div class="text-2xl font-510 text-amber-400">
+        {format_currency(@budget.spent_amount, @budget.currency)}
+      </div>
+    </div>
+
+    <div class="bg-surface border border-border rounded-card p-6">
+      <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+        Available
+      </div>
+      <div class="text-2xl font-510 text-green-400">
+        {format_currency(available_amount(@budget), @budget.currency)}
+      </div>
+    </div>
+
+    <div class="bg-surface border border-border rounded-card p-6">
+      <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+        Utilization
+      </div>
+      <div class="text-2xl font-510 text-brand">
+        {utilization_percentage(@budget)}
+      </div>
+    </div>
+  </div>
+  
+<!-- Progress Bar -->
+  <div class="bg-surface border border-border rounded-card p-6 mb-8">
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-510 text-text-primary">Budget Utilization</h3>
+      <span class="text-sm text-text-secondary">{utilization_percentage(@budget)}</span>
+    </div>
+    <div class="w-full bg-black/20 rounded-full h-3">
+      <div
+        class={"h-3 rounded-full #{progress_color(@budget)}"}
+        style={"width: #{min(progress_percentage(@budget), 100)}%"}
+      >
+      </div>
+    </div>
+  </div>
+  
+<!-- Budget Details -->
+  <div class="bg-surface border border-border rounded-card overflow-hidden">
+    <div class="px-6 py-4 border-b border-border">
+      <h2 class="text-lg font-510 text-text-primary">Budget Details</h2>
+    </div>
+
+    <div class="p-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+            Scope Type
+          </div>
+          <div class="text-text-primary">{scope_label(@budget)}</div>
+        </div>
+
+        <div>
+          <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+            Currency
+          </div>
+          <div class="text-text-primary">{@budget.currency}</div>
+        </div>
+
+        <div>
+          <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+            Period Start
+          </div>
+          <div class="text-text-primary">{format_datetime(@budget.period_start)}</div>
+        </div>
+
+        <div>
+          <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+            Period End
+          </div>
+          <div class="text-text-primary">{format_datetime(@budget.period_end)}</div>
+        </div>
+
+        <div>
+          <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+            Hard Stop
+          </div>
+          <div class="text-text-primary">{boolean_label(@budget.hard_stop)}</div>
+        </div>
+
+        <div>
+          <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+            Alert Threshold
+          </div>
+          <div class="text-text-primary">{@budget.threshold_alert_percentage}%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <.live_component
+    :if={@live_action in [:edit]}
+    module={CymphoWeb.BudgetLive.FormComponent}
+    id={@budget.id}
+    title={@page_title}
+    action={@live_action}
+    budget={@budget}
+    patch={true}
+  />
+</div>

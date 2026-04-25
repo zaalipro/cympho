@@ -25,6 +25,7 @@ defmodule Cympho.Issues.Issue do
     field :execution_state, :map, default: %{}
 
     belongs_to :project, Project
+    belongs_to :company, Cympho.Companies.Company
     belongs_to :assignee, Agent, foreign_key: :assignee_id
     belongs_to :parent, __MODULE__, foreign_key: :parent_id
     belongs_to :execution_policy, ExecutionPolicy
@@ -57,6 +58,7 @@ defmodule Cympho.Issues.Issue do
       :priority,
       :assignee_id,
       :project_id,
+      :company_id,
       :github_pr_url,
       :parent_id,
       :execution_policy_id,

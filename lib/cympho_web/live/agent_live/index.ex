@@ -131,6 +131,36 @@ defmodule CymphoWeb.AgentLive.Index do
     end
   end
 
+  def handle_event("pause_agent", %{"id" => id}, socket) do
+    case Agents.pause_agent(id) do
+      {:ok, _agent} ->
+        {:noreply, put_flash(socket, :info, "Agent paused successfully")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to pause agent")}
+    end
+  end
+
+  def handle_event("resume_agent", %{"id" => id}, socket) do
+    case Agents.resume_agent(id) do
+      {:ok, _agent} ->
+        {:noreply, put_flash(socket, :info, "Agent resumed successfully")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to resume agent")}
+    end
+  end
+
+  def handle_event("terminate_agent", %{"id" => id}, socket) do
+    case Agents.terminate_agent(id) do
+      {:ok, _agent} ->
+        {:noreply, put_flash(socket, :info, "Agent terminated successfully")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to terminate agent")}
+    end
+  end
+
   def status_label(:idle), do: "Idle"
   def status_label(:running), do: "Running"
   def status_label(:error), do: "Error"
