@@ -78,6 +78,7 @@ defmodule CymphoWeb.Router do
     live "/workspaces", WorkspaceLive.Index
     live "/workspaces/:id", WorkspaceLive.ShowWorkspace
     live "/workspaces/:id/exec/:exec_id", WorkspaceLive.ExecWorkspace
+    live "/tool-call-traces", ToolCallTracesLive.Index
       live "/profile/:id", ProfileLive.Show
       live "/profile/:id/edit", ProfileLive.Edit
     end
