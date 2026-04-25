@@ -144,6 +144,7 @@ defmodule Cympho.Companies do
     |> CompanyMembership.changeset(attrs)
     |> Repo.update()
   end
+
   # ── Invites ──
 
   def create_invite(attrs) do

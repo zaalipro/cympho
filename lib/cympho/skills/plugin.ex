@@ -1,4 +1,8 @@
 defmodule Cympho.Skills.Plugin do
+  @moduledoc """
+  Schema for reading plugins as skills.
+  This schema maps to the existing plugins table.
+  """
   use Ecto.Schema
   import Ecto.Changeset
 

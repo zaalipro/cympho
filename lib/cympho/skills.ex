@@ -4,7 +4,7 @@ defmodule Cympho.Skills do
   """
 
   import Ecto.Query
-  alias Cympho.{Repo, Skills.Skill}
+  alias Cympho.{Repo, Skills.Skill, Skills.Plugin, Skills.AgentSkill}
 
   def list_skills(opts \\ []) do
     company_id = Keyword.get(opts, :company_id)
@@ -71,6 +71,79 @@ defmodule Cympho.Skills do
 
   def change_skill(%Skill{} = skill, attrs \\ %{}) do
     Skill.changeset(skill, attrs)
+  end
+
+  @doc """
+  Returns all enabled skills (plugins) assigned to an agent.
+  """
+  def list_skills_for_agent(agent_id) do
+    query =
+      from p in Plugin,
+      join: as in AgentSkill,
+      on: as.plugin_id == p.id,
+      where: as.agent_id == ^agent_id and p.enabled == true,
+      order_by: [asc: p.name]
+
+    Repo.all(query)
+  end
+
+  @doc """
+  Assigns a plugin (skill) to an agent with an optional version lock.
+  """
+  def assign_skill_to_agent(agent_id, plugin_id, opts \\ []) do
+    attrs = %{
+      agent_id: agent_id,
+      plugin_id: plugin_id,
+      locked_version: Keyword.get(opts, :locked_version)
+    }
+
+    %AgentSkill{}
+    |> AgentSkill.changeset(attrs)
+    |> Repo.insert(
+      on_conflict: [set: [locked_version: attrs.locked_version]],
+      conflict_target: [:agent_id, :plugin_id]
+    )
+  end
+
+  @doc """
+  Removes a skill (plugin) assignment from an agent.
+  """
+  def remove_skill_from_agent(agent_id, plugin_id) do
+    query =
+      from as in AgentSkill,
+      where: as.agent_id == ^agent_id and as.plugin_id == ^plugin_id
+
+    case Repo.one(query) do
+      nil -> {:error, :not_found}
+      agent_skill -> Repo.delete(agent_skill)
+    end
+  end
+
+  @doc """
+  Updates the status of a plugin (skill).
+  Valid statuses: draft, installed, active, disabled, error
+  """
+  def update_skill_status(%Plugin{} = plugin, status) when is_binary(status) do
+    update_plugin(plugin, %{status: status})
+  end
+
+  @doc """
+  Gets a plugin by ID.
+  """
+  def get_plugin(id) do
+    case Repo.get(Plugin, id) do
+      nil -> {:error, :not_found}
+      plugin -> {:ok, plugin}
+    end
+  end
+
+  @doc """
+  Updates a plugin.
+  """
+  def update_plugin(%Plugin{} = plugin, attrs) do
+    plugin
+    |> Plugin.changeset(attrs)
+    |> Repo.update()
   end
 end
 
