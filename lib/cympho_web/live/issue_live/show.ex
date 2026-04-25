@@ -31,7 +31,8 @@ defmodule CymphoWeb.IssueLive.Show do
 
         comment_changeset = Comments.Comment.changeset(%Comments.Comment{}, %{})
         runs = HeartbeatEngine.list_runs_for_issue(issue.id)
-        timeline = build_timeline(issue, runs)
+        interactions = IssueThreadInteractions.list_interactions(issue.id)
+        timeline = build_timeline(issue, runs, interactions)
 
         {:ok,
          assign(socket,
@@ -44,6 +45,7 @@ defmodule CymphoWeb.IssueLive.Show do
            editing: nil,
            assignee_search: "",
            runs: runs,
+           interactions: interactions,
            timeline: timeline,
            scrolled_to_bottom: true
          )}
@@ -233,6 +235,63 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   @impl true
+  def handle_event("resolve_interaction", %{"id" => id, "status" => status}, socket) do
+    current_user = socket.assigns[:current_user]
+    user_id = if current_user, do: to_string(current_user.id), else: nil
+
+    with {:ok, interaction} <- IssueThreadInteractions.get_interaction(id),
+         {:ok, _updated} <-
+           IssueThreadInteractions.resolve_interaction(interaction, %{
+             "status" => String.to_existing_atom(status),
+             "resolved_by_user_id" => user_id
+           }) do
+      interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
+      {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
+    else
+      {:error, :invalid_transition} ->
+        {:noreply, put_flash(socket, :error, "Invalid state transition")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Interaction not found")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to resolve interaction")}
+    end
+  end
+
+  @impl true
+  def handle_event(
+        "respond_questions",
+        %{"id" => id, "response" => response},
+        socket
+      ) do
+    current_user = socket.assigns[:current_user]
+    user_id = if current_user, do: to_string(current_user.id), else: nil
+
+    with {:ok, interaction} <- IssueThreadInteractions.get_interaction(id),
+         {:ok, _updated} <-
+           IssueThreadInteractions.resolve_interaction(interaction, %{
+             "status" => :responded,
+             "resolved_by_user_id" => user_id,
+             "response" => response
+           }) do
+      interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
+      {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
+    else
+      {:error, :invalid_transition} ->
+        {:noreply, put_flash(socket, :error, "Invalid state transition")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Interaction not found")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to respond")}
+    end
+  end
+
+  @impl true
   def handle_info({:issue_updated, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
       runs = HeartbeatEngine.list_runs_for_issue(updated_issue.id)
@@ -281,6 +340,26 @@ defmodule CymphoWeb.IssueLive.Show do
         {:noreply, assign(socket, :issue, issue)}
       {:error, _} ->
         {:noreply, socket}
+    end
+  end
+
+  def handle_info({:interaction_created, interaction}, socket) do
+    if socket.assigns.issue.id == interaction.issue_id do
+      interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
+      {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:interaction_updated, interaction}, socket) do
+    if socket.assigns.issue.id == interaction.issue_id do
+      interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
+      {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
+    else
+      {:noreply, socket}
     end
   end
 
@@ -372,8 +451,8 @@ defmodule CymphoWeb.IssueLive.Show do
   defp try_string_to_priority("critical"), do: :critical
   defp try_string_to_priority(_), do: nil
 
-  # Build a unified timeline of comments, status changes, and runs
-  defp build_timeline(issue, runs) do
+  # Build a unified timeline of comments, interactions, and runs
+  defp build_timeline(issue, runs, interactions) do
     comments_timeline =
       Enum.map(issue.comments, fn comment ->
         %{
@@ -394,15 +473,26 @@ defmodule CymphoWeb.IssueLive.Show do
         }
       end)
 
+    interactions_timeline =
+      Enum.map(interactions, fn interaction ->
+        %{
+          type: :interaction,
+          id: interaction.id,
+          timestamp: interaction.inserted_at,
+          data: interaction
+        }
+      end)
+
     # Combine and sort by timestamp (newest last for chat view)
-    (comments_timeline ++ runs_timeline)
+    (comments_timeline ++ runs_timeline ++ interactions_timeline)
     |> Enum.sort_by(& &1.timestamp, DateTime)
   end
 
   # Rebuild timeline when issue updates (status changes, etc.)
   defp maybe_rebuild_timeline(socket) do
-    timeline = build_timeline(socket.assigns.issue, socket.assigns.runs)
-    assign(socket, :timeline, timeline)
+    interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
+    timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
+    assign(socket, :timeline, timeline, :interactions, interactions)
   end
 
   # Format timestamp for timeline entries
