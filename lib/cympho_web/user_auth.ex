@@ -1,0 +1,106 @@
+defmodule CymphoWeb.UserAuth do
+  @moduledoc """
+  Authentication and company context for LiveViews.
+
+  Provides an on_mount hook that:
+  - Loads the current user from session
+  - Determines the current company from session or user default
+  - Falls back to first membership company if needed
+  - Assigns :current_user, :user_companies, :current_company to socket
+  """
+
+  import Phoenix.LiveView
+  import Phoenix.Component, only: [assign: 3]
+  import Ecto.Query
+  alias Cympho.Users
+  alias Cympho.Companies
+
+  def on_mount(:default, _params, session, socket) do
+    socket =
+      socket
+      |> assign_current_user(session)
+      |> assign_user_companies()
+      |> assign_current_company(session)
+
+    {:cont, socket}
+  end
+
+  defp assign_current_user(socket, session) do
+    case session["user_id"] do
+      nil ->
+        # Guest user
+        assign(socket, :current_user, nil)
+
+      user_id ->
+        case Users.get_user(user_id) do
+          {:ok, user} ->
+            assign(socket, :current_user, user)
+
+          {:error, :not_found} ->
+            # Invalid user ID in session - treat as guest
+            assign(socket, :current_user, nil)
+        end
+    end
+  end
+
+  defp assign_user_companies(socket) do
+    user = socket.assigns[:current_user]
+
+    companies =
+      if is_nil(user) do
+        []
+      else
+        # Load all companies the user is a member of
+        query =
+          from(m in Cympho.Companies.CompanyMembership,
+            where: m.user_id == ^user.id,
+            preload: :company
+          )
+
+        Cympho.Repo.all(query)
+        |> Enum.map(& &1.company)
+      end
+
+    assign(socket, :user_companies, companies)
+  end
+
+  defp assign_current_company(socket, session) do
+    user = socket.assigns[:current_user]
+    companies = socket.assigns[:user_companies]
+
+    company =
+      cond do
+        # Guest users have no company
+        is_nil(user) ->
+          nil
+
+        # Try session company_id first
+        session["company_id"] ->
+          session_company =
+            companies
+            |> Enum.find(fn c -> c.id == session["company_id"] end)
+
+          session_company || fallback_company(user, companies)
+
+        # Try user's default company_id
+        user.company_id ->
+          user_company =
+            companies
+            |> Enum.find(fn c -> c.id == user.company_id end)
+
+          user_company || fallback_company(user, companies)
+
+        # Fallback to first membership company
+        true ->
+          List.first(companies)
+      end
+
+    assign(socket, :current_company, company)
+  end
+
+  defp fallback_company(user, companies) do
+    # If the session company or user default company is not in the user's memberships,
+    # fall back to the first company in their memberships
+    List.first(companies)
+  end
+end
