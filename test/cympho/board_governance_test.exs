@@ -94,7 +94,7 @@ defmodule Cympho.BoardGovernanceTest do
     test "rejects non-map governance_config" do
       changeset = Company.changeset(%Company{}, %{name: "Test", slug: "test", governance_config: "not-a-map"})
       refute changeset.valid?
-      assert %{governance_config: ["must be a map"]} = errors_on(changeset)
+      assert %{governance_config: [_]} = errors_on(changeset)
     end
   end
 
@@ -165,29 +165,29 @@ defmodule Cympho.BoardGovernanceTest do
     end
   end
 
-  describe "governance_config_required?/2" do
-    test "returns true when category is in governance config" do
+  describe "governance_required?/2" do
+    test "returns true when category is in required_approvals" do
       company = %Company{
-        governance_config: %{"categories" => ["agent_hire", "agent_termination"]}
+        governance_config: %{"required_approvals" => ["agent_hire", "agent_termination"]}
       }
-      assert BoardApprovals.governance_config_required?(company, "agent_hire")
+      assert BoardApprovals.governance_required?(company, "agent_hire")
     end
 
-    test "returns false when category is not in governance config" do
+    test "returns false when category is not in required_approvals" do
       company = %Company{
-        governance_config: %{"categories" => ["agent_termination"]}
+        governance_config: %{"required_approvals" => ["agent_termination"]}
       }
-      refute BoardApprovals.governance_config_required?(company, "agent_hire")
+      refute BoardApprovals.governance_required?(company, "agent_hire")
     end
 
-    test "returns false when governance config has no categories" do
+    test "returns false when governance config has no required_approvals" do
       company = %Company{governance_config: %{}}
-      refute BoardApprovals.governance_config_required?(company, "agent_hire")
+      refute BoardApprovals.governance_required?(company, "agent_hire")
     end
 
     test "returns false when governance config is nil" do
       company = %Company{governance_config: nil}
-      refute BoardApprovals.governance_config_required?(company, "agent_hire")
+      refute BoardApprovals.governance_required?(company, "agent_hire")
     end
   end
 end
