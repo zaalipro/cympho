@@ -15,7 +15,7 @@ defmodule Cympho.HeartbeatEngine do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.HeartbeatEngine.Run
-  alias Cympho.{Agents, Workspace, Wakes}
+  alias Cympho.{Agents, Workspace}
   require Logger
 
   @default_budget_allocation Decimal.new("5.00")
@@ -181,10 +181,8 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   defp get_agent_budget(agent) do
-    case Cympho.Budgets.get_budget_for_scope(:agent, agent.id) do
-      {:ok, budget} -> budget
-      {:error, _} -> nil
-    end
+    budgets = Cympho.Budgets.list_budgets(scope_type: "agent", scope_id: agent.id)
+    Enum.find(budgets, &(&1.status == "active"))
   rescue
     _ -> nil
   end

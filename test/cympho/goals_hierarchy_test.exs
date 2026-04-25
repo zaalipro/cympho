@@ -77,4 +77,39 @@ defmodule Cympho.GoalsHierarchyTest do
       assert length(roots) == 2
     end
   end
+
+  describe "get_ancestors/1" do
+    test "returns empty list for root goal", %{project: project} do
+      {:ok, root} = Goals.create_goal(%{title: "Root", project_id: project.id})
+      assert Goals.get_ancestors(root.id) == []
+    end
+
+    test "returns parent chain for nested goals", %{project: project} do
+      {:ok, grandparent} = Goals.create_goal(%{title: "GP", project_id: project.id})
+      {:ok, parent} = Goals.create_goal(%{title: "P", project_id: project.id, parent_id: grandparent.id})
+      {:ok, child} = Goals.create_goal(%{title: "C", project_id: project.id, parent_id: parent.id})
+
+      ancestors = Goals.get_ancestors(child.id)
+      assert length(ancestors) == 2
+      assert Enum.at(ancestors, 0).id == grandparent.id
+      assert Enum.at(ancestors, 1).id == parent.id
+    end
+  end
+
+  describe "get_descendants/1" do
+    test "returns empty list for leaf goal", %{project: project} do
+      {:ok, leaf} = Goals.create_goal(%{title: "Leaf", project_id: project.id})
+      assert Goals.get_descendants(leaf.id) == []
+    end
+
+    test "returns all nested children recursively", %{project: project} do
+      {:ok, root} = Goals.create_goal(%{title: "Root", project_id: project.id})
+      {:ok, child1} = Goals.create_goal(%{title: "C1", project_id: project.id, parent_id: root.id})
+      {:ok, _child2} = Goals.create_goal(%{title: "C2", project_id: project.id, parent_id: root.id})
+      {:ok, _grandchild} = Goals.create_goal(%{title: "GC1", project_id: project.id, parent_id: child1.id})
+
+      descendants = Goals.get_descendants(root.id)
+      assert length(descendants) == 3
+    end
+  end
 end

@@ -17,6 +17,10 @@ defmodule Cympho.Issues.StateMachineTest do
       assert StateMachine.valid_transition?(:backlog, :blocked) == true
     end
 
+    test "backlog to cancelled is valid" do
+      assert StateMachine.valid_transition?(:backlog, :cancelled) == true
+    end
+
     test "backlog to done is invalid" do
       assert StateMachine.valid_transition?(:backlog, :done) == false
     end
@@ -28,6 +32,10 @@ defmodule Cympho.Issues.StateMachineTest do
 
     test "todo to blocked is valid" do
       assert StateMachine.valid_transition?(:todo, :blocked) == true
+    end
+
+    test "todo to cancelled is valid" do
+      assert StateMachine.valid_transition?(:todo, :cancelled) == true
     end
 
     test "todo to done is invalid" do
@@ -43,6 +51,10 @@ defmodule Cympho.Issues.StateMachineTest do
       assert StateMachine.valid_transition?(:in_progress, :blocked) == true
     end
 
+    test "in_progress to cancelled is valid" do
+      assert StateMachine.valid_transition?(:in_progress, :cancelled) == true
+    end
+
     test "in_progress to done is invalid" do
       assert StateMachine.valid_transition?(:in_progress, :done) == false
     end
@@ -54,6 +66,10 @@ defmodule Cympho.Issues.StateMachineTest do
 
     test "in_review to in_progress is valid" do
       assert StateMachine.valid_transition?(:in_review, :in_progress) == true
+    end
+
+    test "in_review to cancelled is valid" do
+      assert StateMachine.valid_transition?(:in_review, :cancelled) == true
     end
 
     test "in_review to blocked is invalid" do
@@ -71,6 +87,23 @@ defmodule Cympho.Issues.StateMachineTest do
 
     test "done to backlog is invalid" do
       assert StateMachine.valid_transition?(:done, :backlog) == false
+    end
+
+    # cancelled transitions
+    test "cancelled to todo is valid (reopen)" do
+      assert StateMachine.valid_transition?(:cancelled, :todo) == true
+    end
+
+    test "cancelled to in_progress is valid" do
+      assert StateMachine.valid_transition?(:cancelled, :in_progress) == true
+    end
+
+    test "cancelled to done is invalid" do
+      assert StateMachine.valid_transition?(:cancelled, :done) == false
+    end
+
+    test "cancelled to backlog is invalid" do
+      assert StateMachine.valid_transition?(:cancelled, :backlog) == false
     end
 
     # blocked transitions
@@ -97,19 +130,19 @@ defmodule Cympho.Issues.StateMachineTest do
 
   describe "valid_transitions/1" do
     test "backlog transitions" do
-      assert StateMachine.valid_transitions(:backlog) == [:todo, :in_progress, :blocked]
+      assert StateMachine.valid_transitions(:backlog) == [:todo, :in_progress, :blocked, :cancelled]
     end
 
     test "todo transitions" do
-      assert StateMachine.valid_transitions(:todo) == [:in_progress, :blocked]
+      assert StateMachine.valid_transitions(:todo) == [:in_progress, :blocked, :cancelled]
     end
 
     test "in_progress transitions" do
-      assert StateMachine.valid_transitions(:in_progress) == [:in_review, :blocked]
+      assert StateMachine.valid_transitions(:in_progress) == [:in_review, :blocked, :cancelled]
     end
 
     test "in_review transitions" do
-      assert StateMachine.valid_transitions(:in_review) == [:done, :in_progress]
+      assert StateMachine.valid_transitions(:in_review) == [:done, :in_progress, :cancelled]
     end
 
     test "done transitions (reopen or block)" do
@@ -122,8 +155,13 @@ defmodule Cympho.Issues.StateMachineTest do
                :todo,
                :in_progress,
                :in_review,
-               :done
+               :done,
+               :cancelled
              ]
+    end
+
+    test "cancelled transitions" do
+      assert StateMachine.valid_transitions(:cancelled) == [:todo, :in_progress]
     end
 
     test "unknown status returns empty list" do
@@ -139,7 +177,8 @@ defmodule Cympho.Issues.StateMachineTest do
                :in_progress,
                :in_review,
                :done,
-               :blocked
+               :blocked,
+               :cancelled
              ]
     end
   end

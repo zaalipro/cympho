@@ -67,6 +67,27 @@ defmodule Cympho.Goals do
     end)
   end
 
+  def get_ancestors(goal_id) do
+    walk_ancestors(goal_id, [])
+  end
+
+  defp walk_ancestors(nil, acc), do: Enum.reverse(acc)
+  defp walk_ancestors(id, acc) do
+    case Repo.get(Goal, id) do
+      nil -> Enum.reverse(acc)
+      %{parent_id: nil} -> Enum.reverse(acc)
+      %{parent_id: pid} = parent ->
+        walk_ancestors(pid, [parent | acc])
+    end
+  end
+
+  def get_descendants(goal_id) do
+    children = from(g in Goal, where: g.parent_id == ^goal_id) |> Repo.all()
+    Enum.flat_map(children, fn child ->
+      [child | get_descendants(child.id)]
+    end)
+  end
+
   def would_create_cycle?(goal_id, parent_id) do
     if goal_id == parent_id, do: true,
     else: ancestor_reaches?(parent_id, goal_id, MapSet.new())
