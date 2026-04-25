@@ -145,16 +145,15 @@ defmodule Cympho.Budgets do
     if Keyword.get(opts, :skip_governance, false) do
       do_update_budget(budget, attrs, actor)
     else
-      if budget_increase_exceeds_threshold?(budget, attrs) do
-        company = Cympho.Repo.get(Cympho.Companies.Company, budget.company_id)
-
-        if company && BoardApprovals.governance_required?(company, "budget_increase") do
+      case check_update_approval_needed(budget, attrs) do
+        {:ok, :approval_needed, company} ->
           create_pending_budget_update_approval(company, budget, attrs, actor)
-        else
+
+        {:ok, :not_needed} ->
           do_update_budget(budget, attrs, actor)
-        end
-      else
-        do_update_budget(budget, attrs, actor)
+
+        {:error, :company_not_found} ->
+          do_update_budget(budget, attrs, actor)
       end
     end
   end
@@ -391,14 +390,36 @@ defmodule Cympho.Budgets do
   defp parse_decimal(v) when is_float(v), do: Decimal.from_float(v)
   defp parse_decimal(v) when is_binary(v), do: Decimal.new(v)
 
-  defp budget_increase_exceeds_threshold?(%Budget{} = budget, attrs) do
+  defp check_update_approval_needed(%Budget{} = budget, attrs) do
     new_limit = attrs[:limit_amount] || attrs["limit_amount"]
 
     if new_limit do
       new_dec = parse_decimal(new_limit)
-      new_dec && Decimal.gt?(new_dec, budget.limit_amount || Decimal.new(0))
+      old_dec = budget.limit_amount || Decimal.new(0)
+
+      if new_dec && Decimal.gt?(new_dec, old_dec) do
+        company = Cympho.Repo.get(Cympho.Companies.Company, budget.company_id)
+
+        if company do
+          if BoardApprovals.governance_required?(company, "budget_increase") do
+            threshold = get_budget_threshold(company)
+
+            if Decimal.gt?(new_dec, threshold) do
+              {:ok, :approval_needed, company}
+            else
+              {:ok, :not_needed}
+            end
+          else
+            {:ok, :not_needed}
+          end
+        else
+          {:error, :company_not_found}
+        end
+      else
+        {:ok, :not_needed}
+      end
     else
-      false
+      {:ok, :not_needed}
     end
   end
 

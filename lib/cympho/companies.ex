@@ -30,9 +30,36 @@ defmodule Cympho.Companies do
     if policy_change_needs_approval?(company, attrs) do
       create_pending_policy_approval(company, attrs)
     else
-      company
-      |> Company.changeset(attrs)
-      |> Repo.update()
+      do_update_company(company, attrs)
+    end
+  end
+
+  @doc """
+  Updates a company directly, bypassing governance gates.
+  Used by the approval executor to enact board-approved changes.
+  """
+  def execute_company_update(%Company{} = company, attrs) do
+    do_update_company(company, attrs)
+  end
+
+  defp do_update_company(%Company{} = company, attrs) do
+    company
+    |> Company.changeset(attrs)
+    |> Repo.update()
+    |> case do
+      {:ok, updated} ->
+        GovernanceAuditLogs.log_action(
+          "company_updated",
+          nil,
+          "Company updated: #{updated.name}",
+          resource: updated,
+          metadata: %{changes: Map.keys(attrs)}
+        )
+
+        {:ok, updated}
+
+      error ->
+        error
     end
   end
 

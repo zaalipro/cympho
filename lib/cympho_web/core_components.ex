@@ -25,4 +25,15 @@ defmodule CymphoWeb.CoreComponents do
       String.replace(acc, "%{#{key}}", fn _ -> to_string(value) end)
     end)
   end
+
+  attr :name, :string, required: true
+  attr :class, :string, default: nil
+
+  def icon(assigns) do
+    ~H"""
+    <span class={["heroicon", @class]} {@rest}>
+      <i class={@name}></i>
+    </span>
+    """
+  end
 end

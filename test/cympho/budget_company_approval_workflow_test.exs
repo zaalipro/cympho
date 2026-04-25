@@ -1,5 +1,5 @@
 defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
-  use Cympho.DataCase, async: true
+  use Cympho.DataCase, async: false
 
   alias Cympho.Budgets
   alias Cympho.Budgets.Budget
@@ -7,6 +7,18 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
   alias Cympho.Companies.Company
   alias Cympho.BoardApprovals
   alias Cympho.BoardApprovals.BoardApproval
+
+  setup do
+    case start_supervised(Cympho.BoardApprovals.BoardApprovalActionExecutor) do
+      {:ok, pid} ->
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+        :ok
+
+      {:error, {:already_started, pid}} ->
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+        :ok
+    end
+  end
 
   # ── Helpers ──
 
@@ -169,7 +181,7 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
                Budgets.update_budget(budget, %{name: "Renamed Budget"})
     end
 
-    test "returns pending_approval when limit increases and governance required" do
+    test "returns pending_approval when limit increases above threshold and governance required" do
       company = company_with_governance(["budget_increase"])
       budget = create_test_budget(company, %{limit_amount: Decimal.new("400")})
 
@@ -179,6 +191,17 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       assert approval.status == "pending"
       assert get_in(approval.proposal_data, ["action"]) == "update_budget"
       assert get_in(approval.proposal_data, ["budget_id"]) == budget.id
+    end
+
+    test "updates budget directly when limit increases but stays below threshold" do
+      company = company_with_governance(["budget_increase"])
+      budget = create_test_budget(company, %{limit_amount: Decimal.new("100")})
+
+      # Increase from 100 to 450 — still below the threshold of 500
+      assert {:ok, %Budget{limit_amount: new_limit}} =
+               Budgets.update_budget(budget, %{limit_amount: Decimal.new("450")})
+
+      assert Decimal.eq?(new_limit, Decimal.new("450"))
     end
   end
 
@@ -215,6 +238,15 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       assert get_in(approval.proposal_data, ["action"]) == "update_company"
       assert get_in(approval.proposal_data, ["company_id"]) == company.id
     end
+
+    test "logs audit event on direct company update" do
+      company = create_test_company(%{governance_config: %{"categories" => []}})
+
+      {:ok, _} = Companies.update_company(company, %{name: "Audited Company"})
+
+      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "company_updated")
+      assert length(logs) >= 1
+    end
   end
 
   # ── Action execution on approval ──
@@ -233,6 +265,7 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
         })
 
       user = create_test_user()
+
       Companies.create_membership(%{
         user_id: user.id,
         company_id: company.id,
@@ -243,11 +276,12 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       {:ok, _} =
         BoardApprovals.cast_vote(approval.id, user.id, "approve", "Looks good")
 
-      # The vote should trigger auto-approve (single vote = 100% > 60%)
+      # Wait for the executor to process the PubSub message
+      Process.sleep(50)
+
       updated_approval = BoardApprovals.get_board_approval!(approval.id)
       assert updated_approval.status == "approved"
 
-      # Budget should now exist
       budgets = Budgets.list_budgets(company_id: company.id)
       budget = Enum.find(budgets, &(&1.name == "Approved Budget"))
       assert budget != nil
@@ -262,6 +296,7 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
         Budgets.update_budget(budget, %{limit_amount: Decimal.new("5000")})
 
       user = create_test_user()
+
       Companies.create_membership(%{
         user_id: user.id,
         company_id: company.id,
@@ -272,10 +307,11 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       {:ok, _} =
         BoardApprovals.cast_vote(approval.id, user.id, "approve", "Approved increase")
 
+      Process.sleep(50)
+
       updated_approval = BoardApprovals.get_board_approval!(approval.id)
       assert updated_approval.status == "approved"
 
-      # Budget should be updated
       updated_budget = Budgets.get_budget!(budget.id)
       assert Decimal.eq?(updated_budget.limit_amount, Decimal.new("5000"))
     end
@@ -295,6 +331,7 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
         Companies.update_company(company, %{governance_config: new_config})
 
       user = create_test_user()
+
       Companies.create_membership(%{
         user_id: user.id,
         company_id: company.id,
@@ -305,10 +342,11 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       {:ok, _} =
         BoardApprovals.cast_vote(approval.id, user.id, "approve", "Config change approved")
 
+      Process.sleep(50)
+
       updated_approval = BoardApprovals.get_board_approval!(approval.id)
       assert updated_approval.status == "approved"
 
-      # Company config should be updated
       updated_company = Companies.get_company!(company.id)
       assert updated_company.governance_config["threshold_value"] == 0.8
       assert "budget_increase" in updated_company.governance_config["categories"]
