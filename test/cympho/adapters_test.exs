@@ -35,6 +35,7 @@ defmodule Cympho.AdaptersTest do
       assert :http in adapter_keys
       assert :openclaw in adapter_keys
       assert :process in adapter_keys
+      assert :openclaw in adapter_keys
     end
   end
 
@@ -124,6 +125,23 @@ defmodule Cympho.AdaptersTest do
 
     test "returns error for unknown adapter" do
       assert {:error, _} = Adapters.validate_config(:fake, %{})
+    end
+
+    test "validates openclaw adapter config with valid data" do
+      config = %{
+        endpoint: "https://openclaw.example.com",
+        api_key: "test-key-123"
+      }
+
+      assert :ok = Adapters.validate_config(:openclaw, config)
+    end
+
+    test "validates openclaw adapter config without endpoint" do
+      assert {:error, _} = Adapters.validate_config(:openclaw, %{api_key: "test-key-123"})
+    end
+
+    test "validates openclaw adapter config with invalid endpoint" do
+      assert {:error, _} = Adapters.validate_config(:openclaw, %{endpoint: "not-a-url"})
     end
   end
 
