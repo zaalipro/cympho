@@ -69,4 +69,22 @@ defmodule Cympho.Companies.Company do
         add_error(changeset, :governance_config, "must be a map")
     end
   end
+
+  defp validate_governance_config(changeset) do
+    case get_change(changeset, :governance_config) do
+      nil -> changeset
+      config when is_map(config) ->
+        valid_keys = ~w(board_members required_approval_roles voting_thresholds max_budget_approval)
+        invalid_keys = Map.keys(config) -- valid_keys
+
+        if Enum.empty?(invalid_keys) do
+          changeset
+        else
+          add_error(changeset, :governance_config, "contains invalid keys: #{inspect(invalid_keys)}")
+        end
+
+      _ ->
+        add_error(changeset, :governance_config, "must be a map")
+    end
+  end
 end
