@@ -9,7 +9,16 @@ defmodule CymphoWeb.Components.CompanyRail do
   def company_rail(assigns) do
     ~H"""
     <div class="h-14 flex items-center justify-between px-4 border-b border-border-subtle" {@rest}>
-      <.company_display company={@company} collapsed={@collapsed} />
+      <button
+        type="button"
+        class="flex items-center gap-2 hover:bg-white/[0.04] -mx-4 px-4 py-3 transition-colors rounded-lg flex-1"
+        onclick="window.openCompanySwitcher && window.openCompanySwitcher()"
+      >
+        <.company_display company={@company} collapsed={@collapsed} />
+        <svg class="w-4 h-4 text-text-quaternary ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
     </div>
     """
   end

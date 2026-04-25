@@ -61,16 +61,28 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
           </svg>
         </button>
-        <span class="text-sm font-590 text-text-primary">Cympho</span>
         <button
           type="button"
-          onclick="document.getElementById('command-palette').classList.remove('hidden');document.getElementById('command-input').focus()"
-          class="p-2 -mr-2 rounded-md text-text-secondary hover:text-text-primary active:bg-white/[0.08] transition-colors"
+          onclick="window.openCompanySwitcher && window.openCompanySwitcher()"
+          class="flex items-center gap-2 px-2 -mx-2 rounded-md text-text-secondary hover:text-text-primary active:bg-white/[0.08] transition-colors"
         >
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          <%= if @current_company do %>
+            <%= if @current_company.logo_url do %>
+              <img src={@current_company.logo_url} alt={@current_company.name} class="w-5 h-5 rounded object-cover border border-border-subtle" />
+            <% else %>
+              <div class="w-5 h-5 rounded bg-brand/10 border border-border-subtle flex items-center justify-center">
+                <span class="text-[10px] font-590 text-brand">C</span>
+              </div>
+            <% end %>
+            <span class="text-sm font-590 text-text-primary truncate max-w-[150px]"><%= @current_company.name %></span>
+          <% else %>
+            <span class="text-sm font-590 text-text-primary">Cympho</span>
+          <% end %>
+          <svg class="w-4 h-4 text-text-quaternary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
           </svg>
         </button>
+        <div class="w-9"></div>
       </header>
 
       <!-- Main content -->
@@ -229,7 +241,7 @@
             <h3 class="text-[10px] font-510 text-text-quaternary uppercase tracking-wider mb-2">General</h3>
             <div class="space-y-2">
               <div class="flex items-center justify-between text-sm">
-                <span class="text-text-secondary">Open command palette</span>
+                <span class="text-text-secondary">Switch company</span>
                 <div class="flex gap-1"><kbd class="kbd">Cmd</kbd><kbd class="kbd">K</kbd></div>
               </div>
               <div class="flex items-center justify-between text-sm">
@@ -287,5 +299,11 @@
         </div>
       </div>
     </div>
+
+    <!-- Company switcher -->
+    <.company_switcher_static
+      companies={assigns[:user_companies] || []}
+      current_company_id={if assigns[:current_company], do: @current_company.id, else: nil}
+    />
   </body>
 </html>

@@ -70,6 +70,7 @@ defmodule CymphoWeb do
       import CymphoWeb.Components.Badge
       import CymphoWeb.Components.Card
       import CymphoWeb.Components.CompanyRail
+      import CymphoWeb.Components.CompanySwitcherStatic
       import CymphoWeb.Components.NavRail
       import CymphoWeb.Gettext
 

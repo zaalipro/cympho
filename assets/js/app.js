@@ -117,24 +117,11 @@ function handleKeydown(e) {
   // Don't trigger shortcuts when typing in inputs
   if (isInput) return;
 
-  // Cmd/Ctrl+K opens command palette
+  // Cmd/Ctrl+K opens company switcher
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
     e.preventDefault();
-    const palette = document.getElementById('command-palette');
-    if (palette) {
-      palette.classList.remove('hidden');
-      const input = document.getElementById('command-input');
-      if (input) {
-        input.value = '';
-        input.focus();
-        // Reset search filter
-        const results = document.getElementById('command-results');
-        if (results) {
-          results.querySelectorAll('.command-item').forEach(item => {
-            item.style.display = '';
-          });
-        }
-      }
+    if (window.openCompanySwitcher) {
+      window.openCompanySwitcher();
     }
     return;
   }
@@ -174,11 +161,123 @@ function handleKeydown(e) {
   }
 }
 
+// Company switcher
+function initCompanySwitcher() {
+  const wrapper = document.getElementById('company-switcher-wrapper');
+  if (!wrapper) return;
+
+  const modal = document.getElementById('company-switcher-modal');
+  const searchInput = document.getElementById('company-switcher-search');
+  const resultsList = document.getElementById('company-switcher-list');
+  const emptyState = document.getElementById('company-switcher-empty');
+  const companies = JSON.parse(wrapper.dataset.companies || '[]');
+  const currentCompanyId = wrapper.dataset.currentCompanyId;
+
+  function companyInitials(name) {
+    return name
+      .split(/\s+/)
+      .slice(0, 2)
+      .map(word => word[0])
+      .join('')
+      .toUpperCase();
+  }
+
+  function renderCompanyList(filter = '') {
+    const filtered = companies.filter(c =>
+      c.name.toLowerCase().includes(filter.toLowerCase())
+    );
+
+    if (filtered.length === 0) {
+      resultsList.innerHTML = '';
+      emptyState.classList.remove('hidden');
+      return;
+    }
+
+    emptyState.classList.add('hidden');
+    resultsList.innerHTML = filtered.map(company => {
+      const isCurrent = company.id === currentCompanyId;
+      return `
+        <div
+          class="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm cursor-pointer transition-colors ${isCurrent ? 'bg-white/[0.06] text-text-primary' : 'text-text-secondary hover:bg-white/[0.04] hover:text-text-primary'}"
+          data-company-id="${company.id}"
+        >
+          <div class="w-8 h-8 rounded-lg overflow-hidden border-l-2 border-brand flex items-center justify-center shrink-0 bg-brand/10">
+            ${company.logo_url
+              ? `<img src="${company.logo_url}" alt="${company.name}" class="w-full h-full object-cover" />`
+              : `<span class="text-sm font-590 text-brand">${companyInitials(company.name)}</span>`
+            }
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="font-510 truncate">${company.name}</div>
+            ${isCurrent ? '<div class="text-xs text-text-quaternary">Current company</div>' : ''}
+          </div>
+          ${isCurrent
+            ? '<svg class="w-4 h-4 text-brand shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
+            : ''
+          }
+        </div>
+      `;
+    }).join('');
+
+    // Add click handlers
+    resultsList.querySelectorAll('[data-company-id]').forEach(el => {
+      el.addEventListener('click', () => {
+        const companyId = el.dataset.companyId;
+        const returnTo = encodeURIComponent(window.location.pathname);
+        window.location.href = `/switch-company/${companyId}?return_to=${returnTo}`;
+      });
+    });
+  }
+
+  function openModal() {
+    modal.classList.remove('hidden');
+    searchInput.value = '';
+    searchInput.focus();
+    renderCompanyList('');
+  }
+
+  function closeModal() {
+    modal.classList.add('hidden');
+  }
+
+  // Search input handler
+  searchInput.addEventListener('input', (e) => {
+    renderCompanyList(e.target.value);
+  });
+
+  // Click outside to close
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      closeModal();
+    }
+  });
+
+  // Escape to close
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+      closeModal();
+    }
+  });
+
+  // Expose open function globally
+  window.openCompanySwitcher = openModal;
+}
+
+// CompanySwitcher hook (deprecated, kept for backwards compatibility)
+const CompanySwitcher = {
+  mounted() {
+    // This hook is no longer needed, functionality moved to initCompanySwitcher
+  },
+  destroyed() {
+    // Cleanup if needed
+  }
+};
+
 // Boot
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
 const liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
-  hooks: {KanbanSortable}
+  hooks: {KanbanSortable, CompanySwitcher}
 });
 
 liveSocket.connect();
@@ -188,10 +287,14 @@ window.liveSocket = liveSocket;
 document.addEventListener('DOMContentLoaded', () => {
   highlightActiveNav();
   initCommandPalette();
+  initCompanySwitcher();
 
   // Re-highlight on LiveView navigation
   liveSocket.addEventListener('phx:navigate', highlightActiveNav);
-  liveSocket.addEventListener('phx:page-loading-stop', highlightActiveNav);
+  liveSocket.addEventListener('phx:page-loading-stop', () => {
+    highlightActiveNav();
+    initCompanySwitcher();
+  });
 });
 
 // Also highlight on popstate (browser back/forward)
