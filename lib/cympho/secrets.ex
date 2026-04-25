@@ -125,18 +125,14 @@ defmodule Cympho.Secrets do
   end
 
   def list_secret_versions(secret_id) do
-    Secret
-    |> where([s], s.key in fragment(
-      "(SELECT ? FROM secrets WHERE id = ?)",
-      select([s], s.key),
-      ^secret_id
-    ))
-    |> where(company_id: fragment(
-      "(SELECT company_id FROM secrets WHERE id = ?)",
-      ^secret_id
-    ))
-    |> order_by(desc: :version)
-    |> Repo.all()
+    case Repo.get(Secret, secret_id) do
+      nil -> []
+      secret ->
+        Secret
+        |> where(key: ^secret.key, company_id: ^secret.company_id)
+        |> order_by(desc: :version)
+        |> Repo.all()
+    end
   end
 
   def list_active_secret_values(company_id, opts \\ []) do

@@ -184,4 +184,44 @@ defmodule CymphoWeb.ActivityLive.Index do
 
   defp has_prev_pages?(%{page: page}) when page > 1, do: true
   defp has_prev_pages?(_), do: false
+
+
+  defp render_metadata(assigns) do
+    ~H"""
+    <%= case @action do %>
+      <% "title_changed" -> %>
+        Changed title from <code class="text-xs bg-white/[0.05] px-1 rounded">{@metadata["from"]}</code> to <code class="text-xs bg-white/[0.05] px-1 rounded">{@metadata["to"]}</code>
+      <% "description_changed" -> %>
+        Updated description
+      <% "status_changed" -> %>
+        Changed status from <span class="text-xs">{@metadata["from"]}</span> to <span class="text-xs">{@metadata["to"]}</span>
+      <% "assigned" -> %>
+        Assigned to agent
+      <% "unassigned" -> %>
+        Unassigned
+      <% "blocker_added" -> %>
+        Added blocker
+      <% "blocker_removed" -> %>
+        Removed blocker
+      <% "comment_added" -> %>
+        Added a comment
+      <% "approval_created" -> %>
+        Created approval
+      <% "approval_resolved" -> %>
+        Resolved approval
+      <% "heartbeat_started" -> %>
+        Started heartbeat
+      <% "heartbeat_completed" -> %>
+        Completed heartbeat
+      <% "heartbeat_failed" -> %>
+        Heartbeat failed
+      <% "cost_incurred" -> %>
+        Incurred cost: <span class="text-xs">{@metadata["amount"]}</span>
+      <% "budget_threshold_exceeded" -> %>
+        Budget threshold exceeded: <span class="text-xs">{@metadata["threshold_type"]}</span>
+      <% _ -> %>
+        <span></span>
+    <% end %>
+    """
+  end
 end

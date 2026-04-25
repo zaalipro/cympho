@@ -126,4 +126,21 @@ defmodule CymphoWeb.Components do
   defp input_name(field), do: field.name
 
   defp input_value(field), do: field.value
+
+
+  attr :field, :any, required: true
+
+  def error(assigns) do
+    ~H"""
+    <div :for={error <- List.wrap(@field.errors)} class="text-xs text-red-400 mt-1">
+      {error}
+    </div>
+    """
+  end
+
+  er_slot(@inner_block)}
+      </div>
+    </div>
+    """
+  end
 end
