@@ -142,6 +142,13 @@ defmodule Cympho.Workspaces do
 
   def get_runtime_service!(id), do: Repo.get!(RuntimeService, id)
 
+  def get_runtime_service(id) do
+    case Repo.get(RuntimeService, id) do
+      nil -> {:error, :not_found}
+      service -> {:ok, service}
+    end
+  end
+
   def create_runtime_service(attrs \\ %{}) do
     %RuntimeService{}
     |> RuntimeService.changeset(attrs)
@@ -172,6 +179,32 @@ defmodule Cympho.Workspaces do
       stopped_at: nil
     })
     |> Repo.update()
+  end
+
+  @doc """
+  Update runtime service with discovered port information.
+  """
+  def update_service_port(%RuntimeService{} = svc, port, attrs \\ %{}) do
+    svc
+    |> RuntimeService.changeset(Map.merge(attrs, %{port: port, status: "running"}))
+    |> Repo.update()
+  end
+
+  @doc """
+  Set the preview URL for a runtime service.
+  """
+  def set_service_url(%RuntimeService{} = svc, url) do
+    svc
+    |> RuntimeService.changeset(%{url: url})
+    |> Repo.update()
+  end
+
+  @doc """
+  Auto-discover ports and infer likely dev server from project files.
+  """
+  def discover_service_ports(cwd) when is_binary(cwd) do
+    alias Cympho.Workspaces.PreviewUrl
+    PreviewUrl.infer_ports_from_project(cwd)
   end
 
   # --- Operations ---
