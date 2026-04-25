@@ -19,6 +19,7 @@ defmodule Cympho.GovernanceAuditLogs.GovernanceAuditLog do
     field :metadata, :map, default: %{}
     field :ip_address, :string
     field :user_agent, :string
+    field :tool_call_trace_id, :binary_id
 
     timestamps(type: :utc_datetime)
   end
@@ -35,7 +36,8 @@ defmodule Cympho.GovernanceAuditLogs.GovernanceAuditLog do
       :reasoning,
       :metadata,
       :ip_address,
-      :user_agent
+      :user_agent,
+      :tool_call_trace_id
     ])
     |> validate_required([
       :action_type,

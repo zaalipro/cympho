@@ -6,7 +6,7 @@ defmodule Cympho.Orchestrator do
   publishing results via PubSub for LiveView consumption.
 
   Session lifecycle:
-    start_session -> session_started -> turn_completed (possibly multiple) -> session_ended
+    start_session -> session_started -> tool_call_detected (possibly multiple) -> turn_completed -> session_ended
 
   Each orchestrator instance is registered by issue_id and manages
   a single agent session, forwarding messages to the caller via messages
@@ -15,8 +15,8 @@ defmodule Cympho.Orchestrator do
   Protocol:
     - Started by AgentHeartbeat via `start_and_run/2`
     - Calls AgentRunner.run/4 with self() as recipient_pid
-    - Receives {:session_started, session_id}, {:turn_completed, session_id, result},
-      {:turn_ended_with_error, session_id, reason} from AgentRunner
+    - Receives {:session_started, session_id}, {:tool_call_detected, session_id, tool_call},
+      {:turn_completed, session_id, result}, {:turn_ended_with_error, session_id, reason} from AgentRunner
     - On completion: creates Comment, transitions issue, updates agent status
   """
 
@@ -130,6 +130,16 @@ defmodule Cympho.Orchestrator do
   @impl true
   def handle_info({:session_started, session_id}, %Session{} = session) do
     {:noreply, %{session | session_id: session_id}}
+  end
+
+  @impl true
+  def handle_info({:tool_call_detected, _session_id, tool_call}, %Session{} = session) do
+    issue = session.issue
+    agent_id = session.agent_id
+
+    capture_tool_call(tool_call, issue, agent_id)
+
+    {:noreply, %{session | turn_count: session.turn_count + 1}}
   end
 
   @impl true
@@ -358,5 +368,44 @@ defmodule Cympho.Orchestrator do
 
   defp run_opts(_issue) do
     []
+  end
+
+  defp capture_tool_call(tool_call, issue, agent_id) do
+    try do
+      attrs = %{
+        trace_type: "tool_invocation",
+        tool_name: tool_call["name"],
+        tool_arguments: tool_call["input"] || %{},
+        status: "pending",
+        company_id: issue.company_id,
+        agent_id: agent_id,
+        issue_id: issue.id,
+        actor_type: "agent",
+        actor_id: agent_id,
+        occurred_at: DateTime.utc_now()
+      }
+
+      case Cympho.ToolCallTraces.create_tool_call_trace(attrs) do
+        {:ok, trace} ->
+          :logger.info("[Orchestrator] Captured tool call trace: #{trace.tool_name}")
+
+          :telemetry.execute(
+            [:cympho, :tool, :call],
+            %{count: 1},
+            %{
+              tool_name: tool_call["name"],
+              agent_id: agent_id,
+              issue_id: issue.id,
+              trace_id: trace.id
+            }
+          )
+
+        {:error, reason} ->
+          :logger.warning("[Orchestrator] Failed to capture tool call trace: #{inspect(reason)}")
+      end
+    rescue
+      e ->
+        :logger.error("[Orchestrator] Error capturing tool call: #{inspect(e)}")
+    end
   end
 end

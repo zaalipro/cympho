@@ -73,7 +73,8 @@ defmodule Cympho.GovernanceAuditLogs do
       reasoning: Keyword.get(opts, :reasoning),
       metadata: Keyword.get(opts, :metadata, %{}),
       ip_address: Keyword.get(opts, :ip_address),
-      user_agent: Keyword.get(opts, :user_agent)
+      user_agent: Keyword.get(opts, :user_agent),
+      tool_call_trace_id: Keyword.get(opts, :tool_call_trace_id)
     }
 
     case create_governance_audit_log(attrs) do
