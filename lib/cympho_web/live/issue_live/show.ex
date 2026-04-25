@@ -114,11 +114,17 @@ defmodule CymphoWeb.IssueLive.Show do
 
   @impl true
   def handle_event("update_priority", %{"priority" => priority}, socket) do
-    priority_atom = String.to_existing_atom(priority)
+    priority_atom = try_string_to_priority(priority)
 
-    case Issues.update_issue(socket.assigns.issue, %{priority: priority_atom}) do
-      {:ok, _issue} -> {:noreply, socket}
-      {:error, _changeset} -> {:noreply, put_flash(socket, :error, "Failed to update priority")}
+    case priority_atom do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Invalid priority")}
+
+      atom ->
+        case Issues.update_issue(socket.assigns.issue, %{priority: atom}) do
+          {:ok, _issue} -> {:noreply, socket}
+          {:error, _changeset} -> {:noreply, put_flash(socket, :error, "Failed to update priority")}
+        end
     end
   end
 
@@ -252,13 +258,11 @@ defmodule CymphoWeb.IssueLive.Show do
     {:noreply, assign(socket, :agent_session_id, session_id)}
   end
 
-  def handle_info({:turn_completed, session_id, result}, socket) do
-    IO.inspect({:turn_completed, session_id, result}, label: "Agent turn completed")
+  def handle_info({:turn_completed, _session_id, _result}, socket) do
     {:noreply, socket}
   end
 
-  def handle_info({:turn_ended_with_error, session_id, reason}, socket) do
-    IO.inspect({:turn_ended_with_error, session_id, reason}, label: "Agent error")
+  def handle_info({:turn_ended_with_error, _session_id, reason}, socket) do
     {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
   end
 
@@ -331,4 +335,10 @@ defmodule CymphoWeb.IssueLive.Show do
   defp format_seconds(s) when s < 60, do: "#{s}s"
   defp format_seconds(s) when s < 3600, do: "#{div(s, 60)}m #{rem(s, 60)}s"
   defp format_seconds(s), do: "#{div(s, 3600)}h #{div(rem(s, 3600), 60)}m"
+
+  defp try_string_to_priority("low"), do: :low
+  defp try_string_to_priority("medium"), do: :medium
+  defp try_string_to_priority("high"), do: :high
+  defp try_string_to_priority("critical"), do: :critical
+  defp try_string_to_priority(_), do: nil
 end

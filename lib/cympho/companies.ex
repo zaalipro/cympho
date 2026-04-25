@@ -52,11 +52,11 @@ defmodule Cympho.Companies do
       category: "policy_change",
       company_id: company.id,
       proposal_data: %{
-        action: "update_company",
-        company_id: company.id,
-        old_governance_config: company.governance_config,
-        new_governance_config: new_config,
-        update_attrs: stringify_keys(attrs)
+        "action" => "update_company",
+        "company_id" => company.id,
+        "old_governance_config" => company.governance_config,
+        "new_governance_config" => new_config,
+        "update_attrs" => stringify_keys(attrs)
       }
     }
 

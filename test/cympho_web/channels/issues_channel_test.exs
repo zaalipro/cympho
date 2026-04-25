@@ -7,7 +7,7 @@ defmodule CymphoWeb.IssuesChannelTest do
       {:ok, socket} = connect_jwt(company_id, Ecto.UUID.generate())
 
       assert {:ok, _reply, _socket} =
-               subscribe_and_join(socket, CymphoWeb.IssuesChannel, "company:#{company_id}:issues")
+               subscribe_and_join(socket, CymphoWeb.CompanyChannel, "company:#{company_id}:issues")
     end
 
     test "rejects when company_id does not match socket" do
@@ -16,7 +16,11 @@ defmodule CymphoWeb.IssuesChannelTest do
       {:ok, socket} = connect_jwt(company_id, Ecto.UUID.generate())
 
       assert {:error, %{reason: "unauthorized"}} =
-               subscribe_and_join(socket, CymphoWeb.IssuesChannel, "company:#{other_company_id}:issues")
+               subscribe_and_join(
+                 socket,
+                 CymphoWeb.CompanyChannel,
+                 "company:#{other_company_id}:issues"
+               )
     end
   end
 
@@ -26,10 +30,10 @@ defmodule CymphoWeb.IssuesChannelTest do
       {:ok, socket} = connect_jwt(company_id, Ecto.UUID.generate())
 
       {:ok, _, socket} =
-        subscribe_and_join(socket, CymphoWeb.IssuesChannel, "company:#{company_id}:issues")
+        subscribe_and_join(socket, CymphoWeb.CompanyChannel, "company:#{company_id}:issues")
 
       ref = push(socket, "ping", %{})
-      assert_reply ref, {:ok, %{pong: true}}
+      assert_reply ref, :ok, %{pong: true}
     end
   end
 end

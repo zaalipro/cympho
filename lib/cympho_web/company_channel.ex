@@ -45,6 +45,10 @@ defmodule CymphoWeb.CompanyChannel do
     CymphoWeb.ActivityChannel.join(topic, %{}, socket)
   end
 
+  defp dispatch_sub_topic(topic, "issues", _payload, socket) do
+    CymphoWeb.IssuesChannel.join(topic, %{}, socket)
+  end
+
   defp dispatch_sub_topic(topic, "issue:" <> _issue_id, _payload, socket) do
     CymphoWeb.IssueChannel.join(topic, %{}, socket)
   end

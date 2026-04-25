@@ -493,7 +493,7 @@ defmodule Cympho.BoardApprovals do
     agent_id = get_in(board_approval.proposal_data, ["agent_id"])
     new_role = get_in(board_approval.proposal_data, ["new_role"])
 
-    if agent_id and new_role do
+    if agent_id != nil and new_role != nil do
       case Cympho.Agents.get_agent(agent_id) do
         {:ok, agent} ->
           case Cympho.Agents.update_agent(agent, %{role: new_role}) do
@@ -530,7 +530,7 @@ defmodule Cympho.BoardApprovals do
     case action do
       "create_budget" ->
         attrs = get_in(board_approval.proposal_data, ["budget_attrs"]) || %{}
-        Cympho.Budgets.create_budget(attrs, {"board_approval", board_approval.id})
+        Cympho.Budgets.execute_budget_creation(attrs, {"board_approval", board_approval.id})
 
       "update_budget" ->
         budget_id = get_in(board_approval.proposal_data, ["budget_id"])
@@ -539,7 +539,7 @@ defmodule Cympho.BoardApprovals do
         if budget_id do
           case Cympho.Budgets.get_budget(budget_id) do
             {:ok, budget} ->
-              Cympho.Budgets.update_budget(budget, update_attrs, {"board_approval", board_approval.id})
+              Cympho.Budgets.execute_budget_update(budget, update_attrs, {"board_approval", board_approval.id})
 
             {:error, :not_found} ->
               GovernanceAuditLogs.log_action(

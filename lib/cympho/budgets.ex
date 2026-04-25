@@ -57,6 +57,23 @@ defmodule Cympho.Budgets do
   end
 
   @doc """
+  Creates a budget directly, bypassing governance gates.
+  Used by the approval executor to enact board-approved budget changes.
+  """
+  def execute_budget_creation(attrs, actor \\ nil) do
+    changeset = Budget.changeset(%Budget{}, attrs)
+    do_create_budget(changeset, actor)
+  end
+
+  @doc """
+  Updates a budget directly, bypassing governance gates.
+  Used by the approval executor to enact board-approved budget changes.
+  """
+  def execute_budget_update(%Budget{} = budget, attrs, actor \\ nil) do
+    do_update_budget(budget, attrs, actor)
+  end
+
+  @doc """
   Creates a budget.
 
   If the company's governance config requires `budget_increase` approval and the

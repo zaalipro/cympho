@@ -9,7 +9,7 @@ defmodule CymphoWeb.ActivityChannelTest do
       assert {:ok, _reply, _socket} =
                subscribe_and_join(
                  socket,
-                 CymphoWeb.ActivityChannel,
+                 CymphoWeb.CompanyChannel,
                  "company:#{company_id}:activities"
                )
     end
@@ -22,7 +22,7 @@ defmodule CymphoWeb.ActivityChannelTest do
       assert {:error, %{reason: "unauthorized"}} =
                subscribe_and_join(
                  socket,
-                 CymphoWeb.ActivityChannel,
+                 CymphoWeb.CompanyChannel,
                  "company:#{other_company_id}:activities"
                )
     end
@@ -36,12 +36,12 @@ defmodule CymphoWeb.ActivityChannelTest do
       {:ok, _, socket} =
         subscribe_and_join(
           socket,
-          CymphoWeb.ActivityChannel,
+          CymphoWeb.CompanyChannel,
           "company:#{company_id}:activities"
         )
 
       ref = push(socket, "ping", %{})
-      assert_reply ref, {:ok, %{pong: true}}
+      assert_reply ref, :ok, %{pong: true}
     end
   end
 end

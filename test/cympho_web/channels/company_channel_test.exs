@@ -29,7 +29,7 @@ defmodule CymphoWeb.CompanyChannelTest do
         subscribe_and_join(socket, CymphoWeb.CompanyChannel, "company:#{company_id}")
 
       ref = push(socket, "ping", %{})
-      assert_reply ref, {:ok, %{pong: true}}
+      assert_reply ref, :ok, %{pong: true}
     end
   end
 end

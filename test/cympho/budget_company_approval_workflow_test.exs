@@ -127,8 +127,8 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       assert approval.status == "pending"
 
       # Verify proposal_data has the budget attrs
-      assert approval.proposal_data.action == "create_budget"
-      assert approval.proposal_data.budget_attrs["name"] == "Big Budget"
+      assert approval.proposal_data["action"] == "create_budget"
+      assert approval.proposal_data["budget_attrs"]["name"] == "Big Budget"
     end
 
     test "creates budget directly when no company_id in attrs" do
@@ -191,8 +191,8 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
                Budgets.update_budget(budget, %{limit_amount: Decimal.new("5000")})
 
       assert approval.status == "pending"
-      assert approval.proposal_data.action == "update_budget"
-      assert approval.proposal_data.budget_id == budget.id
+      assert approval.proposal_data["action"] == "update_budget"
+      assert approval.proposal_data["budget_id"] == budget.id
     end
   end
 
@@ -226,8 +226,8 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
                Companies.update_company(company, %{governance_config: new_config})
 
       assert approval.status == "pending"
-      assert approval.proposal_data.action == "update_company"
-      assert approval.proposal_data.company_id == company.id
+      assert approval.proposal_data["action"] == "update_company"
+      assert approval.proposal_data["company_id"] == company.id
     end
   end
 
