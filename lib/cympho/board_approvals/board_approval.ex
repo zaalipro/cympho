@@ -79,15 +79,45 @@ defmodule Cympho.BoardApprovals.BoardApproval do
     |> Map.new()
   end
 
-  def approval_threshold_met?(%__MODULE__{} = board_approval, threshold \\ 0.6) do
+  @doc """
+  Checks whether an approval meets the configured threshold.
+
+  Threshold types (read from company governance_config):
+    - "any"        : any single approve vote is enough
+    - "percentage" : approve_pct >= threshold_value (default 0.6)
+    - "all"        : every cast vote must be approve (unanimous)
+    - "count"      : at least N approve votes needed
+
+  Falls back to percentage at 0.6 when no config is set.
+  """
+  def approval_threshold_met?(%__MODULE__{} = board_approval, opts \\ []) do
     summary = vote_summary(board_approval)
     approve_count = Map.get(summary, "approve", 0)
-    total_votes = Enum.sum(Map.values(summary))
+    deny_count = Map.get(summary, "deny", 0)
+    total_votes = approve_count + deny_count + Map.get(summary, "abstain", 0)
 
-    if total_votes > 0 do
-      approve_count / total_votes >= threshold
-    else
+    if total_votes == 0 do
       false
+    else
+      threshold_type = Keyword.get(opts, :threshold_type, "percentage")
+      threshold_value = Keyword.get(opts, :threshold_value, 0.6)
+
+      case threshold_type do
+        "any" ->
+          approve_count >= 1
+
+        "percentage" ->
+          approve_count / total_votes >= threshold_value
+
+        "all" ->
+          deny_count == 0 and approve_count > 0
+
+        "count" ->
+          approve_count >= (threshold_value || 1)
+
+        _ ->
+          approve_count / total_votes >= 0.6
+      end
     end
   end
 

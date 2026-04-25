@@ -54,7 +54,7 @@ defmodule Cympho.Attachments.Storage.S3Storage do
   end
 
   defp upload_to_s3(key, file_binary, filename) do
-    content_type = MIME.from_filename(filename) || "application/octet-stream"
+    content_type = MIME.from_path(filename) || "application/octet-stream"
 
     ExAws.S3.put_object(
       bucket(),

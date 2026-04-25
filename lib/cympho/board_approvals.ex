@@ -356,6 +356,30 @@ defmodule Cympho.BoardApprovals do
     end
   end
 
+  @doc """
+  Proposes a strategic initiative requiring board review.
+  Strategy approvals cover major plan changes, new directions, and
+  significant pivots that require board-level visibility and sign-off.
+  """
+  def propose_strategic_initiative(company_id, title, description, proposal_data, requested_by \\ nil) do
+    if governance_required?(company_id, "strategic_initiative") do
+      create_board_approval(
+        %{
+          title: title,
+          description: description,
+          category: "strategic_initiative",
+          company_id: company_id,
+          requested_by_agent_id: extract_agent_id(requested_by),
+          proposal_data: proposal_data,
+          review_deadline: DateTime.utc_now() |> DateTime.add(14 * 24 * 3600, :second)
+        },
+        requested_by
+      )
+    else
+      {:ok, :auto_approved}
+    end
+  end
+
   defp apply_budget_change(company_id, budget_id, new_limit) do
     # Update company budget config
     company = Cympho.Repo.get!(Cympho.Companies.Company, company_id)
@@ -388,7 +412,9 @@ defmodule Cympho.BoardApprovals do
   @nil_uuid "00000000-0000-0000-0000-000000000000"
 
   defp check_auto_approve(%BoardApproval{} = board_approval) do
-    if BoardApproval.approval_threshold_met?(board_approval) do
+    threshold_opts = load_threshold_opts(board_approval.company_id)
+
+    if BoardApproval.approval_threshold_met?(board_approval, threshold_opts) do
       resolve_board_approval(
         board_approval.id,
         "approved",
@@ -398,6 +424,16 @@ defmodule Cympho.BoardApprovals do
         {"system", @nil_uuid}
       )
     end
+  end
+
+  defp load_threshold_opts(company_id) do
+    company = Cympho.Repo.get(Cympho.Companies.Company, company_id)
+    config = company && company.governance_config || %{}
+
+    [
+      threshold_type: Map.get(config, "threshold_type", "percentage"),
+      threshold_value: Map.get(config, "threshold_value", 0.6)
+    ]
   end
 
   defp maybe_trigger_action(%BoardApproval{status: "approved"} = board_approval) do
@@ -419,6 +455,9 @@ defmodule Cympho.BoardApprovals do
 
       "principal_permission" ->
         trigger_permission_grant(board_approval)
+
+      "strategic_initiative" ->
+        trigger_strategic_initiative(board_approval)
 
       _ ->
         :ok

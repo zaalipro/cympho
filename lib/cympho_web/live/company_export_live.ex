@@ -112,7 +112,7 @@ defmodule CymphoWeb.CompanyExportLive do
             </div>
           </div>
 
-          <.app_link
+          <a
             download={"#{@company.slug}-export-#{Date.utc_today()}.json"}
             href={"data:application/json;charset=utf-8,#{URI.encode(Jason.encode!(@export_data))}"}
             class="bg-success hover:bg-success/80 text-white font-510 text-sm px-6 py-3 rounded-md transition-colors inline-flex items-center gap-2"
@@ -126,7 +126,7 @@ defmodule CymphoWeb.CompanyExportLive do
               />
             </svg>
             Download Export
-          </.app_link>
+          </a>
 
           <div class="mt-4 text-xs text-text-tertiary">
             Exported on {@export_data.exported_at} • Version {@export_data.version}
