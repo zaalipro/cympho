@@ -7,15 +7,17 @@ config :cympho, CymphoWeb.Endpoint,
   url: [host: System.get_env("APP_HOST") || "localhost", port: port],
   cache_static_manifest: "priv/static/cache_manifest.json"
 
-if database_url = System.get_env("DATABASE_URL") do
-  config :cympho, Cympho.Repo,
-    url: database_url,
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
-
-  if config_env() == :prod do
+if config_env() != :test do
+  if database_url = System.get_env("DATABASE_URL") do
     config :cympho, Cympho.Repo,
-      ssl: [verify: :verify_peer],
-      ssl_verify_host: true
+      url: database_url,
+      pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
+
+    if config_env() == :prod do
+      config :cympho, Cympho.Repo,
+        ssl: [verify: :verify_peer],
+        ssl_verify_host: true
+    end
   end
 end
 
