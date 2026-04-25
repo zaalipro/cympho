@@ -127,6 +127,22 @@ defmodule CymphoWeb.Router do
     # MCP server endpoints
     get "/mcp/tools", McpController, :tools
     post "/mcp/call", McpController, :call
+
+    # Company portability & multi-tenancy
+    resources "/companies", CompanyController, only: [:index, :show, :create, :update, :delete]
+    get "/companies/:company_id/members", CompanyController, :list_members
+    post "/companies/:company_id/members", CompanyController, :add_member
+    delete "/companies/:company_id/members/:user_id", CompanyController, :remove_member
+    get "/companies/:company_id/invites", CompanyController, :list_invites
+    post "/companies/:company_id/invites", CompanyController, :create_invite
+    delete "/companies/:company_id/invites/:invite_id", CompanyController, :revoke_invite
+    post "/invites/:token/accept", CompanyController, :accept_invite
+    get "/companies/:company_id/join-requests", CompanyController, :list_join_requests
+    post "/companies/:company_id/join-requests", CompanyController, :create_join_request
+    post "/companies/:company_id/join-requests/:request_id/approve", CompanyController, :approve_join_request
+    post "/companies/:company_id/join-requests/:request_id/reject", CompanyController, :reject_join_request
+    get "/companies/:company_id/export", CompanyController, :export
+    post "/companies/import", CompanyController, :import_company
   end
 
   scope "/api", CymphoWeb do
