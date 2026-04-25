@@ -47,6 +47,7 @@ defmodule Cympho.HeartbeatEngine do
     with {:ok, workspace_path} <- resolve_workspace(run),
          {:ok, run} <- apply_start(run, workspace_path) do
       log_audit(run, "run_started")
+      CymphoWeb.Events.broadcast_run_status(run, :run_started)
       {:ok, run}
     end
   end
@@ -64,6 +65,7 @@ defmodule Cympho.HeartbeatEngine do
     |> tap_ok(fn updated ->
       log_audit(updated, "run_completed")
       record_cost_event(updated)
+      CymphoWeb.Events.broadcast_run_status(updated, :run_completed)
     end)
   end
 
@@ -77,7 +79,10 @@ defmodule Cympho.HeartbeatEngine do
     run
     |> Run.fail_changeset(%{error_reason: error_reason})
     |> Repo.update()
-    |> tap_ok(&log_audit(&1, "run_failed"))
+    |> tap_ok(fn updated ->
+      log_audit(updated, "run_failed")
+      CymphoWeb.Events.broadcast_run_status(updated, :run_failed)
+    end)
   end
 
   def fail_run(%Run{status: status}, _), do: {:error, {:invalid_status, status}}

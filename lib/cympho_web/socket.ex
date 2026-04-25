@@ -2,6 +2,10 @@ defmodule CymphoWeb.Socket do
   use Phoenix.Socket
 
   channel "company:*", CymphoWeb.CompanyChannel
+  channel "company:*:issues", CymphoWeb.IssuesChannel
+  channel "company:*:project:*:comments", CymphoWeb.CommentsChannel
+  channel "company:*:runs", CymphoWeb.RunsChannel
+  channel "company:*:issues:*:heartbeats", CymphoWeb.HeartbeatsChannel
 
   @impl true
   def connect(%{"token" => token}, socket, _connect_info) do

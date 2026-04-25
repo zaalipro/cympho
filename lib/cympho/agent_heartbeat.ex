@@ -218,6 +218,12 @@ defmodule Cympho.AgentHeartbeat do
                 agent_id: agent_id
               })
 
+              CymphoWeb.Events.broadcast_agent_heartbeat(
+                checked_out_issue,
+                agent_id,
+                %{status: :started, timestamp: DateTime.utc_now() |> DateTime.to_iso8601()}
+              )
+
               timer_ref = schedule_heartbeat(agent_id)
 
               {:noreply,
@@ -281,6 +287,21 @@ defmodule Cympho.AgentHeartbeat do
 
   @impl true
   def handle_call(:set_idle, _from, state) do
+    # Broadcast agent heartbeat event when transitioning to idle
+    if state.current_issue_id do
+      case Issues.get_issue(state.current_issue_id) do
+        {:ok, issue} ->
+          CymphoWeb.Events.broadcast_agent_heartbeat(
+            issue,
+            state.agent_id,
+            %{status: :idle, timestamp: DateTime.utc_now() |> DateTime.to_iso8601()}
+          )
+
+        _ ->
+          :ok
+      end
+    end
+
     {:reply, :ok, %{state | status: :idle, current_issue_id: nil, started_at: nil}}
   end
 

@@ -183,6 +183,7 @@ defmodule Cympho.Issues do
         })
 
         Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
+        CymphoWeb.Events.broadcast_issue_update(issue, :issue_created)
         {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
       {:error, changeset} ->
@@ -217,6 +218,9 @@ defmodule Cympho.Issues do
       updated = Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])
       Activities.log_issue_changes(old_issue, updated, attrs)
       Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, updated})
+
+      event_type = determine_update_event_type(old_issue, updated, attrs)
+      CymphoWeb.Events.broadcast_issue_update(updated, event_type, build_update_metadata(old_issue, updated, attrs))
       {:ok, updated}
     end
   end
@@ -767,6 +771,41 @@ defmodule Cympho.Issues do
       {:ok, updated} -> {:ok, Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])}
       {:error, changeset} -> {:error, changeset}
     end
+  end
+
+  defp determine_update_event_type(old_issue, new_issue, attrs) do
+    cond do
+      Map.has_key?(attrs, :status) and old_issue.status != new_issue.status ->
+        :issue_status_changed
+
+      Map.has_key?(attrs, :assignee_id) and old_issue.assignee_id != new_issue.assignee_id ->
+        :issue_assigned
+
+      true ->
+        :issue_updated
+    end
+  end
+
+  defp build_update_metadata(old_issue, new_issue, attrs) do
+    base = %{}
+
+    base =
+      if Map.has_key?(attrs, :status) do
+        Map.put(base, :from, old_issue.status)
+        |> Map.put(:to, new_issue.status)
+      else
+        base
+      end
+
+    base =
+      if Map.has_key?(attrs, :assignee_id) do
+        Map.put(base, :from_assignee_id, old_issue.assignee_id)
+        |> Map.put(:to_assignee_id, new_issue.assignee_id)
+      else
+        base
+      end
+
+    base
   end
 
   def subscribe do

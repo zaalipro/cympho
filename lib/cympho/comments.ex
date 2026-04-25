@@ -50,6 +50,8 @@ defmodule Cympho.Comments do
             Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_created, issue})
         end
 
+        CymphoWeb.Events.broadcast_comment(comment, :comment_created)
+
         # Wake the assigned agent if the issue is active
         _ = Wakes.notify_comment(comment)
 
@@ -76,6 +78,8 @@ defmodule Cympho.Comments do
             issue = Repo.preload(issue, :comments)
             Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_updated, issue})
         end
+
+        CymphoWeb.Events.broadcast_comment(comment, :comment_updated)
 
         {:ok, comment}
 
