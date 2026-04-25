@@ -29,3 +29,4 @@ Thumbs.db
 # Backup files
 *.bak
 .claude/worktrees/
+erl_crash.dump
