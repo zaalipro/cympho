@@ -69,6 +69,8 @@ defmodule CymphoWeb do
       import CymphoWeb.Components
       import CymphoWeb.Components.Badge
       import CymphoWeb.Components.Card
+      import CymphoWeb.Components.CompanyRail
+      import CymphoWeb.Components.NavRail
       import CymphoWeb.Gettext
 
       unquote(verified_routes())
