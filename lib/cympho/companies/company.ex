@@ -55,8 +55,8 @@ defmodule Cympho.Companies.Company do
           not is_nil(categories) and not is_list(categories) ->
             add_error(changeset, :governance_config, "categories must be a list")
 
-          threshold_type not in [nil, "percentage", "count"] ->
-            add_error(changeset, :governance_config, "threshold_type must be percentage or count")
+          threshold_type not in [nil, "any", "percentage", "count", "all"] ->
+            add_error(changeset, :governance_config, "threshold_type must be any, percentage, count, or all")
 
           not is_nil(threshold_value) and not is_number(threshold_value) ->
             add_error(changeset, :governance_config, "threshold_value must be a number")

@@ -81,7 +81,7 @@ defmodule Cympho.BoardGovernanceTest do
       config = %{"threshold_type" => "invalid"}
       changeset = Company.changeset(%Company{}, %{name: "Test", slug: "test", governance_config: config})
       refute changeset.valid?
-      assert %{governance_config: ["threshold_type must be percentage or count"]} = errors_on(changeset)
+      assert %{governance_config: ["threshold_type must be any, percentage, count, or all"]} = errors_on(changeset)
     end
 
     test "rejects non-numeric threshold_value" do
