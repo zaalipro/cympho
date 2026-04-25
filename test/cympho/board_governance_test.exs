@@ -1,5 +1,5 @@
 defmodule Cympho.BoardGovernanceTest do
-  use Cympho.DataCase, async: true
+  use Cympho.DataCase, async: false
 
   alias Cympho.Companies
   alias Cympho.Companies.{Company, CompanyMembership}
