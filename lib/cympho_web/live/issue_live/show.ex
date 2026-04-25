@@ -304,7 +304,15 @@ defmodule CymphoWeb.IssueLive.Show do
   end
   def format_cost(_), do: "$0.00"
 
-  def format_tokens(tokens) when is_integer(tokens), do: Number.Delimit.number_to_delimited(tokens)
+  def format_tokens(tokens) when is_integer(tokens) do
+    tokens
+    |> Integer.to_string()
+    |> String.graphemes()
+    |> Enum.reverse()
+    |> Enum.chunk_every(3)
+    |> Enum.join(",")
+    |> String.reverse()
+  end
   def format_tokens(_), do: "0"
 
   def format_run_duration(run) do

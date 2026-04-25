@@ -90,8 +90,60 @@ defmodule Cympho.Dashboard do
         closed: issues_closed_per_day()
       },
       bottlenecks: Enum.map(bottleneck_issues(), &bottle_neck_to_map/1),
-      routine_health: routine_health()
+      routine_health: routine_health(),
+      recent_activities: recent_activities(10),
+      cost_summary: cost_summary()
     }
+  end
+
+  def recent_activities(limit \\ 20) do
+    import Ecto.Query
+
+    try do
+      Cympho.Activities.Activity
+      |> order_by([a], desc: a.inserted_at)
+      |> limit(^limit)
+      |> Repo.all()
+    rescue
+      _ -> []
+    end
+  end
+
+  def cost_summary do
+    import Ecto.Query
+
+    try do
+      runs = Cympho.HeartbeatEngine.Run
+        |> where([r], r.status == "completed")
+        |> Repo.all()
+
+      total_cost = Enum.reduce(runs, Decimal.new(0), fn run, acc ->
+        cost = run.cost_usd || Decimal.new(0)
+        Decimal.add(acc, cost)
+      end)
+
+      total_input = Enum.reduce(runs, 0, fn run, acc ->
+        acc + (run.input_tokens || 0)
+      end)
+
+      total_output = Enum.reduce(runs, 0, fn run, acc ->
+        acc + (run.output_tokens || 0)
+      end)
+
+      %{
+        total_cost: total_cost,
+        total_input_tokens: total_input,
+        total_output_tokens: total_output,
+        total_runs: length(runs)
+      }
+    rescue
+      _ -> %{
+        total_cost: Decimal.new(0),
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        total_runs: 0
+      }
+    end
   end
 
   def routine_health do

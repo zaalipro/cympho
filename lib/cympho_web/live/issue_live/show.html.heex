@@ -123,36 +123,64 @@
       </div>
 
       <div class="border-t border-border pt-6 space-y-4">
-        <h3 class="text-sm font-510 text-text-primary">Comments ({length(@issue.comments)})</h3>
+        <h3 class="text-sm font-510 text-text-primary">Thread ({length(@issue.comments)})</h3>
 
-        <div class="space-y-3">
+        <div class="space-y-4">
           <div
             :for={comment <- @issue.comments}
             id={"comment-#{comment.id}"}
-            class="bg-surface border border-border rounded-card p-4"
+            class={
+              "flex gap-3 #{if comment.author_type == "system", do: "justify-center", else: ""}"
+            }
           >
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-xs font-510 text-text-secondary">
-                {String.capitalize(to_string(comment.author_type))}: {comment.author_id}
-              </span>
-              <span class="text-xs text-text-quaternary">{comment.inserted_at}</span>
+            <div :if={comment.author_type != "system"} class="flex-shrink-0">
+              <div class={
+                "w-8 h-8 rounded-full flex items-center justify-center text-xs font-510 #{if comment.author_type == "agent", do: "bg-brand/20 text-brand", else: "bg-blue-500/20 text-blue-400"}"
+              }>
+                {String.first(case comment.author_type do
+                  "agent" -> (Enum.find(@all_agents, &(&1.id == comment.author_id)) || %{name: "A"}).name
+                  _ -> "U"
+                end) || "?"}
+              </div>
             </div>
-            <p class="text-sm text-text-secondary">{comment.body}</p>
-            <button
-              type="button"
-              class="mt-2 text-xs text-text-quaternary hover:text-red-400 transition-colors"
-              phx-click="delete_comment"
-              phx-value-id={comment.id}
-              data-confirm="Delete this comment?"
-            >
-              Delete
-            </button>
+            <div class={
+              "flex-1 #{if comment.author_type == "system", do: "bg-white/[0.03] border border-dashed border-border/50 rounded-lg px-4 py-2 text-center", else: "bg-surface border border-border rounded-lg p-4"}"
+            }>
+              <div :if={comment.author_type != "system"} class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-510 text-text-secondary">
+                    {case comment.author_type do
+                      "agent" ->
+                        agent = Enum.find(@all_agents, &(&1.id == comment.author_id))
+                        if agent, do: agent.name, else: "Agent"
+                      _ ->
+                        "User"
+                    end}
+                  </span>
+                  <span :if={comment.author_type == "agent"} class="text-[10px] bg-brand/10 text-brand px-1.5 py-0.5 rounded">Agent</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-text-quaternary">{comment.inserted_at}</span>
+                  <button
+                    type="button"
+                    class="text-text-quaternary hover:text-red-400 transition-colors text-xs opacity-0 group-hover:opacity-100"
+                    phx-click="delete_comment"
+                    phx-value-id={comment.id}
+                    data-confirm="Delete this comment?"
+                  >
+                    x
+                  </button>
+                </div>
+              </div>
+              <p class={if comment.author_type == "system", do: "text-xs text-text-quaternary", else: "text-sm text-text-secondary whitespace-pre-wrap"}>
+                {comment.body}
+              </p>
+            </div>
           </div>
         </div>
 
-        <div class="bg-surface border border-border rounded-card p-5 space-y-4">
-          <h4 class="text-sm font-510 text-text-primary">Add Comment</h4>
-          <form id="comment-form" phx-submit="add_comment" class="space-y-4">
+        <div class="bg-surface border border-border rounded-lg p-4 space-y-3">
+          <form id="comment-form" phx-submit="add_comment" class="space-y-3">
             <.select
               name="comment[author_type]"
               label="Author Type"
@@ -162,6 +190,38 @@
             <.input field={@comment_form[:body]} label="Comment" type="textarea" />
             <.button type="submit">Add Comment</.button>
           </form>
+        </div>
+      </div>
+
+      <div :if={!Enum.empty?(@runs)} class="bg-surface border border-border rounded-lg p-5 space-y-4">
+        <h3 class="text-sm font-510 text-text-primary">Run Ledger ({length(@runs)})</h3>
+        <div class="space-y-2">
+          <div
+            :for={run <- @runs}
+            class="flex items-center gap-3 p-3 bg-white/[0.02] border border-border/50 rounded-lg"
+          >
+            <span class={"w-2.5 h-2.5 rounded-full flex-shrink-0 #{run_status_color(run.status)}"}></span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-510 text-text-primary">{run_status_label(run.status)}</span>
+                <span class="text-xs text-text-quaternary">
+                  {run.adapter || "unknown"}
+                </span>
+              </div>
+              <div class="flex items-center gap-3 mt-1 text-xs text-text-quaternary">
+                <span>{format_run_duration(run)}</span>
+                <span :if={run.input_tokens > 0 or run.output_tokens > 0}>
+                  {format_tokens(run.input_tokens + run.output_tokens)} tokens
+                </span>
+                <span :if={run.cost_usd && run.cost_usd > 0}>
+                  {format_cost(run.cost_usd)}
+                </span>
+              </div>
+            </div>
+            <span class="text-xs text-text-quaternary flex-shrink-0">
+              {Calendar.strftime(run.inserted_at, "%b %d, %H:%M")}
+            </span>
+          </div>
         </div>
       </div>
     </div>

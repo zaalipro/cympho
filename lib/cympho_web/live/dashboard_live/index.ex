@@ -37,6 +37,8 @@ defmodule CymphoWeb.DashboardLive.Index do
     |> assign(:throughput, summary.throughput)
     |> assign(:bottlenecks, summary.bottlenecks)
     |> assign(:routine_health, summary.routine_health)
+    |> assign(:recent_activities, summary.recent_activities)
+    |> assign(:cost_summary, summary.cost_summary)
   end
 
   def status_label(:backlog), do: "Backlog"
@@ -95,4 +97,36 @@ defmodule CymphoWeb.DashboardLive.Index do
   def agent_status_bar(:running), do: "bg-blue-400"
   def agent_status_bar(:error), do: "bg-red-400"
   def agent_status_bar(_), do: "bg-gray-400"
+
+  def format_cost(cost) when not is_nil(cost) do
+    "$" <> (:erlang.float_to_binary(Decimal.to_float(cost), decimals: 2))
+  end
+  def format_cost(_), do: "$0.00"
+
+  def format_tokens(tokens) when is_integer(tokens) and tokens > 0 do
+    cond do
+      tokens >= 1_000_000 -> "#{Float.round(tokens / 1_000_000, 1)}M"
+      tokens >= 1_000 -> "#{Float.round(tokens / 1_000, 1)}K"
+      true -> to_string(tokens)
+    end
+  end
+  def format_tokens(_), do: "0"
+
+  def activity_icon("created"), do: "bg-green-400"
+  def activity_icon("status_changed"), do: "bg-blue-400"
+  def activity_icon("assigned"), do: "bg-purple-400"
+  def activity_icon("comment_added"), do: "bg-yellow-400"
+  def activity_icon("blocker_added"), do: "bg-red-400"
+  def activity_icon("blocker_removed"), do: "bg-orange-400"
+  def activity_icon("heartbeat"), do: "bg-gray-400"
+  def activity_icon(_), do: "bg-gray-400"
+
+  def activity_label("created"), do: "Created"
+  def activity_label("status_changed"), do: "Status Changed"
+  def activity_label("assigned"), do: "Assigned"
+  def activity_label("comment_added"), do: "Comment Added"
+  def activity_label("blocker_added"), do: "Blocker Added"
+  def activity_label("blocker_removed"), do: "Blocker Removed"
+  def activity_label("heartbeat"), do: "Heartbeat"
+  def activity_label(other), do: String.capitalize(to_string(other))
 end
