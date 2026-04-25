@@ -66,10 +66,11 @@ defmodule Cympho.AgentApprovalWorkflowTest do
     %Agent{}
     |> Agent.changeset(attrs)
     |> Cympho.Repo.insert!()
+  end
 
   defp start_heartbeat_supervisor(_context) do
     case start_supervised({Cympho.AgentHeartbeat.Supervisor, []}) do
-      {:ok, _} -> :ok
+      {:ok, pid} -> Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), pid)
       {:error, {:already_started, _}} -> :ok
     end
 
@@ -83,8 +84,13 @@ defmodule Cympho.AgentApprovalWorkflowTest do
 
   defp start_executor(_context) do
     case start_supervised(Cympho.BoardApprovals.BoardApprovalActionExecutor) do
-      {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> :ok
+      {:ok, pid} ->
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), pid)
+        :ok
+
+      {:error, {:already_started, pid}} ->
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), pid)
+        :ok
     end
   end
 
@@ -386,7 +392,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
 
       logs =
         GovernanceAuditLogs.list_governance_audit_logs(
-          action_type: "agent_hire_approved_executed"
+          action_type: "agent_hired"
         )
 
       assert length(logs) >= 1
@@ -410,7 +416,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
 
       logs =
         GovernanceAuditLogs.list_governance_audit_logs(
-          action_type: "board_approval_denied_noop"
+          action_type: "board_decision"
         )
 
       assert length(logs) >= 1

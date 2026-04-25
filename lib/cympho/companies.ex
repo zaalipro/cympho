@@ -65,7 +65,7 @@ defmodule Cympho.Companies do
       {:ok, approval} ->
         GovernanceAuditLogs.log_action(
           "policy_change_pending_approval",
-          {"system", "system"},
+          nil,
           "Company config change pending board approval: #{company.name}",
           resource: approval,
           metadata: %{company_id: company.id}

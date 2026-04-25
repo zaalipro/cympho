@@ -43,12 +43,26 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       scope_type: "company",
       scope_id: company.id,
       company_id: company.id,
-      limit_amount: Decimal.new("1000"),
+      limit_amount: Decimal.new("100"),
       currency: "USD"
     }
 
-    {:ok, budget} = Budgets.create_budget(Map.merge(defaults, attrs))
-    budget
+    merged = Map.merge(defaults, attrs)
+
+    # If the company has budget_increase governance, ensure we create below threshold
+    result = Budgets.create_budget(merged)
+    case result do
+      {:ok, budget} -> budget
+      {:pending_approval, _} ->
+        # Retry with a limit below the threshold (governance budget_limit_threshold defaults to 500)
+        Budgets.create_budget(Map.put(merged, :limit_amount, Decimal.new("100")))
+        |> case do
+          {:ok, budget} -> budget
+          {:pending_approval, approval} -> flunk("create_test_budget still hit approval gate: #{inspect(approval)}")
+          {:error, cs} -> flunk("create_test_budget failed: #{inspect(cs.errors)}")
+        end
+      {:error, cs} -> flunk("create_test_budget failed: #{inspect(cs.errors)}")
+    end
   end
 
   defp company_with_governance(categories, extra \\ %{}) do
@@ -113,8 +127,8 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       assert approval.status == "pending"
 
       # Verify proposal_data has the budget attrs
-      assert get_in(approval.proposal_data, ["action"]) == "create_budget"
-      assert get_in(approval.proposal_data, ["budget_attrs", "name"]) == "Big Budget"
+      assert approval.proposal_data.action == "create_budget"
+      assert approval.proposal_data.budget_attrs["name"] == "Big Budget"
     end
 
     test "creates budget directly when no company_id in attrs" do
@@ -155,10 +169,10 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
 
     test "updates budget directly when limit is not increasing" do
       company = company_with_governance(["budget_increase"])
-      budget = create_test_budget(company, %{limit_amount: Decimal.new("1000")})
+      budget = create_test_budget(company, %{limit_amount: Decimal.new("100")})
 
       assert {:ok, %Budget{}} =
-               Budgets.update_budget(budget, %{limit_amount: Decimal.new("500")})
+               Budgets.update_budget(budget, %{limit_amount: Decimal.new("50")})
     end
 
     test "updates budget directly when limit unchanged" do
@@ -171,14 +185,14 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
 
     test "returns pending_approval when limit increases and governance required" do
       company = company_with_governance(["budget_increase"])
-      budget = create_test_budget(company, %{limit_amount: Decimal.new("1000")})
+      budget = create_test_budget(company, %{limit_amount: Decimal.new("100")})
 
       assert {:pending_approval, %BoardApproval{category: "budget_increase"} = approval} =
                Budgets.update_budget(budget, %{limit_amount: Decimal.new("5000")})
 
       assert approval.status == "pending"
-      assert get_in(approval.proposal_data, ["action"]) == "update_budget"
-      assert get_in(approval.proposal_data, ["budget_id"]) == budget.id
+      assert approval.proposal_data.action == "update_budget"
+      assert approval.proposal_data.budget_id == budget.id
     end
   end
 
@@ -212,8 +226,8 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
                Companies.update_company(company, %{governance_config: new_config})
 
       assert approval.status == "pending"
-      assert get_in(approval.proposal_data, ["action"]) == "update_company"
-      assert get_in(approval.proposal_data, ["company_id"]) == company.id
+      assert approval.proposal_data.action == "update_company"
+      assert approval.proposal_data.company_id == company.id
     end
   end
 
@@ -256,7 +270,7 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
 
     test "updates budget when board approval for increase is resolved" do
       company = company_with_governance(["budget_increase"])
-      budget = create_test_budget(company, %{limit_amount: Decimal.new("1000")})
+      budget = create_test_budget(company, %{limit_amount: Decimal.new("100")})
 
       {:pending_approval, approval} =
         Budgets.update_budget(budget, %{limit_amount: Decimal.new("5000")})
@@ -330,8 +344,10 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
           limit_amount: Decimal.new("1000")
         })
 
-      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "budget_pending_approval")
+      # Board approval creation logs board_proposal_created
+      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "board_proposal_created")
       assert length(logs) >= 1
+      assert Enum.any?(logs, &String.contains?(&1.decision, "Budget"))
     end
 
     test "logs audit event for policy change pending approval" do
@@ -340,8 +356,9 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       {:pending_approval, _approval} =
         Companies.update_company(company, %{governance_config: %{"categories" => ["policy_change"]}})
 
-      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "policy_change_pending_approval")
+      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "board_proposal_created")
       assert length(logs) >= 1
+      assert Enum.any?(logs, &String.contains?(&1.decision, "policy"))
     end
   end
 

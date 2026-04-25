@@ -13,28 +13,30 @@ defmodule CymphoWeb.ChannelCase do
       import CymphoWeb.ChannelCase
 
       @endpoint CymphoWeb.Endpoint
+
+      @doc """
+      Connects a socket with JWT auth (agent-style).
+      """
+      def connect_jwt(company_id, agent_id) do
+        {:ok, token} =
+          Cympho.AgentAuthJWT.generate_token(agent_id, "run-#{:rand.uniform(1000)}", company_id)
+
+        Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{"token" => token})
+      end
+
+      @doc """
+      Connects a socket with session auth (browser-style).
+      """
+      def connect_session(company_id, user_id) do
+        Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{}, %{
+          session: %{"user_id" => user_id, "company_id" => company_id}
+        })
+      end
     end
   end
 
   setup tags do
     Cympho.DataCase.setup_sandbox(tags)
     :ok
-  end
-
-  @doc """
-  Connects a socket with JWT auth (agent-style).
-  """
-  def connect_jwt(company_id, agent_id) do
-    {:ok, token} = Cympho.AgentAuthJWT.generate_token(agent_id, "run-#{:rand.uniform(1000)}", company_id)
-    Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{"token" => token})
-  end
-
-  @doc """
-  Connects a socket with session auth (browser-style).
-  """
-  def connect_session(company_id, user_id) do
-    Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{}, %{
-      session: %{"user_id" => user_id, "company_id" => company_id}
-    })
   end
 end

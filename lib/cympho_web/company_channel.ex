@@ -2,9 +2,9 @@ defmodule CymphoWeb.CompanyChannel do
   use CymphoWeb, :channel
 
   @impl true
-  def join("company:" <> topic, _payload, socket) do
-    case parse_company_id(topic) do
-      {:ok, company_id} ->
+  def join("company:" <> rest, payload, socket) do
+    case String.split(rest, ":", parts: 2) do
+      [company_id] ->
         if socket.assigns.company_id == company_id do
           send(self(), :after_join)
           {:ok, socket}
@@ -12,9 +12,18 @@ defmodule CymphoWeb.CompanyChannel do
           {:error, %{reason: "unauthorized"}}
         end
 
-      :error ->
-        {:error, %{reason: "invalid_topic"}}
+      [company_id, sub_topic] ->
+        if socket.assigns.company_id == company_id do
+          dispatch_sub_topic("company:#{rest}", sub_topic, payload, socket)
+        else
+          {:error, %{reason: "unauthorized"}}
+        end
     end
+  end
+
+  @impl true
+  def join(_, _payload, _socket) do
+    {:error, %{reason: "invalid_topic"}}
   end
 
   @impl true
@@ -27,13 +36,24 @@ defmodule CymphoWeb.CompanyChannel do
     {:reply, {:ok, %{pong: true}}, socket}
   end
 
-  defp parse_company_id(topic) do
-    case String.split(topic, ":", parts: 2) do
-      [company_id | _] ->
-        if byte_size(company_id) > 0, do: {:ok, company_id}, else: :error
+  @impl true
+  def handle_in(event, payload, socket) do
+    {:noreply, socket}
+  end
 
-      _ ->
-        :error
-    end
+  defp dispatch_sub_topic(topic, "activities", _payload, socket) do
+    CymphoWeb.ActivityChannel.join(topic, %{}, socket)
+  end
+
+  defp dispatch_sub_topic(topic, "issue:" <> _issue_id, _payload, socket) do
+    CymphoWeb.IssueChannel.join(topic, %{}, socket)
+  end
+
+  defp dispatch_sub_topic(topic, "project:" <> _project_id, _payload, socket) do
+    CymphoWeb.CommentsChannel.join(topic, %{}, socket)
+  end
+
+  defp dispatch_sub_topic(_topic, _sub, _payload, _socket) do
+    {:error, %{reason: "invalid_topic"}}
   end
 end

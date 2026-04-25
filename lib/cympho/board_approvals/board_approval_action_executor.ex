@@ -46,8 +46,8 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     case Agents.execute_approved_hire(proposal_data) do
       {:ok, agent} ->
         GovernanceAuditLogs.log_action(
-          "agent_hire_approved_executed",
-          {"system", "board_approval_action_executor"},
+          "agent_hired",
+          {"system", approval.company_id},
           "Agent hire executed after board approval: #{agent.name}",
           resource: agent,
           metadata: %{board_approval_id: approval.id, agent_id: agent.id}
@@ -55,8 +55,8 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
       {:error, reason} ->
         GovernanceAuditLogs.log_action(
-          "agent_hire_approved_failed",
-          {"system", "board_approval_action_executor"},
+          "board_decision",
+          {"system", approval.company_id},
           "Agent hire failed after board approval: #{inspect(reason)}",
           resource: approval,
           metadata: %{board_approval_id: approval.id, error: inspect(reason)}
@@ -69,14 +69,14 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     agent_id = proposal_data["agent_id"]
     new_role = proposal_data["new_role"]
 
-    if agent_id && new_role do
+    if agent_id != nil and new_role != nil do
       new_role_atom = parse_role(new_role)
 
       case Agents.apply_role_change(agent_id, new_role_atom) do
         {:ok, agent} ->
           GovernanceAuditLogs.log_action(
-            "agent_promotion_approved_executed",
-            {"system", "board_approval_action_executor"},
+            "agent_promoted",
+            {"system", approval.company_id},
             "Agent role change executed: #{agent.name} → #{agent.role}",
             resource: agent,
             metadata: %{board_approval_id: approval.id, agent_id: agent.id, new_role: new_role}
@@ -84,8 +84,8 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
         {:error, reason} ->
           GovernanceAuditLogs.log_action(
-            "agent_promotion_approved_failed",
-            {"system", "board_approval_action_executor"},
+            "board_decision",
+            {"system", approval.company_id},
             "Agent role change failed: #{inspect(reason)}",
             resource: approval,
             metadata: %{board_approval_id: approval.id, error: inspect(reason)}
@@ -98,8 +98,8 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
   defp audit_non_executed(approval, status) do
     GovernanceAuditLogs.log_action(
-      "board_approval_#{status}_noop",
-      {"system", "board_approval_action_executor"},
+      "board_decision",
+      {"system", approval.company_id},
       "Board approval #{status}, action not executed: #{approval.title}",
       resource: approval,
       metadata: %{

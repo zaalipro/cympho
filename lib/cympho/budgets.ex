@@ -378,8 +378,8 @@ defmodule Cympho.Budgets do
       category: "budget_increase",
       company_id: company.id,
       proposal_data: %{
-        action: "create_budget",
-        budget_attrs: stringify_keys(attrs)
+        "action" => "create_budget",
+        "budget_attrs" => stringify_keys(attrs)
       }
     }
 
@@ -408,11 +408,11 @@ defmodule Cympho.Budgets do
       category: "budget_increase",
       company_id: company.id,
       proposal_data: %{
-        action: "update_budget",
-        budget_id: budget.id,
-        old_limit: Decimal.to_string(budget.limit_amount),
-        new_limit: to_string(attrs[:limit_amount] || attrs["limit_amount"]),
-        update_attrs: stringify_keys(attrs)
+        "action" => "update_budget",
+        "budget_id" => budget.id,
+        "old_limit" => Decimal.to_string(budget.limit_amount),
+        "new_limit" => to_string(attrs[:limit_amount] || attrs["limit_amount"]),
+        "update_attrs" => stringify_keys(attrs)
       }
     }
 

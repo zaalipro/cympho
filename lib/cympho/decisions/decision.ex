@@ -82,7 +82,7 @@ defmodule Cympho.Decisions.Decision do
   def create_changeset(decision, attrs) do
     decision
     |> changeset(attrs)
-    |> put_change(:effective_at, DateTime.utc_now())
+    |> put_change(:effective_at, DateTime.utc_now() |> DateTime.truncate(:second))
     |> put_change(:status, "active")
   end
 

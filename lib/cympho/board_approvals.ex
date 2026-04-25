@@ -595,7 +595,7 @@ defmodule Cympho.BoardApprovals do
             {:error, changeset} ->
               GovernanceAuditLogs.log_action(
                 "policy_change_execution_failed",
-                {"system", "system"},
+                nil,
                 "Company config update failed after board approval",
                 resource: board_approval,
                 metadata: %{errors: traverse_errors(changeset)}
