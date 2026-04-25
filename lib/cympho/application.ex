@@ -16,7 +16,12 @@ defmodule Cympho.Application do
       # Layer 2: NotificationSupervisor
       {Cympho.Notifications.NotificationSupervisor, []},
       Cympho.Orchestrator.Dispatcher,
+      Cympho.HeartbeatEngine.Watchdog,
       Cympho.Scheduler,
+      # Plugin system
+      {Registry, keys: :unique, name: Cympho.PluginRegistry},
+      Cympho.Plugins.Registry,
+      {Cympho.Plugins.Supervisor, []},
       CymphoWeb.Endpoint
     ]
 

@@ -25,7 +25,9 @@ defmodule Cympho.Orchestrator do
 
   use GenServer
   alias Cympho.Orchestrator.Session
-  alias Cympho.{Issues, Comments, Agents, Activities}
+  alias Cympho.{Issues, Comments, Agents, Activities, HeartbeatEngine}
+
+  @heartbeat_tick_interval 30_000
 
   @registry Cympho.OrchestratorRegistry
 
@@ -107,6 +109,7 @@ defmodule Cympho.Orchestrator do
   @impl true
   def init({issue, agent_id}) do
     session = %Session{issue: issue, agent_id: agent_id}
+    session = create_pending_run(session, issue, agent_id)
     {:ok, session, {:continue, :start_session}}
   end
 
@@ -115,7 +118,9 @@ defmodule Cympho.Orchestrator do
     issue = session.issue
     agent_id = session.agent_id
 
-    # Use Mock for test environment, real runner otherwise
+    start_engine_run(session)
+    schedule_heartbeat_tick()
+
     runner = runner_module()
     session_id = runner.run(issue, agent_id, self(), run_opts(issue))
 
@@ -132,10 +137,10 @@ defmodule Cympho.Orchestrator do
     issue = session.issue
     agent_id = session.agent_id
 
-    # Extract text content from Claude result
+    complete_engine_run(session, result)
+
     body = extract_result_content(result)
 
-    # Create comment with agent as polymorphic author
     {:ok, _comment} =
       Comments.create_comment(%{
         body: body,
@@ -144,7 +149,6 @@ defmodule Cympho.Orchestrator do
         issue_id: issue.id
       })
 
-    # Mark issue done
     Issues.transition_issue(issue, :done)
 
     Activities.log_heartbeat_event(issue.id, :completed, %{
@@ -152,10 +156,8 @@ defmodule Cympho.Orchestrator do
       turn_count: session.turn_count + 1
     })
 
-    # Update agent status back to idle
     set_agent_idle(agent_id)
 
-    # Stop this orchestrator - work is complete
     {:stop, :normal, session}
   end
 
@@ -168,7 +170,8 @@ defmodule Cympho.Orchestrator do
       "[Orchestrator] Session ended with error for issue #{issue.id}, agent #{agent_id}: #{inspect(reason)}"
     )
 
-    # Create error comment
+    fail_engine_run(session, reason)
+
     error_body = "Agent work error: #{inspect(reason)}"
 
     {:ok, _comment} =
@@ -179,7 +182,6 @@ defmodule Cympho.Orchestrator do
         issue_id: issue.id
       })
 
-    # Mark issue as blocked waiting on resolution (use state machine)
     case Issues.transition_issue(issue, :blocked) do
       {:ok, _} ->
         :logger.info("[Orchestrator] Issue #{issue.id} transitioned to :blocked after error")
@@ -190,10 +192,20 @@ defmodule Cympho.Orchestrator do
         )
     end
 
-    # Keep agent idle
     set_agent_idle(agent_id)
 
     {:stop, :normal, session}
+  end
+
+  @impl true
+  def handle_info(:heartbeat_tick, %Session{run_id: run_id} = session) when run_id != nil do
+    record_heartbeat(session)
+    schedule_heartbeat_tick()
+    {:noreply, session}
+  end
+
+  def handle_info(:heartbeat_tick, session) do
+    {:noreply, session}
   end
 
   @impl true
@@ -203,6 +215,7 @@ defmodule Cympho.Orchestrator do
        issue_id: session.issue.id,
        agent_id: session.agent_id,
        session_id: session.session_id,
+       run_id: session.run_id,
        status: session.status,
        turn_count: session.turn_count
      }, session}
@@ -220,7 +233,94 @@ defmodule Cympho.Orchestrator do
     :ok
   end
 
-  ## Private
+  ## Private — HeartbeatEngine integration
+
+  defp create_pending_run(session, issue, agent_id) do
+    try do
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: issue.id,
+          adapter: "claude_local"
+        })
+
+      %{session | run_id: run.id}
+    rescue
+      e ->
+        :logger.warning("[Orchestrator] Failed to create engine run: #{inspect(e)}")
+        session
+    end
+  end
+
+  defp start_engine_run(%Session{run_id: nil}), do: :ok
+
+  defp start_engine_run(%Session{run_id: run_id}) do
+    try do
+      {:ok, run} = HeartbeatEngine.get_run(run_id)
+      HeartbeatEngine.start_run(run)
+    rescue
+      e ->
+        :logger.warning("[Orchestrator] Failed to start engine run: #{inspect(e)}")
+    end
+  end
+
+  defp complete_engine_run(%Session{run_id: nil}, _result), do: :ok
+
+  defp complete_engine_run(%Session{run_id: run_id}, result) do
+    try do
+      {:ok, run} = HeartbeatEngine.get_run(run_id)
+      attrs = extract_run_attrs(result)
+      HeartbeatEngine.complete_run(run, attrs)
+    rescue
+      e ->
+        :logger.warning("[Orchestrator] Failed to complete engine run: #{inspect(e)}")
+    end
+  end
+
+  defp fail_engine_run(%Session{run_id: nil}, _reason), do: :ok
+
+  defp fail_engine_run(%Session{run_id: run_id}, reason) do
+    try do
+      {:ok, run} = HeartbeatEngine.get_run(run_id)
+      HeartbeatEngine.fail_run(run, to_string(reason))
+    rescue
+      e ->
+        :logger.warning("[Orchestrator] Failed to fail engine run: #{inspect(e)}")
+    end
+  end
+
+  defp record_heartbeat(%Session{run_id: nil}), do: :ok
+
+  defp record_heartbeat(%Session{run_id: run_id}) do
+    try do
+      {:ok, run} = HeartbeatEngine.get_run(run_id)
+      HeartbeatEngine.record_heartbeat(run)
+    rescue
+      _ -> :ok
+    end
+  end
+
+  defp extract_run_attrs(result) when is_map(result) do
+    usage = result["usage"] || %{}
+
+    %{
+      input_tokens: usage["input_tokens"] || 0,
+      output_tokens: usage["output_tokens"] || 0,
+      cost_usd: parse_cost(result["cost_usd"] || usage["cost_usd"])
+    }
+  end
+
+  defp extract_run_attrs(_), do: %{input_tokens: 0, output_tokens: 0, cost_usd: Decimal.new("0")}
+
+  defp parse_cost(nil), do: Decimal.new("0")
+  defp parse_cost(val) when is_binary(val), do: Decimal.new(val)
+  defp parse_cost(val), do: Decimal.new("#{val}")
+
+  defp schedule_heartbeat_tick do
+    Process.send_after(self(), :heartbeat_tick, @heartbeat_tick_interval)
+  end
+
+  ## Private — original helpers
 
   defp extract_result_content(result) when is_map(result) do
     content = result["content"] || []
