@@ -222,6 +222,20 @@ defmodule Cympho.BoardApprovals do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "board_approvals")
   end
 
+
+  @doc """
+  Checks whether board approval is required for a given category
+  based on the company's governance config.
+  """
+  def governance_config_required?(%Cympho.Companies.Company{} = company, category) do
+    categories =
+      company
+      |> Map.get(:governance_config, %{})
+      |> Map.get("categories", [])
+
+    category in categories
+  end
+
   defp check_auto_approve(%BoardApproval{} = board_approval) do
     if BoardApproval.approval_threshold_met?(board_approval) do
       resolve_board_approval(

@@ -18,7 +18,7 @@ defmodule Cympho.Companies.CompanyMembership do
   def changeset(membership, attrs) do
     membership
     |> cast(attrs, [:role, :is_board_member, :user_id, :company_id])
-    |> validate_required([:role, :is_board_member, :user_id, :company_id])
+    |> validate_required([:role, :user_id, :company_id])
     |> validate_inclusion(:role, ["owner", "admin", "member", "viewer"])
     |> unique_constraint([:user_id, :company_id])
     |> assoc_constraint(:user)

@@ -37,7 +37,36 @@ defmodule Cympho.Companies.Company do
     case get_change(changeset, :logo_url) do
       nil -> changeset
       "" -> changeset
-      _url -> validate_format(changeset, :logo_url, ~r/^https?:\/\/.+/, message: "must be a valid URL")
+      url -> validate_format(changeset, :logo_url, ~r/^https?:\/\/.+/, message: "must be a valid URL")
+    end
+  end
+
+  defp validate_governance_config(changeset) do
+    case get_change(changeset, :governance_config) do
+      nil ->
+        changeset
+
+      config when is_map(config) ->
+        categories = Map.get(config, "categories")
+        threshold_type = Map.get(config, "threshold_type")
+        threshold_value = Map.get(config, "threshold_value")
+
+        cond do
+          not is_nil(categories) and not is_list(categories) ->
+            add_error(changeset, :governance_config, "categories must be a list")
+
+          threshold_type not in [nil, "percentage", "count"] ->
+            add_error(changeset, :governance_config, "threshold_type must be percentage or count")
+
+          not is_nil(threshold_value) and not is_number(threshold_value) ->
+            add_error(changeset, :governance_config, "threshold_value must be a number")
+
+          true ->
+            changeset
+        end
+
+      _ ->
+        add_error(changeset, :governance_config, "must be a map")
     end
   end
 end
