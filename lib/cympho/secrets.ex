@@ -124,6 +124,21 @@ defmodule Cympho.Secrets do
     |> Repo.update()
   end
 
+  def list_secret_versions(secret_id) do
+    Secret
+    |> where([s], s.key in fragment(
+      "(SELECT ? FROM secrets WHERE id = ?)",
+      select([s], s.key),
+      ^secret_id
+    ))
+    |> where(company_id: fragment(
+      "(SELECT company_id FROM secrets WHERE id = ?)",
+      ^secret_id
+    ))
+    |> order_by(desc: :version)
+    |> Repo.all()
+  end
+
   def list_active_secret_values(company_id, opts \\ []) do
     list_secrets(company_id, opts)
     |> Enum.flat_map(fn secret ->
