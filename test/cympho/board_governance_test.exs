@@ -190,4 +190,70 @@ defmodule Cympho.BoardGovernanceTest do
       refute BoardApprovals.governance_required?(company, "agent_hire")
     end
   end
+
+  describe "propose_agent_hire/3" do
+    test "hires directly when governance not required" do
+      {:ok, company} = Companies.create_company(%{name: "No Gov", slug: "no-gov-#{System.unique_integer([:positive])}"})
+
+      assert {:ok, agent} = BoardApprovals.propose_agent_hire(company.id, %{
+        "name" => "Direct Hire",
+        "role" => "engineer"
+      })
+      assert agent.name == "Direct Hire"
+    end
+
+    test "creates proposal when governance required" do
+      {:ok, company} = Companies.create_company(%{
+        name: "Gov On",
+        slug: "gov-on-#{System.unique_integer([:positive])}",
+        governance_config: %{"required_approvals" => ["agent_hire"]}
+      })
+
+      assert {:ok, %BoardApproval{} = approval} = BoardApprovals.propose_agent_hire(company.id, %{
+        "name" => "Board Hire",
+        "role" => "engineer"
+      })
+      assert approval.category == "agent_hire"
+      assert approval.status == "pending"
+    end
+  end
+
+  describe "propose_role_change/4" do
+    test "updates role directly when governance not required" do
+      {:ok, company} = Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer([:positive])}"})
+      {:ok, agent} = Cympho.Agents.create_agent(%{name: "Agent", role: :engineer, company_id: company.id})
+
+      assert {:ok, updated} = BoardApprovals.propose_role_change(company.id, agent.id, :cto)
+      assert updated.role == :cto
+    end
+
+    test "creates proposal when governance required" do
+      {:ok, company} = Companies.create_company(%{
+        name: "Gov Role",
+        slug: "gov-role-#{System.unique_integer([:positive])}",
+        governance_config: %{"required_approvals" => ["agent_promotion"]}
+      })
+      {:ok, agent} = Cympho.Agents.create_agent(%{name: "Agent", role: :engineer, company_id: company.id})
+
+      assert {:ok, %BoardApproval{} = approval} = BoardApprovals.propose_role_change(company.id, agent.id, :cto)
+      assert approval.category == "agent_promotion"
+      assert approval.status == "pending"
+    end
+  end
+
+  describe "propose_budget_change/4" do
+    test "creates proposal when governance required" do
+      {:ok, company} = Companies.create_company(%{
+        name: "Budget Gov",
+        slug: "budget-gov-#{System.unique_integer([:positive])}",
+        governance_config: %{"required_approvals" => ["budget_increase"]}
+      })
+
+      assert {:ok, %BoardApproval{} = approval} = BoardApprovals.propose_budget_change(
+        company.id, "monthly_spend", 500_000
+      )
+      assert approval.category == "budget_increase"
+      assert approval.status == "pending"
+    end
+  end
 end
