@@ -245,6 +245,146 @@ defmodule Cympho.BoardApprovals do
     end
   end
 
+  # --- Agent Approval Workflows ---
+
+  @doc """
+  Proposes hiring a new agent. If board approval is required for the company,
+  creates a pending proposal. Otherwise, hires the agent directly.
+  """
+  def propose_agent_hire(company_id, agent_attrs, requested_by \\ nil) do
+    if governance_required?(company_id, "agent_hire") do
+      create_board_approval(
+        %{
+          title: "Hire Agent: #{agent_attrs["name"] || agent_attrs[:name] || "Unnamed"}",
+          description: "Request to hire a new agent.",
+          category: "agent_hire",
+          company_id: company_id,
+          requested_by_agent_id: extract_agent_id(requested_by),
+          proposal_data: %{
+            "agent_attrs" => agent_attrs
+          },
+          review_deadline: DateTime.utc_now() |> DateTime.add(7 * 24 * 3600, :second)
+        },
+        requested_by
+      )
+    else
+      Cympho.Agents.create_agent(agent_attrs)
+    end
+  end
+
+  @doc """
+  Proposes changing an agent's role. If board approval is required,
+  creates a pending proposal. Otherwise, updates the role directly.
+  """
+  def propose_role_change(company_id, agent_id, new_role, requested_by \\ nil) do
+    if governance_required?(company_id, "agent_promotion") do
+      {:ok, agent} = Cympho.Agents.get_agent(agent_id)
+
+      create_board_approval(
+        %{
+          title: "Role Change: #{agent.name} → #{new_role}",
+          description: "Request to change role of agent #{agent.name} from #{agent.role} to #{new_role}.",
+          category: "agent_promotion",
+          company_id: company_id,
+          requested_by_agent_id: extract_agent_id(requested_by),
+          proposal_data: %{
+            "agent_id" => agent_id,
+            "new_role" => to_string(new_role),
+            "current_role" => to_string(agent.role)
+          },
+          review_deadline: DateTime.utc_now() |> DateTime.add(7 * 24 * 3600, :second)
+        },
+        requested_by
+      )
+    else
+      with {:ok, agent} <- Cympho.Agents.get_agent(agent_id) do
+        Cympho.Agents.update_agent(agent, %{role: new_role})
+      end
+    end
+  end
+
+  # --- Budget Approval Workflows ---
+
+  @doc """
+  Proposes a budget increase. If board approval is required, creates a
+  pending proposal. Otherwise, applies the change directly.
+  """
+  def propose_budget_change(company_id, budget_id, new_limit, requested_by \\ nil) do
+    if governance_required?(company_id, "budget_increase") do
+      create_board_approval(
+        %{
+          title: "Budget Increase: #{budget_id}",
+          description: "Request to increase budget limit.",
+          category: "budget_increase",
+          company_id: company_id,
+          requested_by_agent_id: extract_agent_id(requested_by),
+          proposal_data: %{
+            "budget_id" => budget_id,
+            "new_limit" => new_limit
+          },
+          review_deadline: DateTime.utc_now() |> DateTime.add(7 * 24 * 3600, :second)
+        },
+        requested_by
+      )
+    else
+      apply_budget_change(company_id, budget_id, new_limit)
+    end
+  end
+
+  @doc """
+  Proposes a company config change requiring board approval.
+  """
+  def propose_config_change(company_id, config_key, config_value, requested_by \\ nil) do
+    if governance_required?(company_id, "policy_change") do
+      create_board_approval(
+        %{
+          title: "Config Change: #{config_key}",
+          description: "Request to change company config #{config_key}.",
+          category: "policy_change",
+          company_id: company_id,
+          requested_by_agent_id: extract_agent_id(requested_by),
+          proposal_data: %{
+            "config_key" => config_key,
+            "config_value" => config_value
+          },
+          review_deadline: DateTime.utc_now() |> DateTime.add(7 * 24 * 3600, :second)
+        },
+        requested_by
+      )
+    else
+      apply_config_change(company_id, config_key, config_value)
+    end
+  end
+
+  defp apply_budget_change(company_id, budget_id, new_limit) do
+    # Update company budget config
+    company = Cympho.Repo.get!(Cympho.Companies.Company, company_id)
+    config = company.governance_config || %{}
+    budgets = Map.get(config, "budgets", %{})
+    updated_budgets = Map.put(budgets, budget_id, new_limit)
+    updated_config = Map.put(config, "budgets", updated_budgets)
+
+    company
+    |> Ecto.Changeset.change(%{governance_config: updated_config})
+    |> Cympho.Repo.update()
+  end
+
+  defp apply_config_change(company_id, config_key, config_value) do
+    company = Cympho.Repo.get!(Cympho.Companies.Company, company_id)
+    config = company.governance_config || %{}
+    updated_config = Map.put(config, config_key, config_value)
+
+    company
+    |> Ecto.Changeset.change(%{governance_config: updated_config})
+    |> Cympho.Repo.update()
+  end
+
+  defp extract_agent_id(nil), do: nil
+  defp extract_agent_id(%Cympho.Agents.Agent{id: id}), do: id
+  defp extract_agent_id(id) when is_binary(id), do: id
+  defp extract_agent_id({"agent", id}), do: id
+  defp extract_agent_id(_), do: nil
+
   defp check_auto_approve(%BoardApproval{} = board_approval) do
     if BoardApproval.approval_threshold_met?(board_approval) do
       resolve_board_approval(
@@ -260,6 +400,9 @@ defmodule Cympho.BoardApprovals do
 
   defp maybe_trigger_action(%BoardApproval{status: "approved"} = board_approval) do
     case board_approval.category do
+      "agent_hire" ->
+        trigger_agent_hire(board_approval)
+
       "agent_termination" ->
         trigger_agent_termination(board_approval)
 
@@ -282,15 +425,67 @@ defmodule Cympho.BoardApprovals do
 
   defp maybe_trigger_action(_), do: :ok
 
+  defp trigger_agent_hire(board_approval) do
+    proposal_data = board_approval.proposal_data || %{}
+    agent_attrs = Map.get(proposal_data, "agent_attrs") || Map.get(proposal_data, "agent_params") || %{}
+
+    case Cympho.Agents.create_agent(agent_attrs) do
+      {:ok, agent} ->
+        GovernanceAuditLogs.log_action(
+          "agent_hire_executed",
+          {"board_approval", board_approval.id},
+          "Agent hired via board approval: #{agent.name}",
+          resource: agent,
+          metadata: %{board_approval_id: board_approval.id, agent_id: agent.id}
+        )
+
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "governance",
+          {:agent_hire_approved, board_approval.id, agent}
+        )
+
+        {:ok, agent}
+
+      {:error, changeset} ->
+        GovernanceAuditLogs.log_action(
+          "agent_hire_failed",
+          {"board_approval", board_approval.id},
+          "Agent hire failed after board approval",
+          metadata: %{board_approval_id: board_approval.id, errors: inspect(changeset.errors)}
+        )
+
+        {:error, changeset}
+    end
+  end
+
   defp trigger_agent_termination(board_approval) do
     agent_id = get_in(board_approval.proposal_data, ["agent_id"])
 
     if agent_id do
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        "governance",
-        {:agent_termination_approved, board_approval.id, agent_id}
-      )
+      case Cympho.Agents.get_agent(agent_id) do
+        {:ok, agent} ->
+          Cympho.Agents.update_agent(agent, %{status: :offline})
+
+          GovernanceAuditLogs.log_action(
+            "agent_termination_executed",
+            {"board_approval", board_approval.id},
+            "Agent terminated via board approval: #{agent.name}",
+            resource: agent,
+            metadata: %{board_approval_id: board_approval.id, agent_id: agent_id}
+          )
+
+          Phoenix.PubSub.broadcast(
+            Cympho.PubSub,
+            "governance",
+            {:agent_termination_approved, board_approval.id, agent_id}
+          )
+
+          {:ok, agent}
+
+        {:error, _} ->
+          {:error, :agent_not_found}
+      end
     end
   end
 
@@ -299,11 +494,33 @@ defmodule Cympho.BoardApprovals do
     new_role = get_in(board_approval.proposal_data, ["new_role"])
 
     if agent_id and new_role do
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        "governance",
-        {:agent_promotion_approved, board_approval.id, agent_id, new_role}
-      )
+      case Cympho.Agents.get_agent(agent_id) do
+        {:ok, agent} ->
+          case Cympho.Agents.update_agent(agent, %{role: new_role}) do
+            {:ok, updated} ->
+              GovernanceAuditLogs.log_action(
+                "agent_promotion_executed",
+                {"board_approval", board_approval.id},
+                "Agent #{agent.name} promoted to #{new_role}",
+                resource: updated,
+                metadata: %{board_approval_id: board_approval.id, agent_id: agent_id, new_role: new_role}
+              )
+
+              Phoenix.PubSub.broadcast(
+                Cympho.PubSub,
+                "governance",
+                {:agent_promotion_approved, board_approval.id, agent_id, new_role}
+              )
+
+              {:ok, updated}
+
+            error ->
+              error
+          end
+
+        {:error, _} ->
+          {:error, :agent_not_found}
+      end
     end
   end
 

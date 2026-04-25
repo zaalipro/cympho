@@ -35,7 +35,6 @@ defmodule Cympho.BoardApprovals.BoardApproval do
       "agent_hire",
       "agent_termination",
       "agent_promotion",
-      "agent_hire",
       "budget_increase",
       "policy_change",
       "security_exception",
