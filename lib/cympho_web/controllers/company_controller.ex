@@ -41,6 +41,20 @@ defmodule CymphoWeb.CompanyController do
     end
   end
 
+  def update_governance_config(conn, %{"id" => id, "governance_config" => config_params}) do
+    company = Companies.get_company!(id)
+
+    case Companies.update_company(company, %{governance_config: config_params}) do
+      {:ok, company} ->
+        json(conn, %{data: company})
+
+      {:error, changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: translate_errors(changeset)})
+    end
+  end
+
   def delete(conn, %{"id" => id}) do
     company = Companies.get_company!(id)
 

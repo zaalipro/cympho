@@ -660,6 +660,28 @@ defmodule Cympho.BoardApprovals do
     end
   end
 
+  defp trigger_strategic_initiative(board_approval) do
+    GovernanceAuditLogs.log_action(
+      "strategic_initiative_approved",
+      {"board_approval", board_approval.id},
+      "Strategic initiative approved: #{board_approval.title}",
+      resource: board_approval,
+      reasoning: board_approval.description,
+      metadata: %{
+        board_approval_id: board_approval.id,
+        proposal_data: board_approval.proposal_data
+      }
+    )
+
+    Phoenix.PubSub.broadcast(
+      Cympho.PubSub,
+      "governance",
+      {:strategic_initiative_approved, board_approval.id, board_approval.proposal_data}
+    )
+
+    {:ok, board_approval}
+  end
+
   defp traverse_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
       Enum.reduce(opts, msg, fn {key, value}, acc ->

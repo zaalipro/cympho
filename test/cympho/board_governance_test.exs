@@ -256,4 +256,216 @@ defmodule Cympho.BoardGovernanceTest do
       assert approval.status == "pending"
     end
   end
+
+  describe "approval_threshold_met?/2 - configurable chains" do
+    setup do
+      unique = System.unique_integer([:positive])
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Threshold Co #{unique}",
+          slug: "threshold-co-#{unique}"
+        })
+      %{company: company}
+    end
+
+    test "any: single approve vote is enough" do
+      {:ok, company} = Companies.create_company(%{
+        name: "Any Threshold",
+        slug: "any-threshold-#{System.unique_integer([:positive])}",
+        governance_config: %{"required_approvals" => ["agent_hire"]}
+      })
+
+      {:ok, approval} = BoardApprovals.create_board_approval(%{
+        title: "Test Any",
+        category: "agent_hire",
+        company_id: company.id
+      })
+
+      user = create_test_user()
+      create_membership(user, company, "member", true)
+      BoardApprovals.cast_vote(approval.id, user.id, "approve")
+
+      approval = BoardApprovals.get_board_approval!(approval.id)
+      assert BoardApproval.approval_threshold_met?(approval, threshold_type: "any")
+    end
+
+    test "any: no votes means not met" do
+      {:ok, company} = Companies.create_company(%{
+        name: "Any No Votes",
+        slug: "any-no-votes-#{System.unique_integer([:positive])}",
+        governance_config: %{"required_approvals" => ["agent_hire"]}
+      })
+
+      {:ok, approval} = BoardApprovals.create_board_approval(%{
+        title: "Test Any No Votes",
+        category: "agent_hire",
+        company_id: company.id
+      })
+
+      approval = BoardApprovals.get_board_approval!(approval.id)
+      refute BoardApproval.approval_threshold_met?(approval, threshold_type: "any")
+    end
+
+    test "percentage: meets 0.5 threshold with 1/2 approve" do
+      {:ok, company} = Companies.create_company(%{
+        name: "Pct Co",
+        slug: "pct-co-#{System.unique_integer([:positive])}",
+        governance_config: %{"required_approvals" => ["agent_hire"]}
+      })
+
+      {:ok, approval} = BoardApprovals.create_board_approval(%{
+        title: "Test Pct",
+        category: "agent_hire",
+        company_id: company.id
+      })
+
+      user1 = create_test_user()
+      user2 = create_test_user()
+      create_membership(user1, company, "member", true)
+      create_membership(user2, company, "member", true)
+      BoardApprovals.cast_vote(approval.id, user1.id, "approve")
+      BoardApprovals.cast_vote(approval.id, user2.id, "deny")
+
+      approval = BoardApprovals.get_board_approval!(approval.id)
+      assert BoardApproval.approval_threshold_met?(approval, threshold_type: "percentage", threshold_value: 0.5)
+      refute BoardApproval.approval_threshold_met?(approval, threshold_type: "percentage", threshold_value: 0.6)
+    end
+
+    test "all: unanimous approve required, deny blocks" do
+      {:ok, company} = Companies.create_company(%{
+        name: "All Co",
+        slug: "all-co-#{System.unique_integer([:positive])}",
+        governance_config: %{"required_approvals" => ["agent_hire"]}
+      })
+
+      {:ok, approval} = BoardApprovals.create_board_approval(%{
+        title: "Test All",
+        category: "agent_hire",
+        company_id: company.id
+      })
+
+      user1 = create_test_user()
+      user2 = create_test_user()
+      create_membership(user1, company, "member", true)
+      create_membership(user2, company, "member", true)
+      BoardApprovals.cast_vote(approval.id, user1.id, "approve")
+      BoardApprovals.cast_vote(approval.id, user2.id, "deny")
+
+      approval = BoardApprovals.get_board_approval!(approval.id)
+      refute BoardApproval.approval_threshold_met?(approval, threshold_type: "all")
+    end
+
+    test "all: passes with all approve votes" do
+      {:ok, company} = Companies.create_company(%{
+        name: "All Pass",
+        slug: "all-pass-#{System.unique_integer([:positive])}",
+        governance_config: %{"required_approvals" => ["agent_hire"]}
+      })
+
+      {:ok, approval} = BoardApprovals.create_board_approval(%{
+        title: "Test All Pass",
+        category: "agent_hire",
+        company_id: company.id
+      })
+
+      user1 = create_test_user()
+      user2 = create_test_user()
+      create_membership(user1, company, "member", true)
+      create_membership(user2, company, "member", true)
+      BoardApprovals.cast_vote(approval.id, user1.id, "approve")
+      BoardApprovals.cast_vote(approval.id, user2.id, "approve")
+
+      approval = BoardApprovals.get_board_approval!(approval.id)
+      assert BoardApproval.approval_threshold_met?(approval, threshold_type: "all")
+    end
+
+    test "count: requires N approve votes" do
+      {:ok, company} = Companies.create_company(%{
+        name: "Count Co",
+        slug: "count-co-#{System.unique_integer([:positive])}",
+        governance_config: %{"required_approvals" => ["agent_hire"]}
+      })
+
+      {:ok, approval} = BoardApprovals.create_board_approval(%{
+        title: "Test Count",
+        category: "agent_hire",
+        company_id: company.id
+      })
+
+      user1 = create_test_user()
+      user2 = create_test_user()
+      create_membership(user1, company, "member", true)
+      create_membership(user2, company, "member", true)
+      BoardApprovals.cast_vote(approval.id, user1.id, "approve")
+
+      approval = BoardApprovals.get_board_approval!(approval.id)
+      refute BoardApproval.approval_threshold_met?(approval, threshold_type: "count", threshold_value: 2)
+      assert BoardApproval.approval_threshold_met?(approval, threshold_type: "count", threshold_value: 1)
+    end
+  end
+
+  describe "propose_strategic_initiative/5" do
+    test "creates proposal when governance required" do
+      {:ok, company} = Companies.create_company(%{
+        name: "Strategy Gov",
+        slug: "strategy-gov-#{System.unique_integer([:positive])}",
+        governance_config: %{"required_approvals" => ["strategic_initiative"]}
+      })
+
+      assert {:ok, %BoardApproval{} = approval} = BoardApprovals.propose_strategic_initiative(
+        company.id,
+        "Pivot to AI-first",
+        "Major pivot to AI-first strategy",
+        %{"direction" => "ai_first"},
+        nil
+      )
+      assert approval.category == "strategic_initiative"
+      assert approval.status == "pending"
+      assert approval.title == "Pivot to AI-first"
+    end
+
+    test "auto-approves when governance not required" do
+      {:ok, company} = Companies.create_company(%{
+        name: "No Strategy Gov",
+        slug: "no-strategy-gov-#{System.unique_integer([:positive])}"
+      })
+
+      assert {:ok, :auto_approved} = BoardApprovals.propose_strategic_initiative(
+        company.id,
+        "Minor plan update",
+        "Small change",
+        %{},
+        nil
+      )
+    end
+  end
+
+  describe "check_auto_approve reads company threshold config" do
+    test "auto-approves with 'any' threshold after single vote" do
+      {:ok, company} = Companies.create_company(%{
+        name: "Auto Any",
+        slug: "auto-any-#{System.unique_integer([:positive])}",
+        governance_config: %{
+          "required_approvals" => ["agent_hire"],
+          "threshold_type" => "any",
+          "threshold_value" => 1
+        }
+      })
+
+      {:ok, approval} = BoardApprovals.create_board_approval(%{
+        title: "Auto Test",
+        category: "agent_hire",
+        company_id: company.id,
+        proposal_data: %{"agent_attrs" => %{"name" => "Auto Agent", "role" => "engineer", "company_id" => company.id}}
+      })
+
+      user = create_test_user()
+      create_membership(user, company, "member", true)
+
+      {:ok, _vote} = BoardApprovals.cast_vote(approval.id, user.id, "approve")
+
+      updated = BoardApprovals.get_board_approval!(approval.id)
+      assert updated.status == "approved"
+    end
+  end
 end

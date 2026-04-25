@@ -63,6 +63,18 @@ defmodule CymphoWeb.AgentController do
     end
   end
 
+  def update_role(conn, %{"id" => id, "role" => new_role}) do
+    with {:ok, agent} <- Agents.get_agent(id) do
+      case Agents.update_agent(agent, %{role: new_role}) do
+        {:ok, updated} ->
+          json(conn, %{data: updated})
+
+        {:error, changeset} ->
+          {:error, changeset}
+      end
+    end
+  end
+
   defp translate_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
       Regex.replace(~r"%{(\w+)}", msg, fn _, key ->

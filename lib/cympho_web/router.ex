@@ -214,6 +214,8 @@ defmodule CymphoWeb.Router do
     pipe_through [:api, :board]
 
     post "/agents", AgentController, :create
+    patch "/agents/:id/role", AgentController, :update_role
     resources "/budgets", BudgetController, only: [:create, :update, :delete]
+    patch "/companies/:id/governance-config", CompanyController, :update_governance_config
   end
 end
