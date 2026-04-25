@@ -10,6 +10,7 @@ defmodule Cympho.Orchestrator.Session do
     :run_id,
     status: :idle,
     turn_count: 0,
+    tool_traces: %{},
     last_result: nil,
     last_error: nil,
     last_output_time: nil
@@ -25,6 +26,7 @@ defmodule Cympho.Orchestrator.Session do
           run_id: String.t() | nil,
           status: status(),
           turn_count: non_neg_integer(),
+          tool_traces: map(),
           last_result: map() | nil,
           last_error: term() | nil,
           last_output_time: integer() | nil

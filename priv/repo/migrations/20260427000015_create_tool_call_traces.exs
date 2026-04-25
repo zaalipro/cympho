@@ -40,17 +40,6 @@ defmodule Cympho.Repo.Migrations.CreateToolCallTraces do
     create unique_index(:tool_call_traces, [:company_id, :sequence_number])
     create unique_index(:tool_call_traces, [:content_hash])
 
-    # Ensure prev_hash points to a valid previous trace
-    create constraint(
-      :tool_call_traces,
-      :valid_prev_hash,
-      check: "prev_hash IS NULL OR EXISTS (
-        SELECT 1 FROM tool_call_traces t
-        WHERE t.chain_hash = tool_call_traces.prev_hash
-        AND t.company_id = tool_call_traces.company_id
-      )"
-    )
-
     # Ensure valid actor types
     create constraint(
       :tool_call_traces,

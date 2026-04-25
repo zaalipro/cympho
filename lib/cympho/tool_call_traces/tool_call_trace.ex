@@ -61,27 +61,29 @@ defmodule Cympho.ToolCallTraces.ToolCallTrace do
 
     {content_hash, _} = calculate_content_hash(attrs)
 
-    attrs
-    |> Map.put(:content_hash, content_hash)
-    |> Map.put(:prev_hash, prev_chain_hash)
-    |> then(fn attrs ->
-      {chain_hash, _} = calculate_chain_hash(attrs[:content_hash], attrs[:prev_hash])
-      Map.put(attrs, :chain_hash, chain_hash)
-    end)
-    |> changeset(%{})
+    final_attrs =
+      attrs
+      |> Map.put(:content_hash, content_hash)
+      |> Map.put(:prev_hash, prev_chain_hash)
+      |> then(fn attrs ->
+        chain_hash = calculate_chain_hash(attrs[:content_hash], attrs[:prev_hash])
+        Map.put(attrs, :chain_hash, chain_hash)
+      end)
+
+    changeset(%__MODULE__{}, final_attrs)
   end
 
   def calculate_content_hash(attrs) do
     content = %{
-      trace_type: attrs[:trace_type] || attrs["trace_type"],
-      tool_name: attrs[:tool_name] || attrs["tool_name"],
-      tool_arguments: attrs[:tool_arguments] || attrs["tool_arguments"],
-      tool_result: attrs[:tool_result] || attrs["tool_result"],
-      error_message: attrs[:error_message] || attrs["error_message"],
-      status: attrs[:status] || attrs["status"],
-      occurred_at: attrs[:occurred_at] || attrs["occurred_at"],
-      actor_type: attrs[:actor_type] || attrs["actor_type"],
-      actor_id: attrs[:actor_id] || attrs["actor_id"]
+      trace_type: Map.get(attrs, :trace_type) || Map.get(attrs, "trace_type"),
+      tool_name: Map.get(attrs, :tool_name) || Map.get(attrs, "tool_name"),
+      tool_arguments: Map.get(attrs, :tool_arguments) || Map.get(attrs, "tool_arguments"),
+      tool_result: Map.get(attrs, :tool_result) || Map.get(attrs, "tool_result"),
+      error_message: Map.get(attrs, :error_message) || Map.get(attrs, "error_message"),
+      status: Map.get(attrs, :status) || Map.get(attrs, "status"),
+      occurred_at: Map.get(attrs, :occurred_at) || Map.get(attrs, "occurred_at"),
+      actor_type: Map.get(attrs, :actor_type) || Map.get(attrs, "actor_type"),
+      actor_id: Map.get(attrs, :actor_id) || Map.get(attrs, "actor_id")
     }
 
     hash = :crypto.hash(:sha256, :erlang.term_to_binary(content))

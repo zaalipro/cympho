@@ -78,6 +78,8 @@ defmodule Cympho.ToolCallTracesTest do
     end
 
     test "prevents duplicate content_hash", %{company: company} do
+      actor_id = Ecto.UUID.generate()
+
       attrs = %{
         trace_type: "llm_tool_call",
         tool_name: "web_search",
@@ -85,7 +87,7 @@ defmodule Cympho.ToolCallTracesTest do
         status: "pending",
         company_id: company.id,
         actor_type: "agent",
-        actor_id: Ecto.UUID.generate()
+        actor_id: actor_id
       }
 
       assert {:ok, _trace1} = ToolCallTraces.create_tool_call_trace(attrs)
@@ -590,6 +592,8 @@ defmodule Cympho.ToolCallTracesTest do
     end
 
     test "correctly attributes tool calls to system", %{company: company} do
+      system_uuid = "00000000-0000-0000-0000-000000000000"
+
       attrs = %{
         trace_type: "system_tool_call",
         tool_name: "health_check",
@@ -597,13 +601,13 @@ defmodule Cympho.ToolCallTracesTest do
         status: "success",
         company_id: company.id,
         actor_type: "system",
-        actor_id: "system"
+        actor_id: system_uuid
       }
 
       {:ok, trace} = ToolCallTraces.create_tool_call_trace(attrs)
 
       assert trace.actor_type == "system"
-      assert trace.actor_id == "system"
+      assert trace.actor_id == system_uuid
     end
   end
 
@@ -720,6 +724,8 @@ defmodule Cympho.ToolCallTracesTest do
     end
 
     test "prevents duplicate content hash insertion", %{company: company} do
+      fixed_time = DateTime.utc_now() |> DateTime.truncate(:second)
+
       attrs = %{
         trace_type: "llm_tool_call",
         tool_name: "web_search",
@@ -727,7 +733,8 @@ defmodule Cympho.ToolCallTracesTest do
         status: "success",
         company_id: company.id,
         actor_type: "agent",
-        actor_id: Ecto.UUID.generate()
+        actor_id: Ecto.UUID.generate(),
+        occurred_at: fixed_time
       }
 
       assert {:ok, _trace1} = ToolCallTraces.create_tool_call_trace(attrs)
