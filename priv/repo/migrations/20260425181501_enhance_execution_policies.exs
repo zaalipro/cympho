@@ -4,7 +4,7 @@ defmodule Cympho.Repo.Migrations.EnhanceExecutionPolicies do
   def change do
     alter table(:execution_policies) do
       add :description, :text
-      add :company_id, references(:companies, on_delete: :delete_all)
+      add :company_id, references(:companies, type: :binary_id, on_delete: :delete_all)
       add :apply_to, :string, default: "issues"
       add :auto_advance, :boolean, default: true
       add :require_approval_for_stages, :boolean, default: false
@@ -30,10 +30,10 @@ defmodule Cympho.Repo.Migrations.EnhanceExecutionPolicies do
       add :notes, :text
       add :metadata, :map, default: %{}
 
-      add :execution_policy_id, references(:execution_policies, on_delete: :delete_all), null: false
+      add :execution_policy_id, references(:execution_policies, type: :binary_id, on_delete: :delete_all), null: false
       add :resource_type, :string, null: false
       add :resource_id, :binary_id, null: false
-      add :company_id, references(:companies, on_delete: :delete_all), null: false
+      add :company_id, references(:companies, type: :binary_id, on_delete: :delete_all), null: false
 
       timestamps(type: :utc_datetime)
     end

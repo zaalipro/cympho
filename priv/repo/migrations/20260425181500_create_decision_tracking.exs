@@ -22,7 +22,7 @@ defmodule Cympho.Repo.Migrations.CreateDecisionTracking do
       add :reversed_at, :utc_datetime
       add :metadata, :map, default: %{}
 
-      add :company_id, references(:companies, on_delete: :delete_all), null: false
+      add :company_id, references(:companies, type: :binary_id, on_delete: :delete_all), null: false
 
       timestamps(type: :utc_datetime)
     end
@@ -42,11 +42,11 @@ defmodule Cympho.Repo.Migrations.CreateDecisionTracking do
       add :reasoning, :text, null: false
       add :actor_type, :string, null: false
       add :actor_id, :binary_id, null: false
-      add :original_decision_id, references(:decisions, on_delete: :delete_all), null: false
-      add :reversing_decision_id, references(:decisions, on_delete: :delete_all), null: false
+      add :original_decision_id, references(:decisions, type: :binary_id, on_delete: :delete_all), null: false
+      add :reversing_decision_id, references(:decisions, type: :binary_id, on_delete: :delete_all), null: false
       add :metadata, :map, default: %{}
 
-      add :company_id, references(:companies, on_delete: :delete_all), null: false
+      add :company_id, references(:companies, type: :binary_id, on_delete: :delete_all), null: false
 
       timestamps(type: :utc_datetime)
     end
