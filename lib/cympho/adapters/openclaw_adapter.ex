@@ -1,9 +1,9 @@
 defmodule Cympho.Adapters.OpenClawAdapter do
   @moduledoc """
-  Adapter for OpenClaw agent integration protocol.
+  OpenClaw protocol adapter.
 
-  OpenClaw provides a standardized HTTP-based protocol for agent communication,
-  supporting session management, task dispatch, and result collection.
+  Runs agents via the OpenClaw HTTP protocol for agent integration.
+  OpenClaw provides a standardized interface for agent execution and communication.
   """
 
   @behaviour Cympho.Adapters.Adapter
@@ -24,7 +24,7 @@ defmodule Cympho.Adapters.OpenClawAdapter do
 
     config = opts[:config] || %{}
 
-    case dispatch_task(issue, agent_id, config) do
+    case dispatch_to_openclaw(issue, agent_id, config) do
       {:ok, result} ->
         send(recipient_pid, {:turn_completed, session_id, result})
 
@@ -33,7 +33,7 @@ defmodule Cympho.Adapters.OpenClawAdapter do
     end
   end
 
-  defp dispatch_task(issue, agent_id, config) do
+  defp dispatch_to_openclaw(issue, agent_id, config) do
     endpoint = get_endpoint(config)
     api_key = get_api_key(config)
 
@@ -42,112 +42,99 @@ defmodule Cympho.Adapters.OpenClawAdapter do
         {:error, :no_endpoint_configured}
 
       true ->
-        payload = build_task_payload(issue, agent_id, config)
-        headers = build_headers(api_key, config)
-        timeout = get_timeout(config)
-
-        case send_request(endpoint, payload, headers, timeout) do
-          {:ok, response} ->
-            parse_response(response)
-
-          {:error, reason} ->
-            {:error, {:openclaw_error, reason}}
-        end
+        payload = build_openclaw_payload(issue, agent_id, config)
+        make_openclaw_request(endpoint, api_key, payload)
     end
   end
 
-  defp build_task_payload(issue, agent_id, config) do
+  defp build_openclaw_payload(issue, agent_id, config) do
     base = %{
-      protocol: "openclaw/v1",
-      task: %{
-        id: issue.id,
-        title: issue.title,
-        description: issue.description || "",
-        agent_id: agent_id,
-        assigned_at: DateTime.utc_now() |> DateTime.to_iso8601()
+      "version" => "1.0",
+      "agent_id" => agent_id,
+      "task" => %{
+        "id" => issue.id,
+        "title" => issue.title,
+        "description" => issue.description || "",
+        "metadata" => %{
+          "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601(),
+          "type" => "paperclip_issue"
+        }
       }
     }
 
-    instructions = config[:instructions] || config["instructions"]
+    # Merge with custom config if provided
+    custom_context = config[:context] || config["context"]
 
-    if instructions do
-      put_in(base, [:task, :instructions], instructions)
+    if custom_context do
+      put_in(base, ["task", "context"], custom_context)
     else
       base
     end
   end
 
-  defp build_headers(api_key, config) do
-    base = [
+  defp make_openclaw_request(endpoint, api_key, payload) do
+    url = build_openclaw_url(endpoint)
+
+    headers = [
       {"content-type", "application/json"},
       {"accept", "application/json"}
     ]
 
-    base =
+    headers =
       if api_key do
-        base ++ [{"authorization", "Bearer #{api_key}"}]
+        [{"authorization", "Bearer #{api_key}"} | headers]
       else
-        base
+        headers
       end
 
-    custom_headers = config[:headers] || config["headers"] || []
-
-    custom_list =
-      Enum.map(custom_headers, fn
-        {k, v} -> {to_string(k), to_string(v)}
-        _ -> nil
-      end)
-      |> Enum.reject(&is_nil/1)
-
-    base ++ custom_list
-  end
-
-  defp send_request(endpoint, payload, headers, timeout) do
     body = Jason.encode!(payload)
 
-    request = Finch.build(:post, endpoint, headers, body)
+    case :httpc.request(
+      :post,
+      {url, headers, "application/json", body},
+      [],
+      body_format: :binary
+    ) do
+      {:ok, {{_, status_code, _}, _headers, response_body}} when status_code in 200..299 ->
+        parse_openclaw_response(response_body)
 
-    case Finch.request(request, Cympho.Finch, receive_timeout: timeout) do
-      {:ok, %Finch.Response{status: status, body: resp_body}}
-      when status >= 200 and status < 300 ->
-        {:ok, resp_body}
-
-      {:ok, %Finch.Response{status: status, body: resp_body}} ->
-        {:error, {:http_status, status, resp_body}}
+      {:ok, {{_, status_code, _}, _headers, response_body}} ->
+        {:error, {:http_error, status_code, response_body}}
 
       {:error, reason} ->
-        {:error, reason}
+        {:error, {:request_failed, reason}}
     end
   end
 
-  defp parse_response(body) when is_binary(body) do
+  defp build_openclaw_url(endpoint) do
+    base = String.trim_trailing(endpoint, "/")
+    "#{base}/openclaw/v1/tasks"
+  end
+
+  defp parse_openclaw_response(body) do
     case Jason.decode(body) do
+      {:ok, %{"data" => data}} when is_map(data) ->
+        {:ok, data}
+
       {:ok, %{"result" => result}} when is_map(result) ->
         {:ok, result}
 
-      {:ok, decoded} when is_map(decoded) ->
-        {:ok, decoded}
-
       {:ok, other} ->
-        {:ok, %{output: other}}
+        {:ok, other}
 
       {:error, _} ->
-        {:ok, %{output: body, raw: true}}
+        {:ok, %{raw_response: body}}
     end
   end
 
   defp get_endpoint(config) do
-    config[:endpoint] || config["endpoint"]
+    config[:endpoint] || config["endpoint"] ||
+      Application.get_env(:cympho, :openclaw_endpoint)
   end
 
   defp get_api_key(config) do
     config[:api_key] || config["api_key"] ||
-      Application.get_env(:cympho, :openclaw_api_key) ||
-      System.get_env("OPENCLAW_API_KEY")
-  end
-
-  defp get_timeout(config) do
-    config[:timeout] || config["timeout"] || 60_000
+      Application.get_env(:cympho, :openclaw_api_key)
   end
 
   @impl true
@@ -156,20 +143,25 @@ defmodule Cympho.Adapters.OpenClawAdapter do
 
     cond do
       is_nil(endpoint) or endpoint == "" ->
-        %{status: :unhealthy, message: "OpenClaw endpoint not configured", checked_at: DateTime.utc_now()}
+        %{status: :unhealthy, message: "No OpenClaw endpoint configured", checked_at: DateTime.utc_now()}
 
       true ->
-        case Finch.build(:get, endpoint <> "/health", [])
-             |> Finch.request(Cympho.Finch, receive_timeout: 5000) do
-          {:ok, %Finch.Response{status: status}} when status >= 200 and status < 300 ->
-            %{status: :healthy, message: "OpenClaw endpoint reachable", checked_at: DateTime.utc_now()}
+        check_openclaw_health(endpoint)
+    end
+  end
 
-          {:ok, %Finch.Response{status: status}} ->
-            %{status: :degraded, message: "OpenClaw returned status #{status}", checked_at: DateTime.utc_now()}
+  defp check_openclaw_health(endpoint) do
+    health_url = String.trim_trailing(endpoint, "/") <> "/openclaw/v1/health"
 
-          {:error, reason} ->
-            %{status: :unhealthy, message: "OpenClaw unreachable: #{inspect(reason)}", checked_at: DateTime.utc_now()}
-        end
+    case :httpc.request(:get, {health_url, []}, [], []) do
+      {:ok, {{_, 200, _}, _, _}} ->
+        %{status: :healthy, message: "OpenClaw endpoint reachable", checked_at: DateTime.utc_now()}
+
+      {:ok, {{_, status, _}, _, _}} ->
+        %{status: :degraded, message: "OpenClaw endpoint returned #{status}", checked_at: DateTime.utc_now()}
+
+      {:error, _} ->
+        %{status: :unhealthy, message: "OpenClaw endpoint unreachable", checked_at: DateTime.utc_now()}
     end
   end
 
@@ -181,35 +173,21 @@ defmodule Cympho.Adapters.OpenClawAdapter do
         type: :string,
         required: true,
         default: nil,
-        description: "OpenClaw server endpoint URL"
+        description: "OpenClaw endpoint URL (e.g., https://api.openclaw.example.com)"
       },
       %{
         key: :api_key,
         type: :string,
         required: false,
         default: nil,
-        description: "API key for OpenClaw authentication (defaults to OPENCLAW_API_KEY env var)"
+        description: "OpenClaw API key for authentication"
       },
       %{
-        key: :instructions,
-        type: :string,
-        required: false,
-        default: nil,
-        description: "Task-level instructions sent with each dispatch"
-      },
-      %{
-        key: :timeout,
-        type: :integer,
-        required: false,
-        default: 60_000,
-        description: "Request timeout in milliseconds"
-      },
-      %{
-        key: :headers,
+        key: :context,
         type: :map,
         required: false,
-        default: %{},
-        description: "Custom HTTP headers to include in requests"
+        default: nil,
+        description: "Additional context to include in task payload"
       }
     ]
   end
@@ -219,18 +197,15 @@ defmodule Cympho.Adapters.OpenClawAdapter do
 
   @impl true
   def available? do
-    endpoint =
-      Application.get_env(:cympho, :openclaw_endpoint) ||
-        System.get_env("OPENCLAW_ENDPOINT")
-
-    not is_nil(endpoint) and endpoint != ""
+    endpoint = Application.get_env(:cympho, :openclaw_endpoint)
+    not is_nil(endpoint)
   end
 
   @impl true
   def validate_config(config) do
     with :ok <- validate_endpoint(config["endpoint"] || config[:endpoint]),
-         :ok <- validate_timeout(config["timeout"] || config[:timeout]),
-         :ok <- validate_headers(config["headers"] || config[:headers]) do
+         :ok <- validate_api_key(config["api_key"] || config[:api_key]),
+         :ok <- validate_context(config["context"] || config[:context]) do
       :ok
     end
   end
@@ -238,39 +213,28 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   defp validate_endpoint(nil), do: {:error, "endpoint is required"}
   defp validate_endpoint(""), do: {:error, "endpoint cannot be empty"}
 
-  defp validate_endpoint(url) when is_binary(url) do
-    case URI.parse(url) do
-      %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) and host != "" ->
-        :ok
-
-      _ ->
-        {:error, "endpoint must be a valid HTTP/HTTPS URL"}
+  defp validate_endpoint(endpoint) when is_binary(endpoint) do
+    case URI.parse(endpoint) do
+      %URI{scheme: scheme} when scheme in ["http", "https"] -> :ok
+      _ -> {:error, "endpoint must be a valid HTTP/HTTPS URL"}
     end
   end
 
   defp validate_endpoint(_), do: {:error, "endpoint must be a string"}
 
-  defp validate_timeout(nil), do: :ok
+  defp validate_api_key(nil), do: :ok
+  defp validate_api_key(key) when is_binary(key), do: :ok
+  defp validate_api_key(_), do: {:error, "api_key must be a string"}
 
-  defp validate_timeout(timeout) when is_integer(timeout) do
-    if timeout > 0 and timeout <= 600_000 do
+  defp validate_context(nil), do: :ok
+
+  defp validate_context(context) when is_map(context) do
+    if Enum.all?(context, fn {k, v} -> is_binary(k) end) do
       :ok
     else
-      {:error, "timeout must be between 1 and 600000 milliseconds"}
+      {:error, "context must be a map with string keys"}
     end
   end
 
-  defp validate_timeout(_), do: {:error, "timeout must be an integer"}
-
-  defp validate_headers(nil), do: :ok
-
-  defp validate_headers(headers) when is_map(headers) do
-    if Enum.all?(headers, fn {k, v} -> is_binary(k) and is_binary(v) end) do
-      :ok
-    else
-      {:error, "headers must be a map with string keys and values"}
-    end
-  end
-
-  defp validate_headers(_), do: {:error, "headers must be a map"}
+  defp validate_context(_), do: {:error, "context must be a map"}
 end
