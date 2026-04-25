@@ -6,6 +6,14 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
   alias Cympho.Finances.BudgetIncident
   alias Cympho.Repo
 
+  defp company_fixture do
+    {:ok, company} = Cympho.Companies.create_company(%{
+      name: "Test Company",
+      slug: "test-#{System.unique_integer([:positive])}"
+    })
+    company
+  end
+
   describe "budget enforcement - action_on_exceed" do
     test "action: 'warn' allows token usage and creates incidents" do
       company_id = company_fixture().id
@@ -188,7 +196,7 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
               model: "claude-3",
               total_tokens: 1000,
               cost_usd: Decimal.new("10.00")
-            end)
+            })
           end)
         end
 
@@ -244,7 +252,7 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
               model: "claude-3",
               total_tokens: 300,
               cost_usd: Decimal.new("3.00")
-            end)
+            })
           end)
         end
 
