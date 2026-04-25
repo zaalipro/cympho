@@ -14,62 +14,71 @@ defmodule CymphoWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :board do
+    plug CymphoWeb.Plugs.BoardAuth
+  end
+
   scope "/", CymphoWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
-
     live_session :default, on_mount: [{CymphoWeb.UserAuth, :default}] do
+      live "/", PageLive, :home
       live "/issues", IssueLive.Index
-    live "/issues/new", IssueLive.New
-    live "/issues/:id", IssueLive.Show
-    live "/projects", ProjectLive.Index
-    live "/projects/new", ProjectLive.New
-    live "/projects/:id", ProjectLive.Show
-    live "/projects/:id/edit", ProjectLive.Edit
-    live "/goals", GoalLive.Index
-    live "/goals/new", GoalLive.New
-    live "/goals/:id", GoalLive.Show
-    live "/goals/:id/edit", GoalLive.Edit
-    live "/kanban", KanbanLive.Index
-    live "/labels", LabelLive.Index
-    live "/approvals", ApprovalLive.Index
-    live "/approvals/:id", ApprovalLive.Show
-    live "/agents", AgentLive.Index
-    live "/agents/new", AgentLive.New
-    live "/agents/:id", AgentLive.Show
-    live "/agents/:id/edit", AgentLive.Edit
-    live "/org-chart", OrgChartLive
-    live "/routines", RoutineLive.Index
-    live "/routines/new", RoutineLive.New
-    live "/routines/:id", RoutineLive.Show
-    live "/routines/:id/edit", RoutineLive.Edit
-    live "/onboarding", OnboardingLive.Index
-    live "/settings", SettingsLive.Index
-    live "/execution-policies", ExecutionPolicyLive.Index
-    live "/execution-policies/new", ExecutionPolicyLive.New
-    live "/execution-policies/:id", ExecutionPolicyLive.Show
-    live "/execution-policies/:id/edit", ExecutionPolicyLive.Edit
-    live "/companies", CompanyLive.Index
-    live "/companies/new", CompanyLive.Index, :new
-    live "/companies/:id", CompanyLive.Show
-    live "/companies/:id/edit", CompanyLive.Show, :edit
-    live "/budgets", BudgetLive.Index
-    live "/budgets/new", BudgetLive.Index, :new
-    live "/budgets/:id", BudgetLive.Show
-    live "/budgets/:id/edit", BudgetLive.Show, :edit
-    live "/skills", SkillLive.Index
-    live "/skills/new", SkillLive.New
-    live "/skills/:id", SkillLive.Show
-    live "/skills/:id/edit", SkillLive.Edit
-    live "/plugins", PluginLive.Index
-    live "/plugins/new", PluginLive.New
-    live "/plugins/:id", PluginLive.Show
-    live "/plugins/:id/edit", PluginLive.Edit
-    live "/plugins/:id/settings", PluginLive.Show, :settings
-    live "/workspace/:issue_id", WorkspaceLive.Show
-    live "/profile/:id", ProfileLive.Show
-    live "/profile/:id/edit", ProfileLive.Edit
+      live "/issues/new", IssueLive.New
+      live "/issues/:id", IssueLive.Show
+      live "/projects", ProjectLive.Index
+      live "/projects/new", ProjectLive.New
+      live "/projects/:id", ProjectLive.Show
+      live "/projects/:id/edit", ProjectLive.Edit
+      live "/goals", GoalLive.Index
+      live "/goals/new", GoalLive.New
+      live "/goals/:id", GoalLive.Show
+      live "/goals/:id/edit", GoalLive.Edit
+      live "/kanban", KanbanLive.Index
+      live "/labels", LabelLive.Index
+      live "/approvals", ApprovalLive.Index
+      live "/approvals/:id", ApprovalLive.Show
+      live "/agents", AgentLive.Index
+      live "/agents/:id", AgentLive.Show
+      live "/org-chart", OrgChartLive
+      live "/routines", RoutineLive.Index
+      live "/routines/new", RoutineLive.New
+      live "/routines/:id", RoutineLive.Show
+      live "/routines/:id/edit", RoutineLive.Edit
+      live "/onboarding", OnboardingLive.Index
+      live "/settings", SettingsLive.Index
+      live "/execution-policies", ExecutionPolicyLive.Index
+      live "/execution-policies/new", ExecutionPolicyLive.New
+      live "/execution-policies/:id", ExecutionPolicyLive.Show
+      live "/execution-policies/:id/edit", ExecutionPolicyLive.Edit
+      live "/companies", CompanyLive.Index
+      live "/companies/new", CompanyLive.Index, :new
+      live "/companies/:id", CompanyLive.Show
+      live "/skills", SkillLive.Index
+      live "/skills/new", SkillLive.New
+      live "/skills/:id", SkillLive.Show
+      live "/skills/:id/edit", SkillLive.Edit
+      live "/plugins", PluginLive.Index
+      live "/plugins/new", PluginLive.New
+      live "/plugins/:id", PluginLive.Show
+      live "/plugins/:id/edit", PluginLive.Edit
+      live "/plugins/:id/settings", PluginLive.Show, :settings
+      live "/workspace/:issue_id", WorkspaceLive.Show
+    live "/workspaces", WorkspaceLive.Index
+    live "/workspaces/:id", WorkspaceLive.ShowWorkspace
+    live "/workspaces/:id/exec/:exec_id", WorkspaceLive.ExecWorkspace
+      live "/profile/:id", ProfileLive.Show
+      live "/profile/:id/edit", ProfileLive.Edit
+    end
+
+    live_session :board_governed, on_mount: [{CymphoWeb.UserAuth, :default}, {CymphoWeb.Live.BoardAuth, :default}] do
+      live "/agents/new", AgentLive.New
+      live "/agents/:id/edit", AgentLive.Edit
+      live "/budgets", BudgetLive.Index
+      live "/budgets/new", BudgetLive.Index, :new
+      live "/budgets/:id", BudgetLive.Show
+      live "/budgets/:id/edit", BudgetLive.Show, :edit
+      live "/companies/:id/edit", CompanyLive.Show, :edit
     end
   end
 
@@ -145,6 +154,26 @@ defmodule CymphoWeb.Router do
     post "/companies/:company_id/join-requests/:request_id/reject", CompanyController, :reject_join_request
     get "/companies/:company_id/export", CompanyController, :export
     post "/companies/import", CompanyController, :import_company
+
+    # Workspace & Runtime Services
+    resources "/workspaces", WorkspaceController, only: [:index, :show, :create, :update, :delete]
+    get "/workspaces/:id/exec-workspaces", WorkspaceController, :list_exec_workspaces
+    post "/workspaces/:id/exec-workspaces", WorkspaceController, :create_exec_workspace
+    get "/exec-workspaces/:id", WorkspaceController, :show_exec_workspace
+    patch "/exec-workspaces/:id", WorkspaceController, :update_exec_workspace
+    delete "/exec-workspaces/:id", WorkspaceController, :destroy_exec_workspace
+    get "/exec-workspaces/:id/default-branch", WorkspaceController, :detect_default_branch
+    patch "/workspaces/:id/worktree-config", WorkspaceController, :update_worktree_config
+    post "/exec-workspaces/:id/seed", WorkspaceController, :seed_worktree
+    post "/exec-workspaces/:id/secrets", WorkspaceController, :inject_secrets
+    get "/exec-workspaces/:id/services", WorkspaceController, :list_services
+    post "/exec-workspaces/:id/services", WorkspaceController, :create_service
+    patch "/services/:id/start", WorkspaceController, :start_service
+    patch "/services/:id/stop", WorkspaceController, :stop_service
+    patch "/services/:id/restart", WorkspaceController, :restart_service
+    get "/exec-workspaces/:id/operations", WorkspaceController, :list_operations
+    post "/exec-workspaces/:id/leases", WorkspaceController, :create_lease
+    delete "/leases/:id", WorkspaceController, :revoke_lease
   end
 
   scope "/api", CymphoWeb do
@@ -158,5 +187,13 @@ defmodule CymphoWeb.Router do
     get "/attachments/:id", AttachmentController, :show
     get "/attachments/:id/download", AttachmentController, :download
     delete "/attachments/:id", AttachmentController, :delete
+  end
+
+  # Board-governed governance mutations
+  scope "/api", CymphoWeb do
+    pipe_through [:api, :board]
+
+    post "/agents", AgentController, :create
+    resources "/budgets", BudgetController, only: [:create, :update, :delete]
   end
 end

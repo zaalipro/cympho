@@ -115,13 +115,15 @@ defmodule Cympho.Companies do
     role in ["owner", "admin"]
   end
 
+
+
   @doc """
   Returns true if the user is a board member of the given company.
   """
   def is_board_member?(user_id, company_id) do
     case get_membership(user_id, company_id) do
       nil -> false
-      membership -> membership.is_board_member
+      membership -> membership.is_board_member == true
     end
   end
 

@@ -18,6 +18,8 @@ defmodule Cympho.Application do
       Cympho.Orchestrator.Dispatcher,
       Cympho.HeartbeatEngine.Watchdog,
       Cympho.Scheduler,
+      # Adapter system
+      Cympho.Adapters.Registry,
       # Plugin system
       {Registry, keys: :unique, name: Cympho.PluginRegistry},
       Cympho.Plugins.Registry,
@@ -29,6 +31,7 @@ defmodule Cympho.Application do
 
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
+        Cympho.Adapters.Registry.register_builtin()
         Cympho.RoutineTriggers.schedule_all_triggers()
         {:ok, pid}
 

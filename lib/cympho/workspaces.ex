@@ -11,6 +11,9 @@ defmodule Cympho.Workspaces do
   alias Cympho.Workspaces.RuntimeService
   alias Cympho.Workspaces.WorkspaceOperation
   alias Cympho.Workspaces.EnvironmentLease
+  alias Cympho.Workspaces.Environment
+  alias Cympho.Workspaces.EnvironmentProbe
+  alias Cympho.Workspaces.ExecutionWorkspacePolicy
 
   # --- Project Workspaces ---
 
@@ -214,5 +217,137 @@ defmodule Cympho.Workspaces do
       where: ew.status == "closed" and ew.cleanup_eligible_at < ^now
     )
     |> Repo.update_all(set: [status: "cleaned_up", updated_at: now])
+  end
+
+  # --- Environments ---
+
+  def list_environments(project_id) do
+    from(e in Environment, where: e.project_id == ^project_id)
+    |> Repo.all()
+  end
+
+  def get_environment!(id), do: Repo.get!(Environment, id)
+
+  def get_environment(id) do
+    case Repo.get(Environment, id) do
+      nil -> {:error, :not_found}
+      env -> {:ok, env}
+    end
+  end
+
+  def create_environment(attrs \\ %{}) do
+    %Environment{}
+    |> Environment.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  # --- Environment Probes ---
+
+  def list_probes(environment_id) do
+    from(p in EnvironmentProbe, where: p.environment_id == ^environment_id)
+    |> Repo.all()
+  end
+
+  def list_probes_for_workspace(execution_workspace_id) do
+    from(p in EnvironmentProbe, where: p.execution_workspace_id == ^execution_workspace_id)
+    |> Repo.all()
+  end
+
+  def create_probe(attrs \\ %{}) do
+    %EnvironmentProbe{}
+    |> EnvironmentProbe.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def update_probe(%EnvironmentProbe{} = probe, attrs) do
+    probe
+    |> EnvironmentProbe.changeset(attrs)
+    |> Repo.update()
+  end
+
+  def run_probe_checks do
+    now = DateTime.utc_now()
+
+    from(p in EnvironmentProbe,
+      where: p.status == "pending" and p.next_check_at < ^now
+    )
+    |> Repo.all()
+    |> Enum.each(fn probe ->
+      update_probe(probe, %{
+        status: "checking",
+        last_checked_at: now
+      })
+    end)
+  end
+
+  # --- Execution Workspace Policies ---
+
+  def list_policies(project_id) do
+    from(p in ExecutionWorkspacePolicy, where: p.project_id == ^project_id)
+    |> Repo.all()
+  end
+
+  def get_policy!(id), do: Repo.get!(ExecutionWorkspacePolicy, id)
+
+  def get_policy(id) do
+    case Repo.get(ExecutionWorkspacePolicy, id) do
+      nil -> {:error, :not_found}
+      policy -> {:ok, policy}
+    end
+  end
+
+  def get_policy_for_project(project_id) do
+    case Repo.get_by(ExecutionWorkspacePolicy, project_id: project_id) do
+      nil -> {:error, :not_found}
+      policy -> {:ok, policy}
+    end
+  end
+
+  def create_policy(attrs \\ %{}) do
+    %ExecutionWorkspacePolicy{}
+    |> ExecutionWorkspacePolicy.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def update_policy(%ExecutionWorkspacePolicy{} = policy, attrs) do
+    policy
+    |> ExecutionWorkspacePolicy.changeset(attrs)
+    |> Repo.update()
+  end
+
+  def delete_policy(%ExecutionWorkspacePolicy{} = policy) do
+    Repo.delete(policy)
+  end
+
+  def check_policy_limits(policy, project_id) do
+    active_count =
+      from(ew in ExecutionWorkspace,
+        where: ew.project_id == ^project_id and ew.status == "open"
+      )
+      |> Repo.aggregate(:count, :id)
+
+    if active_count < policy.max_concurrent_workspaces do
+      :ok
+    else
+      {:error, :concurrency_limit_reached}
+    end
+  end
+
+  def cleanup_idle_workspaces do
+    now = DateTime.utc_now()
+
+    from(p in ExecutionWorkspacePolicy, where: p.auto_cleanup == true)
+    |> Repo.all()
+    |> Enum.each(fn policy ->
+      threshold = DateTime.add(now, -policy.max_idle_minutes * 60, :second)
+
+      from(ew in ExecutionWorkspace,
+        where:
+          ew.project_id == ^policy.project_id and
+            ew.status == "open" and
+            ew.last_used_at < ^threshold
+      )
+      |> Repo.update_all(set: [status: "closed", closed_at: now, cleanup_reason: "idle", updated_at: now])
+    end)
   end
 end

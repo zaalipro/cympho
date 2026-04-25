@@ -67,7 +67,7 @@ defmodule CymphoWeb.Components.NavRail do
       data-nav-path={@to}
     >
       <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        {@icon |> raw()}
+        {@icon}
       </svg>
       <span :if={!@collapsed} class="hidden md:inline">{@label}</span>
     </.link>
