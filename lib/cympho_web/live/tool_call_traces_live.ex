@@ -22,6 +22,8 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
      |> assign(:statistics, nil)
      |> assign(:integrity_status, :unknown)
      |> assign(:selected_trace, nil)
+     |> assign(:export_data_json, nil)
+     |> assign(:export_data_csv, nil)
      |> load_traces()}
   end
 
@@ -108,6 +110,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
     {:noreply,
      socket
+     |> assign(:export_data_json, json_data)
      |> put_flash(:info, "Exported #{length(traces)} traces as JSON")}
   end
 
@@ -137,6 +140,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
     {:noreply,
      socket
+     |> assign(:export_data_csv, csv_content)
      |> put_flash(:info, "Exported #{length(traces)} traces as CSV")}
   end
 
@@ -233,6 +237,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
           </button>
 
           <button
+            :if={!@export_data_json}
             type="button"
             class="px-4 py-2 bg-surface border border-border hover:border-brand/50 text-text-primary rounded-lg transition-colors"
             phx-click="export_json"
@@ -240,13 +245,38 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
             Export JSON
           </button>
 
+          <a
+            :if={@export_data_json}
+            download={"tool-traces-#{Date.utc_today()}.json"}
+            href={"data:application/json;charset=utf-8,#{URI.encode(@export_data_json)}"}
+            class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors inline-flex items-center gap-2"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            Download JSON
+          </a>
+
           <button
+            :if={!@export_data_csv}
             type="button"
             class="px-4 py-2 bg-surface border border-border hover:border-brand/50 text-text-primary rounded-lg transition-colors"
             phx-click="export_csv"
           >
             Export CSV
           </button>
+
+          <a
+            :if={@export_data_csv}
+            download={"tool-traces-#{Date.utc_today()}.csv"}
+            href={"data:text/csv;charset=utf-8,#{URI.encode(@export_data_csv)}"}
+            class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors inline-flex items-center gap-2"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            Download CSV
+          </a>
         </div>
 
         <div class={"text-sm font-medium " <> integrity_status_color(@integrity_status)}>
@@ -254,55 +284,54 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
         </div>
       </div>
 
-      <.form
-        let={f}
-        for={%{}}
-        as={:filter}
-        phx-submit="filter"
-        class="mb-6 bg-surface border border-border rounded-lg p-4"
-      >
+      <form phx-submit="filter" class="mb-6 bg-surface border border-border rounded-lg p-4">
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
           <div>
             <label class="block text-sm font-medium text-text-secondary mb-1">Tool Name</label>
-            <.input
+            <input
               type="text"
-              field={f[:tool_name]}
+              name="filter[tool_name]"
               value={@filters.tool_name}
               placeholder="Filter by tool name..."
-              class="w-full"
+              class="w-full px-3 py-2 bg-black/[0.2] border border-border rounded-lg text-text-primary placeholder-text-secondary focus:outline-none focus:border-brand/50"
             />
           </div>
 
           <div>
             <label class="block text-sm font-medium text-text-secondary mb-1">Status</label>
-            <.input
-              type="select"
-              field={f[:status]}
-              value={@filters.status}
-              options={[{"All Statuses", ""}, {"Success", "success"}, {"Error", "error"}, {"Pending", "pending"}, {"Timeout", "timeout"}]}
-              class="w-full"
-            />
+            <select
+              name="filter[status]"
+              class="w-full px-3 py-2 bg-black/[0.2] border border-border rounded-lg text-text-primary focus:outline-none focus:border-brand/50"
+            >
+              <option value="">All Statuses</option>
+              <option value="success" selected={@filters.status == "success"}>Success</option>
+              <option value="error" selected={@filters.status == "error"}>Error</option>
+              <option value="pending" selected={@filters.status == "pending"}>Pending</option>
+              <option value="timeout" selected={@filters.status == "timeout"}>Timeout</option>
+            </select>
           </div>
 
           <div>
             <label class="block text-sm font-medium text-text-secondary mb-1">Agent</label>
-            <.input
-              type="select"
-              field={f[:agent_id]}
-              value={@filters.agent_id}
-              options={[{"All Agents", ""} | Enum.map(@agents, fn a -> {a.name, a.id} end)]}
-              class="w-full"
-            />
+            <select
+              name="filter[agent_id]"
+              class="w-full px-3 py-2 bg-black/[0.2] border border-border rounded-lg text-text-primary focus:outline-none focus:border-brand/50"
+            >
+              <option value="">All Agents</option>
+              <%= for agent <- @agents do %>
+                <option value={agent.id} selected={@filters.agent_id == agent.id}><%= agent.name %></option>
+              <% end %>
+            </select>
           </div>
 
           <div>
             <label class="block text-sm font-medium text-text-secondary mb-1">Issue ID</label>
-            <.input
+            <input
               type="text"
-              field={f[:issue_id]}
+              name="filter[issue_id]"
               value={@filters.issue_id}
               placeholder="Filter by issue ID..."
-              class="w-full"
+              class="w-full px-3 py-2 bg-black/[0.2] border border-border rounded-lg text-text-primary placeholder-text-secondary focus:outline-none focus:border-brand/50"
             />
           </div>
         </div>
@@ -323,7 +352,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
             Clear Filters
           </button>
         </div>
-      </.form>
+      </form>
 
       <%= if @statistics do %>
         <div class="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
