@@ -136,7 +136,6 @@ defmodule Cympho.Companies do
     |> Repo.all()
   end
 
-
   @doc """
   Updates a board membership (e.g., toggling board member status).
   """
@@ -145,7 +144,6 @@ defmodule Cympho.Companies do
     |> CompanyMembership.changeset(attrs)
     |> Repo.update()
   end
-
   # ── Invites ──
 
   def create_invite(attrs) do
