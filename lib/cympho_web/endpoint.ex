@@ -13,7 +13,7 @@ defmodule CymphoWeb.Endpoint do
     longpoll: false
 
   socket "/socket", CymphoWeb.Socket,
-    websocket: true,
+    websocket: [connect_info: [session: @session_options]],
     longpoll: false
 
   plug Plug.Static,
