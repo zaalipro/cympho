@@ -344,17 +344,16 @@ defmodule Cympho.Companies do
 
   defp import_company!(%{company: company_data} = data, slug_strategy) do
     Repo.transaction(fn ->
-      # Resolve slug collision
-      slug = resolve_slug_collision(company_data.slug, slug_strategy)
+      # Create company with retry loop for slug collision (handles race condition)
+      {:ok, company} = create_company_with_retry(company_data, slug_strategy)
 
-      {:ok, company} =
-        create_company(%{
-          name: company_data.name,
-          slug: slug,
-          logo_url: Map.get(company_data, :logo_url)
-        })
+      # Import users first (memberships reference them)
+      user_id_map = import_users(Map.get(data, :users, []), company.id)
 
-      # Import labels first (issues reference them)
+      # Import memberships
+      import_memberships(Map.get(data, :memberships, []), company.id, user_id_map)
+
+      # Import labels (issues reference them)
       label_id_map = import_labels(Map.get(data, :labels, []), company.id)
 
       # Import projects
@@ -376,66 +375,161 @@ defmodule Cympho.Companies do
           label_id_map
         )
 
-      %{company: company, id_maps: %{projects: project_id_map, agents: agent_id_map, issues: issue_id_map, labels: label_id_map}}
+      %{company: company, id_maps: %{projects: project_id_map, agents: agent_id_map, issues: issue_id_map, labels: label_id_map, users: user_id_map}}
     end)
   end
 
-  defp resolve_slug_collision(slug, :suffix) do
-    if Repo.get_by(Company, slug: slug) do
-      resolve_slug_collision("#{slug}-#{:rand.uniform(9999)}", :suffix)
-    else
-      slug
+  # Creates a company, retrying with a new slug suffix on unique constraint violation
+  defp create_company_with_retry(company_data, slug_strategy, attempts \\ 1) do
+    slug = case slug_strategy do
+      :suffix -> "#{company_data.slug}-#{:rand.uniform(9999)}"
+      :fail -> company_data.slug
+    end
+
+    attrs = %{
+      name: company_data.name,
+      slug: slug,
+      logo_url: Map.get(company_data, :logo_url)
+    }
+
+    case create_company(attrs) do
+      {:ok, _company} = result ->
+        result
+
+      {:error, %{errors: errors}} = error when is_list(errors) ->
+        slug_error = Enum.find(errors, fn {field, _} -> field == :slug end)
+
+        if slug_error && attempts < 10 do
+          create_company_with_retry(company_data, slug_strategy, attempts + 1)
+        else
+          error
+        end
+
+      {:error, _} = error ->
+        error
     end
   end
 
-  defp resolve_slug_collision(slug, :fail) do
-    if Repo.get_by(Company, slug: slug) do
-      raise "Slug collision: #{slug}"
-    else
-      slug
+  # Returns map of old_user_id -> new_user_id
+  defp import_users(users, company_id) do
+    result =
+      Enum.reduce(users, %{}, fn user_data, acc ->
+        # Check if user with this email already exists
+        existing_user = Repo.get_by(Cympho.Users.User, email: user_data.email)
+
+        if existing_user do
+          # Link to existing user - the membership will use the existing user
+          {:ok, Map.put(acc, Map.get(user_data, :id), existing_user.id)}
+        else
+          # Create new user with a random password they must reset
+          random_password = :crypto.strong_rand_bytes(16) |> Base.encode64()
+
+          attrs = %{
+            email: user_data.email,
+            name: user_data.name,
+            password: random_password,
+            company_id: company_id
+          }
+
+          case Repo.insert(%Cympho.Users.User{} |> Cympho.Users.User.registration_changeset(attrs)) do
+            {:ok, user} -> {:ok, Map.put(acc, Map.get(user_data, :id), user.id)}
+            {:error, changeset} -> {:error, changeset}
+          end
+        end
+      end)
+
+    case result do
+      {:error, changeset} ->
+        raise "User import failed: #{inspect(changeset.errors)}"
+
+      id_map when is_map(id_map) ->
+        id_map
     end
+  end
+
+  defp import_memberships(memberships, company_id, user_id_map) do
+    Enum.each(memberships, fn membership_data ->
+      new_user_id = remap_id(user_id_map, Map.get(membership_data, :user_id))
+
+      # Skip if user wasn't imported (user_id_map doesn't have this user)
+      if new_user_id do
+        attrs = %{
+          user_id: new_user_id,
+          company_id: company_id,
+          role: Map.get(membership_data, :role, "member")
+        }
+
+        case Repo.insert(%CompanyMembership{} |> CompanyMembership.changeset(attrs)) do
+          {:ok, _membership} -> :ok
+          {:error, changeset} -> raise "Membership import failed: #{inspect(changeset.errors)}"
+        end
+      end
+    end)
   end
 
   defp import_labels(labels, company_id) do
-    Enum.reduce(labels, %{}, fn label_data, acc ->
-      attrs = %{
-        name: label_data.name,
-        color: Map.get(label_data, :color, "#6B7280"),
-        description: Map.get(label_data, :description),
-        company_id: company_id
-      }
+    errors = []
 
-      case Repo.insert(%Cympho.Labels.Label{} |> Cympho.Labels.Label.changeset(attrs)) do
-        {:ok, label} -> Map.put(acc, Map.get(label_data, :id), label.id)
-        {:error, _} -> acc
-      end
-    end)
+    result =
+      Enum.reduce(labels, %{}, fn label_data, acc ->
+        attrs = %{
+          name: label_data.name,
+          color: Map.get(label_data, :color, "#6B7280"),
+          description: Map.get(label_data, :description),
+          company_id: company_id
+        }
+
+        case Repo.insert(%Cympho.Labels.Label{} |> Cympho.Labels.Label.changeset(attrs)) do
+          {:ok, label} -> Map.put(acc, Map.get(label_data, :id), label.id)
+          {:error, changeset} -> {:error, changeset, acc}
+        end
+      end)
+
+    case result do
+      {:error, changeset, _acc} ->
+        raise "Label import failed: #{inspect(changeset.errors)}"
+
+      id_map when is_map(id_map) ->
+        id_map
+    end
   end
 
   defp import_projects(projects, company_id) do
-    Enum.reduce(projects, %{}, fn project_data, acc ->
-      prefix = resolve_prefix_collision(project_data.prefix)
+    result =
+      Enum.reduce(projects, %{}, fn project_data, acc ->
+        {:ok, project} = create_project_with_retry(project_data, company_id)
+        Map.put(acc, Map.get(project_data, :id), project.id)
+      end)
 
-      attrs = %{
-        name: project_data.name,
-        description: Map.get(project_data, :description),
-        prefix: prefix,
-        settings: Map.get(project_data, :settings, %{}),
-        company_id: company_id
-      }
-
-      case Repo.insert(%Cympho.Projects.Project{} |> Cympho.Projects.Project.changeset(attrs)) do
-        {:ok, project} -> Map.put(acc, Map.get(project_data, :id), project.id)
-        {:error, _} -> acc
-      end
-    end)
+    result
   end
 
-  defp resolve_prefix_collision(prefix) do
-    if Repo.get_by(Cympho.Projects.Project, prefix: prefix) do
-      resolve_prefix_collision("#{prefix}#{:rand.uniform(9)}")
-    else
-      prefix
+  defp create_project_with_retry(project_data, company_id, attempts \\ 1) do
+    prefix = "#{project_data.prefix}-#{:rand.uniform(99)}"
+
+    attrs = %{
+      name: project_data.name,
+      description: Map.get(project_data, :description),
+      prefix: prefix,
+      settings: Map.get(project_data, :settings, %{}),
+      company_id: company_id
+    }
+
+    case Repo.insert(%Cympho.Projects.Project{} |> Cympho.Projects.Project.changeset(attrs)) do
+      {:ok, _project} = result ->
+        result
+
+      {:error, %{errors: errors}} = error when is_list(errors) ->
+        prefix_error = Enum.find(errors, fn {field, _} -> field == :prefix end)
+
+        if prefix_error && attempts < 10 do
+          create_project_with_retry(project_data, company_id, attempts + 1)
+        else
+          {:error, error}
+        end
+
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -455,95 +549,135 @@ defmodule Cympho.Companies do
   end
 
   defp import_agents(agents, company_id) do
-    Enum.reduce(agents, %{}, fn agent_data, acc ->
-      url_key = resolve_url_key_collision(agent_data.url_key)
+    result =
+      Enum.reduce(agents, %{}, fn agent_data, acc ->
+        {:ok, agent} = create_agent_with_retry(agent_data, company_id)
+        Map.put(acc, Map.get(agent_data, :id), agent.id)
+      end)
 
-      attrs = %{
-        name: agent_data.name,
-        url_key: url_key,
-        role: Map.get(agent_data, :role, :engineer),
-        config: Map.get(agent_data, :config, %{}),
-        instructions: Map.get(agent_data, :instructions),
-        company_id: company_id
-      }
-
-      case Repo.insert(%Cympho.Agents.Agent{} |> Cympho.Agents.Agent.changeset(attrs)) do
-        {:ok, agent} -> Map.put(acc, Map.get(agent_data, :id), agent.id)
-        {:error, _} -> acc
-      end
-    end)
+    result
   end
 
-  defp resolve_url_key_collision(nil), do: nil
+  defp create_agent_with_retry(agent_data, company_id, attempts \\ 1) do
+    url_key = case agent_data.url_key do
+      nil -> nil
+      _ -> "#{agent_data.url_key}-#{:rand.uniform(9999)}"
+    end
 
-  defp resolve_url_key_collision(url_key) do
-    if Repo.get_by(Cympho.Agents.Agent, url_key: url_key) do
-      resolve_url_key_collision("#{url_key}-#{:rand.uniform(9999)}")
-    else
-      url_key
+    attrs = %{
+      name: agent_data.name,
+      url_key: url_key,
+      role: Map.get(agent_data, :role, :engineer),
+      config: Map.get(agent_data, :config, %{}),
+      instructions: Map.get(agent_data, :instructions),
+      company_id: company_id
+    }
+
+    case Repo.insert(%Cympho.Agents.Agent{} |> Cympho.Agents.Agent.changeset(attrs)) do
+      {:ok, _agent} = result ->
+        result
+
+      {:error, %{errors: errors}} = error when is_list(errors) ->
+        url_key_error = Enum.find(errors, fn {field, _} -> field == :url_key end)
+
+        if url_key_error && attempts < 10 do
+          create_agent_with_retry(agent_data, company_id, attempts + 1)
+        else
+          {:error, error}
+        end
+
+      {:error, _} = error ->
+        error
     end
   end
 
   defp import_issues(issues, company_id, project_id_map, agent_id_map, label_id_map) do
-    Enum.reduce(issues, %{}, fn issue_data, acc ->
-      project_id = remap_id(project_id_map, Map.get(issue_data, :project_id))
-      assignee_id = remap_id(agent_id_map, Map.get(issue_data, :assignee_id))
+    result =
+      Enum.reduce(issues, %{}, fn issue_data, acc ->
+        project_id = remap_id(project_id_map, Map.get(issue_data, :project_id))
+        assignee_id = remap_id(agent_id_map, Map.get(issue_data, :assignee_id))
 
-      attrs = %{
-        title: Map.get(issue_data, :title),
-        description: Map.get(issue_data, :description),
-        status: Map.get(issue_data, :status, :backlog),
-        priority: Map.get(issue_data, :priority, :medium),
-        project_id: project_id,
-        assignee_id: assignee_id,
-        company_id: company_id
-      }
+        attrs = %{
+          title: Map.get(issue_data, :title),
+          description: Map.get(issue_data, :description),
+          status: Map.get(issue_data, :status, :backlog),
+          priority: Map.get(issue_data, :priority, :medium),
+          project_id: project_id,
+          assignee_id: assignee_id,
+          company_id: company_id
+        }
 
-      changeset = %Cympho.Issues.Issue{} |> Cympho.Issues.Issue.changeset(attrs)
+        changeset = %Cympho.Issues.Issue{} |> Cympho.Issues.Issue.changeset(attrs)
 
-      case Repo.insert(changeset) do
-        {:ok, issue} ->
-          old_id = Map.get(issue_data, :id)
+        case Repo.insert(changeset) do
+          {:ok, issue} ->
+            old_id = Map.get(issue_data, :id)
 
-          # Import labels
-          labels = Map.get(issue_data, :labels, [])
-          label_ids = Enum.map(labels, fn l -> remap_id(label_id_map, Map.get(l, :id)) end)
-                             |> Enum.filter(&(&1 != nil))
+            # Import labels
+            labels = Map.get(issue_data, :labels, [])
+            label_ids = Enum.map(labels, fn l -> remap_id(label_id_map, Map.get(l, :id)) end)
+                               |> Enum.filter(&(&1 != nil))
 
-          if length(label_ids) > 0 do
-            issue
-            |> Repo.preload(:labels)
-            |> Cympho.Issues.Issue.changeset(%{})
-            |> Ecto.Changeset.put_assoc(:labels, Cympho.Repo.all(from l in Cympho.Labels.Label, where: l.id in ^label_ids))
-            |> Repo.update()
-          end
+            if length(label_ids) > 0 do
+              label_update =
+                issue
+                |> Repo.preload(:labels)
+                |> Cympho.Issues.Issue.changeset(%{})
+                |> Ecto.Changeset.put_assoc(:labels, Cympho.Repo.all(from l in Cympho.Labels.Label, where: l.id in ^label_ids))
+                |> Repo.update()
 
-          # Import comments
-          comments = Map.get(issue_data, :comments, [])
-          Enum.each(comments, fn c ->
-            {author_type, author_id} =
-              case Map.get(c, :author_type) do
-                "agent" ->
-                  {"agent", remap_id(agent_id_map, Map.get(c, :author_id))}
-
-                other ->
-                  {other || "system", Map.get(c, :author_id)}
+              case label_update do
+                {:ok, _} -> :ok
+                {:error, changeset} -> raise "Issue label import failed: #{inspect(changeset.errors)}"
               end
+            end
 
-            Repo.insert(%Cympho.Comments.Comment{} |> Cympho.Comments.Comment.changeset(%{
-              issue_id: issue.id,
-              body: Map.get(c, :body, ""),
-              author_type: author_type,
-              author_id: author_id
-            }))
-          end)
+            # Import comments
+            comments = Map.get(issue_data, :comments, [])
+            Enum.each(comments, fn c ->
+              {author_type, author_id} =
+                case Map.get(c, :author_type) do
+                  "agent" ->
+                    old_author_id = Map.get(c, :author_id)
+                    # Only remap if the agent was actually imported (exists in agent_id_map)
+                    if Map.has_key?(agent_id_map, old_author_id) do
+                      {"agent", Map.get(agent_id_map, old_author_id)}
+                    else
+                      # Agent wasn't imported - use system author
+                      {"system", nil}
+                    end
 
-          Map.put(acc, old_id, issue.id)
+                  other ->
+                    {other || "system", Map.get(c, :author_id)}
+                end
 
-        {:error, _} ->
-          acc
-      end
-    end)
+              comment_attrs = %{
+                issue_id: issue.id,
+                body: Map.get(c, :body, ""),
+                author_type: author_type,
+                author_id: author_id
+              }
+
+              case Repo.insert(%Cympho.Comments.Comment{} |> Cympho.Comments.Comment.changeset(comment_attrs)) do
+                {:ok, _} -> :ok
+                {:error, changeset} -> raise "Comment import failed: #{inspect(changeset.errors)}"
+              end
+            end)
+
+            {:ok, Map.put(acc, old_id, issue.id)}
+
+          {:error, changeset} ->
+            {:error, changeset, acc}
+        end
+      end)
+
+    case result do
+      {:error, changeset, _acc} ->
+        raise "Issue import failed: #{inspect(changeset.errors)}"
+
+      id_map when is_map(id_map) ->
+        id_map
+    end
   end
 
   defp remap_id(_map, nil), do: nil

@@ -212,8 +212,16 @@ defmodule CymphoWeb.CompanyController do
   # ── Export / Import ──
 
   def export(conn, %{"company_id" => company_id}) do
-    data = Companies.export_company(company_id)
-    json(conn, %{data: data})
+    user_id = get_current_user_id(conn)
+
+    if Companies.has_access?(user_id, company_id) do
+      data = Companies.export_company(company_id)
+      json(conn, %{data: data})
+    else
+      conn
+      |> put_status(:forbidden)
+      |> json(%{error: "You do not have access to this company"})
+    end
   end
 
   def import_company(conn, %{"company" => company_data}) do
