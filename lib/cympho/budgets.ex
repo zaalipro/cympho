@@ -79,20 +79,27 @@ defmodule Cympho.Budgets do
   If the company's governance config requires `budget_increase` approval and the
   limit exceeds the configured budget threshold, a BoardApproval is created
   instead and `{:pending_approval, approval}` is returned.
+
+  Pass `skip_governance: true` in opts to bypass the governance gate
+  (used when executing an already-approved board action).
   """
-  def create_budget(attrs, actor \\ nil) do
+  def create_budget(attrs, actor \\ nil, opts \\ []) do
     changeset = Budget.changeset(%Budget{}, attrs)
 
     if changeset.valid? do
-      case check_budget_approval_needed(attrs, nil) do
-        {:ok, :approval_needed, company} ->
-          create_pending_budget_approval(company, attrs, actor)
+      if Keyword.get(opts, :skip_governance, false) do
+        do_create_budget(changeset, actor)
+      else
+        case check_budget_approval_needed(attrs, nil) do
+          {:ok, :approval_needed, company} ->
+            create_pending_budget_approval(company, attrs, actor)
 
-        {:ok, :not_needed} ->
-          do_create_budget(changeset, actor)
+          {:ok, :not_needed} ->
+            do_create_budget(changeset, actor)
 
-        {:error, :company_not_found} ->
-          do_create_budget(changeset, actor)
+          {:error, :company_not_found} ->
+            do_create_budget(changeset, actor)
+        end
       end
     else
       {:error, changeset}
@@ -130,18 +137,25 @@ defmodule Cympho.Budgets do
   If the company's governance config requires `budget_increase` approval and the
   new limit exceeds the old limit, a BoardApproval is created instead and
   `{:pending_approval, approval}` is returned.
-  """
-  def update_budget(%Budget{} = budget, attrs, actor \\ nil) do
-    if budget_increase_exceeds_threshold?(budget, attrs) do
-      company = Cympho.Repo.get(Cympho.Companies.Company, budget.company_id)
 
-      if company && BoardApprovals.governance_required?(company, "budget_increase") do
-        create_pending_budget_update_approval(company, budget, attrs, actor)
+  Pass `skip_governance: true` in opts to bypass the governance gate
+  (used when executing an already-approved board action).
+  """
+  def update_budget(%Budget{} = budget, attrs, actor \\ nil, opts \\ []) do
+    if Keyword.get(opts, :skip_governance, false) do
+      do_update_budget(budget, attrs, actor)
+    else
+      if budget_increase_exceeds_threshold?(budget, attrs) do
+        company = Cympho.Repo.get(Cympho.Companies.Company, budget.company_id)
+
+        if company && BoardApprovals.governance_required?(company, "budget_increase") do
+          create_pending_budget_update_approval(company, budget, attrs, actor)
+        else
+          do_update_budget(budget, attrs, actor)
+        end
       else
         do_update_budget(budget, attrs, actor)
       end
-    else
-      do_update_budget(budget, attrs, actor)
     end
   end
 

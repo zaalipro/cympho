@@ -3,6 +3,8 @@ defmodule Cympho.GovernanceAuditLogs do
   The GovernanceAuditLogs context for managing audit trails of all governance decisions.
   """
 
+  @nil_uuid "00000000-0000-0000-0000-000000000000"
+
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.GovernanceAuditLogs.GovernanceAuditLog
@@ -107,10 +109,15 @@ defmodule Cympho.GovernanceAuditLogs do
   end
 
   defp extract_actor_info({type, id}) when is_binary(type) and is_binary(id) do
-    {String.downcase(type), id}
+    actor_id = if valid_uuid?(id), do: id, else: @nil_uuid
+    {String.downcase(type), actor_id}
   end
 
-  defp extract_actor_info(nil), do: {"system", "00000000-0000-0000-0000-000000000000"}
+  defp extract_actor_info(nil), do: {"system", @nil_uuid}
+
+  defp valid_uuid?(s) when is_binary(s) do
+    String.match?(s, ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+  end
 
   defp extract_resource_info(nil), do: {nil, nil}
 

@@ -291,8 +291,10 @@ defmodule Cympho.Decisions do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "decisions")
   end
 
+  @nil_uuid "00000000-0000-0000-0000-000000000000"
+
   defp extract_actor(%Decision{actor_type: type, actor_id: id}), do: {type, id}
-  defp extract_actor(_), do: {"system", "system"}
+  defp extract_actor(_), do: {"system", @nil_uuid}
 
   defp maybe_mark_parent_superseded(%Decision{parent_decision_id: nil}), do: :ok
 
