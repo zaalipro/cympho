@@ -25,6 +25,12 @@ defmodule CymphoWeb.SpawnAgentComponent do
               value={to_string(@prefilled_role)}
             />
 
+            <.select
+              name="agent[adapter]"
+              label="Adapter"
+              options={[{"Default (none)", ""} | Enum.map(@adapter_options, &{adapter_label(&1), to_string(&1)})]}
+            />
+
             <.input field={@form[:config]} label="Adapter Config" placeholder="{}" />
             <.input field={@form[:instructions]} label="Instructions" type="textarea" />
 
@@ -65,6 +71,7 @@ defmodule CymphoWeb.SpawnAgentComponent do
       |> assign(:show_form, false)
       |> assign(:spawnable_roles, Agents.spawnable_roles(assigns.current_agent))
       |> assign(:prefilled_role, prefilled_role(assigns.current_agent.role))
+      |> assign(:adapter_options, Agents.adapter_options())
 
     {:ok, socket}
   end
@@ -80,6 +87,11 @@ defmodule CymphoWeb.SpawnAgentComponent do
   end
 
   def handle_event("spawn", %{"agent" => agent_params}, socket) do
+    agent_params =
+      agent_params
+      |> normalize_adapter_param()
+      |> normalize_role_param()
+
     case Agents.spawn_agent(agent_params, socket.assigns.current_agent.id) do
       {:ok, _agent} ->
         {:noreply,
@@ -107,4 +119,26 @@ defmodule CymphoWeb.SpawnAgentComponent do
   defp role_label(:designer), do: "Designer"
   defp role_label(:cto), do: "CTO"
   defp role_label(:ceo), do: "CEO"
+
+  defp normalize_adapter_param(params) do
+    case Map.get(params, "adapter") do
+      "" -> Map.delete(params, "adapter")
+      nil -> params
+      value -> Map.put(params, "adapter", String.to_existing_atom(value))
+    end
+  end
+
+  defp normalize_role_param(params) do
+    case Map.get(params, "role") do
+      nil -> params
+      value when is_binary(value) -> Map.put(params, "role", String.to_existing_atom(value))
+      _ -> params
+    end
+  end
+
+  defp adapter_label(:claude_code), do: "Claude Code"
+  defp adapter_label(:codex), do: "Codex"
+  defp adapter_label(:cursor), do: "Cursor"
+  defp adapter_label(:http), do: "HTTP"
+  defp adapter_label(:process), do: "Process"
 end

@@ -7,7 +7,7 @@ config :cympho, CymphoWeb.Endpoint,
   url: [host: System.get_env("APP_HOST") || "localhost", port: port],
   cache_static_manifest: "priv/static/cache_manifest.json"
 
-if database_url = System.get_env("DATABASE_URL") do
+if database_url = System.get_env("DATABASE_URL") and config_env() != :test do
   config :cympho, Cympho.Repo,
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")

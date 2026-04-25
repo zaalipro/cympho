@@ -32,6 +32,7 @@ defmodule Cympho.BoardApprovals.BoardApproval do
 
   def categories,
     do: [
+      "agent_hire",
       "agent_termination",
       "agent_promotion",
       "budget_increase",

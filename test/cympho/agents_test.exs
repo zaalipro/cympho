@@ -62,6 +62,66 @@ defmodule Cympho.AgentsTest do
       assert agent.status == :idle
     end
 
+    test "creates agent with adapter" do
+      attrs = %{
+        name: "Claude Agent",
+        role: :engineer,
+        adapter: :claude_code
+      }
+
+      assert {:ok, %Agent{} = agent} = Agents.create_agent(attrs)
+      assert agent.adapter == :claude_code
+    end
+
+    test "creates agent without adapter (nil allowed)" do
+      attrs = %{
+        name: "No Adapter Agent",
+        role: :engineer
+      }
+
+      assert {:ok, %Agent{} = agent} = Agents.create_agent(attrs)
+      assert agent.adapter == nil
+    end
+
+    test "creates agent with heartbeat_config" do
+      attrs = %{
+        name: "Heartbeat Agent",
+        role: :engineer,
+        heartbeat_config: %{"interval_ms" => 30_000}
+      }
+
+      assert {:ok, %Agent{} = agent} = Agents.create_agent(attrs)
+      assert agent.heartbeat_config == %{"interval_ms" => 30_000}
+    end
+
+    test "creates agent with parent_id" do
+      {:ok, parent} =
+        Agents.create_agent(%{
+          name: "Parent Agent",
+          role: :cto
+        })
+
+      attrs = %{
+        name: "Child Agent",
+        role: :engineer,
+        parent_id: parent.id
+      }
+
+      assert {:ok, %Agent{} = agent} = Agents.create_agent(attrs)
+      assert agent.parent_id == parent.id
+    end
+
+    test "returns error for invalid adapter" do
+      attrs = %{
+        name: "Bad Adapter",
+        role: :engineer,
+        adapter: :invalid_adapter
+      }
+
+      assert {:error, %Ecto.Changeset{} = changeset} = Agents.create_agent(attrs)
+      assert %{adapter: ["is invalid"]} = errors_on(changeset)
+    end
+
     test "creates agent with config" do
       attrs = %{
         name: "Config Agent",
