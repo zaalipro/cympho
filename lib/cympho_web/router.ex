@@ -76,6 +76,9 @@ defmodule CymphoWeb.Router do
   scope "/api", CymphoWeb do
     pipe_through :api
 
+    post "/register", RegistrationController, :create
+    post "/login", LoginController, :create
+
     resources "/users", UserController, only: [:index, :show, :create, :update, :delete]
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
 
