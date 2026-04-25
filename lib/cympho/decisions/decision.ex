@@ -122,7 +122,7 @@ defmodule Cympho.Decisions.Decision do
               d.status == "active",
           select: count(d.id)
 
-      if Repo.one(query) > 0 do
+      if Cympho.Repo.one(query) > 0 do
         add_error(changeset, :decision_key, "has already been used for this parent decision")
       else
         changeset

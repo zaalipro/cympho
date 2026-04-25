@@ -12,7 +12,7 @@ defmodule Cympho.Repo.Migrations.CreatePrincipalPermissionGrants do
       add :granted_by_type, :string
       add :expires_at, :utc_datetime
       add :status, :string, default: "active", null: false
-      add :board_approval_id, references(:board_approvals, on_delete: :nilify_all)
+      add :board_approval_id, references(:board_approvals, on_delete: :nilify_all, type: :binary_id)
       add :metadata, :map, default: %{}
 
       timestamps(type: :utc_datetime)
