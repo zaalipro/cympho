@@ -10,7 +10,6 @@ defmodule Cympho.Authentication do
 
   import Ecto.Query, warn: false
   alias Cympho.Repo
-  alias Cympho.Agents.Agent
   alias Cympho.Agents.AgentApiKey
   alias Cympho.AgentAuthJWT
 

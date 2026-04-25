@@ -30,13 +30,14 @@ defmodule Cympho.Companies.Company do
     |> validate_length(:slug, min: 3, max: 50)
     |> unique_constraint(:slug)
     |> validate_logo_url()
+    |> validate_governance_config()
   end
 
   defp validate_logo_url(changeset) do
     case get_change(changeset, :logo_url) do
       nil -> changeset
       "" -> changeset
-      url -> validate_format(changeset, :logo_url, ~r/^https?:\/\/.+/, message: "must be a valid URL")
+      _url -> validate_format(changeset, :logo_url, ~r/^https?:\/\/.+/, message: "must be a valid URL")
     end
   end
 end
