@@ -1,0 +1,193 @@
+<div class="activity-feed" id={"activity-feed-#{@issue_id}"}>
+  <div class="activity-header">
+    <h3>Activity Log</h3>
+    <span class="activity-count">{@statistics.total} events</span>
+  </div>
+
+  <div class="activity-stats">
+    <div class="stat-item">
+      <span class="stat-label">Total</span>
+      <span class="stat-value">{@statistics.total}</span>
+    </div>
+    <%= for {action, count} <- @statistics.by_action do %>
+      <div class="stat-item">
+        <span class="stat-icon">{activity_icon(action)}</span>
+        <span class="stat-value">{count}</span>
+      </div>
+    <% end %>
+  </div>
+
+  <div class="activity-list" phx-update="prepend" id="activity-list">
+    <%= for activity <- @activities do %>
+      <div class="activity-item" id={"activity-#{activity.id}"}>
+        <div class="activity-icon">
+          {activity_icon(activity.action)}
+        </div>
+        <div class="activity-content">
+          <div class="activity-header-row">
+            <span class="activity-action">{format_action(activity.action)}</span>
+            <span class="activity-time">{format_timestamp(activity.inserted_at)}</span>
+          </div>
+          <div class="activity-meta">
+            <span class="activity-actor">{activity.actor_type}</span>
+            <%= if activity.metadata != %{} do %>
+              <span class="activity-details">
+                {inspect(activity.metadata, limit: 100)}
+              </span>
+            <% end %>
+          </div>
+        </div>
+      </div>
+    <% end %>
+  </div>
+
+  <%= if @statistics.total > length(@activities) do %>
+    <button class="load-more-btn" phx-click="load_more" phx-target={@myself}>
+      Load More
+    </button>
+  <% end %>
+</div>
+
+<style>
+  .activity-feed {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 16px;
+  }
+
+  .activity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .activity-header h3 {
+    font-size: 18px;
+    font-weight: 590;
+    color: #f7f8f8;
+    margin: 0;
+  }
+
+  .activity-count {
+    font-size: 13px;
+    color: #8a8f98;
+  }
+
+  .activity-stats {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .stat-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    color: #8a8f98;
+  }
+
+  .stat-icon {
+    font-size: 14px;
+  }
+
+  .stat-value {
+    font-size: 14px;
+    font-weight: 510;
+    color: #d0d6e0;
+  }
+
+  .activity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .activity-item {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 6px;
+    transition: background 0.2s;
+  }
+
+  .activity-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .activity-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .activity-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .activity-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+
+  .activity-action {
+    font-size: 14px;
+    font-weight: 510;
+    color: #f7f8f8;
+  }
+
+  .activity-time {
+    font-size: 12px;
+    color: #62666d;
+  }
+
+  .activity-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #8a8f98;
+  }
+
+  .activity-actor {
+    font-weight: 510;
+  }
+
+  .activity-details {
+    font-family: Berkeley Mono, ui-monospace, SF Mono, Menlo, monospace;
+    font-size: 12px;
+    color: #62666d;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .load-more-btn {
+    width: 100%;
+    margin-top: 16px;
+    padding: 8px 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: #d0d6e0;
+    font-size: 14px;
+    font-weight: 510;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .load-more-btn:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+</style>

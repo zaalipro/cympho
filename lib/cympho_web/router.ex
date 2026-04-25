@@ -42,11 +42,20 @@ defmodule CymphoWeb.Router do
     live "/routines/new", RoutineLive.New
     live "/routines/:id", RoutineLive.Show
     live "/routines/:id/edit", RoutineLive.Edit
+    live "/onboarding", OnboardingLive.Index
     live "/settings", SettingsLive.Index
     live "/execution-policies", ExecutionPolicyLive.Index
     live "/execution-policies/new", ExecutionPolicyLive.New
     live "/execution-policies/:id", ExecutionPolicyLive.Show
     live "/execution-policies/:id/edit", ExecutionPolicyLive.Edit
+    live "/companies", CompanyLive.Index
+    live "/companies/new", CompanyLive.Index, :new
+    live "/companies/:id", CompanyLive.Show
+    live "/companies/:id/edit", CompanyLive.Show, :edit
+    live "/budgets", BudgetLive.Index
+    live "/budgets/new", BudgetLive.Index, :new
+    live "/budgets/:id", BudgetLive.Show
+    live "/budgets/:id/edit", BudgetLive.Show, :edit
   end
 
   scope "/api", CymphoWeb do
@@ -96,6 +105,11 @@ defmodule CymphoWeb.Router do
     put "/issues/:issue_id/documents/:key", DocumentController, :upsert
     delete "/issues/:issue_id/documents/:key", DocumentController, :delete
     get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
+
+    get "/issues/:issue_id/activities", ActivityController, :index
+    get "/issues/:issue_id/activities/statistics", ActivityController, :statistics
+    get "/activities/:id", ActivityController, :show
+    get "/companies/:company_id/activities/timeline", ActivityController, :company_timeline
   end
 
   scope "/api", CymphoWeb do

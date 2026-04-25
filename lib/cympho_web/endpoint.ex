@@ -12,6 +12,10 @@ defmodule CymphoWeb.Endpoint do
     websocket: [connect_info: [session: @session_options]],
     longpoll: false
 
+  socket "/socket", CymphoWeb.Socket,
+    websocket: true,
+    longpoll: false
+
   plug Plug.Static,
     at: "/",
     from: :cympho,

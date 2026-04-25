@@ -14,7 +14,7 @@ defmodule Cympho.AgentHeartbeat do
 
   alias Cympho.AgentHeartbeat.Supervisor
   alias Cympho.AgentHeartbeat.Registry, as: HeartbeatRegistry
-  alias Cympho.{Orchestrator, Issues, Agents}
+  alias Cympho.{Orchestrator, Issues, Agents, Activities}
   alias Cympho.Issues.Issue
   alias Cympho.Repo
   import Ecto.Query
@@ -214,6 +214,10 @@ defmodule Cympho.AgentHeartbeat do
           # Start orchestrator - it handles the session and posts completion comment
           case Orchestrator.start_and_run(checked_out_issue, agent_id) do
             {:ok, _pid} ->
+              Activities.log_heartbeat_event(checked_out_issue.id, :started, %{
+                agent_id: agent_id
+              })
+
               timer_ref = schedule_heartbeat(agent_id)
 
               {:noreply,
@@ -228,6 +232,11 @@ defmodule Cympho.AgentHeartbeat do
             {:error, reason} ->
               _ =
                 :logger.error("[AgentHeartbeat] failed to start orchestrator: #{inspect(reason)}")
+
+              Activities.log_heartbeat_event(checked_out_issue.id, :failed, %{
+                agent_id: agent_id,
+                reason: inspect(reason)
+              })
 
               _ = maybe_update_agent_status(agent_id, :error)
               timer_ref = schedule_heartbeat(agent_id)

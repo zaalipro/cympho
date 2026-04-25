@@ -15,7 +15,26 @@ defmodule Cympho.Activities.Activity do
   end
 
   @valid_actor_types ~w(agent user system)
-  @valid_actions ~w(created title_changed description_changed status_changed assigned unassigned blocker_added blocker_removed comment_added approval_created approval_resolved)
+  @valid_actions ~w(
+    created
+    title_changed
+    description_changed
+    status_changed
+    assigned
+    unassigned
+    blocker_added
+    blocker_removed
+    comment_added
+    approval_created
+    approval_resolved
+    heartbeat_started
+    heartbeat_completed
+    heartbeat_failed
+    cost_incurred
+    budget_threshold_exceeded
+    feedback_submitted
+    feedback_exported
+  )
 
   def changeset(activity, attrs) do
     activity

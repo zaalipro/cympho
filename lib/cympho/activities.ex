@@ -15,6 +15,8 @@ defmodule Cympho.Activities do
     case %Activity{} |> Activity.changeset(attrs) |> Repo.insert() do
       {:ok, activity} ->
         Phoenix.PubSub.broadcast(Cympho.PubSub, "activities", {:activity_created, activity})
+        CymphoWeb.Endpoint.broadcast("activities:*", "activity_created", activity)
+        CymphoWeb.Endpoint.broadcast("issue:#{activity.issue_id}", "activity_created", activity)
         {:ok, activity}
 
       error ->
@@ -70,5 +72,77 @@ defmodule Cympho.Activities do
       true ->
         [{:assigned, %{assignee_id: new_id, previous_assignee_id: old_id}} | acc]
     end
+  end
+
+  def log_heartbeat_event(issue_id, event_type, metadata \\ %{})
+      when event_type in ~w(started completed failed)a do
+    action = :"heartbeat_#{event_type}"
+
+    log_activity(%{
+      issue_id: issue_id,
+      actor_type: "agent",
+      action: to_string(action),
+      metadata: metadata
+    })
+  end
+
+  def log_cost_event(issue_id, cost_amount, cost_type, metadata \\ %{}) do
+    log_activity(%{
+      issue_id: issue_id,
+      actor_type: "system",
+      action: "cost_incurred",
+      metadata: Map.merge(metadata, %{amount: cost_amount, cost_type: cost_type})
+    })
+  end
+
+  def log_budget_threshold(issue_id, threshold_type, current_amount, limit_amount) do
+    log_activity(%{
+      issue_id: issue_id,
+      actor_type: "system",
+      action: "budget_threshold_exceeded",
+      metadata: %{
+        threshold_type: threshold_type,
+        current_amount: current_amount,
+        limit_amount: limit_amount
+      }
+    })
+  end
+
+  def log_approval_event(issue_id, event_type, approval_id, actor \\ nil)
+      when event_type in ~w(created approved rejected requested_changes)a do
+    log_activity(%{
+      issue_id: issue_id,
+      actor_type: if(is_nil(actor), do: "system", else: "user"),
+      actor_id: if(is_nil(actor), do: nil, else: actor.id),
+      action: "approval_#{event_type}",
+      metadata: %{approval_id: approval_id}
+    })
+  end
+
+  def log_feedback_event(issue_id, event_type, metadata \\ %{})
+      when event_type in ~w(submitted exported)a do
+    log_activity(%{
+      issue_id: issue_id,
+      actor_type: "user",
+      action: "feedback_#{event_type}",
+      metadata: metadata
+    })
+  end
+
+  def get_activity_statistics(issue_id) do
+    activities = list_activities(issue_id)
+
+    %{
+      total: length(activities),
+      by_action:
+        Enum.group_by(activities, & &1.action)
+        |> Enum.map(fn {k, v} -> {k, length(v)} end)
+        |> Map.new(),
+      by_actor_type:
+        Enum.group_by(activities, & &1.actor_type)
+        |> Enum.map(fn {k, v} -> {k, length(v)} end)
+        |> Map.new(),
+      latest: List.last(activities)
+    }
   end
 end

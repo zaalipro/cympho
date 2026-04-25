@@ -25,7 +25,7 @@ defmodule Cympho.Orchestrator do
 
   use GenServer
   alias Cympho.Orchestrator.Session
-  alias Cympho.{Issues, Comments, Agents}
+  alias Cympho.{Issues, Comments, Agents, Activities}
 
   @registry Cympho.OrchestratorRegistry
 
@@ -146,6 +146,11 @@ defmodule Cympho.Orchestrator do
 
     # Mark issue done
     Issues.transition_issue(issue, :done)
+
+    Activities.log_heartbeat_event(issue.id, :completed, %{
+      agent_id: agent_id,
+      turn_count: session.turn_count + 1
+    })
 
     # Update agent status back to idle
     set_agent_idle(agent_id)
