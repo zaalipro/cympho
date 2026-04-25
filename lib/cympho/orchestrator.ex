@@ -21,7 +21,7 @@ defmodule Cympho.Orchestrator do
   """
 
   @enforce_keys [:issue, :agent_id]
-  defstruct [:issue, :agent_id, :session_id, turn_count: 0]
+  defstruct [:issue, :agent_id, :session_id, turn_count: 0, tool_traces: %{}]
 
   use GenServer
   alias Cympho.Orchestrator.Session
@@ -137,9 +137,9 @@ defmodule Cympho.Orchestrator do
     issue = session.issue
     agent_id = session.agent_id
 
-    capture_tool_call(tool_call, issue, agent_id)
+    {updated_tool_traces, _trace_id} = capture_tool_call(tool_call, issue, agent_id, session.tool_traces)
 
-    {:noreply, %{session | turn_count: session.turn_count + 1}}
+    {:noreply, %{session | turn_count: session.turn_count + 1, tool_traces: updated_tool_traces}}
   end
 
   @impl true
@@ -147,7 +147,10 @@ defmodule Cympho.Orchestrator do
     issue = session.issue
     agent_id = session.agent_id
 
-    complete_engine_run(session, result)
+    # Process tool results from the response
+    updated_tool_traces = process_tool_results(result, session.tool_traces)
+
+    complete_engine_run(%{session | tool_traces: updated_tool_traces}, result)
 
     body = extract_result_content(result)
 
@@ -179,6 +182,9 @@ defmodule Cympho.Orchestrator do
     :logger.warning(
       "[Orchestrator] Session ended with error for issue #{issue.id}, agent #{agent_id}: #{inspect(reason)}"
     )
+
+    # Mark pending tool traces as errored/timed out
+    mark_pending_traces_as_errored(session.tool_traces, reason)
 
     fail_engine_run(session, reason)
 
@@ -370,7 +376,92 @@ defmodule Cympho.Orchestrator do
     []
   end
 
-  defp capture_tool_call(tool_call, issue, agent_id) do
+  defp process_tool_results(result, tool_traces) when is_map(result) do
+    content = result["content"] || []
+
+    Enum.reduce(content, tool_traces, fn item, acc_traces ->
+      if item["type"] == "tool_result" do
+        tool_use_id = item["tool_use_id"]
+        result_content = item["content"] || ""
+        is_error = item["is_error"] || false
+
+        # Find and update the corresponding trace
+        case Map.get(acc_traces, tool_use_id) do
+          nil ->
+            :logger.warning("[Orchestrator] No trace found for tool_result: #{tool_use_id}")
+            acc_traces
+
+          trace_id ->
+            update_trace_with_result(trace_id, result_content, is_error, acc_traces)
+        end
+      else
+        acc_traces
+      end
+    end)
+  end
+
+  defp process_tool_results(_result, tool_traces), do: tool_traces
+
+  defp update_trace_with_result(trace_id, result_content, is_error, tool_traces) do
+    case Cympho.ToolCallTraces.get_tool_call_trace(trace_id) do
+      {:ok, trace} ->
+        status = if is_error, do: "error", else: "success"
+
+        case Cympho.ToolCallTraces.update_tool_call_trace_status(trace, status, result_content) do
+          {:ok, _updated_trace} ->
+            :logger.info("[Orchestrator] Updated tool call trace: #{trace_id} with status: #{status}")
+
+            # Emit telemetry for tool completion
+            :telemetry.execute(
+              [:cympho, :tool, :complete],
+              %{count: 1},
+              %{
+                tool_name: trace.tool_name,
+                agent_id: trace.agent_id,
+                issue_id: trace.issue_id,
+                trace_id: trace_id,
+                status: status,
+                duration_ms: DateTime.diff(DateTime.utc_now(), trace.occurred_at, :millisecond)
+              }
+            )
+
+            # Remove from pending traces map since it's now completed
+            tool_use_id = Enum.find_value(tool_traces, fn {k, v} -> if v == trace_id, do: k end)
+            Map.delete(tool_traces, tool_use_id)
+
+          {:error, reason} ->
+            :logger.warning("[Orchestrator] Failed to update tool call trace: #{inspect(reason)}")
+            tool_traces
+        end
+
+      {:error, :not_found} ->
+        :logger.warning("[Orchestrator] Trace not found: #{trace_id}")
+        tool_traces
+    end
+  end
+
+  defp mark_pending_traces_as_errored(tool_traces, reason) do
+    Enum.each(tool_traces, fn {_tool_use_id, trace_id} ->
+      case Cympho.ToolCallTraces.get_tool_call_trace(trace_id) do
+        {:ok, trace} ->
+          status = if reason == :stall_timeout, do: "timeout", else: "error"
+          error_message = "Session error: #{inspect(reason)}"
+
+          case Cympho.ToolCallTraces.update_tool_call_trace_status(trace, status, error_message) do
+            {:ok, _updated_trace} ->
+              :logger.info("[Orchestrator] Marked pending tool call trace as errored: #{trace_id}")
+
+            {:error, update_reason} ->
+              :logger.warning("[Orchestrator] Failed to update errored tool call trace: #{inspect(update_reason)}")
+          end
+
+        {:error, :not_found} ->
+          :logger.warning("[Orchestrator] Trace not found for error marking: #{trace_id}")
+      end
+    end)
+  end
+
+  defp capture_tool_call(tool_call, issue, agent_id, tool_traces \\ %{}) do
     try do
       attrs = %{
         trace_type: "tool_invocation",
@@ -400,12 +491,20 @@ defmodule Cympho.Orchestrator do
             }
           )
 
+          # Store tool_use_id -> trace_id mapping for async result updates
+          tool_use_id = tool_call["id"]
+          updated_tool_traces = Map.put(tool_traces, tool_use_id, trace.id)
+
+          {updated_tool_traces, trace.id}
+
         {:error, reason} ->
           :logger.warning("[Orchestrator] Failed to capture tool call trace: #{inspect(reason)}")
+          {tool_traces, nil}
       end
     rescue
       e ->
         :logger.error("[Orchestrator] Error capturing tool call: #{inspect(e)}")
+        {tool_traces, nil}
     end
   end
 end
