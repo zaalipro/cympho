@@ -17,6 +17,10 @@ defmodule Cympho.Application do
       {Cympho.Notifications.NotificationSupervisor, []},
       Cympho.Orchestrator.Dispatcher,
       Cympho.Scheduler,
+      # Plugin system
+      {Registry, keys: :unique, name: Cympho.PluginRegistry},
+      Cympho.Plugins.Registry,
+      {Cympho.Plugins.Supervisor, []},
       CymphoWeb.Endpoint
     ]
 
