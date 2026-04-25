@@ -394,7 +394,7 @@ defmodule Cympho.Agents do
 
     {approval_attrs, actor} =
       if requester_agent_id do
-        {Map.put(approval_attrs, :requested_by_id, requester_agent_id),
+        {Map.put(approval_attrs, :requested_by_agent_id, requester_agent_id),
          %Agent{id: requester_agent_id}}
       else
         {approval_attrs, {"system", company_id}}
@@ -423,7 +423,7 @@ defmodule Cympho.Agents do
       description: "Request to change agent '#{agent.name}' role from '#{agent.role}' to '#{new_role}'.",
       category: "agent_promotion",
       company_id: agent.company_id,
-      requested_by_id: agent.id,
+      requested_by_agent_id: agent.id,
       proposal_data: %{
         "agent_id" => agent.id,
         "current_role" => to_string(agent.role),

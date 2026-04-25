@@ -22,7 +22,7 @@ defmodule Cympho.BoardApprovals.BoardApproval do
     field :decision_reasoning, :string
     field :review_deadline, :utc_datetime
 
-    belongs_to :requested_by, Agent
+    belongs_to :requested_by, Agent, foreign_key: :requested_by_agent_id
     belongs_to :company, Company
 
     has_many :votes, BoardApprovalVote, foreign_key: :board_approval_id
@@ -53,7 +53,7 @@ defmodule Cympho.BoardApprovals.BoardApproval do
       :proposal_data,
       :decision_reasoning,
       :review_deadline,
-      :requested_by_id,
+      :requested_by_agent_id,
       :company_id
     ])
     |> validate_required([:title, :category, :company_id])

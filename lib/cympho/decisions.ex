@@ -126,13 +126,19 @@ defmodule Cympho.Decisions do
   Records a decision from a board approval.
   """
   def record_board_decision(board_approval, actor) do
+    {actor_type, actor_id} =
+      case actor do
+        {type, id} when is_binary(type) and is_binary(id) -> {type, id}
+        nil -> {"system", "00000000-0000-0000-0000-000000000000"}
+      end
+
     attrs = %{
       decision_type: "board_approval",
       decision_key: "board_#{board_approval.id}",
       outcome: board_approval.status,
       reasoning: Map.get(board_approval, :decision_reasoning),
-      actor_type: elem(actor, 0),
-      actor_id: elem(actor, 1),
+      actor_type: actor_type,
+      actor_id: actor_id,
       resource_type: "board_approval",
       resource_id: board_approval.id,
       context: %{

@@ -89,7 +89,7 @@ defmodule Cympho.Budgets do
       {:ok, budget} ->
         GovernanceAuditLogs.log_action(
           "budget_created",
-          actor || {"system", "system"},
+          actor,
           "Budget created: #{budget.name}",
           resource: budget,
           metadata: %{
@@ -136,7 +136,7 @@ defmodule Cympho.Budgets do
       {:ok, updated} ->
         GovernanceAuditLogs.log_action(
           "budget_updated",
-          actor || {"system", "system"},
+          actor,
           "Budget updated: #{updated.name}",
           resource: updated,
           metadata: %{
@@ -163,7 +163,7 @@ defmodule Cympho.Budgets do
       {:ok, updated} ->
         GovernanceAuditLogs.log_action(
           "budget_spent",
-          actor || {"system", "system"},
+          actor,
           "Spent #{amount} #{budget.currency}: #{description}",
           resource: updated,
           reasoning: description,
@@ -235,7 +235,7 @@ defmodule Cympho.Budgets do
       {:ok, deleted} ->
         GovernanceAuditLogs.log_action(
           "budget_deleted",
-          actor || {"system", "system"},
+          actor,
           "Budget deleted: #{deleted.name}",
           resource: deleted,
           metadata: %{
@@ -272,7 +272,7 @@ defmodule Cympho.Budgets do
     if Budget.at_threshold?(budget) do
       GovernanceAuditLogs.log_action(
         "budget_threshold_reached",
-        actor || {"system", "system"},
+        actor,
         "Budget threshold alert: #{budget.name} at #{Budget.utilization_percentage(budget)}%",
         resource: budget,
         metadata: %{
@@ -300,7 +300,7 @@ defmodule Cympho.Budgets do
     if Budget.exhausted?(budget) and budget.hard_stop do
       GovernanceAuditLogs.log_action(
         "budget_limit_reached",
-        actor || {"system", "system"},
+        actor,
         "Budget hard-stop triggered: #{budget.name}",
         resource: budget,
         reasoning: "Budget limit reached and hard-stop is enabled",
@@ -388,7 +388,7 @@ defmodule Cympho.Budgets do
       {:ok, approval} ->
         GovernanceAuditLogs.log_action(
           "budget_pending_approval",
-          actor || {"system", "system"},
+          actor,
           "Budget creation pending board approval",
           resource: approval,
           metadata: %{limit: attrs[:limit_amount] || attrs["limit_amount"]}
@@ -421,7 +421,7 @@ defmodule Cympho.Budgets do
       {:ok, approval} ->
         GovernanceAuditLogs.log_action(
           "budget_update_pending_approval",
-          actor || {"system", "system"},
+          actor,
           "Budget update pending board approval: #{budget.name}",
           resource: approval,
           metadata: %{

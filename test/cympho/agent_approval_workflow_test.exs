@@ -53,20 +53,19 @@ defmodule Cympho.AgentApprovalWorkflowTest do
   end
 
   defp create_agent_in_company(company, attrs \\ %{}) do
-    {:ok, agent} =
-      Agents.create_agent(
-        Map.merge(
-          %{
-            name: "Test Agent",
-            role: :engineer,
-            company_id: company.id
-          },
-          attrs
-        )
+    attrs =
+      Map.merge(
+        %{
+          name: "Test Agent",
+          role: :engineer,
+          company_id: company.id
+        },
+        attrs
       )
 
-    agent
-  end
+    %Agent{}
+    |> Agent.changeset(attrs)
+    |> Cympho.Repo.insert!()
 
   defp start_heartbeat_supervisor(_context) do
     case start_supervised({Cympho.AgentHeartbeat.Supervisor, []}) do

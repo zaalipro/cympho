@@ -393,7 +393,7 @@ defmodule Cympho.BoardApprovals do
         %{
           decision_reasoning: "Auto-approved based on board vote threshold"
         },
-        {"system", "system"}
+        nil
       )
     end
   end
@@ -544,7 +544,7 @@ defmodule Cympho.BoardApprovals do
             {:error, :not_found} ->
               GovernanceAuditLogs.log_action(
                 "budget_increase_execution_failed",
-                {"system", "system"},
+                nil,
                 "Budget not found for approved increase",
                 resource: board_approval,
                 metadata: %{budget_id: budget_id}
