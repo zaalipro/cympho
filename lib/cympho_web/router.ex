@@ -123,6 +123,10 @@ defmodule CymphoWeb.Router do
     get "/issues/:issue_id/activities/statistics", ActivityController, :statistics
     get "/activities/:id", ActivityController, :show
     get "/companies/:company_id/activities/timeline", ActivityController, :company_timeline
+
+    # MCP server endpoints
+    get "/mcp/tools", McpController, :tools
+    post "/mcp/call", McpController, :call
   end
 
   scope "/api", CymphoWeb do
