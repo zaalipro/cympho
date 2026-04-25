@@ -15,6 +15,13 @@ defmodule CymphoWeb do
     end
   end
 
+  def channel do
+    quote do
+      use Phoenix.Channel
+      import CymphoWeb.Gettext
+    end
+  end
+
   def controller do
     quote do
       use Phoenix.Controller,
