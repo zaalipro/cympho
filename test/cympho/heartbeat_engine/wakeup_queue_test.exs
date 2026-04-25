@@ -3,90 +3,113 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
 
   alias Cympho.HeartbeatEngine.WakeupQueue
 
-  describe "enqueue/1" do
-    test "creates a new wake entry" do
-      agent_id = Ecto.UUID.generate()
-      issue_id = Ecto.UUID.generate()
+  setup do
+    {:ok, agent} =
+      Cympho.Agents.create_agent(%{
+        name: "WakeTest #{System.unique_integer()}",
+        role: :engineer,
+        status: :idle
+      })
 
+    {:ok, project} =
+      Cympho.Projects.create_project(%{
+        name: "WakeTestProject #{System.unique_integer()}",
+        prefix: "WKP"
+      })
+
+    {:ok, issue} =
+      Cympho.Issues.create_issue(%{
+        title: "WakeTest Issue",
+        description: "test",
+        project_id: project.id
+      })
+
+    {:ok, issue2} =
+      Cympho.Issues.create_issue(%{
+        title: "WakeTest Issue 2",
+        description: "test",
+        project_id: project.id
+      })
+
+    %{agent: agent, issue: issue, issue2: issue2}
+  end
+
+  describe "enqueue/1" do
+    test "creates a new wake entry", %{agent: agent, issue: issue} do
       assert {:ok, wake} =
                WakeupQueue.enqueue(%{
-                 agent_id: agent_id,
-                 issue_id: issue_id,
+                 agent_id: agent.id,
+                 issue_id: issue.id,
                  reason: "issue_commented"
                })
 
-      assert wake.agent_id == agent_id
-      assert wake.issue_id == issue_id
+      assert wake.agent_id == agent.id
+      assert wake.issue_id == issue.id
       assert wake.reason == "issue_commented"
     end
 
-    test "coalesces duplicate wake for same agent/issue/reason" do
-      agent_id = Ecto.UUID.generate()
-      issue_id = Ecto.UUID.generate()
-
+    test "coalesces duplicate wake for same agent/issue/reason", %{agent: agent, issue: issue} do
       {:ok, _first} =
         WakeupQueue.enqueue(%{
-          agent_id: agent_id,
-          issue_id: issue_id,
+          agent_id: agent.id,
+          issue_id: issue.id,
           reason: "issue_commented",
           metadata: %{"key" => "value1"}
         })
 
       {:ok, second} =
         WakeupQueue.enqueue(%{
-          agent_id: agent_id,
-          issue_id: issue_id,
+          agent_id: agent.id,
+          issue_id: issue.id,
           reason: "issue_commented",
           metadata: %{"key" => "value2"}
         })
 
-      count = WakeupQueue.pending_count(agent_id)
+      count = WakeupQueue.pending_count(agent.id)
       assert count == 1
 
       assert second.metadata["key"] == "value2"
     end
 
-    test "allows different reasons for same agent/issue" do
-      agent_id = Ecto.UUID.generate()
-      issue_id = Ecto.UUID.generate()
-
+    test "allows different reasons for same agent/issue", %{agent: agent, issue: issue} do
       {:ok, _} =
         WakeupQueue.enqueue(%{
-          agent_id: agent_id,
-          issue_id: issue_id,
+          agent_id: agent.id,
+          issue_id: issue.id,
           reason: "issue_commented"
         })
 
       {:ok, _} =
         WakeupQueue.enqueue(%{
-          agent_id: agent_id,
-          issue_id: issue_id,
+          agent_id: agent.id,
+          issue_id: issue.id,
           reason: "issue_blockers_resolved"
         })
 
-      assert WakeupQueue.pending_count(agent_id) == 2
+      assert WakeupQueue.pending_count(agent.id) == 2
     end
   end
 
   describe "dequeue/1" do
-    test "returns the most recent wake for an agent" do
-      agent_id = Ecto.UUID.generate()
-
+    test "returns the most recent wake for an agent", %{agent: agent, issue: issue, issue2: issue2} do
       {:ok, _} =
         WakeupQueue.enqueue(%{
-          agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
+          agent_id: agent.id,
+          issue_id: issue.id,
           reason: "issue_commented"
         })
 
+      # Ensure different timestamp
+      Process.sleep(1100)
+
       {:ok, latest} =
         WakeupQueue.enqueue(%{
-          agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
+          agent_id: agent.id,
+          issue_id: issue2.id,
           reason: "issue_blockers_resolved"
         })
 
-      assert {:ok, dequeued} = WakeupQueue.dequeue(agent_id)
+      assert {:ok, dequeued} = WakeupQueue.dequeue(agent.id)
       assert dequeued.id == latest.id
     end
 
@@ -100,56 +123,76 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
       assert WakeupQueue.pending_count(Ecto.UUID.generate()) == 0
     end
 
-    test "counts wakes for an agent" do
-      agent_id = Ecto.UUID.generate()
+    test "counts wakes for an agent", %{agent: agent, issue: issue, issue2: issue2} do
+      WakeupQueue.enqueue(%{
+        agent_id: agent.id,
+        issue_id: issue.id,
+        reason: "issue_commented"
+      })
 
-      for _ <- 1..3 do
-        WakeupQueue.enqueue(%{
-          agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
-          reason: "issue_commented"
-        })
-      end
+      WakeupQueue.enqueue(%{
+        agent_id: agent.id,
+        issue_id: issue2.id,
+        reason: "issue_commented"
+      })
 
-      assert WakeupQueue.pending_count(agent_id) == 3
+      WakeupQueue.enqueue(%{
+        agent_id: agent.id,
+        issue_id: issue.id,
+        reason: "issue_blockers_resolved"
+      })
+
+      assert WakeupQueue.pending_count(agent.id) == 3
     end
   end
 
   describe "list_pending/1" do
-    test "returns wakes ordered by most recent first" do
-      agent_id = Ecto.UUID.generate()
-
-      {:ok, first} =
+    test "returns wakes ordered by most recent first", %{agent: agent, issue: issue, issue2: issue2} do
+      {:ok, _first} =
         WakeupQueue.enqueue(%{
-          agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
+          agent_id: agent.id,
+          issue_id: issue.id,
           reason: "issue_commented"
         })
 
+      Process.sleep(1100)
+
       {:ok, second} =
         WakeupQueue.enqueue(%{
-          agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
+          agent_id: agent.id,
+          issue_id: issue2.id,
           reason: "issue_blockers_resolved"
         })
 
-      wakes = WakeupQueue.list_pending(agent_id)
+      wakes = WakeupQueue.list_pending(agent.id)
       assert length(wakes) == 2
       assert hd(wakes).id == second.id
     end
 
-    test "respects limit option" do
-      agent_id = Ecto.UUID.generate()
+    test "respects limit option", %{agent: agent, issue: issue, issue2: issue2} do
+      reasons = ["issue_commented", "issue_blockers_resolved", "issue_children_completed"]
 
-      for _ <- 1..5 do
+      for reason <- reasons do
         WakeupQueue.enqueue(%{
-          agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
-          reason: "issue_commented"
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: reason
         })
       end
 
-      wakes = WakeupQueue.list_pending(agent_id, limit: 2)
+      WakeupQueue.enqueue(%{
+        agent_id: agent.id,
+        issue_id: issue2.id,
+        reason: "issue_commented"
+      })
+
+      WakeupQueue.enqueue(%{
+        agent_id: agent.id,
+        issue_id: issue2.id,
+        reason: "issue_blockers_resolved"
+      })
+
+      wakes = WakeupQueue.list_pending(agent.id, limit: 2)
       assert length(wakes) == 2
     end
   end

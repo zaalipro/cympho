@@ -247,7 +247,9 @@ defmodule Cympho.Finances do
     results =
       Enum.map(policies, fn policy ->
         # Lock the policy row to prevent concurrent budget checks
-        locked_policy = Repo.lock!(BudgetPolicy, policy.id, for_update: true)
+        locked_policy =
+          from(p in BudgetPolicy, where: p.id == ^policy.id, lock: "FOR UPDATE")
+          |> Repo.one!()
         check_policy_threshold(locked_policy, token_usage)
       end)
 

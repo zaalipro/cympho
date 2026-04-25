@@ -254,7 +254,7 @@ defmodule Cympho.Companies do
     end
   end
 
-  defp create_membership!(attrs) do
+  def create_membership!(attrs) do
     %CompanyMembership{}
     |> CompanyMembership.changeset(attrs)
     |> Repo.insert!()

@@ -163,19 +163,18 @@ defmodule Cympho.Decisions do
       decision_type: "issue_approval",
       decision_key: "issue_approval_#{approval.id}",
       outcome: approval.status,
-      reasoning: approval.reasoning,
+      reasoning: approval.resolution_reason,
       actor_type: elem(actor, 0),
       actor_id: elem(actor, 1),
       resource_type: "approval",
       resource_id: approval.id,
       context: %{
-        issue_id: approval.issue_id,
-        approval_type: approval.approval_type
+        approval_id: approval.id,
+        type: approval.type
       },
-      company_id: approval.company_id,
       metadata: %{
         approval_id: approval.id,
-        requested_by: approval.requested_by
+        requested_by_agent_id: approval.requested_by_agent_id
       }
     }
 

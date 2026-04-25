@@ -35,6 +35,8 @@ defmodule Cympho.Wakes.AgentWake do
     |> validate_required([:agent_id, :reason])
     |> validate_inclusion(:reason, @reasons)
     |> validate_inclusion(:triggered_by_type, ["agent", "user", "system"])
+    |> foreign_key_constraint(:agent_id)
+    |> foreign_key_constraint(:issue_id)
   end
 
   def reasons, do: @reasons

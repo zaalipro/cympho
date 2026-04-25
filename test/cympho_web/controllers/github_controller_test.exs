@@ -43,7 +43,7 @@ defmodule CymphoWeb.GithubControllerTest do
       conn =
         conn
         |> put_req_header("x-hub-signature-256", "")
-        |> post("/github/webhook", payload)
+        |> post("/api/github/webhook", payload)
 
       assert response(conn, :unauthorized) == ""
     end
@@ -54,7 +54,7 @@ defmodule CymphoWeb.GithubControllerTest do
       conn =
         conn
         |> put_req_header("x-hub-signature-256", "sha256=invalidsignature")
-        |> post("/github/webhook", payload)
+        |> post("/api/github/webhook", payload)
 
       assert response(conn, :unauthorized) == ""
     end
@@ -68,7 +68,7 @@ defmodule CymphoWeb.GithubControllerTest do
       conn =
         conn
         |> put_req_header("x-hub-signature-256", signature)
-        |> post("/github/webhook", payload)
+        |> post("/api/github/webhook", payload)
 
       assert response(conn, :ok) == ""
 
@@ -97,7 +97,7 @@ defmodule CymphoWeb.GithubControllerTest do
       conn =
         conn
         |> put_req_header("x-hub-signature-256", signature)
-        |> post("/github/webhook", payload)
+        |> post("/api/github/webhook", payload)
 
       assert response(conn, :ok) == ""
 
@@ -126,7 +126,7 @@ defmodule CymphoWeb.GithubControllerTest do
       conn =
         conn
         |> put_req_header("x-hub-signature-256", signature)
-        |> post("/github/webhook", payload)
+        |> post("/api/github/webhook", payload)
 
       assert response(conn, :ok) == ""
 
@@ -146,7 +146,7 @@ defmodule CymphoWeb.GithubControllerTest do
       conn =
         conn
         |> put_req_header("x-hub-signature-256", signature)
-        |> post("/github/webhook", payload)
+        |> post("/api/github/webhook", payload)
 
       assert response(conn, :ok) == ""
 
@@ -166,7 +166,7 @@ defmodule CymphoWeb.GithubControllerTest do
       conn =
         conn
         |> put_req_header("x-hub-signature-256", signature)
-        |> post("/github/webhook", payload)
+        |> post("/api/github/webhook", payload)
 
       assert response(conn, :ok) == ""
 
@@ -186,7 +186,7 @@ defmodule CymphoWeb.GithubControllerTest do
       conn =
         conn
         |> put_req_header("x-hub-signature-256", signature)
-        |> post("/github/webhook", payload)
+        |> post("/api/github/webhook", payload)
 
       assert response(conn, :ok) == ""
 
@@ -200,7 +200,7 @@ defmodule CymphoWeb.GithubControllerTest do
     test "returns 200 for non-PR payloads without error", %{conn: conn} do
       payload = %{"action" => "created", "ref" => "refs/heads/main"}
 
-      conn = post(conn, "/github/webhook", payload)
+      conn = post(conn, "/api/github/webhook", payload)
 
       assert response(conn, :ok) == ""
     end
@@ -213,7 +213,7 @@ defmodule CymphoWeb.GithubControllerTest do
       conn =
         conn
         |> put_req_header("x-hub-signature-256", signature)
-        |> post("/github/webhook", payload)
+        |> post("/api/github/webhook", payload)
 
       # Should return 200 but take no action (no issue linked)
       assert response(conn, :ok) == ""

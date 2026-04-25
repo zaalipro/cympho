@@ -71,7 +71,7 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
       Repo.one(
         from w in AgentWake,
           where: w.agent_id == ^agent_id,
-          order_by: [desc: w.inserted_at],
+          order_by: [desc: w.inserted_at, desc: w.id],
           limit: 1
       )
 

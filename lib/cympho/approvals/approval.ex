@@ -38,7 +38,7 @@ defmodule Cympho.Approvals.Approval do
   def resolve_changeset(approval, attrs) do
     approval
     |> cast(attrs, [:status, :resolution_reason, :resolved_by_user_id])
-    |> validate_required([:status, :resolved_by_user_id])
+    |> validate_required([:status])
     |> validate_resolution_transition(approval.status)
   end
 
