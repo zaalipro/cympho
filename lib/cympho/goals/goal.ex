@@ -10,7 +10,6 @@ defmodule Cympho.Goals.Goal do
     field :description, :string
     field :status, :string, default: "active"
     field :priority, :string, default: "medium"
-    field :search_vector, :tsvector
 
     belongs_to :project, Cympho.Projects.Project
     belongs_to :company, Cympho.Companies.Company

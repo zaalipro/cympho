@@ -159,8 +159,8 @@
             }
           >
             {String.capitalize(to_string(tab))}
-            <%= tab_count = tab_count(@results, tab) do %>
-              <span class="ml-2 text-xs text-text-tertiary">{tab_count}</span>
+            <%= if count = tab_count(@results, tab) do %>
+              <span class="ml-2 text-xs text-text-tertiary">{count}</span>
             <% end %>
           </button>
         <% end %>

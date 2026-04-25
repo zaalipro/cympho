@@ -254,4 +254,128 @@ defmodule CymphoWeb.SearchLive.Index do
 
   defp recent_searches_for_user(nil), do: []
   defp recent_searches_for_user(user), do: RecentSearches.list_recent_searches(user.id)
+
+  defp render_issues(assigns, issues, title) do
+    assigns = assign(assigns, issues: issues, section_title: title)
+
+    ~H"""
+    <div :if={@issues != []} class="space-y-2">
+      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">{@section_title}</h2>
+      <div class="space-y-2">
+        <.link
+          :for={issue <- @issues}
+          navigate={~p"/issues/#{issue.id}"}
+          class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+        >
+          <div class="flex items-start justify-between">
+            <div class="flex-1">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-sm font-medium text-text-primary">{issue.identifier}</span>
+                <span class={["px-2 py-0.5 text-xs rounded-full", status_color(issue.status)]}>
+                  {status_label(issue.status)}
+                </span>
+                <span class={["text-xs font-medium", priority_color(issue.priority)]}>
+                  {priority_label(issue.priority)} priority
+                </span>
+              </div>
+              <h3 class="text-base font-medium text-text-primary mb-1">{issue.title}</h3>
+              <p class="text-sm text-text-secondary line-clamp-2">{issue.description}</p>
+              <div class="flex items-center gap-4 mt-2 text-xs text-text-tertiary">
+                <span :if={issue.assignee}>Assignee: {issue.assignee.name}</span>
+                <span :if={issue.project}>Project: {issue.project.name}</span>
+                <span :if={issue.labels != []}>Labels: {Enum.map_join(issue.labels, ", ", & &1.name)}</span>
+              </div>
+            </div>
+          </div>
+        </.link>
+      </div>
+    </div>
+    """
+  end
+
+  defp render_agents(assigns, agents, title) do
+    assigns = assign(assigns, agents: agents, section_title: title)
+
+    ~H"""
+    <div :if={@agents != []} class="space-y-2">
+      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">{@section_title}</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <.link
+          :for={agent <- @agents}
+          navigate={~p"/agents/#{agent.id}"}
+          class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+        >
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-base font-medium text-text-primary">{agent.name}</h3>
+            <span class="w-2 h-2 rounded-full" style={"background-color: " <> agent_status_color(agent.status)}></span>
+          </div>
+          <p class="text-sm text-text-secondary mb-2">{agent.title}</p>
+          <div class="flex items-center gap-2 text-xs text-text-tertiary">
+            <span class="capitalize">{agent.role}</span>
+            <span>•</span>
+            <span class="capitalize">{agent.status}</span>
+          </div>
+        </.link>
+      </div>
+    </div>
+    """
+  end
+
+  defp render_projects(assigns, projects, title) do
+    assigns = assign(assigns, projects: projects, section_title: title)
+
+    ~H"""
+    <div :if={@projects != []} class="space-y-2">
+      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">{@section_title}</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <.link
+          :for={project <- @projects}
+          navigate={~p"/projects/#{project.id}"}
+          class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+        >
+          <h3 class="text-base font-medium text-text-primary mb-1">{project.name}</h3>
+          <p class="text-sm text-text-secondary line-clamp-2 mb-2">{project.description}</p>
+          <div class="flex items-center gap-2 text-xs text-text-tertiary">
+            <span class="capitalize">{project.status}</span>
+            <span>•</span>
+            <span>{project.prefix}</span>
+          </div>
+        </.link>
+      </div>
+    </div>
+    """
+  end
+
+  defp render_goals(assigns, goals, title) do
+    assigns = assign(assigns, goals: goals, section_title: title)
+
+    ~H"""
+    <div :if={@goals != []} class="space-y-2">
+      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">{@section_title}</h2>
+      <div class="space-y-2">
+        <.link
+          :for={goal <- @goals}
+          navigate={~p"/goals/#{goal.id}"}
+          class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+        >
+          <div class="flex items-start justify-between">
+            <div class="flex-1">
+              <div class="flex items-center gap-2 mb-1">
+                <h3 class="text-base font-medium text-text-primary">{goal.title}</h3>
+                <span class={["text-xs font-medium", priority_color(String.to_existing_atom(goal.priority))]}>
+                  {String.capitalize(goal.priority)} priority
+                </span>
+              </div>
+              <p class="text-sm text-text-secondary line-clamp-2">{goal.description}</p>
+              <div class="flex items-center gap-4 mt-2 text-xs text-text-tertiary">
+                <span class="capitalize">{goal.status}</span>
+                <span :if={goal.project}>Project: {goal.project.name}</span>
+              </div>
+            </div>
+          </div>
+        </.link>
+      </div>
+    </div>
+    """
+  end
 end

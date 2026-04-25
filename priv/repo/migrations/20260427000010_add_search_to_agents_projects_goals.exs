@@ -26,8 +26,7 @@ defmodule Cympho.Repo.Migrations.AddSearchToAgentsProjectsGoals do
     BEGIN
       NEW.search_vector :=
         setweight(to_tsvector('english', coalesce(NEW.name, '')), 'A') ||
-        setweight(to_tsvector('english', coalesce(NEW.title, '')), 'B') ||
-        setweight(to_tsvector('english', coalesce(NEW.instructions, '')), 'C');
+        setweight(to_tsvector('english', coalesce(NEW.instructions, '')), 'B');
       RETURN NEW;
     END;
     $$ LANGUAGE plpgsql;
@@ -60,7 +59,7 @@ defmodule Cympho.Repo.Migrations.AddSearchToAgentsProjectsGoals do
     # Triggers to keep vectors in sync
     execute """
     CREATE TRIGGER agents_search_vector_trigger
-    BEFORE INSERT OR UPDATE OF name, title, instructions ON agents
+    BEFORE INSERT OR UPDATE OF name, instructions ON agents
     FOR EACH ROW EXECUTE FUNCTION agents_search_vector_update();
     """
 
@@ -77,7 +76,7 @@ defmodule Cympho.Repo.Migrations.AddSearchToAgentsProjectsGoals do
     """
 
     # Backfill existing rows
-    execute "UPDATE agents SET search_vector = setweight(to_tsvector('english', coalesce(name, '')), 'A') || setweight(to_tsvector('english', coalesce(title, '')), 'B') || setweight(to_tsvector('english', coalesce(instructions, '')), 'C');"
+    execute "UPDATE agents SET search_vector = setweight(to_tsvector('english', coalesce(name, '')), 'A') || setweight(to_tsvector('english', coalesce(instructions, '')), 'B');"
     execute "UPDATE projects SET search_vector = setweight(to_tsvector('english', coalesce(name, '')), 'A') || setweight(to_tsvector('english', coalesce(description, '')), 'B');"
     execute "UPDATE goals SET search_vector = setweight(to_tsvector('english', coalesce(title, '')), 'A') || setweight(to_tsvector('english', coalesce(description, '')), 'B');"
   end

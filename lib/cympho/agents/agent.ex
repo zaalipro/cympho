@@ -26,7 +26,6 @@ defmodule Cympho.Agents.Agent do
     field :heartbeat_config, :map, default: %{}
     field :permissions, :map, default: %{}
     field :budget, :map, default: %{}
-    field :search_vector, :tsvector
 
     belongs_to :company, Cympho.Companies.Company
     belongs_to :parent, __MODULE__, foreign_key: :parent_id
