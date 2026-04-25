@@ -68,16 +68,20 @@ defmodule Cympho.Goals do
   end
 
   def get_ancestors(goal_id) do
-    walk_ancestors(goal_id, [])
+    case Repo.get(Goal, goal_id) do
+      nil -> []
+      %{parent_id: nil} -> []
+      %{parent_id: pid} -> walk_ancestors(pid, [])
+    end
   end
 
-  defp walk_ancestors(nil, acc), do: Enum.reverse(acc)
+  defp walk_ancestors(nil, acc), do: acc
   defp walk_ancestors(id, acc) do
     case Repo.get(Goal, id) do
-      nil -> Enum.reverse(acc)
-      %{parent_id: nil} -> Enum.reverse(acc)
-      %{parent_id: pid} = parent ->
-        walk_ancestors(pid, [parent | acc])
+      nil -> acc
+      goal ->
+        acc = [goal | acc]
+        if goal.parent_id, do: walk_ancestors(goal.parent_id, acc), else: acc
     end
   end
 

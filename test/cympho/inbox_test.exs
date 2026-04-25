@@ -3,10 +3,11 @@ defmodule Cympho.InboxTest do
   alias Cympho.Inbox
 
   setup do
-    company = insert(:company)
-    project = insert(:project, company_id: company.id)
-    issue = insert(:issue, project_id: project.id)
-    agent = insert(:agent, company_id: company.id)
+    {:ok, company} = Cympho.Companies.create_company(%{name: "Test Co", slug: "inbox-test-#{System.unique_integer()}"})
+    prefix = for _ <- 1..4, into: "", do: <<Enum.random(?A..?Z)>>
+    {:ok, project} = Cympho.Projects.create_project(%{name: "Proj", prefix: prefix, company_id: company.id})
+    {:ok, issue} = Cympho.Issues.create_issue(%{title: "Test Issue", project_id: project.id})
+    {:ok, agent} = Cympho.Agents.create_agent(%{name: "Bot", role: "engineer", status: "idle", company_id: company.id})
     {:ok, issue: issue, agent: agent}
   end
 

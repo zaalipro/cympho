@@ -4,8 +4,9 @@ defmodule Cympho.GoalsHierarchyTest do
   alias Cympho.Goals.Goal
 
   setup do
-    company = insert(:company)
-    project = insert(:project, company_id: company.id)
+    {:ok, company} = Cympho.Companies.create_company(%{name: "Test Co", slug: "gh-#{System.unique_integer()}"})
+    prefix = for _ <- 1..4, into: "", do: <<Enum.random(?A..?Z)>>
+    {:ok, project} = Cympho.Projects.create_project(%{name: "Test Project", prefix: prefix, company_id: company.id})
     {:ok, company: company, project: project}
   end
 
@@ -49,9 +50,9 @@ defmodule Cympho.GoalsHierarchyTest do
     test "calculates progress from linked issues", %{project: project} do
       {:ok, goal} = Goals.create_goal(%{title: "Goal", project_id: project.id})
 
-      insert(:issue, project_id: project.id, goal_id: goal.id, status: :done)
-      insert(:issue, project_id: project.id, goal_id: goal.id, status: :done)
-      insert(:issue, project_id: project.id, goal_id: goal.id, status: :in_progress)
+      {:ok, _} = Cympho.Issues.create_issue(%{title: "I1", project_id: project.id, goal_id: goal.id, status: :done})
+      {:ok, _} = Cympho.Issues.create_issue(%{title: "I2", project_id: project.id, goal_id: goal.id, status: :done})
+      {:ok, _} = Cympho.Issues.create_issue(%{title: "I3", project_id: project.id, goal_id: goal.id, status: :in_progress})
 
       progress = Goals.goal_progress(goal.id)
       assert progress.total == 3

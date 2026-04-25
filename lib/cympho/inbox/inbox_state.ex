@@ -25,15 +25,15 @@ defmodule Cympho.Inbox.InboxState do
   end
 
   def dismiss_changeset(inbox_state) do
-    change(inbox_state, %{status: "dismissed", dismissed_at: DateTime.utc_now()})
+    change(inbox_state, %{status: "dismissed", dismissed_at: DateTime.utc_now() |> DateTime.truncate(:second)})
   end
 
   def archive_changeset(inbox_state) do
-    change(inbox_state, %{status: "archived", archived_at: DateTime.utc_now()})
+    change(inbox_state, %{status: "archived", archived_at: DateTime.utc_now() |> DateTime.truncate(:second)})
   end
 
   def read_changeset(inbox_state) do
-    change(inbox_state, %{status: "read", read_at: DateTime.utc_now()})
+    change(inbox_state, %{status: "read", read_at: DateTime.utc_now() |> DateTime.truncate(:second)})
   end
 
   def restore_changeset(inbox_state) do
