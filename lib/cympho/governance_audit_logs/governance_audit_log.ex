@@ -55,12 +55,19 @@ defmodule Cympho.GovernanceAuditLogs.GovernanceAuditLog do
       "budget_updated",
       "budget_spent",
       "budget_limit_reached",
+      "budget_threshold_reached",
       "agent_paused",
       "agent_resumed",
       "agent_terminated",
+      "agent_hired",
+      "agent_promoted",
       "permission_granted",
       "permission_revoked",
+      "board_proposal_created",
+      "board_vote_cast",
+      "board_proposal_cancelled",
       "board_decision",
+      "guard_denied",
       "issue_gated"
     ])
   end

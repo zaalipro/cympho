@@ -116,6 +116,28 @@ defmodule Cympho.Companies do
   end
 
 
+
+  @doc """
+  Returns true if the user is a board member of the given company.
+  """
+  def is_board_member?(user_id, company_id) do
+    case get_membership(user_id, company_id) do
+      nil -> false
+      membership -> membership.is_board_member == true
+    end
+  end
+
+  @doc """
+  Lists all board members for a company.
+  """
+  def list_board_members(company_id) do
+    from(m in CompanyMembership,
+      where: m.company_id == ^company_id and m.is_board_member == true,
+      preload: [:user]
+    )
+    |> Repo.all()
+  end
+
   @doc """
   Updates a board membership (e.g., toggling board member status).
   """

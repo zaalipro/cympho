@@ -5,6 +5,20 @@ defmodule CymphoWeb.AgentController do
 
   action_fallback CymphoWeb.FallbackController
 
+  def create(conn, %{"agent" => agent_params}) do
+    case Agents.create_agent(agent_params) do
+      {:ok, agent} ->
+        conn
+        |> put_status(:created)
+        |> json(%{data: agent})
+
+      {:error, changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: translate_errors(changeset)})
+    end
+  end
+
   def inbox(conn, %{"id" => id}) do
     with {:ok, _agent} <- Agents.get_agent(id) do
       issues = Agents.list_agent_inbox(id)
@@ -47,5 +61,13 @@ defmodule CymphoWeb.AgentController do
       true ->
         {:error, :forbidden}
     end
+  end
+
+  defp translate_errors(changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
+        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
+      end)
+    end)
   end
 end
