@@ -44,6 +44,7 @@ defmodule CymphoWeb.Router do
       live "/labels", LabelLive.Index
       live "/approvals", ApprovalLive.Index
       live "/approvals/:id", ApprovalLive.Show
+      live "/board-approvals/:id", BoardApprovalLive.Show
       live "/agents", AgentLive.Index
       live "/agents/:id", AgentLive.Show
       live "/org-chart", OrgChartLive

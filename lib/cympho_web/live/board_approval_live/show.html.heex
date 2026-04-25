@@ -1,0 +1,86 @@
+<div class="p-6 lg:p-8 max-w-4xl mx-auto">
+  <.header>
+    <:actions>
+      <.app_link
+        navigate={~p"/agents"}
+        class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors"
+      >
+        Back to Agents
+      </.app_link>
+    </:actions>
+    <span class={"px-3 py-1 rounded-md text-xs font-510 border #{status_badge(@approval.status)}"}>
+      String.upcase(@approval.status)
+    </span>
+    <:title>{@approval.title}</:title>
+    <:subtitle>
+      <%= category_label(@approval.category) %> &middot; Created <%= format_datetime(@approval.inserted_at) %>
+    </:subtitle>
+  </.header>
+
+  <div class="mt-6 space-y-6">
+    <div class="bg-white/[0.02] border border-border rounded-lg p-6">
+      <h3 class="text-sm font-510 text-text-secondary mb-2">Description</h3>
+      <p class="text-text-primary"><%= @approval.description %></p>
+    </div>
+
+    <div class="bg-white/[0.02] border border-border rounded-lg p-6">
+      <h3 class="text-sm font-510 text-text-secondary mb-4">Details</h3>
+      <div class="space-y-3">
+        <div class="flex justify-between">
+          <span class="text-text-secondary text-sm">Category</span>
+          <span class="text-text-primary text-sm font-510"><%= category_label(@approval.category) %></span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-text-secondary text-sm">Status</span>
+          <span class={"text-sm font-510 #{status_badge(@approval.status)} px-2 py-0.5 rounded border"}>
+            <%= String.upcase(@approval.status) %>
+          </span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-text-secondary text-sm">Requested By</span>
+          <span class="text-text-primary text-sm">
+            <%= if @approval.requested_by do %>
+              <%= @approval.requested_by.name %>
+            <% else %>
+              System
+            <% end %>
+          </span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-text-secondary text-sm">Review Deadline</span>
+          <span class="text-text-primary text-sm"><%= format_datetime(@approval.review_deadline) %></span>
+        </div>
+        <%= if @approval.decision_reasoning do %>
+          <div class="mt-4 pt-4 border-t border-border">
+            <span class="text-text-secondary text-sm">Decision Reasoning</span>
+            <p class="text-text-primary text-sm mt-1"><%= @approval.decision_reasoning %></p>
+          </div>
+        <% end %>
+      </div>
+    </div>
+
+    <%= if @approval.status != "pending" && length(@approval.votes) > 0 do %>
+      <div class="bg-white/[0.02] border border-border rounded-lg p-6">
+        <h3 class="text-sm font-510 text-text-secondary mb-4">Votes</h3>
+        <div class="space-y-2">
+          <%= for vote <- @approval.votes do %>
+            <div class="flex justify-between items-center py-2 border-b border-border last:border-0">
+              <span class="text-text-primary text-sm"><%= vote.user.name %></span>
+              <span class={
+                "text-xs font-510 px-2 py-1 rounded border " <>
+                (case vote.vote do
+                  "approve" -> "bg-green-500/10 text-green-500 border-green-500/20"
+                  "deny" -> "bg-red-500/10 text-red-500 border-red-500/20"
+                  "abstain" -> "bg-gray-500/10 text-gray-500 border-gray-500/20"
+                  _ -> "bg-gray-500/10 text-gray-500 border-gray-500/20"
+                end)
+              }>
+                <%= String.upcase(vote.vote) %>
+              </span>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  </div>
+</div>

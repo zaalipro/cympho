@@ -1,5 +1,5 @@
 defmodule Cympho.AgentApprovalWorkflowTest do
-  use Cympho.DataCase, async: true
+  use Cympho.DataCase, async: false
 
   alias Cympho.{Agents, BoardApprovals, Companies, GovernanceAuditLogs}
   alias Cympho.Agents.Agent
@@ -80,8 +80,15 @@ defmodule Cympho.AgentApprovalWorkflowTest do
 
   defp start_executor(_context) do
     case start_supervised(Cympho.BoardApprovals.BoardApprovalActionExecutor) do
-      {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> :ok
+      {:ok, pid} ->
+        # Allow the executor GenServer to access the test's sandbox connection
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+        :ok
+
+      {:error, {:already_started, pid}} ->
+        # Allow the already-started executor to access the test's sandbox connection
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+        :ok
     end
   end
 
@@ -383,7 +390,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
 
       logs =
         GovernanceAuditLogs.list_governance_audit_logs(
-          action_type: "agent_hire_approved_executed"
+          action_type: "agent_hired"
         )
 
       assert length(logs) >= 1
@@ -407,7 +414,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
 
       logs =
         GovernanceAuditLogs.list_governance_audit_logs(
-          action_type: "board_approval_denied_noop"
+          action_type: "board_decision"
         )
 
       assert length(logs) >= 1

@@ -161,7 +161,8 @@ defmodule Cympho.BoardApprovals do
           {:board_approval_resolved, updated}
         )
 
-        maybe_trigger_action(updated)
+        # Execution is handled by BoardApprovalActionExecutor GenServer
+        # to prevent race conditions and ensure consistent async processing
 
         {:ok, updated}
 
