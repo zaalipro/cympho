@@ -7,6 +7,13 @@ defmodule CymphoWeb.DashboardLiveTest do
   alias Cympho.Issues
 
   describe "Dashboard page" do
+    test "root route redirects to dashboard", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/")
+
+      assert html =~ "Dashboard"
+      assert html =~ "Active Agents"
+    end
+
     test "renders dashboard with metric cards", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/dashboard")
 

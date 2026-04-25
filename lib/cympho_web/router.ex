@@ -22,7 +22,8 @@ defmodule CymphoWeb.Router do
     pipe_through :browser
 
     live_session :default, on_mount: [{CymphoWeb.UserAuth, :default}] do
-      live "/", PageLive, :home
+      live "/", DashboardLive.Index, :home
+      live "/dashboard", DashboardLive.Index
       live "/issues", IssueLive.Index
       live "/issues/new", IssueLive.New
       live "/issues/:id", IssueLive.Show
