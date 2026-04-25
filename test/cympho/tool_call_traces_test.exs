@@ -482,4 +482,256 @@ defmodule Cympho.ToolCallTracesTest do
       assert length(traces) == 5
     end
   end
+
+  describe "tamper detection" do
+    test "detects when content hash is modified", %{company: company} do
+      attrs = %{
+        trace_type: "llm_tool_call",
+        tool_name: "web_search",
+        tool_arguments: %{"query" => "original"},
+        status: "success",
+        company_id: company.id,
+        actor_type: "agent",
+        actor_id: Ecto.UUID.generate()
+      }
+
+      {:ok, trace} = ToolCallTraces.create_tool_call_trace(attrs)
+
+      # Simulate tampering by directly updating the database
+      trace
+      |> Ecto.Changeset.change(%{tool_name: "modified_tool"})
+      |> Cympho.Repo.update()
+
+      # Verify should detect the tampering
+      assert {:error, :content_hash_mismatch} = ToolCallTraces.verify_content_hash(trace)
+    end
+
+    test "detects broken chain integrity", %{company: company} do
+      attrs1 = %{
+        trace_type: "llm_tool_call",
+        tool_name: "tool1",
+        tool_arguments: %{},
+        status: "success",
+        company_id: company.id,
+        actor_type: "agent",
+        actor_id: Ecto.UUID.generate()
+      }
+
+      attrs2 = %{
+        trace_type: "llm_tool_call",
+        tool_name: "tool2",
+        tool_arguments: %{},
+        status: "success",
+        company_id: company.id,
+        actor_type: "agent",
+        actor_id: Ecto.UUID.generate()
+      }
+
+      {:ok, trace1} = ToolCallTraces.create_tool_call_trace(attrs1)
+      {:ok, trace2} = ToolCallTraces.create_tool_call_trace(attrs2)
+
+      # Tamper with the chain by modifying prev_hash
+      trace2
+      |> Ecto.Changeset.change(%{prev_hash: "tampered_hash"})
+      |> Cympho.Repo.update()
+
+      # Chain verification should fail
+      assert {:error, :chain_broken, _, _} = ToolCallTraces.verify_chain_integrity(company.id)
+    end
+  end
+
+  describe "actor attribution" do
+    test "correctly attributes tool calls to agents", %{company: company} do
+      agent_id = Ecto.UUID.generate()
+
+      attrs = %{
+        trace_type: "llm_tool_call",
+        tool_name: "code_edit",
+        tool_arguments: %{"file" => "app.ex"},
+        status: "success",
+        company_id: company.id,
+        actor_type: "agent",
+        actor_id: agent_id
+      }
+
+      {:ok, trace} = ToolCallTraces.create_tool_call_trace(attrs)
+
+      assert trace.actor_type == "agent"
+      assert trace.actor_id == agent_id
+
+      # Query by actor should return the trace
+      traces = ToolCallTraces.list_tool_call_traces(actor_id: agent_id)
+      assert length(traces) == 1
+      assert hd(traces).id == trace.id
+    end
+
+    test "correctly attributes tool calls to users", %{company: company} do
+      user_id = Ecto.UUID.generate()
+
+      attrs = %{
+        trace_type: "manual_tool_call",
+        tool_name: "file_upload",
+        tool_arguments: %{"filename" => "data.csv"},
+        status: "success",
+        company_id: company.id,
+        actor_type: "user",
+        actor_id: user_id
+      }
+
+      {:ok, trace} = ToolCallTraces.create_tool_call_trace(attrs)
+
+      assert trace.actor_type == "user"
+      assert trace.actor_id == user_id
+
+      # Query by actor type should return only user traces
+      user_traces = ToolCallTraces.list_tool_call_traces(company_id: company.id, actor_type: "user")
+      assert length(user_traces) == 1
+      assert hd(user_traces).actor_type == "user"
+    end
+
+    test "correctly attributes tool calls to system", %{company: company} do
+      attrs = %{
+        trace_type: "system_tool_call",
+        tool_name: "health_check",
+        tool_arguments: %{},
+        status: "success",
+        company_id: company.id,
+        actor_type: "system",
+        actor_id: "system"
+      }
+
+      {:ok, trace} = ToolCallTraces.create_tool_call_trace(attrs)
+
+      assert trace.actor_type == "system"
+      assert trace.actor_id == "system"
+    end
+  end
+
+  describe "immutability properties" do
+    test "prevents modification of trace content", %{company: company} do
+      attrs = %{
+        trace_type: "llm_tool_call",
+        tool_name: "web_search",
+        tool_arguments: %{"query" => "test"},
+        status: "pending",
+        company_id: company.id,
+        actor_type: "agent",
+        actor_id: Ecto.UUID.generate()
+      }
+
+      {:ok, trace} = ToolCallTraces.create_tool_call_trace(attrs)
+      original_content_hash = trace.content_hash
+
+      # Attempting to change tool arguments should be rejected or detected
+      trace
+      |> Ecto.Changeset.change(%{tool_arguments: %{"query" => "modified"}})
+      |> Cympho.Repo.update()
+
+      # Reload and verify hash
+      {:ok, reloaded_trace} = ToolCallTraces.get_tool_call_trace(trace.id)
+
+      # Content hash should remain unchanged (verification would fail)
+      assert reloaded_trace.content_hash == original_content_hash
+
+      # Tampering should be detectable
+      assert {:error, :content_hash_mismatch} = ToolCallTraces.verify_content_hash(reloaded_trace)
+    end
+
+    test "maintains chain integrity across multiple updates", %{company: company} do
+      agent_id = Ecto.UUID.generate()
+
+      # Create a chain of traces
+      for i <- 1..5 do
+        attrs = %{
+          trace_type: "llm_tool_call",
+          tool_name: "tool_#{i}",
+          tool_arguments: %{"index" => i},
+          status: "pending",
+          company_id: company.id,
+          actor_type: "agent",
+          actor_id: agent_id
+        }
+
+        ToolCallTraces.create_tool_call_trace(attrs)
+      end
+
+      # Update all traces to success
+      traces = ToolCallTraces.get_chain_traces(company.id)
+
+      Enum.each(traces, fn trace ->
+        ToolCallTraces.update_tool_call_trace_status(trace, "success", "completed")
+      end)
+
+      # Verify chain integrity is maintained
+      assert :ok = ToolCallTraces.verify_chain_integrity(company.id)
+    end
+  end
+
+  describe "security properties" do
+    test "uses SHA-256 for content hashing", %{company: company} do
+      attrs = %{
+        trace_type: "llm_tool_call",
+        tool_name: "web_search",
+        tool_arguments: %{"query" => "test"},
+        status: "success",
+        company_id: company.id,
+        actor_type: "agent",
+        actor_id: Ecto.UUID.generate()
+      }
+
+      {:ok, trace} = ToolCallTraces.create_tool_call_trace(attrs)
+
+      # Verify hash format (64 hex characters for SHA-256)
+      assert String.length(trace.content_hash) == 64
+      assert String.match?(trace.content_hash, ~r/^[a-f0-9]{64}$/)
+      assert String.length(trace.chain_hash) == 64
+      assert String.match?(trace.chain_hash, ~r/^[a-f0-9]{64}$/)
+    end
+
+    test "generates unique hashes for different content", %{company: company} do
+      agent_id = Ecto.UUID.generate()
+
+      attrs1 = %{
+        trace_type: "llm_tool_call",
+        tool_name: "tool_a",
+        tool_arguments: %{"param" => "value1"},
+        status: "success",
+        company_id: company.id,
+        actor_type: "agent",
+        actor_id: agent_id
+      }
+
+      attrs2 = %{
+        trace_type: "llm_tool_call",
+        tool_name: "tool_b",
+        tool_arguments: %{"param" => "value2"},
+        status: "success",
+        company_id: company.id,
+        actor_type: "agent",
+        actor_id: agent_id
+      }
+
+      {:ok, trace1} = ToolCallTraces.create_tool_call_trace(attrs1)
+      {:ok, trace2} = ToolCallTraces.create_tool_call_trace(attrs2)
+
+      # Different content should produce different hashes
+      refute trace1.content_hash == trace2.content_hash
+      refute trace1.chain_hash == trace2.chain_hash
+    end
+
+    test "prevents duplicate content hash insertion", %{company: company} do
+      attrs = %{
+        trace_type: "llm_tool_call",
+        tool_name: "web_search",
+        tool_arguments: %{"query" => "same"},
+        status: "success",
+        company_id: company.id,
+        actor_type: "agent",
+        actor_id: Ecto.UUID.generate()
+      }
+
+      assert {:ok, _trace1} = ToolCallTraces.create_tool_call_trace(attrs)
+      assert {:error, _changeset} = ToolCallTraces.create_tool_call_trace(attrs)
+    end
+  end
 end
