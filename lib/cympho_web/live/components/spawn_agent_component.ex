@@ -124,6 +124,7 @@ defmodule CymphoWeb.SpawnAgentComponent do
   defp adapter_label(:codex), do: "Codex"
   defp adapter_label(:cursor), do: "Cursor"
   defp adapter_label(:http), do: "HTTP"
+  defp adapter_label(:openclaw), do: "OpenClaw"
   defp adapter_label(:process), do: "Process"
 
   defp normalize_adapter_param(%{"adapter" => ""} = params), do: Map.delete(params, "adapter")

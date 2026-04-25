@@ -21,7 +21,7 @@ defmodule Cympho.Agents.Agent do
     field :last_heartbeat_at, :utc_datetime
 
     field :adapter, Ecto.Enum,
-      values: [:claude_code, :codex, :cursor, :http, :process]
+      values: [:claude_code, :codex, :cursor, :http, :openclaw, :process]
 
     field :heartbeat_config, :map, default: %{}
     field :permissions, :map, default: %{}
@@ -80,7 +80,7 @@ defmodule Cympho.Agents.Agent do
 
   def status_options, do: [:idle, :running, :error, :sleeping, :offline]
   def role_options, do: [:engineer, :product_manager, :designer, :ceo, :cto]
-  def adapter_options, do: [:claude_code, :codex, :cursor, :http, :process]
+  def adapter_options, do: [:claude_code, :codex, :cursor, :http, :openclaw, :process]
 
   def status_changeset(agent, attrs) do
     agent

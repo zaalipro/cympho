@@ -33,6 +33,7 @@ defmodule Cympho.AdaptersTest do
       assert :codex in adapter_keys
       assert :cursor in adapter_keys
       assert :http in adapter_keys
+      assert :openclaw in adapter_keys
       assert :process in adapter_keys
     end
   end
@@ -163,6 +164,123 @@ defmodule Cympho.AdaptersTest do
 
     test "resolves nil to default adapter" do
       assert {:ok, _} = Registry.resolve(nil)
+    end
+  end
+
+  describe "OpenClaw adapter" do
+    alias Cympho.Adapters.OpenClawAdapter
+
+    test "implements Adapter behaviour" do
+      behaviours =
+        OpenClawAdapter.__info__(:attributes)
+        |> Keyword.get_values(:behaviour)
+        |> List.flatten()
+
+      assert Cympho.Adapters.Adapter in behaviours
+    end
+
+    test "name/0 returns OpenClaw" do
+      assert OpenClawAdapter.name() == "OpenClaw"
+    end
+
+    test "config_schema/0 returns expected entries" do
+      schema = OpenClawAdapter.config_schema()
+      keys = Enum.map(schema, & &1.key)
+
+      assert :endpoint in keys
+      assert :api_key in keys
+      assert :instructions in keys
+      assert :timeout in keys
+      assert :headers in keys
+
+      endpoint_entry = Enum.find(schema, &(&1.key == :endpoint))
+      assert endpoint_entry.required == true
+    end
+
+    test "validate_config/1 with valid config" do
+      config = %{
+        "endpoint" => "https://openclaw.example.com",
+        "timeout" => 30_000
+      }
+
+      assert :ok = OpenClawAdapter.validate_config(config)
+    end
+
+    test "validate_config/1 rejects missing endpoint" do
+      assert {:error, msg} = OpenClawAdapter.validate_config(%{})
+      assert msg =~ "endpoint"
+    end
+
+    test "validate_config/1 rejects empty endpoint" do
+      assert {:error, msg} = OpenClawAdapter.validate_config(%{"endpoint" => ""})
+      assert msg =~ "endpoint"
+    end
+
+    test "validate_config/1 rejects invalid endpoint URL" do
+      assert {:error, msg} = OpenClawAdapter.validate_config(%{"endpoint" => "not-a-url"})
+      assert msg =~ "HTTP"
+    end
+
+    test "validate_config/1 rejects out-of-range timeout" do
+      assert {:error, _} =
+               OpenClawAdapter.validate_config(%{
+                 "endpoint" => "https://openclaw.example.com",
+                 "timeout" => 0
+               })
+
+      assert {:error, _} =
+               OpenClawAdapter.validate_config(%{
+                 "endpoint" => "https://openclaw.example.com",
+                 "timeout" => 700_000
+               })
+    end
+
+    test "validate_config/1 rejects non-map headers" do
+      assert {:error, _} =
+               OpenClawAdapter.validate_config(%{
+                 "endpoint" => "https://openclaw.example.com",
+                 "headers" => "not-a-map"
+               })
+    end
+
+    test "validate_config/1 accepts atom keys" do
+      config = %{
+        endpoint: "https://openclaw.example.com",
+        timeout: 30_000
+      }
+
+      assert :ok = OpenClawAdapter.validate_config(config)
+    end
+
+    test "health_check/1 returns unhealthy when no endpoint configured" do
+      result = OpenClawAdapter.health_check(%{})
+      assert result.status == :unhealthy
+      assert result.message =~ "not configured"
+    end
+
+    test "run/4 returns a reference" do
+      recipient = self()
+      issue = %{id: "issue-1", title: "Test", description: "Test issue"}
+      session_id = OpenClawAdapter.run(issue, "agent-1", recipient, config: %{endpoint: nil})
+
+      assert is_reference(session_id)
+    end
+
+    test "get_adapter/1 returns openclaw adapter" do
+      assert {:ok, adapter} = Adapters.get_adapter(:openclaw)
+      assert adapter.key == :openclaw
+      assert adapter.name == "OpenClaw"
+    end
+
+    test "validate_config/2 delegates to openclaw adapter" do
+      assert {:error, _} = Adapters.validate_config(:openclaw, %{})
+      assert :ok = Adapters.validate_config(:openclaw, %{endpoint: "https://example.com"})
+    end
+
+    test "config_schema/1 returns schema for openclaw" do
+      assert {:ok, schema} = Adapters.config_schema(:openclaw)
+      assert is_list(schema)
+      assert length(schema) > 0
     end
   end
 end
