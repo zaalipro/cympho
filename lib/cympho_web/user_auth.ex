@@ -34,7 +34,10 @@ defmodule CymphoWeb.UserAuth do
       user_id ->
         case Users.get_user(user_id) do
           {:ok, user} ->
-            assign(socket, :current_user, user)
+            # Store lightweight map instead of full Ecto struct to avoid
+            # Jason.Encoder errors in LiveView test mode
+            user_map = %{id: user.id, email: user.email, name: user.name, company_id: user.company_id}
+            assign(socket, :current_user, user_map)
 
           {:error, :not_found} ->
             # Invalid user ID in session - treat as guest
@@ -59,6 +62,7 @@ defmodule CymphoWeb.UserAuth do
 
         Cympho.Repo.all(query)
         |> Enum.map(& &1.company)
+        |> Enum.map(fn c -> %{id: c.id, name: c.name, logo_url: c.logo_url} end)
       end
 
     assign(socket, :user_companies, companies)
