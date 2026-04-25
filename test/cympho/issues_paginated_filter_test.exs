@@ -145,6 +145,13 @@ defmodule Cympho.IssuesPaginatedFilterTest do
     end
 
     test "page 2 returns different issues" do
+      # Create issues with distinct timestamps for stable pagination
+      {:ok, _i1} = Issues.create_issue(%{title: "Page1Issue", description: "first", status: :backlog})
+      Process.sleep(1100)
+      {:ok, _i2} = Issues.create_issue(%{title: "Page1Issue2", description: "second", status: :backlog})
+      Process.sleep(1100)
+      {:ok, _i3} = Issues.create_issue(%{title: "Page2Issue", description: "third", status: :backlog})
+
       page1 = Issues.list_issues_paginated(%{"page" => "1", "per_page" => "2"})
       page2 = Issues.list_issues_paginated(%{"page" => "2", "per_page" => "2"})
 

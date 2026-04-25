@@ -53,7 +53,7 @@ defmodule Cympho.Issues do
   @default_page_size 25
 
   def list_issues_paginated(params \\ %{}) do
-    page = Map.get(params, "page", "1") |> to_int_max(1, 1)
+    page = Map.get(params, "page", "1") |> to_int_max(1, 1000)
     per_page = Map.get(params, "per_page", "#{@default_page_size}") |> to_int_max(1, 100)
     status = Map.get(params, "status")
     priority = Map.get(params, "priority")
@@ -70,7 +70,7 @@ defmodule Cympho.Issues do
       |> maybe_filter_by_assignee(assignee_id)
       |> maybe_filter_by_project_id_filter(project_id)
       |> maybe_filter_by_label_id(label_id)
-      |> order_by(desc: :updated_at)
+      |> order_by([i], [desc: i.updated_at, desc: i.inserted_at, desc: i.id])
 
     total = Repo.aggregate(query, :count)
     total_pages = max(1, ceil(total / per_page))
@@ -130,7 +130,7 @@ defmodule Cympho.Issues do
   defp maybe_filter_by_label_id(query, label_id) do
     query
     |> join(:inner, [i], l in "issue_labels", on: i.id == l.issue_id)
-    |> where([_, l], l.label_id == ^label_id)
+    |> where([_, l], l.label_id == type(^label_id, :binary_id))
   end
 
   defp to_int_max(value, min, max) when is_binary(value) do
