@@ -1,0 +1,93 @@
+<div id="company-switcher-modal" class={"fixed inset-0 z-[60] flex items-center justify-center bg-black/50 #{if @open, do: "", else: "hidden"}"}>
+  <div
+    class="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-[#0d0d0d] border border-border rounded-lg shadow-xl z-50"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="company-switcher-title"
+  >
+    <div class="p-4">
+      <div class="flex items-center justify-between mb-4">
+        <h2 id="company-switcher-title" class="text-lg font-semibold text-text-primary">
+          Switch Company
+        </h2>
+        <button
+          type="button"
+          phx-click="close"
+          phx-target={@myself}
+          class="text-text-quaternary hover:text-text-secondary transition-colors p-1"
+          aria-label="Close"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="relative mb-4">
+        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-quaternary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        <input
+          type="text"
+          phx-keyup="search"
+          phx-target={@myself}
+          phx-debounce="150"
+          value={@search_query}
+          placeholder="Search companies..."
+          class="w-full pl-10 pr-4 py-2 bg-white/[0.05] border border-border text-text-primary rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-text-quaternary"
+          autocomplete="off"
+          autofocus
+        />
+      </div>
+
+      <div class="max-h-96 overflow-y-auto">
+        <%= if @filtered_companies == [] do %>
+          <div class="text-center py-8 text-text-tertiary">
+            <svg class="w-12 h-12 mx-auto mb-3 text-text-quaternary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+            <p class="text-sm">No companies found</p>
+            <p class="text-xs text-text-quaternary mt-1">Try a different search term</p>
+          </div>
+        <% else %>
+          <div class="space-y-1">
+            <div
+              :for={company <- @filtered_companies}
+              phx-click="switch_company"
+              phx-value-id={company.id}
+              phx-target={@myself}
+              class={"flex items-center gap-3 p-3 rounded-md cursor-pointer transition-colors hover:bg-white/[0.04] border border-transparent #{if is_active_company(company, @current_company), do: "border-blue-500/50 bg-blue-500/10", else: ""}"}
+            >
+              <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold shrink-0">
+                <%= if company_logo_url(company) do %>
+                  <img src={company_logo_url(company)} alt="" class="w-full h-full rounded-full object-cover" />
+                <% else %>
+                  <span class="text-sm">{company_initials(company)}</span>
+                <% end %>
+              </div>
+
+              <div class="flex-1 min-w-0">
+                <div class="font-medium text-text-primary truncate">
+                  {company.name}
+                </div>
+                <%= if is_active_company(company, @current_company) do %>
+                  <div class="text-xs text-blue-400">
+                    Current company
+                  </div>
+                <% end %>
+              </div>
+
+              <svg :if={is_active_company(company, @current_company)} class="w-5 h-5 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+              </svg>
+            </div>
+          </div>
+        <% end %>
+      </div>
+
+      <div class="mt-4 pt-4 border-t border-border text-xs text-text-quaternary">
+        <p>Type to search • Click to switch • ESC to close</p>
+      </div>
+    </div>
+  </div>
+</div>

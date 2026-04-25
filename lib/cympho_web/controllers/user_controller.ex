@@ -3,6 +3,7 @@ defmodule CymphoWeb.UserController do
 
   alias Cympho.Users
   alias Cympho.Users.User
+  import Ecto.Query
 
   action_fallback CymphoWeb.FallbackController
 
