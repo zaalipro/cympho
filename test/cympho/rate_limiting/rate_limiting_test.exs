@@ -27,7 +27,15 @@ defmodule Cympho.RateLimitingTest do
     end
 
     test "refills tokens over time" do
-      socket = %Phoenix.Socket{assigns: %{rate_limit_bucket: %{tokens: 0, last_refill: System.monotonic_time(:millisecond) - 1_000}}}
+      socket = %Phoenix.Socket{
+        assigns: %{
+          rate_limit_bucket: %{
+            tokens: 0,
+            last_refill: System.monotonic_time(:millisecond) - 1_000
+          }
+        }
+      }
+
       assert {:ok, _} = RateLimiting.check_message_rate(socket)
     end
 

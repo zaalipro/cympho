@@ -91,7 +91,11 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
   end
 
   describe "dequeue/1" do
-    test "returns the most recent wake for an agent", %{agent: agent, issue: issue, issue2: issue2} do
+    test "returns the most recent wake for an agent", %{
+      agent: agent,
+      issue: issue,
+      issue2: issue2
+    } do
       {:ok, _} =
         WakeupQueue.enqueue(%{
           agent_id: agent.id,
@@ -147,7 +151,11 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
   end
 
   describe "list_pending/1" do
-    test "returns wakes ordered by most recent first", %{agent: agent, issue: issue, issue2: issue2} do
+    test "returns wakes ordered by most recent first", %{
+      agent: agent,
+      issue: issue,
+      issue2: issue2
+    } do
       {:ok, _first} =
         WakeupQueue.enqueue(%{
           agent_id: agent.id,

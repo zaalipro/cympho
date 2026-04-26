@@ -130,7 +130,12 @@ defmodule Cympho.Issues.StateMachineTest do
 
   describe "valid_transitions/1" do
     test "backlog transitions" do
-      assert StateMachine.valid_transitions(:backlog) == [:todo, :in_progress, :blocked, :cancelled]
+      assert StateMachine.valid_transitions(:backlog) == [
+               :todo,
+               :in_progress,
+               :blocked,
+               :cancelled
+             ]
     end
 
     test "todo transitions" do

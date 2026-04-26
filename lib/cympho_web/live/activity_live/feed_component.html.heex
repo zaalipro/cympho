@@ -17,7 +17,7 @@
     <% end %>
   </div>
 
-  <div class="activity-list" phx-update="prepend" id="activity-list">
+  <div class="activity-list" id="activity-list">
     <%= for activity <- @activities do %>
       <div class="activity-item" id={"activity-#{activity.id}"}>
         <div class="activity-icon">

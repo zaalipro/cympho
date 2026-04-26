@@ -44,7 +44,8 @@
     >
       <.link navigate={~p"/issues/#{issue.id}"} class="block">
         <div class="flex items-start gap-3">
-          <span class={"mt-1.5 w-2.5 h-2.5 rounded-full flex-shrink-0 #{status_color(issue.status)}"}></span>
+          <span class={"mt-1.5 w-2.5 h-2.5 rounded-full flex-shrink-0 #{status_color(issue.status)}"}>
+          </span>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2">
               <span :if={issue.identifier} class="text-xs text-text-quaternary font-mono">

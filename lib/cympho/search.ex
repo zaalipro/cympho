@@ -141,18 +141,21 @@ defmodule Cympho.Search do
 
   defp apply_status_filter(query, nil), do: query
   defp apply_status_filter(query, ""), do: query
+
   defp apply_status_filter(query, status) do
     from(q in query, where: q.status == ^status)
   end
 
   defp apply_assignee_filter(query, nil), do: query
   defp apply_assignee_filter(query, ""), do: query
+
   defp apply_assignee_filter(query, assignee_id) do
     from(q in query, where: q.assignee_id == ^assignee_id)
   end
 
   defp apply_label_filter(query, nil), do: query
   defp apply_label_filter(query, ""), do: query
+
   defp apply_label_filter(query, label_id) do
     from(q in query,
       join: l in assoc(q, :labels),
@@ -162,23 +165,28 @@ defmodule Cympho.Search do
 
   defp apply_project_filter(query, nil), do: query
   defp apply_project_filter(query, ""), do: query
+
   defp apply_project_filter(query, project_id) do
     from(q in query, where: q.project_id == ^project_id)
   end
 
   defp apply_goal_filter(query, nil), do: query
   defp apply_goal_filter(query, ""), do: query
+
   defp apply_goal_filter(query, goal_id) do
     from(q in query, where: q.goal_id == ^goal_id)
   end
 
   defp apply_date_range_filter(query, nil, nil), do: query
+
   defp apply_date_range_filter(query, date_from, nil) do
     from(q in query, where: q.inserted_at >= ^parse_date(date_from))
   end
+
   defp apply_date_range_filter(query, nil, date_to) do
     from(q in query, where: q.inserted_at <= ^parse_date(date_to))
   end
+
   defp apply_date_range_filter(query, date_from, date_to) do
     from(q in query,
       where: q.inserted_at >= ^parse_date(date_from) and q.inserted_at <= ^parse_date(date_to)
@@ -187,30 +195,35 @@ defmodule Cympho.Search do
 
   defp apply_agent_status_filter(query, nil), do: query
   defp apply_agent_status_filter(query, ""), do: query
+
   defp apply_agent_status_filter(query, status) do
     from(q in query, where: q.status == ^status)
   end
 
   defp apply_role_filter(query, nil), do: query
   defp apply_role_filter(query, ""), do: query
+
   defp apply_role_filter(query, role) do
     from(q in query, where: q.role == ^role)
   end
 
   defp apply_project_status_filter(query, nil), do: query
   defp apply_project_status_filter(query, ""), do: query
+
   defp apply_project_status_filter(query, status) do
     from(q in query, where: q.status == ^status)
   end
 
   defp apply_goal_status_filter(query, nil), do: query
   defp apply_goal_status_filter(query, ""), do: query
+
   defp apply_goal_status_filter(query, status) do
     from(q in query, where: q.status == ^status)
   end
 
   defp apply_goal_priority_filter(query, nil), do: query
   defp apply_goal_priority_filter(query, ""), do: query
+
   defp apply_goal_priority_filter(query, priority) do
     from(q in query, where: q.priority == ^priority)
   end
@@ -221,5 +234,6 @@ defmodule Cympho.Search do
       _ -> nil
     end
   end
+
   defp parse_date(_), do: nil
 end

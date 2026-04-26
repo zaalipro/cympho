@@ -7,6 +7,7 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
     case Workspaces.get_project_workspace(id) do
       {:ok, workspace} ->
         execution_workspaces = Workspaces.list_execution_workspaces(id)
+
         {:ok,
          socket
          |> assign(:page_title, "Workspace: #{workspace.name}")
@@ -31,7 +32,10 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
     ~H"""
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="mb-8">
-        <.app_link navigate={~p"/workspaces"} class="text-text-secondary hover:text-text-primary text-sm">
+        <.app_link
+          navigate={~p"/workspaces"}
+          class="text-text-secondary hover:text-text-primary text-sm"
+        >
           &larr; Back to Workspaces
         </.app_link>
       </div>

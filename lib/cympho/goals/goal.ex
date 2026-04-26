@@ -25,7 +25,15 @@ defmodule Cympho.Goals.Goal do
 
   def changeset(goal, attrs) do
     goal
-    |> cast(attrs, [:title, :description, :status, :priority, :project_id, :company_id, :parent_id])
+    |> cast(attrs, [
+      :title,
+      :description,
+      :status,
+      :priority,
+      :project_id,
+      :company_id,
+      :parent_id
+    ])
     |> validate_required([:title])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:priority, @priorities)

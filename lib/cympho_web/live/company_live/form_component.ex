@@ -38,7 +38,10 @@ defmodule CymphoWeb.CompanyLive.FormComponent do
       {:pending_approval, _approval} ->
         {:noreply,
          socket
-         |> put_flash(:warning, "Governance config change requires board approval. A proposal has been submitted.")
+         |> put_flash(
+           :warning,
+           "Governance config change requires board approval. A proposal has been submitted."
+         )
          |> push_navigate(to: ~p"/companies")}
 
       {:error, %Ecto.Changeset{} = changeset} ->

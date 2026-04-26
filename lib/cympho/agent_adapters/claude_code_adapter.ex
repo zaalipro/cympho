@@ -24,10 +24,18 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
   def health_check(config \\ %{}) do
     cond do
       not claude_in_path?() ->
-        %{status: :unhealthy, message: "Claude CLI not found in PATH", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "Claude CLI not found in PATH",
+          checked_at: DateTime.utc_now()
+        }
 
       not api_key_present?(config) ->
-        %{status: :unhealthy, message: "ANTHROPIC_API_KEY not set", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "ANTHROPIC_API_KEY not set",
+          checked_at: DateTime.utc_now()
+        }
 
       true ->
         case System.cmd("claude", ["--version"], stderr_to_stdout: true) do
@@ -37,7 +45,8 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
           {output, code} ->
             %{
               status: :degraded,
-              message: "claude --version exited with code #{code}: #{String.slice(output, 0, 100)}",
+              message:
+                "claude --version exited with code #{code}: #{String.slice(output, 0, 100)}",
               checked_at: DateTime.utc_now()
             }
         end

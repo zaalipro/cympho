@@ -61,7 +61,10 @@ defmodule CymphoWeb.PluginLive.Index do
                  if p.id == updated_plugin.id, do: updated_plugin, else: p
                end)
              end)
-             |> put_flash(:info, "Plugin #{if updated_plugin.enabled, do: "enabled", else: "disabled"}")}
+             |> put_flash(
+               :info,
+               "Plugin #{if updated_plugin.enabled, do: "enabled", else: "disabled"}"
+             )}
 
           {:error, _} ->
             {:noreply, put_flash(socket, :error, "Failed to toggle plugin")}
@@ -100,4 +103,3 @@ defmodule CymphoWeb.PluginLive.Index do
     |> Enum.map(fn p -> Repo.preload(p, [:company, :project]) end)
   end
 end
-

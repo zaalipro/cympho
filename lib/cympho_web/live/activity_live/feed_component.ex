@@ -7,7 +7,12 @@ defmodule CymphoWeb.ActivityLive.FeedComponent do
   def update(%{issue_id: issue_id} = assigns, socket) do
     if connected?(socket) do
       CymphoWeb.Endpoint.subscribe("issue:#{issue_id}")
-      company_id = Cympho.Repo.one(from i in Cympho.Issues.Issue, where: i.id == ^issue_id, select: i.company_id)
+
+      company_id =
+        Cympho.Repo.one(
+          from i in Cympho.Issues.Issue, where: i.id == ^issue_id, select: i.company_id
+        )
+
       if company_id, do: Activities.subscribe(company_id)
     end
 

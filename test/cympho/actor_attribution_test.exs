@@ -27,66 +27,66 @@ defmodule Cympho.ActorAttributionTest do
   describe "extract_actor/1" do
     test "extracts actor from agent struct", %{agent: agent} do
       assert ActorAttribution.extract_actor(agent) == %{
-        type: "agent",
-        id: agent.id
-      }
+               type: "agent",
+               id: agent.id
+             }
     end
 
     test "extracts actor from map with type and id" do
       actor_id = Ecto.UUID.generate()
 
       assert ActorAttribution.extract_actor(%{type: "user", id: actor_id}) == %{
-        type: "user",
-        id: actor_id
-      }
+               type: "user",
+               id: actor_id
+             }
     end
 
     test "extracts actor from string key map with type and id" do
       actor_id = Ecto.UUID.generate()
 
       assert ActorAttribution.extract_actor(%{"type" => "agent", "id" => actor_id}) == %{
-        type: "agent",
-        id: actor_id
-      }
+               type: "agent",
+               id: actor_id
+             }
     end
 
     test "extracts actor from tuple" do
       actor_id = Ecto.UUID.generate()
 
       assert ActorAttribution.extract_actor({"user", actor_id}) == %{
-        type: "user",
-        id: actor_id
-      }
+               type: "user",
+               id: actor_id
+             }
     end
 
     test "extracts actor from map with actor_type and actor_id" do
       actor_id = Ecto.UUID.generate()
 
       assert ActorAttribution.extract_actor(%{
-        actor_type: "agent",
-        actor_id: actor_id
-      }) == %{type: "agent", id: actor_id}
+               actor_type: "agent",
+               actor_id: actor_id
+             }) == %{type: "agent", id: actor_id}
     end
 
     test "returns system actor for nil input" do
       assert ActorAttribution.extract_actor(nil) == %{
-        type: "system",
-        id: "00000000-0000-0000-0000-000000000000"
-      }
+               type: "system",
+               id: "00000000-0000-0000-0000-000000000000"
+             }
     end
 
     test "returns system actor for invalid input" do
       assert ActorAttribution.extract_actor("invalid") == %{
-        type: "system",
-        id: "00000000-0000-0000-0000-000000000000"
-      }
+               type: "system",
+               id: "00000000-0000-0000-0000-000000000000"
+             }
     end
 
     test "normalizes invalid UUID to nil UUID" do
       assert ActorAttribution.extract_actor({"user", "not-a-uuid"}) == %{
-        type: "user",
-        id: "00000000-0000-0000-0000-000000000000"
-      }
+               type: "user",
+               id: "00000000-0000-0000-0000-000000000000"
+             }
     end
   end
 
@@ -95,16 +95,16 @@ defmodule Cympho.ActorAttributionTest do
       actor_id = Ecto.UUID.generate()
 
       assert ActorAttribution.to_db_attrs(%{type: "agent", id: actor_id}) == %{
-        actor_type: "agent",
-        actor_id: actor_id
-      }
+               actor_type: "agent",
+               actor_id: actor_id
+             }
     end
 
     test "handles nil actor_id for system actors" do
       assert ActorAttribution.to_db_attrs(%{type: "system", id: nil}) == %{
-        actor_type: "system",
-        actor_id: nil
-      }
+               actor_type: "system",
+               actor_id: nil
+             }
     end
   end
 

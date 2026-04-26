@@ -71,6 +71,7 @@ defmodule CymphoWeb.CostLive.Index do
   def format_cost(cost) when not is_nil(cost) do
     "$" <> Decimal.to_string(cost, :normal)
   end
+
   def format_cost(_), do: "$0.00"
 
   def format_tokens(tokens) when is_integer(tokens) and tokens > 0 do
@@ -80,6 +81,7 @@ defmodule CymphoWeb.CostLive.Index do
       true -> to_string(tokens)
     end
   end
+
   def format_tokens(_), do: "0"
 
   def budget_utilization_pct(budget) do
@@ -118,6 +120,7 @@ defmodule CymphoWeb.CostLive.Index do
     pct = (value / total * 100) |> min(100)
     "#{pct}%"
   end
+
   def bar_width(_, _), do: "0%"
 
   def max_daily_cost(daily_costs) do
@@ -135,5 +138,6 @@ defmodule CymphoWeb.CostLive.Index do
       "4%"
     end
   end
+
   def daily_bar_height(_, _), do: "4%"
 end

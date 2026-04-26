@@ -41,11 +41,13 @@ defmodule CymphoWeb.IssueReadStateController do
     with {:ok, user_id} <- extract_user_id(conn),
          state = IssueReadStates.get_read_state_or_default(user_id, issue_id),
          {_, new_comments} <- IssueReadStates.get_unread_comments(user_id, issue_id) do
-      json(conn, %{data: %{
-        last_read_at: state.last_read_at,
-        last_read_comment_id: state.last_read_comment_id,
-        unread_count: length(new_comments)
-      }})
+      json(conn, %{
+        data: %{
+          last_read_at: state.last_read_at,
+          last_read_comment_id: state.last_read_comment_id,
+          unread_count: length(new_comments)
+        }
+      })
     else
       {:error, :no_auth} ->
         unauthorized(conn, "Missing authentication")
@@ -67,6 +69,7 @@ defmodule CymphoWeb.IssueReadStateController do
               {:ok, user_id} -> {:ok, user_id}
               _ -> {:error, :invalid_token}
             end
+
           _ ->
             {:error, :invalid_token}
         end

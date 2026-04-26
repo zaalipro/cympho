@@ -29,7 +29,15 @@ defmodule CymphoWeb.DashboardLive.Index do
   end
 
   def handle_info({:run_status, payload}, socket) do
-    {type, msg} = Events.run_status_toast(payload)
+    type =
+      case payload[:event_type] do
+        :run_completed -> "success"
+        :run_failed -> "error"
+        :run_cancelled -> "warning"
+        _ -> "info"
+      end
+
+    msg = "Run #{payload[:event_type]} (#{payload[:status]})"
     {:noreply, socket |> push_event("toast", %{message: msg, type: type}) |> assign_metrics()}
   end
 
@@ -106,8 +114,9 @@ defmodule CymphoWeb.DashboardLive.Index do
   def agent_status_bar(_), do: "bg-gray-400"
 
   def format_cost(cost) when not is_nil(cost) do
-    "$" <> (:erlang.float_to_binary(Decimal.to_float(cost), decimals: 2))
+    "$" <> :erlang.float_to_binary(Decimal.to_float(cost), decimals: 2)
   end
+
   def format_cost(_), do: "$0.00"
 
   def format_tokens(tokens) when is_integer(tokens) and tokens > 0 do
@@ -117,6 +126,7 @@ defmodule CymphoWeb.DashboardLive.Index do
       true -> to_string(tokens)
     end
   end
+
   def format_tokens(_), do: "0"
 
   def activity_icon("created"), do: "bg-green-400"

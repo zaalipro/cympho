@@ -59,7 +59,14 @@ defmodule Cympho.ExecutionPolicies.ExecutionStageResult do
       :resource_id,
       :company_id
     ])
-    |> validate_inclusion(:status, ["pending", "in_progress", "completed", "failed", "skipped", "cancelled"])
+    |> validate_inclusion(:status, [
+      "pending",
+      "in_progress",
+      "completed",
+      "failed",
+      "skipped",
+      "cancelled"
+    ])
     |> validate_inclusion(:outcome, ["approved", "rejected", "deferred", "implemented", "failed"])
     |> validate_stage_index()
     |> validate_completion_ordering()

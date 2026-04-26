@@ -50,7 +50,9 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
         :rotate ->
           case secret_params["value"] || secret_params[:value] do
             nil ->
-              {:error, Secret.changeset(socket.assigns.secret, %{}) |> Ecto.Changeset.add_error(:value, "can't be blank")}
+              {:error,
+               Secret.changeset(socket.assigns.secret, %{})
+               |> Ecto.Changeset.add_error(:value, "can't be blank")}
 
             new_value ->
               Secrets.rotate_secret(socket.assigns.secret, new_value)
@@ -83,7 +85,12 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
           <.select
             name={@form[:scope].name}
             label="Scope"
-            options={[{"Company", "company"}, {"Instance", "instance"}, {"Agent", "agent"}, {"Project", "project"}]}
+            options={[
+              {"Company", "company"},
+              {"Instance", "instance"},
+              {"Agent", "agent"},
+              {"Project", "project"}
+            ]}
             value={@form[:scope].value}
             required
           />

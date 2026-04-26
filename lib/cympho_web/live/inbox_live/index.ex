@@ -5,7 +5,9 @@ defmodule CymphoWeb.InboxLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    company_id = if socket.assigns[:current_company], do: socket.assigns.current_company.id, else: nil
+    company_id =
+      if socket.assigns[:current_company], do: socket.assigns.current_company.id, else: nil
+
     agents = if company_id, do: Agents.list_agents_by_company(company_id), else: []
 
     socket =
@@ -19,6 +21,7 @@ defmodule CymphoWeb.InboxLive.Index do
       if socket.assigns.selected_agent_id do
         Inbox.subscribe(socket.assigns.selected_agent_id)
       end
+
       if socket.assigns[:current_company] do
         CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
       end
@@ -54,17 +57,26 @@ defmodule CymphoWeb.InboxLive.Index do
 
   def handle_info({:run_status_changed, payload}, socket) do
     selected_agent_id = socket.assigns[:selected_agent_id]
-    socket = if payload[:agent_id] == selected_agent_id do
-      {message, type} = case payload do
-        %{new_status: "completed"} -> {"Agent completed a run", "success"}
-        %{new_status: "failed"} -> {"Agent run failed", "error"}
-        %{new_status: "cancelled"} -> {"Agent run cancelled", "warning"}
-        _ -> {"Agent run status changed", "info"}
+
+    socket =
+      if payload[:agent_id] == selected_agent_id do
+        {message, type} =
+          case payload do
+            %{new_status: "completed"} -> {"Agent completed a run", "success"}
+            %{new_status: "failed"} -> {"Agent run failed", "error"}
+            %{new_status: "cancelled"} -> {"Agent run cancelled", "warning"}
+            _ -> {"Agent run status changed", "info"}
+          end
+
+        push_event(socket, "toast", %{
+          message: message,
+          type: type,
+          key: "run_#{payload[:run_id]}"
+        })
+      else
+        socket
       end
-      push_event(socket, "toast", %{message: message, type: type, key: "run_#{payload[:run_id]}"})
-    else
-      socket
-    end
+
     {:noreply, socket}
   end
 
@@ -84,7 +96,8 @@ defmodule CymphoWeb.InboxLive.Index do
       {:noreply, load_inbox(socket)}
     else
       {:error, :unauthorized} ->
-        {:noreply, put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
+        {:noreply,
+         put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
 
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Inbox entry not found")}
@@ -99,7 +112,8 @@ defmodule CymphoWeb.InboxLive.Index do
       {:noreply, load_inbox(socket)}
     else
       {:error, :unauthorized} ->
-        {:noreply, put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
+        {:noreply,
+         put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
 
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Inbox entry not found")}
@@ -114,7 +128,8 @@ defmodule CymphoWeb.InboxLive.Index do
       {:noreply, load_inbox(socket)}
     else
       {:error, :unauthorized} ->
-        {:noreply, put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
+        {:noreply,
+         put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
 
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Inbox entry not found")}
@@ -129,7 +144,8 @@ defmodule CymphoWeb.InboxLive.Index do
       {:noreply, load_inbox(socket)}
     else
       {:error, :unauthorized} ->
-        {:noreply, put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
+        {:noreply,
+         put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
 
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Inbox entry not found")}
@@ -152,7 +168,8 @@ defmodule CymphoWeb.InboxLive.Index do
         {:noreply, push_patch(socket, to: build_url(socket, %{"agent_id" => agent_id}))}
 
       {:error, :unauthorized} ->
-        {:noreply, put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
+        {:noreply,
+         put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
     end
   end
 

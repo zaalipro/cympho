@@ -16,7 +16,9 @@
             <.badge variant="priority" value={to_string(@issue.priority)} />
           </div>
           <div :if={@editing != "title"} class="flex items-center gap-2">
-            <h1 class="text-xl lg:text-2xl font-510 tracking-tight text-text-primary">{@issue.title}</h1>
+            <h1 class="text-xl lg:text-2xl font-510 tracking-tight text-text-primary">
+              {@issue.title}
+            </h1>
             <button
               type="button"
               phx-click="start_editing"
@@ -35,14 +37,20 @@
               autofocus
             />
             <.button type="submit" size="sm">Save</.button>
-            <.button type="button" variant="ghost" size="sm" phx-click="cancel_editing">Cancel</.button>
+            <.button type="button" variant="ghost" size="sm" phx-click="cancel_editing">
+              Cancel
+            </.button>
           </form>
         </div>
       </div>
     </div>
-
-    <!-- Timeline Stream -->
-    <div id="timeline-stream" class="flex-1 overflow-y-auto px-4 lg:px-6 py-6 space-y-4" phx-hook="TimelineScroll">
+    
+<!-- Timeline Stream -->
+    <div
+      id="timeline-stream"
+      class="flex-1 overflow-y-auto px-4 lg:px-6 py-6 space-y-4"
+      phx-hook="TimelineScroll"
+    >
       <div :for={entry <- @timeline} id={"entry-#{entry.type}-#{entry.id}"} class="flex gap-3">
         <!-- Avatar/Icon Column -->
         <div class="flex-shrink-0 flex flex-col items-center gap-1">
@@ -50,10 +58,16 @@
             case entry.type do
               :comment ->
                 author_type = get_in(entry.data, [:author_type])
+
                 cond do
-                  author_type == "agent" -> "w-8 h-8 rounded-full bg-brand/20 text-brand flex items-center justify-center text-xs font-510"
-                  author_type == "system" -> "w-8 h-8 rounded-full bg-white/[0.03] border border-dashed border-border/50 flex items-center justify-center text-text-quaternary"
-                  true -> "w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-510"
+                  author_type == "agent" ->
+                    "w-8 h-8 rounded-full bg-brand/20 text-brand flex items-center justify-center text-xs font-510"
+
+                  author_type == "system" ->
+                    "w-8 h-8 rounded-full bg-white/[0.03] border border-dashed border-border/50 flex items-center justify-center text-text-quaternary"
+
+                  true ->
+                    "w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-510"
                 end
 
               :interaction ->
@@ -69,6 +83,7 @@
             {case entry.type do
               :comment ->
                 author_type = get_in(entry.data, [:author_type])
+
                 cond do
                   author_type == "agent" ->
                     agent = Enum.find(@all_agents, &(&1.id == entry.data.author_id))
@@ -91,6 +106,7 @@
 
               :run ->
                 status = entry.data.status || "pending"
+
                 case status do
                   "completed" -> "✓"
                   "failed" -> "✕"
@@ -105,14 +121,17 @@
           <!-- Vertical line connector -->
           <div class="w-0.5 flex-1 bg-border/30 min-h-[8px]"></div>
         </div>
-
-        <!-- Content Column -->
+        
+<!-- Content Column -->
         <div class="flex-1 min-w-0">
           <%= case entry.type do %>
             <% :comment -> %>
               ~H"""
               <div class={"bg-surface border border-border rounded-lg p-4 #{if entry.data.author_type == "system", do: "bg-white/[0.03] border-dashed", else: ""}"}>
-                <div :if={entry.data.author_type != "system"} class="flex items-center justify-between mb-2">
+                <div
+                  :if={entry.data.author_type != "system"}
+                  class="flex items-center justify-between mb-2"
+                >
                   <div class="flex items-center gap-2">
                     <span class="text-xs font-510 text-text-secondary">
                       {case entry.data.author_type do
@@ -124,10 +143,17 @@
                           "User"
                       end}
                     </span>
-                    <span :if={entry.data.author_type == "agent"} class="text-[10px] bg-brand/10 text-brand px-1.5 py-0.5 rounded">Agent</span>
+                    <span
+                      :if={entry.data.author_type == "agent"}
+                      class="text-[10px] bg-brand/10 text-brand px-1.5 py-0.5 rounded"
+                    >
+                      Agent
+                    </span>
                   </div>
                   <div class="flex items-center gap-2">
-                    <span class="text-xs text-text-quaternary">{format_timeline_timestamp(entry.timestamp)}</span>
+                    <span class="text-xs text-text-quaternary">
+                      {format_timeline_timestamp(entry.timestamp)}
+                    </span>
                     <button
                       type="button"
                       class="text-text-quaternary hover:text-red-400 transition-colors text-xs opacity-0 group-hover:opacity-100"
@@ -139,22 +165,32 @@
                     </button>
                   </div>
                 </div>
-                <p class={if entry.data.author_type == "system", do: "text-xs text-text-quaternary", else: "text-sm text-text-secondary whitespace-pre-wrap"}>
+                <p class={
+                  if entry.data.author_type == "system",
+                    do: "text-xs text-text-quaternary",
+                    else: "text-sm text-text-secondary whitespace-pre-wrap"
+                }>
                   {entry.data.body}
                 </p>
               </div>
               """
-
             <% :run -> %>
               ~H"""
               <div class="bg-white/[0.02] border border-border/50 rounded-lg p-3">
                 <div class="flex items-center justify-between mb-2">
                   <div class="flex items-center gap-2">
-                    <span class={"w-2 h-2 rounded-full #{run_status_color(entry.data.status)}"}></span>
-                    <span class="text-xs font-510 text-text-primary">{run_status_label(entry.data.status)}</span>
-                    <span class="text-xs text-text-quaternary">{entry.data.adapter || "unknown"}</span>
+                    <span class={"w-2 h-2 rounded-full #{run_status_color(entry.data.status)}"}>
+                    </span>
+                    <span class="text-xs font-510 text-text-primary">
+                      {run_status_label(entry.data.status)}
+                    </span>
+                    <span class="text-xs text-text-quaternary">
+                      {entry.data.adapter || "unknown"}
+                    </span>
                   </div>
-                  <span class="text-xs text-text-quaternary">{format_timeline_timestamp(entry.timestamp)}</span>
+                  <span class="text-xs text-text-quaternary">
+                    {format_timeline_timestamp(entry.timestamp)}
+                  </span>
                 </div>
                 <div class="flex items-center gap-3 text-xs text-text-quaternary">
                   <span>{format_run_duration(entry.data)}</span>
@@ -167,7 +203,6 @@
                 </div>
               </div>
               """
-
             <% :interaction -> %>
               ~H"""
               <div class="bg-surface border border-accent/30 rounded-lg p-4 space-y-3">
@@ -182,52 +217,97 @@
                     </span>
                     <.badge variant="status" value={to_string(entry.data.status)} />
                   </div>
-                  <span class="text-xs text-text-quaternary">{format_timeline_timestamp(entry.timestamp)}</span>
+                  <span class="text-xs text-text-quaternary">
+                    {format_timeline_timestamp(entry.timestamp)}
+                  </span>
                 </div>
 
                 <%= case entry.data.kind do %>
                   <% :suggest_tasks -> %>
                     <div class="space-y-2">
                       <p class="text-sm text-text-secondary">
-                        {Map.get(entry.data.payload, "message", "The agent suggests the following tasks:")}
+                        {Map.get(
+                          entry.data.payload,
+                          "message",
+                          "The agent suggests the following tasks:"
+                        )}
                       </p>
-                      <div :for={{task, idx} <- Enum.with_index(Map.get(entry.data.payload, "tasks", []))} class="flex items-start gap-2 p-2 bg-white/[0.03] rounded-md">
+                      <div
+                        :for={
+                          {task, idx} <- Enum.with_index(Map.get(entry.data.payload, "tasks", []))
+                        }
+                        class="flex items-start gap-2 p-2 bg-white/[0.03] rounded-md"
+                      >
                         <span class="text-xs text-text-quaternary mt-0.5">{idx + 1}.</span>
                         <div class="flex-1">
-                          <p class="text-sm text-text-primary font-510">{Map.get(task, "title", "Untitled")}</p>
-                          <p :if={Map.get(task, "description")} class="text-xs text-text-tertiary mt-0.5">
+                          <p class="text-sm text-text-primary font-510">
+                            {Map.get(task, "title", "Untitled")}
+                          </p>
+                          <p
+                            :if={Map.get(task, "description")}
+                            class="text-xs text-text-tertiary mt-0.5"
+                          >
                             {Map.get(task, "description")}
                           </p>
                         </div>
-                        <div :if={Map.get(task, "accepted")} class="text-xs text-success">Accepted</div>
+                        <div :if={Map.get(task, "accepted")} class="text-xs text-success">
+                          Accepted
+                        </div>
                       </div>
                     </div>
                     <div :if={entry.data.status == :pending} class="flex items-center gap-2 pt-2">
-                      <.button type="button" size="sm" phx-click="resolve_interaction" phx-value-id={entry.data.id} phx-value-status="accepted">
+                      <.button
+                        type="button"
+                        size="sm"
+                        phx-click="resolve_interaction"
+                        phx-value-id={entry.data.id}
+                        phx-value-status="accepted"
+                      >
                         Accept Tasks
                       </.button>
-                      <.button type="button" size="sm" variant="ghost" phx-click="resolve_interaction" phx-value-id={entry.data.id} phx-value-status="rejected">
+                      <.button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        phx-click="resolve_interaction"
+                        phx-value-id={entry.data.id}
+                        phx-value-status="rejected"
+                      >
                         Reject
                       </.button>
                     </div>
-
                   <% :ask_user_questions -> %>
                     <div class="space-y-3">
                       <p class="text-sm text-text-secondary">
                         {Map.get(entry.data.payload, "message", "The agent has questions:")}
                       </p>
-                      <div :for={{q, idx} <- Enum.with_index(Map.get(entry.data.payload, "questions", []))} class="space-y-1">
+                      <div
+                        :for={
+                          {q, idx} <-
+                            Enum.with_index(Map.get(entry.data.payload, "questions", []))
+                        }
+                        class="space-y-1"
+                      >
                         <p class="text-sm text-text-primary">
-                          <span class="text-text-quaternary">{idx + 1}.</span> {Map.get(q, "question", "N/A")}
+                          <span class="text-text-quaternary">{idx + 1}.</span> {Map.get(
+                            q,
+                            "question",
+                            "N/A"
+                          )}
                         </p>
                       </div>
-                      <div :if={Map.get(entry.data.payload, "response")} class="p-2 bg-white/[0.03] rounded-md">
-                        <p class="text-sm text-text-secondary">{Map.get(entry.data.payload, "response")}</p>
+                      <div
+                        :if={Map.get(entry.data.payload, "response")}
+                        class="p-2 bg-white/[0.03] rounded-md"
+                      >
+                        <p class="text-sm text-text-secondary">
+                          {Map.get(entry.data.payload, "response")}
+                        </p>
                       </div>
                     </div>
                     <div :if={entry.data.status == :pending} class="pt-2">
                       <form phx-submit="respond_questions" class="space-y-2">
-                        <input type="hidden" name="id" value={entry.data.id} />
+                        <input type="hidden" name="_id" value={entry.data.id} />
                         <textarea
                           name="response"
                           placeholder="Type your response..."
@@ -237,28 +317,42 @@
                         <.button type="submit" size="sm">Respond</.button>
                       </form>
                     </div>
-
                   <% :request_confirmation -> %>
                     <div class="space-y-2">
                       <p class="text-sm text-text-secondary">
                         {Map.get(entry.data.payload, "message", "Please confirm:")}
                       </p>
-                      <div :if={Map.get(entry.data.payload, "details")} class="text-xs text-text-tertiary p-2 bg-white/[0.03] rounded-md">
+                      <div
+                        :if={Map.get(entry.data.payload, "details")}
+                        class="text-xs text-text-tertiary p-2 bg-white/[0.03] rounded-md"
+                      >
                         {Map.get(entry.data.payload, "details")}
                       </div>
                     </div>
                     <div :if={entry.data.status == :pending} class="flex items-center gap-2 pt-2">
-                      <.button type="button" size="sm" phx-click="resolve_interaction" phx-value-id={entry.data.id} phx-value-status="accepted">
+                      <.button
+                        type="button"
+                        size="sm"
+                        phx-click="resolve_interaction"
+                        phx-value-id={entry.data.id}
+                        phx-value-status="accepted"
+                      >
                         Confirm
                       </.button>
-                      <.button type="button" size="sm" variant="ghost" phx-click="resolve_interaction" phx-value-id={entry.data.id} phx-value-status="rejected">
+                      <.button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        phx-click="resolve_interaction"
+                        phx-value-id={entry.data.id}
+                        phx-value-status="rejected"
+                      >
                         Reject
                       </.button>
                     </div>
                 <% end %>
               </div>
               """
-
             <% _ -> %>
               ~H"""
               <div class="text-xs text-text-quaternary">
@@ -269,8 +363,8 @@
         </div>
       </div>
     </div>
-
-    <!-- Sticky Composer -->
+    
+<!-- Sticky Composer -->
     <div class="p-4 lg:p-6 border-t border-border bg-surface/50">
       <form id="comment-form" phx-submit="add_comment" class="space-y-3">
         <div class="flex gap-2">
@@ -290,13 +384,15 @@
       </form>
     </div>
   </div>
-
-  <!-- Sidebar (Metadata Rail) -->
+  
+<!-- Sidebar (Metadata Rail) -->
   <div class="w-full lg:w-80 border-t lg:border-t-0 lg:border-l border-border bg-surface/30 p-4 lg:p-6 space-y-6">
     <!-- Description -->
     <div class="group">
       <div :if={@editing != "description"} class="relative">
-        <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Description</h3>
+        <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+          Description
+        </h3>
         <p class="text-sm text-text-secondary whitespace-pre-wrap leading-relaxed">
           {@issue.description}
         </p>
@@ -310,7 +406,9 @@
         </button>
       </div>
       <form :if={@editing == "description"} phx-submit="save_description" class="space-y-3">
-        <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Description</h3>
+        <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+          Description
+        </h3>
         <textarea
           name="description"
           class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[120px] resize-y"
@@ -318,14 +416,18 @@
         ><%= @issue.description %></textarea>
         <div class="flex items-center gap-2">
           <.button type="submit" size="sm">Save</.button>
-          <.button type="button" variant="ghost" size="sm" phx-click="cancel_editing">Cancel</.button>
+          <.button type="button" variant="ghost" size="sm" phx-click="cancel_editing">
+            Cancel
+          </.button>
         </div>
       </form>
     </div>
-
-    <!-- GitHub PR Link -->
+    
+<!-- GitHub PR Link -->
     <div>
-      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">GitHub PR</h3>
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+        GitHub PR
+      </h3>
       <form phx-submit="update_github_pr_url" class="space-y-2">
         <input
           type="text"
@@ -347,8 +449,8 @@
         </div>
       </form>
     </div>
-
-    <!-- Status -->
+    
+<!-- Status -->
     <div>
       <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Status</h3>
       <form phx-change="update_status">
@@ -365,8 +467,8 @@
         </select>
       </form>
     </div>
-
-    <!-- Priority -->
+    
+<!-- Priority -->
     <div>
       <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Priority</h3>
       <form phx-change="update_priority">
@@ -384,8 +486,8 @@
         </select>
       </form>
     </div>
-
-    <!-- Assignee -->
+    
+<!-- Assignee -->
     <div>
       <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Assignee</h3>
       <div :if={@issue.assignee} class="space-y-2">
@@ -433,8 +535,8 @@
         </div>
       </div>
     </div>
-
-    <!-- Agent Spawn -->
+    
+<!-- Agent Spawn -->
     <div>
       <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Agent</h3>
       <.button type="button" phx-click="toggle_agent_panel" size="sm" variant="ghost">
@@ -460,29 +562,23 @@
         </form>
       </div>
     </div>
-
-    <!-- Documents -->
+    
+<!-- Documents -->
     <div>
-      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Documents</h3>
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+        Documents
+      </h3>
       <div :if={Enum.empty?(@documents)} class="text-sm text-text-tertiary">
         No documents yet.
       </div>
       <div :if={!Enum.empty?(@documents)} class="space-y-2">
         <div :for={doc <- @documents} class="space-y-1">
-          <div class="flex items-center justify-between">
-            <span class="text-sm text-text-secondary">{doc.title || doc.key}</span>
-            <.link
-              navigate={~p"/issues/#{@issue.id}/documents/#{doc.key}/revisions"}
-              class="text-xs text-text-quaternary hover:text-text-secondary transition-colors"
-            >
-              View History
-            </.link>
-          </div>
+          <span class="text-sm text-text-secondary">{doc.title || doc.key}</span>
         </div>
       </div>
     </div>
-
-    <!-- Metadata -->
+    
+<!-- Metadata -->
     <div class="space-y-2 text-sm">
       <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Details</h3>
       <div class="flex justify-between">

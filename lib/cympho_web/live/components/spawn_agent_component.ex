@@ -28,7 +28,10 @@ defmodule CymphoWeb.SpawnAgentComponent do
             <.select
               name="agent[adapter]"
               label="Adapter"
-              options={[{"Default (none)", ""} | Enum.map(@adapter_options, &{adapter_label(&1), to_string(&1)})]}
+              options={[
+                {"Default (none)", ""}
+                | Enum.map(@adapter_options, &{adapter_label(&1), to_string(&1)})
+              ]}
               phx-change="adapter_changed"
               phx-target={@myself}
             />
@@ -36,7 +39,11 @@ defmodule CymphoWeb.SpawnAgentComponent do
             <%= case @selected_adapter do %>
               <% :claude_code -> %>
                 <.input field={@form[:api_key]} label="API Key" type="password" />
-                <.input field={@form[:base_url]} label="Base URL" placeholder="https://api.anthropic.com" />
+                <.input
+                  field={@form[:base_url]}
+                  label="Base URL"
+                  placeholder="https://api.anthropic.com"
+                />
               <% :codex -> %>
                 <.input field={@form[:api_key]} label="API Key" type="password" />
                 <.input field={@form[:model]} label="Model" placeholder="gpt-4" />
@@ -155,7 +162,6 @@ defmodule CymphoWeb.SpawnAgentComponent do
   defp adapter_label(:http), do: "HTTP"
   defp adapter_label(:openclaw), do: "OpenClaw"
   defp adapter_label(:process), do: "Process"
-  defp adapter_label(:openclaw), do: "OpenClaw"
 
   defp normalize_adapter_param(%{"adapter" => ""} = params), do: Map.delete(params, "adapter")
 
@@ -170,7 +176,6 @@ defmodule CymphoWeb.SpawnAgentComponent do
   end
 
   defp normalize_role_param(params), do: params
-
 
   defp merge_adapter_config(%{"adapter" => adapter} = params) when is_atom(adapter) do
     adapter_config_keys = adapter_config_keys(adapter)

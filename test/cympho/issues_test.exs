@@ -928,7 +928,11 @@ defmodule Cympho.IssuesTest do
       {:ok, cto} = Agents.create_agent(%{name: "CTO", role: :cto})
 
       {:ok, issue} =
-        Issues.create_issue(%{title: "CTO Review Task", description: "Test", status: :in_progress})
+        Issues.create_issue(%{
+          title: "CTO Review Task",
+          description: "Test",
+          status: :in_progress
+        })
 
       assert {:ok, updated} = Issues.transition_issue(issue, :in_review, cto.id)
       assert updated.status == :in_review
@@ -938,7 +942,11 @@ defmodule Cympho.IssuesTest do
       {:ok, ceo} = Agents.create_agent(%{name: "CEO", role: :ceo})
 
       {:ok, issue} =
-        Issues.create_issue(%{title: "CEO Review Task", description: "Test", status: :in_progress})
+        Issues.create_issue(%{
+          title: "CEO Review Task",
+          description: "Test",
+          status: :in_progress
+        })
 
       assert {:ok, updated} = Issues.transition_issue(issue, :in_review, ceo.id)
       assert updated.status == :in_review

@@ -23,7 +23,7 @@ defmodule Cympho.Workspaces.PreviewUrl do
     {27017, "mongodb", ["mongod"]},
     {8888, "jupyter", ["jupyter", "notebook"]},
     {1234, "ruby", ["ruby", "rails", "rackup"]},
-    {5000, "python", ["python", "gunicorn", "uvicorn"]},
+    {5000, "python", ["python", "gunicorn", "uvicorn"]}
   ]
 
   @doc """
@@ -71,13 +71,34 @@ defmodule Cympho.Workspaces.PreviewUrl do
   def infer_ports_from_project(cwd) when is_binary(cwd) do
     inferred = []
 
-    inferred = if File.exists?("#{cwd}/package.json"), do: [{3000, "node", 0.8} | inferred], else: inferred
-    inferred = if File.exists?("#{cwd}/vite.config.ts") or File.exists?("#{cwd}/vite.config.js"), do: [{5173, "vite", 0.9} | inferred], else: inferred
-    inferred = if File.exists?("#{cwd}/webpack.config.js") or File.exists?("#{cwd}/webpack.config.ts"), do: [{3000, "webpack", 0.8} | inferred], else: inferred
-    inferred = if File.exists?("#{cwd}/next.config.js") or File.exists?("#{cwd}/next.config.ts"), do: [{3000, "next", 0.9} | inferred], else: inferred
-    inferred = if File.exists?("#{cwd}/requirements.txt") or File.exists?("#{cwd}/Pipfile"), do: [{5000, "python", 0.7} | inferred], else: inferred
-    inferred = if File.exists?("#{cwd}/Gemfile"), do: [{3000, "ruby", 0.7} | inferred], else: inferred
-    inferred = if File.exists?("#{cwd}/go.mod"), do: [{8080, "go", 0.6} | inferred], else: inferred
+    inferred =
+      if File.exists?("#{cwd}/package.json"), do: [{3000, "node", 0.8} | inferred], else: inferred
+
+    inferred =
+      if File.exists?("#{cwd}/vite.config.ts") or File.exists?("#{cwd}/vite.config.js"),
+        do: [{5173, "vite", 0.9} | inferred],
+        else: inferred
+
+    inferred =
+      if File.exists?("#{cwd}/webpack.config.js") or File.exists?("#{cwd}/webpack.config.ts"),
+        do: [{3000, "webpack", 0.8} | inferred],
+        else: inferred
+
+    inferred =
+      if File.exists?("#{cwd}/next.config.js") or File.exists?("#{cwd}/next.config.ts"),
+        do: [{3000, "next", 0.9} | inferred],
+        else: inferred
+
+    inferred =
+      if File.exists?("#{cwd}/requirements.txt") or File.exists?("#{cwd}/Pipfile"),
+        do: [{5000, "python", 0.7} | inferred],
+        else: inferred
+
+    inferred =
+      if File.exists?("#{cwd}/Gemfile"), do: [{3000, "ruby", 0.7} | inferred], else: inferred
+
+    inferred =
+      if File.exists?("#{cwd}/go.mod"), do: [{8080, "go", 0.6} | inferred], else: inferred
 
     inferred
   end
@@ -104,6 +125,7 @@ defmodule Cympho.Workspaces.PreviewUrl do
       case parse_lsof_line(line) do
         {port, protocol} when protocol in ["TCP", "UDP"] and is_integer(port) ->
           [{port, "lsof", 1.0} | acc]
+
         _ ->
           acc
       end

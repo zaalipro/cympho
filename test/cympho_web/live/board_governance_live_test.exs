@@ -17,11 +17,16 @@ defmodule CymphoWeb.Live.BoardGovernanceLiveTest do
     unique = System.unique_integer([:positive])
 
     %User{}
-    |> User.registration_changeset(Map.merge(%{
-      email: "board-lv-e2e-#{unique}@example.com",
-      name: "Board LV E2E #{unique}",
-      password: "password123"
-    }, attrs))
+    |> User.registration_changeset(
+      Map.merge(
+        %{
+          email: "board-lv-e2e-#{unique}@example.com",
+          name: "Board LV E2E #{unique}",
+          password: "password123"
+        },
+        attrs
+      )
+    )
     |> Cympho.Repo.insert!()
   end
 
@@ -87,7 +92,9 @@ defmodule CymphoWeb.Live.BoardGovernanceLiveTest do
       create_membership(user, company, "member", true)
       socket = build_socket(user, company)
 
-      assert {:cont, updated_socket} = CymphoWeb.Live.BoardAuth.on_mount(:default, %{}, %{}, socket)
+      assert {:cont, updated_socket} =
+               CymphoWeb.Live.BoardAuth.on_mount(:default, %{}, %{}, socket)
+
       assert updated_socket.assigns[:is_board_member] == true
     end
 
@@ -95,17 +102,20 @@ defmodule CymphoWeb.Live.BoardGovernanceLiveTest do
       company = create_company(%{"required_approvals" => ["agent_hire"]})
       socket = build_socket(nil, company)
 
-      assert {:cont, updated_socket} = CymphoWeb.Live.BoardAuth.on_mount(:default, %{}, %{}, socket)
+      assert {:cont, updated_socket} =
+               CymphoWeb.Live.BoardAuth.on_mount(:default, %{}, %{}, socket)
+
       assert updated_socket.assigns[:is_board_member] == false
     end
   end
 
   describe "full board approval E2E flow: propose → vote → execute" do
     test "agent hire: board member proposes, votes, agent appears in company" do
-      company = create_company(%{
-        "required_approvals" => ["agent_hire"],
-        "threshold_type" => "any"
-      })
+      company =
+        create_company(%{
+          "required_approvals" => ["agent_hire"],
+          "threshold_type" => "any"
+        })
 
       board_user = create_user()
       create_membership(board_user, company, "member", true)
@@ -141,16 +151,18 @@ defmodule CymphoWeb.Live.BoardGovernanceLiveTest do
     end
 
     test "role change: board member proposes, votes, role is updated" do
-      company = create_company(%{
-        "required_approvals" => ["agent_promotion"],
-        "threshold_type" => "any"
-      })
+      company =
+        create_company(%{
+          "required_approvals" => ["agent_promotion"],
+          "threshold_type" => "any"
+        })
 
       board_user = create_user()
       create_membership(board_user, company, "member", true)
 
       # Create an agent first
-      {:ok, agent} = Agents.do_create_agent(%{name: "Promo Target", role: :engineer, company_id: company.id})
+      {:ok, agent} =
+        Agents.do_create_agent(%{name: "Promo Target", role: :engineer, company_id: company.id})
 
       # Step 1: Propose role change
       assert {:ok, %BoardApproval{} = approval} =
@@ -176,11 +188,12 @@ defmodule CymphoWeb.Live.BoardGovernanceLiveTest do
     end
 
     test "budget increase: board member proposes, votes, budget limit updated" do
-      company = create_company(%{
-        "categories" => ["budget_increase"],
-        "threshold_type" => "any",
-        "budget_limit_threshold" => 500
-      })
+      company =
+        create_company(%{
+          "categories" => ["budget_increase"],
+          "threshold_type" => "any",
+          "budget_limit_threshold" => 500
+        })
 
       board_user = create_user()
       create_membership(board_user, company, "member", true)

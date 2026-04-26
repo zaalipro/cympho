@@ -58,17 +58,20 @@ defmodule Cympho.Adapters.CodexAdapter do
       timeout = config[:timeout] || config["timeout"] || @default_timeout
 
       args = [
-        "--model", to_string(model),
-        "--format", "json",
+        "--model",
+        to_string(model),
+        "--format",
+        "json",
         "--quiet"
       ]
 
       env = build_env(config)
 
-      port = Port.open(
-        {:spawn_executable, codex_bin},
-        [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}]
-      )
+      port =
+        Port.open(
+          {:spawn_executable, codex_bin},
+          [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}]
+        )
 
       Port.command(port, "#{prompt}\n")
 
@@ -134,9 +137,10 @@ defmodule Cympho.Adapters.CodexAdapter do
   end
 
   defp build_env(config) do
-    api_key = config[:api_key] || config["api_key"] ||
-      Application.get_env(:cympho, :openai_api_key) ||
-      System.get_env("OPENAI_API_KEY")
+    api_key =
+      config[:api_key] || config["api_key"] ||
+        Application.get_env(:cympho, :openai_api_key) ||
+        System.get_env("OPENAI_API_KEY")
 
     base = [{"TERM", "dumb"}]
 
@@ -153,10 +157,18 @@ defmodule Cympho.Adapters.CodexAdapter do
 
     cond do
       is_nil(api_key) or api_key == "" ->
-        %{status: :unhealthy, message: "OpenAI API key not configured", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "OpenAI API key not configured",
+          checked_at: DateTime.utc_now()
+        }
 
       is_nil(System.find_executable("codex")) ->
-        %{status: :degraded, message: "codex binary not found in PATH", checked_at: DateTime.utc_now()}
+        %{
+          status: :degraded,
+          message: "codex binary not found in PATH",
+          checked_at: DateTime.utc_now()
+        }
 
       true ->
         %{status: :healthy, message: "Codex adapter ready", checked_at: DateTime.utc_now()}
@@ -166,11 +178,41 @@ defmodule Cympho.Adapters.CodexAdapter do
   @impl true
   def config_schema do
     [
-      %{key: :api_key, type: :string, required: true, default: nil, description: "OpenAI API key"},
-      %{key: :model, type: :string, required: false, default: @default_model, description: "Model to use"},
-      %{key: :temperature, type: :float, required: false, default: 0.7, description: "Sampling temperature (0.0 - 2.0)"},
-      %{key: :max_tokens, type: :integer, required: false, default: 2000, description: "Maximum tokens to generate"},
-      %{key: :timeout, type: :integer, required: false, default: @default_timeout, description: "CLI process timeout (ms)"}
+      %{
+        key: :api_key,
+        type: :string,
+        required: true,
+        default: nil,
+        description: "OpenAI API key"
+      },
+      %{
+        key: :model,
+        type: :string,
+        required: false,
+        default: @default_model,
+        description: "Model to use"
+      },
+      %{
+        key: :temperature,
+        type: :float,
+        required: false,
+        default: 0.7,
+        description: "Sampling temperature (0.0 - 2.0)"
+      },
+      %{
+        key: :max_tokens,
+        type: :integer,
+        required: false,
+        default: 2000,
+        description: "Maximum tokens to generate"
+      },
+      %{
+        key: :timeout,
+        type: :integer,
+        required: false,
+        default: @default_timeout,
+        description: "CLI process timeout (ms)"
+      }
     ]
   end
 
@@ -227,14 +269,20 @@ defmodule Cympho.Adapters.CodexAdapter do
   defp validate_model(_), do: {:error, "model must be a string"}
 
   defp validate_temperature(nil), do: :ok
+
   defp validate_temperature(temp) when is_float(temp) or is_integer(temp) do
-    if temp >= 0.0 and temp <= 2.0, do: :ok, else: {:error, "temperature must be between 0.0 and 2.0"}
+    if temp >= 0.0 and temp <= 2.0,
+      do: :ok,
+      else: {:error, "temperature must be between 0.0 and 2.0"}
   end
+
   defp validate_temperature(_), do: {:error, "temperature must be a number"}
 
   defp validate_max_tokens(nil), do: :ok
+
   defp validate_max_tokens(tokens) when is_integer(tokens) do
     if tokens > 0, do: :ok, else: {:error, "max_tokens must be positive"}
   end
+
   defp validate_max_tokens(_), do: {:error, "max_tokens must be an integer"}
 end

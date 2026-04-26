@@ -46,17 +46,33 @@
     </div>
   </div>
 
-  <div :if={@selected_agent_id == "" || is_nil(@selected_agent_id)} class="flex flex-col items-center justify-center py-20 text-center">
+  <div
+    :if={@selected_agent_id == "" || is_nil(@selected_agent_id)}
+    class="flex flex-col items-center justify-center py-20 text-center"
+  >
     <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
-      <svg class="w-6 h-6 text-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+      <svg
+        class="w-6 h-6 text-text-tertiary"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+        />
       </svg>
     </div>
     <p class="text-sm text-text-tertiary">Select an agent to view their inbox.</p>
   </div>
 
   <div :if={@selected_agent_id != "" && @selected_agent_id != nil} class="space-y-2">
-    <div :for={item <- @inbox_items} class="group flex items-center gap-4 p-3 rounded-md hover:bg-white/[0.04] transition-colors border border-transparent hover:border-border-subtle">
+    <div
+      :for={item <- @inbox_items}
+      class="group flex items-center gap-4 p-3 rounded-md hover:bg-white/[0.04] transition-colors border border-transparent hover:border-border-subtle"
+    >
       <div class="w-2 h-2 rounded-full shrink-0">
         <span class={["inline-block w-2 h-2 rounded-full", unread_dot(item.status)]}></span>
       </div>
@@ -64,13 +80,19 @@
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-3">
           <%= if item.issue do %>
-            <.app_link navigate={issue_link(item.issue)} class="text-sm font-510 text-text-primary truncate hover:underline">
+            <.app_link
+              navigate={issue_link(item.issue)}
+              class="text-sm font-510 text-text-primary truncate hover:underline"
+            >
               {item.issue.identifier || "Issue"}&mdash;{item.issue.title}
             </.app_link>
           <% else %>
             <span class="text-sm font-510 text-text-tertiary truncate">Issue removed</span>
           <% end %>
-          <span class={["text-xs px-2 py-0.5 rounded-full font-510", status_badge_class(item.status)]}>
+          <span class={[
+            "text-xs px-2 py-0.5 rounded-full font-510",
+            status_badge_class(item.status)
+          ]}>
             {String.capitalize(item.status)}
           </span>
         </div>
@@ -89,7 +111,12 @@
           title="Mark as read"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M5 13l4 4L19 7"
+            />
           </svg>
         </button>
         <button
@@ -101,7 +128,12 @@
           title="Dismiss"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M6 18L18 6M6 6l12 12"
+            />
           </svg>
         </button>
         <button
@@ -113,7 +145,12 @@
           title="Archive"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
+            />
           </svg>
         </button>
         <button
@@ -125,17 +162,35 @@
           title="Restore to unread"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
           </svg>
         </button>
       </div>
     </div>
   </div>
 
-  <div :if={@selected_agent_id != "" && @selected_agent_id != nil && Enum.empty?(@inbox_items)} class="flex flex-col items-center justify-center py-20 text-center">
+  <div
+    :if={@selected_agent_id != "" && @selected_agent_id != nil && Enum.empty?(@inbox_items)}
+    class="flex flex-col items-center justify-center py-20 text-center"
+  >
     <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
-      <svg class="w-6 h-6 text-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+      <svg
+        class="w-6 h-6 text-text-tertiary"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+        />
       </svg>
     </div>
     <p class="text-sm text-text-tertiary mb-4">No inbox items found.</p>

@@ -21,6 +21,7 @@ defmodule Cympho.CompaniesTest do
     test "create_company/1 with invalid slug returns error" do
       attrs = %{name: "Bad", slug: "INVALID SLUG!"}
       assert {:error, changeset} = Companies.create_company(attrs)
+
       assert "must contain only lowercase letters, numbers, and hyphens" in errors_on(changeset).slug
     end
 
@@ -39,12 +40,25 @@ defmodule Cympho.CompaniesTest do
   describe "invites" do
     setup do
       {:ok, company} = Companies.create_company(%{name: "Invite Corp", slug: "invite-corp"})
-      {:ok, user} = Cympho.Authentication.register_user(%{email: "inviter@test.com", name: "Inviter", password: "password123"})
+
+      {:ok, user} =
+        Cympho.Authentication.register_user(%{
+          email: "inviter@test.com",
+          name: "Inviter",
+          password: "password123"
+        })
+
       {:ok, company: company, user: user}
     end
 
     test "create_invite/1 creates a pending invite", %{company: company, user: user} do
-      attrs = %{"company_id" => company.id, "inviter_id" => user.id, "email" => "new@test.com", "role" => "member"}
+      attrs = %{
+        "company_id" => company.id,
+        "inviter_id" => user.id,
+        "email" => "new@test.com",
+        "role" => "member"
+      }
+
       assert {:ok, %CompanyInvite{} = invite} = Companies.create_invite(attrs)
       assert invite.token != nil
       assert invite.status == "pending"
@@ -52,21 +66,38 @@ defmodule Cympho.CompaniesTest do
     end
 
     test "accept_invite/2 creates membership", %{company: company, user: user} do
-      attrs = %{"company_id" => company.id, "inviter_id" => user.id, "email" => "new@test.com", "role" => "member"}
+      attrs = %{
+        "company_id" => company.id,
+        "inviter_id" => user.id,
+        "email" => "new@test.com",
+        "role" => "member"
+      }
+
       {:ok, invite} = Companies.create_invite(attrs)
 
-      {:ok, new_user} = Cympho.Authentication.register_user(%{email: "new@test.com", name: "New", password: "password123"})
+      {:ok, new_user} =
+        Cympho.Authentication.register_user(%{
+          email: "new@test.com",
+          name: "New",
+          password: "password123"
+        })
+
       assert {:ok, _} = Companies.accept_invite(invite.token, new_user.id)
       assert Companies.has_access?(new_user.id, company.id)
     end
 
     test "accept_invite/2 with expired token returns error", %{company: company, user: user} do
       expired = DateTime.add(DateTime.utc_now(), -1, :second)
+
       invite = %CompanyInvite{
-        company_id: company.id, inviter_id: user.id,
-        email: "expired@test.com", token: "expired-token",
-        status: "pending", expires_at: expired
+        company_id: company.id,
+        inviter_id: user.id,
+        email: "expired@test.com",
+        token: "expired-token",
+        status: "pending",
+        expires_at: expired
       }
+
       {:ok, invite} = Repo.insert(invite)
 
       assert {:error, :expired} = Companies.accept_invite("expired-token", user.id)
@@ -76,14 +107,25 @@ defmodule Cympho.CompaniesTest do
   describe "join requests" do
     setup do
       {:ok, company} = Companies.create_company(%{name: "Join Corp", slug: "join-corp"})
-      {:ok, user} = Cympho.Authentication.register_user(%{email: "joiner@test.com", name: "Joiner", password: "password123"})
+
+      {:ok, user} =
+        Cympho.Authentication.register_user(%{
+          email: "joiner@test.com",
+          name: "Joiner",
+          password: "password123"
+        })
+
       {:ok, company: company, user: user}
     end
 
     test "create_join_request/1 creates pending request", %{company: company, user: user} do
-      assert {:ok, %JoinRequest{} = req} = Companies.create_join_request(%{
-        company_id: company.id, user_id: user.id, message: "Please let me in"
-      })
+      assert {:ok, %JoinRequest{} = req} =
+               Companies.create_join_request(%{
+                 company_id: company.id,
+                 user_id: user.id,
+                 message: "Please let me in"
+               })
+
       assert req.status == "pending"
     end
 

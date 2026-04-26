@@ -49,7 +49,8 @@ defmodule Cympho.AgentAdapters.MockAdapterTest do
       recipient = self()
       issue = %{id: "test-789", title: "Tool Call Issue", description: "Test"}
 
-      session_id = MockAdapter.run(issue, "agent-1", recipient, mock_delay: 5, include_tool_calls: true)
+      session_id =
+        MockAdapter.run(issue, "agent-1", recipient, mock_delay: 5, include_tool_calls: true)
 
       assert_receive {:session_started, ^session_id}
 
@@ -69,7 +70,8 @@ defmodule Cympho.AgentAdapters.MockAdapterTest do
       recipient = self()
       issue = %{id: "test-999", title: "No Tool Call Issue", description: "Test"}
 
-      session_id = MockAdapter.run(issue, "agent-1", recipient, mock_delay: 5, include_tool_calls: false)
+      session_id =
+        MockAdapter.run(issue, "agent-1", recipient, mock_delay: 5, include_tool_calls: false)
 
       assert_receive {:session_started, ^session_id}
       assert_receive {:turn_completed, ^session_id, _result}

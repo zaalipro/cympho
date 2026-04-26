@@ -70,7 +70,7 @@ defmodule Cympho.Issues do
       |> maybe_filter_by_assignee(assignee_id)
       |> maybe_filter_by_project_id_filter(project_id)
       |> maybe_filter_by_label_id(label_id)
-      |> order_by([i], [desc: i.updated_at, desc: i.inserted_at, desc: i.id])
+      |> order_by([i], desc: i.updated_at, desc: i.inserted_at, desc: i.id)
 
     total = Repo.aggregate(query, :count)
     total_pages = max(1, ceil(total / per_page))
@@ -183,7 +183,12 @@ defmodule Cympho.Issues do
           metadata: %{title: issue.title}
         })
 
-        Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_created, issue})
+        Cympho.RateLimiting.dedup_pubsub(
+          Cympho.PubSub,
+          "company:#{issue.company_id}:issues",
+          {:issue_created, issue}
+        )
+
         CymphoWeb.Events.broadcast_issue_update(issue, :issue_created)
         {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
@@ -218,10 +223,21 @@ defmodule Cympho.Issues do
     with {:ok, updated} <- do_update_issue(issue, attrs) do
       updated = Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])
       Activities.log_issue_changes(old_issue, updated, attrs)
-      Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{updated.company_id}:issues", {:issue_updated, updated})
+
+      Cympho.RateLimiting.dedup_pubsub(
+        Cympho.PubSub,
+        "company:#{updated.company_id}:issues",
+        {:issue_updated, updated}
+      )
 
       event_type = determine_update_event_type(old_issue, updated, attrs)
-      CymphoWeb.Events.broadcast_issue_update(updated, event_type, build_update_metadata(old_issue, updated, attrs))
+
+      CymphoWeb.Events.broadcast_issue_update(
+        updated,
+        event_type,
+        build_update_metadata(old_issue, updated, attrs)
+      )
+
       {:ok, updated}
     end
   end
@@ -302,14 +318,18 @@ defmodule Cympho.Issues do
 
   defp maybe_complete_parent(%Issue{parent_id: parent_id}) do
     case Repo.get(Issue, parent_id) do
-      nil -> :ok
+      nil ->
+        :ok
+
       parent ->
         siblings = from(i in Issue, where: i.parent_id == ^parent_id) |> Repo.all()
         all_done? = Enum.all?(siblings, &(&1.status == :done))
+
         if all_done? and parent.status != :done do
           {:ok, _} = do_transition(parent, :done)
           add_system_comment(parent, "Auto-completed: all sub-issues are done")
         end
+
         :ok
     end
   end
@@ -517,7 +537,12 @@ defmodule Cympho.Issues do
               metadata: %{blocker_id: blocker_issue.id}
             })
 
-            Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_updated, issue})
+            Cympho.RateLimiting.dedup_pubsub(
+              Cympho.PubSub,
+              "company:#{issue.company_id}:issues",
+              {:issue_updated, issue}
+            )
+
             {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
           {:error, reason} ->
@@ -578,7 +603,12 @@ defmodule Cympho.Issues do
         metadata: %{blocker_id: blocker_issue.id}
       })
 
-      Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_updated, issue})
+      Cympho.RateLimiting.dedup_pubsub(
+        Cympho.PubSub,
+        "company:#{issue.company_id}:issues",
+        {:issue_updated, issue}
+      )
+
       {:ok, issue}
     end
   end
@@ -589,7 +619,13 @@ defmodule Cympho.Issues do
     case Repo.delete(issue) do
       {:ok, _issue} ->
         Approvals.cancel_pending_for_issue(issue.id)
-        Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_deleted, issue.id})
+
+        Cympho.RateLimiting.dedup_pubsub(
+          Cympho.PubSub,
+          "company:#{issue.company_id}:issues",
+          {:issue_deleted, issue.id}
+        )
+
         :ok
 
       {:error, changeset} ->

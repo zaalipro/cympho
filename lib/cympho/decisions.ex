@@ -61,8 +61,11 @@ defmodule Cympho.Decisions do
 
   def get_decision(id) do
     case Repo.get(Decision, id) do
-      nil -> {:error, :not_found}
-      decision -> {:ok, Repo.preload(decision, [:company, :child_decisions, :reversals, :parent_decision])}
+      nil ->
+        {:error, :not_found}
+
+      decision ->
+        {:ok, Repo.preload(decision, [:company, :child_decisions, :reversals, :parent_decision])}
     end
   end
 
@@ -104,14 +107,19 @@ defmodule Cympho.Decisions do
           "Decision recorded: #{decision.decision_type} - #{decision.outcome}",
           resource: decision,
           reasoning: decision.reasoning,
-          metadata: Map.merge(decision.context, %{
-            decision_key: decision.decision_key,
-            resource: "#{decision.resource_type}:#{decision.resource_id}",
-            reversible: decision.reversible
-          })
+          metadata:
+            Map.merge(decision.context, %{
+              decision_key: decision.decision_key,
+              resource: "#{decision.resource_type}:#{decision.resource_id}",
+              reversible: decision.reversible
+            })
         )
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{decision.company_id}:decisions", {:decision_created, decision})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{decision.company_id}:decisions",
+          {:decision_created, decision}
+        )
 
         maybe_mark_parent_superseded(decision)
 
@@ -231,7 +239,12 @@ defmodule Cympho.Decisions do
           context: Map.put(original_decision.context, :reversal_reasoning, reasoning),
           reversible: false,
           company_id: original_decision.company_id,
-          metadata: Map.put(original_decision.metadata, :reversing_original_decision_id, original_decision.id)
+          metadata:
+            Map.put(
+              original_decision.metadata,
+              :reversing_original_decision_id,
+              original_decision.id
+            )
         }
 
         with {:ok, reversing_decision} <-
@@ -310,7 +323,11 @@ defmodule Cympho.Decisions do
       from(d in Decision, where: d.id == ^parent_id)
       |> Repo.update_all(set: [status: "superseded"])
 
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{decision.company_id}:decisions", {:decision_superseded, parent_id})
+      Phoenix.PubSub.broadcast(
+        Cympho.PubSub,
+        "company:#{decision.company_id}:decisions",
+        {:decision_superseded, parent_id}
+      )
     end
 
     :ok

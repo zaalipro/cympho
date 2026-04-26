@@ -9,67 +9,83 @@
     <div class="chart-card">
       <h4>Activities by Type</h4>
       <div class="bar-chart">
-        <%= max = max_count(@chart_data) %>
+        {max = max_count(@chart_data)}
         <%= for {action, count} <- @chart_data.by_action do %>
           <div class="bar-row">
-            <span class="bar-label"><%= String.replace(action, "_", " ") |> String.capitalize() %></span>
+            <span class="bar-label">
+              {String.replace(action, "_", " ") |> String.capitalize()}
+            </span>
             <div class="bar-container">
-              <div class="bar-fill"
-                   style={"width: #{if(max > 0, do: "#{count * 100 / max}%", else: "0%")}; background-color: #{action_color(action)};"}>
-                <span class="bar-value"><%= count %></span>
+              <div
+                class="bar-fill"
+                style={"width: #{if(max > 0, do: "#{count * 100 / max}%", else: "0%")}; background-color: #{action_color(action)};"}
+              >
+                <span class="bar-value">{count}</span>
               </div>
             </div>
           </div>
         <% end %>
       </div>
     </div>
-
-    <!-- Activity by Actor (Donut Chart) -->
+    
+<!-- Activity by Actor (Donut Chart) -->
     <div class="chart-card">
       <h4>Activities by Actor</h4>
       <div class="donut-chart-container">
         <svg viewBox="0 0 100 100" class="donut-chart">
-          <%= {total, _} = Enum.reduce(@chart_data.by_actor, {0, 0}, fn {_actor, count}, {acc, _offset} -> {acc + count, acc} end) %>
+          {{total, _} =
+            Enum.reduce(@chart_data.by_actor, {0, 0}, fn {_actor, count}, {acc, _offset} ->
+              {acc + count, acc}
+            end)}
           <%= {_total, _} = Enum.reduce(@chart_data.by_actor, {total, 0}, fn {actor, count}, {remaining, offset} -> %>
             <% percentage = if total > 0, do: count * 100 / total, else: 0 %>
             <% dash_array = "#{percentage * 2.83} #{100 - percentage * 2.83}" %>
             <% rotation = offset * 3.6 %>
-            <circle cx="50" cy="50" r="40"
-                    fill="none"
-                    stroke={actor_color(actor)}
-                    stroke-width="20"
-                    stroke-dasharray={dash_array}
-                    transform={"rotate(#{rotation} 50 50)"}
-                    class="donut-segment" />
-            <%= {remaining - count, offset + count} %>
+            <circle
+              cx="50"
+              cy="50"
+              r="40"
+              fill="none"
+              stroke={actor_color(actor)}
+              stroke-width="20"
+              stroke-dasharray={dash_array}
+              transform={"rotate(#{rotation} 50 50)"}
+              class="donut-segment"
+            />
+            {{remaining - count, offset + count}}
           <% end) %>
           <text x="50" y="50" text-anchor="middle" dy="0.3em" class="donut-center">
-            <%= total %>
+            {total}
           </text>
         </svg>
         <div class="donut-legend">
           <%= for {actor, count} <- @chart_data.by_actor do %>
             <div class="legend-item">
-              <span class="legend-color" style={"background-color: #{actor_color(actor)};"}></span>
-              <span class="legend-label"><%= String.capitalize(actor) %></span>
-              <span class="legend-value"><%= count %></span>
+              <span class="legend-color" style={"background-color: #{actor_color(actor)};"}>
+              </span>
+              <span class="legend-label">{String.capitalize(actor)}</span>
+              <span class="legend-value">{count}</span>
             </div>
           <% end %>
         </div>
       </div>
     </div>
-
-    <!-- Timeline (Line Chart) -->
+    
+<!-- Timeline (Line Chart) -->
     <div class="chart-card full-width">
       <h4>Activity Timeline</h4>
       <div class="timeline-chart">
         <%= if length(@chart_data.timeline) > 0 do %>
-          <% max_timeline = Enum.max_by(@chart_data.timeline, fn {_date, count} -> count end) |> elem(1) %>
+          <% max_timeline =
+            Enum.max_by(@chart_data.timeline, fn {_date, count} -> count end) |> elem(1) %>
           <svg viewBox="0 0 100 50" class="timeline-svg">
-            <%= {points, _} = Enum.reduce(@chart_data.timeline, {[], 0}, fn {date, count}, {acc, idx} -> %>
-              <% x = if length(@chart_data.timeline) > 1, do: idx * 100 / (length(@chart_data.timeline) - 1), else: 50 %>
-              <% y = if max_timeline > 0, do: 50 - (count * 40 / max_timeline), else: 50 %>
-              <%= {[{x, y} | acc], idx + 1} %>
+            <%= {points, _} = Enum.reduce(@chart_data.timeline, {[], 0}, fn {_date, count}, {acc, idx} -> %>
+              <% x =
+                if length(@chart_data.timeline) > 1,
+                  do: idx * 100 / (length(@chart_data.timeline) - 1),
+                  else: 50 %>
+              <% y = if max_timeline > 0, do: 50 - count * 40 / max_timeline, else: 50 %>
+              {{[{x, y} | acc], idx + 1}}
             <% end) %>
             <% points = Enum.reverse(points) %>
             <polyline
@@ -77,17 +93,24 @@
               fill="none"
               stroke="#7170ff"
               stroke-width="2"
-              class="timeline-line" />
+              class="timeline-line"
+            />
 
             <%= for {{x, y}, idx} <- Enum.with_index(points) do %>
               <circle cx={x} cy={y} r="3" fill="#7170ff" class="timeline-point">
-                <title><%= Enum.at(@chart_data.timeline, idx) |> elem(0) |> Calendar.strftime("%b %d") %>: <%= Enum.at(@chart_data.timeline, idx) |> elem(1) %></title>
+                <title>
+                  {Enum.at(@chart_data.timeline, idx) |> elem(0) |> Calendar.strftime("%b %d")}: {Enum.at(
+                    @chart_data.timeline,
+                    idx
+                  )
+                  |> elem(1)}
+                </title>
               </circle>
             <% end %>
           </svg>
           <div class="timeline-labels">
             <%= for {date, _count} <- @chart_data.timeline do %>
-              <span class="timeline-date"><%= Calendar.strftime(date, "%b %d") %></span>
+              <span class="timeline-date">{Calendar.strftime(date, "%b %d")}</span>
             <% end %>
           </div>
         <% else %>

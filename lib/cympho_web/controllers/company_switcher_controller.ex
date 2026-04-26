@@ -27,10 +27,11 @@ defmodule CymphoWeb.CompanySwitcherController do
     # Get the return path from query params or referer, default to dashboard
     return_to = get_in(conn.params, ["return_to"])
 
-    path = case return_to do
-      nil -> get_req_header(conn, "referer") |> List.first("/") || "/"
-      path -> path
-    end
+    path =
+      case return_to do
+        nil -> get_req_header(conn, "referer") |> List.first("/") || "/"
+        path -> path
+      end
 
     # Validate the path is safe - only allow relative paths starting with /
     if is_safe_path?(path) do
@@ -49,5 +50,6 @@ defmodule CymphoWeb.CompanySwitcherController do
       !String.contains?(path, ["javascript:", "data:", "vbscript:", "file:"]) &&
       !String.contains?(path, ["\n", "\r", "\t"])
   end
+
   defp is_safe_path?(_), do: false
 end

@@ -74,8 +74,12 @@ defmodule Cympho.AgentAdapters.HealthChecker do
   @spec check_all_now() :: :ok
   def check_all_now do
     case GenServer.whereis(__MODULE__) do
-      nil -> :ok
-      _pid -> send(__MODULE__, :check_all); :ok
+      nil ->
+        :ok
+
+      _pid ->
+        send(__MODULE__, :check_all)
+        :ok
     end
   end
 
@@ -85,8 +89,12 @@ defmodule Cympho.AgentAdapters.HealthChecker do
   @spec check_agent_now(agent_id()) :: :ok
   def check_agent_now(agent_id) do
     case GenServer.whereis(__MODULE__) do
-      nil -> :ok
-      _pid -> send(__MODULE__, {:check_agent, agent_id}); :ok
+      nil ->
+        :ok
+
+      _pid ->
+        send(__MODULE__, {:check_agent, agent_id})
+        :ok
     end
   end
 
@@ -195,7 +203,12 @@ defmodule Cympho.AgentAdapters.HealthChecker do
         rescue
           e ->
             Logger.error("[HealthChecker] health_check crashed for #{agent.id}: #{inspect(e)}")
-            %{status: :unavailable, message: "Health check failed", checked_at: DateTime.utc_now()}
+
+            %{
+              status: :unavailable,
+              message: "Health check failed",
+              checked_at: DateTime.utc_now()
+            }
         end
 
       {:error, :no_adapter} ->
@@ -227,7 +240,9 @@ defmodule Cympho.AgentAdapters.HealthChecker do
               Logger.info("[HealthChecker] agent #{agent.id} transitioned to :idle")
 
             {:error, changeset} ->
-              Logger.error("[HealthChecker] failed to update agent #{agent.id}: #{inspect(changeset)}")
+              Logger.error(
+                "[HealthChecker] failed to update agent #{agent.id}: #{inspect(changeset)}"
+              )
           end
         else
           # Just update health_status
@@ -237,7 +252,10 @@ defmodule Cympho.AgentAdapters.HealthChecker do
       # Health degraded or unavailable
       new_health_status in [:degraded, :unavailable] ->
         new_failures = consecutive_failures + 1
-        Logger.warning("[HealthChecker] agent #{agent.id} unhealthy (#{new_failures}/#{@max_consecutive_failures}): #{health_result.message}")
+
+        Logger.warning(
+          "[HealthChecker] agent #{agent.id} unhealthy (#{new_failures}/#{@max_consecutive_failures}): #{health_result.message}"
+        )
 
         # Update state
         _ = put_in(state.consecutive_failures[agent.id], new_failures)
@@ -252,10 +270,14 @@ defmodule Cympho.AgentAdapters.HealthChecker do
         if new_failures >= @max_consecutive_failures and agent.status != :error do
           case Agents.update_agent(agent, %{status: :error, health_status: new_health_status}) do
             {:ok, _updated_agent} ->
-              Logger.error("[HealthChecker] agent #{agent.id} transitioned to :error after #{new_failures} consecutive failures")
+              Logger.error(
+                "[HealthChecker] agent #{agent.id} transitioned to :error after #{new_failures} consecutive failures"
+              )
 
             {:error, changeset} ->
-              Logger.error("[HealthChecker] failed to update agent #{agent.id}: #{inspect(changeset)}")
+              Logger.error(
+                "[HealthChecker] failed to update agent #{agent.id}: #{inspect(changeset)}"
+              )
           end
         else
           # Just update health_status
@@ -271,7 +293,10 @@ defmodule Cympho.AgentAdapters.HealthChecker do
     end
 
     # Return updated state
-    %{state | consecutive_failures: Map.get(state.consecutive_failures, agent.id, consecutive_failures)}
+    %{
+      state
+      | consecutive_failures: Map.get(state.consecutive_failures, agent.id, consecutive_failures)
+    }
   end
 
   defp broadcast_health_status(agent_id, new_status, old_status) do
@@ -284,6 +309,9 @@ defmodule Cympho.AgentAdapters.HealthChecker do
     }
 
     Phoenix.PubSub.broadcast(Cympho.PubSub, @pubsub_topic, {:health_status_changed, payload})
-    Logger.debug("[HealthChecker] broadcast health status change for agent #{agent_id}: #{old_status} -> #{new_status}")
+
+    Logger.debug(
+      "[HealthChecker] broadcast health status change for agent #{agent_id}: #{old_status} -> #{new_status}"
+    )
   end
 end

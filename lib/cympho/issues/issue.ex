@@ -95,4 +95,5 @@ defmodule Cympho.Issues.Issue do
   def role_rank(:designer), do: 1
   def role_rank(_), do: 0
 end
+
 # TEST MARKER

@@ -24,10 +24,10 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
                     @default_check_interval
                   )
   @stale_threshold Application.compile_env(
-                    :cympho,
-                    [:heartbeat_engine, :stale_threshold_minutes],
-                    @default_stale_threshold
-                  )
+                     :cympho,
+                     [:heartbeat_engine, :stale_threshold_minutes],
+                     @default_stale_threshold
+                   )
 
   # Client API
 
@@ -110,9 +110,7 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
             [recovered]
 
           {:error, reason} ->
-            Logger.error(
-              "Watchdog: failed to recover orphaned run #{run.id}: #{inspect(reason)}"
-            )
+            Logger.error("Watchdog: failed to recover orphaned run #{run.id}: #{inspect(reason)}")
 
             []
         end

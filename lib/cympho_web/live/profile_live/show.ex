@@ -11,10 +11,8 @@ defmodule CymphoWeb.ProfileLive.Show do
 
         memberships =
           Enum.map(user.company_memberships, fn mem ->
-            case Companies.get_company(mem.company_id) do
-              {:ok, company} -> Map.put(mem, :company, company)
-              _ -> mem
-            end
+            company = Companies.get_company!(mem.company_id)
+            Map.put(mem, :company, company)
           end)
 
         {:ok,
@@ -49,7 +47,7 @@ defmodule CymphoWeb.ProfileLive.Show do
   @impl true
   def handle_event("delete_account", _params, socket) do
     case Users.delete_user(socket.assigns.user) do
-      {:ok, _} ->
+      :ok ->
         {:noreply,
          socket
          |> put_flash(:info, "Account deleted successfully")

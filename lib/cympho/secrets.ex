@@ -126,7 +126,9 @@ defmodule Cympho.Secrets do
 
   def list_secret_versions(secret_id) do
     case Repo.get(Secret, secret_id) do
-      nil -> []
+      nil ->
+        []
+
       secret ->
         Secret
         |> where(key: ^secret.key, company_id: ^secret.company_id)

@@ -139,7 +139,6 @@ defmodule CymphoWeb.Components do
 
   defp input_value(field), do: field.value
 
-
   attr :field, :any, required: true
 
   def error(assigns) do

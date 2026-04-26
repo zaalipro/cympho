@@ -44,11 +44,13 @@ defmodule CymphoWeb.PreviewController do
 
     headers = Enum.map(conn.req_headers, fn {k, v} -> {k, v} end)
 
-    case Finch.build(conn.method, full_url, headers, conn.body) |> Finch.request(Cympho.Finch, []) do
+    case Finch.build(conn.method, full_url, headers, conn.body)
+         |> Finch.request(Cympho.Finch, []) do
       {:ok, response} ->
-        filtered_headers = Enum.filter(response.headers, fn {k, _} ->
-          k in ["content-type", "content-length", "cache-control", "etag"]
-        end)
+        filtered_headers =
+          Enum.filter(response.headers, fn {k, _} ->
+            k in ["content-type", "content-length", "cache-control", "etag"]
+          end)
 
         conn
         |> put_status(response.status)
@@ -111,7 +113,11 @@ defmodule CymphoWeb.PreviewController do
   defp get_base_url(conn) do
     scheme = if conn.scheme == :https, do: "https", else: "http"
     host = conn.host
-    port = if (conn.scheme == :https && conn.port == 443) || (conn.scheme == :http && conn.port == 80), do: nil, else: conn.port
+
+    port =
+      if (conn.scheme == :https && conn.port == 443) || (conn.scheme == :http && conn.port == 80),
+        do: nil,
+        else: conn.port
 
     base = "#{scheme}://#{host}"
     if port, do: "#{base}:#{port}", else: base

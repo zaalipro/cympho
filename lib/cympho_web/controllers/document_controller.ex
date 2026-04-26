@@ -50,7 +50,11 @@ defmodule CymphoWeb.DocumentController do
     end
   end
 
-  def show_with_revision(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id}) do
+  def show_with_revision(conn, %{
+        "issue_id" => issue_id,
+        "key" => key,
+        "revision_id" => revision_id
+      }) do
     case Documents.get_document_by_key(issue_id, key) do
       {:ok, document} ->
         revisions = Documents.list_revisions(document.id)
@@ -62,7 +66,12 @@ defmodule CymphoWeb.DocumentController do
     end
   end
 
-  def diff(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id, "other_revision_id" => other_revision_id}) do
+  def diff(conn, %{
+        "issue_id" => issue_id,
+        "key" => key,
+        "revision_id" => revision_id,
+        "other_revision_id" => other_revision_id
+      }) do
     case Documents.get_document_by_key(issue_id, key) do
       {:ok, document} ->
         diff = Documents.get_diff(revision_id, other_revision_id)

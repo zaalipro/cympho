@@ -63,9 +63,21 @@ defmodule Cympho.Activities do
     case %Activity{} |> Activity.changeset(attrs) |> Repo.insert() do
       {:ok, activity} ->
         company_id = issue_company_id(activity.issue_id)
-        Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{company_id}:activities", {:activity_created, activity})
+
+        Cympho.RateLimiting.dedup_pubsub(
+          Cympho.PubSub,
+          "company:#{company_id}:activities",
+          {:activity_created, activity}
+        )
+
         Cympho.RateLimiting.dedup_broadcast("activities:*", "activity_created", activity)
-        Cympho.RateLimiting.dedup_broadcast("issue:#{activity.issue_id}", "activity_created", activity)
+
+        Cympho.RateLimiting.dedup_broadcast(
+          "issue:#{activity.issue_id}",
+          "activity_created",
+          activity
+        )
+
         {:ok, activity}
 
       error ->
@@ -195,5 +207,6 @@ defmodule Cympho.Activities do
     }
   end
 
-  defp issue_company_id(issue_id), do: Repo.one(from i in Cympho.Issues.Issue, where: i.id == ^issue_id, select: i.company_id)
+  defp issue_company_id(issue_id),
+    do: Repo.one(from i in Cympho.Issues.Issue, where: i.id == ^issue_id, select: i.company_id)
 end

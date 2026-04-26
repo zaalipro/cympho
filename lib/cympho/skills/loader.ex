@@ -107,6 +107,7 @@ defmodule Cympho.Skills.Loader do
         [{^plugin_id, _manifest}] ->
           :ets.delete(@table_name, plugin_id)
           :ok
+
         [] ->
           :ok
       end

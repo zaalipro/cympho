@@ -18,7 +18,8 @@ defmodule CymphoWeb.SocketAuthTest do
     end
 
     test "rejects an expired JWT token" do
-      secret = Application.get_env(:cympho, :agent_jwt_secret, "default-secret-change-in-production")
+      secret =
+        Application.get_env(:cympho, :agent_jwt_secret, "default-secret-change-in-production")
 
       claims = %{
         "agent_id" => Ecto.UUID.generate(),

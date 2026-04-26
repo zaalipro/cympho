@@ -59,7 +59,9 @@ defmodule CymphoWeb.OrgChartLive do
       <div class="w-36 sm:w-44 lg:w-48 bg-surface border border-border rounded-lg p-3 sm:p-4 hover:border-brand/50 transition-colors cursor-pointer">
         <.app_link navigate={~p"/agents/#{@node.id}"} class="block">
           <div class="flex items-center justify-between mb-2">
-            <h3 class="text-xs sm:text-sm font-510 text-text-primary truncate flex-1">{@node.name}</h3>
+            <h3 class="text-xs sm:text-sm font-510 text-text-primary truncate flex-1">
+              {@node.name}
+            </h3>
             <div
               class="w-2 h-2 rounded-full ml-2 flex-shrink-0"
               style={"background-color: #{status_color(@node.status)}"}

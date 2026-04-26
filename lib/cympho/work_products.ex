@@ -61,11 +61,13 @@ defmodule Cympho.WorkProducts do
          |> Repo.update() do
       {:ok, updated} ->
         updated = Repo.preload(updated, [:created_by_agent, :attachment])
+
         Phoenix.PubSub.broadcast(
           Cympho.PubSub,
           "issues",
           {:work_product_updated, updated}
         )
+
         {:ok, updated}
 
       {:error, changeset} ->
@@ -81,6 +83,7 @@ defmodule Cympho.WorkProducts do
           "issues",
           {:work_product_deleted, work_product.issue_id}
         )
+
         :ok
 
       {:error, changeset} ->

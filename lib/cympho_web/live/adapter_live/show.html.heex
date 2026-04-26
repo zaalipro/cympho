@@ -9,7 +9,10 @@
       </svg>
     </.app_link>
     <h1 class="text-lg font-510 text-text-primary">{@page_title}</h1>
-    <span class={["inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-510", health_status_class(@health.status)]}>
+    <span class={[
+      "inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-510",
+      health_status_class(@health.status)
+    ]}>
       {health_status_label(@health.status)}
     </span>
   </div>
@@ -64,13 +67,16 @@
             <span class="text-text-tertiary">Last Checked</span>
             <span class="text-text-secondary">{format_datetime(@health.checked_at)}</span>
           </div>
-          <div :if={@health.message} class="text-xs text-text-tertiary pt-2 border-t border-border">
+          <div
+            :if={@health.message}
+            class="text-xs text-text-tertiary pt-2 border-t border-border"
+          >
             {@health.message}
           </div>
         </div>
       </div>
-
-      <!-- Adapter Details -->
+      
+<!-- Adapter Details -->
       <div class="bg-surface border border-border rounded-card p-5 space-y-4">
         <h2 class="text-sm font-510 text-text-primary">Details</h2>
         <div class="space-y-3">
@@ -84,13 +90,15 @@
           </div>
           <div class="flex items-center justify-between text-xs">
             <span class="text-text-tertiary">Available</span>
-            <span class={"text-xs #{if @adapter.available, do: "text-success", else: "text-red-400"}"}>{if @adapter.available, do: "Yes", else: "No"}</span>
+            <span class={"text-xs #{if @adapter.available, do: "text-success", else: "text-red-400"}"}>
+              {if @adapter.available, do: "Yes", else: "No"}
+            </span>
           </div>
         </div>
       </div>
     </div>
-
-    <!-- Center + Right columns: Config & Agents -->
+    
+<!-- Center + Right columns: Config & Agents -->
     <div class="lg:col-span-2 space-y-6">
       <!-- Configuration -->
       <div class="bg-surface border border-border rounded-card p-5 space-y-4">
@@ -99,7 +107,10 @@
           <span class="text-xs text-text-tertiary">{length(@config_schema)} fields</span>
         </div>
 
-        <div :if={@validation_error} class="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-3 py-2 rounded-md">
+        <div
+          :if={@validation_error}
+          class="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-3 py-2 rounded-md"
+        >
           {@validation_error}
         </div>
 
@@ -119,7 +130,9 @@
                 placeholder={if field.default, do: inspect(field.default), else: ""}
                 class="flex-1 bg-white/[0.04] border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder-text-quaternary focus:outline-none focus:border-brand transition-colors"
               />
-              <span class="text-[10px] text-text-quaternary">{schema_type_label(field.type)}</span>
+              <span class="text-[10px] text-text-quaternary">
+                {schema_type_label(field.type)}
+              </span>
             </div>
           </div>
 
@@ -133,8 +146,8 @@
           </div>
         </form>
       </div>
-
-      <!-- Assigned Agents -->
+      
+<!-- Assigned Agents -->
       <div class="bg-surface border border-border rounded-card p-5 space-y-4">
         <div class="flex items-center justify-between">
           <h2 class="text-sm font-510 text-text-primary">Assigned Agents</h2>
@@ -146,7 +159,10 @@
         </div>
 
         <div :if={not Enum.empty?(@agents)} class="space-y-2">
-          <div :for={agent <- @agents} class="flex items-center justify-between bg-white/[0.02] border border-border rounded-md p-3">
+          <div
+            :for={agent <- @agents}
+            class="flex items-center justify-between bg-white/[0.02] border border-border rounded-md p-3"
+          >
             <div class="flex items-center gap-3">
               <div class="flex-1">
                 <div class="flex items-center gap-2">
@@ -154,7 +170,10 @@
                   <.badge variant="agent" value={to_string(agent.status)} />
                 </div>
                 <div class="text-xs text-text-tertiary mt-0.5">
-                  Role: {agent.role |> Atom.to_string() |> String.replace("_", " ") |> String.capitalize()}
+                  Role: {agent.role
+                  |> Atom.to_string()
+                  |> String.replace("_", " ")
+                  |> String.capitalize()}
                 </div>
               </div>
             </div>

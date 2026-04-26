@@ -206,7 +206,8 @@ defmodule Cympho.PrincipalPermissions do
   """
   def check_expired_grants do
     from(p in PrincipalPermissionGrant,
-      where: p.status == "active" and not is_nil(p.expires_at) and p.expires_at < ^DateTime.utc_now()
+      where:
+        p.status == "active" and not is_nil(p.expires_at) and p.expires_at < ^DateTime.utc_now()
     )
     |> Repo.update_all(set: [status: "expired"])
   end
@@ -224,7 +225,9 @@ defmodule Cympho.PrincipalPermissions do
 
   defp actor_type({type, _}), do: type
   defp actor_type(nil), do: nil
-  defp actor_type(%{__struct__: type}), do: type |> Module.split() |> List.last() |> String.downcase()
+
+  defp actor_type(%{__struct__: type}),
+    do: type |> Module.split() |> List.last() |> String.downcase()
 
   defp parse_expires_at(nil), do: nil
   defp parse_expires_at(datetime), do: datetime

@@ -5,7 +5,9 @@ defmodule CymphoWeb.CompanyChannelRateLimitTest do
     test "allows messages within rate limit" do
       company_id = Ecto.UUID.generate()
       {:ok, socket} = connect_jwt(company_id, Ecto.UUID.generate())
-      {:ok, _, socket} = subscribe_and_join(socket, CymphoWeb.CompanyChannel, "company:#{company_id}")
+
+      {:ok, _, socket} =
+        subscribe_and_join(socket, CymphoWeb.CompanyChannel, "company:#{company_id}")
 
       for _ <- 1..5, do: push(socket, "some_event", %{})
 
@@ -16,7 +18,9 @@ defmodule CymphoWeb.CompanyChannelRateLimitTest do
     test "rate limits when exceeding 10 events/sec" do
       company_id = Ecto.UUID.generate()
       {:ok, socket} = connect_jwt(company_id, Ecto.UUID.generate())
-      {:ok, _, socket} = subscribe_and_join(socket, CymphoWeb.CompanyChannel, "company:#{company_id}")
+
+      {:ok, _, socket} =
+        subscribe_and_join(socket, CymphoWeb.CompanyChannel, "company:#{company_id}")
 
       for _ <- 1..10, do: push(socket, "ping", %{})
 
@@ -29,7 +33,9 @@ defmodule CymphoWeb.CompanyChannelRateLimitTest do
     test "allows first heartbeat" do
       company_id = Ecto.UUID.generate()
       {:ok, socket} = connect_jwt(company_id, Ecto.UUID.generate())
-      {:ok, _, socket} = subscribe_and_join(socket, CymphoWeb.CompanyChannel, "company:#{company_id}")
+
+      {:ok, _, socket} =
+        subscribe_and_join(socket, CymphoWeb.CompanyChannel, "company:#{company_id}")
 
       ref = push(socket, "heartbeat", %{status: "alive"})
       assert_reply ref, :ok, _
@@ -38,7 +44,9 @@ defmodule CymphoWeb.CompanyChannelRateLimitTest do
     test "rejects rapid heartbeat within 1 second" do
       company_id = Ecto.UUID.generate()
       {:ok, socket} = connect_jwt(company_id, Ecto.UUID.generate())
-      {:ok, _, socket} = subscribe_and_join(socket, CymphoWeb.CompanyChannel, "company:#{company_id}")
+
+      {:ok, _, socket} =
+        subscribe_and_join(socket, CymphoWeb.CompanyChannel, "company:#{company_id}")
 
       ref = push(socket, "heartbeat", %{status: "alive"})
       assert_reply ref, :ok, _

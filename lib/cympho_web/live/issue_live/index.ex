@@ -67,7 +67,15 @@ defmodule CymphoWeb.IssueLive.Index do
   def handle_info({:issue_deleted, _id}, socket), do: {:noreply, reload(socket)}
 
   def handle_info({:run_status, payload}, socket) do
-    {type, msg} = Events.run_status_toast(payload)
+    type =
+      case payload[:event_type] do
+        :run_completed -> "success"
+        :run_failed -> "error"
+        :run_cancelled -> "warning"
+        _ -> "info"
+      end
+
+    msg = "Run #{payload[:event_type]} (#{payload[:status]})"
     {:noreply, socket |> push_event("toast", %{message: msg, type: type}) |> reload()}
   end
 
@@ -107,7 +115,8 @@ defmodule CymphoWeb.IssueLive.Index do
   end
 
   def handle_event("filter_priority", %{"priority" => priority}, socket) do
-    {:noreply, push_patch(socket, to: build_url(socket, %{"priority" => priority, "page" => "1"}))}
+    {:noreply,
+     push_patch(socket, to: build_url(socket, %{"priority" => priority, "page" => "1"}))}
   end
 
   def handle_event("search", %{"search" => search}, socket) do
@@ -115,15 +124,18 @@ defmodule CymphoWeb.IssueLive.Index do
   end
 
   def handle_event("filter_assignee", %{"assignee_id" => assignee_id}, socket) do
-    {:noreply, push_patch(socket, to: build_url(socket, %{"assignee_id" => assignee_id, "page" => "1"}))}
+    {:noreply,
+     push_patch(socket, to: build_url(socket, %{"assignee_id" => assignee_id, "page" => "1"}))}
   end
 
   def handle_event("filter_project", %{"project_id" => project_id}, socket) do
-    {:noreply, push_patch(socket, to: build_url(socket, %{"project_id" => project_id, "page" => "1"}))}
+    {:noreply,
+     push_patch(socket, to: build_url(socket, %{"project_id" => project_id, "page" => "1"}))}
   end
 
   def handle_event("filter_label", %{"label_id" => label_id}, socket) do
-    {:noreply, push_patch(socket, to: build_url(socket, %{"label_id" => label_id, "page" => "1"}))}
+    {:noreply,
+     push_patch(socket, to: build_url(socket, %{"label_id" => label_id, "page" => "1"}))}
   end
 
   def handle_event("change_page", %{"page" => page}, socket) do

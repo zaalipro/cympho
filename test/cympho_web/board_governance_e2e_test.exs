@@ -167,24 +167,25 @@ defmodule CymphoWeb.BoardGovernanceE2ETest do
     setup [:start_executor]
 
     test "board member votes on agent hire and agent is created" do
-      company = create_company(%{
-        governance_config: %{
-          "required_approvals" => ["agent_hire"],
-          "threshold_type" => "any",
-          "threshold_value" => 1
-        }
-      })
+      company =
+        create_company(%{
+          governance_config: %{
+            "required_approvals" => ["agent_hire"],
+            "threshold_type" => "any",
+            "threshold_value" => 1
+          }
+        })
 
       board_user = create_user()
       create_membership(board_user, company, "member", true)
 
       # Step 1: Agent hire requires approval
       assert {:error, :pending_board_approval, approval_id} =
-        Agents.create_agent(%{
-          name: "Lifecycle Agent",
-          role: :engineer,
-          company_id: company.id
-        })
+               Agents.create_agent(%{
+                 name: "Lifecycle Agent",
+                 role: :engineer,
+                 company_id: company.id
+               })
 
       # Step 2: No agent exists yet
       agents = Agents.list_agents_by_company(company.id)
@@ -208,13 +209,14 @@ defmodule CymphoWeb.BoardGovernanceE2ETest do
     end
 
     test "denied vote does not create agent" do
-      company = create_company(%{
-        governance_config: %{
-          "required_approvals" => ["agent_hire"],
-          "threshold_type" => "count",
-          "threshold_value" => 2
-        }
-      })
+      company =
+        create_company(%{
+          governance_config: %{
+            "required_approvals" => ["agent_hire"],
+            "threshold_type" => "count",
+            "threshold_value" => 2
+          }
+        })
 
       board_user1 = create_user()
       board_user2 = create_user()
@@ -222,11 +224,11 @@ defmodule CymphoWeb.BoardGovernanceE2ETest do
       create_membership(board_user2, company, "member", true)
 
       assert {:error, :pending_board_approval, approval_id} =
-        Agents.create_agent(%{
-          name: "Denied Lifecycle Agent",
-          role: :engineer,
-          company_id: company.id
-        })
+               Agents.create_agent(%{
+                 name: "Denied Lifecycle Agent",
+                 role: :engineer,
+                 company_id: company.id
+               })
 
       # One approve, one deny — count threshold (2 approves required) not met
       {:ok, _} = BoardApprovals.cast_vote(approval_id, board_user1.id, "approve")
@@ -240,14 +242,15 @@ defmodule CymphoWeb.BoardGovernanceE2ETest do
     end
 
     test "budget increase through approval lifecycle" do
-      company = create_company(%{
-        governance_config: %{
-          "categories" => ["budget_increase"],
-          "threshold_type" => "any",
-          "threshold_value" => 1,
-          "budget_limit_threshold" => 500
-        }
-      })
+      company =
+        create_company(%{
+          governance_config: %{
+            "categories" => ["budget_increase"],
+            "threshold_type" => "any",
+            "threshold_value" => 1,
+            "budget_limit_threshold" => 500
+          }
+        })
 
       board_user = create_user()
       create_membership(board_user, company, "member", true)
@@ -263,7 +266,7 @@ defmodule CymphoWeb.BoardGovernanceE2ETest do
 
       # Update above threshold → pending approval
       assert {:pending_approval, approval} =
-        Cympho.Budgets.update_budget(budget, %{limit_amount: Decimal.new("5000")})
+               Cympho.Budgets.update_budget(budget, %{limit_amount: Decimal.new("5000")})
 
       # Board member approves
       {:ok, _} = BoardApprovals.cast_vote(approval.id, board_user.id, "approve")

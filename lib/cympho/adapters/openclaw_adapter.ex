@@ -101,11 +101,11 @@ defmodule Cympho.Adapters.OpenClawAdapter do
     body = Jason.encode!(payload)
 
     case :httpc.request(
-      :post,
-      {url, headers, "application/json", body},
-      [],
-      body_format: :binary
-    ) do
+           :post,
+           {url, headers, "application/json", body},
+           [],
+           body_format: :binary
+         ) do
       {:ok, {{_, status_code, _}, _headers, response_body}} when status_code in 200..299 ->
         parse_openclaw_response(response_body)
 
@@ -154,7 +154,11 @@ defmodule Cympho.Adapters.OpenClawAdapter do
 
     cond do
       is_nil(endpoint) or endpoint == "" ->
-        %{status: :unhealthy, message: "No OpenClaw endpoint configured", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "No OpenClaw endpoint configured",
+          checked_at: DateTime.utc_now()
+        }
 
       true ->
         check_openclaw_health(endpoint)
@@ -170,20 +174,36 @@ defmodule Cympho.Adapters.OpenClawAdapter do
         do_health_check_request(health_url)
 
       {:error, _reason} ->
-        %{status: :unhealthy, message: "Failed to start inets application", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "Failed to start inets application",
+          checked_at: DateTime.utc_now()
+        }
     end
   end
 
   defp do_health_check_request(health_url) do
     case :httpc.request(:get, {health_url, []}, [], []) do
       {:ok, {{_, 200, _}, _, _}} ->
-        %{status: :healthy, message: "OpenClaw endpoint reachable", checked_at: DateTime.utc_now()}
+        %{
+          status: :healthy,
+          message: "OpenClaw endpoint reachable",
+          checked_at: DateTime.utc_now()
+        }
 
       {:ok, {{_, status, _}, _, _}} ->
-        %{status: :degraded, message: "OpenClaw endpoint returned #{status}", checked_at: DateTime.utc_now()}
+        %{
+          status: :degraded,
+          message: "OpenClaw endpoint returned #{status}",
+          checked_at: DateTime.utc_now()
+        }
 
       {:error, _} ->
-        %{status: :unhealthy, message: "OpenClaw endpoint unreachable", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "OpenClaw endpoint unreachable",
+          checked_at: DateTime.utc_now()
+        }
     end
   end
 

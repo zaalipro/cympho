@@ -71,8 +71,10 @@ defmodule Cympho.PrincipalPermissions.PrincipalPermissionGrant do
   Check if a grant is currently active.
   """
   def active?(%__MODULE__{status: "active", expires_at: nil}), do: true
+
   def active?(%__MODULE__{status: "active", expires_at: expires_at}) do
     DateTime.compare(expires_at, DateTime.utc_now()) == :gt
   end
+
   def active?(%__MODULE__{}), do: false
 end

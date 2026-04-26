@@ -11,7 +11,10 @@ defmodule CymphoWeb.CoreComponents do
 
   def modal(assigns) do
     ~H"""
-    <div id={@id} class={"fixed inset-0 z-50 flex items-center justify-center #{if @show, do: "", else: "hidden"}"}>
+    <div
+      id={@id}
+      class={"fixed inset-0 z-50 flex items-center justify-center #{if @show, do: "", else: "hidden"}"}
+    >
       <div class="fixed inset-0 bg-black/50" phx-click={@on_cancel} />
       <div class="relative bg-zinc-900 rounded-lg p-6 max-w-lg w-full mx-4 z-10">
         <h2 :if={@title} class="text-lg font-semibold mb-4">{@title}</h2>

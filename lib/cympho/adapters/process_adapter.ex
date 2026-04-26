@@ -73,14 +73,15 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
   defp build_env(issue, agent_id, config) do
     # Encode issue payload as JSON for the subprocess
-    issue_json = Jason.encode!(%{
-      id: issue.id,
-      title: issue.title,
-      description: Map.get(issue, :description),
-      status: Map.get(issue, :status),
-      priority: Map.get(issue, :priority),
-      agent_id: agent_id
-    })
+    issue_json =
+      Jason.encode!(%{
+        id: issue.id,
+        title: issue.title,
+        description: Map.get(issue, :description),
+        status: Map.get(issue, :status),
+        priority: Map.get(issue, :priority),
+        agent_id: agent_id
+      })
 
     base_env = [
       {"ISSUE_PAYLOAD", issue_json},
@@ -128,11 +129,10 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
       {^port, {:exit_status, code}} ->
         send(recipient_pid, {:turn_ended_with_error, session_id, {:exit_code, code, acc}})
-
-      after
-        timeout ->
-          Port.close(port)
-          send(recipient_pid, {:turn_ended_with_error, session_id, :timeout})
+    after
+      timeout ->
+        Port.close(port)
+        send(recipient_pid, {:turn_ended_with_error, session_id, :timeout})
     end
   end
 
@@ -167,7 +167,11 @@ defmodule Cympho.Adapters.ProcessAdapter do
             run_health_check_command(command, config)
 
           _ ->
-            %{status: :degraded, message: "Command not found in PATH", checked_at: DateTime.utc_now()}
+            %{
+              status: :degraded,
+              message: "Command not found in PATH",
+              checked_at: DateTime.utc_now()
+            }
         end
     end
   end
@@ -182,16 +186,28 @@ defmodule Cympho.Adapters.ProcessAdapter do
              cd: config[:cwd] || config["cwd"]
            ) do
         {_, 0} ->
-          %{status: :healthy, message: "Command available and healthy", checked_at: DateTime.utc_now()}
+          %{
+            status: :healthy,
+            message: "Command available and healthy",
+            checked_at: DateTime.utc_now()
+          }
 
         {_output, _code} ->
           # Command doesn't support --health-check, but it exists, so return healthy
-          %{status: :healthy, message: "Command available (no health check)", checked_at: DateTime.utc_now()}
+          %{
+            status: :healthy,
+            message: "Command available (no health check)",
+            checked_at: DateTime.utc_now()
+          }
       end
     rescue
       _ ->
         # If System.cmd fails entirely (e.g., command not executable), still return healthy since we confirmed it exists
-        %{status: :healthy, message: "Command available (no health check)", checked_at: DateTime.utc_now()}
+        %{
+          status: :healthy,
+          message: "Command available (no health check)",
+          checked_at: DateTime.utc_now()
+        }
     end
   end
 

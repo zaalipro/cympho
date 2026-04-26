@@ -1,8 +1,7 @@
 <div class="container mx-auto px-4 py-8">
-  <.header title="Search" subtitle="Search across issues, agents, projects, and goals">
-  </.header>
-
-  <!-- Search Input -->
+  <.header title="Search" subtitle="Search across issues, agents, projects, and goals"></.header>
+  
+<!-- Search Input -->
   <div class="mb-6">
     <form phx-submit="search" class="flex gap-4">
       <div class="flex-1">
@@ -23,8 +22,8 @@
       </button>
     </form>
   </div>
-
-  <!-- Recent Searches -->
+  
+<!-- Recent Searches -->
   <%= if @recent_searches != [] do %>
     <div class="mb-6 p-4 bg-surface border border-border rounded-lg">
       <div class="flex items-center justify-between mb-3">
@@ -52,8 +51,8 @@
       </div>
     </div>
   <% end %>
-
-  <!-- Filters -->
+  
+<!-- Filters -->
   <div class="mb-6 p-4 bg-surface border border-border rounded-lg">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-medium text-text-primary">Filters</h3>
@@ -79,16 +78,21 @@
           <option value="">All</option>
           <option value="backlog" selected={@filters["status"] == "backlog"}>Backlog</option>
           <option value="todo" selected={@filters["status"] == "todo"}>To Do</option>
-          <option value="in_progress" selected={@filters["status"] == "in_progress"}>In Progress
+          <option value="in_progress" selected={@filters["status"] == "in_progress"}>
+            In Progress
           </option>
-          <option value="in_review" selected={@filters["status"] == "in_review"}>In Review</option>
+          <option value="in_review" selected={@filters["status"] == "in_review"}>
+            In Review
+          </option>
           <option value="done" selected={@filters["status"] == "done"}>Done</option>
           <option value="blocked" selected={@filters["status"] == "blocked"}>Blocked</option>
-          <option value="cancelled" selected={@filters["status"] == "cancelled"}>Cancelled</option>
+          <option value="cancelled" selected={@filters["status"] == "cancelled"}>
+            Cancelled
+          </option>
         </select>
       </div>
-
-      <!-- Assignee Filter -->
+      
+<!-- Assignee Filter -->
       <div>
         <label class="block text-xs text-text-secondary mb-1">Assignee</label>
         <select
@@ -103,8 +107,8 @@
           <% end %>
         </select>
       </div>
-
-      <!-- Label Filter -->
+      
+<!-- Label Filter -->
       <div>
         <label class="block text-xs text-text-secondary mb-1">Label</label>
         <select
@@ -119,8 +123,8 @@
           <% end %>
         </select>
       </div>
-
-      <!-- Project Filter -->
+      
+<!-- Project Filter -->
       <div>
         <label class="block text-xs text-text-secondary mb-1">Project</label>
         <select
@@ -137,8 +141,8 @@
       </div>
     </form>
   </div>
-
-  <!-- Results Tabs -->
+  
+<!-- Results Tabs -->
   <div class="mb-4">
     <div class="border-b border-border">
       <nav class="-mb-px flex space-x-8">
@@ -147,14 +151,13 @@
             type="button"
             phx-click="change_tab"
             phx-value-tab={tab}
-            class={
-              [
-                "whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors",
-                active_tab?(@socket, tab) &&
-                  "border-brand text-brand",
-                !active_tab?(@socket, tab) && "border-transparent text-text-secondary hover:text-text-primary hover:border-border"
-              ]
-            }
+            class={[
+              "whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors",
+              active_tab?(@socket, tab) &&
+                "border-brand text-brand",
+              !active_tab?(@socket, tab) &&
+                "border-transparent text-text-secondary hover:text-text-primary hover:border-border"
+            ]}
           >
             {String.capitalize(to_string(tab))}
             <%= if count = tab_count(@results, tab) do %>
@@ -165,8 +168,8 @@
       </nav>
     </div>
   </div>
-
-  <!-- Results -->
+  
+<!-- Results -->
   <div class="space-y-4">
     <%= if @query != "" and @total_count == 0 do %>
       <div class="text-center py-12">
@@ -182,31 +185,31 @@
         <!-- All Tab -->
         <%= if @active_tab == :all do %>
           <div class="space-y-6">
-            <%= render_issues(assigns, @results.issues, "Issues") %>
-            <%= render_agents(assigns, @results.agents, "Agents") %>
-            <%= render_projects(assigns, @results.projects, "Projects") %>
-            <%= render_goals(assigns, @results.goals, "Goals") %>
+            {render_issues(assigns, @results.issues, "Issues")}
+            {render_agents(assigns, @results.agents, "Agents")}
+            {render_projects(assigns, @results.projects, "Projects")}
+            {render_goals(assigns, @results.goals, "Goals")}
           </div>
         <% end %>
-
-        <!-- Issues Tab -->
+        
+<!-- Issues Tab -->
         <%= if @active_tab == :issues do %>
-          <%= render_issues(assigns, @results.issues, nil) %>
+          {render_issues(assigns, @results.issues, nil)}
         <% end %>
-
-        <!-- Agents Tab -->
+        
+<!-- Agents Tab -->
         <%= if @active_tab == :agents do %>
-          <%= render_agents(assigns, @results.agents, nil) %>
+          {render_agents(assigns, @results.agents, nil)}
         <% end %>
-
-        <!-- Projects Tab -->
+        
+<!-- Projects Tab -->
         <%= if @active_tab == :projects do %>
-          <%= render_projects(assigns, @results.projects, nil) %>
+          {render_projects(assigns, @results.projects, nil)}
         <% end %>
-
-        <!-- Goals Tab -->
+        
+<!-- Goals Tab -->
         <%= if @active_tab == :goals do %>
-          <%= render_goals(assigns, @results.goals, nil) %>
+          {render_goals(assigns, @results.goals, nil)}
         <% end %>
       <% end %>
     <% end %>

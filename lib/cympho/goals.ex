@@ -15,8 +15,10 @@ defmodule Cympho.Goals do
   end
 
   def list_root_goals_by_project(project_id) do
-    Goal |> where([g], g.project_id == ^project_id and is_nil(g.parent_id))
-    |> order_by(asc: :priority) |> Repo.all()
+    Goal
+    |> where([g], g.project_id == ^project_id and is_nil(g.parent_id))
+    |> order_by(asc: :priority)
+    |> Repo.all()
   end
 
   def get_goal!(id), do: Repo.get!(Goal, id)
@@ -34,7 +36,8 @@ defmodule Cympho.Goals do
   end
 
   defp load_tree(goals) do
-    goals |> Repo.preload([:children])
+    goals
+    |> Repo.preload([:children])
     |> Enum.map(fn goal -> %{goal | children: load_tree(goal.children)} end)
   end
 
@@ -53,12 +56,23 @@ defmodule Cympho.Goals do
   end
 
   def goal_progress(goal_id) do
-    counts = Issue |> where(goal_id: ^goal_id) |> group_by([i], i.status)
-    |> select([i], {i.status, count(i.id)}) |> Repo.all() |> Map.new()
+    counts =
+      Issue
+      |> where(goal_id: ^goal_id)
+      |> group_by([i], i.status)
+      |> select([i], {i.status, count(i.id)})
+      |> Repo.all()
+      |> Map.new()
+
     total = Enum.sum(Map.values(counts))
     done = Map.get(counts, :done, 0)
-    %{total: total, done: done, counts: counts,
-      percent: if(total > 0, do: round(done / total * 100), else: 0)}
+
+    %{
+      total: total,
+      done: done,
+      counts: counts,
+      percent: if(total > 0, do: round(done / total * 100), else: 0)
+    }
   end
 
   def list_goals_with_progress(project_id) do
@@ -76,9 +90,12 @@ defmodule Cympho.Goals do
   end
 
   defp walk_ancestors(nil, acc), do: acc
+
   defp walk_ancestors(id, acc) do
     case Repo.get(Goal, id) do
-      nil -> acc
+      nil ->
+        acc
+
       goal ->
         acc = [goal | acc]
         if goal.parent_id, do: walk_ancestors(goal.parent_id, acc), else: acc
@@ -87,14 +104,16 @@ defmodule Cympho.Goals do
 
   def get_descendants(goal_id) do
     children = from(g in Goal, where: g.parent_id == ^goal_id) |> Repo.all()
+
     Enum.flat_map(children, fn child ->
       [child | get_descendants(child.id)]
     end)
   end
 
   def would_create_cycle?(goal_id, parent_id) do
-    if goal_id == parent_id, do: true,
-    else: ancestor_reaches?(parent_id, goal_id, MapSet.new())
+    if goal_id == parent_id,
+      do: true,
+      else: ancestor_reaches?(parent_id, goal_id, MapSet.new())
   end
 
   defp ancestor_reaches?(current_id, target_id, visited) do
@@ -102,6 +121,7 @@ defmodule Cympho.Goals do
       false
     else
       visited = MapSet.put(visited, current_id)
+
       case Repo.get(Goal, current_id) do
         nil -> false
         %{parent_id: nil} -> false

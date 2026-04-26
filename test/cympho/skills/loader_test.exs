@@ -35,7 +35,10 @@ defmodule Cympho.Skills.LoaderTest do
   describe "load/1" do
     setup do
       start_supervised!(Loader)
-      {:ok, company} = Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
+
+      {:ok, company} =
+        Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
+
       %{company: company}
     end
 
@@ -49,55 +52,58 @@ defmodule Cympho.Skills.LoaderTest do
     end
 
     test "loads a valid plugin with valid manifest", %{company: company} do
-      {:ok, plugin} = Repo.insert(%Plugin{
-        identifier: "test-plugin",
-        version: "1.0.0",
-        name: "Test Plugin",
-        author: "test",
-        manifest: %{
-          "name" => "test-plugin",
-          "version" => "1.0.0",
-          "author" => "test",
-          "entrypoint" => "Cympho.Skills.Loader"
-        },
-        company_id: company.id,
-        enabled: true
-      })
+      {:ok, plugin} =
+        Repo.insert(%Plugin{
+          identifier: "test-plugin",
+          version: "1.0.0",
+          name: "Test Plugin",
+          author: "test",
+          manifest: %{
+            "name" => "test-plugin",
+            "version" => "1.0.0",
+            "author" => "test",
+            "entrypoint" => "Cympho.Skills.Loader"
+          },
+          company_id: company.id,
+          enabled: true
+        })
 
       assert {:ok, _manifest} = Loader.load(plugin.id)
       assert Loader.loaded?(plugin.id)
     end
 
     test "returns error for plugin with invalid manifest", %{company: company} do
-      {:ok, plugin} = Repo.insert(%Plugin{
-        identifier: "invalid-plugin",
-        version: "1.0.0",
-        name: "Invalid Plugin",
-        author: "test",
-        manifest: %{"name" => "incomplete"},
-        company_id: company.id,
-        enabled: true
-      })
+      {:ok, plugin} =
+        Repo.insert(%Plugin{
+          identifier: "invalid-plugin",
+          version: "1.0.0",
+          name: "Invalid Plugin",
+          author: "test",
+          manifest: %{"name" => "incomplete"},
+          company_id: company.id,
+          enabled: true
+        })
 
       assert {:error, _reasons} = Loader.load(plugin.id)
       refute Loader.loaded?(plugin.id)
     end
 
     test "returns error for plugin with non-existent entrypoint", %{company: company} do
-      {:ok, plugin} = Repo.insert(%Plugin{
-        identifier: "bad-entrypoint",
-        version: "1.0.0",
-        name: "Bad Entrypoint",
-        author: "test",
-        manifest: %{
-          "name" => "test-plugin",
-          "version" => "1.0.0",
-          "author" => "test",
-          "entrypoint" => "NonExistent.Module"
-        },
-        company_id: company.id,
-        enabled: true
-      })
+      {:ok, plugin} =
+        Repo.insert(%Plugin{
+          identifier: "bad-entrypoint",
+          version: "1.0.0",
+          name: "Bad Entrypoint",
+          author: "test",
+          manifest: %{
+            "name" => "test-plugin",
+            "version" => "1.0.0",
+            "author" => "test",
+            "entrypoint" => "NonExistent.Module"
+          },
+          company_id: company.id,
+          enabled: true
+        })
 
       assert {:error, {:entrypoint_not_found, "NonExistent.Module"}} = Loader.load(plugin.id)
       refute Loader.loaded?(plugin.id)
@@ -107,22 +113,25 @@ defmodule Cympho.Skills.LoaderTest do
   describe "unload/1" do
     setup do
       start_supervised!(Loader)
-      {:ok, company} = Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
 
-      {:ok, plugin} = Repo.insert(%Plugin{
-        identifier: "test-plugin",
-        version: "1.0.0",
-        name: "Test Plugin",
-        author: "test",
-        manifest: %{
-          "name" => "test-plugin",
-          "version" => "1.0.0",
-          "author" => "test",
-          "entrypoint" => "Cympho.Skills.Loader"
-        },
-        company_id: company.id,
-        enabled: true
-      })
+      {:ok, company} =
+        Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
+
+      {:ok, plugin} =
+        Repo.insert(%Plugin{
+          identifier: "test-plugin",
+          version: "1.0.0",
+          name: "Test Plugin",
+          author: "test",
+          manifest: %{
+            "name" => "test-plugin",
+            "version" => "1.0.0",
+            "author" => "test",
+            "entrypoint" => "Cympho.Skills.Loader"
+          },
+          company_id: company.id,
+          enabled: true
+        })
 
       {:ok, _} = Loader.load(plugin.id)
 
@@ -147,25 +156,29 @@ defmodule Cympho.Skills.LoaderTest do
   describe "loaded?/1" do
     setup do
       start_supervised!(Loader)
-      {:ok, company} = Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
+
+      {:ok, company} =
+        Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
+
       %{company: company}
     end
 
     test "returns true for loaded skill", %{company: company} do
-      {:ok, plugin} = Repo.insert(%Plugin{
-        identifier: "test-plugin",
-        version: "1.0.0",
-        name: "Test Plugin",
-        author: "test",
-        manifest: %{
-          "name" => "test-plugin",
-          "version" => "1.0.0",
-          "author" => "test",
-          "entrypoint" => "Cympho.Skills.Loader"
-        },
-        company_id: company.id,
-        enabled: true
-      })
+      {:ok, plugin} =
+        Repo.insert(%Plugin{
+          identifier: "test-plugin",
+          version: "1.0.0",
+          name: "Test Plugin",
+          author: "test",
+          manifest: %{
+            "name" => "test-plugin",
+            "version" => "1.0.0",
+            "author" => "test",
+            "entrypoint" => "Cympho.Skills.Loader"
+          },
+          company_id: company.id,
+          enabled: true
+        })
 
       {:ok, _} = Loader.load(plugin.id)
       assert Loader.loaded?(plugin.id)
@@ -179,22 +192,25 @@ defmodule Cympho.Skills.LoaderTest do
   describe "get_manifest/1" do
     setup do
       start_supervised!(Loader)
-      {:ok, company} = Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
 
-      {:ok, plugin} = Repo.insert(%Plugin{
-        identifier: "test-plugin",
-        version: "1.0.0",
-        name: "Test Plugin",
-        author: "test",
-        manifest: %{
-          "name" => "test-plugin",
-          "version" => "1.0.0",
-          "author" => "test",
-          "entrypoint" => "Cympho.Skills.Loader"
-        },
-        company_id: company.id,
-        enabled: true
-      })
+      {:ok, company} =
+        Companies.create_company(%{name: "Test", slug: "test-#{System.unique_integer()}"})
+
+      {:ok, plugin} =
+        Repo.insert(%Plugin{
+          identifier: "test-plugin",
+          version: "1.0.0",
+          name: "Test Plugin",
+          author: "test",
+          manifest: %{
+            "name" => "test-plugin",
+            "version" => "1.0.0",
+            "author" => "test",
+            "entrypoint" => "Cympho.Skills.Loader"
+          },
+          company_id: company.id,
+          enabled: true
+        })
 
       {:ok, _} = Loader.load(plugin.id)
 

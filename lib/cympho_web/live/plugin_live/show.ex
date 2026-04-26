@@ -52,7 +52,10 @@ defmodule CymphoWeb.PluginLive.Show do
         {:noreply,
          socket
          |> assign(:plugin, updated_plugin)
-         |> put_flash(:info, "Plugin #{if updated_plugin.enabled, do: "enabled", else: "disabled"}")}
+         |> put_flash(
+           :info,
+           "Plugin #{if updated_plugin.enabled, do: "enabled", else: "disabled"}"
+         )}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to toggle plugin")}

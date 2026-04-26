@@ -197,8 +197,6 @@ defmodule Cympho.Companies do
     role in ["owner", "admin"]
   end
 
-
-
   @doc """
   Returns true if the user is a board member of the given company.
   """
@@ -489,16 +487,26 @@ defmodule Cympho.Companies do
           label_id_map
         )
 
-      %{company: company, id_maps: %{projects: project_id_map, agents: agent_id_map, issues: issue_id_map, labels: label_id_map, users: user_id_map}}
+      %{
+        company: company,
+        id_maps: %{
+          projects: project_id_map,
+          agents: agent_id_map,
+          issues: issue_id_map,
+          labels: label_id_map,
+          users: user_id_map
+        }
+      }
     end)
   end
 
   # Creates a company, retrying with a new slug suffix on unique constraint violation
   defp create_company_with_retry(company_data, slug_strategy, attempts \\ 1) do
-    slug = case slug_strategy do
-      :suffix -> "#{company_data.slug}-#{:rand.uniform(9999)}"
-      :fail -> company_data.slug
-    end
+    slug =
+      case slug_strategy do
+        :suffix -> "#{company_data.slug}-#{:rand.uniform(9999)}"
+        :fail -> company_data.slug
+      end
 
     attrs = %{
       name: company_data.name,
@@ -545,7 +553,10 @@ defmodule Cympho.Companies do
             company_id: company_id
           }
 
-          case Repo.insert(%Cympho.Users.User{} |> Cympho.Users.User.registration_changeset(attrs)) do
+          case Repo.insert(
+                 %Cympho.Users.User{}
+                 |> Cympho.Users.User.registration_changeset(attrs)
+               ) do
             {:ok, user} -> {:ok, Map.put(acc, Map.get(user_data, :id), user.id)}
             {:error, changeset} -> {:error, changeset}
           end
@@ -673,10 +684,11 @@ defmodule Cympho.Companies do
   end
 
   defp create_agent_with_retry(agent_data, company_id, attempts \\ 1) do
-    url_key = case agent_data.url_key do
-      nil -> nil
-      _ -> "#{agent_data.url_key}-#{:rand.uniform(9999)}"
-    end
+    url_key =
+      case agent_data.url_key do
+        nil -> nil
+        _ -> "#{agent_data.url_key}-#{:rand.uniform(9999)}"
+      end
 
     attrs = %{
       name: agent_data.name,
@@ -729,25 +741,34 @@ defmodule Cympho.Companies do
 
             # Import labels
             labels = Map.get(issue_data, :labels, [])
-            label_ids = Enum.map(labels, fn l -> remap_id(label_id_map, Map.get(l, :id)) end)
-                               |> Enum.filter(&(&1 != nil))
+
+            label_ids =
+              Enum.map(labels, fn l -> remap_id(label_id_map, Map.get(l, :id)) end)
+              |> Enum.filter(&(&1 != nil))
 
             if length(label_ids) > 0 do
               label_update =
                 issue
                 |> Repo.preload(:labels)
                 |> Cympho.Issues.Issue.changeset(%{})
-                |> Ecto.Changeset.put_assoc(:labels, Cympho.Repo.all(from l in Cympho.Labels.Label, where: l.id in ^label_ids))
+                |> Ecto.Changeset.put_assoc(
+                  :labels,
+                  Cympho.Repo.all(from l in Cympho.Labels.Label, where: l.id in ^label_ids)
+                )
                 |> Repo.update()
 
               case label_update do
-                {:ok, _} -> :ok
-                {:error, changeset} -> raise "Issue label import failed: #{inspect(changeset.errors)}"
+                {:ok, _} ->
+                  :ok
+
+                {:error, changeset} ->
+                  raise "Issue label import failed: #{inspect(changeset.errors)}"
               end
             end
 
             # Import comments
             comments = Map.get(issue_data, :comments, [])
+
             Enum.each(comments, fn c ->
               {author_type, author_id} =
                 case Map.get(c, :author_type) do
@@ -772,7 +793,10 @@ defmodule Cympho.Companies do
                 author_id: author_id
               }
 
-              case Repo.insert(%Cympho.Comments.Comment{} |> Cympho.Comments.Comment.changeset(comment_attrs)) do
+              case Repo.insert(
+                     %Cympho.Comments.Comment{}
+                     |> Cympho.Comments.Comment.changeset(comment_attrs)
+                   ) do
                 {:ok, _} -> :ok
                 {:error, changeset} -> raise "Comment import failed: #{inspect(changeset.errors)}"
               end

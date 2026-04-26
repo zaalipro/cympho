@@ -65,7 +65,10 @@ defmodule CymphoWeb.SearchLive.Index do
       |> assign(:filters, filters)
       |> assign(:active_tab, String.to_existing_atom(active_tab))
       |> perform_search()
-      |> assign(:recent_searches, RecentSearches.list_recent_searches(socket.assigns.current_user.id))
+      |> assign(
+        :recent_searches,
+        RecentSearches.list_recent_searches(socket.assigns.current_user.id)
+      )
 
     {:noreply, socket}
   end
@@ -89,7 +92,8 @@ defmodule CymphoWeb.SearchLive.Index do
     {:noreply,
      push_patch(socket,
        to:
-         build_url(socket,
+         build_url(
+           socket,
            Map.merge(merged_filters, %{
              "q" => socket.assigns.query,
              "tab" => to_string(socket.assigns.active_tab),
@@ -113,12 +117,13 @@ defmodule CymphoWeb.SearchLive.Index do
 
   def handle_event("clear_filters", _params, socket) do
     {:noreply,
-     push_patch(socket, to: ~p"/search?q=#{socket.assigns.query}&tab=#{socket.assigns.active_tab}")}
+     push_patch(socket,
+       to: ~p"/search?q=#{socket.assigns.query}&tab=#{socket.assigns.active_tab}"
+     )}
   end
 
   def handle_event("recent_search", %{"query" => query}, socket) do
-    {:noreply,
-     push_patch(socket, to: ~p"/search?q=#{query}&tab=#{socket.assigns.active_tab}")}
+    {:noreply, push_patch(socket, to: ~p"/search?q=#{query}&tab=#{socket.assigns.active_tab}")}
   end
 
   def handle_event("clear_recent_searches", _params, socket) do
@@ -140,6 +145,7 @@ defmodule CymphoWeb.SearchLive.Index do
       |> assign(:total_count, 0)
     else
       results = Search.search_all(query, filters, limit: 20)
+
       total_count =
         length(results.issues) + length(results.agents) + length(results.projects) +
           length(results.goals)
@@ -260,7 +266,9 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@issues != []} class="space-y-2">
-      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">{@section_title}</h2>
+      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">
+        {@section_title}
+      </h2>
       <div class="space-y-2">
         <.link
           :for={issue <- @issues}
@@ -283,7 +291,9 @@ defmodule CymphoWeb.SearchLive.Index do
               <div class="flex items-center gap-4 mt-2 text-xs text-text-tertiary">
                 <span :if={issue.assignee}>Assignee: {issue.assignee.name}</span>
                 <span :if={issue.project}>Project: {issue.project.name}</span>
-                <span :if={issue.labels != []}>Labels: {Enum.map_join(issue.labels, ", ", & &1.name)}</span>
+                <span :if={issue.labels != []}>
+                  Labels: {Enum.map_join(issue.labels, ", ", & &1.name)}
+                </span>
               </div>
             </div>
           </div>
@@ -298,7 +308,9 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@agents != []} class="space-y-2">
-      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">{@section_title}</h2>
+      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">
+        {@section_title}
+      </h2>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <.link
           :for={agent <- @agents}
@@ -307,7 +319,11 @@ defmodule CymphoWeb.SearchLive.Index do
         >
           <div class="flex items-center justify-between mb-2">
             <h3 class="text-base font-medium text-text-primary">{agent.name}</h3>
-            <span class="w-2 h-2 rounded-full" style={"background-color: " <> agent_status_color(agent.status)}></span>
+            <span
+              class="w-2 h-2 rounded-full"
+              style={"background-color: " <> agent_status_color(agent.status)}
+            >
+            </span>
           </div>
           <p class="text-sm text-text-secondary mb-2">{agent.title}</p>
           <div class="flex items-center gap-2 text-xs text-text-tertiary">
@@ -326,7 +342,9 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@projects != []} class="space-y-2">
-      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">{@section_title}</h2>
+      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">
+        {@section_title}
+      </h2>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <.link
           :for={project <- @projects}
@@ -351,7 +369,9 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@goals != []} class="space-y-2">
-      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">{@section_title}</h2>
+      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">
+        {@section_title}
+      </h2>
       <div class="space-y-2">
         <.link
           :for={goal <- @goals}
@@ -362,7 +382,10 @@ defmodule CymphoWeb.SearchLive.Index do
             <div class="flex-1">
               <div class="flex items-center gap-2 mb-1">
                 <h3 class="text-base font-medium text-text-primary">{goal.title}</h3>
-                <span class={["text-xs font-medium", priority_color(String.to_existing_atom(goal.priority))]}>
+                <span class={[
+                  "text-xs font-medium",
+                  priority_color(String.to_existing_atom(goal.priority))
+                ]}>
                   {String.capitalize(goal.priority)} priority
                 </span>
               </div>

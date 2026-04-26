@@ -101,6 +101,7 @@ defmodule CymphoWeb.WorkspaceLive.Show do
         total_bytes =
           Enum.reduce(files, 0, fn file, acc ->
             full_path = Path.join(path, file)
+
             case File.stat(full_path) do
               {:ok, stat} -> acc + stat.size
               _ -> acc

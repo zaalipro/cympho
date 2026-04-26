@@ -59,19 +59,21 @@ defmodule Cympho.Finances.BudgetThresholdTest do
       results = Task.await_many(tasks, 5000)
 
       # All concurrent inserts should be blocked after the first one exceeds
-      blocked_count = Enum.count(results, fn
-        {:error, :budget_blocked} -> true
-        _ -> false
-      end)
+      blocked_count =
+        Enum.count(results, fn
+          {:error, :budget_blocked} -> true
+          _ -> false
+        end)
 
       # At least 9 should be blocked (only one can succeed before hitting the limit)
       assert blocked_count >= 9
 
       # Verify only one insert succeeded
-      successful_count = Enum.count(results, fn
-        {:ok, _} -> true
-        _ -> false
-      end)
+      successful_count =
+        Enum.count(results, fn
+          {:ok, _} -> true
+          _ -> false
+        end)
 
       assert successful_count <= 1
     end

@@ -88,5 +88,4 @@ defmodule CymphoWeb.AgentLive.Show do
   end
 
   def format_datetime(_), do: "N/A"
-
 end

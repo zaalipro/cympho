@@ -35,7 +35,9 @@ defmodule Cympho.Adapters.RegistryExtendedTest do
 
   describe "resolve_agent/1" do
     test "resolves agent with registered adapter to module and config" do
-      {:ok, module, config} = Registry.resolve_agent(%{adapter: :claude_code, config: %{stall_timeout: 60_000}})
+      {:ok, module, config} =
+        Registry.resolve_agent(%{adapter: :claude_code, config: %{stall_timeout: 60_000}})
+
       assert is_atom(module)
       assert config == %{stall_timeout: 60_000}
     end
@@ -66,7 +68,14 @@ defmodule Cympho.Adapters.RegistryExtendedTest do
   end
 
   describe "type/0 on adapters" do
-    alias Cympho.Adapters.{ClaudeCodeAdapter, CodexAdapter, CursorAdapter, HttpAdapter, OpenClawAdapter, ProcessAdapter}
+    alias Cympho.Adapters.{
+      ClaudeCodeAdapter,
+      CodexAdapter,
+      CursorAdapter,
+      HttpAdapter,
+      OpenClawAdapter,
+      ProcessAdapter
+    }
 
     test "ClaudeCodeAdapter.type/0 returns :claude_code" do
       assert ClaudeCodeAdapter.type() == :claude_code

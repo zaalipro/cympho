@@ -47,7 +47,7 @@ defmodule Cympho.HeartbeatEngine do
     with {:ok, workspace_path} <- resolve_workspace(run),
          {:ok, run} <- apply_start(run, workspace_path) do
       log_audit(run, "run_started")
-      CymphoWeb.Events.broadcast_run_status(run, :run_started, "pending")
+      CymphoWeb.Events.broadcast_run_status(run, :run_started)
       {:ok, run}
     end
   end
@@ -65,7 +65,7 @@ defmodule Cympho.HeartbeatEngine do
     |> tap_ok(fn updated ->
       log_audit(updated, "run_completed")
       record_cost_event(updated)
-      CymphoWeb.Events.broadcast_run_status(updated, :run_completed, "running")
+      CymphoWeb.Events.broadcast_run_status(updated, :run_completed)
     end)
   end
 
@@ -81,7 +81,7 @@ defmodule Cympho.HeartbeatEngine do
     |> Repo.update()
     |> tap_ok(fn updated ->
       log_audit(updated, "run_failed")
-      CymphoWeb.Events.broadcast_run_status(updated, :run_failed, "running")
+      CymphoWeb.Events.broadcast_run_status(updated, :run_failed)
     end)
   end
 
@@ -110,9 +110,9 @@ defmodule Cympho.HeartbeatEngine do
     |> change(%{status: "cancelled", completed_at: now, last_heartbeat_at: now})
     |> Repo.update()
     |> tap_ok(fn updated ->
-        log_audit(updated, "run_cancelled")
-        CymphoWeb.Events.broadcast_run_status(updated, :run_cancelled, status)
-      end)
+      log_audit(updated, "run_cancelled")
+      CymphoWeb.Events.broadcast_run_status(updated, :run_cancelled)
+    end)
   end
 
   def cancel_run(%Run{status: status}), do: {:error, {:invalid_status, status}}
@@ -219,7 +219,10 @@ defmodule Cympho.HeartbeatEngine do
     {:ok, env}
   rescue
     e ->
-      Logger.warning("HeartbeatEngine: failed to resolve secrets for agent #{agent_id}: #{inspect(e)}")
+      Logger.warning(
+        "HeartbeatEngine: failed to resolve secrets for agent #{agent_id}: #{inspect(e)}"
+      )
+
       {:ok, %{}}
   end
 
@@ -298,7 +301,9 @@ defmodule Cympho.HeartbeatEngine do
   # ---------------------------------------------------------------------------
 
   defp log_audit(%Run{} = run, action) do
-    Logger.info("HeartbeatEngine: #{action} run=#{run.id} agent=#{run.agent_id} issue=#{run.issue_id}")
+    Logger.info(
+      "HeartbeatEngine: #{action} run=#{run.id} agent=#{run.agent_id} issue=#{run.issue_id}"
+    )
 
     :ok
   end
@@ -322,6 +327,7 @@ defmodule Cympho.HeartbeatEngine do
     fun.(val)
     {:ok, val}
   end
+
   defp tap_ok({:error, _} = err, _fun), do: err
 
   defp change(%Run{} = run, attrs), do: Ecto.Changeset.change(run, attrs)

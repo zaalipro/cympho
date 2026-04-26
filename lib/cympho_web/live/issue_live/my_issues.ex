@@ -79,6 +79,7 @@ defmodule CymphoWeb.IssueLive.MyIssues do
   end
 
   defp list_active_issues(agent_ids) when agent_ids == [], do: []
+
   defp list_active_issues(agent_ids) do
     import Ecto.Query
 
@@ -91,6 +92,7 @@ defmodule CymphoWeb.IssueLive.MyIssues do
   end
 
   defp list_user_created_issues(nil), do: []
+
   defp list_user_created_issues(_user) do
     import Ecto.Query
 
@@ -103,6 +105,7 @@ defmodule CymphoWeb.IssueLive.MyIssues do
   end
 
   defp list_watching_issues(agent_ids) when agent_ids == [], do: []
+
   defp list_watching_issues(agent_ids) do
     import Ecto.Query
 
@@ -115,6 +118,7 @@ defmodule CymphoWeb.IssueLive.MyIssues do
   end
 
   defp list_all_company_issues(nil, _agent_ids), do: []
+
   defp list_all_company_issues(company, agent_ids) do
     import Ecto.Query
 

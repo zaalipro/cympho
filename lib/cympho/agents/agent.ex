@@ -20,8 +20,7 @@ defmodule Cympho.Agents.Agent do
     field :max_concurrent_jobs, :integer, default: 3
     field :last_heartbeat_at, :utc_datetime
 
-    field :adapter, Ecto.Enum,
-      values: [:claude_code, :codex, :cursor, :http, :openclaw, :process]
+    field :adapter, Ecto.Enum, values: [:claude_code, :codex, :cursor, :http, :openclaw, :process]
 
     field :health_status, Ecto.Enum,
       values: [:healthy, :degraded, :unavailable],

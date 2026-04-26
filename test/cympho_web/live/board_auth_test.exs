@@ -8,21 +8,28 @@ defmodule CymphoWeb.Live.BoardAuthTest do
     unique = System.unique_integer([:positive])
 
     %User{}
-    |> User.registration_changeset(Map.merge(%{
-      email: "lv-board-#{unique}@example.com",
-      name: "LV Board Test #{unique}",
-      password: "password123"
-    }, attrs))
+    |> User.registration_changeset(
+      Map.merge(
+        %{
+          email: "lv-board-#{unique}@example.com",
+          name: "LV Board Test #{unique}",
+          password: "password123"
+        },
+        attrs
+      )
+    )
     |> Cympho.Repo.insert!()
   end
 
   defp create_company do
     unique = System.unique_integer([:positive])
+
     {:ok, company} =
       Companies.create_company(%{
         name: "LV Board Company #{unique}",
         slug: "lv-board-company-#{unique}"
       })
+
     company
   end
 
@@ -34,6 +41,7 @@ defmodule CymphoWeb.Live.BoardAuthTest do
         role: role,
         is_board_member: is_board_member
       })
+
     membership
   end
 
@@ -140,7 +148,9 @@ defmodule CymphoWeb.Live.BoardAuthTest do
 
       CymphoWeb.Live.BoardAuth.on_mount(:default, %{}, %{}, socket)
 
-      [log] = GovernanceAuditLogs.list_governance_audit_logs(action_type: "guard_denied", limit: 1)
+      [log] =
+        GovernanceAuditLogs.list_governance_audit_logs(action_type: "guard_denied", limit: 1)
+
       assert log.actor_id == user.id
       assert log.metadata["company_id"] == company.id
     end
@@ -153,7 +163,9 @@ defmodule CymphoWeb.Live.BoardAuthTest do
 
       CymphoWeb.Live.BoardAuth.on_mount(:default, %{}, %{}, socket)
 
-      [log] = GovernanceAuditLogs.list_governance_audit_logs(action_type: "guard_denied", limit: 1)
+      [log] =
+        GovernanceAuditLogs.list_governance_audit_logs(action_type: "guard_denied", limit: 1)
+
       assert log.actor_id == user.id
     end
   end

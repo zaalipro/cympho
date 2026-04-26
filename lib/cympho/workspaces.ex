@@ -380,7 +380,9 @@ defmodule Cympho.Workspaces do
             ew.status == "open" and
             ew.last_used_at < ^threshold
       )
-      |> Repo.update_all(set: [status: "closed", closed_at: now, cleanup_reason: "idle", updated_at: now])
+      |> Repo.update_all(
+        set: [status: "closed", closed_at: now, cleanup_reason: "idle", updated_at: now]
+      )
     end)
   end
 end

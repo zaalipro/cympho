@@ -56,7 +56,12 @@ defmodule CymphoWeb.DocumentRevisionsLive do
         aria-label="Close"
       >
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M6 18L18 6M6 6l12 12"
+          />
         </svg>
       </button>
     </div>
@@ -66,7 +71,11 @@ defmodule CymphoWeb.DocumentRevisionsLive do
   def revisions_list(assigns) do
     ~H"""
     <div class="space-y-2 max-h-96 overflow-y-auto">
-      <div :for={revision <- @revisions} id={"revision-#{revision.id}"} class="flex items-start gap-3 p-3 rounded-md bg-white/[0.02] border border-border hover:bg-white/[0.04] transition-colors">
+      <div
+        :for={revision <- @revisions}
+        id={"revision-#{revision.id}"}
+        class="flex items-start gap-3 p-3 rounded-md bg-white/[0.02] border border-border hover:bg-white/[0.04] transition-colors"
+      >
         <div class="flex-shrink-0">
           <div class="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-semibold">
             {String.first(revision.author_type || "A")}
@@ -78,7 +87,10 @@ defmodule CymphoWeb.DocumentRevisionsLive do
             <span class="text-sm font-medium text-text-primary">
               Revision #{revision.revision_number}
             </span>
-            <span :if={is_current_revision?(revision, @current_revision_id)} class="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400">
+            <span
+              :if={is_current_revision?(revision, @current_revision_id)}
+              class="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400"
+            >
               Current
             </span>
           </div>
@@ -194,23 +206,30 @@ defmodule CymphoWeb.DocumentRevisionsLive do
   def diff_lines(assigns) do
     ~H"""
     <div class="bg-white/[0.02] rounded-md border border-border overflow-hidden max-h-96 overflow-y-auto font-mono text-xs">
-      <div :for={line <- @diff} id={"diff-line-#{line.type}"} class={[
-        "flex",
-        case line.type do
-          :same -> "bg-transparent"
-          :addition -> "bg-green-500/10"
-          :deletion -> "bg-red-500/10"
-          _ -> "bg-transparent"
-        end
-      ]}>
-        <div :if={line.type != :same} class={[
-          "w-8 flex-shrink-0 text-center",
+      <div
+        :for={line <- @diff}
+        id={"diff-line-#{line.type}"}
+        class={[
+          "flex",
           case line.type do
-            :addition -> "text-green-500"
-            :deletion -> "text-red-500"
-            _ -> "text-text-quaternary"
+            :same -> "bg-transparent"
+            :addition -> "bg-green-500/10"
+            :deletion -> "bg-red-500/10"
+            _ -> "bg-transparent"
           end
-        ]}>
+        ]}
+      >
+        <div
+          :if={line.type != :same}
+          class={[
+            "w-8 flex-shrink-0 text-center",
+            case line.type do
+              :addition -> "text-green-500"
+              :deletion -> "text-red-500"
+              _ -> "text-text-quaternary"
+            end
+          ]}
+        >
           {case line.type do
             :addition -> "+"
             :deletion -> "-"

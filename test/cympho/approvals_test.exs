@@ -257,11 +257,12 @@ defmodule Cympho.ApprovalsTest do
       status: :idle
     }
 
-    agent = if opts[:company_id] do
-      %{agent | company_id: opts[:company_id]}
-    else
-      agent
-    end
+    agent =
+      if opts[:company_id] do
+        %{agent | company_id: opts[:company_id]}
+      else
+        agent
+      end
 
     %{id: id} = Cympho.Repo.insert!(agent)
     Cympho.Repo.get!(Cympho.Agents.Agent, id)
@@ -273,11 +274,12 @@ defmodule Cympho.ApprovalsTest do
       prefix: "TST"
     }
 
-    project = if opts[:company_id] do
-      %{project | company_id: opts[:company_id]}
-    else
-      project
-    end
+    project =
+      if opts[:company_id] do
+        %{project | company_id: opts[:company_id]}
+      else
+        project
+      end
 
     project = Cympho.Repo.insert!(project)
 
@@ -287,11 +289,12 @@ defmodule Cympho.ApprovalsTest do
       project_id: project.id
     }
 
-    issue_attrs = if opts[:company_id] do
-      Map.put(issue_attrs, :company_id, opts[:company_id])
-    else
-      issue_attrs
-    end
+    issue_attrs =
+      if opts[:company_id] do
+        Map.put(issue_attrs, :company_id, opts[:company_id])
+      else
+        issue_attrs
+      end
 
     {:ok, issue} = Cympho.Issues.create_issue(issue_attrs)
     issue
@@ -303,11 +306,12 @@ defmodule Cympho.ApprovalsTest do
       requested_by_agent_id: agent.id
     }
 
-    attrs = if issue do
-      Map.put(attrs, :issue_ids, [issue.id])
-    else
-      attrs
-    end
+    attrs =
+      if issue do
+        Map.put(attrs, :issue_ids, [issue.id])
+      else
+        attrs
+      end
 
     Approvals.create_approval(attrs)
   end

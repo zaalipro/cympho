@@ -2,10 +2,26 @@ defmodule CymphoWeb.OnboardingLive.Index do
   use CymphoWeb, :live_view
 
   @steps [
-    %{id: :welcome, title: "Welcome to Cympho", description: "Your AI-powered project management workspace"},
-    %{id: :workspace, title: "Create your workspace", description: "Set up projects and invite your team"},
-    %{id: :shortcuts, title: "Quick navigation", description: "Learn keyboard shortcuts to move fast"},
-    %{id: :ready, title: "You're all set!", description: "Start managing your projects with AI agents"}
+    %{
+      id: :welcome,
+      title: "Welcome to Cympho",
+      description: "Your AI-powered project management workspace"
+    },
+    %{
+      id: :workspace,
+      title: "Create your workspace",
+      description: "Set up projects and invite your team"
+    },
+    %{
+      id: :shortcuts,
+      title: "Quick navigation",
+      description: "Learn keyboard shortcuts to move fast"
+    },
+    %{
+      id: :ready,
+      title: "You're all set!",
+      description: "Start managing your projects with AI agents"
+    }
   ]
 
   @impl true
@@ -33,6 +49,7 @@ defmodule CymphoWeb.OnboardingLive.Index do
 
   def handle_event("prev_step", _params, socket) do
     current = socket.assigns.current_step
+
     if current > 0 do
       {:noreply, assign(socket, :current_step, current - 1)}
     else

@@ -90,7 +90,12 @@ defmodule Cympho.Agents do
     |> Repo.insert()
     |> case do
       {:ok, agent} ->
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{agent.company_id}:agents", {:agent_created, agent})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{agent.company_id}:agents",
+          {:agent_created, agent}
+        )
+
         {:ok, agent}
 
       {:error, changeset} ->
@@ -115,7 +120,12 @@ defmodule Cympho.Agents do
     |> Repo.update()
     |> case do
       {:ok, updated} ->
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:agents", {:agent_updated, updated})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.company_id}:agents",
+          {:agent_updated, updated}
+        )
+
         {:ok, updated}
 
       {:error, changeset} ->
@@ -140,7 +150,12 @@ defmodule Cympho.Agents do
     Repo.delete(agent)
     |> case do
       {:ok, _} ->
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{agent.company_id}:agents", {:agent_deleted, agent.id})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{agent.company_id}:agents",
+          {:agent_deleted, agent.id}
+        )
+
         {:ok, agent}
 
       {:error, changeset} ->
@@ -420,7 +435,8 @@ defmodule Cympho.Agents do
   defp create_role_change_approval(%Agent{} = agent, new_role) do
     approval_attrs = %{
       title: "Agent Role Change: #{agent.name} (#{agent.role} → #{new_role})",
-      description: "Request to change agent '#{agent.name}' role from '#{agent.role}' to '#{new_role}'.",
+      description:
+        "Request to change agent '#{agent.name}' role from '#{agent.role}' to '#{new_role}'.",
       category: "agent_promotion",
       company_id: agent.company_id,
       requested_by_agent_id: agent.id,
@@ -497,7 +513,12 @@ defmodule Cympho.Agents do
     |> Repo.update()
     |> case do
       {:ok, updated} ->
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:agents", {:agent_updated, updated})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.company_id}:agents",
+          {:agent_updated, updated}
+        )
+
         {:ok, updated}
 
       {:error, changeset} ->

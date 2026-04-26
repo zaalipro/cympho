@@ -7,6 +7,7 @@ defmodule CymphoWeb.IssueInteractionController do
 
   def index(conn, %{"issue_id" => issue_id}) do
     interactions = IssueThreadInteractions.list_interactions(issue_id)
+
     json(conn, %{data: Enum.map(interactions, &CymphoWeb.IssueInteractionJSON.interaction_data/1)})
   end
 

@@ -65,13 +65,21 @@ defmodule Cympho.Documents do
     end
   end
 
-  def update_document(%IssueDocument{} = document, attrs, author_id \\ nil, author_type \\ "agent") do
+  def update_document(
+        %IssueDocument{} = document,
+        attrs,
+        author_id \\ nil,
+        author_type \\ "agent"
+      ) do
     old_body = document.body
     old_title = document.title
     current_revision = get_latest_revision_number(document.id)
 
     Ecto.Multi.new()
-    |> Ecto.Multi.insert(:revision, revision_changeset(document, old_title, old_body, current_revision, author_id, author_type))
+    |> Ecto.Multi.insert(
+      :revision,
+      revision_changeset(document, old_title, old_body, current_revision, author_id, author_type)
+    )
     |> Ecto.Multi.update(:document, IssueDocument.changeset(document, attrs))
     |> Repo.transaction()
     |> case do
@@ -87,7 +95,15 @@ defmodule Cympho.Documents do
     end
   end
 
-  defp revision_changeset(document, title, body, revision_number, author_id, author_type, change_summary \\ nil) do
+  defp revision_changeset(
+         document,
+         title,
+         body,
+         revision_number,
+         author_id,
+         author_type,
+         change_summary \\ nil
+       ) do
     attrs = %{
       document_id: document.id,
       title: title,
@@ -122,7 +138,12 @@ defmodule Cympho.Documents do
 
   def get_revision!(id), do: Repo.get!(IssueDocumentRevision, id)
 
-  def rollback_to_revision(%IssueDocument{} = document, revision_id, author_id \\ nil, author_type \\ "agent") do
+  def rollback_to_revision(
+        %IssueDocument{} = document,
+        revision_id,
+        author_id \\ nil,
+        author_type \\ "agent"
+      ) do
     case get_revision!(revision_id) do
       %IssueDocumentRevision{} = revision ->
         # Check for pending approvals on the issue
@@ -133,8 +154,22 @@ defmodule Cympho.Documents do
           change_summary = "Rolled back to revision #{revision.revision_number}"
 
           Ecto.Multi.new()
-          |> Ecto.Multi.insert(:new_revision, revision_changeset(document, revision.title, revision.body, current_revision, author_id, author_type, change_summary))
-          |> Ecto.Multi.update(:document, IssueDocument.changeset(document, %{body: revision.body, title: revision.title}))
+          |> Ecto.Multi.insert(
+            :new_revision,
+            revision_changeset(
+              document,
+              revision.title,
+              revision.body,
+              current_revision,
+              author_id,
+              author_type,
+              change_summary
+            )
+          )
+          |> Ecto.Multi.update(
+            :document,
+            IssueDocument.changeset(document, %{body: revision.body, title: revision.title})
+          )
           |> Repo.transaction()
           |> case do
             {:ok, %{new_revision: _new_revision, document: updated}} ->
@@ -149,7 +184,12 @@ defmodule Cympho.Documents do
   end
 
   def get_latest_revision_number(document_id) do
-    case Repo.one(from r in IssueDocumentRevision, where: r.document_id == ^document_id, order_by: [desc: r.revision_number], limit: 1) do
+    case Repo.one(
+           from r in IssueDocumentRevision,
+             where: r.document_id == ^document_id,
+             order_by: [desc: r.revision_number],
+             limit: 1
+         ) do
       nil -> 0
       revision -> revision.revision_number
     end
@@ -197,15 +237,22 @@ defmodule Cympho.Documents do
     {Enum.reverse(same_ops), [], new_lines, Enum.reverse(diff_ops) ++ additions}
   end
 
-  defp diff_lines([old_head | old_rest] = _old_lines, [new_head | new_rest] = _new_lines, same_ops, diff_ops) do
+  defp diff_lines(
+         [old_head | old_rest] = _old_lines,
+         [new_head | new_rest] = _new_lines,
+         same_ops,
+         diff_ops
+       ) do
     if old_head == new_head do
       diff_lines(old_rest, new_rest, [old_head | same_ops], diff_ops)
     else
       # Find the length of the common prefix
-      {_common_prefix, old_remainder, new_remainder} = find_common_sequence(old_rest, new_rest, [old_head], [new_head])
+      {_common_prefix, old_remainder, new_remainder} =
+        find_common_sequence(old_rest, new_rest, [old_head], [new_head])
 
       # Flush same_ops if any
-      same_ops_flushed = if same_ops != [], do: [%{type: :same, lines: Enum.reverse(same_ops)}], else: []
+      same_ops_flushed =
+        if same_ops != [], do: [%{type: :same, lines: Enum.reverse(same_ops)}], else: []
 
       diff_lines(old_remainder, new_remainder, [], diff_ops ++ same_ops_flushed)
     end
@@ -222,7 +269,11 @@ defmodule Cympho.Documents do
 
   defp broadcast_document_event({_event_type, document} = msg) do
     topic =
-      case Repo.one(from i in Cympho.Issues.Issue, where: i.id == ^document.issue_id, select: i.company_id) do
+      case Repo.one(
+             from i in Cympho.Issues.Issue,
+               where: i.id == ^document.issue_id,
+               select: i.company_id
+           ) do
         nil -> "documents"
         company_id -> "company:#{company_id}:documents"
       end

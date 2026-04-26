@@ -285,7 +285,9 @@ defmodule Cympho.AgentsTest do
 
     test "accepts all valid adapter values" do
       for adapter <- [:claude_code, :codex, :cursor, :http, :process] do
-        changeset = Agents.change_agent(%Agent{}, %{name: "Test", role: :engineer, adapter: adapter})
+        changeset =
+          Agents.change_agent(%Agent{}, %{name: "Test", role: :engineer, adapter: adapter})
+
         assert changeset.valid?, "Expected adapter #{adapter} to be valid"
       end
     end

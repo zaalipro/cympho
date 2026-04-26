@@ -33,7 +33,11 @@ defmodule CymphoWeb.Events do
       Events.broadcast_issue_update(issue, :issue_updated)
       Events.broadcast_issue_update(issue, :issue_status_changed, %{from: :todo, to: :in_progress})
   """
-  def broadcast_issue_update(%Issue{company_id: company_id, id: issue_id} = issue, event_type, metadata \\ %{}) do
+  def broadcast_issue_update(
+        %Issue{company_id: company_id, id: issue_id} = issue,
+        event_type,
+        metadata \\ %{}
+      ) do
     topic = "company:#{company_id}:issues"
     payload = build_event_payload(event_type, issue_id, metadata, issue)
 
@@ -45,7 +49,9 @@ defmodule CymphoWeb.Events do
   """
   def broadcast_comment(%Comment{issue_id: issue_id} = comment, event_type \\ :comment_created) do
     case Repo.get(Issue, issue_id) do
-      nil -> :ok
+      nil ->
+        :ok
+
       %Issue{company_id: company_id, project_id: project_id} ->
         topic = "company:#{company_id}:project:#{project_id}:comments"
         payload = build_comment_payload(comment, event_type)
@@ -58,7 +64,9 @@ defmodule CymphoWeb.Events do
   """
   def broadcast_run_status(%Run{id: _run_id, issue_id: issue_id} = run, event_type) do
     case Repo.get(Issue, issue_id) do
-      nil -> :ok
+      nil ->
+        :ok
+
       %Issue{company_id: company_id} ->
         topic = "company:#{company_id}:runs"
         payload = build_run_payload(run, event_type)
@@ -69,8 +77,13 @@ defmodule CymphoWeb.Events do
   @doc """
   Broadcast an agent heartbeat event to WebSocket clients.
   """
-  def broadcast_agent_heartbeat(%Issue{company_id: company_id, id: issue_id}, agent_id, heartbeat_data) do
+  def broadcast_agent_heartbeat(
+        %Issue{company_id: company_id, id: issue_id},
+        agent_id,
+        heartbeat_data
+      ) do
     topic = "company:#{company_id}:issues:#{issue_id}:heartbeats"
+
     payload = %{
       event_type: :agent_heartbeat,
       agent_id: agent_id,
@@ -130,7 +143,16 @@ defmodule CymphoWeb.Events do
     Map.merge(base, Map.merge(metadata, issue_data))
   end
 
-  defp build_comment_payload(%Comment{id: comment_id, issue_id: issue_id, body: body, author_id: author_id, author_type: author_type}, event_type) do
+  defp build_comment_payload(
+         %Comment{
+           id: comment_id,
+           issue_id: issue_id,
+           body: body,
+           author_id: author_id,
+           author_type: author_type
+         },
+         event_type
+       ) do
     %{
       event_type: event_type,
       resource_id: comment_id,
@@ -142,7 +164,10 @@ defmodule CymphoWeb.Events do
     }
   end
 
-  defp build_run_payload(%Run{id: run_id, status: status, adapter: adapter, issue_id: issue_id}, event_type) do
+  defp build_run_payload(
+         %Run{id: run_id, status: status, adapter: adapter, issue_id: issue_id},
+         event_type
+       ) do
     %{
       event_type: event_type,
       resource_id: run_id,

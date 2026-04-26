@@ -21,7 +21,16 @@ defmodule Cympho.Orchestrator do
   """
 
   @enforce_keys [:issue, :agent_id]
-  defstruct [:issue, :agent_id, :session_id, :run_id, :status, turn_count: 0, tool_traces: %{}, opts: []]
+  defstruct [
+    :issue,
+    :agent_id,
+    :session_id,
+    :run_id,
+    :status,
+    turn_count: 0,
+    tool_traces: %{},
+    opts: []
+  ]
 
   use GenServer
   alias Cympho.{Issues, Comments, Agents, Activities, HeartbeatEngine, AgentAdapters}
@@ -141,7 +150,8 @@ defmodule Cympho.Orchestrator do
     issue = session.issue
     agent_id = session.agent_id
 
-    {updated_tool_traces, _trace_id} = capture_tool_call(tool_call, issue, agent_id, session.tool_traces)
+    {updated_tool_traces, _trace_id} =
+      capture_tool_call(tool_call, issue, agent_id, session.tool_traces)
 
     {:noreply, %{session | turn_count: session.turn_count + 1, tool_traces: updated_tool_traces}}
   end
@@ -373,7 +383,8 @@ defmodule Cympho.Orchestrator do
     issue = session.issue
     agent_id = session.agent_id
 
-    error_body = "Adapter resolution failed: unknown adapter `#{adapter_type}`. Check agent configuration."
+    error_body =
+      "Adapter resolution failed: unknown adapter `#{adapter_type}`. Check agent configuration."
 
     {:ok, _} =
       Comments.create_comment(%{
@@ -393,7 +404,9 @@ defmodule Cympho.Orchestrator do
     issue = session.issue
     agent_id = session.agent_id
 
-    :logger.error("[Orchestrator] Adapter resolution failed for issue #{issue.id}: #{inspect(reason)}")
+    :logger.error(
+      "[Orchestrator] Adapter resolution failed for issue #{issue.id}: #{inspect(reason)}"
+    )
 
     error_body = "Adapter resolution failed: #{inspect(reason)}"
 
@@ -444,7 +457,9 @@ defmodule Cympho.Orchestrator do
 
         case Cympho.ToolCallTraces.update_tool_call_trace_status(trace, status, result_content) do
           {:ok, _updated_trace} ->
-            :logger.info("[Orchestrator] Updated tool call trace: #{trace_id} with status: #{status}")
+            :logger.info(
+              "[Orchestrator] Updated tool call trace: #{trace_id} with status: #{status}"
+            )
 
             # Emit telemetry for tool completion
             :telemetry.execute(
@@ -484,10 +499,14 @@ defmodule Cympho.Orchestrator do
 
           case Cympho.ToolCallTraces.update_tool_call_trace_status(trace, status, error_message) do
             {:ok, _updated_trace} ->
-              :logger.info("[Orchestrator] Marked pending tool call trace as errored: #{trace_id}")
+              :logger.info(
+                "[Orchestrator] Marked pending tool call trace as errored: #{trace_id}"
+              )
 
             {:error, update_reason} ->
-              :logger.warning("[Orchestrator] Failed to update errored tool call trace: #{inspect(update_reason)}")
+              :logger.warning(
+                "[Orchestrator] Failed to update errored tool call trace: #{inspect(update_reason)}"
+              )
           end
 
         {:error, :not_found} ->

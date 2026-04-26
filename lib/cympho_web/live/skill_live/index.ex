@@ -60,7 +60,10 @@ defmodule CymphoWeb.SkillLive.Index do
                  if s.id == updated_skill.id, do: updated_skill, else: s
                end)
              end)
-             |> put_flash(:info, "Skill #{if updated_skill.enabled, do: "enabled", else: "disabled"}")}
+             |> put_flash(
+               :info,
+               "Skill #{if updated_skill.enabled, do: "enabled", else: "disabled"}"
+             )}
 
           {:error, _} ->
             {:noreply, put_flash(socket, :error, "Failed to toggle skill")}
@@ -98,4 +101,3 @@ defmodule CymphoWeb.SkillLive.Index do
     |> Enum.map(fn s -> Repo.preload(s, [:company, :project]) end)
   end
 end
-

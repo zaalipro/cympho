@@ -57,7 +57,10 @@ defmodule CymphoWeb.Components.InteractionCard do
       <p class="text-sm text-text-secondary">
         {Map.get(@interaction.payload, "message", "The agent suggests the following tasks:")}
       </p>
-      <div :for={{task, idx} <- Enum.with_index(@tasks)} class="flex items-start gap-2 p-2 bg-white/[0.03] rounded-md">
+      <div
+        :for={{task, idx} <- Enum.with_index(@tasks)}
+        class="flex items-start gap-2 p-2 bg-white/[0.03] rounded-md"
+      >
         <span class="text-xs text-text-quaternary mt-0.5">{idx + 1}.</span>
         <div class="flex-1">
           <p class="text-sm text-text-primary font-510">{Map.get(task, "title", "Untitled")}</p>
@@ -114,7 +117,10 @@ defmodule CymphoWeb.Components.InteractionCard do
     ~H"""
     <div class="space-y-2">
       <p class="text-sm text-text-secondary">{@message}</p>
-      <div :if={Map.get(@interaction.payload, "details")} class="text-xs text-text-tertiary p-2 bg-white/[0.03] rounded-md">
+      <div
+        :if={Map.get(@interaction.payload, "details")}
+        class="text-xs text-text-tertiary p-2 bg-white/[0.03] rounded-md"
+      >
         {Map.get(@interaction.payload, "details")}
       </div>
     </div>

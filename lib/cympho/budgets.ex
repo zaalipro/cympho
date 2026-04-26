@@ -130,7 +130,12 @@ defmodule Cympho.Budgets do
           }
         )
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{budget.company_id}:budgets", {:budget_created, budget})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{budget.company_id}:budgets",
+          {:budget_created, budget}
+        )
+
         {:ok, budget}
 
       error ->
@@ -181,7 +186,12 @@ defmodule Cympho.Budgets do
           }
         )
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:budgets", {:budget_updated, updated})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.company_id}:budgets",
+          {:budget_updated, updated}
+        )
+
         {:ok, updated}
 
       error ->
@@ -221,7 +231,12 @@ defmodule Cympho.Budgets do
           remaining: Budget.available_amount(updated)
         })
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:budgets", {:budget_spent, updated})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.company_id}:budgets",
+          {:budget_spent, updated}
+        )
+
         {:ok, updated}
 
       error ->
@@ -281,7 +296,12 @@ defmodule Cympho.Budgets do
           }
         )
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{deleted.company_id}:budgets", {:budget_deleted, deleted})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{deleted.company_id}:budgets",
+          {:budget_deleted, deleted}
+        )
+
         {:ok, deleted}
 
       error ->
@@ -347,7 +367,11 @@ defmodule Cympho.Budgets do
         }
       )
 
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{budget.company_id}:budgets", {:budget_hard_stop, budget})
+      Phoenix.PubSub.broadcast(
+        Cympho.PubSub,
+        "company:#{budget.company_id}:budgets",
+        {:budget_hard_stop, budget}
+      )
     end
   end
 
@@ -433,7 +457,8 @@ defmodule Cympho.Budgets do
   defp create_pending_budget_approval(company, attrs, actor) do
     approval_attrs = %{
       title: "Budget creation approval: #{attrs[:name] || attrs["name"] || "Untitled"}",
-      description: "Budget creation requires board approval. Limit: #{attrs[:limit_amount] || attrs["limit_amount"]}",
+      description:
+        "Budget creation requires board approval. Limit: #{attrs[:limit_amount] || attrs["limit_amount"]}",
       category: "budget_increase",
       company_id: company.id,
       proposal_data: %{
@@ -463,7 +488,8 @@ defmodule Cympho.Budgets do
   defp create_pending_budget_update_approval(company, budget, attrs, actor) do
     approval_attrs = %{
       title: "Budget increase approval: #{budget.name}",
-      description: "Budget limit increase from #{budget.limit_amount} to #{attrs[:limit_amount] || attrs["limit_amount"]} requires board approval.",
+      description:
+        "Budget limit increase from #{budget.limit_amount} to #{attrs[:limit_amount] || attrs["limit_amount"]} requires board approval.",
       category: "budget_increase",
       company_id: company.id,
       proposal_data: %{

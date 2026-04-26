@@ -113,22 +113,26 @@ defmodule Cympho.Dashboard do
     import Ecto.Query
 
     try do
-      runs = Cympho.HeartbeatEngine.Run
+      runs =
+        Cympho.HeartbeatEngine.Run
         |> where([r], r.status == "completed")
         |> Repo.all()
 
-      total_cost = Enum.reduce(runs, Decimal.new(0), fn run, acc ->
-        cost = run.cost_usd || Decimal.new(0)
-        Decimal.add(acc, cost)
-      end)
+      total_cost =
+        Enum.reduce(runs, Decimal.new(0), fn run, acc ->
+          cost = run.cost_usd || Decimal.new(0)
+          Decimal.add(acc, cost)
+        end)
 
-      total_input = Enum.reduce(runs, 0, fn run, acc ->
-        acc + (run.input_tokens || 0)
-      end)
+      total_input =
+        Enum.reduce(runs, 0, fn run, acc ->
+          acc + (run.input_tokens || 0)
+        end)
 
-      total_output = Enum.reduce(runs, 0, fn run, acc ->
-        acc + (run.output_tokens || 0)
-      end)
+      total_output =
+        Enum.reduce(runs, 0, fn run, acc ->
+          acc + (run.output_tokens || 0)
+        end)
 
       %{
         total_cost: total_cost,
@@ -137,12 +141,13 @@ defmodule Cympho.Dashboard do
         total_runs: length(runs)
       }
     rescue
-      _ -> %{
-        total_cost: Decimal.new(0),
-        total_input_tokens: 0,
-        total_output_tokens: 0,
-        total_runs: 0
-      }
+      _ ->
+        %{
+          total_cost: Decimal.new(0),
+          total_input_tokens: 0,
+          total_output_tokens: 0,
+          total_runs: 0
+        }
     end
   end
 

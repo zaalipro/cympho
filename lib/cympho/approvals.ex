@@ -72,7 +72,12 @@ defmodule Cympho.Approvals do
           })
         end)
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, scoped_topic(approval), {:approval_created, approval})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          scoped_topic(approval),
+          {:approval_created, approval}
+        )
+
         {:ok, approval}
 
       {:error, _operation, changeset, _changes} ->
@@ -109,7 +114,12 @@ defmodule Cympho.Approvals do
           })
         end)
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, scoped_topic(updated), {:approval_resolved, updated})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          scoped_topic(updated),
+          {:approval_resolved, updated}
+        )
+
         maybe_wake_agent(updated)
         {:ok, updated}
 
@@ -127,7 +137,12 @@ defmodule Cympho.Approvals do
       |> Repo.update()
       |> case do
         {:ok, updated} ->
-          Phoenix.PubSub.broadcast(Cympho.PubSub, scoped_topic(updated), {:approval_cancelled, updated})
+          Phoenix.PubSub.broadcast(
+            Cympho.PubSub,
+            scoped_topic(updated),
+            {:approval_cancelled, updated}
+          )
+
           {:ok, updated}
 
         {:error, changeset} ->
@@ -150,9 +165,10 @@ defmodule Cympho.Approvals do
 
     if count > 0 do
       company_id = issue_company_id_for_approval(issue_id)
+
       Phoenix.PubSub.broadcast(
         Cympho.PubSub,
-        company_id && "company:#{company_id}:approvals" || "approvals",
+        (company_id && "company:#{company_id}:approvals") || "approvals",
         {:approvals_cancelled_for_issue, issue_id}
       )
     end
@@ -189,13 +205,18 @@ defmodule Cympho.Approvals do
 
   defp scoped_topic(%Approval{} = approval) do
     approval = Repo.preload(approval, [:issues, :requested_by])
+
     case approval.issues do
-      [issue | _] -> "company:#{issue.company_id}:approvals"
+      [issue | _] ->
+        "company:#{issue.company_id}:approvals"
+
       [] ->
         case approval.requested_by do
           %Cympho.Agents.Agent{company_id: company_id} when not is_nil(company_id) ->
             "company:#{company_id}:approvals"
-          _ -> "approvals"
+
+          _ ->
+            "approvals"
         end
     end
   end

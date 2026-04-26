@@ -73,12 +73,14 @@ defmodule Cympho.Skills.HotReloaderTest do
 
     test "in test environment, does not start file system watcher" do
       # In test mode, the HotReloader starts but without a watcher
-      pid = if Process.whereis(HotReloader) == nil do
-        {:ok, p} = HotReloader.start_link([])
-        p
-      else
-        Process.whereis(HotReloader)
-      end
+      pid =
+        if Process.whereis(HotReloader) == nil do
+          {:ok, p} = HotReloader.start_link([])
+          p
+        else
+          Process.whereis(HotReloader)
+        end
+
       :sys.get_state(pid)
     end
   end
@@ -141,15 +143,22 @@ defmodule Cympho.Skills.HotReloaderTest do
       unknown_manifest = Path.join(@manifest_dir, "unknown.json")
       File.write!(unknown_manifest, Jason.encode!(%{"identifier" => "unknown_skill"}))
 
-      assert {:error, {:missing_company_context, "unknown_skill"}} = HotReloader.reload_manifest(unknown_manifest)
+      assert {:error, {:missing_company_context, "unknown_skill"}} =
+               HotReloader.reload_manifest(unknown_manifest)
     end
 
-    test "returns not_found for plugin with valid company_slug but non-existent identifier", %{company: company} do
+    test "returns not_found for plugin with valid company_slug but non-existent identifier", %{
+      company: company
+    } do
       unknown_manifest = Path.join(@manifest_dir, "unknown_with_company.json")
-      File.write!(unknown_manifest, Jason.encode!(%{
-        "identifier" => "nonexistent_skill",
-        "company_slug" => company.slug
-      }))
+
+      File.write!(
+        unknown_manifest,
+        Jason.encode!(%{
+          "identifier" => "nonexistent_skill",
+          "company_slug" => company.slug
+        })
+      )
 
       assert {:error, :not_found} = HotReloader.reload_manifest(unknown_manifest)
     end
@@ -207,5 +216,4 @@ defmodule Cympho.Skills.HotReloaderTest do
       assert plugin.manifest["version"] == "1.0.0"
     end
   end
-
 end

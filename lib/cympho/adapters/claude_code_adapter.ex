@@ -21,13 +21,25 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
 
     cond do
       (is_nil(api_key) or api_key == "") and not has_claude ->
-        %{status: :unhealthy, message: "Claude CLI not found and API key not configured", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "Claude CLI not found and API key not configured",
+          checked_at: DateTime.utc_now()
+        }
 
       is_nil(api_key) or api_key == "" ->
-        %{status: :degraded, message: "Claude CLI available but API key not configured", checked_at: DateTime.utc_now()}
+        %{
+          status: :degraded,
+          message: "Claude CLI available but API key not configured",
+          checked_at: DateTime.utc_now()
+        }
 
       not has_claude ->
-        %{status: :degraded, message: "API key configured but Claude CLI not found in PATH", checked_at: DateTime.utc_now()}
+        %{
+          status: :degraded,
+          message: "API key configured but Claude CLI not found in PATH",
+          checked_at: DateTime.utc_now()
+        }
 
       true ->
         %{status: :healthy, message: "Claude CLI available", checked_at: DateTime.utc_now()}

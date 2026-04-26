@@ -35,9 +35,14 @@ defmodule Cympho.Companies.Company do
 
   defp validate_logo_url(changeset) do
     case get_change(changeset, :logo_url) do
-      nil -> changeset
-      "" -> changeset
-      _url -> validate_format(changeset, :logo_url, ~r/^https?:\/\/.+/, message: "must be a valid URL")
+      nil ->
+        changeset
+
+      "" ->
+        changeset
+
+      _url ->
+        validate_format(changeset, :logo_url, ~r/^https?:\/\/.+/, message: "must be a valid URL")
     end
   end
 
@@ -56,7 +61,11 @@ defmodule Cympho.Companies.Company do
             add_error(changeset, :governance_config, "categories must be a list")
 
           threshold_type not in [nil, "any", "percentage", "count", "all"] ->
-            add_error(changeset, :governance_config, "threshold_type must be any, percentage, count, or all")
+            add_error(
+              changeset,
+              :governance_config,
+              "threshold_type must be any, percentage, count, or all"
+            )
 
           not is_nil(threshold_value) and not is_number(threshold_value) ->
             add_error(changeset, :governance_config, "threshold_value must be a number")

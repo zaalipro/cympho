@@ -12,7 +12,6 @@ defmodule CymphoWeb.UserAuth do
   import Phoenix.Component, only: [assign: 3]
   import Ecto.Query
   alias Cympho.Users
-  
 
   def on_mount(:default, _params, session, socket) do
     socket =
@@ -35,7 +34,13 @@ defmodule CymphoWeb.UserAuth do
           {:ok, user} ->
             # Store lightweight map instead of full Ecto struct to avoid
             # Jason.Encoder errors in LiveView test mode
-            user_map = %{id: user.id, email: user.email, name: user.name, company_id: user.company_id}
+            user_map = %{
+              id: user.id,
+              email: user.email,
+              name: user.name,
+              company_id: user.company_id
+            }
+
             assign(socket, :current_user, user_map)
 
           {:error, :not_found} ->

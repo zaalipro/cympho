@@ -56,7 +56,9 @@ defmodule Cympho.AgentApprovalWorkflowTest do
     merged = Map.merge(%{name: "Test Agent", role: :engineer, company_id: company.id}, attrs)
 
     case Agents.create_agent(merged) do
-      {:ok, agent} -> agent
+      {:ok, agent} ->
+        agent
+
       {:error, :pending_board_approval, _} ->
         %Agent{}
         |> Agent.changeset(merged)
@@ -127,7 +129,12 @@ defmodule Cympho.AgentApprovalWorkflowTest do
     test "stores original attrs in proposal_data for later execution" do
       company = create_company(%{"required_approvals" => ["agent_hire"]})
 
-      attrs = %{name: "Stored Agent", role: :cto, company_id: company.id, config: %{"key" => "val"}}
+      attrs = %{
+        name: "Stored Agent",
+        role: :cto,
+        company_id: company.id,
+        config: %{"key" => "val"}
+      }
 
       assert {:error, :pending_board_approval, approval_id} = Agents.create_agent(attrs)
 
@@ -389,9 +396,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
       Process.sleep(100)
 
       logs =
-        GovernanceAuditLogs.list_governance_audit_logs(
-          action_type: "agent_hired"
-        )
+        GovernanceAuditLogs.list_governance_audit_logs(action_type: "agent_hired")
 
       assert length(logs) >= 1
     end
@@ -413,9 +418,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
       Process.sleep(100)
 
       logs =
-        GovernanceAuditLogs.list_governance_audit_logs(
-          action_type: "board_decision"
-        )
+        GovernanceAuditLogs.list_governance_audit_logs(action_type: "board_decision")
 
       assert length(logs) >= 1
     end

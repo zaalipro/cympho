@@ -21,7 +21,17 @@ defmodule Cympho.Documents.IssueDocumentRevision do
 
   def changeset(revision, attrs) do
     revision
-    |> cast(attrs, [:body, :title, :document_id, :revision_number, :change_summary, :author_id, :author_type, :parent_id, :parent_revision_number])
+    |> cast(attrs, [
+      :body,
+      :title,
+      :document_id,
+      :revision_number,
+      :change_summary,
+      :author_id,
+      :author_type,
+      :parent_id,
+      :parent_revision_number
+    ])
     |> validate_required([:body, :title, :document_id])
     |> validate_inclusion(:author_type, ["agent", "user", "system"])
     |> validate_number(:revision_number, greater_than: 0)

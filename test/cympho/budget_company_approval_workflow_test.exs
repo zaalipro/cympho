@@ -24,7 +24,9 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
 
   setup do
     case Process.whereis(Cympho.BoardApprovals.BoardApprovalActionExecutor) do
-      nil -> :ok
+      nil ->
+        :ok
+
       pid ->
         Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), pid)
         :ok
@@ -75,15 +77,16 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
 
   defp company_with_governance(categories, extra \\ %{}) do
     create_test_company(%{
-      governance_config: Map.merge(
-        %{
-          "categories" => categories,
-          "threshold_type" => "percentage",
-          "threshold_value" => 0.6,
-          "budget_limit_threshold" => 500
-        },
-        extra
-      )
+      governance_config:
+        Map.merge(
+          %{
+            "categories" => categories,
+            "threshold_type" => "percentage",
+            "threshold_value" => 0.6,
+            "budget_limit_threshold" => 500
+          },
+          extra
+        )
     })
   end
 
@@ -378,7 +381,11 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
           limit_amount: Decimal.new("1000")
         })
 
-      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "budget_pending_approval")
+      logs =
+        Cympho.GovernanceAuditLogs.list_governance_audit_logs(
+          action_type: "budget_pending_approval"
+        )
+
       assert length(logs) >= 1
     end
 
@@ -386,9 +393,15 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       company = company_with_governance(["policy_change"])
 
       {:pending_approval, _approval} =
-        Companies.update_company(company, %{governance_config: %{"categories" => ["policy_change"]}})
+        Companies.update_company(company, %{
+          governance_config: %{"categories" => ["policy_change"]}
+        })
 
-      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "policy_change_pending_approval")
+      logs =
+        Cympho.GovernanceAuditLogs.list_governance_audit_logs(
+          action_type: "policy_change_pending_approval"
+        )
+
       assert length(logs) >= 1
     end
   end
@@ -434,7 +447,8 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       company = create_test_company(%{governance_config: %{"categories" => []}})
       budget = create_test_budget(company, %{limit_amount: Decimal.new("400")})
 
-      assert {:ok, _} = BoardApprovals.propose_budget_change(company.id, budget.id, Decimal.new("5000"))
+      assert {:ok, _} =
+               BoardApprovals.propose_budget_change(company.id, budget.id, Decimal.new("5000"))
 
       updated_company = Companies.get_company!(company.id)
       budgets_map = get_in(updated_company.governance_config, ["budgets"]) || %{}
@@ -447,10 +461,16 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       company = company_with_governance(["budget_increase"])
       budget = create_test_budget(company, %{limit_amount: Decimal.new("1000")})
 
-      assert {:ok, _} = BoardApprovals.propose_budget_change(company.id, budget.id, Decimal.new("500"))
+      assert {:ok, _} =
+               BoardApprovals.propose_budget_change(company.id, budget.id, Decimal.new("500"))
 
       # Should NOT create a board approval for a decrease
-      approvals = BoardApprovals.list_board_approvals(%{company_id: company.id, category: "budget_increase"})
+      approvals =
+        BoardApprovals.list_board_approvals(%{
+          company_id: company.id,
+          category: "budget_increase"
+        })
+
       assert Enum.empty?(approvals)
     end
 
@@ -468,7 +488,11 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
 
       BoardApprovals.propose_budget_change(company.id, budget.id, Decimal.new("5000"))
 
-      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "budget_change_applied_directly")
+      logs =
+        Cympho.GovernanceAuditLogs.list_governance_audit_logs(
+          action_type: "budget_change_applied_directly"
+        )
+
       assert length(logs) >= 1
     end
   end
@@ -487,7 +511,9 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       company = company_with_governance(["policy_change"])
 
       assert {:ok, %BoardApproval{category: "policy_change"} = approval} =
-               BoardApprovals.propose_config_change(company.id, "governance_config", %{"new_key" => "val"})
+               BoardApprovals.propose_config_change(company.id, "governance_config", %{
+                 "new_key" => "val"
+               })
 
       assert get_in(approval.proposal_data, ["action"]) == "update_company"
       assert get_in(approval.proposal_data, ["company_id"]) == company.id
@@ -498,7 +524,11 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
 
       BoardApprovals.propose_config_change(company.id, "some_key", "some_value")
 
-      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "config_change_applied_directly")
+      logs =
+        Cympho.GovernanceAuditLogs.list_governance_audit_logs(
+          action_type: "config_change_applied_directly"
+        )
+
       assert length(logs) >= 1
     end
   end
@@ -527,7 +557,11 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       result = BoardApprovals.execute_approved_action(loaded)
       assert {:ok, %Budget{}} = result
 
-      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "budget_creation_executed")
+      logs =
+        Cympho.GovernanceAuditLogs.list_governance_audit_logs(
+          action_type: "budget_creation_executed"
+        )
+
       assert length(logs) >= 1
     end
 
@@ -547,7 +581,11 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       result = BoardApprovals.execute_approved_action(loaded)
       assert {:ok, %Budget{}} = result
 
-      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "budget_increase_executed")
+      logs =
+        Cympho.GovernanceAuditLogs.list_governance_audit_logs(
+          action_type: "budget_increase_executed"
+        )
+
       assert length(logs) >= 1
     end
   end
@@ -568,6 +606,7 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
         Companies.update_company(company, %{governance_config: new_config})
 
       user = create_test_user()
+
       Companies.create_membership(%{
         user_id: user.id,
         company_id: company.id,
@@ -586,7 +625,11 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       assert "budget_increase" in updated_company.governance_config["categories"]
 
       # Verify audit was logged
-      logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "policy_change_executed")
+      logs =
+        Cympho.GovernanceAuditLogs.list_governance_audit_logs(
+          action_type: "policy_change_executed"
+        )
+
       assert length(logs) >= 1
     end
 
@@ -595,7 +638,9 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
 
       new_config = %{"categories" => ["policy_change"], "threshold_value" => 0.5}
 
-      assert {:ok, updated} = Companies.execute_company_update(company, %{governance_config: new_config})
+      assert {:ok, updated} =
+               Companies.execute_company_update(company, %{governance_config: new_config})
+
       assert updated.governance_config["threshold_value"] == 0.5
     end
   end

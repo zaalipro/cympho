@@ -16,6 +16,7 @@ defmodule CymphoWeb.KanbanLive.Index do
       CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
       CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
     end
+
     Phoenix.PubSub.subscribe(Cympho.PubSub, "agent_heartbeats")
 
     projects = Projects.list_projects()
@@ -141,23 +142,47 @@ defmodule CymphoWeb.KanbanLive.Index do
       if heartbeat_state.status in [:offline, :idle] do
         agent = Enum.find(socket.assigns.agents, &(&1.id == agent_id))
         name = if agent, do: agent.name, else: "Agent"
-        push_event(socket, "toast", %{message: "#{name} went #{heartbeat_state.status}", type: "warning", key: "agent_#{agent_id}_#{heartbeat_state.status}"})
+
+        push_event(socket, "toast", %{
+          message: "#{name} went #{heartbeat_state.status}",
+          type: "warning",
+          key: "agent_#{agent_id}_#{heartbeat_state.status}"
+        })
       else
         socket
       end
-    {:noreply, update(socket, :agent_heartbeat_states, fn states -> Map.put(states, agent_id, heartbeat_state) end)}
+
+    {:noreply,
+     update(socket, :agent_heartbeat_states, fn states ->
+       Map.put(states, agent_id, heartbeat_state)
+     end)}
   end
 
   def handle_info({:run_status_changed, payload}, socket) do
-    socket = case payload do
-      %{new_status: "completed", agent_id: aid, issue_id: iid} ->
-        a = Enum.find(socket.assigns.agents, &(&1.id == aid))
-        push_event(socket, "toast", %{message: "#{if a, do: a.name, else: "Agent"} completed work on #{iid}", type: "success", key: "run_#{iid}_completed"})
-      %{new_status: "failed", agent_id: aid, issue_id: iid} ->
-        a = Enum.find(socket.assigns.agents, &(&1.id == aid))
-        push_event(socket, "toast", %{message: "#{if a, do: a.name, else: "Agent"} failed on #{iid}", type: "error", key: "run_#{iid}_failed"})
-      _ -> socket
-    end
+    socket =
+      case payload do
+        %{new_status: "completed", agent_id: aid, issue_id: iid} ->
+          a = Enum.find(socket.assigns.agents, &(&1.id == aid))
+
+          push_event(socket, "toast", %{
+            message: "#{if a, do: a.name, else: "Agent"} completed work on #{iid}",
+            type: "success",
+            key: "run_#{iid}_completed"
+          })
+
+        %{new_status: "failed", agent_id: aid, issue_id: iid} ->
+          a = Enum.find(socket.assigns.agents, &(&1.id == aid))
+
+          push_event(socket, "toast", %{
+            message: "#{if a, do: a.name, else: "Agent"} failed on #{iid}",
+            type: "error",
+            key: "run_#{iid}_failed"
+          })
+
+        _ ->
+          socket
+      end
+
     {:noreply, socket}
   end
 
