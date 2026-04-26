@@ -224,4 +224,101 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Instructions File Path"
     end
   end
+
+  describe "Adapter Selection" do
+    test "shows adapter dropdown in spawn form", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/agents")
+
+      view |> element("button[phx-click='show_form']") |> render_click()
+
+      html = render(view)
+      assert html =~ "Adapter"
+      assert html =~ "Claude Code"
+      assert html =~ "Codex"
+      assert html =~ "HTTP"
+    end
+
+    test "shows claude_code specific fields when selected", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/agents")
+
+      view |> element("button[phx-click='show_form']") |> render_click()
+
+      view
+      |> element("select[name='agent[adapter]']")
+      |> render_change(%{"agent" => %{"adapter" => "claude_code"}})
+
+      html = render(view)
+      assert html =~ "API Key"
+      assert html =~ "Base URL"
+    end
+
+    test "shows http adapter specific fields when selected", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/agents")
+
+      view |> element("button[phx-click='show_form']") |> render_click()
+
+      view
+      |> element("select[name='agent[adapter]']")
+      |> render_change(%{"agent" => %{"adapter" => "http"}})
+
+      html = render(view)
+      assert html =~ "Webhook URL"
+      assert html =~ "Secret"
+    end
+
+    test "shows process adapter specific fields when selected", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/agents")
+
+      view |> element("button[phx-click='show_form']") |> render_click()
+
+      view
+      |> element("select[name='agent[adapter]']")
+      |> render_change(%{"agent" => %{"adapter" => "process"}})
+
+      html = render(view)
+      assert html =~ "Command Path"
+      assert html =~ "Arguments"
+    end
+  end
+
+  describe "Health Status Display" do
+    test "shows health status badge on agent detail page", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Healthy Agent",
+          role: :engineer,
+          status: :idle,
+          health_status: :healthy
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
+      assert html =~ "Healthy"
+    end
+
+    test "shows degraded health status", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Degraded Agent",
+          role: :engineer,
+          status: :idle,
+          health_status: :degraded
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
+      assert html =~ "Degraded"
+    end
+
+    test "shows unavailable health status", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Unavailable Agent",
+          role: :engineer,
+          status: :offline,
+          health_status: :unavailable
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
+      assert html =~ "Unavailable"
+    end
+  end
 end

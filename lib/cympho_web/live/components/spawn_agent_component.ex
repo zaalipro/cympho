@@ -29,9 +29,31 @@ defmodule CymphoWeb.SpawnAgentComponent do
               name="agent[adapter]"
               label="Adapter"
               options={[{"Default (none)", ""} | Enum.map(@adapter_options, &{adapter_label(&1), to_string(&1)})]}
+              phx-change="adapter_changed"
+              phx-target={@myself}
             />
 
-            <.input field={@form[:config]} label="Adapter Config" placeholder="{}" />
+            <%= case @selected_adapter do %>
+              <% :claude_code -> %>
+                <.input field={@form[:api_key]} label="API Key" type="password" />
+                <.input field={@form[:base_url]} label="Base URL" placeholder="https://api.anthropic.com" />
+              <% :codex -> %>
+                <.input field={@form[:api_key]} label="API Key" type="password" />
+                <.input field={@form[:model]} label="Model" placeholder="gpt-4" />
+              <% :cursor -> %>
+                <.input field={@form[:api_key]} label="API Key" type="password" />
+              <% :http -> %>
+                <.input field={@form[:webhook_url]} label="Webhook URL" type="url" />
+                <.input field={@form[:secret]} label="Secret" type="password" />
+              <% :openclaw -> %>
+                <.input field={@form[:invite_code]} label="Invite Code" />
+              <% :process -> %>
+                <.input field={@form[:command]} label="Command Path" placeholder="/usr/bin/node" />
+                <.input field={@form[:args]} label="Arguments" placeholder="script.js" />
+              <% _ -> %>
+                <% nil %>
+            <% end %>
+
             <.input field={@form[:instructions]} label="Instructions" type="textarea" />
 
             <:actions>
@@ -72,6 +94,7 @@ defmodule CymphoWeb.SpawnAgentComponent do
       |> assign(:spawnable_roles, Agents.spawnable_roles(assigns.current_agent))
       |> assign(:prefilled_role, prefilled_role(assigns.current_agent.role))
       |> assign(:adapter_options, Agents.adapter_options())
+      |> assign(:selected_adapter, nil)
 
     {:ok, socket}
   end
@@ -79,6 +102,11 @@ defmodule CymphoWeb.SpawnAgentComponent do
   @impl true
   def handle_event("show_form", _, socket) do
     {:noreply, assign(socket, :show_form, true)}
+  end
+
+  def handle_event("adapter_changed", %{"adapter" => adapter}, socket) do
+    selected_adapter = if adapter == "", do: nil, else: String.to_existing_atom(adapter)
+    {:noreply, assign(socket, :selected_adapter, selected_adapter)}
   end
 
   def handle_event("hide_form", _, socket) do
@@ -91,6 +119,7 @@ defmodule CymphoWeb.SpawnAgentComponent do
       agent_params
       |> normalize_adapter_param()
       |> normalize_role_param()
+      |> merge_adapter_config()
 
     case Agents.spawn_agent(agent_params, socket.assigns.current_agent.id) do
       {:ok, _agent} ->
@@ -141,4 +170,37 @@ defmodule CymphoWeb.SpawnAgentComponent do
   end
 
   defp normalize_role_param(params), do: params
+
+
+  defp merge_adapter_config(%{"adapter" => adapter} = params) when is_atom(adapter) do
+    adapter_config_keys = adapter_config_keys(adapter)
+    config = extract_adapter_config(params, adapter_config_keys)
+
+    params
+    |> Map.drop(adapter_config_keys)
+    |> Map.put("config", config)
+  end
+
+  defp merge_adapter_config(params), do: params
+
+  defp adapter_config_keys(:claude_code), do: [:api_key, :base_url]
+  defp adapter_config_keys(:codex), do: [:api_key, :model]
+  defp adapter_config_keys(:cursor), do: [:api_key]
+  defp adapter_config_keys(:http), do: [:webhook_url, :secret]
+  defp adapter_config_keys(:openclaw), do: [:invite_code]
+  defp adapter_config_keys(:process), do: [:command, :args]
+  defp adapter_config_keys(_), do: []
+
+  defp extract_adapter_config(params, keys) do
+    keys
+    |> Enum.reduce(%{}, fn key, acc ->
+      case Map.fetch(params, to_string(key)) do
+        {:ok, value} when not is_nil(value) and value != "" ->
+          Map.put(acc, to_string(key), value)
+
+        _ ->
+          acc
+      end
+    end)
+  end
 end

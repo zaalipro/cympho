@@ -23,6 +23,10 @@ defmodule Cympho.Agents.Agent do
     field :adapter, Ecto.Enum,
       values: [:claude_code, :codex, :cursor, :http, :openclaw, :process]
 
+    field :health_status, Ecto.Enum,
+      values: [:healthy, :degraded, :unavailable],
+      default: :healthy
+
     field :heartbeat_config, :map, default: %{}
     field :permissions, :map, default: %{}
     field :budget, :map, default: %{}
@@ -58,6 +62,7 @@ defmodule Cympho.Agents.Agent do
       :max_concurrent_jobs,
       :last_heartbeat_at,
       :adapter,
+      :health_status,
       :heartbeat_config,
       :permissions,
       :budget,
@@ -73,6 +78,7 @@ defmodule Cympho.Agents.Agent do
     |> validate_required([:name, :role])
     |> validate_inclusion(:role, [:engineer, :product_manager, :designer, :ceo, :cto])
     |> validate_inclusion(:status, [:idle, :running, :error, :sleeping, :offline])
+    |> validate_inclusion(:health_status, [:healthy, :degraded, :unavailable])
     |> unique_constraint(:url_key)
     |> validate_number(:max_concurrent_jobs, greater_than: 0)
     |> foreign_key_constraint(:parent_id)
@@ -81,6 +87,7 @@ defmodule Cympho.Agents.Agent do
   def status_options, do: [:idle, :running, :error, :sleeping, :offline]
   def role_options, do: [:engineer, :product_manager, :designer, :ceo, :cto]
   def adapter_options, do: [:claude_code, :codex, :cursor, :http, :openclaw, :process]
+  def health_status_options, do: [:healthy, :degraded, :unavailable]
 
   def status_changeset(agent, attrs) do
     agent
