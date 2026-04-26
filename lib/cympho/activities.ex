@@ -64,7 +64,9 @@ defmodule Cympho.Activities do
       {:ok, activity} ->
         company_id = issue_company_id(activity.issue_id)
         Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{company_id}:activities", {:activity_created, activity})
-        CymphoWeb.Endpoint.broadcast("activities:*", "activity_created", activity)
+        if company_id do
+          CymphoWeb.Endpoint.broadcast("activities:*", "activity_created", activity)
+        end
         CymphoWeb.Endpoint.broadcast("issue:#{activity.issue_id}", "activity_created", activity)
         {:ok, activity}
 
@@ -78,6 +80,7 @@ defmodule Cympho.Activities do
     |> Enum.each(fn {action, metadata} ->
       log_activity(%{
         issue_id: new_issue.id,
+        company_id: new_issue.company_id,
         actor_type: Map.get(attrs, :actor_type, "system"),
         actor_id: Map.get(attrs, :actor_id),
         action: action,
