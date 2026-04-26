@@ -123,7 +123,7 @@ defmodule Cympho.Orchestrator do
         start_engine_run(session)
         schedule_heartbeat_tick()
 
-        opts = run_opts(session, config)
+        opts = run_opts(session, config, module)
         session_id = module.run(session.issue, session.agent_id, self(), opts)
 
         {:noreply, %{session | session_id: session_id}}
@@ -398,9 +398,9 @@ defmodule Cympho.Orchestrator do
     %{adapter: adapter_type, config: config}
   end
 
-  defp run_opts(session, resolved_config) do
+  defp run_opts(session, resolved_config, adapter_module) do
     skills = Keyword.get(session.opts || [], :skills, [])
-    [skills: skills, config: resolved_config]
+    [skills: skills, config: resolved_config, adapter_module: adapter_module]
   end
 
   defp handle_resolution_error(session, error) do
