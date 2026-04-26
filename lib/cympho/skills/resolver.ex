@@ -51,6 +51,9 @@ defmodule Cympho.Skills.Resolver do
             cache_resolution(agent_id, plugins)
             result
 
+          {:error, _, _} = error ->
+            error
+
           {:error, _} = error ->
             error
         end
@@ -58,6 +61,8 @@ defmodule Cympho.Skills.Resolver do
   end
 
   def resolve(_, _), do: {:error, :invalid_id}
+
+  def resolve(_), do: {:error, :invalid_id}
 
   def resolve(agent_id) when is_binary(agent_id) do
     # Deprecated: use resolve/2 with explicit company_id for proper security
@@ -194,8 +199,8 @@ defmodule Cympho.Skills.Resolver do
 
       case resolve_plugin_dependencies(plugin, plugin_map, ordered_list, resolved, MapSet.put(visiting, plugin_id), [plugin_id | path]) do
         {:ok, new_ordered_list, new_resolved} ->
-          # Add plugin after all its dependencies
-          {:ok, [plugin_id | new_ordered_list], MapSet.put(new_resolved, plugin_id)}
+          # Add plugin after all its dependencies (append for proper topological order)
+          {:ok, new_ordered_list ++ [plugin_id], MapSet.put(new_resolved, plugin_id)}
 
         {:error, _, _} = error ->
           error
@@ -219,7 +224,10 @@ defmodule Cympho.Skills.Resolver do
       end)
       |> Enum.reject(&is_nil/1)
 
-    resolve_dfs(dep_ids, plugin_map, ordered_list, resolved, visiting, path)
+    case resolve_dfs(dep_ids, plugin_map, ordered_list, resolved, visiting, path) do
+      {:ok, {dep_order, dep_resolved}} -> {:ok, dep_order, dep_resolved}
+      {:error, _, _} = error -> error
+    end
   end
 
   defp find_plugin_by_identifier(identifier, version_req, plugin_map) do
