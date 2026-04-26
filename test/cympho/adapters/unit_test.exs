@@ -210,6 +210,10 @@ defmodule Cympho.Adapters.UnitTest do
       assert ProcessAdapter.name() == "Local Process"
     end
 
+    test "type/0 returns process atom" do
+      assert ProcessAdapter.type() == :process
+    end
+
     test "config_schema/0 returns valid schema" do
       schema = ProcessAdapter.config_schema()
 
@@ -241,12 +245,182 @@ defmodule Cympho.Adapters.UnitTest do
       assert {:error, _} = ProcessAdapter.validate_config(%{command: "test", timeout: 4_000_000})
     end
 
-    test "health_check/1 returns health result" do
+    test "health_check/1 returns healthy for valid command" do
       result = ProcessAdapter.health_check(%{command: "ls"})
 
       assert Map.has_key?(result, :status)
       assert Map.has_key?(result, :checked_at)
       assert result.status in [:healthy, :degraded, :unhealthy]
+      assert result.status == :healthy
+    end
+
+    test "health_check/1 returns unhealthy when no command configured" do
+      result = ProcessAdapter.health_check(%{})
+
+      assert result.status == :unhealthy
+      assert result.message == "No command configured"
+    end
+
+    test "health_check/1 returns degraded for missing command" do
+      result = ProcessAdapter.health_check(%{command: "nonexistent_command_xyz"})
+
+      assert result.status == :degraded
+      assert String.contains?(result.message, "not found")
+    end
+
+    test "available?/0 returns true for process adapter" do
+      assert ProcessAdapter.available?() == true
+    end
+
+    test "available?/1 returns false when no command configured" do
+      refute ProcessAdapter.available?(%{})
+      refute ProcessAdapter.available?(%{command: nil})
+      refute ProcessAdapter.available?(%{command: ""})
+    end
+
+    test "available?/1 returns true when command exists in PATH" do
+      assert ProcessAdapter.available?(%{command: "ls"})
+      assert ProcessAdapter.available?(%{command: "echo"})
+    end
+
+    test "available?/1 returns false when command does not exist in PATH" do
+      refute ProcessAdapter.available?(%{command: "nonexistent_command_xyz"})
+    end
+
+    test "run/4 spawns process and sends session_started" do
+      issue = %{id: "ISSUE-1", title: "Test Issue", description: "Test"}
+      agent_id = "agent-1"
+      config = %{
+        command: "echo",
+        args: ["-n", "hello"]
+      }
+
+      parent = self()
+      ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
+
+      assert is_reference(ref)
+
+      assert_receive {:session_started, ^ref}
+      assert_receive {:turn_completed, ^ref, result}
+      assert result.output =~ "hello"
+    end
+
+    test "run/4 passes issue payload as environment variable" do
+      issue = %{
+        id: "ISSUE-123",
+        title: "Test Issue",
+        description: "Test Description",
+        status: "open",
+        priority: "high"
+      }
+      agent_id = "agent-456"
+
+      # Use a shell command that prints the environment variable
+      parent = self()
+      config = %{
+        command: "sh",
+        args: ["-c", "echo $ISSUE_PAYLOAD"]
+      }
+
+      ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
+
+      assert is_reference(ref)
+
+      assert_receive {:session_started, ^ref}
+      assert_receive {:turn_completed, ^ref, result}
+
+      # Verify that issue payload was passed in JSON format
+      assert result.output =~ "ISSUE-123"
+      assert result.output =~ "Test Issue"
+    end
+
+    test "run/4 handles JSON output" do
+      issue = %{id: "ISSUE-1", title: "Test", description: "Test"}
+      agent_id = "agent-1"
+
+      # Create a command that outputs JSON
+      json_output = Jason.encode!(%{status: "success", data: "test result"})
+
+      parent = self()
+      config = %{
+        command: "echo",
+        args: [json_output]
+      }
+
+      ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
+
+      assert_receive {:session_started, ^ref}
+      assert_receive {:turn_completed, ^ref, result}
+
+      # JSON should be parsed into a map
+      assert is_map(result)
+      assert result.status == "success"
+      assert result.data == "test result"
+    end
+
+    test "run/4 handles non-JSON output" do
+      issue = %{id: "ISSUE-1", title: "Test", description: "Test"}
+      agent_id = "agent-1"
+
+      parent = self()
+      config = %{
+        command: "echo",
+        args: ["plain text output"]
+      }
+
+      ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
+
+      assert_receive {:session_started, ^ref}
+      assert_receive {:turn_completed, ^ref, result}
+
+      # Non-JSON output should be returned as-is
+      assert result.output =~ "plain text output"
+      assert result.raw =~ "plain text output"
+    end
+
+    test "run/4 handles command errors" do
+      issue = %{id: "ISSUE-1", title: "Test", description: "Test"}
+      agent_id = "agent-1"
+
+      parent = self()
+      config = %{
+        command: "ls",
+        args: ["/nonexistent_directory_xyz"]
+      }
+
+      ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
+
+      assert_receive {:session_started, ^ref}
+      assert_receive {:turn_ended_with_error, ^ref, {:exit_code, _code, _output}}
+    end
+
+    test "run/4 handles timeout" do
+      issue = %{id: "ISSUE-1", title: "Test", description: "Test"}
+      agent_id = "agent-1"
+
+      parent = self()
+      config = %{
+        command: "sleep",
+        args: ["10"],
+        timeout: 100
+      }
+
+      ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
+
+      assert_receive {:session_started, ^ref}
+      assert_receive {:turn_ended_with_error, ^ref, :timeout}
+    end
+
+    test "run/4 handles no command error" do
+      issue = %{id: "ISSUE-1", title: "Test", description: "Test"}
+      agent_id = "agent-1"
+
+      parent = self()
+      config = %{}
+
+      ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
+
+      assert_receive {:turn_ended_with_error, ^ref, :no_command}
     end
   end
 end
