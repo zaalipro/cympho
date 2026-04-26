@@ -34,32 +34,30 @@ defmodule Cympho.RateLimiting do
 
   def check_heartbeat_throttle(socket) do
     now = System.monotonic_time(:millisecond)
+    process_key = {__MODULE__, :heartbeat, socket.channel_pid || self()}
+    last_heartbeat = Process.get(process_key)
 
-    case Map.get(socket.assigns, :last_heartbeat_ts) do
-      nil ->
-        {:ok, Phoenix.Socket.assign(socket, :last_heartbeat_ts, now)}
-
-      last when now - last >= @heartbeat_min_interval_ms ->
-        {:ok, Phoenix.Socket.assign(socket, :last_heartbeat_ts, now)}
-
-      _ ->
-        {:error, :rate_limited}
+    if is_nil(last_heartbeat) or now - last_heartbeat >= @heartbeat_min_interval_ms do
+      Process.put(process_key, now)
+      {:ok, socket}
+    else
+      {:error, :rate_limited}
     end
   end
 
   def dedup_broadcast(topic, event, payload) do
     if Cympho.RateLimiting.BroadcastDedup.should_broadcast?(topic, event, payload) do
       CymphoWeb.Endpoint.broadcast(topic, event, payload)
+    else
+      {:ok, :deduplicated}
     end
-
-    :ok
   end
 
   def dedup_pubsub(pubsub, topic, message) do
     if Cympho.RateLimiting.BroadcastDedup.should_broadcast_pubsub?(topic, message) do
       Phoenix.PubSub.broadcast(pubsub, topic, message)
+    else
+      {:ok, :deduplicated}
     end
-
-    :ok
   end
 end
