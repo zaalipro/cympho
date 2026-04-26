@@ -4,7 +4,7 @@ defmodule CymphoWeb.Socket do
   channel "company:*", CymphoWeb.CompanyChannel
 
   @impl true
-  def connect(%{"token" => token}, socket, _connect_info) do
+  def connect(%{"token" => token}, socket, connect_info) do
     with {:ok, claims} <- Cympho.AgentAuthJWT.verify_token(token),
          {:ok, company_id} <- Cympho.AgentAuthJWT.get_company_id(claims),
          {:ok, agent_id} <- Cympho.AgentAuthJWT.get_agent_id(claims) do
@@ -12,7 +12,8 @@ defmodule CymphoWeb.Socket do
        socket
        |> assign(:company_id, company_id)
        |> assign(:user_id, agent_id)
-       |> assign(:auth_method, :jwt)}
+       |> assign(:auth_method, :jwt)
+       |> assign(:ip_address, extract_ip(connect_info))}
     else
       _ -> {:error, :unauthorized}
     end
@@ -26,7 +27,8 @@ defmodule CymphoWeb.Socket do
          socket
          |> assign(:company_id, company_id)
          |> assign(:user_id, user_id)
-         |> assign(:auth_method, :session)}
+         |> assign(:auth_method, :session)
+         |> assign(:ip_address, extract_ip(connect_info))}
 
       _ ->
         {:error, :unauthorized}
@@ -35,4 +37,11 @@ defmodule CymphoWeb.Socket do
 
   @impl true
   def id(socket), do: "socket:#{socket.assigns.company_id}:#{socket.assigns.user_id}"
+
+  defp extract_ip(connect_info) do
+    case connect_info[:peer_data] do
+      %{address: address} -> address
+      _ -> {127, 0, 0, 1}
+    end
+  end
 end

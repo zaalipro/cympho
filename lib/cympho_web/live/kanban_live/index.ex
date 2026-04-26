@@ -5,7 +5,6 @@ defmodule CymphoWeb.KanbanLive.Index do
   alias Cympho.Issues.Issue
   alias Cympho.AgentHeartbeat
   alias Cympho.Projects
-  alias CymphoWeb.Events
 
   @status_columns [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
 
@@ -159,11 +158,6 @@ defmodule CymphoWeb.KanbanLive.Index do
       _ -> socket
     end
     {:noreply, socket}
-  end
-
-  def handle_info({:run_status, payload}, socket) do
-    {type, msg} = Events.run_status_toast(payload)
-    {:noreply, push_event(socket, "toast", %{message: msg, type: type})}
   end
 
   @impl true

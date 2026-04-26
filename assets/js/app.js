@@ -63,13 +63,11 @@ const Toast = {
     const {message, type} = this._queue.shift();
     const container = document.getElementById("toast-container");
     if (!container) return;
-
     const el = document.createElement("div");
     el.className = `toast toast-${type}`;
     el.textContent = message;
     container.appendChild(el);
     requestAnimationFrame(() => el.classList.add("toast-visible"));
-
     const id = setTimeout(() => this._dismiss(el), this._DISMISS_MS);
     this._activeToasts.push({el, id});
   },
@@ -409,59 +407,6 @@ function initCompanySwitcher() {
   // Expose open function globally
   window.openCompanySwitcher = openModal;
 }
-
-// Toast notifications — global listener for phx:toast pushes from any LiveView
-(function() {
-  function showToast(message, type) {
-    let container = document.getElementById("toast-container");
-    if (!container) {
-      container = document.createElement("div");
-      container.id = "toast-container";
-      container.style.cssText = "position:fixed;top:1rem;right:1rem;z-index:9999;display:flex;flex-direction:column;gap:0.5rem;pointer-events:none;";
-      document.body.appendChild(container);
-    }
-
-    const colors = {
-      info:    "background:#3b82f6;color:#fff",
-      success: "background:#22c55e;color:#fff",
-      warning: "background:#eab308;color:#000",
-      error:   "background:#ef4444;color:#fff"
-    };
-
-    const toast = document.createElement("div");
-    toast.style.cssText = `${colors[type] || colors.info};padding:0.75rem 1rem;border-radius:0.5rem;box-shadow:0 4px 12px rgba(0,0,0,.3);max-width:24rem;pointer-events:auto;display:flex;align-items:center;gap:0.5rem;font-size:0.875rem;opacity:0;transform:translateX(100%);transition:all .3s ease;`;
-
-    const span = document.createElement("span");
-    span.style.cssText = "flex:1";
-    span.textContent = message;
-    toast.appendChild(span);
-
-    const close = document.createElement("button");
-    close.style.cssText = "background:none;border:none;color:inherit;cursor:pointer;font-size:1rem;line-height:1;padding:0 0 0 0.5rem;opacity:.7;";
-    close.textContent = "×";
-    close.addEventListener("click", () => removeToast(toast));
-    toast.appendChild(close);
-
-    container.appendChild(toast);
-    requestAnimationFrame(() => {
-      toast.style.opacity = "1";
-      toast.style.transform = "translateX(0)";
-    });
-
-    setTimeout(() => removeToast(toast), 5000);
-  }
-
-  function removeToast(el) {
-    if (!el.parentElement) return;
-    el.style.opacity = "0";
-    el.style.transform = "translateX(100%)";
-    setTimeout(() => el.remove(), 300);
-  }
-
-  window.addEventListener("phx:toast", (e) => {
-    showToast(e.detail.message, e.detail.type || "info");
-  });
-})();
 
 // Boot
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");

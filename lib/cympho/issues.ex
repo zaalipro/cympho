@@ -183,7 +183,7 @@ defmodule Cympho.Issues do
           metadata: %{title: issue.title}
         })
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_created, issue})
+        Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_created, issue})
         CymphoWeb.Events.broadcast_issue_update(issue, :issue_created)
         {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
@@ -218,7 +218,7 @@ defmodule Cympho.Issues do
     with {:ok, updated} <- do_update_issue(issue, attrs) do
       updated = Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])
       Activities.log_issue_changes(old_issue, updated, attrs)
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:issues", {:issue_updated, updated})
+      Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{updated.company_id}:issues", {:issue_updated, updated})
 
       event_type = determine_update_event_type(old_issue, updated, attrs)
       CymphoWeb.Events.broadcast_issue_update(updated, event_type, build_update_metadata(old_issue, updated, attrs))
@@ -517,7 +517,7 @@ defmodule Cympho.Issues do
               metadata: %{blocker_id: blocker_issue.id}
             })
 
-            Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_updated, issue})
+            Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_updated, issue})
             {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
           {:error, reason} ->
@@ -578,7 +578,7 @@ defmodule Cympho.Issues do
         metadata: %{blocker_id: blocker_issue.id}
       })
 
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_updated, issue})
+      Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_updated, issue})
       {:ok, issue}
     end
   end
@@ -589,7 +589,7 @@ defmodule Cympho.Issues do
     case Repo.delete(issue) do
       {:ok, _issue} ->
         Approvals.cancel_pending_for_issue(issue.id)
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_deleted, issue.id})
+        Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_deleted, issue.id})
         :ok
 
       {:error, changeset} ->

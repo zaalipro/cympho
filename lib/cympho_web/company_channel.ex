@@ -1,21 +1,35 @@
 defmodule CymphoWeb.CompanyChannel do
   @moduledoc """
-  Company-level WebSocket channel.
+  Main company channel handling WebSocket connections.
 
-  Handles scoped topic subscriptions (`company:<id>:<resource>`) with
-  per-socket rate limiting (10 events/sec), heartbeat throttling (1/sec),
-  and IP-based join rate limiting (10 joins/sec).
+  ## Rate Limiting
+
+  This channel enforces several rate limits to prevent abuse and flooding:
+
+  - **Per-socket message rate limit:** Each connected socket is limited to
+    10 events per second using a token bucket algorithm. Events exceeding
+    this limit receive a `{:error, %{reason: "rate_limited"}}` reply.
+
+  - **Heartbeat throttling:** Heartbeat events (`"heartbeat"` push) are
+    limited to 1 per second per client. Excess heartbeats are rejected
+    with a rate-limit error.
+
+  - **IP-based join rate limit:** Channel joins are limited to 10 per second
+    per IP address to prevent thundering herd attacks. Excess join attempts
+    receive `{:error, %{reason: "rate_limited"}}`.
   """
 
   use CymphoWeb, :channel
 
-  alias CymphoWeb.RateLimiter
+  alias Cympho.RateLimiting
 
   @impl true
   def join("company:" <> rest, payload, socket) do
-    case RateLimiter.check_join(client_ip(socket)) do
+    ip = Map.get(socket.assigns, :ip_address, {127, 0, 0, 1})
+
+    case Cympho.RateLimiting.IpRateLimiter.check_join(ip) do
       :ok ->
-        join_topic(rest, payload, socket)
+        do_join(rest, payload, socket)
 
       {:error, :rate_limited} ->
         {:error, %{reason: "rate_limited"}}
@@ -27,11 +41,10 @@ defmodule CymphoWeb.CompanyChannel do
     {:error, %{reason: "invalid_topic"}}
   end
 
-  defp join_topic(rest, payload, socket) do
+  defp do_join(rest, payload, socket) do
     case String.split(rest, ":", parts: 2) do
       [company_id] ->
         if socket.assigns.company_id == company_id do
-          socket = maybe_assign_last_event_id(socket, payload)
           send(self(), :after_join)
           {:ok, socket}
         else
@@ -49,20 +62,14 @@ defmodule CymphoWeb.CompanyChannel do
 
   @impl true
   def handle_info(:after_join, socket) do
-    socket = maybe_replay_events(socket)
     {:noreply, socket}
   end
 
   @impl true
   def handle_in("ping", _payload, socket) do
-    {:reply, {:ok, %{pong: true}}, socket}
-  end
-
-  @impl true
-  def handle_in("heartbeat", _payload, socket) do
-    case RateLimiter.check_heartbeat(socket_id(socket)) do
-      :ok ->
-        {:reply, {:ok, %{ts: System.system_time(:millisecond)}}, socket}
+    case RateLimiting.check_message_rate(socket) do
+      {:ok, socket} ->
+        {:reply, {:ok, %{pong: true}}, socket}
 
       {:error, :rate_limited} ->
         {:reply, {:error, %{reason: "rate_limited"}}, socket}
@@ -70,20 +77,26 @@ defmodule CymphoWeb.CompanyChannel do
   end
 
   @impl true
-  def handle_in(event, payload, socket) do
-    case RateLimiter.check_push(socket_id(socket)) do
-      :ok ->
+  def handle_in("heartbeat", payload, socket) do
+    with {:ok, socket} <- RateLimiting.check_heartbeat_throttle(socket),
+         {:ok, socket} <- RateLimiting.check_message_rate(socket) do
+      broadcast(socket, "heartbeat", payload)
+      {:noreply, socket}
+    else
+      {:error, :rate_limited} ->
+        {:reply, {:error, %{reason: "rate_limited"}}, socket}
+    end
+  end
+
+  @impl true
+  def handle_in(_event, _payload, socket) do
+    case RateLimiting.check_message_rate(socket) do
+      {:ok, socket} ->
         {:noreply, socket}
 
       {:error, :rate_limited} ->
         {:reply, {:error, %{reason: "rate_limited"}}, socket}
     end
-  end
-
-  @impl true
-  def terminate(_reason, socket) do
-    RateLimiter.cleanup_socket(socket_id(socket))
-    :ok
   end
 
   defp dispatch_sub_topic(topic, "activities", _payload, socket) do
@@ -105,25 +118,4 @@ defmodule CymphoWeb.CompanyChannel do
   defp dispatch_sub_topic(_topic, _sub, _payload, _socket) do
     {:error, %{reason: "invalid_topic"}}
   end
-
-  defp maybe_assign_last_event_id(socket, %{"last_event_id" => id}) when is_integer(id) do
-    Phoenix.Socket.assign(socket, :last_event_id, id)
-  end
-
-  defp maybe_assign_last_event_id(socket, _payload), do: socket
-
-  defp maybe_replay_events(%{assigns: %{last_event_id: last_id}} = socket) do
-    case Cympho.EventStore.fetch_since(socket.topic, last_id) do
-      {:ok, events} ->
-        for event <- events, do: push(socket, "replay", event)
-        socket
-
-      {:error, :replay_window_expired} ->
-        push(socket, "replay_expired", %{reason: "replay_window_expired"})
-        socket
-    end
-  end
-
-  defp maybe_replay_events(socket), do: socket
->>>>>>> origin/LLM-106c/event-replay
 end

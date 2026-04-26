@@ -30,10 +30,9 @@ defmodule Cympho.Application do
       {Cympho.Plugins.Supervisor, []},
       # Skill hot-reload for development
       {Cympho.Skills.HotReloader, []},
-      # Event store for WebSocket replay
-      Cympho.EventStore,
-      # Rate limiting for WebSocket channels
-      CymphoWeb.RateLimiter,
+      # Rate limiting
+      Cympho.RateLimiting.BroadcastDedup,
+      Cympho.RateLimiting.IpRateLimiter,
       CymphoWeb.Endpoint
     ]
 

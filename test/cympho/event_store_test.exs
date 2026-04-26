@@ -2,14 +2,7 @@ defmodule Cympho.EventStoreTest do
   use ExUnit.Case, async: false
 
   setup do
-    # Start EventStore if not already running (app may not start in test mode)
-    case GenServer.whereis(Cympho.EventStore) do
-      nil ->
-        {:ok, _pid} = Cympho.EventStore.start_link(max_events_per_topic: 5)
-        on_exit(fn -> GenServer.stop(Cympho.EventStore, :normal) end)
-      _pid ->
-        :ok
-    end
+    Cympho.EventStore.purge_old(0)
     :ok
   end
 
