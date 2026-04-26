@@ -1,11 +1,13 @@
 defmodule CymphoWeb.DashboardLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Dashboard
+  alias CymphoWeb.Events
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket) do
+    if connected?(socket) && socket.assigns[:current_company] do
       :timer.send_interval(:timer.seconds(30), self(), :refresh)
+      Events.subscribe_to_runs(socket.assigns.current_company.id)
     end
 
     socket =
@@ -24,6 +26,11 @@ defmodule CymphoWeb.DashboardLive.Index do
   @impl true
   def handle_info(:refresh, socket) do
     {:noreply, assign_metrics(socket)}
+  end
+
+  def handle_info({:run_status, payload}, socket) do
+    {type, msg} = Events.run_status_toast(payload)
+    {:noreply, socket |> push_event("toast", %{message: msg, type: type}) |> assign_metrics()}
   end
 
   defp assign_metrics(socket) do

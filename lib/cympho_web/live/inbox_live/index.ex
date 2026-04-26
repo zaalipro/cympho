@@ -2,6 +2,7 @@ defmodule CymphoWeb.InboxLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Inbox
   alias Cympho.Agents
+  alias CymphoWeb.Events
 
   @impl true
   def mount(_params, _session, socket) do
@@ -15,6 +16,10 @@ defmodule CymphoWeb.InboxLive.Index do
 
     if connected?(socket) && socket.assigns.selected_agent_id do
       Inbox.subscribe(socket.assigns.selected_agent_id)
+    end
+
+    if connected?(socket) && socket.assigns[:current_company] do
+      Events.subscribe_to_runs(socket.assigns.current_company.id)
     end
 
     {:ok, socket}
@@ -41,6 +46,11 @@ defmodule CymphoWeb.InboxLive.Index do
 
   def handle_info({:inbox_created, _state}, socket) do
     {:noreply, load_inbox(socket)}
+  end
+
+  def handle_info({:run_status, payload}, socket) do
+    {type, msg} = Events.run_status_toast(payload)
+    {:noreply, socket |> push_event("toast", %{message: msg, type: type}) |> load_inbox()}
   end
 
   @impl true

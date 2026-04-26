@@ -5,6 +5,7 @@ defmodule CymphoWeb.KanbanLive.Index do
   alias Cympho.Issues.Issue
   alias Cympho.AgentHeartbeat
   alias Cympho.Projects
+  alias CymphoWeb.Events
 
   @status_columns [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
 
@@ -13,6 +14,7 @@ defmodule CymphoWeb.KanbanLive.Index do
     if connected?(socket) && socket.assigns[:current_company] do
       Issues.subscribe(socket.assigns.current_company.id)
       Cympho.Agents.subscribe(socket.assigns.current_company.id)
+      Events.subscribe_to_runs(socket.assigns.current_company.id)
     end
     Phoenix.PubSub.subscribe(Cympho.PubSub, "agent_heartbeats")
 
@@ -139,6 +141,11 @@ defmodule CymphoWeb.KanbanLive.Index do
      update(socket, :agent_heartbeat_states, fn states ->
        Map.put(states, agent_id, heartbeat_state)
      end)}
+  end
+
+  def handle_info({:run_status, payload}, socket) do
+    {type, msg} = Events.run_status_toast(payload)
+    {:noreply, push_event(socket, "toast", %{message: msg, type: type})}
   end
 
   @impl true

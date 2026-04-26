@@ -143,14 +143,29 @@ defmodule CymphoWeb.Events do
     }
   end
 
-  defp build_run_payload(%Run{id: run_id, status: status, adapter: adapter, issue_id: issue_id}, event_type) do
+  defp build_run_payload(%Run{id: run_id, status: status, adapter: adapter, issue_id: issue_id, agent_id: agent_id}, event_type) do
     %{
       event_type: event_type,
       resource_id: run_id,
       issue_id: issue_id,
+      agent_id: agent_id,
       status: status,
       adapter: adapter,
       timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
     }
+  end
+
+  @doc """
+  Converts a run status event payload into a toast type and message.
+  """
+  @spec run_status_toast(map()) :: {String.t(), String.t()}
+  def run_status_toast(%{event_type: event_type, issue_id: issue_id}) do
+    case event_type do
+      :run_started   -> {"info",    "Run started for issue #{issue_id}"}
+      :run_completed -> {"success", "Run completed for issue #{issue_id}"}
+      :run_failed    -> {"error",   "Run failed for issue #{issue_id}"}
+      :run_cancelled -> {"warning", "Run cancelled for issue #{issue_id}"}
+      _              -> {"info",    "Run status updated for issue #{issue_id}"}
+    end
   end
 end

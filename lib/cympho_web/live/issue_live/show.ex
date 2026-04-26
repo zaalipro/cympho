@@ -11,12 +11,14 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.IssueThreadInteractions
   alias Cympho.WorkProducts
   alias Cympho.ToolCallTraces
+  alias CymphoWeb.Events
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     if connected?(socket) && socket.assigns[:current_company] do
       Issues.subscribe(socket.assigns.current_company.id)
       Comments.subscribe(socket.assigns.current_company.id)
+      Events.subscribe_to_runs(socket.assigns.current_company.id)
     end
     Documents.subscribe()
 
@@ -534,6 +536,12 @@ defmodule CymphoWeb.IssueLive.Show do
       documents = Documents.list_documents(socket.assigns.issue.id)
       {:noreply, assign(socket, documents: documents)}
     end
+  end
+
+  def handle_info({:run_status, payload}, socket) do
+    {type, msg} = Events.run_status_toast(payload)
+    runs = HeartbeatEngine.list_runs_for_issue(socket.assigns.issue.id)
+    {:noreply, socket |> assign(:runs, runs) |> push_event("toast", %{message: msg, type: type})}
   end
 
   defp valid_status_options(current_status) do

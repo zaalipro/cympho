@@ -109,7 +109,10 @@ defmodule Cympho.HeartbeatEngine do
     run
     |> change(%{status: "cancelled", completed_at: now, last_heartbeat_at: now})
     |> Repo.update()
-    |> tap_ok(&log_audit(&1, "run_cancelled"))
+    |> tap_ok(fn updated ->
+      log_audit(updated, "run_cancelled")
+      CymphoWeb.Events.broadcast_run_status(updated, :run_cancelled)
+    end)
   end
 
   def cancel_run(%Run{status: status}), do: {:error, {:invalid_status, status}}
