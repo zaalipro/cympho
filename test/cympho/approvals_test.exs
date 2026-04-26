@@ -95,10 +95,12 @@ defmodule Cympho.ApprovalsTest do
     end
 
     test "broadcasts approval_resolved event" do
-      agent = insert_agent()
-      {:ok, approval} = create_test_approval(agent)
+      company = insert_company()
+      agent = insert_agent(company_id: company.id)
+      issue = insert_issue(company_id: company.id)
+      {:ok, approval} = create_test_approval(agent, issue)
 
-      Approvals.subscribe()
+      Approvals.subscribe(company.id)
       {:ok, _} = Approvals.resolve_approval(approval.id, :approved, %{})
 
       assert_received {:approval_resolved, _}
@@ -215,38 +217,72 @@ defmodule Cympho.ApprovalsTest do
     end
   end
 
-  defp insert_agent do
-    %{id: id} =
-      Cympho.Repo.insert!(%Cympho.Agents.Agent{
-        name: "Test Agent #{System.unique_integer()}",
-        role: :engineer,
-        status: :idle
-      })
+  defp insert_company do
+    Cympho.Repo.insert!(%Cympho.Companies.Company{
+      name: "Test Company #{System.unique_integer()}",
+      slug: "test-company-#{System.unique_integer()}"
+    })
+  end
 
+  defp insert_agent(opts \\ []) do
+    agent = %Cympho.Agents.Agent{
+      name: "Test Agent #{System.unique_integer()}",
+      role: :engineer,
+      status: :idle
+    }
+
+    agent = if opts[:company_id] do
+      %{agent | company_id: opts[:company_id]}
+    else
+      agent
+    end
+
+    %{id: id} = Cympho.Repo.insert!(agent)
     Cympho.Repo.get!(Cympho.Agents.Agent, id)
   end
 
-  defp insert_issue do
-    project =
-      Cympho.Repo.insert!(%Cympho.Projects.Project{
-        name: "Test Project #{System.unique_integer()}",
-        prefix: "TST"
-      })
+  defp insert_issue(opts \\ []) do
+    project = %Cympho.Projects.Project{
+      name: "Test Project #{System.unique_integer()}",
+      prefix: "TST"
+    }
 
-    {:ok, issue} =
-      Cympho.Issues.create_issue(%{
-        title: "Test Issue",
-        description: "Test description",
-        project_id: project.id
-      })
+    project = if opts[:company_id] do
+      %{project | company_id: opts[:company_id]}
+    else
+      project
+    end
 
+    project = Cympho.Repo.insert!(project)
+
+    issue_attrs = %{
+      title: "Test Issue",
+      description: "Test description",
+      project_id: project.id
+    }
+
+    issue_attrs = if opts[:company_id] do
+      Map.put(issue_attrs, :company_id, opts[:company_id])
+    else
+      issue_attrs
+    end
+
+    {:ok, issue} = Cympho.Issues.create_issue(issue_attrs)
     issue
   end
 
-  defp create_test_approval(agent) do
-    Approvals.create_approval(%{
+  defp create_test_approval(agent, issue \\ nil) do
+    attrs = %{
       type: "request_board_approval",
       requested_by_agent_id: agent.id
-    })
+    }
+
+    attrs = if issue do
+      Map.put(attrs, :issue_ids, [issue.id])
+    else
+      attrs
+    end
+
+    Approvals.create_approval(attrs)
   end
 end

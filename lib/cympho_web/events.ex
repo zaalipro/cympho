@@ -85,22 +85,22 @@ defmodule CymphoWeb.Events do
   @doc """
   Subscribe to issue events for a company via PubSub (for LiveView).
   """
-  def subscribe_to_issues do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "issues")
+  def subscribe_to_issues(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:issues")
   end
 
   @doc """
   Subscribe to comment events for a project via PubSub (for LiveView).
   """
-  def subscribe_to_comments do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "issues")
+  def subscribe_to_comments(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:comments")
   end
 
   @doc """
   Subscribe to run status events for a company via PubSub (for LiveView).
   """
-  def subscribe_to_runs do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "runs")
+  def subscribe_to_runs(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:runs")
   end
 
   @doc """

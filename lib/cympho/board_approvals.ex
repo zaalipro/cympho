@@ -77,7 +77,7 @@ defmodule Cympho.BoardApprovals do
           }
         )
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "board_approvals", {:board_approval_created, approval})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{approval.company_id}:approvals", {:board_approval_created, approval})
         {:ok, approval}
 
       error ->
@@ -117,7 +117,7 @@ defmodule Cympho.BoardApprovals do
 
         Phoenix.PubSub.broadcast(
           Cympho.PubSub,
-          "board_approvals",
+          "company:#{board_approval.company_id}:approvals",
           {:board_vote_cast, vote_record}
         )
 
@@ -159,9 +159,11 @@ defmodule Cympho.BoardApprovals do
 
         Phoenix.PubSub.broadcast(
           Cympho.PubSub,
-          "board_approvals",
+          "company:#{updated.company_id}:approvals",
           {:board_approval_resolved, updated}
         )
+
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "system:board_approvals", {:board_approval_resolved, updated})
 
         # Execution is handled by BoardApprovalActionExecutor GenServer
         # to prevent race conditions and ensure consistent async processing
@@ -194,9 +196,11 @@ defmodule Cympho.BoardApprovals do
 
           Phoenix.PubSub.broadcast(
             Cympho.PubSub,
-            "board_approvals",
+            "company:#{updated.company_id}:approvals",
             {:board_approval_cancelled, updated}
           )
+
+          Phoenix.PubSub.broadcast(Cympho.PubSub, "system:board_approvals", {:board_approval_cancelled, updated})
 
           {:ok, updated}
 
@@ -221,8 +225,8 @@ defmodule Cympho.BoardApprovals do
   @doc """
   Subscribes to board approval events.
   """
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "board_approvals")
+  def subscribe(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:approvals")
   end
 
   @doc """

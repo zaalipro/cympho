@@ -4,7 +4,9 @@ defmodule CymphoWeb.BoardApprovalLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    BoardApprovals.subscribe()
+    if connected?(socket) && socket.assigns[:current_company] do
+      BoardApprovals.subscribe(socket.assigns.current_company.id)
+    end
 
     case BoardApprovals.get_board_approval(id) do
       {:ok, approval} ->

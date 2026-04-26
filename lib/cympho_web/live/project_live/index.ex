@@ -5,7 +5,9 @@ defmodule CymphoWeb.ProjectLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    Projects.subscribe()
+    if connected?(socket) && socket.assigns[:current_company] do
+      Projects.subscribe(socket.assigns.current_company.id)
+    end
     {:ok, assign(socket, :projects, Projects.list_projects())}
   end
 

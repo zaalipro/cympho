@@ -53,7 +53,7 @@ defmodule Cympho.AgentGovernance do
 
           Decisions.record_governance_decision(updated, "resume", "approved", actor)
 
-          Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_resumed, updated})
+          Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:agents", {:agent_resumed, updated})
           {:ok, updated}
 
         error ->
@@ -100,8 +100,8 @@ defmodule Cympho.AgentGovernance do
   @doc """
   Subscribes to agent governance events.
   """
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "agents")
+  def subscribe(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:agents")
   end
 
   defp request_board_approval_for_pause(agent, opts, actor) do
@@ -187,7 +187,7 @@ defmodule Cympho.AgentGovernance do
 
         Decisions.record_governance_decision(updated, "pause", "approved", actor)
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_paused, updated})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:agents", {:agent_paused, updated})
         {:ok, updated}
 
       error ->
@@ -214,7 +214,7 @@ defmodule Cympho.AgentGovernance do
 
         Decisions.record_governance_decision(updated, "terminate", "approved", actor)
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_terminated, updated})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:agents", {:agent_terminated, updated})
         {:ok, updated}
 
       error ->

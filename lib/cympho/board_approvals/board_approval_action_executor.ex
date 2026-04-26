@@ -17,7 +17,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
   @impl true
   def init(_opts) do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "board_approvals")
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "system:board_approvals")
     {:ok, %{}}
   end
 

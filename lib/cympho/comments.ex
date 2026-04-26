@@ -48,7 +48,7 @@ defmodule Cympho.Comments do
 
           issue ->
             issue = Repo.preload(issue, :comments)
-            Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_created, issue})
+            Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:comments", {:comment_created, issue})
         end
 
         CymphoWeb.Events.broadcast_comment(comment, :comment_created)
@@ -80,7 +80,7 @@ defmodule Cympho.Comments do
 
           issue ->
             issue = Repo.preload(issue, :comments)
-            Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_updated, issue})
+            Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:comments", {:comment_updated, issue})
         end
 
         CymphoWeb.Events.broadcast_comment(comment, :comment_updated)
@@ -106,7 +106,7 @@ defmodule Cympho.Comments do
 
           issue ->
             issue = Repo.preload(issue, :comments)
-            Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:comment_deleted, issue})
+            Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:comments", {:comment_deleted, issue})
         end
 
         :ok
@@ -119,7 +119,7 @@ defmodule Cympho.Comments do
   @doc """
   Subscribes to issue updates for real-time comment updates.
   """
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "issues")
+  def subscribe(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:comments")
   end
 end

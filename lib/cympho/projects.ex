@@ -75,8 +75,8 @@ defmodule Cympho.Projects do
   @doc """
   Subscribes to project updates.
   """
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "projects")
+  def subscribe(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:projects")
   end
 
   @doc """
