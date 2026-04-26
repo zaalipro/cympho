@@ -38,7 +38,7 @@ defmodule CymphoWeb.Events do
     topic = "company:#{company_id}:issues"
     payload = build_event_payload(event_type, issue_id, metadata, issue)
 
-    CymphoWeb.Endpoint.broadcast(topic, "issue_update", payload)
+    Cympho.RateLimiting.dedup_broadcast(topic, "issue_update", payload)
   end
 
   @doc """
@@ -50,7 +50,7 @@ defmodule CymphoWeb.Events do
       %Issue{company_id: company_id, project_id: project_id} ->
         topic = "company:#{company_id}:project:#{project_id}:comments"
         payload = build_comment_payload(comment, event_type)
-        CymphoWeb.Endpoint.broadcast(topic, "comment", payload)
+        Cympho.RateLimiting.dedup_broadcast(topic, "comment", payload)
     end
   end
 
@@ -63,7 +63,7 @@ defmodule CymphoWeb.Events do
       %Issue{company_id: company_id} ->
         topic = "company:#{company_id}:runs"
         payload = build_run_payload(run, event_type)
-        CymphoWeb.Endpoint.broadcast(topic, "run_status", payload)
+        Cympho.RateLimiting.dedup_broadcast(topic, "run_status", payload)
     end
   end
 
@@ -79,7 +79,7 @@ defmodule CymphoWeb.Events do
       data: heartbeat_data
     }
 
-    CymphoWeb.Endpoint.broadcast(topic, "heartbeat", payload)
+    Cympho.RateLimiting.dedup_broadcast(topic, "heartbeat", payload)
   end
 
   @doc """

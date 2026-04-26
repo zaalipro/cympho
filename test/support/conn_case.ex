@@ -10,8 +10,12 @@ defmodule CymphoWeb.ConnCase do
     quote do
       import Plug.Conn
       import Phoenix.ConnTest
-      import Phoenix.VerifiedRoutes
       import CymphoWeb.ConnCase
+
+      use Phoenix.VerifiedRoutes,
+        endpoint: CymphoWeb.Endpoint,
+        router: CymphoWeb.Router,
+        statics: CymphoWeb.static_paths()
 
       alias CymphoWeb.Router.Helpers, as: Routes
 
