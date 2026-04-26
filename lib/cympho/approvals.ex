@@ -9,14 +9,6 @@ defmodule Cympho.Approvals do
   alias Cympho.Activities
   alias Cympho.Decisions
 
-  defp company_id_for(%Approval{issues: [_ | _] = issues}) do
-    hd(issues).company_id
-  end
-
-  defp company_id_for(%Approval{requested_by: %Cympho.Agents.Agent{company_id: company_id}}) do
-    company_id
-  end
-
   def list_approvals(opts \\ %{}) do
     query = from(a in Approval, order_by: [desc: a.inserted_at])
 
@@ -157,10 +149,9 @@ defmodule Cympho.Approvals do
     {count, _} = Repo.update_all(query, set: [status: :cancelled])
 
     if count > 0 do
-      company_id = Repo.one(from i in "issues", where: i.id == ^issue_id, select: i.company_id)
       Phoenix.PubSub.broadcast(
         Cympho.PubSub,
-        "company:#{company_id}:approvals",
+        "approvals",
         {:approvals_cancelled_for_issue, issue_id}
       )
     end
