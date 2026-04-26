@@ -44,13 +44,14 @@ defmodule Cympho.RateLimitingTest do
 
     test "rejects heartbeat within 1 second" do
       socket = %Phoenix.Socket{assigns: %{}}
-      {:ok, socket} = RateLimiting.check_heartbeat_throttle(socket)
+      {:ok, _} = RateLimiting.check_heartbeat_throttle(socket)
       assert {:error, :rate_limited} = RateLimiting.check_heartbeat_throttle(socket)
     end
 
     test "allows heartbeat after 1 second" do
-      now = System.monotonic_time(:millisecond)
-      socket = %Phoenix.Socket{assigns: %{last_heartbeat_ts: now - 1_001}}
+      process_key = {Cympho.RateLimiting, :heartbeat, self()}
+      Process.put(process_key, System.monotonic_time(:millisecond) - 1_001)
+      socket = %Phoenix.Socket{assigns: %{}}
       assert {:ok, _} = RateLimiting.check_heartbeat_throttle(socket)
     end
   end
