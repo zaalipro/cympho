@@ -21,7 +21,7 @@ defmodule Cympho.Orchestrator do
   """
 
   @enforce_keys [:issue, :agent_id]
-  defstruct [:issue, :agent_id, :session_id, turn_count: 0, tool_traces: %{}, opts: []]
+  defstruct [:issue, :agent_id, :session_id, :run_id, turn_count: 0, tool_traces: %{}, opts: []]
 
   use GenServer
   alias Cympho.{Issues, Comments, Agents, Activities, HeartbeatEngine}
