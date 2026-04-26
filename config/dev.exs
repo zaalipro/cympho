@@ -1,5 +1,7 @@
 import Config
 
+config :cympho, :env, :dev
+
 config :cympho, Cympho.Repo,
   username: "postgres",
   password: "postgres",
