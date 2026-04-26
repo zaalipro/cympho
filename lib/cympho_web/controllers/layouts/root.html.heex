@@ -32,8 +32,8 @@
         class="w-60 bg-panel border-r border-border-subtle flex-col fixed inset-y-0 left-0 z-50 hidden md:flex lg:translate-x-0 -translate-x-full transition-transform duration-200"
         id="sidebar"
       >
-        <.company_rail company={assigns[:current_company]} collapsed={assigns[:rail_collapsed] || false} />
-        <.nav_rail current_path={@conn.request_path} collapsed={assigns[:rail_collapsed] || false} />
+        <.company_rail company={assigns[:current_company]} />
+        <.nav_rail current_path={@conn.request_path} />
         <!-- Keyboard shortcuts hint -->
         <div class="px-3 pb-4">
           <button
@@ -44,8 +44,8 @@
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707"/>
             </svg>
-            <span :if={!assigns[:rail_collapsed]}>Shortcuts</span>
-            <kbd class={["text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary", assigns[:rail_collapsed] && "ml-auto"]}>?</kbd>
+            <span>Shortcuts</span>
+            <kbd class="text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary ml-auto">?</kbd>
           </button>
         </div>
       </aside>

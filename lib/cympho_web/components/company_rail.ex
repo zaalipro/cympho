@@ -3,7 +3,6 @@ defmodule CymphoWeb.Components.CompanyRail do
   alias Cympho.Companies.Company
 
   attr :company, :map, default: nil
-  attr :collapsed, :boolean, default: false
   attr :rest, :global
 
   def company_rail(assigns) do
@@ -14,7 +13,7 @@ defmodule CymphoWeb.Components.CompanyRail do
         class="flex items-center gap-2 hover:bg-white/[0.04] -mx-4 px-4 py-3 transition-colors rounded-lg flex-1"
         onclick="window.openCompanySwitcher && window.openCompanySwitcher()"
       >
-        <.company_display company={@company} collapsed={@collapsed} />
+        <.company_display company={@company} />
         <svg class="w-4 h-4 text-text-quaternary ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
         </svg>
@@ -24,19 +23,10 @@ defmodule CymphoWeb.Components.CompanyRail do
   end
 
   attr :company, :map, default: nil
-  attr :collapsed, :boolean, default: false
 
   def company_display(%{company: nil} = assigns) do
     ~H"""
     <span class="text-lg font-590 tracking-tight text-text-primary">Cympho</span>
-    """
-  end
-
-  def company_display(%{company: company, collapsed: true} = assigns) do
-    ~H"""
-    <div class="w-8 h-8 rounded-lg bg-brand/10 border-l-2 border-brand flex items-center justify-center">
-      <span class="text-sm font-590 text-brand">{company_initials(company.name)}</span>
-    </div>
     """
   end
 
@@ -49,7 +39,7 @@ defmodule CymphoWeb.Components.CompanyRail do
       <div :if={!company.logo_url} class="w-8 h-8 rounded-lg bg-brand/10 border-l-2 border-brand flex items-center justify-center">
         <span class="text-sm font-590 text-brand">{company_initials(company.name)}</span>
       </div>
-      <span class="text-lg font-590 tracking-tight text-text-primary truncate">{company.name}</span>
+      <span class="text-lg font-590 tracking-tight text-text-primary truncate hidden md:inline">{company.name}</span>
     </div>
     """
   end
