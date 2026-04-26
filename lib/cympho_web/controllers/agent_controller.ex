@@ -80,6 +80,17 @@ defmodule CymphoWeb.AgentController do
     end
   end
 
+  def health_status(conn, %{"id" => id}) do
+    with {:ok, agent} <- Agents.get_agent(id) do
+      json(conn, %{data: CymphoWeb.AgentJSON.health_status(agent)})
+    end
+  end
+
+  def all_health_statuses(conn, _params) do
+    agents = Agents.list_agents()
+    json(conn, %{data: CymphoWeb.AgentJSON.all_health_statuses(agents)})
+  end
+
   defp translate_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
       Regex.replace(~r"%{(\w+)}", msg, fn _, key ->

@@ -21,6 +21,7 @@ defmodule Cympho.Application do
       Cympho.Scheduler,
       # Adapter system
       Cympho.Adapters.Registry,
+      {Cympho.AgentAdapters.HealthChecker, []},
       # Plugin system
       {Registry, keys: :unique, name: Cympho.PluginRegistry},
       Cympho.Plugins.Registry,

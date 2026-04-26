@@ -5,6 +5,7 @@ defmodule CymphoWeb.AgentLive.Index do
   @impl true
   def mount(_params, session, socket) do
     Agents.subscribe(socket.assigns.current_company.id)
+    Cympho.AgentAdapters.HealthChecker.subscribe()
 
     current_agent = session["current_agent"]
     full_agent = current_agent && Agents.get_agent(current_agent.id) |> then(fn {:ok, a} -> a end)
@@ -93,6 +94,22 @@ defmodule CymphoWeb.AgentLive.Index do
      end)}
   end
 
+  def handle_info({:health_status_changed, %{agent_id: agent_id}}, socket) do
+    case Agents.get_agent(agent_id) do
+      {:ok, updated_agent} ->
+        {:noreply,
+         socket
+         |> update(:agents, fn agents ->
+           Enum.map(agents, fn agent ->
+             if agent.id == updated_agent.id, do: updated_agent, else: agent
+           end)
+         end)}
+
+      {:error, :not_found} ->
+        {:noreply, socket}
+    end
+  end
+
   def handle_info(:update_progress, socket) do
     running_agents = Enum.filter(socket.assigns.agents, fn a -> a.status == :running end)
 
@@ -166,6 +183,10 @@ defmodule CymphoWeb.AgentLive.Index do
   def status_label(:error), do: "Error"
   def status_label(:sleeping), do: "Sleeping"
   def status_label(:offline), do: "Offline"
+
+  def health_status_label(:healthy), do: "Healthy"
+  def health_status_label(:degraded), do: "Degraded"
+  def health_status_label(:unavailable), do: "Unavailable"
 
   def role_label(:engineer), do: "Engineer"
   def role_label(:ceo), do: "CEO"
