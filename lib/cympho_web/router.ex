@@ -161,6 +161,9 @@ defmodule CymphoWeb.Router do
     put "/issues/:issue_id/documents/:key", DocumentController, :upsert
     delete "/issues/:issue_id/documents/:key", DocumentController, :delete
     get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
+    get "/issues/:issue_id/documents/:key/revisions/:revision_id", DocumentController, :show_with_revision
+    get "/issues/:issue_id/documents/:key/revisions/:revision_id/diff", DocumentController, :diff
+    post "/issues/:issue_id/documents/:key/rollback/:revision_id", DocumentController, :rollback
 
     resources "/issues/:issue_id/work-products", WorkProductController, only: [:index, :create, :show, :update, :delete], name: "issue_work_product"
 

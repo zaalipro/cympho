@@ -33,6 +33,7 @@ defmodule CymphoWeb.IssueLive.Show do
         runs = HeartbeatEngine.list_runs_for_issue(issue.id)
         interactions = IssueThreadInteractions.list_interactions(issue.id)
         timeline = build_timeline(issue, runs, interactions)
+        documents = Documents.list_documents(issue.id)
 
         {:ok,
          assign(socket,
@@ -47,6 +48,7 @@ defmodule CymphoWeb.IssueLive.Show do
            runs: runs,
            interactions: interactions,
            timeline: timeline,
+           documents: documents,
            scrolled_to_bottom: true
          )}
 
@@ -361,6 +363,21 @@ defmodule CymphoWeb.IssueLive.Show do
     else
       {:noreply, socket}
     end
+  end
+
+  def handle_info({:document_created, _document}, socket) do
+    documents = Documents.list_documents(socket.assigns.issue.id)
+    {:noreply, assign(socket, :documents, documents)}
+  end
+
+  def handle_info({:document_updated, _document}, socket) do
+    documents = Documents.list_documents(socket.assigns.issue.id)
+    {:noreply, assign(socket, :documents, documents)}
+  end
+
+  def handle_info({:document_deleted, _document}, socket) do
+    documents = Documents.list_documents(socket.assigns.issue.id)
+    {:noreply, assign(socket, :documents, documents)}
   end
 
   def handle_info({:session_started, session_id}, socket) do

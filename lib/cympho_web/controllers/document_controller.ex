@@ -50,12 +50,12 @@ defmodule CymphoWeb.DocumentController do
     end
   end
 
-  def show(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id}) do
+  def show_with_revision(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id}) do
     case Documents.get_document_by_key(issue_id, key) do
       {:ok, document} ->
         revisions = Documents.list_revisions(document.id)
         revision = Documents.get_revision!(revision_id)
-        render(conn, :show, document: document, revisions: revisions, revision: revision)
+        render(conn, :show_revision, document: document, revisions: revisions, revision: revision)
 
       {:error, :not_found} ->
         {:error, :not_found}
@@ -84,6 +84,12 @@ defmodule CymphoWeb.DocumentController do
             conn
             |> put_flash(:info, "Rolled back to revision #{revision_id}")
             |> redirect(to: ~p"/issues/#{issue_id}")
+
+          {:error, :pending_approvals} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> put_view(html: CymphoWeb.ErrorHTML)
+            |> render(:error, "Cannot rollback document while there are pending approvals")
 
           {:error, changeset} ->
             conn

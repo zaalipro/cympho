@@ -461,6 +461,27 @@
       </div>
     </div>
 
+    <!-- Documents -->
+    <div>
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Documents</h3>
+      <div :if={Enum.empty?(@documents)} class="text-sm text-text-tertiary">
+        No documents yet.
+      </div>
+      <div :if={!Enum.empty?(@documents)} class="space-y-2">
+        <div :for={doc <- @documents} class="space-y-1">
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-text-secondary">{doc.title || doc.key}</span>
+            <.link
+              navigate={~p"/issues/#{@issue.id}/documents/#{doc.key}/revisions"}
+              class="text-xs text-text-quaternary hover:text-text-secondary transition-colors"
+            >
+              View History
+            </.link>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Metadata -->
     <div class="space-y-2 text-sm">
       <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Details</h3>
@@ -475,6 +496,10 @@
       <div class="flex justify-between">
         <span class="text-text-tertiary">Interactions</span>
         <span class="text-text-secondary">{length(@interactions)}</span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-text-tertiary">Documents</span>
+        <span class="text-text-secondary">{length(@documents)}</span>
       </div>
       <div class="flex justify-between">
         <span class="text-text-tertiary">Created</span>

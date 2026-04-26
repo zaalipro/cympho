@@ -125,20 +125,25 @@ defmodule Cympho.Documents do
   def rollback_to_revision(%IssueDocument{} = document, revision_id, author_id \\ nil, author_type \\ "agent") do
     case get_revision!(revision_id) do
       %IssueDocumentRevision{} = revision ->
-        current_revision = get_latest_revision_number(document.id)
-        change_summary = "Rolled back to revision #{revision.revision_number}"
+        # Check for pending approvals on the issue
+        if has_pending_approvals?(document.issue_id) do
+          {:error, :pending_approvals}
+        else
+          current_revision = get_latest_revision_number(document.id)
+          change_summary = "Rolled back to revision #{revision.revision_number}"
 
-        Ecto.Multi.new()
-        |> Ecto.Multi.insert(:new_revision, revision_changeset(document, revision.title, revision.body, current_revision, author_id, author_type, change_summary))
-        |> Ecto.Multi.update(:document, IssueDocument.changeset(document, %{body: revision.body, title: revision.title}))
-        |> Repo.transaction()
-        |> case do
-          {:ok, %{new_revision: new_revision, document: updated}} ->
-            broadcast_document_event({:document_updated, updated})
-            {:ok, updated}
+          Ecto.Multi.new()
+          |> Ecto.Multi.insert(:new_revision, revision_changeset(document, revision.title, revision.body, current_revision, author_id, author_type, change_summary))
+          |> Ecto.Multi.update(:document, IssueDocument.changeset(document, %{body: revision.body, title: revision.title}))
+          |> Repo.transaction()
+          |> case do
+            {:ok, %{new_revision: new_revision, document: updated}} ->
+              broadcast_document_event({:document_updated, updated})
+              {:ok, updated}
 
-          {:error, _, changeset, _} ->
-            {:error, changeset}
+            {:error, _, changeset, _} ->
+              {:error, changeset}
+          end
         end
     end
   end
@@ -221,5 +226,22 @@ defmodule Cympho.Documents do
 
   def subscribe do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "documents")
+  end
+
+  defp has_pending_approvals?(issue_id) do
+    import Ecto.Query
+
+    alias Cympho.Approvals.Approval
+    alias Cympho.Approvals.ApprovalIssue
+
+    query =
+      from(a in Approval,
+        join: ai in ApprovalIssue,
+        on: ai.approval_id == a.id,
+        where: ai.issue_id == ^issue_id and a.status == :pending,
+        select: count(a.id)
+      )
+
+    Repo.one(query) > 0
   end
 end
