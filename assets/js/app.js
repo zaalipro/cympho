@@ -157,7 +157,7 @@ function handleKeydown(e) {
     return;
   }
 
-  // Cmd/Ctrl+Shift+K opens company switcher
+  // Cmd/Ctrl+K opens company switcher
   if ((e.metaKey || e.ctrlKey) && e.key === 'K') {
     e.preventDefault();
     if (window.openCompanySwitcher) {
@@ -342,21 +342,11 @@ function initCompanySwitcher() {
   window.openCompanySwitcher = openModal;
 }
 
-// CompanySwitcher hook (deprecated, kept for backwards compatibility)
-const CompanySwitcher = {
-  mounted() {
-    // This hook is no longer needed, functionality moved to initCompanySwitcher
-  },
-  destroyed() {
-    // Cleanup if needed
-  }
-};
-
 // Boot
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
 const liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
-  hooks: {TimelineScroll, KanbanSortable, CompanySwitcher}
+  hooks: {TimelineScroll, KanbanSortable}
 });
 
 liveSocket.connect();

@@ -13,10 +13,11 @@ defmodule CymphoWeb.Components.CompanySwitcher do
 
   def render(assigns) do
     ~H"""
-    <div id={@id} class="hidden" phx-hook="CompanySwitcher" data-return-to={@return_to}>
-      <div id="company-switcher-modal" class="hidden fixed inset-0 z-[70] flex items-start justify-center pt-[15vh] bg-black/50">
+    <div id={@id} class="hidden" data-return-to={@return_to}>
+      <div id="company-switcher-modal" class="hidden fixed inset-0 z-[70] flex items-start justify-center pt-[15vh] bg-black/50" role="dialog" aria-modal="true" aria-labelledby="company-switcher-title">
         <div class="bg-panel border border-border rounded-panel shadow-dialog w-full max-w-lg mx-4 overflow-hidden">
           <div class="flex items-center gap-3 px-4 border-b border-border-subtle">
+            <span id="company-switcher-title" class="sr-only">Company Switcher</span>
             <svg class="w-4 h-4 text-text-quaternary shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
             </svg>
@@ -70,7 +71,7 @@ defmodule CymphoWeb.Components.CompanySwitcher do
 
     {:noreply,
      socket
-     |> push_redirect(to: "/switch-company/#{company_id}?return_to=#{return_to}")}
+     |> push_redirect(to: "/switch-company/#{company_id}?return_to=#{URI.encode_www_form(return_to)}")}
   end
 
   def handle_event("update_search", %{"query" => query}, socket) do
