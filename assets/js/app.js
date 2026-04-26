@@ -142,8 +142,23 @@ function handleKeydown(e) {
   // Don't trigger shortcuts when typing in inputs
   if (isInput) return;
 
-  // Cmd/Ctrl+K opens company switcher
-  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+  // Cmd/Ctrl+K opens command palette
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k' && !e.shiftKey) {
+    e.preventDefault();
+    const palette = document.getElementById('command-palette');
+    if (palette) {
+      palette.classList.toggle('hidden');
+      const input = document.getElementById('command-input');
+      if (input && !palette.classList.contains('hidden')) {
+        input.value = '';
+        input.focus();
+      }
+    }
+    return;
+  }
+
+  // Cmd/Ctrl+Shift+K opens company switcher
+  if ((e.metaKey || e.ctrlKey) && e.key === 'K') {
     e.preventDefault();
     if (window.openCompanySwitcher) {
       window.openCompanySwitcher();
@@ -213,44 +228,83 @@ function initCompanySwitcher() {
     );
 
     if (filtered.length === 0) {
-      resultsList.innerHTML = '';
+      while (resultsList.firstChild) {
+        resultsList.removeChild(resultsList.firstChild);
+      }
       emptyState.classList.remove('hidden');
       return;
     }
 
     emptyState.classList.add('hidden');
-    resultsList.innerHTML = filtered.map(company => {
-      const isCurrent = company.id === currentCompanyId;
-      return `
-        <div
-          class="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm cursor-pointer transition-colors ${isCurrent ? 'bg-white/[0.06] text-text-primary' : 'text-text-secondary hover:bg-white/[0.04] hover:text-text-primary'}"
-          data-company-id="${company.id}"
-        >
-          <div class="w-8 h-8 rounded-lg overflow-hidden border-l-2 border-brand flex items-center justify-center shrink-0 bg-brand/10">
-            ${company.logo_url
-              ? `<img src="${company.logo_url}" alt="${company.name}" class="w-full h-full object-cover" />`
-              : `<span class="text-sm font-590 text-brand">${companyInitials(company.name)}</span>`
-            }
-          </div>
-          <div class="flex-1 min-w-0">
-            <div class="font-510 truncate">${company.name}</div>
-            ${isCurrent ? '<div class="text-xs text-text-quaternary">Current company</div>' : ''}
-          </div>
-          ${isCurrent
-            ? '<svg class="w-4 h-4 text-brand shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
-            : ''
-          }
-        </div>
-      `;
-    }).join('');
+    while (resultsList.firstChild) {
+      resultsList.removeChild(resultsList.firstChild);
+    }
 
-    // Add click handlers
-    resultsList.querySelectorAll('[data-company-id]').forEach(el => {
-      el.addEventListener('click', () => {
-        const companyId = el.dataset.companyId;
+    filtered.forEach(company => {
+      const isCurrent = company.id === currentCompanyId;
+
+      const item = document.createElement('div');
+      item.className = `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm cursor-pointer transition-colors ${isCurrent ? 'bg-white/[0.06] text-text-primary' : 'text-text-secondary hover:bg-white/[0.04] hover:text-text-primary'}`;
+      item.dataset.companyId = company.id;
+
+      const logoDiv = document.createElement('div');
+      logoDiv.className = 'w-8 h-8 rounded-lg overflow-hidden border-l-2 border-brand flex items-center justify-center shrink-0 bg-brand/10';
+
+      if (company.logo_url) {
+        const img = document.createElement('img');
+        img.src = company.logo_url;
+        img.alt = company.name;
+        img.className = 'w-full h-full object-cover';
+        logoDiv.appendChild(img);
+      } else {
+        const span = document.createElement('span');
+        span.className = 'text-sm font-590 text-brand';
+        span.textContent = companyInitials(company.name);
+        logoDiv.appendChild(span);
+      }
+
+      const infoDiv = document.createElement('div');
+      infoDiv.className = 'flex-1 min-w-0';
+
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'font-510 truncate';
+      nameDiv.textContent = company.name;
+      infoDiv.appendChild(nameDiv);
+
+      if (isCurrent) {
+        const currentDiv = document.createElement('div');
+        currentDiv.className = 'text-xs text-text-quaternary';
+        currentDiv.textContent = 'Current company';
+        infoDiv.appendChild(currentDiv);
+      }
+
+      item.appendChild(logoDiv);
+      item.appendChild(infoDiv);
+
+      if (isCurrent) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'w-4 h-4 text-brand shrink-0');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('viewBox', '0 0 24 24');
+
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('stroke-linejoin', 'round');
+        path.setAttribute('stroke-width', '2');
+        path.setAttribute('d', 'M5 13l4 4L19 7');
+
+        svg.appendChild(path);
+        item.appendChild(svg);
+      }
+
+      item.addEventListener('click', () => {
+        const companyId = company.id;
         const returnTo = encodeURIComponent(window.location.pathname);
         window.location.href = `/switch-company/${companyId}?return_to=${returnTo}`;
       });
+
+      resultsList.appendChild(item);
     });
   }
 
