@@ -62,12 +62,6 @@
               :run ->
                 "w-8 h-8 rounded-full bg-white/[0.05] border border-border flex items-center justify-center text-text-quaternary"
 
-              :work_product ->
-                "w-8 h-8 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center text-xs font-510"
-
-              :tool_call_trace ->
-                "w-8 h-8 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center text-xs font-510"
-
               _ ->
                 "w-8 h-8 rounded-full bg-white/[0.05] border border-border flex items-center justify-center text-text-quaternary"
             end
@@ -103,18 +97,6 @@
                   "running" -> "▶"
                   _ -> "○"
                 end
-
-              :work_product ->
-                case entry.data.kind do
-                  "code_change" -> "💻"
-                  "document" -> "📄"
-                  "url" -> "🔗"
-                  "artifact" -> "📦"
-                  _ -> "•"
-                end
-
-              :tool_call_trace ->
-                "⚡"
 
               _ ->
                 "•"
@@ -277,103 +259,6 @@
               </div>
               """
 
-            <% :work_product -> %>
-              ~H"""
-              <div class="bg-purple-500/5 border border-purple-500/20 rounded-lg p-4 space-y-2">
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs font-510 text-purple-400 uppercase">
-                      {case entry.data.kind do
-                        "code_change" -> "Code Change"
-                        "document" -> "Document"
-                        "url" -> "URL"
-                        "artifact" -> "Artifact"
-                        _ -> "Work Product"
-                      end}
-                    </span>
-                  </div>
-                  <span class="text-xs text-text-quaternary">{format_timeline_timestamp(entry.timestamp)}</span>
-                </div>
-                <p class="text-sm text-text-primary font-510">{entry.data.title}</p>
-                <p :if={entry.data.description} class="text-xs text-text-secondary whitespace-pre-wrap">
-                  {entry.data.description}
-                </p>
-                <div :if={entry.data.url} class="mt-2">
-                  <a href={entry.data.url} target="_blank" rel="noopener noreferrer" class="text-xs text-cyan-400 hover:underline break-all">
-                    {entry.data.url}
-                  </a>
-                </div>
-                <div :if={entry.data.created_by_agent} class="flex items-center gap-2 mt-2 pt-2 border-t border-purple-500/10">
-                  <div class="w-5 h-5 rounded-full bg-purple-500/20 flex items-center justify-center text-[10px] font-510 text-purple-400">
-                    {String.first(entry.data.created_by_agent.name || "A")}
-                  </div>
-                  <span class="text-xs text-text-quaternary">{entry.data.created_by_agent.name}</span>
-                </div>
-              </div>
-              """
-
-            <% :tool_call_trace -> %>
-              ~H"""
-              <div class="bg-cyan-500/5 border border-cyan-500/20 rounded-lg overflow-hidden">
-                <div class="flex items-center justify-between p-3 cursor-pointer hover:bg-cyan-500/10 transition-colors"
-                     phx-click="toggle_trace"
-                     phx-value-id={entry.data.id}>
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs font-510 text-cyan-400">{entry.data.tool_name}</span>
-                    <span class={
-                      case entry.data.status do
-                        "success" -> "text-xs text-green-400"
-                        "error" -> "text-xs text-red-400"
-                        "pending" -> "text-xs text-yellow-400"
-                        _ -> "text-xs text-text-quaternary"
-                      end
-                    }>
-                      {case entry.data.status do
-                        "success" -> "✓"
-                        "error" -> "✕"
-                        "pending" -> "○"
-                        _ -> "?"
-                      end}
-                    </span>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs text-text-quaternary">{format_timeline_timestamp(entry.timestamp)}</span>
-                    <span class="text-xs text-text-quaternary">{if @expanded_traces && @expanded_traces[entry.data.id], do: "▼", else: "▶"}</span>
-                  </div>
-                </div>
-                <div :if={@expanded_traces && @expanded_traces[entry.data.id]} class="px-3 pb-3 space-y-2">
-                  <div class="flex items-center gap-2 text-xs text-text-quaternary mb-2">
-                    <div class="w-5 h-5 rounded-full bg-cyan-500/20 flex items-center justify-center text-[10px] font-510 text-cyan-400">
-                      {case entry.data.actor_type do
-                        "user" -> "U"
-                        "agent" -> "A"
-                        "system" -> "⚙️"
-                        _ -> "?"
-                      end}
-                    </div>
-                    <span>{case entry.data.actor_type do
-                      "user" -> "User"
-                      "agent" -> "Agent"
-                      "system" -> "System"
-                      _ -> "Unknown"
-                    end}</span>
-                  </div>
-                  <div class="text-xs space-y-1">
-                    <p class="text-text-quaternary font-510">Arguments:</p>
-                    <pre class="bg-white/[0.03] rounded p-2 text-text-secondary overflow-x-auto whitespace-pre-wrap">{Jason.encode!(entry.data.tool_arguments || %{}, pretty: true)}</pre>
-                  </div>
-                  <div :if={entry.data.tool_result} class="text-xs space-y-1">
-                    <p class="text-text-quaternary font-510">Result:</p>
-                    <pre class="bg-white/[0.03] rounded p-2 text-text-secondary overflow-x-auto whitespace-pre-wrap max-h-48">{String.slice(entry.data.tool_result, 0, 1000)}{if String.length(entry.data.tool_result) > 1000, do: "..."}</pre>
-                  </div>
-                  <div :if={entry.data.error_message} class="text-xs space-y-1">
-                    <p class="text-red-400 font-510">Error:</p>
-                    <p class="bg-red-500/10 rounded p-2 text-red-300">{entry.data.error_message}</p>
-                  </div>
-                </div>
-              </div>
-              """
-
             <% _ -> %>
               ~H"""
               <div class="text-xs text-text-quaternary">
@@ -436,130 +321,6 @@
           <.button type="button" variant="ghost" size="sm" phx-click="cancel_editing">Cancel</.button>
         </div>
       </form>
-    </div>
-
-    <!-- Documents -->
-    <div :if={length(@documents) > 0}>
-      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Documents</h3>
-      <div class="space-y-2">
-        <div :for={doc <- @documents} class="flex items-center justify-between bg-white/[0.05] rounded-md px-3 py-2">
-          <div class="flex-1 min-w-0">
-            <p class="text-sm font-510 text-text-primary truncate">{doc.title}</p>
-            <p class="text-xs text-text-tertiary">{doc.key}</p>
-          </div>
-          <button
-            type="button"
-            phx-click="show_document_revisions"
-            phx-value-document_key={doc.key}
-            class="text-text-quaternary hover:text-accent transition-colors text-xs ml-2"
-          >
-            <.icon name="hero-clock" class="w-4 h-4" />
-            <span class="ml-1">{length(doc.revisions)}</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Revisions Panel -->
-    <div :if={@show_revisions && @selected_document} class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" phx-click="hide_revisions">
-      <div class="bg-surface border border-border rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden flex flex-col m-4" phx-click-stop>
-        <!-- Header -->
-        <div class="flex items-center justify-between p-4 border-b border-border">
-          <div>
-            <h3 class="text-lg font-510 text-text-primary">{@selected_document.title} — Revisions</h3>
-            <p class="text-sm text-text-tertiary">{@selected_document.key}</p>
-          </div>
-          <button type="button" phx-click="hide_revisions" class="text-text-quaternary hover:text-text-secondary transition-colors">
-            <.icon name="hero-x-mark" class="w-5 h-5" />
-          </button>
-        </div>
-
-        <!-- Rollback Blocker Banner -->
-        <div :if={@rollback_blocker} class="m-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-md">
-          <div class="flex items-start gap-2">
-            <.icon name="hero-exclamation-triangle" class="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
-            <p class="text-sm text-yellow-200">{@rollback_blocker}</p>
-          </div>
-        </div>
-
-        <!-- Revisions List -->
-        <div class="flex-1 overflow-y-auto p-4 space-y-3">
-          <div :for={revision <- @revisions} class="bg-white/[0.03] border border-border rounded-lg p-4 space-y-3">
-            <div class="flex items-start justify-between">
-              <div class="flex-1">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="text-sm font-510 text-text-primary">Revision #{revision.revision_number}</span>
-                  <.badge variant={if revision.revision_number == 1, do: "info", else: "secondary"}>
-                    {if revision.revision_number == 1, do: "Initial", else: "##{revision.revision_number - 1}"}
-                  </.badge>
-                </div>
-                <p :if={revision.change_summary} class="text-sm text-text-secondary mb-1">{revision.change_summary}</p>
-                <div class="flex items-center gap-3 text-xs text-text-tertiary">
-                  <span>{format_timeline_timestamp(revision.inserted_at)}</span>
-                  <span :if={revision.created_by_agent_id}>Agent</span>
-                  <span :if={revision.created_by_user_id}>User</span>
-                </div>
-              </div>
-              <div class="flex items-center gap-2">
-                <button
-                  type="button"
-                  phx-click="show_revision_diff"
-                  phx-value-revision_id={revision.id}
-                  class="text-text-quaternary hover:text-accent transition-colors text-xs flex items-center gap-1"
-                >
-                  <.icon name="hero-document-text" class="w-4 h-4" />
-                  Diff
-                </button>
-                <button
-                  type="button"
-                  phx-click="restore_revision"
-                  phx-value-revision_id={revision.id}
-                  class={"text-xs flex items-center gap-1 #{@rollback_blocker && "opacity-50 cursor-not-allowed" || "text-text-quaternary hover:text-green-400"} transition-colors"}
-                  disabled={@rollback_blocker != nil}
-                >
-                  <.icon name="hero-arrow-uturn-left" class="w-4 h-4" />
-                  Restore
-                </button>
-              </div>
-            </div>
-
-            <!-- Revision Preview (first 200 chars) -->
-            <div class="text-xs text-text-tertiary bg-black/20 rounded p-2 font-mono max-h-20 overflow-hidden">
-              {String.slice(revision.body, 0, 200)}{if String.length(revision.body) > 200, do: "...", else: ""}
-            </div>
-          </div>
-
-          <div :if={length(@revisions) == 0} class="text-center py-8 text-text-tertiary">
-            <p>No revisions found</p>
-          </div>
-        </div>
-
-        <!-- Diff View (shown when a revision is selected for diff) -->
-        <div :if={@selected_revision_diff} class="border-t border-border">
-          <div class="flex items-center justify-between p-3 bg-white/[0.03]">
-            <h4 class="text-sm font-510 text-text-primary">Diff View</h4>
-            <button
-              type="button"
-              phx-click="hide_revision_diff"
-              class="text-text-quaternary hover:text-text-secondary transition-colors text-xs"
-            >
-              <.icon name="hero-x-mark" class="w-4 h-4" />
-            </button>
-          </div>
-          <div class="p-4 max-h-64 overflow-y-auto space-y-1 font-mono text-xs">
-            <div :for={line <- @selected_revision_diff.diff} class={
-              "flex " <> case line.type do
-                :unchanged -> "text-text-tertiary"
-                :added -> "bg-green-500/10 text-green-400"
-                :removed -> "bg-red-500/10 text-red-400"
-              end
-            }>
-              <span class="w-8 text-right mr-2 opacity-50">{line.line_number}</span>
-              <span class="flex-1 whitespace-pre-wrap break-words">{line.content}</span>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- GitHub PR Link -->
@@ -700,6 +461,27 @@
       </div>
     </div>
 
+    <!-- Documents -->
+    <div>
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Documents</h3>
+      <div :if={Enum.empty?(@documents)} class="text-sm text-text-tertiary">
+        No documents yet.
+      </div>
+      <div :if={!Enum.empty?(@documents)} class="space-y-2">
+        <div :for={doc <- @documents} class="space-y-1">
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-text-secondary">{doc.title || doc.key}</span>
+            <.link
+              navigate={~p"/issues/#{@issue.id}/documents/#{doc.key}/revisions"}
+              class="text-xs text-text-quaternary hover:text-text-secondary transition-colors"
+            >
+              View History
+            </.link>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Metadata -->
     <div class="space-y-2 text-sm">
       <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Details</h3>
@@ -716,12 +498,8 @@
         <span class="text-text-secondary">{length(@interactions)}</span>
       </div>
       <div class="flex justify-between">
-        <span class="text-text-tertiary">Work Products</span>
-        <span class="text-text-secondary">{length(@work_products)}</span>
-      </div>
-      <div class="flex justify-between">
-        <span class="text-text-tertiary">Tool Traces</span>
-        <span class="text-text-secondary">{length(@tool_call_traces)}</span>
+        <span class="text-text-tertiary">Documents</span>
+        <span class="text-text-secondary">{length(@documents)}</span>
       </div>
       <div class="flex justify-between">
         <span class="text-text-tertiary">Created</span>

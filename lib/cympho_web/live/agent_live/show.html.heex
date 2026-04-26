@@ -20,6 +20,7 @@
     <div class="flex items-center gap-3">
       <.badge variant="agent" value={to_string(@agent.status)} />
       <.badge variant="pill" value={role_label(@agent.role)} />
+      <.badge variant="pill" value={health_status_label(@agent.health_status)} />
     </div>
 
     <div class="bg-surface border border-border rounded-card p-5 space-y-4">

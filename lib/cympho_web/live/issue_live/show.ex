@@ -9,8 +9,6 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.HeartbeatEngine
   alias Cympho.IssueReadStates
   alias Cympho.IssueThreadInteractions
-  alias Cympho.WorkProducts
-  alias Cympho.ToolCallTraces
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -34,9 +32,7 @@ defmodule CymphoWeb.IssueLive.Show do
         comment_changeset = Comments.Comment.changeset(%Comments.Comment{}, %{})
         runs = HeartbeatEngine.list_runs_for_issue(issue.id)
         interactions = IssueThreadInteractions.list_interactions(issue.id)
-        work_products = WorkProducts.list_work_products(issue.id)
-        tool_call_traces = ToolCallTraces.list_tool_call_traces(issue_id: issue.id)
-        timeline = build_timeline(issue, runs, interactions, work_products, tool_call_traces)
+        timeline = build_timeline(issue, runs, interactions)
         documents = Documents.list_documents(issue.id)
 
         {:ok,
@@ -51,17 +47,9 @@ defmodule CymphoWeb.IssueLive.Show do
            assignee_search: "",
            runs: runs,
            interactions: interactions,
-           work_products: work_products,
-           tool_call_traces: tool_call_traces,
            timeline: timeline,
-           scrolled_to_bottom: true,
-           expanded_traces: %{},
            documents: documents,
-           selected_document: nil,
-           show_revisions: false,
-           revisions: [],
-           selected_revision_diff: nil,
-           rollback_blocker: nil
+           scrolled_to_bottom: true
          )}
 
       {:error, :not_found} ->
@@ -260,7 +248,7 @@ defmodule CymphoWeb.IssueLive.Show do
              "resolved_by_user_id" => user_id
            }) do
       interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, socket.assigns.work_products, socket.assigns.tool_call_traces)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
       {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
     else
       {:error, :invalid_transition} ->
@@ -291,7 +279,7 @@ defmodule CymphoWeb.IssueLive.Show do
              "response" => response
            }) do
       interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, socket.assigns.work_products, socket.assigns.tool_call_traces)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
       {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
     else
       {:error, :invalid_transition} ->
@@ -302,92 +290,6 @@ defmodule CymphoWeb.IssueLive.Show do
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to respond")}
-    end
-  end
-
-  @impl true
-  def handle_event("toggle_trace", %{"id" => id}, socket) do
-    expanded_traces = socket.assigns.expanded_traces
-    new_state = Map.put(expanded_traces, id, !Map.get(expanded_traces, id, false))
-    {:noreply, assign(socket, :expanded_traces, new_state)}
-  end
-
-  @impl true
-  def handle_event("show_document_revisions", %{"document_key" => key}, socket) do
-    case Documents.get_document_by_key(socket.assigns.issue.id, key) do
-      {:ok, document} ->
-        revisions = Documents.list_revisions(document.id)
-
-        # Check for plan approval binding blocker
-        blocker = check_plan_approval_blocker(key, socket.assigns.issue)
-
-        {:noreply,
-         assign(socket,
-           selected_document: document,
-           show_revisions: true,
-           revisions: revisions,
-           selected_revision_diff: nil,
-           rollback_blocker: blocker
-         )}
-
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Document not found")}
-    end
-  end
-
-  @impl true
-  def handle_event("hide_revisions", _, socket) do
-    {:noreply,
-     assign(socket,
-       selected_document: nil,
-       show_revisions: false,
-       revisions: [],
-       selected_revision_diff: nil,
-       rollback_blocker: nil
-     )}
-  end
-
-  @impl true
-  def handle_event("show_revision_diff", %{"revision_id" => revision_id}, socket) do
-    case Documents.diff_revision(revision_id) do
-      {:ok, diff_result} ->
-        {:noreply, assign(socket, :selected_revision_diff, diff_result)}
-
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Revision not found")}
-    end
-  end
-
-  @impl true
-  def handle_event("hide_revision_diff", _, socket) do
-    {:noreply, assign(socket, :selected_revision_diff, nil)}
-  end
-
-  @impl true
-  def handle_event("restore_revision", %{"revision_id" => revision_id}, socket) do
-    if socket.assigns.rollback_blocker do
-      {:noreply, put_flash(socket, :error, socket.assigns.rollback_blocker)}
-    else
-      document = socket.assigns.selected_document
-
-      case Documents.restore_revision(document.id, revision_id) do
-        {:ok, _restored} ->
-          # Reload documents and revisions
-          documents = Documents.list_documents(socket.assigns.issue.id)
-          revisions = Documents.list_revisions(document.id)
-
-          {:noreply,
-           socket
-           |> put_flash(:info, "Document restored successfully")
-           |> assign(
-             documents: documents,
-             revisions: revisions,
-             selected_revision_diff: nil
-           )}
-
-        {:error, _changeset} ->
-          {:noreply, put_flash(socket, :error, "Failed to restore revision")}
-      end
     end
   end
 
@@ -443,19 +345,10 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
-  def handle_info({:new_comment_on_read_issue, _issue_id, _comment_id}, socket) do
-    case Issues.get_issue(socket.assigns.issue.id) do
-      {:ok, issue} ->
-        {:noreply, assign(socket, :issue, issue)}
-      {:error, _} ->
-        {:noreply, socket}
-    end
-  end
-
   def handle_info({:interaction_created, interaction}, socket) do
     if socket.assigns.issue.id == interaction.issue_id do
       interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, socket.assigns.work_products, socket.assigns.tool_call_traces)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
       {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
     else
       {:noreply, socket}
@@ -465,51 +358,26 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:interaction_updated, interaction}, socket) do
     if socket.assigns.issue.id == interaction.issue_id do
       interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, socket.assigns.work_products, socket.assigns.tool_call_traces)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
       {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
     else
       {:noreply, socket}
     end
   end
 
-  def handle_info({:work_product_created, work_product}, socket) do
-    if socket.assigns.issue.id == work_product.issue_id do
-      work_products = WorkProducts.list_work_products(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, socket.assigns.interactions, work_products, socket.assigns.tool_call_traces)
-      {:noreply, assign(socket, work_products: work_products, timeline: timeline)}
-    else
-      {:noreply, socket}
-    end
+  def handle_info({:document_created, _document}, socket) do
+    documents = Documents.list_documents(socket.assigns.issue.id)
+    {:noreply, assign(socket, :documents, documents)}
   end
 
-  def handle_info({:work_product_updated, work_product}, socket) do
-    if socket.assigns.issue.id == work_product.issue_id do
-      work_products = WorkProducts.list_work_products(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, socket.assigns.interactions, work_products, socket.assigns.tool_call_traces)
-      {:noreply, assign(socket, work_products: work_products, timeline: timeline)}
-    else
-      {:noreply, socket}
-    end
+  def handle_info({:document_updated, _document}, socket) do
+    documents = Documents.list_documents(socket.assigns.issue.id)
+    {:noreply, assign(socket, :documents, documents)}
   end
 
-  def handle_info({:work_product_deleted, issue_id}, socket) do
-    if socket.assigns.issue.id == issue_id do
-      work_products = WorkProducts.list_work_products(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, socket.assigns.interactions, work_products, socket.assigns.tool_call_traces)
-      {:noreply, assign(socket, work_products: work_products, timeline: timeline)}
-    else
-      {:noreply, socket}
-    end
-  end
-
-  def handle_info({:tool_call_trace_created, trace}, socket) do
-    if socket.assigns.issue.id == trace.issue_id do
-      tool_call_traces = ToolCallTraces.list_tool_call_traces(issue_id: socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, socket.assigns.interactions, socket.assigns.work_products, tool_call_traces)
-      {:noreply, assign(socket, tool_call_traces: tool_call_traces, timeline: timeline)}
-    else
-      {:noreply, socket}
-    end
+  def handle_info({:document_deleted, _document}, socket) do
+    documents = Documents.list_documents(socket.assigns.issue.id)
+    {:noreply, assign(socket, :documents, documents)}
   end
 
   def handle_info({:session_started, session_id}, socket) do
@@ -522,16 +390,6 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:turn_ended_with_error, _session_id, reason}, socket) do
     {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
-  end
-
-  def handle_info({:document_updated, updated_document}, socket) do
-    if socket.assigns.selected_document && socket.assigns.selected_document.id == updated_document.id do
-      revisions = Documents.list_revisions(updated_document.id)
-      {:noreply, assign(socket, revisions: revisions)}
-    else
-      documents = Documents.list_documents(socket.assigns.issue.id)
-      {:noreply, assign(socket, documents: documents)}
-    end
   end
 
   defp valid_status_options(current_status) do
@@ -610,8 +468,8 @@ defmodule CymphoWeb.IssueLive.Show do
   defp try_string_to_priority("critical"), do: :critical
   defp try_string_to_priority(_), do: nil
 
-  # Build a unified timeline of comments, interactions, runs, work_products, and tool_call_traces
-  defp build_timeline(issue, runs, interactions, work_products, tool_call_traces) do
+  # Build a unified timeline of comments, interactions, and runs
+  defp build_timeline(issue, runs, interactions) do
     comments_timeline =
       Enum.map(issue.comments, fn comment ->
         %{
@@ -642,42 +500,16 @@ defmodule CymphoWeb.IssueLive.Show do
         }
       end)
 
-    work_products_timeline =
-      Enum.map(work_products, fn wp ->
-        %{
-          type: :work_product,
-          id: wp.id,
-          timestamp: wp.inserted_at,
-          data: wp
-        }
-      end)
-
-    tool_call_traces_timeline =
-      Enum.map(tool_call_traces, fn trace ->
-        %{
-          type: :tool_call_trace,
-          id: trace.id,
-          timestamp: trace.occurred_at,
-          data: trace
-        }
-      end)
-
     # Combine and sort by timestamp (newest last for chat view)
-    (comments_timeline ++ runs_timeline ++ interactions_timeline ++ work_products_timeline ++ tool_call_traces_timeline)
+    (comments_timeline ++ runs_timeline ++ interactions_timeline)
     |> Enum.sort_by(& &1.timestamp, DateTime)
   end
 
   # Rebuild timeline when issue updates (status changes, etc.)
   defp maybe_rebuild_timeline(socket) do
     interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-    work_products = WorkProducts.list_work_products(socket.assigns.issue.id)
-    tool_call_traces = ToolCallTraces.list_tool_call_traces(issue_id: socket.assigns.issue.id)
-    timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, work_products, tool_call_traces)
-    socket
-    |> assign(:timeline, timeline)
-    |> assign(:interactions, interactions)
-    |> assign(:work_products, work_products)
-    |> assign(:tool_call_traces, tool_call_traces)
+    timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
+    assign(socket, :timeline, timeline, :interactions, interactions)
   end
 
   # Format timestamp for timeline entries
@@ -694,26 +526,4 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
   def format_timeline_timestamp(_), do: ""
-
-  # Check if there's a plan approval blocker for rollback
-  defp check_plan_approval_blocker(document_key, issue) do
-    if document_key == "plan" do
-      # Check if there's an open approval for this issue
-      case Cympho.Approvals.list_approvals_for_issue(issue.id) do
-        approvals when is_list(approvals) ->
-          open_approval = Enum.find(approvals, fn a -> a.status in [:pending, :requested] end)
-
-          if open_approval do
-            "Cannot rollback plan document while approval ##{open_approval.id} is open"
-          else
-            nil
-          end
-
-        _ ->
-          nil
-      end
-    else
-      nil
-    end
-  end
 end

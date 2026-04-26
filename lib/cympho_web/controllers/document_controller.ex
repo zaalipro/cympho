@@ -43,66 +43,73 @@ defmodule CymphoWeb.DocumentController do
     case Documents.get_document_by_key(issue_id, key) do
       {:ok, document} ->
         revisions = Documents.list_revisions(document.id)
-        render(conn, :revisions, revisions: revisions)
+        render(conn, :revisions, revisions: revisions, document: document)
 
       {:error, :not_found} ->
         {:error, :not_found}
     end
   end
 
-  def show_revision(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id}) do
-    with {:ok, document} <- Documents.get_document_by_key(issue_id, key),
-         {:ok, revision} <- Documents.get_revision(revision_id),
-         true <- revision.document_id == document.id do
-      render(conn, :show_revision, revision: revision)
-    else
-      {:error, :not_found} -> {:error, :not_found}
-      false -> {:error, :not_found}
+  def show_with_revision(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id}) do
+    case Documents.get_document_by_key(issue_id, key) do
+      {:ok, document} ->
+        revisions = Documents.list_revisions(document.id)
+        revision = Documents.get_revision!(revision_id)
+        render(conn, :show_revision, document: document, revisions: revisions, revision: revision)
+
+      {:error, :not_found} ->
+        {:error, :not_found}
     end
   end
 
-  def diff_revision(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id}) do
-    with {:ok, document} <- Documents.get_document_by_key(issue_id, key),
-         {:ok, %{target: target} = result} <- safe_diff_revision(revision_id),
-         true <- target.document_id == document.id do
-      render(conn, :diff, result: result)
-    else
-      {:error, :not_found} -> {:error, :not_found}
-      false -> {:error, :not_found}
+  def diff(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id, "other_revision_id" => other_revision_id}) do
+    case Documents.get_document_by_key(issue_id, key) do
+      {:ok, document} ->
+        diff = Documents.get_diff(revision_id, other_revision_id)
+        render(conn, :diff, document: document, diff: diff)
+
+      {:error, :not_found} ->
+        {:error, :not_found}
     end
   end
 
-  def restore_revision(conn, %{
-        "issue_id" => issue_id,
-        "key" => key,
-        "revision_id" => revision_id
-      }) do
-    with {:ok, document} <- Documents.get_document_by_key(issue_id, key),
-         {:ok, revision} <- Documents.get_revision(revision_id),
-         true <- revision.document_id == document.id do
-      opts =
-        conn.assigns[:current_agent] &&
-          [created_by_agent_id: conn.assigns[:current_agent].id] ||
-          []
+  def rollback(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id}) do
+    author_id = get_author_id(conn)
+    author_type = get_author_type(conn)
 
-      case Documents.restore_revision(document.id, revision_id, opts) do
-        {:ok, _document} ->
-          conn
-          |> put_status(:ok)
-          |> json(%{data: %{message: "Restored revision ##{revision.revision_number}"}})
+    case Documents.get_document_by_key(issue_id, key) do
+      {:ok, document} ->
+        case Documents.rollback_to_revision(document, revision_id, author_id, author_type) do
+          {:ok, updated} ->
+            conn
+            |> put_flash(:info, "Rolled back to revision #{revision_id}")
+            |> redirect(to: ~p"/issues/#{issue_id}")
 
-        {:error, changeset} ->
-          {:error, changeset}
-      end
-    else
-      {:error, :not_found} -> {:error, :not_found}
-      false -> {:error, :not_found}
+          {:error, :pending_approvals} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> put_view(html: CymphoWeb.ErrorHTML)
+            |> render(:error, "Cannot rollback document while there are pending approvals")
+
+          {:error, changeset} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> put_view(html: CymphoWeb.ErrorJSON)
+            |> render(:error, changeset: changeset)
+        end
+
+      {:error, :not_found} ->
+        {:error, :not_found}
     end
   end
 
-  defp safe_diff_revision(revision_id) do
-    Documents.diff_revision(revision_id)
-  rescue
-    Ecto.NoResultsError -> {:error, :not_found}
+  defp get_author_id(conn) do
+    # TODO: Extract from actual auth session
+    conn.params["author_id"] || System.get_env("TEST_AUTHOR_ID")
+  end
+
+  defp get_author_type(conn) do
+    # TODO: Extract from actual auth session
+    conn.params["author_type"] || "agent"
   end
 end

@@ -65,12 +65,13 @@ defmodule Cympho.Documents do
     end
   end
 
-  def update_document(%IssueDocument{} = document, attrs) do
+  def update_document(%IssueDocument{} = document, attrs, author_id \\ nil, author_type \\ "agent") do
     old_body = document.body
     old_title = document.title
+    current_revision = get_latest_revision_number(document.id)
 
     Ecto.Multi.new()
-    |> Ecto.Multi.insert(:revision, revision_changeset(document, old_title, old_body))
+    |> Ecto.Multi.insert(:revision, revision_changeset(document, old_title, old_body, current_revision, author_id, author_type))
     |> Ecto.Multi.update(:document, IssueDocument.changeset(document, attrs))
     |> Repo.transaction()
     |> case do
@@ -86,9 +87,19 @@ defmodule Cympho.Documents do
     end
   end
 
-  defp revision_changeset(document, title, body) do
+  defp revision_changeset(document, title, body, revision_number, author_id, author_type, change_summary \\ nil) do
+    attrs = %{
+      document_id: document.id,
+      title: title,
+      body: body,
+      revision_number: revision_number + 1,
+      author_id: author_id,
+      author_type: author_type,
+      change_summary: change_summary || "Document updated"
+    }
+
     %IssueDocumentRevision{}
-    |> IssueDocumentRevision.changeset(%{document_id: document.id, title: title, body: body})
+    |> IssueDocumentRevision.changeset(attrs)
   end
 
   def delete_document(%IssueDocument{} = document) do
@@ -105,237 +116,104 @@ defmodule Cympho.Documents do
   def list_revisions(document_id) do
     IssueDocumentRevision
     |> where(document_id: ^document_id)
-    |> order_by([r], desc: r.inserted_at, desc: r.id)
+    |> order_by([r], desc: r.revision_number)
     |> Repo.all()
   end
 
   def get_revision!(id), do: Repo.get!(IssueDocumentRevision, id)
 
-  def get_revision(id) do
-    case Repo.get(IssueDocumentRevision, id) do
-      nil -> {:error, :not_found}
-      revision -> {:ok, revision}
-    end
-  end
+  def rollback_to_revision(%IssueDocument{} = document, revision_id, author_id \\ nil, author_type \\ "agent") do
+    case get_revision!(revision_id) do
+      %IssueDocumentRevision{} = revision ->
+        # Check for pending approvals on the issue
+        if has_pending_approvals?(document.issue_id) do
+          {:error, :pending_approvals}
+        else
+          current_revision = get_latest_revision_number(document.id)
+          change_summary = "Rolled back to revision #{revision.revision_number}"
 
-  def get_revision_by_number!(document_id, revision_number) do
-    IssueDocumentRevision
-    |> where(document_id: ^document_id, revision_number: ^revision_number)
-    |> Repo.one!()
-  end
+          Ecto.Multi.new()
+          |> Ecto.Multi.insert(:new_revision, revision_changeset(document, revision.title, revision.body, current_revision, author_id, author_type, change_summary))
+          |> Ecto.Multi.update(:document, IssueDocument.changeset(document, %{body: revision.body, title: revision.title}))
+          |> Repo.transaction()
+          |> case do
+            {:ok, %{new_revision: new_revision, document: updated}} ->
+              broadcast_document_event({:document_updated, updated})
+              {:ok, updated}
 
-  @doc """
-  Computes a line-based diff between a revision and its base (previous) revision.
-  Returns `%{base: revision, target: base_revision, diff: [...diff_lines]}`.
-  """
-  def diff_revision(revision_id) do
-    revision = Repo.get!(IssueDocumentRevision, revision_id)
-
-    base_revision =
-      case revision.base_revision_id do
-        nil ->
-          # Fall back to the previous revision by number
-          prev = revision.revision_number - 1
-
-          IssueDocumentRevision
-          |> where(document_id: ^revision.document_id, revision_number: ^prev)
-          |> Repo.one()
-
-        base_id ->
-          Repo.get(IssueDocumentRevision, base_id)
-      end
-
-    diff = compute_diff(base_revision && base_revision.body || "", revision.body)
-
-    {:ok, %{base: base_revision, target: revision, diff: diff}}
-  end
-
-  @doc """
-  Restores a previous revision by creating a new revision with the old content.
-  """
-  def restore_revision(document_id, revision_id, opts \\ []) do
-    revision = Repo.get!(IssueDocumentRevision, revision_id)
-
-    if revision.document_id != document_id do
-      {:error, :revision_mismatch}
-    else
-      document = Repo.get!(IssueDocument, document_id)
-      next_rev = next_revision_number(document_id)
-
-      Ecto.Multi.new()
-      |> Ecto.Multi.insert(:new_revision, fn _ ->
-        attrs = %{
-          document_id: document_id,
-          title: revision.title,
-          body: revision.body,
-          format: revision.format,
-          revision_number: next_rev,
-          base_revision_id: current_revision_id(document_id),
-          change_summary: "Restored revision ##{revision.revision_number}",
-          created_by_agent_id: Keyword.get(opts, :created_by_agent_id),
-          created_by_user_id: Keyword.get(opts, :created_by_user_id)
-        }
-
-        IssueDocumentRevision.changeset(%IssueDocumentRevision{}, attrs)
-      end)
-      |> Ecto.Multi.update(:document, fn _ ->
-        IssueDocument.changeset(document, %{
-          title: revision.title,
-          body: revision.body,
-          format: revision.format
-        })
-      end)
-      |> Repo.transaction()
-      |> case do
-        {:ok, %{document: updated}} ->
-          broadcast_document_event({:document_updated, updated})
-          {:ok, updated}
-
-        {:error, :document, changeset, _} ->
-          {:error, changeset}
-
-        {:error, :new_revision, changeset, _} ->
-          {:error, changeset}
-      end
-    end
-  end
-
-  defp next_revision_number(document_id) do
-    case Repo.one(
-           from r in IssueDocumentRevision,
-             where: r.document_id == ^document_id,
-             select: max(r.revision_number)
-         ) do
-      nil -> 1
-      num -> num + 1
-    end
-  end
-
-  defp current_revision_id(document_id) do
-    case Repo.one(
-           from r in IssueDocumentRevision,
-             where: r.document_id == ^document_id,
-             order_by: [desc: r.inserted_at, desc: r.id],
-             limit: 1,
-             select: r.id
-         ) do
-      nil -> nil
-      id -> id
-    end
-  end
-
-  @doc """
-  Computes a unified diff between two strings using the longest common subsequence algorithm.
-  Returns a list of maps with :type (:unchanged, :added, :removed), :line_number, and :content.
-  """
-  def compute_diff(old, new) when is_binary(old) and is_binary(new) do
-    old_lines = String.split(old, "\n")
-    new_lines = String.split(new, "\n")
-
-    lcs = longest_common_subsequence(old_lines, new_lines)
-
-    build_diff_lines(old_lines, new_lines, lcs)
-  end
-
-  defp longest_common_subsequence(list_a, list_b) do
-    # Build DP table
-    table = build_lcs_table(list_a, list_b)
-
-    # Backtrack to find LCS
-    backtrack_lcs(table, list_a, list_b, length(list_a), length(list_b), [])
-  end
-
-  defp build_lcs_table(list_a, list_b) do
-    m = length(list_a)
-    n = length(list_b)
-
-    initial_row = for _ <- 0..n, do: 0
-    table = :array.from_list(initial_row)
-
-    Enum.reduce(0..(m - 1), table, fn i, acc_table ->
-      a = Enum.at(list_a, i)
-      Enum.reduce(0..(n - 1), acc_table, fn j, inner_table ->
-        b = Enum.at(list_b, j)
-
-        current_val =
-          if a == b do
-            get_lcs_value(inner_table, i, j) + 1
-          else
-            max(get_lcs_value(inner_table, i + 1, j), get_lcs_value(inner_table, i, j + 1))
+            {:error, _, changeset, _} ->
+              {:error, changeset}
           end
-
-        :array.set(j + 1, current_val, inner_table)
-      end)
-    end)
-  end
-
-  defp get_lcs_value(table, i, j) do
-    row = :array.get(i, table)
-    Enum.at(row, j)
-  end
-
-  defp backtrack_lcs(_table, _list_a, _list_b, 0, 0, acc), do: Enum.reverse(acc)
-
-  defp backtrack_lcs(table, list_a, list_b, i, j, acc) do
-    a = Enum.at(list_a, i - 1, nil)
-    b = Enum.at(list_b, j - 1, nil)
-
-    cond do
-      a != nil and b != nil and a == b ->
-        backtrack_lcs(table, list_a, list_b, i - 1, j - 1, [a | acc])
-
-      i > 0 and get_lcs_value(table, i, j) == get_lcs_value(table, i - 1, j) ->
-        backtrack_lcs(table, list_a, list_b, i - 1, j, acc)
-
-      j > 0 ->
-        backtrack_lcs(table, list_a, list_b, i, j - 1, acc)
-
-      true ->
-        Enum.reverse(acc)
+        end
     end
   end
 
-  defp build_diff_lines(old_lines, new_lines, lcs) do
-    {old_diffs, _} = walk_old_lines(old_lines, lcs, 1, [])
-    {new_diffs, _} = walk_new_lines(new_lines, lcs, 1, [])
-
-    Enum.reverse(old_diffs) ++ Enum.reverse(new_diffs)
-  end
-
-  defp walk_old_lines([], _lcs, _line_num, acc), do: {acc, []}
-
-  defp walk_old_lines([line | rest_old], lcs, line_num, acc) do
-    case lcs do
-      [^line | rest_lcs] ->
-        # Unchanged line
-        walk_old_lines(rest_old, rest_lcs, line_num + 1, [
-          %{type: :unchanged, line_number: line_num, content: line} | acc
-        ])
-
-      _ ->
-        # Removed line
-        walk_old_lines(rest_old, lcs, line_num + 1, [
-          %{type: :removed, line_number: line_num, content: line} | acc
-        ])
+  def get_latest_revision_number(document_id) do
+    case Repo.one(from r in IssueDocumentRevision, where: r.document_id == ^document_id, order_by: [desc: r.revision_number], limit: 1) do
+      nil -> 0
+      revision -> revision.revision_number
     end
   end
 
-  defp walk_new_lines([], _lcs, _line_num, acc), do: {acc, []}
+  def get_diff(revision_id, other_revision_id) do
+    revision = get_revision!(revision_id)
+    other_revision = get_revision!(other_revision_id)
 
-  defp walk_new_lines([line | rest_new], lcs, line_num, acc) do
-    case lcs do
-      [^line | rest_lcs] ->
-        # Unchanged line
-        walk_new_lines(rest_new, rest_lcs, line_num + 1, [
-          %{type: :unchanged, line_number: line_num, content: line} | acc
-        ])
+    %{
+      current: revision,
+      other: other_revision,
+      diff: compute_diff(other_revision.body, revision.body)
+    }
+  end
 
-      _ ->
-        # Added line
-        walk_new_lines(rest_new, lcs, line_num + 1, [
-          %{type: :added, line_number: line_num, content: line} | acc
-        ])
+  defp compute_diff(old_text, new_text) do
+    # Simple line-by-line diff implementation
+    old_lines = String.split(old_text, "\n")
+    new_lines = String.split(new_text, "\n")
+
+    {diff, _, _} = compute_line_diff(old_lines, new_lines, [])
+    diff
+  end
+
+  # Simple line diff algorithm
+  defp compute_line_diff(old_lines, new_lines, acc \\ []) do
+    {old_rest, new_rest, ops} = diff_lines(old_lines, new_lines, [], [])
+
+    diff = Enum.reverse(ops)
+    {diff, old_rest, new_rest}
+  end
+
+  defp diff_lines([], [], same_ops, diff_ops) do
+    {Enum.reverse(same_ops), [], [], Enum.reverse(diff_ops)}
+  end
+
+  defp diff_lines(old_lines, [], same_ops, diff_ops) do
+    deletions = Enum.map(old_lines, fn line -> %{type: :deletion, line: line} end)
+    {Enum.reverse(same_ops), old_lines, [], Enum.reverse(diff_ops) ++ deletions}
+  end
+
+  defp diff_lines([], new_lines, same_ops, diff_ops) do
+    additions = Enum.map(new_lines, fn line -> %{type: :addition, line: line} end)
+    {Enum.reverse(same_ops), [], new_lines, Enum.reverse(diff_ops) ++ additions}
+  end
+
+  defp diff_lines([old_head | old_rest] = old_lines, [new_head | new_rest] = new_lines, same_ops, diff_ops) do
+    if old_head == new_head do
+      diff_lines(old_rest, new_rest, [old_head | same_ops], diff_ops)
+    else
+      # Find the length of the common prefix
+      {common_prefix, old_remainder, new_remainder} = find_common_sequence(old_rest, new_rest, [old_head], [new_head])
+
+      # Flush same_ops if any
+      same_ops_flushed = if same_ops != [], do: [%{type: :same, lines: Enum.reverse(same_ops)}], else: []
+
+      diff_lines(old_remainder, new_remainder, [], diff_ops ++ same_ops_flushed)
     end
+  end
+
+  defp find_common_sequence(old_lines, new_lines, old_prefix, new_prefix) do
+    # Simple approach: return what we have
+    {Enum.reverse(old_prefix), old_lines, Enum.reverse(new_prefix)}
   end
 
   def change_document(%IssueDocument{} = document, attrs \\ %{}) do
@@ -348,5 +226,22 @@ defmodule Cympho.Documents do
 
   def subscribe do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "documents")
+  end
+
+  defp has_pending_approvals?(issue_id) do
+    import Ecto.Query
+
+    alias Cympho.Approvals.Approval
+    alias Cympho.Approvals.ApprovalIssue
+
+    query =
+      from(a in Approval,
+        join: ai in ApprovalIssue,
+        on: ai.approval_id == a.id,
+        where: ai.issue_id == ^issue_id and a.status == :pending,
+        select: count(a.id)
+      )
+
+    Repo.one(query) > 0
   end
 end
