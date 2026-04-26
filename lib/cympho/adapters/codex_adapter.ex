@@ -67,7 +67,7 @@ defmodule Cympho.Adapters.CodexAdapter do
     try do
       port = Port.open(
         {:spawn_executable, codex_bin},
-        [:binary, :exit_status, :use_stdio, :stderr_to_std_err, {:args, args}, {:env, env}]
+        [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}]
       )
 
       send(port, {self(), {:command, "#{prompt}\n"}})
@@ -130,7 +130,7 @@ defmodule Cympho.Adapters.CodexAdapter do
   end
 
   defp find_codex_binary do
-    System.find_executable("codex") || "codex"
+    System.find_executable("codex") || raise "codex binary not found in PATH"
   end
 
   defp build_env(config) do
@@ -183,9 +183,12 @@ defmodule Cympho.Adapters.CodexAdapter do
   @impl true
   def available?(config) do
     api_key = get_api_key(config)
-    not is_nil(api_key) and api_key != ""
+    has_key = not is_nil(api_key) and api_key != ""
+    has_binary = not is_nil(System.find_executable("codex"))
+    has_key and has_binary
   end
 
+  @impl true
   def available? do
     available?(%{})
   end
