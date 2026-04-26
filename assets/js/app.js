@@ -167,7 +167,7 @@ function handleKeydown(e) {
     return;
   }
 
-  // Cmd/Ctrl+Shift+K opens company switcher
+  // Cmd/Ctrl+K opens company switcher
   if ((e.metaKey || e.ctrlKey) && e.key === 'K') {
     e.preventDefault();
     if (window.openCompanySwitcher) {
