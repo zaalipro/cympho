@@ -120,7 +120,7 @@ defmodule Cympho.Orchestrator do
     start_engine_run(session)
     schedule_heartbeat_tick()
 
-    runner = runner_module()
+    runner = runner_module(session)
     session_id = runner.run(issue, agent_id, self(), run_opts(session))
 
     {:noreply, %{session | session_id: session_id}}
@@ -363,17 +363,28 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp runner_module do
+  defp runner_module(session) do
     if Application.get_env(:cympho, :env) == :test do
-      Cympho.AgentRunner.Mock
+      Cympho.AgentAdapters.MockAdapter
     else
-      Cympho.AgentRunner
+      resolve_adapter(session)
+    end
+  end
+
+  defp resolve_adapter(session) do
+    adapter_type = Keyword.get(session.opts || [], :adapter, nil)
+    config = Keyword.get(session.opts || [], :adapter_config, %{})
+
+    case adapter_type && Cympho.AgentAdapters.resolve(%{adapter: adapter_type, config: config}) do
+      {:ok, module, _config} -> module
+      _ -> Cympho.Adapters.ClaudeCodeAdapter
     end
   end
 
   defp run_opts(session) do
     skills = Keyword.get(session.opts || [], :skills, [])
-    [skills: skills]
+    adapter_config = Keyword.get(session.opts || [], :adapter_config, %{})
+    [skills: skills, config: adapter_config]
   end
 
   defp process_tool_results(result, tool_traces) when is_map(result) do

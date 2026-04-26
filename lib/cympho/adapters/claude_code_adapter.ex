@@ -15,14 +15,22 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
   end
 
   @impl true
-  def health_check(_config) do
-    # Check if claude CLI is available
-    case System.cmd("which", ["claude"]) do
-      {_, 0} ->
-        %{status: :healthy, message: "Claude CLI available", checked_at: DateTime.utc_now()}
+  def health_check(config) do
+    api_key = get_api_key(config)
+    has_claude = System.find_executable("claude") != nil
 
-      _ ->
-        %{status: :unhealthy, message: "Claude CLI not found in PATH", checked_at: DateTime.utc_now()}
+    cond do
+      (is_nil(api_key) or api_key == "") and not has_claude ->
+        %{status: :unhealthy, message: "Claude CLI not found and API key not configured", checked_at: DateTime.utc_now()}
+
+      is_nil(api_key) or api_key == "" ->
+        %{status: :degraded, message: "Claude CLI available but API key not configured", checked_at: DateTime.utc_now()}
+
+      not has_claude ->
+        %{status: :degraded, message: "API key configured but Claude CLI not found in PATH", checked_at: DateTime.utc_now()}
+
+      true ->
+        %{status: :healthy, message: "Claude CLI available", checked_at: DateTime.utc_now()}
     end
   end
 
@@ -49,6 +57,13 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
         required: false,
         default: nil,
         description: "Working directory for Claude CLI (defaults to workspace path)"
+      },
+      %{
+        key: :resume,
+        type: :boolean,
+        required: false,
+        default: false,
+        description: "Resume a multi-turn session"
       }
     ]
   end
@@ -60,19 +75,40 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
   def type, do: :claude_code
 
   @impl true
+  def available?(config) do
+    api_key = get_api_key(config)
+    has_key = not is_nil(api_key) and api_key != ""
+    has_binary = System.find_executable("claude") != nil
+    has_key or has_binary
+  end
+
+  @impl true
   def available? do
-    case System.cmd("which", ["claude"]) do
-      {_, 0} -> true
-      _ -> false
-    end
+    available?(%{})
   end
 
   @impl true
   def validate_config(config) do
-    with :ok <- validate_stall_timeout(config["stall_timeout"] || config[:stall_timeout]),
-         :ok <- validate_cwd(config["cwd"] || config[:cwd]) do
+    config = atomize_keys(config)
+
+    with :ok <- validate_stall_timeout(config[:stall_timeout]),
+         :ok <- validate_cwd(config[:cwd]),
+         :ok <- validate_resume(config[:resume]) do
       :ok
     end
+  end
+
+  defp atomize_keys(map) when is_map(map) do
+    Map.new(map, fn
+      {k, v} when is_binary(k) -> {String.to_atom(k), v}
+      {k, v} -> {k, v}
+    end)
+  end
+
+  defp get_api_key(config) do
+    config[:api_key] || config["api_key"] ||
+      Application.get_env(:cympho, :anthropic_api_key) ||
+      System.get_env("ANTHROPIC_API_KEY")
   end
 
   defp validate_stall_timeout(nil), do: :ok
@@ -98,4 +134,8 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
   end
 
   defp validate_cwd(_), do: {:error, "cwd must be a string"}
+
+  defp validate_resume(nil), do: :ok
+  defp validate_resume(val) when is_boolean(val), do: :ok
+  defp validate_resume(_), do: {:error, "resume must be a boolean"}
 end
