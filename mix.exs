@@ -53,7 +53,8 @@ defmodule Cympho.MixProject do
       {:ex_aws, "~> 2.5"},
       {:ex_aws_s3, "~> 2.5"},
       {:sweet_xml, "~> 0.7"},
-      {:file_system, "~> 1.0", only: [:dev, :test]}
+      {:file_system, "~> 1.0", only: [:dev, :test]},
+      {:mock, "~> 0.3", only: :test}
     ]
   end
 

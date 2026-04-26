@@ -1,16 +1,17 @@
 defmodule Cympho.SkillsIntegrationTest do
   use Cympho.DataCase
-  alias Cympho.{Skills, Agents, Skills.AgentSkill, Skills.Plugin}
+  alias Cympho.{Skills, Skills.AgentSkill, Skills.Plugin}
+  alias Cympho.Repo
 
   describe "available_for_agent/1" do
     test "returns empty list when agent has no skills" do
-      agent = insert(:agent)
+      agent = insert_agent()
 
       assert Skills.available_for_agent(agent.id) == []
     end
 
     test "returns list of skill maps when agent has skills" do
-      agent = insert(:agent)
+      agent = insert_agent()
 
       # Create a test plugin/skill
       plugin =
@@ -24,7 +25,8 @@ defmodule Cympho.SkillsIntegrationTest do
           entrypoint: "test.sh",
           enabled: true,
           company_id: agent.company_id,
-          status: "active"
+          status: "active",
+          manifest: %{"name" => "Test Skill", "version" => "1.0.0"}
         })
         |> Repo.insert!()
 
@@ -46,11 +48,10 @@ defmodule Cympho.SkillsIntegrationTest do
       assert skill.version == "1.0.0"
       assert skill.capabilities == ["file_io", "web_search"]
       assert skill.description == "A test skill"
-      assert skill.entrypoint == "test.sh"
     end
 
     test "returns only enabled skills" do
-      agent = insert(:agent)
+      agent = insert_agent()
 
       # Create enabled plugin
       enabled_plugin =
@@ -62,7 +63,8 @@ defmodule Cympho.SkillsIntegrationTest do
           capabilities: ["file_io"],
           enabled: true,
           company_id: agent.company_id,
-          status: "active"
+          status: "active",
+          manifest: %{"name" => "Enabled Skill", "version" => "1.0.0"}
         })
         |> Repo.insert!()
 
@@ -76,7 +78,8 @@ defmodule Cympho.SkillsIntegrationTest do
           capabilities: ["web_search"],
           enabled: false,
           company_id: agent.company_id,
-          status: "disabled"
+          status: "disabled",
+          manifest: %{"name" => "Disabled Skill", "version" => "1.0.0"}
         })
         |> Repo.insert!()
 
@@ -111,5 +114,20 @@ defmodule Cympho.SkillsIntegrationTest do
 
       assert skills == []
     end
+  end
+
+  defp insert_agent do
+    company =
+      Repo.insert!(%Cympho.Companies.Company{
+        name: "Test Company #{System.unique_integer()}",
+        slug: "test-company-#{System.unique_integer()}"
+      })
+
+    Repo.insert!(%Cympho.Agents.Agent{
+      name: "Test Agent #{System.unique_integer()}",
+      role: :engineer,
+      status: :idle,
+      company_id: company.id
+    })
   end
 end

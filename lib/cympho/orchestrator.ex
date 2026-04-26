@@ -638,14 +638,4 @@ defmodule Cympho.Orchestrator do
         {tool_traces, nil}
     end
   end
-
-  defp build_agent_map(session) do
-    %{adapter: Keyword.get(session.opts || [], :adapter), config: Keyword.get(session.opts || [], :adapter_config, %{})}
-  end
-
-  defp run_opts(session, config) do
-    [skills: Keyword.get(session.opts || [], :skills, []), config: config]
-  end
-
-  defp reset_adapter_failure(_agent_id), do: :ok
 end
