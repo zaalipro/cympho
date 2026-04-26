@@ -117,7 +117,7 @@ defmodule Cympho.BoardApprovals do
 
         Phoenix.PubSub.broadcast(
           Cympho.PubSub,
-          "company:#{approval.company_id}:approvals",
+          "company:#{board_approval.company_id}:approvals",
           {:board_vote_cast, vote_record}
         )
 
@@ -159,7 +159,7 @@ defmodule Cympho.BoardApprovals do
 
         Phoenix.PubSub.broadcast(
           Cympho.PubSub,
-          "company:#{approval.company_id}:approvals",
+          "company:#{board_approval.company_id}:approvals",
           {:board_approval_resolved, updated}
         )
 
@@ -194,7 +194,7 @@ defmodule Cympho.BoardApprovals do
 
           Phoenix.PubSub.broadcast(
             Cympho.PubSub,
-            "company:#{approval.company_id}:approvals",
+            "company:#{board_approval.company_id}:approvals",
             {:board_approval_cancelled, updated}
           )
 
