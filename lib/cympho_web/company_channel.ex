@@ -85,7 +85,7 @@ defmodule CymphoWeb.CompanyChannel do
     with {:ok, socket} <- RateLimiting.check_heartbeat_throttle(socket),
          {:ok, socket} <- RateLimiting.check_message_rate(socket) do
       broadcast(socket, "heartbeat", payload)
-      {:noreply, socket}
+      {:reply, :ok, socket}
     else
       {:error, :rate_limited} ->
         {:reply, {:error, %{reason: "rate_limited"}}, socket}
