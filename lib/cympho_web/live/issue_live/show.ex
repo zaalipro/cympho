@@ -12,8 +12,12 @@ defmodule CymphoWeb.IssueLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    Issues.subscribe()
-    Comments.subscribe()
+    if connected?(socket) && socket.assigns[:current_company] do
+      company_id = socket.assigns.current_company.id
+      Issues.subscribe(company_id)
+      Comments.subscribe(company_id)
+    end
+
     Documents.subscribe()
 
     # Subscribe to read state updates if user is logged in
