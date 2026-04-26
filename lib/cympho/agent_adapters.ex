@@ -23,7 +23,7 @@ defmodule Cympho.AgentAdapters do
       |> Keyword.get_values(:behaviour)
       |> List.flatten()
 
-    if Cympho.AgentAdapters.Adapter in behaviours do
+    if Cympho.Adapters.Adapter in behaviours or Cympho.AgentAdapters.Adapter in behaviours do
       Registry.register(type, module)
     else
       {:error, :invalid_module}
@@ -69,7 +69,9 @@ defmodule Cympho.AgentAdapters do
     |> Enum.find_value({:error, :no_adapter}, fn type ->
       case Registry.lookup(type) do
         {:ok, module} ->
-          if module.available?(config) and module.validate_config(config) == :ok do
+          available = module_available?(module, config)
+
+          if available and module.validate_config(config) == :ok do
             {:ok, module, config}
           end
 
@@ -77,6 +79,14 @@ defmodule Cympho.AgentAdapters do
           nil
       end
     end)
+  end
+
+  defp module_available?(module, config) do
+    if function_exported?(module, :available?, 1) do
+      module.available?(config)
+    else
+      module.available?()
+    end
   end
 
   @doc """

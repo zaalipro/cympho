@@ -88,7 +88,46 @@ defmodule Cympho.Adapters.UnitTest do
 
       assert Map.has_key?(result, :status)
       assert Map.has_key?(result, :checked_at)
-      assert result.status in [:healthy, :unhealthy]
+      assert result.status in [:healthy, :degraded, :unhealthy]
+    end
+
+    test "type/0 returns :codex" do
+      assert CodexAdapter.type() == :codex
+    end
+
+    test "available?/1 with api key returns true" do
+      assert CodexAdapter.available?(%{api_key: "sk-test"}) == true
+    end
+
+    test "available?/1 without api key returns false" do
+      assert CodexAdapter.available?(%{}) == false
+    end
+
+    test "run/4 returns a reference" do
+      issue = %{id: "issue-1", title: "Test", description: "Do something"}
+      ref = CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test"})
+      assert is_reference(ref)
+    end
+
+    test "run/4 sends session_started message" do
+      issue = %{id: "issue-1", title: "Test", description: "Do something"}
+      _ref = CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test", timeout: 500})
+      assert_receive {:session_started, _session_id}, 1000
+    end
+
+    test "validate_config/1 accepts atom and string keys" do
+      assert :ok = CodexAdapter.validate_config(%{"api_key" => "sk-test"})
+      assert :ok = CodexAdapter.validate_config(%{api_key: "sk-test"})
+    end
+
+    test "health_check/1 with api key reports healthy or degraded" do
+      result = CodexAdapter.health_check(%{api_key: "sk-test"})
+      assert result.status in [:healthy, :degraded]
+    end
+
+    test "health_check/1 without api key reports unhealthy" do
+      result = CodexAdapter.health_check(%{})
+      assert result.status == :unhealthy
     end
   end
 
