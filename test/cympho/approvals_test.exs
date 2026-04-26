@@ -94,11 +94,12 @@ defmodule Cympho.ApprovalsTest do
       assert {:error, changeset} = Approvals.resolve_approval(approved.id, :denied, %{})
     end
 
-    test "broadcasts approval_resolved event" do
-      agent = insert_agent()
+    test "broadcasts approval_resolved event on scoped topic" do
+      company = insert_company()
+      agent = insert_agent(company.id)
       {:ok, approval} = create_test_approval(agent)
 
-      Approvals.subscribe()
+      Approvals.subscribe(company.id)
       {:ok, _} = Approvals.resolve_approval(approval.id, :approved, %{})
 
       assert_received {:approval_resolved, _}
@@ -215,14 +216,21 @@ defmodule Cympho.ApprovalsTest do
     end
   end
 
-  defp insert_agent do
-    %{id: id} =
-      Cympho.Repo.insert!(%Cympho.Agents.Agent{
-        name: "Test Agent #{System.unique_integer()}",
-        role: :engineer,
-        status: :idle
-      })
+  defp insert_company do
+    Cympho.Repo.insert!(%Cympho.Companies.Company{
+      name: "Test Company #${System.unique_integer()}"
+    })
+  end
 
+  defp insert_agent(company_id \\ nil) do
+    attrs = %{
+      name: "Test Agent #${System.unique_integer()}",
+      role: :engineer,
+      status: :idle
+    }
+
+    attrs = if company_id, do: Map.put(attrs, :company_id, company_id), else: attrs
+    %{id: id} = Cympho.Repo.insert!(struct(Cympho.Agents.Agent, attrs))
     Cympho.Repo.get!(Cympho.Agents.Agent, id)
   end
 
