@@ -647,7 +647,5 @@ defmodule Cympho.Orchestrator do
     [skills: Keyword.get(session.opts || [], :skills, []), config: config]
   end
 
-  defp handle_resolution_error(session, error), do: handle_adapter_error(session, error)
-
   defp reset_adapter_failure(_agent_id), do: :ok
 end
