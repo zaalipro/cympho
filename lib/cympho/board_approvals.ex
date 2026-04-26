@@ -804,7 +804,7 @@ defmodule Cympho.BoardApprovals do
     if principal_id != nil and permission != nil do
       Phoenix.PubSub.broadcast(
         Cympho.PubSub,
-        "governance",
+        "company:#{board_approval.company_id}:governance",
         {:permission_grant_approved, board_approval.id, principal_id, permission}
       )
     end
@@ -825,7 +825,7 @@ defmodule Cympho.BoardApprovals do
 
     Phoenix.PubSub.broadcast(
       Cympho.PubSub,
-      "governance",
+      "company:#{board_approval.company_id}:governance",
       {:strategic_initiative_approved, board_approval.id, board_approval.proposal_data}
     )
 
