@@ -122,7 +122,7 @@ defmodule Cympho.Orchestrator do
     schedule_heartbeat_tick()
 
     runner = runner_module()
-    session_id = runner.run(issue, agent_id, self(), run_opts(issue))
+    session_id = runner.run(issue, agent_id, self(), run_opts(session))
 
     {:noreply, %{session | session_id: session_id}}
   end
@@ -372,8 +372,8 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp run_opts(issue) do
-    skills = Keyword.get(issue.opts || [], :skills, [])
+  defp run_opts(session) do
+    skills = Keyword.get(session.opts || [], :skills, [])
     [skills: skills]
   end
 
