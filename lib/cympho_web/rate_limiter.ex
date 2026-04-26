@@ -45,7 +45,7 @@ defmodule CymphoWeb.RateLimiter do
   end
 
   defp check_rate(key, kind, max_per_sec) do
-    now = System.system_time(:millisecond())
+    now = System.system_time(:millisecond)
 
     :ets.insert(@table, {{key, kind, now}, true})
 

@@ -56,6 +56,12 @@ defmodule CymphoWeb.AgentLive.Show do
     {:noreply, push_navigate(socket, to: ~p"/agents")}
   end
 
+  def health_status_label(:healthy), do: "Healthy"
+  def health_status_label(:degraded), do: "Degraded"
+  def health_status_label(:unhealthy), do: "Unhealthy"
+  def health_status_label(:unknown), do: "Unknown"
+  def health_status_label(_), do: "Unknown"
+
   def status_label(:idle), do: "Idle"
   def status_label(:running), do: "Running"
   def status_label(:error), do: "Error"

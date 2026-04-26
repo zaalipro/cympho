@@ -55,12 +55,12 @@ defmodule Cympho.AgentAdapters do
     resolve(%{adapter: adapter_type, config: %{}})
   end
 
-  defp resolve_chain([], _config, _found_any, []), do: {:error, :unknown_adapter}
+  defp resolve_chain([], _config, true, []), do: {:error, :no_adapter_available}
 
   defp resolve_chain([], _config, _found_any, config_errors) when config_errors != [],
     do: {:error, {:config_invalid, Enum.reverse(config_errors)}}
 
-  defp resolve_chain([], _config, true, []), do: {:error, :no_adapter_available}
+  defp resolve_chain([], _config, false, []), do: {:error, :unknown_adapter}
 
   defp resolve_chain([type | rest], config, found_any, config_errors) do
     case Registry.lookup(type) do

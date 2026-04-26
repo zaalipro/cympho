@@ -9,6 +9,11 @@ defmodule Cympho.OrchestratorTest do
       start_supervised!({Registry, keys: :unique, name: Cympho.OrchestratorRegistry})
     end
 
+    unless Process.whereis(Cympho.Adapters.Registry) do
+      start_supervised!(Cympho.Adapters.Registry)
+      Cympho.AgentAdapters.register(:mock, Cympho.AgentAdapters.MockAdapter)
+    end
+
     on_exit(fn ->
       Registry.select(Cympho.OrchestratorRegistry, [{{:_, :"$1", :_}, [], [:"$1"]}])
       |> Enum.each(fn pid ->
@@ -54,10 +59,26 @@ defmodule Cympho.OrchestratorTest do
       issue = %{id: "orch-test-2", title: "Test", description: "Desc"}
       agent_id = "agent-1"
 
-      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id, adapter: :mock)
       assert Orchestrator.whereis(issue.id) == pid
     after
       if pid = Orchestrator.whereis("orch-test-2") do
+        GenServer.stop(pid)
+      end
+    end
+
+    @tag :capture_log
+    test "starts orchestrator without adapter opts — resolves via default chain" do
+      issue = %{id: "orch-test-default", title: "Test", description: "Desc"}
+      agent_id = "agent-1"
+
+      # With no adapter in opts and no agent in DB, resolve uses default (:claude_code).
+      # If :claude_code resolves successfully, the orchestrator starts a session.
+      # If not, it stops immediately. Either way, the call returns {:ok, pid}.
+      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id, [])
+      assert is_pid(pid)
+    after
+      if pid = Orchestrator.whereis("orch-test-default") do
         GenServer.stop(pid)
       end
     end
@@ -66,8 +87,8 @@ defmodule Cympho.OrchestratorTest do
       issue = %{id: "orch-test-3", title: "Test", description: "Desc"}
       agent_id = "agent-1"
 
-      {:ok, pid1} = Orchestrator.start_and_run(issue, agent_id)
-      {:error, :already_started} = Orchestrator.start_and_run(issue, agent_id)
+      {:ok, _pid1} = Orchestrator.start_and_run(issue, agent_id, adapter: :mock)
+      {:error, :already_started} = Orchestrator.start_and_run(issue, agent_id, adapter: :mock)
     after
       if pid = Orchestrator.whereis("orch-test-3") do
         GenServer.stop(pid)
@@ -89,7 +110,7 @@ defmodule Cympho.OrchestratorTest do
       issue = %{id: "orch-stop-test", title: "Test", description: "Desc"}
       agent_id = "agent-1"
 
-      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id, adapter: :mock)
       assert Orchestrator.whereis(issue.id) == pid
       assert :ok = Orchestrator.stop(issue.id)
       # Give the Registry time to clean up the entry
@@ -103,7 +124,7 @@ defmodule Cympho.OrchestratorTest do
       issue = %{id: "orch-test-4", title: "Test", description: "Desc"}
       agent_id = "agent-1"
 
-      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id, adapter: :mock)
       assert Orchestrator.whereis(issue.id) == pid
     after
       if pid = Orchestrator.whereis("orch-test-4") do
@@ -121,7 +142,7 @@ defmodule Cympho.OrchestratorTest do
       issue = %{id: "orch-test-5", title: "Test", description: "Desc"}
       agent_id = "agent-1"
 
-      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id, adapter: :mock)
       assert Orchestrator.whereis(issue.id) == pid
 
       Orchestrator.stop(issue.id)
@@ -131,6 +152,140 @@ defmodule Cympho.OrchestratorTest do
 
     test "handles stop for unknown issue gracefully" do
       Orchestrator.stop("nonexistent-issue")
+    end
+  end
+
+  describe "adapter resolution" do
+    @tag :capture_log
+    test "resolves :mock adapter successfully" do
+      issue = %{id: "orch-resolve-ok", title: "Test", description: "Desc"}
+      agent_id = "agent-resolve-ok"
+
+      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id, adapter: :mock)
+      assert is_pid(pid)
+      assert Orchestrator.whereis(issue.id) == pid
+    after
+      if pid = Orchestrator.whereis("orch-resolve-ok") do
+        GenServer.stop(pid)
+      end
+    end
+
+    @tag :capture_log
+    test "stops orchestrator when adapter type is unknown" do
+      # Overwrite :claude_code fallback so it also fails
+      original = Cympho.AgentAdapters.lookup(:claude_code)
+
+      # Register an unavailable adapter as :claude_code to block fallback
+      defmodule UnknownFallbackBlocker do
+        @behaviour Cympho.AgentAdapters.Adapter
+        @impl true
+        def run(_, _, _, _), do: make_ref()
+        @impl true
+        def available?(_), do: false
+        @impl true
+        def health_check(_), do: %{status: :unhealthy, message: "Down", checked_at: DateTime.utc_now()}
+        @impl true
+        def type, do: :fallback_blocker
+        @impl true
+        def validate_config(_), do: :ok
+      end
+
+      Cympho.AgentAdapters.register(:claude_code, UnknownFallbackBlocker)
+
+      issue = %{id: "orch-unknown-adapter", title: "Test", description: "Desc"}
+      agent_id = "agent-unknown"
+
+      {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id, adapter: :nonexistent_adapter_xyz)
+
+      :timer.sleep(100)
+      assert Orchestrator.whereis(issue.id) == nil
+
+      # Restore
+      case original do
+        {:ok, mod} -> Cympho.AgentAdapters.register(:claude_code, mod)
+        :error -> :ok
+      end
+    end
+
+    @tag :capture_log
+    test "stops orchestrator when no adapter is available" do
+      defmodule UnavailableTestAdapter do
+        @behaviour Cympho.AgentAdapters.Adapter
+
+        @impl true
+        def run(_, _, _, _), do: make_ref()
+        @impl true
+        def available?(_), do: false
+        @impl true
+        def health_check(_), do: %{status: :unhealthy, message: "Down", checked_at: DateTime.utc_now()}
+        @impl true
+        def type, do: :unavailable_test
+        @impl true
+        def validate_config(_), do: :ok
+      end
+
+      # Block both primary and fallback
+      original = Cympho.AgentAdapters.lookup(:claude_code)
+      Cympho.AgentAdapters.register(:unavailable_test, UnavailableTestAdapter)
+      Cympho.AgentAdapters.register(:claude_code, UnavailableTestAdapter)
+
+      issue = %{id: "orch-no-adapter", title: "Test", description: "Desc"}
+      agent_id = "agent-no-adapter"
+
+      {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id, adapter: :unavailable_test)
+
+      :timer.sleep(100)
+      assert Orchestrator.whereis(issue.id) == nil
+
+      # Restore
+      case original do
+        {:ok, mod} -> Cympho.AgentAdapters.register(:claude_code, mod)
+        :error -> :ok
+      end
+    end
+
+    @tag :capture_log
+    test "stops orchestrator when config is invalid" do
+      defmodule BadConfigTestAdapter do
+        @behaviour Cympho.AgentAdapters.Adapter
+
+        @impl true
+        def run(_, _, _, _), do: make_ref()
+        @impl true
+        def available?(_), do: true
+        @impl true
+        def health_check(_), do: %{status: :healthy, message: "OK", checked_at: DateTime.utc_now()}
+        @impl true
+        def type, do: :bad_config_test
+        @impl true
+        def validate_config(%{must_be_valid: false}), do: {:error, "must_be_valid must be true"}
+        def validate_config(_), do: :ok
+      end
+
+      # Block fallback with same bad config adapter
+      original = Cympho.AgentAdapters.lookup(:claude_code)
+      Cympho.AgentAdapters.register(:bad_config_test, BadConfigTestAdapter)
+      Cympho.AgentAdapters.register(:claude_code, BadConfigTestAdapter)
+
+      issue = %{id: "orch-bad-config", title: "Test", description: "Desc"}
+      agent_id = "agent-bad-config"
+
+      {:ok, _pid} =
+        Orchestrator.start_and_run(
+          issue,
+          agent_id,
+          adapter: :bad_config_test,
+          adapter_config: %{must_be_valid: false}
+        )
+
+      :timer.sleep(100)
+      assert Orchestrator.whereis(issue.id) == nil
+
+      # Restore
+      case original do
+        {:ok, mod} -> Cympho.AgentAdapters.register(:claude_code, mod)
+        :error -> :ok
+      end
     end
   end
 
@@ -155,7 +310,7 @@ defmodule Cympho.OrchestratorTest do
       state_before = Cympho.Orchestrator.Dispatcher.state()
       assert MapSet.member?(state_before.running_issue_ids, issue_id)
 
-      {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+      {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id, adapter: :mock)
       assert :ok = Orchestrator.stop(issue_id)
       :timer.sleep(100)
 
