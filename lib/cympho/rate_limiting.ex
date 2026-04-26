@@ -34,12 +34,16 @@ defmodule Cympho.RateLimiting do
 
   def check_heartbeat_throttle(socket) do
     now = System.monotonic_time(:millisecond)
-    last_heartbeat = Map.get(socket.assigns, :last_heartbeat_ts, 0)
 
-    if now - last_heartbeat >= @heartbeat_min_interval_ms do
-      {:ok, Phoenix.Socket.assign(socket, :last_heartbeat_ts, now)}
-    else
-      {:error, :rate_limited}
+    case Map.get(socket.assigns, :last_heartbeat_ts) do
+      nil ->
+        {:ok, Phoenix.Socket.assign(socket, :last_heartbeat_ts, now)}
+
+      last when now - last >= @heartbeat_min_interval_ms ->
+        {:ok, Phoenix.Socket.assign(socket, :last_heartbeat_ts, now)}
+
+      _ ->
+        {:error, :rate_limited}
     end
   end
 
