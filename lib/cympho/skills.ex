@@ -79,9 +79,9 @@ defmodule Cympho.Skills do
   def list_skills_for_agent(agent_id) do
     query =
       from p in Plugin,
-      join: as in AgentSkill,
-      on: as.plugin_id == p.id,
-      where: as.agent_id == ^agent_id and p.enabled == true,
+      join: agent_skill in AgentSkill,
+      on: agent_skill.plugin_id == p.id,
+      where: agent_skill.agent_id == ^agent_id and p.enabled == true,
       order_by: [asc: p.name]
 
     Repo.all(query)
@@ -119,11 +119,14 @@ defmodule Cympho.Skills do
     end
   end
 
+  @valid_statuses ~w(draft installed active disabled error)
+
   @doc """
   Updates the status of a plugin (skill).
   Valid statuses: draft, installed, active, disabled, error
   """
-  def update_skill_status(%Plugin{} = plugin, status) when is_binary(status) do
+  def update_skill_status(%Plugin{} = plugin, status)
+      when is_binary(status) and status in @valid_statuses do
     update_plugin(plugin, %{status: status})
   end
 
