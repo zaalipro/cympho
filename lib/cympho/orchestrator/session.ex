@@ -8,7 +8,6 @@ defmodule Cympho.Orchestrator.Session do
     :session_id,
     :session_pid,
     :run_id,
-    :opts,
     status: :idle,
     turn_count: 0,
     tool_traces: %{},
