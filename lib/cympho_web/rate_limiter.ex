@@ -25,7 +25,7 @@ defmodule CymphoWeb.RateLimiter do
   """
   @spec check_push(String.t()) :: :ok | {:error, :rate_limited}
   def check_push(socket_id) do
-    check_rate(socket_id, :push, @max_events_per_sec)
+    GenServer.call(__MODULE__, {:check_rate, socket_id, :push, @max_events_per_sec})
   end
 
   @doc """
@@ -33,7 +33,7 @@ defmodule CymphoWeb.RateLimiter do
   """
   @spec check_heartbeat(String.t()) :: :ok | {:error, :rate_limited}
   def check_heartbeat(socket_id) do
-    check_rate(socket_id, :heartbeat, @max_heartbeats_per_sec)
+    GenServer.call(__MODULE__, {:check_rate, socket_id, :heartbeat, @max_heartbeats_per_sec})
   end
 
   @doc """
@@ -41,21 +41,7 @@ defmodule CymphoWeb.RateLimiter do
   """
   @spec check_join(String.t()) :: :ok | {:error, :rate_limited}
   def check_join(ip) do
-    check_rate("join:#{ip}", :join, @max_joins_per_sec)
-  end
-
-  defp check_rate(key, kind, max_per_sec) do
-    now = System.system_time(:millisecond)
-
-    :ets.insert(@table, {{key, kind, now}, true})
-
-    count = :ets.match_count(@table, {{{key, kind, :_}, :_}})
-
-    if count <= max_per_sec do
-      :ok
-    else
-      {:error, :rate_limited}
-    end
+    GenServer.call(__MODULE__, {:check_rate, "join:#{ip}", :join, @max_joins_per_sec})
   end
 
   @doc """
@@ -68,9 +54,27 @@ defmodule CymphoWeb.RateLimiter do
 
   @impl true
   def init(_opts) do
-    :ets.new(@table, [:named_table, :set, :public, read_concurrency: true])
+    :ets.new(@table, [:named_table, :set])
     schedule_cleanup()
     {:ok, %{}}
+  end
+
+  @impl true
+  def handle_call({:check_rate, key, kind, max_per_sec}, _from, state) do
+    now = System.system_time(:millisecond)
+
+    :ets.insert(@table, {{key, kind, now}, true})
+
+    count = :ets.match_count(@table, {{{key, kind, :_}, :_}})
+
+    result =
+      if count <= max_per_sec do
+        :ok
+      else
+        {:error, :rate_limited}
+      end
+
+    {:reply, result, state}
   end
 
   @impl true
