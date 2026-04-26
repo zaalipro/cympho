@@ -2,9 +2,10 @@ defmodule Cympho.AgentAdapters.Adapter do
   @moduledoc """
   Behaviour specification for agent adapters.
 
-  Each adapter bridges agents to a specific AI runtime or execution
-  environment. Modules implementing this behaviour are registered in
-  `Cympho.AgentAdapters` for discovery and resolution.
+  Compatible with `Cympho.Adapters.Adapter`. Concrete adapter implementations
+  live under `Cympho.Adapters.*` and implement `Cympho.Adapters.Adapter`.
+  This behaviour exists as the contract used by the orchestrator resolution
+  pipeline (`Cympho.AgentAdapters.resolve/1`).
   """
 
   @typedoc "Health status returned by health_check/1"
