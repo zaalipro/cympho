@@ -351,7 +351,12 @@
                         _ -> "?"
                       end}
                     </div>
-                    <span>{case entry.data.actor_type do "user" -> "User" "agent" -> "Agent" "system" -> "System" _ -> "Unknown" end}</span>
+                    <span>{case entry.data.actor_type do
+                      "user" -> "User"
+                      "agent" -> "Agent"
+                      "system" -> "System"
+                      _ -> "Unknown"
+                    end}</span>
                   </div>
                   <div class="text-xs space-y-1">
                     <p class="text-text-quaternary font-510">Arguments:</p>
@@ -431,6 +436,130 @@
           <.button type="button" variant="ghost" size="sm" phx-click="cancel_editing">Cancel</.button>
         </div>
       </form>
+    </div>
+
+    <!-- Documents -->
+    <div :if={length(@documents) > 0}>
+      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Documents</h3>
+      <div class="space-y-2">
+        <div :for={doc <- @documents} class="flex items-center justify-between bg-white/[0.05] rounded-md px-3 py-2">
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-510 text-text-primary truncate">{doc.title}</p>
+            <p class="text-xs text-text-tertiary">{doc.key}</p>
+          </div>
+          <button
+            type="button"
+            phx-click="show_document_revisions"
+            phx-value-document_key={doc.key}
+            class="text-text-quaternary hover:text-accent transition-colors text-xs ml-2"
+          >
+            <.icon name="hero-clock" class="w-4 h-4" />
+            <span class="ml-1">{length(doc.revisions)}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Revisions Panel -->
+    <div :if={@show_revisions && @selected_document} class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" phx-click="hide_revisions">
+      <div class="bg-surface border border-border rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden flex flex-col m-4" phx-click-stop>
+        <!-- Header -->
+        <div class="flex items-center justify-between p-4 border-b border-border">
+          <div>
+            <h3 class="text-lg font-510 text-text-primary">{@selected_document.title} — Revisions</h3>
+            <p class="text-sm text-text-tertiary">{@selected_document.key}</p>
+          </div>
+          <button type="button" phx-click="hide_revisions" class="text-text-quaternary hover:text-text-secondary transition-colors">
+            <.icon name="hero-x-mark" class="w-5 h-5" />
+          </button>
+        </div>
+
+        <!-- Rollback Blocker Banner -->
+        <div :if={@rollback_blocker} class="m-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-md">
+          <div class="flex items-start gap-2">
+            <.icon name="hero-exclamation-triangle" class="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+            <p class="text-sm text-yellow-200">{@rollback_blocker}</p>
+          </div>
+        </div>
+
+        <!-- Revisions List -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-3">
+          <div :for={revision <- @revisions} class="bg-white/[0.03] border border-border rounded-lg p-4 space-y-3">
+            <div class="flex items-start justify-between">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-sm font-510 text-text-primary">Revision #{revision.revision_number}</span>
+                  <.badge variant={if revision.revision_number == 1, do: "info", else: "secondary"}>
+                    {if revision.revision_number == 1, do: "Initial", else: "##{revision.revision_number - 1}"}
+                  </.badge>
+                </div>
+                <p :if={revision.change_summary} class="text-sm text-text-secondary mb-1">{revision.change_summary}</p>
+                <div class="flex items-center gap-3 text-xs text-text-tertiary">
+                  <span>{format_timeline_timestamp(revision.inserted_at)}</span>
+                  <span :if={revision.created_by_agent_id}>Agent</span>
+                  <span :if={revision.created_by_user_id}>User</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  phx-click="show_revision_diff"
+                  phx-value-revision_id={revision.id}
+                  class="text-text-quaternary hover:text-accent transition-colors text-xs flex items-center gap-1"
+                >
+                  <.icon name="hero-document-text" class="w-4 h-4" />
+                  Diff
+                </button>
+                <button
+                  type="button"
+                  phx-click="restore_revision"
+                  phx-value-revision_id={revision.id}
+                  class={"text-xs flex items-center gap-1 #{@rollback_blocker && "opacity-50 cursor-not-allowed" || "text-text-quaternary hover:text-green-400"} transition-colors"}
+                  disabled={@rollback_blocker != nil}
+                >
+                  <.icon name="hero-arrow-uturn-left" class="w-4 h-4" />
+                  Restore
+                </button>
+              </div>
+            </div>
+
+            <!-- Revision Preview (first 200 chars) -->
+            <div class="text-xs text-text-tertiary bg-black/20 rounded p-2 font-mono max-h-20 overflow-hidden">
+              {String.slice(revision.body, 0, 200)}{if String.length(revision.body) > 200, do: "...", else: ""}
+            </div>
+          </div>
+
+          <div :if={length(@revisions) == 0} class="text-center py-8 text-text-tertiary">
+            <p>No revisions found</p>
+          </div>
+        </div>
+
+        <!-- Diff View (shown when a revision is selected for diff) -->
+        <div :if={@selected_revision_diff} class="border-t border-border">
+          <div class="flex items-center justify-between p-3 bg-white/[0.03]">
+            <h4 class="text-sm font-510 text-text-primary">Diff View</h4>
+            <button
+              type="button"
+              phx-click="hide_revision_diff"
+              class="text-text-quaternary hover:text-text-secondary transition-colors text-xs"
+            >
+              <.icon name="hero-x-mark" class="w-4 h-4" />
+            </button>
+          </div>
+          <div class="p-4 max-h-64 overflow-y-auto space-y-1 font-mono text-xs">
+            <div :for={line <- @selected_revision_diff.diff} class={
+              "flex " <> case line.type do
+                :unchanged -> "text-text-tertiary"
+                :added -> "bg-green-500/10 text-green-400"
+                :removed -> "bg-red-500/10 text-red-400"
+              end
+            }>
+              <span class="w-8 text-right mr-2 opacity-50">{line.line_number}</span>
+              <span class="flex-1 whitespace-pre-wrap break-words">{line.content}</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- GitHub PR Link -->

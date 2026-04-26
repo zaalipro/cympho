@@ -49,4 +49,60 @@ defmodule CymphoWeb.DocumentController do
         {:error, :not_found}
     end
   end
+
+  def show_revision(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id}) do
+    with {:ok, document} <- Documents.get_document_by_key(issue_id, key),
+         {:ok, revision} <- Documents.get_revision(revision_id),
+         true <- revision.document_id == document.id do
+      render(conn, :show_revision, revision: revision)
+    else
+      {:error, :not_found} -> {:error, :not_found}
+      false -> {:error, :not_found}
+    end
+  end
+
+  def diff_revision(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id}) do
+    with {:ok, document} <- Documents.get_document_by_key(issue_id, key),
+         {:ok, %{target: target} = result} <- safe_diff_revision(revision_id),
+         true <- target.document_id == document.id do
+      render(conn, :diff, result: result)
+    else
+      {:error, :not_found} -> {:error, :not_found}
+      false -> {:error, :not_found}
+    end
+  end
+
+  def restore_revision(conn, %{
+        "issue_id" => issue_id,
+        "key" => key,
+        "revision_id" => revision_id
+      }) do
+    with {:ok, document} <- Documents.get_document_by_key(issue_id, key),
+         {:ok, revision} <- Documents.get_revision(revision_id),
+         true <- revision.document_id == document.id do
+      opts =
+        conn.assigns[:current_agent] &&
+          [created_by_agent_id: conn.assigns[:current_agent].id] ||
+          []
+
+      case Documents.restore_revision(document.id, revision_id, opts) do
+        {:ok, _document} ->
+          conn
+          |> put_status(:ok)
+          |> json(%{data: %{message: "Restored revision ##{revision.revision_number}"}})
+
+        {:error, changeset} ->
+          {:error, changeset}
+      end
+    else
+      {:error, :not_found} -> {:error, :not_found}
+      false -> {:error, :not_found}
+    end
+  end
+
+  defp safe_diff_revision(revision_id) do
+    Documents.diff_revision(revision_id)
+  rescue
+    Ecto.NoResultsError -> {:error, :not_found}
+  end
 end

@@ -159,6 +159,17 @@ defmodule Cympho.Approvals do
     {:ok, count}
   end
 
+  def list_approvals_for_issue(issue_id) do
+    from(a in Approval,
+      join: ai in ApprovalIssue,
+      on: ai.approval_id == a.id,
+      where: ai.issue_id == ^issue_id,
+      order_by: [desc: a.inserted_at]
+    )
+    |> Repo.all()
+    |> Repo.preload([:requested_by, :resolved_by, :issues])
+  end
+
   def subscribe do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "approvals")
   end

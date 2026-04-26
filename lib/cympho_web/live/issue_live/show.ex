@@ -37,6 +37,7 @@ defmodule CymphoWeb.IssueLive.Show do
         work_products = WorkProducts.list_work_products(issue.id)
         tool_call_traces = ToolCallTraces.list_tool_call_traces(issue_id: issue.id)
         timeline = build_timeline(issue, runs, interactions, work_products, tool_call_traces)
+        documents = Documents.list_documents(issue.id)
 
         {:ok,
          assign(socket,
@@ -54,7 +55,13 @@ defmodule CymphoWeb.IssueLive.Show do
            tool_call_traces: tool_call_traces,
            timeline: timeline,
            scrolled_to_bottom: true,
-           expanded_traces: %{}
+           expanded_traces: %{},
+           documents: documents,
+           selected_document: nil,
+           show_revisions: false,
+           revisions: [],
+           selected_revision_diff: nil,
+           rollback_blocker: nil
          )}
 
       {:error, :not_found} ->
@@ -306,6 +313,85 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   @impl true
+  def handle_event("show_document_revisions", %{"document_key" => key}, socket) do
+    case Documents.get_document_by_key(socket.assigns.issue.id, key) do
+      {:ok, document} ->
+        revisions = Documents.list_revisions(document.id)
+
+        # Check for plan approval binding blocker
+        blocker = check_plan_approval_blocker(key, socket.assigns.issue)
+
+        {:noreply,
+         assign(socket,
+           selected_document: document,
+           show_revisions: true,
+           revisions: revisions,
+           selected_revision_diff: nil,
+           rollback_blocker: blocker
+         )}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Document not found")}
+    end
+  end
+
+  @impl true
+  def handle_event("hide_revisions", _, socket) do
+    {:noreply,
+     assign(socket,
+       selected_document: nil,
+       show_revisions: false,
+       revisions: [],
+       selected_revision_diff: nil,
+       rollback_blocker: nil
+     )}
+  end
+
+  @impl true
+  def handle_event("show_revision_diff", %{"revision_id" => revision_id}, socket) do
+    case Documents.diff_revision(revision_id) do
+      {:ok, diff_result} ->
+        {:noreply, assign(socket, :selected_revision_diff, diff_result)}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Revision not found")}
+    end
+  end
+
+  @impl true
+  def handle_event("hide_revision_diff", _, socket) do
+    {:noreply, assign(socket, :selected_revision_diff, nil)}
+  end
+
+  @impl true
+  def handle_event("restore_revision", %{"revision_id" => revision_id}, socket) do
+    if socket.assigns.rollback_blocker do
+      {:noreply, put_flash(socket, :error, socket.assigns.rollback_blocker)}
+    else
+      document = socket.assigns.selected_document
+
+      case Documents.restore_revision(document.id, revision_id) do
+        {:ok, _restored} ->
+          # Reload documents and revisions
+          documents = Documents.list_documents(socket.assigns.issue.id)
+          revisions = Documents.list_revisions(document.id)
+
+          {:noreply,
+           socket
+           |> put_flash(:info, "Document restored successfully")
+           |> assign(
+             documents: documents,
+             revisions: revisions,
+             selected_revision_diff: nil
+           )}
+
+        {:error, _changeset} ->
+          {:noreply, put_flash(socket, :error, "Failed to restore revision")}
+      end
+    end
+  end
+
+  @impl true
   def handle_info({:issue_updated, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
       runs = HeartbeatEngine.list_runs_for_issue(updated_issue.id)
@@ -436,6 +522,16 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:turn_ended_with_error, _session_id, reason}, socket) do
     {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
+  end
+
+  def handle_info({:document_updated, updated_document}, socket) do
+    if socket.assigns.selected_document && socket.assigns.selected_document.id == updated_document.id do
+      revisions = Documents.list_revisions(updated_document.id)
+      {:noreply, assign(socket, revisions: revisions)}
+    else
+      documents = Documents.list_documents(socket.assigns.issue.id)
+      {:noreply, assign(socket, documents: documents)}
+    end
   end
 
   defp valid_status_options(current_status) do
@@ -598,4 +694,26 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
   def format_timeline_timestamp(_), do: ""
+
+  # Check if there's a plan approval blocker for rollback
+  defp check_plan_approval_blocker(document_key, issue) do
+    if document_key == "plan" do
+      # Check if there's an open approval for this issue
+      case Cympho.Approvals.list_approvals_for_issue(issue.id) do
+        approvals when is_list(approvals) ->
+          open_approval = Enum.find(approvals, fn a -> a.status in [:pending, :requested] end)
+
+          if open_approval do
+            "Cannot rollback plan document while approval ##{open_approval.id} is open"
+          else
+            nil
+          end
+
+        _ ->
+          nil
+      end
+    else
+      nil
+    end
+  end
 end
