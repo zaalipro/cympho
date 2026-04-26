@@ -43,10 +43,67 @@ defmodule CymphoWeb.DocumentController do
     case Documents.get_document_by_key(issue_id, key) do
       {:ok, document} ->
         revisions = Documents.list_revisions(document.id)
-        render(conn, :revisions, revisions: revisions)
+        render(conn, :revisions, revisions: revisions, document: document)
 
       {:error, :not_found} ->
         {:error, :not_found}
     end
+  end
+
+  def show(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id}) do
+    case Documents.get_document_by_key(issue_id, key) do
+      {:ok, document} ->
+        revisions = Documents.list_revisions(document.id)
+        revision = Documents.get_revision!(revision_id)
+        render(conn, :show, document: document, revisions: revisions, revision: revision)
+
+      {:error, :not_found} ->
+        {:error, :not_found}
+    end
+  end
+
+  def diff(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id, "other_revision_id" => other_revision_id}) do
+    case Documents.get_document_by_key(issue_id, key) do
+      {:ok, document} ->
+        diff = Documents.get_diff(revision_id, other_revision_id)
+        render(conn, :diff, document: document, diff: diff)
+
+      {:error, :not_found} ->
+        {:error, :not_found}
+    end
+  end
+
+  def rollback(conn, %{"issue_id" => issue_id, "key" => key, "revision_id" => revision_id}) do
+    author_id = get_author_id(conn)
+    author_type = get_author_type(conn)
+
+    case Documents.get_document_by_key(issue_id, key) do
+      {:ok, document} ->
+        case Documents.rollback_to_revision(document, revision_id, author_id, author_type) do
+          {:ok, updated} ->
+            conn
+            |> put_flash(:info, "Rolled back to revision #{revision_id}")
+            |> redirect(to: ~p"/issues/#{issue_id}")
+
+          {:error, changeset} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> put_view(html: CymphoWeb.ErrorJSON)
+            |> render(:error, changeset: changeset)
+        end
+
+      {:error, :not_found} ->
+        {:error, :not_found}
+    end
+  end
+
+  defp get_author_id(conn) do
+    # TODO: Extract from actual auth session
+    conn.params["author_id"] || System.get_env("TEST_AUTHOR_ID")
+  end
+
+  defp get_author_type(conn) do
+    # TODO: Extract from actual auth session
+    conn.params["author_type"] || "agent"
   end
 end
