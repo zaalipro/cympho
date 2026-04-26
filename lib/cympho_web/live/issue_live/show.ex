@@ -492,7 +492,9 @@ defmodule CymphoWeb.IssueLive.Show do
   defp maybe_rebuild_timeline(socket) do
     interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
     timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
-    assign(socket, :timeline, timeline, :interactions, interactions)
+    socket
+    |> assign(:timeline, timeline)
+    |> assign(:interactions, interactions)
   end
 
   # Format timestamp for timeline entries

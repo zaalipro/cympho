@@ -755,7 +755,7 @@ defmodule Cympho.BoardApprovals do
             {:error, :not_found}
 
           company ->
-            case Cympho.Companies.update_company(company, update_attrs, skip_governance: true) do
+            case Cympho.Companies.execute_company_update(company, update_attrs) do
               {:ok, updated} ->
                 GovernanceAuditLogs.log_action(
                   "policy_change_executed",

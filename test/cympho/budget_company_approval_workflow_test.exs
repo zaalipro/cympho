@@ -595,7 +595,7 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
 
       new_config = %{"categories" => ["policy_change"], "threshold_value" => 0.5}
 
-      assert {:ok, updated} = Companies.update_company(company, %{governance_config: new_config}, skip_governance: true)
+      assert {:ok, updated} = Companies.execute_company_update(company, %{governance_config: new_config})
       assert updated.governance_config["threshold_value"] == 0.5
     end
   end

@@ -62,7 +62,6 @@ defmodule Cympho.Companies do
         error
     end
   end
-  end
 
   defp policy_change_needs_approval?(%Company{} = company, attrs) do
     governance_key_changing? =
