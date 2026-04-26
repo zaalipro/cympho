@@ -141,7 +141,9 @@ defmodule Cympho.Skills.HotReloader do
   ## Private Functions
 
   defp env do
-    Application.get_env(:cympho, :env, Mix.env())
+    # Runtime environment must be explicitly configured via Application config
+    # Do NOT use Mix.env() at runtime as it returns compile-time environment
+    Application.fetch_env!(:cympho, :env)
   end
 
   defp get_manifest_dir do
@@ -216,16 +218,48 @@ defmodule Cympho.Skills.HotReloader do
     {:error, :yaml_not_supported}
   end
 
-  defp find_plugin_by_identifier(%{"identifier" => identifier}) do
-    # Get the first company ID (in dev, this is typically the test company)
+  defp find_plugin_by_identifier(%{"identifier" => identifier, "company_slug" => company_slug}) do
+    # Look up company by slug from manifest
+    # Use limit(2) to detect duplicates - if more than one company has this
+    # slug, we have a data integrity issue and should fail safely
     query =
       from c in Cympho.Companies.Company,
-      limit: 1,
+      where: c.slug == ^company_slug,
+      limit: 2,
       select: c.id
 
-    case Repo.one(query) do
-      nil -> {:error, :no_company}
-      company_id -> Plugins.get_plugin_by_identifier(identifier, company_id)
+    case Repo.all(query) do
+      [] -> {:error, :no_company}
+      [company_id] -> Plugins.get_plugin_by_identifier(identifier, company_id)
+      [_first, _second | _] ->
+        Logger.error("Multiple companies found with slug #{company_slug}, possible data integrity issue")
+        {:error, :ambiguous_company}
+    end
+  end
+
+  defp find_plugin_by_identifier(%{"identifier" => identifier}) do
+    # Fallback: look up plugin by identifier alone and use its company_id
+    # This is safe in dev where plugin identifiers are typically unique
+    # In production with multi-tenant, manifests should include company_slug
+    query =
+      from p in Plugin,
+      where: p.identifier == ^identifier,
+      limit: 2,
+      select: {p.id, p.company_id}
+
+    case Repo.all(query) do
+      [] -> {:error, :plugin_not_found}
+      [{plugin_id, company_id}] ->
+        case Plugins.get_plugin_by_identifier(identifier, company_id) do
+          {:ok, plugin} -> {:ok, plugin}
+          error -> error
+        end
+      [_first, _second | _] ->
+        Logger.warning("Multiple plugins found with identifier #{identifier}, using first match. " <>
+                       "Consider adding company_slug to manifest for unambiguous lookup.")
+        # Use the first match
+        [{_plugin_id, company_id} | _] = Repo.all(query)
+        Plugins.get_plugin_by_identifier(identifier, company_id)
     end
   end
 

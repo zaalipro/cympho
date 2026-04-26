@@ -30,22 +30,23 @@ defmodule Cympho.Skills.Resolver do
   @doc """
   Resolves the dependency graph for an agent's skills.
 
-  Takes an agent_id and returns an ordered list of skills with
+  Takes an agent_id and company_id and returns an ordered list of skills with
   transitive dependencies resolved, or an error if:
   - Circular dependencies are detected
   - Semver compatibility cannot be satisfied
   - A required skill is not found
+  - The agent does not belong to the specified company
 
   Returns {:ok, [plugins]} on success, {:error, :circular_dependency, path} on cycle,
   or {:error, reason} for other errors.
   """
-  def resolve(agent_id) when is_binary(agent_id) do
+  def resolve(agent_id, company_id) when is_binary(agent_id) and is_binary(company_id) do
     case check_cache(agent_id) do
       {:ok, plugins} ->
         {:ok, plugins}
 
       :miss ->
-        case do_resolve(agent_id) do
+        case do_resolve(agent_id, company_id) do
           {:ok, plugins} = result ->
             cache_resolution(agent_id, plugins)
             result
@@ -56,7 +57,14 @@ defmodule Cympho.Skills.Resolver do
     end
   end
 
-  def resolve(_), do: {:error, :invalid_id}
+  def resolve(_, _), do: {:error, :invalid_id}
+
+  def resolve(agent_id) when is_binary(agent_id) do
+    # Deprecated: use resolve/2 with explicit company_id for proper security
+    require Logger
+    Logger.warning("Resolver.resolve/1 is deprecated, use resolve/2 with company_id")
+    resolve(agent_id, nil)
+  end
 
   @doc """
   Invalidates the resolution cache for an agent.
@@ -100,8 +108,8 @@ defmodule Cympho.Skills.Resolver do
     :ok
   end
 
-  defp do_resolve(agent_id) do
-    with {:ok, agent_skills} <- fetch_agent_skills(agent_id),
+  defp do_resolve(agent_id, company_id) do
+    with {:ok, agent_skills} <- fetch_agent_skills(agent_id, company_id),
          {:ok, plugin_map} <- build_plugin_map(agent_skills),
          {:ok, {resolved_ids, _resolved_set}} <- resolve_dependencies(plugin_map, [], MapSet.new()) do
       # Look up actual plugin structs by ID in dependency order
@@ -112,12 +120,17 @@ defmodule Cympho.Skills.Resolver do
     end
   end
 
-  defp fetch_agent_skills(agent_id) do
+  defp fetch_agent_skills(agent_id, company_id) do
     query =
       from agent_skill in AgentSkill,
+      join: agent in Cympho.Agents.Agent,
+      on: agent_skill.agent_id == agent.id,
       join: plugin in Plugin,
       on: agent_skill.plugin_id == plugin.id,
-      where: agent_skill.agent_id == ^agent_id and plugin.enabled == true,
+      where: agent.id == ^agent_id,
+      where: agent.company_id == ^company_id,
+      where: plugin.company_id == ^company_id,
+      where: plugin.enabled == true,
       select: plugin
 
     case Repo.all(query) do
