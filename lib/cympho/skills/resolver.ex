@@ -53,6 +53,9 @@ defmodule Cympho.Skills.Resolver do
 
           {:error, _} = error ->
             error
+
+          {:error, _, _} = error ->
+            error
         end
     end
   end
@@ -112,10 +115,11 @@ defmodule Cympho.Skills.Resolver do
     with {:ok, agent_skills} <- fetch_agent_skills(agent_id, company_id),
          {:ok, plugin_map} <- build_plugin_map(agent_skills),
          {:ok, {resolved_ids, _resolved_set}} <- resolve_dependencies(plugin_map, [], MapSet.new()) do
-      # Look up actual plugin structs by ID in dependency order
-      plugins = Enum.map(resolved_ids, fn plugin_id ->
-        Enum.find(agent_skills, fn p -> p.id == plugin_id end)
-      end)
+      plugins = resolved_ids
+        |> Enum.reverse()
+        |> Enum.map(fn plugin_id ->
+          Enum.find(agent_skills, fn p -> p.id == plugin_id end)
+        end)
       {:ok, plugins}
     end
   end
@@ -176,7 +180,7 @@ defmodule Cympho.Skills.Resolver do
       resolve_dfs(rest, plugin_map, ordered_list, resolved, visiting, path)
     else
       case visit_plugin(plugin_id, plugin_map, ordered_list, resolved, visiting, path) do
-        {:ok, new_ordered_list, new_resolved} ->
+        {:ok, {new_ordered_list, new_resolved}} ->
           resolve_dfs(rest, plugin_map, new_ordered_list, new_resolved, MapSet.new(), [])
 
         {:error, _, _} = error ->
@@ -193,9 +197,9 @@ defmodule Cympho.Skills.Resolver do
       plugin = Map.get(plugin_map, plugin_id)
 
       case resolve_plugin_dependencies(plugin, plugin_map, ordered_list, resolved, MapSet.put(visiting, plugin_id), [plugin_id | path]) do
-        {:ok, new_ordered_list, new_resolved} ->
+        {:ok, {new_ordered_list, new_resolved}} ->
           # Add plugin after all its dependencies
-          {:ok, [plugin_id | new_ordered_list], MapSet.put(new_resolved, plugin_id)}
+          {:ok, {[plugin_id | new_ordered_list], MapSet.put(new_resolved, plugin_id)}}
 
         {:error, _, _} = error ->
           error
@@ -204,7 +208,7 @@ defmodule Cympho.Skills.Resolver do
   end
 
   defp resolve_plugin_dependencies(nil, _plugin_map, ordered_list, resolved, _visiting, _path) do
-    {:ok, ordered_list, resolved}
+    {:ok, {ordered_list, resolved}}
   end
 
   defp resolve_plugin_dependencies(plugin, plugin_map, ordered_list, resolved, visiting, path) do
