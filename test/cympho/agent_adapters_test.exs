@@ -297,4 +297,62 @@ defmodule Cympho.AgentAdaptersTest do
       assert_receive {:session_started, _pid}
     end
   end
+
+  describe "arity preference consistency" do
+    defmodule BothAritiesAdapter do
+      @behaviour Cympho.AgentAdapters.Adapter
+
+      @impl true
+      def run(_issue, _agent_id, recipient_pid, _opts) do
+        send(recipient_pid, {:session_started, self()})
+        make_ref()
+      end
+
+      @impl true
+      def available?(%{prefer_zero: true}), do: false
+      def available?(_config), do: true
+
+      @impl true
+      def available?, do: false
+
+      @impl true
+      def health_check(_config) do
+        %{status: :healthy, message: "OK", checked_at: DateTime.utc_now()}
+      end
+
+      @impl true
+      def type, do: :both_arities
+
+      @impl true
+      def validate_config(_config), do: :ok
+    end
+
+    test "both AgentAdapters and Registry prefer available?/1 when both arities exist" do
+      AgentAdapters.register(:both_arities, BothAritiesAdapter)
+
+      config_prefer_one = %{prefer_one: true}
+      config_prefer_zero = %{prefer_zero: true}
+
+      # AgentAdapters.resolve should use available?/1
+      assert {:ok, BothAritiesAdapter, ^config_prefer_one} =
+               AgentAdapters.resolve(%{adapter: :both_arities, config: config_prefer_one})
+
+      # When available?/1 returns false, should fall back
+      assert {:error, :no_adapter_available} =
+               AgentAdapters.resolve(%{adapter: :both_arities, config: config_prefer_zero})
+
+      # Verify Registry.resolve_agent has same behavior
+      assert {:ok, BothAritiesAdapter, ^config_prefer_one} =
+               Cympho.Adapters.Registry.resolve_agent(%{
+                 adapter: :both_arities,
+                 config: config_prefer_one
+               })
+
+      assert {:error, :no_adapter} =
+               Cympho.Adapters.Registry.resolve_agent(%{
+                 adapter: :both_arities,
+                 config: config_prefer_zero
+               })
+    end
+  end
 end
