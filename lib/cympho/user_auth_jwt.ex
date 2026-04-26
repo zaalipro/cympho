@@ -193,9 +193,12 @@ defmodule Cympho.UserAuthJWT do
     :crypto.mac(:hmac, :sha256, secret, data)
   end
 
-  defp constant_time_compare(a, b) when byte_size(a) == byte_size(b) do
-    Plug.Crypto.secure_compare(a, b)
+  defp constant_time_compare(a, b) do
+    Plug.Crypto.secure_compare(pad_to_length(a, byte_size(b)), b)
   end
 
-  defp constant_time_compare(_, _), do: false
+  defp pad_to_length(data, target) do
+    current = byte_size(data)
+    if current >= target, do: data, else: data <> :binary.copy(<<0>>, target - current)
+  end
 end
