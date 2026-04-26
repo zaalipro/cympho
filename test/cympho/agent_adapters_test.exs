@@ -145,16 +145,18 @@ defmodule Cympho.AgentAdaptersTest do
       assert {:ok, MockAdapter, %{}} = AgentAdapters.resolve(agent)
     end
 
-    test "returns error when adapter type is not registered" do
+    test "falls back to default adapter when primary is not registered" do
       agent = %{adapter: :nonexistent, config: %{}}
-      assert {:error, :no_adapter} = AgentAdapters.resolve(agent)
+      assert {:ok, module, %{}} = AgentAdapters.resolve(agent)
+      assert module == Cympho.Adapters.ClaudeCodeAdapter
     end
 
-    test "rejects adapter with invalid config via validate_config" do
+    test "falls back past adapter with invalid config via validate_config" do
       AgentAdapters.register(:bad_config, BadConfigAdapter)
 
       agent = %{adapter: :bad_config, config: %{invalid: true}}
-      assert {:error, :no_adapter} = AgentAdapters.resolve(agent)
+      assert {:ok, module, %{invalid: true}} = AgentAdapters.resolve(agent)
+      assert module == Cympho.Adapters.ClaudeCodeAdapter
     end
 
     test "accepts adapter with valid config via validate_config" do

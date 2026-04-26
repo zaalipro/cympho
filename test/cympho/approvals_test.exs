@@ -218,13 +218,13 @@ defmodule Cympho.ApprovalsTest do
 
   defp insert_company do
     Cympho.Repo.insert!(%Cympho.Companies.Company{
-      name: "Test Company #${System.unique_integer()}"
+      name: "Test Company #{System.unique_integer()}"
     })
   end
 
   defp insert_agent(company_id \\ nil) do
     attrs = %{
-      name: "Test Agent #${System.unique_integer()}",
+      name: "Test Agent #{System.unique_integer()}",
       role: :engineer,
       status: :idle
     }
