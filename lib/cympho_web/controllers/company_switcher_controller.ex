@@ -42,6 +42,8 @@ defmodule CymphoWeb.CompanySwitcherController do
   end
 
   defp is_safe_path?(path) when is_binary(path) do
+    # Normalize to lowercase for case-insensitive protocol check
+    path = String.downcase(path)
     # Must start with / and not contain dangerous protocols
     String.starts_with?(path, "/") &&
       !String.contains?(path, ["javascript:", "data:", "vbscript:", "file:"]) &&
