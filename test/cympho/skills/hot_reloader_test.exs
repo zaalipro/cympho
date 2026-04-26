@@ -6,7 +6,7 @@ defmodule Cympho.Skills.HotReloaderTest do
   alias Cympho.Skills.Plugin
 
   @manifest_dir "test/support/skill_manifests"
-  @test_manifest File.join(@manifest_dir, "test_skill.json")
+  @test_manifest Path.join(@manifest_dir, "test_skill.json")
 
   setup do
     # Ensure clean state
@@ -16,7 +16,7 @@ defmodule Cympho.Skills.HotReloaderTest do
     {:ok, company} =
       Companies.create_company(%{
         name: "Test Company",
-        identifier: "test_company",
+        slug: "test-#{System.unique_integer()}",
         settings: %{}
       })
 
@@ -109,21 +109,21 @@ defmodule Cympho.Skills.HotReloaderTest do
     end
 
     test "returns error for invalid JSON" do
-      invalid_manifest = File.join(@manifest_dir, "invalid.json")
+      invalid_manifest = Path.join(@manifest_dir, "invalid.json")
       File.write!(invalid_manifest, "invalid json content")
 
       assert {:error, :invalid_json} = HotReloader.reload_manifest(invalid_manifest)
     end
 
     test "returns error for manifest without identifier" do
-      no_id_manifest = File.join(@manifest_dir, "no_id.json")
+      no_id_manifest = Path.join(@manifest_dir, "no_id.json")
       File.write!(no_id_manifest, Jason.encode!(%{"name" => "No ID"}))
 
       assert {:error, :missing_identifier} = HotReloader.reload_manifest(no_id_manifest)
     end
 
     test "returns error for non-existent plugin identifier" do
-      unknown_manifest = File.join(@manifest_dir, "unknown.json")
+      unknown_manifest = Path.join(@manifest_dir, "unknown.json")
       File.write!(unknown_manifest, Jason.encode!(%{"identifier" => "unknown_skill"}))
 
       assert {:error, :not_found} = HotReloader.reload_manifest(unknown_manifest)
