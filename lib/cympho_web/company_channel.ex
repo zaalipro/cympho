@@ -1,8 +1,33 @@
 defmodule CymphoWeb.CompanyChannel do
+  @moduledoc """
+  Company-level WebSocket channel.
+
+  Handles scoped topic subscriptions (`company:<id>:<resource>`) with
+  per-socket rate limiting (10 events/sec), heartbeat throttling (1/sec),
+  and IP-based join rate limiting (10 joins/sec).
+  """
+
   use CymphoWeb, :channel
+
+  alias CymphoWeb.RateLimiter
 
   @impl true
   def join("company:" <> rest, payload, socket) do
+    case RateLimiter.check_join(client_ip(socket)) do
+      :ok ->
+        join_topic(rest, payload, socket)
+
+      {:error, :rate_limited} ->
+        {:error, %{reason: "rate_limited"}}
+    end
+  end
+
+  @impl true
+  def join(_, _payload, _socket) do
+    {:error, %{reason: "invalid_topic"}}
+  end
+
+  defp join_topic(rest, payload, socket) do
     case String.split(rest, ":", parts: 2) do
       [company_id] ->
         if socket.assigns.company_id == company_id do
@@ -22,11 +47,6 @@ defmodule CymphoWeb.CompanyChannel do
   end
 
   @impl true
-  def join(_, _payload, _socket) do
-    {:error, %{reason: "invalid_topic"}}
-  end
-
-  @impl true
   def handle_info(:after_join, socket) do
     {:noreply, socket}
   end
@@ -37,8 +57,31 @@ defmodule CymphoWeb.CompanyChannel do
   end
 
   @impl true
+  def handle_in("heartbeat", _payload, socket) do
+    case RateLimiter.check_heartbeat(socket_id(socket)) do
+      :ok ->
+        {:reply, {:ok, %{ts: System.system_time(:millisecond)}}, socket}
+
+      {:error, :rate_limited} ->
+        {:reply, {:error, %{reason: "rate_limited"}}, socket}
+    end
+  end
+
+  @impl true
   def handle_in(event, payload, socket) do
-    {:noreply, socket}
+    case RateLimiter.check_push(socket_id(socket)) do
+      :ok ->
+        {:noreply, socket}
+
+      {:error, :rate_limited} ->
+        {:reply, {:error, %{reason: "rate_limited"}}, socket}
+    end
+  end
+
+  @impl true
+  def terminate(_reason, socket) do
+    RateLimiter.cleanup_socket(socket_id(socket))
+    :ok
   end
 
   defp dispatch_sub_topic(topic, "activities", _payload, socket) do
@@ -59,5 +102,18 @@ defmodule CymphoWeb.CompanyChannel do
 
   defp dispatch_sub_topic(_topic, _sub, _payload, _socket) do
     {:error, %{reason: "invalid_topic"}}
+  end
+
+  defp socket_id(socket) do
+    inspect(socket.transport_pid)
+  end
+
+  defp client_ip(socket) do
+    case Phoenix.Socket.connect_info(socket) do
+      %{peer_data: %{address: address}} -> to_string(:inet_parse.ntoa(address))
+      _ -> "unknown"
+    end
+  rescue
+    _ -> "unknown"
   end
 end
