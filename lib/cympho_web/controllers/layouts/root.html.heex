@@ -23,7 +23,6 @@
       <div
         id="sidebar-overlay"
         class="fixed inset-0 bg-black/50 z-40 lg:hidden hidden"
-        onclick="document.getElementById('sidebar').classList.add('-translate-x-full');document.getElementById('sidebar-overlay').classList.add('hidden')"
       >
       </div>
 
@@ -38,7 +37,7 @@
         <div class="px-3 pb-4">
           <button
             type="button"
-            onclick="document.getElementById('shortcuts-modal').classList.remove('hidden')"
+            data-shortcuts-btn
             class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-510 text-text-quaternary hover:text-text-secondary hover:bg-white/[0.04] transition-colors"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -54,7 +53,7 @@
       <header class="lg:hidden fixed top-0 left-0 right-0 z-30 h-14 bg-panel border-b border-border-subtle flex items-center justify-between px-4">
         <button
           type="button"
-          onclick="document.getElementById('sidebar').classList.remove('-translate-x-full');document.getElementById('sidebar-overlay').classList.remove('hidden')"
+          data-mobile-menu-btn
           class="p-2 -ml-2 rounded-md text-text-secondary hover:text-text-primary active:bg-white/[0.08] transition-colors"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -154,7 +153,6 @@
     <div
       id="command-palette"
       class="hidden fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-black/50"
-      onclick="if(event.target===this){this.classList.add('hidden')}"
     >
       <div class="bg-panel border border-border rounded-panel shadow-dialog w-full max-w-lg mx-4 overflow-hidden">
         <div class="flex items-center gap-3 px-4 border-b border-border-subtle">
@@ -221,14 +219,13 @@
     <div
       id="shortcuts-modal"
       class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
-      onclick="if(event.target===this){this.classList.add('hidden')}"
     >
       <div class="bg-panel border border-border rounded-panel shadow-dialog w-full max-w-md mx-4 overflow-hidden">
         <div class="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
           <h2 class="text-sm font-510 text-text-primary">Keyboard Shortcuts</h2>
           <button
             type="button"
-            onclick="document.getElementById('shortcuts-modal').classList.add('hidden')"
+            data-close-shortcuts-btn
             class="p-1 rounded-md text-text-quaternary hover:text-text-primary transition-colors"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
