@@ -13,7 +13,6 @@ defmodule Cympho.Documents.IssueDocumentRevision do
     field :change_summary, :string
     field :author_id, :binary_id
     field :author_type, :string, default: "agent"
-    field :parent_id, :binary_id
     field :parent_revision_number, :integer
     belongs_to :parent, __MODULE__
     belongs_to :document, IssueDocument

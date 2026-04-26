@@ -9,7 +9,7 @@ defmodule CymphoWeb.DocumentRevisionsLive do
   def render(assigns) do
     ~H"""
     <div class="space-y-4">
-      <.header
+      <.history_header
         document={@document}
         revisions_count={length(@revisions)}
         on_close={@on_close}
@@ -42,7 +42,7 @@ defmodule CymphoWeb.DocumentRevisionsLive do
     """
   end
 
-  def header(assigns) do
+  def history_header(assigns) do
     ~H"""
     <div class="flex items-center justify-between mb-4">
       <div>
@@ -163,7 +163,7 @@ defmodule CymphoWeb.DocumentRevisionsLive do
           </button>
         </div>
       </div>
-    </..modal>
+    </.modal>
     """
   end
 
@@ -219,7 +219,7 @@ defmodule CymphoWeb.DocumentRevisionsLive do
             _ -> " "
           end}
         </div>
-        <div class="flex-1 whitespace-pre-wrap break-words px-2 py-0.5" :class={line_class(line.type)}>
+        <div class={["flex-1 whitespace-pre-wrap break-words px-2 py-0.5", line_class(line.type)]}>
           {line.line}
         </div>
       </div>
