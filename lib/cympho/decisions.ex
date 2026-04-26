@@ -164,8 +164,8 @@ defmodule Cympho.Decisions do
       decision_key: "issue_approval_#{approval.id}",
       outcome: approval.status,
       reasoning: approval.resolution_reason,
-      actor_type: elem(actor, 0),
-      actor_id: elem(actor, 1),
+      actor_type: safe_actor_type(actor),
+      actor_id: safe_actor_id(actor),
       resource_type: "approval",
       resource_id: approval.id,
       context: %{
@@ -190,8 +190,8 @@ defmodule Cympho.Decisions do
       decision_key: "agent_#{agent.id}_#{action}",
       outcome: outcome,
       reasoning: agent.governance_reasoning,
-      actor_type: elem(actor, 0),
-      actor_id: elem(actor, 1),
+      actor_type: safe_actor_type(actor),
+      actor_id: safe_actor_id(actor),
       resource_type: "agent",
       resource_id: agent.id,
       context: %{
@@ -246,8 +246,8 @@ defmodule Cympho.Decisions do
                %DecisionReversal{}
                |> DecisionReversal.changeset(%{
                  reasoning: reasoning,
-                 actor_type: elem(actor, 0),
-                 actor_id: elem(actor, 1),
+                 actor_type: safe_actor_type(actor),
+                 actor_id: safe_actor_id(actor),
                  original_decision_id: original_decision.id,
                  reversing_decision_id: reversing_decision.id,
                  company_id: original_decision.company_id
@@ -294,6 +294,14 @@ defmodule Cympho.Decisions do
 
   defp extract_actor(%Decision{actor_type: type, actor_id: id}), do: {type, id}
   defp extract_actor(_), do: {"system", @nil_uuid}
+
+  defp safe_actor_type(nil), do: "system"
+  defp safe_actor_type({type, _}), do: type
+  defp safe_actor_type(_), do: "unknown"
+
+  defp safe_actor_id(nil), do: nil
+  defp safe_actor_id({_, id}), do: id
+  defp safe_actor_id(_), do: nil
 
   defp maybe_mark_parent_superseded(%Decision{parent_decision_id: nil}), do: :ok
 

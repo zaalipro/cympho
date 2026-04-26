@@ -279,24 +279,24 @@ defmodule Cympho.BoardApprovals do
   """
   def propose_role_change(company_id, agent_id, new_role, requested_by \\ nil) do
     if governance_required?(company_id, "agent_promotion") do
-      {:ok, agent} = Cympho.Agents.get_agent(agent_id)
-
-      create_board_approval(
-        %{
-          title: "Role Change: #{agent.name} → #{new_role}",
-          description: "Request to change role of agent #{agent.name} from #{agent.role} to #{new_role}.",
-          category: "agent_promotion",
-          company_id: company_id,
-          requested_by_agent_id: extract_agent_id(requested_by),
-          proposal_data: %{
-            "agent_id" => agent_id,
-            "new_role" => to_string(new_role),
-            "current_role" => to_string(agent.role)
+      with {:ok, agent} <- Cympho.Agents.get_agent(agent_id) do
+        create_board_approval(
+          %{
+            title: "Role Change: #{agent.name} → #{new_role}",
+            description: "Request to change role of agent #{agent.name} from #{agent.role} to #{new_role}.",
+            category: "agent_promotion",
+            company_id: company_id,
+            requested_by_agent_id: extract_agent_id(requested_by),
+            proposal_data: %{
+              "agent_id" => agent_id,
+              "new_role" => to_string(new_role),
+              "current_role" => to_string(agent.role)
+            },
+            review_deadline: DateTime.utc_now() |> DateTime.add(7 * 24 * 3600, :second)
           },
-          review_deadline: DateTime.utc_now() |> DateTime.add(7 * 24 * 3600, :second)
-        },
-        requested_by
-      )
+          requested_by
+        )
+      end
     else
       with {:ok, agent} <- Cympho.Agents.get_agent(agent_id) do
         Cympho.Agents.update_agent(agent, %{role: new_role})
