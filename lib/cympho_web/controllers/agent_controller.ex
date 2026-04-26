@@ -10,7 +10,12 @@ defmodule CymphoWeb.AgentController do
       {:ok, agent} ->
         conn
         |> put_status(:created)
-        |> json(%{data: agent})
+        |> json(%{data: serialize_agent(agent)})
+
+      {:error, :pending_board_approval, approval_id} ->
+        conn
+        |> put_status(:accepted)
+        |> json(%{data: %{status: "pending_board_approval", approval_id: approval_id}})
 
       {:error, changeset} ->
         conn
@@ -81,5 +86,17 @@ defmodule CymphoWeb.AgentController do
         opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
       end)
     end)
+  end
+
+  defp serialize_agent(agent) do
+    %{
+      id: agent.id,
+      name: agent.name,
+      role: agent.role,
+      status: agent.status,
+      company_id: agent.company_id,
+      inserted_at: agent.inserted_at,
+      updated_at: agent.updated_at
+    }
   end
 end

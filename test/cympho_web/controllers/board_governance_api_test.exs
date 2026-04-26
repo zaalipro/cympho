@@ -122,14 +122,11 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
           "agent" => %{"name" => "Governed Agent", "role" => "engineer", "company_id" => company.id}
         })
 
-      # Controller crashes with CaseClauseError because it doesn't handle
-      # {:error, :pending_board_approval, id} — this is a known controller bug
-      assert conn.status == 422
+      assert %{"data" => %{"status" => "pending_board_approval", "approval_id" => approval_id}} =
+               json_response(conn, 202)
+      assert is_binary(approval_id)
 
-      # Verify a BoardApproval was created with correct category
-      approvals = BoardApprovals.list_board_approvals(%{company_id: company.id, category: "agent_hire"})
-      refute Enum.empty?(approvals)
-      approval = hd(approvals)
+      {:ok, approval} = BoardApprovals.get_board_approval(approval_id)
       assert approval.status == "pending"
       assert approval.category == "agent_hire"
     end

@@ -92,6 +92,21 @@ defmodule CymphoWeb.Plugs.BoardAuthTest do
       assert conn.status == 403
     end
 
+    test "denies agent-authenticated requests (current_agent without current_user)" do
+      user = create_user()
+      company = create_company()
+      create_membership(user, company, "member", true)
+
+      conn =
+        build_conn()
+        |> Plug.Conn.assign(:current_agent, %{id: "agent-123"})
+        |> Plug.Conn.assign(:current_company_id, company.id)
+        |> CymphoWeb.Plugs.BoardAuth.call([])
+
+      assert conn.halted
+      assert conn.status == 403
+    end
+
     test "denies all mutations when no board members exist" do
       user = create_user()
       company = create_company()
