@@ -4,7 +4,18 @@ defmodule Cympho.RateLimiting.BroadcastDedupTest do
   alias Cympho.RateLimiting.BroadcastDedup
 
   setup do
+<<<<<<< HEAD
     BroadcastDedup.reset()
+=======
+    # Stop if already running, then start fresh
+    try do
+      GenServer.stop(BroadcastDedup)
+    catch
+      :exit, _ -> :ok
+    end
+
+    {:ok, _pid} = start_supervised({BroadcastDedup, []})
+>>>>>>> LLM-106c/event-replay
     :ok
   end
 
