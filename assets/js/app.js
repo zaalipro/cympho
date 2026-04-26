@@ -93,6 +93,7 @@ function highlightActiveNav() {
 function initCommandPalette() {
   const input = document.getElementById('command-input');
   const results = document.getElementById('command-results');
+  const palette = document.getElementById('command-palette');
   if (!input || !results) return;
 
   input.addEventListener('input', (e) => {
@@ -104,6 +105,15 @@ function initCommandPalette() {
       item.style.display = !query || text.includes(query) ? '' : 'none';
     });
   });
+
+  // Close on backdrop click
+  if (palette) {
+    palette.addEventListener('click', (e) => {
+      if (e.target === palette) {
+        palette.classList.add('hidden');
+      }
+    });
+  }
 }
 
 // Keyboard shortcuts
@@ -357,6 +367,8 @@ document.addEventListener('DOMContentLoaded', () => {
   highlightActiveNav();
   initCommandPalette();
   initCompanySwitcher();
+  initSidebarMobile();
+  initShortcutsModal();
 
   // Re-highlight on LiveView navigation
   liveSocket.addEventListener('phx:navigate', highlightActiveNav);
@@ -365,6 +377,65 @@ document.addEventListener('DOMContentLoaded', () => {
     initCompanySwitcher();
   });
 });
+
+// Sidebar mobile menu handlers
+function initSidebarMobile() {
+  const overlay = document.getElementById('sidebar-overlay');
+  const sidebar = document.getElementById('sidebar');
+  const mobileMenuBtn = document.querySelector('[data-mobile-menu-btn]');
+
+  if (overlay) {
+    overlay.addEventListener('click', () => {
+      sidebar.classList.add('-translate-x-full');
+      overlay.classList.add('hidden');
+    });
+  }
+
+  if (mobileMenuBtn) {
+    mobileMenuBtn.addEventListener('click', () => {
+      sidebar.classList.remove('-translate-x-full');
+      overlay.classList.remove('hidden');
+    });
+  }
+
+  // Company switcher button in mobile header
+  const companySwitcherBtn = document.querySelector('[data-company-switcher-btn]');
+  if (companySwitcherBtn) {
+    companySwitcherBtn.addEventListener('click', () => {
+      if (window.openCompanySwitcher) {
+        window.openCompanySwitcher();
+      }
+    });
+  }
+}
+
+// Shortcuts modal handlers
+function initShortcutsModal() {
+  const shortcutsBtn = document.querySelector('[data-shortcuts-btn]');
+  const shortcutsModal = document.getElementById('shortcuts-modal');
+  const closeShortcutsBtn = document.querySelector('[data-close-shortcuts-btn]');
+
+  if (shortcutsBtn && shortcutsModal) {
+    shortcutsBtn.addEventListener('click', () => {
+      shortcutsModal.classList.remove('hidden');
+    });
+  }
+
+  if (closeShortcutsBtn && shortcutsModal) {
+    closeShortcutsBtn.addEventListener('click', () => {
+      shortcutsModal.classList.add('hidden');
+    });
+  }
+
+  // Close on backdrop click
+  if (shortcutsModal) {
+    shortcutsModal.addEventListener('click', (e) => {
+      if (e.target === shortcutsModal) {
+        shortcutsModal.classList.add('hidden');
+      }
+    });
+  }
+}
 
 // Also highlight on popstate (browser back/forward)
 window.addEventListener('popstate', highlightActiveNav);

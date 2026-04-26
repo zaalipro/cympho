@@ -21,7 +21,7 @@ defmodule Cympho.Orchestrator do
   """
 
   @enforce_keys [:issue, :agent_id]
-  defstruct [:issue, :agent_id, :session_id, turn_count: 0, tool_traces: %{}]
+  defstruct [:issue, :agent_id, :session_id, turn_count: 0, tool_traces: %{}, opts: []]
 
   use GenServer
   alias Cympho.Orchestrator.Session
@@ -38,7 +38,7 @@ defmodule Cympho.Orchestrator do
   Returns {:ok, pid} or {:error, reason}.
   """
   @spec start_and_run(map(), String.t()) :: {:ok, pid()} | {:error, atom()}
-  def start_and_run(%{id: issue_id} = issue, agent_id) when is_binary(agent_id) do
+  def start_and_run(%{id: issue_id} = issue, agent_id, opts \\ []) when is_binary(agent_id) do
     case Registry.lookup(@registry, issue_id) do
       [{_pid, _}] ->
         {:error, :already_started}
@@ -46,7 +46,7 @@ defmodule Cympho.Orchestrator do
       [] ->
         name = via_tuple(issue_id)
 
-        case GenServer.start_link(__MODULE__, {issue, agent_id}, name: name) do
+        case GenServer.start_link(__MODULE__, {issue, agent_id, opts}, name: name) do
           {:ok, pid} -> {:ok, pid}
           {:error, {:already_started, _pid}} -> {:error, :already_started}
           {:error, reason} -> {:error, reason}
@@ -107,8 +107,8 @@ defmodule Cympho.Orchestrator do
   end
 
   @impl true
-  def init({issue, agent_id}) do
-    session = %Session{issue: issue, agent_id: agent_id}
+  def init({issue, agent_id, opts}) do
+    session = %Session{issue: issue, agent_id: agent_id, opts: opts}
     session = create_pending_run(session, issue, agent_id)
     {:ok, session, {:continue, :start_session}}
   end
@@ -122,7 +122,7 @@ defmodule Cympho.Orchestrator do
     schedule_heartbeat_tick()
 
     runner = runner_module()
-    session_id = runner.run(issue, agent_id, self(), run_opts(issue))
+    session_id = runner.run(issue, agent_id, self(), run_opts(session))
 
     {:noreply, %{session | session_id: session_id}}
   end
@@ -372,8 +372,9 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp run_opts(_issue) do
-    []
+  defp run_opts(session) do
+    skills = Keyword.get(session.opts || [], :skills, [])
+    [skills: skills]
   end
 
   defp process_tool_results(result, tool_traces) when is_map(result) do

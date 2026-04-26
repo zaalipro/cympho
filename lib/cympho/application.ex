@@ -19,6 +19,8 @@ defmodule Cympho.Application do
       Cympho.HeartbeatEngine.Watchdog,
       Cympho.BoardApprovals.BoardApprovalActionExecutor,
       Cympho.Scheduler,
+      # HTTP client for adapters and notifications
+      {Finch, name: Cympho.Finch},
       # Adapter system
       Cympho.Adapters.Registry,
       # Plugin system

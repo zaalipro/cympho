@@ -1,27 +1,63 @@
-defmodule Cympho.AgentRunner do
+defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
   @moduledoc """
-  Spawns and manages Claude CLI sessions for issue processing.
+  Adapter for Anthropic Claude Code CLI.
 
-  Uses Port to open a bash shell that runs the Claude CLI with JSON output,
-  capturing stdout/stderr and forwarding progress to the caller via messages.
+  Spawns and manages Claude CLI sessions using Port, parsing JSON output and
+  forwarding progress to the caller via the standard message protocol.
 
-  Messages sent to recipient_pid:
-    - `{:session_started, session_id}` — when the Claude process starts
-    - `{:turn_completed, session_id, result}` — when a turn completes with parsed result
-    - `{:tool_call_detected, session_id, tool_call}` — when a tool_use block is detected
-    - `{:turn_ended_with_error, session_id, reason}` — when an error occurs
+  Implements `Cympho.AgentAdapters.Adapter`.
   """
+
+  @behaviour Cympho.AgentAdapters.Adapter
 
   @stall_timeout Application.compile_env(:cympho, :agent_runner_stall_timeout, 300_000)
 
-  @doc """
-  Runs a Claude CLI session for the given issue.
+  @impl true
+  def type, do: :claude_code
 
-  Options:
-    - `:resume` — pass true to continue a multi-turn session
-    - `:cwd` — working directory for the Claude CLI (defaults to workspace path)
-    - `: stall_timeout` — milliseconds before killing hung process (default 300_000 / 5 min)
-  """
+  @impl true
+  def available?(config \\ %{}) do
+    claude_in_path?() and api_key_present?(config)
+  end
+
+  @impl true
+  def health_check(config \\ %{}) do
+    cond do
+      not claude_in_path?() ->
+        %{status: :unhealthy, message: "Claude CLI not found in PATH", checked_at: DateTime.utc_now()}
+
+      not api_key_present?(config) ->
+        %{status: :unhealthy, message: "ANTHROPIC_API_KEY not set", checked_at: DateTime.utc_now()}
+
+      true ->
+        case System.cmd("claude", ["--version"], stderr_to_stdout: true) do
+          {_output, 0} ->
+            %{status: :healthy, message: "Claude CLI operational", checked_at: DateTime.utc_now()}
+
+          {output, code} ->
+            %{
+              status: :degraded,
+              message: "claude --version exited with code #{code}: #{String.slice(output, 0, 100)}",
+              checked_at: DateTime.utc_now()
+            }
+        end
+    end
+  end
+
+  @impl true
+  def validate_config(config) when is_map(config) do
+    with :ok <- validate_stall_timeout(config[:stall_timeout]),
+         :ok <- validate_cwd(config[:cwd]),
+         :ok <- validate_resume(config[:resume]) do
+      :ok
+    end
+  end
+
+  def validate_config(config) when is_list(config) do
+    validate_config(Map.new(config))
+  end
+
+  @impl true
   def run(issue, agent_id, recipient_pid, opts \\ []) when is_pid(recipient_pid) do
     session_id = make_ref()
     cwd = opts[:cwd] || Cympho.Workspace.workspace_path(issue.id)
@@ -37,7 +73,60 @@ defmodule Cympho.AgentRunner do
     session_id
   end
 
-  defp build_claude_command(issue, _agent_id, resume?, opts \\ []) do
+  ## Private — availability helpers
+
+  defp claude_in_path? do
+    case System.cmd("which", ["claude"]) do
+      {_, 0} -> true
+      _ -> false
+    end
+  end
+
+  defp api_key_present?(config) when is_map(config) do
+    config_key = config[:api_key] || config["api_key"]
+    api_key(config_key) != ""
+  end
+
+  defp api_key_present?(_), do: api_key(nil) != ""
+
+  defp api_key(nil) do
+    Application.get_env(:cympho, :anthropic_api_key) ||
+      System.get_env("ANTHROPIC_API_KEY") ||
+      ""
+  end
+
+  defp api_key(key) when is_binary(key) and key != "", do: key
+
+  ## Private — config validation
+
+  defp validate_stall_timeout(nil), do: :ok
+
+  defp validate_stall_timeout(timeout) when is_integer(timeout) and timeout > 0 do
+    if timeout > 3_600_000 do
+      {:error, "stall_timeout must be less than 1 hour (3600000ms)"}
+    else
+      :ok
+    end
+  end
+
+  defp validate_stall_timeout(_), do: {:error, "stall_timeout must be a positive integer"}
+
+  defp validate_cwd(nil), do: :ok
+
+  defp validate_cwd(path) when is_binary(path) do
+    if File.dir?(path), do: :ok, else: {:error, "cwd must be a valid directory path"}
+  end
+
+  defp validate_cwd(_), do: {:error, "cwd must be a string"}
+
+  defp validate_resume(nil), do: :ok
+  defp validate_resume(true), do: :ok
+  defp validate_resume(false), do: :ok
+  defp validate_resume(_), do: {:error, "resume must be a boolean"}
+
+  ## Private — command building
+
+  defp build_claude_command(issue, _agent_id, resume?) do
     base = [
       "claude",
       "-p",
@@ -56,61 +145,28 @@ defmodule Cympho.AgentRunner do
         base
       end
 
-    # Build the full bash command with piped input
     bash_command(args, prompt)
   end
 
   defp bash_command(claude_args, prompt) do
     claude_cmd = Enum.join(["claude" | claude_args], " ")
-
-    # Use heredoc to pass prompt safely without shell interpretation.
-    # The single-quoted 'EOF' delimiter prevents variable expansion,
-    # command substitution, and other shell interpretations.
     ~s(bash -c '#{claude_cmd}' << 'PROMPT'\n#{prompt}\nPROMPT)
   end
 
-  defp build_prompt(issue, opts \\ []) do
-    skills = Keyword.get(opts, :skills, [])
-
-    base_prompt = """
+  defp build_prompt(issue) do
+    """
     Issue ID: #{issue.id}
     Title: #{issue.title}
 
     #{issue.description || "No description provided."}
     """
-
-    if Enum.empty?(skills) do
-      String.trim(base_prompt)
-    else
-      skills_block = build_skills_prompt_block(skills)
-      """
-      #{String.trim(base_prompt)}
-
-      #{skills_block}
-      """
-      |> String.trim()
-    end
-  end
-
-  defp build_skills_prompt_block(skills) when is_list(skills) do
-    adapter = :claude_local
-
-    skill_fragments =
-      Enum.map(skills, fn skill ->
-        Cympho.Skills.Adapter.skill_prompt_fragment(adapter, skill)
-      end)
-
-    """
-    ## Available Skills
-
-    The following skills are available for use in this session:
-    #{Enum.join(skill_fragments, "\n")}
-    """
     |> String.trim()
   end
 
+  ## Private — Port execution
+
   defp do_run(session_id, cmd, cwd, recipient_pid, stall_timeout) do
-    env = [{"ANTHROPIC_API_KEY", api_key()} | env_whitelist()]
+    env = [{"ANTHROPIC_API_KEY", api_key(nil)} | env_whitelist()]
 
     port =
       Port.open({:spawn, cmd}, [
@@ -132,7 +188,6 @@ defmodule Cympho.AgentRunner do
 
         case parse_json_output(output) do
           {:ok, result} ->
-            # Extract and send tool calls if present
             extract_and_send_tool_calls(result, session_id, recipient_pid)
             send(recipient_pid, {:turn_completed, session_id, result})
             loop(port, session_id, recipient_pid, stall_timeout, new_last_output)
@@ -164,7 +219,6 @@ defmodule Cympho.AgentRunner do
   end
 
   defp schedule_stall_check(timeout) do
-    # Check slightly more often than the timeout to catch edge cases
     check_interval = min(timeout, 30_000)
     Process.send_after(self(), :stall_check, check_interval)
   end
@@ -182,14 +236,7 @@ defmodule Cympho.AgentRunner do
     end
   end
 
-  defp api_key do
-    Application.get_env(:cympho, :anthropic_api_key) ||
-      System.get_env("ANTHROPIC_API_KEY") ||
-      ""
-  end
-
   defp env_whitelist do
-    # Only pass these env vars to the subprocess for safety
     ["HOME", "PATH", "USER", "LOGNAME"]
     |> Enum.map(fn key -> {key, System.get_env(key)} end)
     |> Enum.reject(fn {_, val} -> is_nil(val) end)

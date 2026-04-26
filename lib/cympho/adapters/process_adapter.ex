@@ -38,7 +38,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
       {:error, :no_command}
     else
       args = build_args(issue, agent_id, config)
-      env = build_env(config)
+      env = build_env(issue, agent_id, config)
       cwd = config[:cwd] || config["cwd"]
 
       opts = [:binary, :exit_status]
@@ -65,23 +65,26 @@ defmodule Cympho.Adapters.ProcessAdapter do
     end
   end
 
-  defp build_args(issue, agent_id, config) do
-    base_args = [
-      issue.id,
-      agent_id,
-      issue.title || ""
-    ]
-
-    extra_args = config[:args] || config["args"] || []
-
-    base_args ++ extra_args
+  defp build_args(_issue, _agent_id, config) do
+    # Return only the configured args - issue payload is passed via env
+    config[:args] || config["args"] || []
   end
 
-  defp build_env(config) do
+  defp build_env(issue, agent_id, config) do
+    # Encode issue payload as JSON for the subprocess
+    issue_json = Jason.encode!(%{
+      id: issue.id,
+      title: issue.title,
+      description: issue.description,
+      status: issue.status,
+      priority: issue.priority,
+      agent_id: agent_id
+    })
+
     base_env = [
-      {"ISSUE_ID", config[:issue_id] || config["issue_id"]},
-      {"AGENT_ID", config[:agent_id] || config["agent_id"]},
-      {"ISSUE_TITLE", config[:issue_title] || config["issue_title"] || ""}
+      {"ISSUE_PAYLOAD", issue_json},
+      {"ISSUE_ID", to_string(issue.id)},
+      {"AGENT_ID", to_string(agent_id)}
     ]
 
     custom_env = config[:env] || config["env"] || %{}
@@ -91,8 +94,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
         {to_string(k), to_string(v)}
       end)
 
-    (base_env ++ custom_env_list)
-    |> Enum.reject(fn {_, v} -> is_nil(v) or v == "" end)
+    base_env ++ custom_env_list
   end
 
   defp run_process(session_id, command, args, opts, recipient_pid, config) do
@@ -127,11 +129,11 @@ defmodule Cympho.Adapters.ProcessAdapter do
       {port, {:data, data}} ->
         wait_for_process(port, session_id, recipient_pid, timeout, acc <> data)
 
-      {port, {:exit_status, 0}} ->
+      {^port, {:exit_status, 0}} ->
         result = parse_output(acc)
         send(recipient_pid, {:turn_completed, session_id, result})
 
-      {port, {:exit_status, code}} ->
+      {^port, {:exit_status, code}} ->
         send(recipient_pid, {:turn_ended_with_error, session_id, {:exit_code, code, acc}})
 
       after
@@ -165,15 +167,36 @@ defmodule Cympho.Adapters.ProcessAdapter do
         %{status: :unhealthy, message: "No command configured", checked_at: DateTime.utc_now()}
 
       true ->
-        # Check if command exists
-        case System.cmd("which", [command]) do
+        # First check if command exists in PATH
+        case System.cmd("which", [command], stderr_to_stdout: true) do
           {_, 0} ->
-            %{status: :healthy, message: "Command available", checked_at: DateTime.utc_now()}
+            # Command exists, try running it with --health-check flag
+            run_health_check_command(command, config)
 
           _ ->
             %{status: :degraded, message: "Command not found in PATH", checked_at: DateTime.utc_now()}
         end
     end
+  end
+
+  defp run_health_check_command(command, config) do
+    args = config[:args] || config["args"] || []
+    health_check_args = args ++ ["--health-check"]
+
+    case System.cmd(command, health_check_args,
+           stderr_to_stdout: true,
+           cd: config[:cwd] || config["cwd"]
+         ) do
+      {_, 0} ->
+        %{status: :healthy, message: "Command available and healthy", checked_at: DateTime.utc_now()}
+
+      {_output, _code} ->
+        # Command doesn't support --health-check, fall back to availability check
+        %{status: :healthy, message: "Command available (no health check)", checked_at: DateTime.utc_now()}
+    end
+  rescue
+    _ ->
+      %{status: :degraded, message: "Command exists but failed health check", checked_at: DateTime.utc_now()}
   end
 
   @impl true
@@ -227,6 +250,21 @@ defmodule Cympho.Adapters.ProcessAdapter do
   def available? do
     # Process adapter is always available on Unix-like systems
     true
+  end
+
+  @impl true
+  def available?(config) do
+    command = config[:command] || config["command"]
+
+    if is_nil(command) or command == "" do
+      false
+    else
+      # Check if command exists in PATH
+      case System.cmd("which", [command], stderr_to_stdout: true) do
+        {_, 0} -> true
+        _ -> false
+      end
+    end
   end
 
   @impl true

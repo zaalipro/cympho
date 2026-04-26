@@ -1,19 +1,16 @@
 defmodule Cympho.AgentAdapters do
   @moduledoc """
-  Registry for agent adapter discovery and resolution.
+  Agent adapter discovery and resolution.
 
-  Maps type atoms to adapter modules that implement `Cympho.AgentAdapters.Adapter`.
-  Provides resolution (agent -> module + config) and ordered fallback chains.
+  Delegates to `Cympho.Adapters.Registry` — the canonical adapter registry.
+  This module exists as a stable public API consumed by the orchestrator and
+  adapter resolution pipeline. The underlying registry is auto-populated with
+  built-in adapters on application start via `Adapters.Registry.register_builtin/0`.
   """
 
-  use GenServer
+  alias Cympho.Adapters.Registry
 
-  @table __MODULE__
   @default_adapter :claude_code
-
-  def start_link(_opts) do
-    GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
-  end
 
   @doc """
   Registers a type atom to an adapter module.
@@ -21,14 +18,13 @@ defmodule Cympho.AgentAdapters do
   """
   @spec register(atom(), module()) :: :ok | {:error, :invalid_module}
   def register(type, module) when is_atom(type) and is_atom(module) do
-    # Verify the module implements the behaviour
     behaviours =
       module.__info__(:attributes)
       |> Keyword.get_values(:behaviour)
       |> List.flatten()
 
-    if Cympho.AgentAdapters.Adapter in behaviours do
-      GenServer.call(__MODULE__, {:register, type, module})
+    if Cympho.Adapters.Adapter in behaviours or Cympho.AgentAdapters.Adapter in behaviours do
+      Registry.register(type, module)
     else
       {:error, :invalid_module}
     end
@@ -38,27 +34,59 @@ defmodule Cympho.AgentAdapters do
   Resolves an agent to its adapter module and config.
 
   Returns `{:ok, module, config}` when the adapter is found and available,
-  or `{:error, reason}` otherwise. Walks the fallback chain if the primary
-  adapter is unavailable.
+  or `{:error, :no_adapter}` otherwise. Walks the fallback chain if the primary
+  adapter is unavailable. Validates config before returning.
   """
-  @spec resolve(map()) :: {:ok, module(), map()} | {:error, :no_adapter | :not_registered}
+  @spec resolve(map()) :: {:ok, module(), map()} | {:error, :no_adapter}
   def resolve(%{adapter: adapter_type, config: config}) do
-    primary = adapter_type || @default_adapter
-    chain = fallback_chain(primary)
+    case Registry.resolve_agent(%{adapter: adapter_type, config: config}) do
+      {:ok, module, config} ->
+        case module.validate_config(config) do
+          :ok -> {:ok, module, config}
+          {:error, _reason} -> nil
+        end
 
-    Enum.find_value(chain, {:error, :no_adapter}, fn type ->
-      with {:ok, module} <- lookup(type),
-           true <- module.available?(config) do
-        {:ok, module, config}
-      else
-        false -> nil
-        :error -> nil
-      end
-    end)
+      {:error, :no_adapter} ->
+        {:error, :no_adapter}
+    end
+    |> case do
+      {:ok, _, _} = ok -> ok
+      {:error, :no_adapter} = err -> err
+      nil -> resolve_fallback(adapter_type, config)
+    end
   end
 
   def resolve(%{adapter: adapter_type}) do
     resolve(%{adapter: adapter_type, config: %{}})
+  end
+
+  defp resolve_fallback(adapter_type, config) do
+    primary = adapter_type || @default_adapter
+    chain = fallback_chain(primary)
+
+    chain
+    |> Enum.drop(1)
+    |> Enum.find_value({:error, :no_adapter}, fn type ->
+      case Registry.lookup(type) do
+        {:ok, module} ->
+          available = module_available?(module, config)
+
+          if available and module.validate_config(config) == :ok do
+            {:ok, module, config}
+          end
+
+        :error ->
+          nil
+      end
+    end)
+  end
+
+  defp module_available?(module, config) do
+    if function_exported?(module, :available?, 1) do
+      module.available?(config)
+    else
+      module.available?()
+    end
   end
 
   @doc """
@@ -81,9 +109,7 @@ defmodule Cympho.AgentAdapters do
   """
   @spec all_types() :: [atom()]
   def all_types do
-    :ets.tab2list(@table)
-    |> Enum.map(fn {type, _module} -> type end)
-    |> Enum.sort()
+    Registry.all_types()
   end
 
   @doc """
@@ -91,21 +117,6 @@ defmodule Cympho.AgentAdapters do
   """
   @spec lookup(atom()) :: {:ok, module()} | :error
   def lookup(type) when is_atom(type) do
-    case :ets.lookup(@table, type) do
-      [{^type, module}] -> {:ok, module}
-      [] -> :error
-    end
-  end
-
-  @impl true
-  def init(_) do
-    :ets.new(@table, [:named_table, :set, :protected, read_concurrency: true])
-    {:ok, %{}}
-  end
-
-  @impl true
-  def handle_call({:register, type, module}, _from, state) do
-    :ets.insert(@table, {type, module})
-    {:reply, :ok, state}
+    Registry.lookup(type)
   end
 end

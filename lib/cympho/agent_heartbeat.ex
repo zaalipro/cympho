@@ -14,7 +14,7 @@ defmodule Cympho.AgentHeartbeat do
 
   alias Cympho.AgentHeartbeat.Supervisor
   alias Cympho.AgentHeartbeat.Registry, as: HeartbeatRegistry
-  alias Cympho.{Orchestrator, Issues, Agents, Activities}
+  alias Cympho.{Orchestrator, Issues, Agents, Activities, Skills}
   alias Cympho.Issues.Issue
   alias Cympho.Repo
   import Ecto.Query
@@ -25,7 +25,8 @@ defmodule Cympho.AgentHeartbeat do
           status: status(),
           current_issue_id: String.t() | nil,
           started_at: DateTime.t() | nil,
-          timer_ref: reference() | nil
+          timer_ref: reference() | nil,
+          available_skills: list(map()) | nil
         }
 
   @default_heartbeat_interval :timer.seconds(60)
@@ -211,8 +212,11 @@ defmodule Cympho.AgentHeartbeat do
           # Set heartbeat to working
           _ = set_working(agent_id, checked_out_issue.id)
 
+          # Fetch available skills for this agent
+          available_skills = Skills.available_for_agent(agent_id)
+
           # Start orchestrator - it handles the session and posts completion comment
-          case Orchestrator.start_and_run(checked_out_issue, agent_id) do
+          case Orchestrator.start_and_run(checked_out_issue, agent_id, skills: available_skills) do
             {:ok, _pid} ->
               Activities.log_heartbeat_event(checked_out_issue.id, :started, %{
                 agent_id: agent_id
@@ -232,7 +236,8 @@ defmodule Cympho.AgentHeartbeat do
                  | status: :running,
                    current_issue_id: checked_out_issue.id,
                    started_at: DateTime.utc_now(),
-                   timer_ref: timer_ref
+                   timer_ref: timer_ref,
+                   available_skills: available_skills
                }}
 
             {:error, reason} ->

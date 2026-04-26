@@ -150,3 +150,29 @@ defmodule Cympho.Skills do
   end
 end
 
+  @doc """
+  Returns available skills for an agent as a list of maps for LLM prompts.
+
+  Gracefully degrades on error - returns empty list and logs error.
+  """
+  def available_for_agent(agent_id) when is_binary(agent_id) do
+    try do
+      plugins = list_skills_for_agent(agent_id)
+
+      Enum.map(plugins, fn plugin ->
+        %{
+          identifier: plugin.identifier,
+          name: plugin.name,
+          version: plugin.version || "0.0.0",
+          capabilities: plugin.capabilities || [],
+          description: plugin.description,
+          entrypoint: plugin.entrypoint
+        }
+      end)
+    rescue
+      e ->
+        :logger.error("[Skills] Failed to load skills for agent #{agent_id}: #{inspect(e)}")
+        []
+    end
+  end
+end

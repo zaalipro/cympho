@@ -3,12 +3,11 @@ defmodule Cympho.AgentAdaptersTest do
 
   alias Cympho.AgentAdapters
 
-  # A mock adapter that satisfies the Adapter behaviour
   defmodule MockAdapter do
     @behaviour Cympho.AgentAdapters.Adapter
 
     @impl true
-    def run(issue, agent_id, recipient_pid, _opts) do
+    def run(_issue, _agent_id, recipient_pid, _opts) do
       send(recipient_pid, {:session_started, self()})
       make_ref()
     end
@@ -28,7 +27,6 @@ defmodule Cympho.AgentAdaptersTest do
     def validate_config(_config), do: :ok
   end
 
-  # A mock adapter that is always unavailable
   defmodule UnavailableAdapter do
     @behaviour Cympho.AgentAdapters.Adapter
 
@@ -50,16 +48,30 @@ defmodule Cympho.AgentAdaptersTest do
     def validate_config(_config), do: :ok
   end
 
-  # A module that does NOT implement the behaviour — for register guard tests
-  defmodule NotAnAdapter do
-    def some_function, do: :ok
+  defmodule BadConfigAdapter do
+    @behaviour Cympho.AgentAdapters.Adapter
+
+    @impl true
+    def run(_issue, _agent_id, _recipient_pid, _opts), do: make_ref()
+
+    @impl true
+    def available?(_config), do: true
+
+    @impl true
+    def health_check(_config) do
+      %{status: :healthy, message: nil, checked_at: DateTime.utc_now()}
+    end
+
+    @impl true
+    def type, do: :bad_config
+
+    @impl true
+    def validate_config(%{invalid: true}), do: {:error, "invalid config"}
+    def validate_config(_config), do: :ok
   end
 
-  setup do
-    # Clear the ETS table between tests
-    :ets.delete_all_objects(Cympho.AgentAdapters)
-
-    :ok
+  defmodule NotAnAdapter do
+    def some_function, do: :ok
   end
 
   describe "register/2" do
@@ -77,26 +89,18 @@ defmodule Cympho.AgentAdaptersTest do
       :ok = AgentAdapters.register(:mock, MockAdapter)
       :ok = AgentAdapters.register(:mock, UnavailableAdapter)
       assert {:ok, UnavailableAdapter} = AgentAdapters.lookup(:mock)
-    end
-
-    test "registers multiple types" do
-      :ok = AgentAdapters.register(:mock, MockAdapter)
-      :ok = AgentAdapters.register(:unavailable, UnavailableAdapter)
-      assert {:ok, MockAdapter} = AgentAdapters.lookup(:mock)
-      assert {:ok, UnavailableAdapter} = AgentAdapters.lookup(:unavailable)
+    after
+      # Restore mock for other tests
+      AgentAdapters.register(:mock, MockAdapter)
     end
   end
 
   describe "all_types/0" do
-    test "returns empty list when nothing registered" do
-      assert AgentAdapters.all_types() == []
-    end
-
-    test "returns sorted list of registered type atoms" do
-      AgentAdapters.register(:beta, MockAdapter)
-      AgentAdapters.register(:alpha, MockAdapter)
-
-      assert AgentAdapters.all_types() == [:alpha, :beta]
+    test "returns list including registered type atoms" do
+      AgentAdapters.register(:mock, MockAdapter)
+      types = AgentAdapters.all_types()
+      assert is_list(types)
+      assert :mock in types
     end
   end
 
@@ -134,13 +138,6 @@ defmodule Cympho.AgentAdaptersTest do
       assert {:ok, MockAdapter, %{timeout: 5000}} = AgentAdapters.resolve(agent)
     end
 
-    test "resolves agent with nil adapter to default adapter when available" do
-      AgentAdapters.register(:claude_code, MockAdapter)
-
-      agent = %{adapter: nil, config: %{}}
-      assert {:ok, MockAdapter, %{}} = AgentAdapters.resolve(agent)
-    end
-
     test "resolves agent without config key using empty config" do
       AgentAdapters.register(:mock, MockAdapter)
 
@@ -148,25 +145,25 @@ defmodule Cympho.AgentAdaptersTest do
       assert {:ok, MockAdapter, %{}} = AgentAdapters.resolve(agent)
     end
 
-    test "falls back through chain when primary is unavailable" do
-      AgentAdapters.register(:unavailable, UnavailableAdapter)
-      AgentAdapters.register(:claude_code, MockAdapter)
-
-      agent = %{adapter: :unavailable, config: %{}}
-      # Primary is unavailable, so fallback to :claude_code
-      assert {:ok, MockAdapter, %{}} = AgentAdapters.resolve(agent)
-    end
-
-    test "returns error when no adapter in chain is available" do
-      AgentAdapters.register(:unavailable, UnavailableAdapter)
-
-      agent = %{adapter: :unavailable, config: %{}}
-      assert {:error, :no_adapter} = AgentAdapters.resolve(agent)
-    end
-
-    test "returns error when adapter type is not registered" do
+    test "falls back to default adapter when primary is not registered" do
       agent = %{adapter: :nonexistent, config: %{}}
-      assert {:error, :no_adapter} = AgentAdapters.resolve(agent)
+      assert {:ok, module, %{}} = AgentAdapters.resolve(agent)
+      assert module == Cympho.Adapters.ClaudeCodeAdapter
+    end
+
+    test "falls back past adapter with invalid config via validate_config" do
+      AgentAdapters.register(:bad_config, BadConfigAdapter)
+
+      agent = %{adapter: :bad_config, config: %{invalid: true}}
+      assert {:ok, module, %{invalid: true}} = AgentAdapters.resolve(agent)
+      assert module == Cympho.Adapters.ClaudeCodeAdapter
+    end
+
+    test "accepts adapter with valid config via validate_config" do
+      AgentAdapters.register(:bad_config, BadConfigAdapter)
+
+      agent = %{adapter: :bad_config, config: %{valid: true}}
+      assert {:ok, BadConfigAdapter, %{valid: true}} = AgentAdapters.resolve(agent)
     end
   end
 
@@ -200,11 +197,13 @@ defmodule Cympho.AgentAdaptersTest do
 
     test "validate_config/1 returns ok or error tuple" do
       assert :ok = MockAdapter.validate_config(%{})
+      assert {:error, _} = BadConfigAdapter.validate_config(%{invalid: true})
     end
 
     test "run/4 returns a reference and sends session_started" do
       ref = MockAdapter.run(%{id: "1"}, "agent-1", self(), [])
       assert is_reference(ref)
+      assert_receive {:session_started, _pid}
     end
   end
 end

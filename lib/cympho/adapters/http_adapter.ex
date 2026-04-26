@@ -35,8 +35,9 @@ defmodule Cympho.Adapters.HttpAdapter do
   defp call_http_endpoint(issue, agent_id, config) do
     url = config[:url] || config["url"]
     method = config[:method] || config["method"] || :post
-    headers = config[:headers] || config["headers"] || []
+    headers = build_headers(config)
     timeout = config[:timeout] || config["timeout"] || 30_000
+    callback_url = config[:callback_url] || config["callback_url"]
 
     if is_nil(url) or url == "" do
       {:error, :no_url_configured}
@@ -45,10 +46,82 @@ defmodule Cympho.Adapters.HttpAdapter do
 
       case make_http_request(method, url, headers, payload, timeout) do
         {:ok, response} ->
-          parse_response(response)
+          handle_response(response, callback_url, config)
 
         {:error, reason} ->
           {:error, {:http_error, reason}}
+      end
+    end
+  end
+
+  defp build_headers(config) do
+    base_headers = config[:headers] || config["headers"] || %{}
+    auth_token = config[:auth_token] || config["auth_token"]
+
+    headers = if auth_token do
+      Map.put(base_headers, "authorization", "Bearer #{auth_token}")
+    else
+      base_headers
+    end
+
+    # Ensure content-type is set
+    if not Map.has_key?(headers, "content-type") and not Map.has_key?(headers, "Content-Type") do
+      Map.put(headers, "content-type", "application/json")
+    else
+      headers
+    end
+  end
+
+  defp handle_response({:ok, data}, nil, _config), do: {:ok, data}
+  defp handle_response({:ok, data}, _callback_url, _config), do: {:ok, data}
+  defp handle_response({:error, _reason} = error, nil, _config), do: error
+
+  defp handle_response({:error, reason}, callback_url, config) do
+    # If callback URL is configured and initial request failed, poll for result
+    poll_timeout = config[:callback_timeout] || config["callback_timeout"] || 60_000
+    poll_interval = config[:poll_interval] || config["poll_interval"] || 2000
+
+    poll_callback(callback_url, poll_timeout, poll_interval)
+  end
+
+  defp poll_callback(callback_url, timeout, interval) do
+    start_time = System.monotonic_time(:millisecond)
+
+    do_poll_callback(callback_url, start_time, timeout, interval)
+  end
+
+  defp do_poll_callback(callback_url, start_time, timeout, interval) do
+    elapsed = System.monotonic_time(:millisecond) - start_time
+
+    if elapsed >= timeout do
+      {:error, :callback_timeout}
+    else
+      req = Finch.build(:get, callback_url, [{"accept", "application/json"}])
+
+      case Finch.request(req, Cympho.Finch, receive_timeout: div(timeout - elapsed, 2)) do
+        {:ok, %Finch.Response{status: status, body: body}} when status in 200..299 ->
+          case Jason.decode(body) do
+            {:ok, %{"status" => "completed", "result" => result}} ->
+              {:ok, result}
+
+            {:ok, %{"status" => "pending"}} ->
+              Process.sleep(interval)
+              do_poll_callback(callback_url, start_time, timeout, interval)
+
+            {:ok, %{"status" => "error", "error" => error}} ->
+              {:error, {:callback_error, error}}
+
+            {:ok, other} ->
+              {:error, {:invalid_callback_response, other}}
+
+            {:error, _} ->
+              Process.sleep(interval)
+              do_poll_callback(callback_url, start_time, timeout, interval)
+          end
+
+        _ ->
+          Process.sleep(interval)
+          do_poll_callback(callback_url, start_time, timeout, interval)
       end
     end
   end
@@ -83,31 +156,105 @@ defmodule Cympho.Adapters.HttpAdapter do
   end
 
   defp make_http_request(method, url, headers, payload, timeout) do
-    # Placeholder implementation
-    # In production, this would use HTTPoison or similar
-    {:error, :not_implemented}
+    method_atom = normalize_method(method)
+    headers_list = normalize_headers(headers)
+
+    req = Finch.build(method_atom, url, headers_list, payload)
+
+    case Finch.request(req, Cympho.Finch, receive_timeout: timeout) do
+      {:ok, %Finch.Response{status: status, headers: resp_headers, body: body}} ->
+        {:ok, %{status: status, headers: resp_headers, body: body}}
+
+      {:error, %Finch.Error{} = error} ->
+        {:error, {:finch_error, Exception.message(error)}}
+
+      {:error, reason} ->
+        {:error, {:request_error, reason}}
+    end
   end
 
-  defp parse_response(response) do
-    # Placeholder for response parsing
-    {:error, :not_implemented}
+  defp parse_response(%{status: status, body: body}) when status in 200..299 do
+    case Jason.decode(body) do
+      {:ok, data} -> {:ok, data}
+      {:error, _} -> {:ok, %{raw_body: body, status: status}}
+    end
   end
+
+  defp parse_response(%{status: status, body: body}) do
+    case Jason.decode(body) do
+      {:ok, data} -> {:error, {:http_error, status, data}}
+      {:error, _} -> {:error, {:http_error, status, body}}
+    end
+  end
+
+  defp normalize_method(method) when is_atom(method), do: method
+  defp normalize_method(method) when is_binary(method) do
+    method |> String.downcase() |> String.to_existing_atom()
+  rescue
+    ArgumentError -> :post
+  end
+
+  defp normalize_headers(headers) when is_list(headers), do: headers
+  defp normalize_headers(headers) when is_map(headers) do
+    Enum.map(headers, fn {k, v} -> {to_string(k), to_string(v)} end)
+  end
+  defp normalize_headers(_), do: []
 
   @impl true
   def health_check(config) do
     url = config[:url] || config["url"]
     health_endpoint = config[:health_endpoint] || config["health_endpoint"]
+    headers = normalize_headers(config[:headers] || config["headers"] || [])
+    timeout = config[:health_timeout] || config["health_timeout"] || 5000
 
     cond do
       is_nil(url) or url == "" ->
         %{status: :unhealthy, message: "No URL configured", checked_at: DateTime.utc_now()}
 
-      health_endpoint ->
-        # Would check health endpoint if configured
-        %{status: :unknown, message: "Health check not implemented", checked_at: DateTime.utc_now()}
-
       true ->
-        %{status: :healthy, message: "URL configured", checked_at: DateTime.utc_now()}
+        check_url = if health_endpoint, do: health_endpoint, else: url
+        do_health_check(check_url, headers, timeout)
+    end
+  end
+
+  defp do_health_check(url, headers, timeout) do
+    # Try HEAD first, fall back to GET
+    req = Finch.build(:head, url, headers)
+
+    case Finch.request(req, Cympho.Finch, receive_timeout: timeout) do
+      {:ok, %Finch.Response{status: status}} when status in 200..299 ->
+        %{status: :healthy, message: "Endpoint accessible (HEAD #{status})", checked_at: DateTime.utc_now()}
+
+      {:ok, %Finch.Response{status: status}} when status in 300..399 ->
+        # Redirect - try GET
+        do_get_health_check(url, headers, timeout)
+
+      {:ok, %Finch.Response{status: status}} ->
+        %{status: :unhealthy, message: "Endpoint returned error status (HEAD #{status})", checked_at: DateTime.utc_now()}
+
+      {:error, %Finch.Error{} = error} ->
+        do_get_health_check(url, headers, timeout)
+
+      {:error, reason} ->
+        %{status: :unhealthy, message: "Health check failed: #{inspect(reason)}", checked_at: DateTime.utc_now()}
+    end
+  end
+
+  defp do_get_health_check(url, headers, timeout) do
+    req = Finch.build(:get, url, headers)
+
+    case Finch.request(req, Cympho.Finch, receive_timeout: timeout) do
+      {:ok, %Finch.Response{status: status}} when status in 200..299 ->
+        %{status: :healthy, message: "Endpoint accessible (GET #{status})", checked_at: DateTime.utc_now()}
+
+      {:ok, %Finch.Response{status: status}} ->
+        %{status: :unhealthy, message: "Endpoint returned error status (GET #{status})", checked_at: DateTime.utc_now()}
+
+      {:error, %Finch.Error{} = error} ->
+        %{status: :unhealthy, message: "Request failed: #{Exception.message(error)}", checked_at: DateTime.utc_now()}
+
+      {:error, reason} ->
+        %{status: :unhealthy, message: "Request failed: #{inspect(reason)}", checked_at: DateTime.utc_now()}
     end
   end
 
@@ -136,6 +283,13 @@ defmodule Cympho.Adapters.HttpAdapter do
         description: "HTTP headers (e.g., Authorization, Content-Type)"
       },
       %{
+        key: :auth_token,
+        type: :string,
+        required: false,
+        default: nil,
+        description: "Bearer token for Authorization header (overrides headers['Authorization'])"
+      },
+      %{
         key: :timeout,
         type: :integer,
         required: false,
@@ -148,6 +302,34 @@ defmodule Cympho.Adapters.HttpAdapter do
         required: false,
         default: nil,
         description: "Custom payload template to merge with default"
+      },
+      %{
+        key: :health_endpoint,
+        type: :string,
+        required: false,
+        default: nil,
+        description: "Optional health check endpoint (defaults to main URL)"
+      },
+      %{
+        key: :health_timeout,
+        type: :integer,
+        required: false,
+        default: 5000,
+        description: "Health check timeout in milliseconds"
+      },
+      %{
+        key: :callback_url,
+        type: :string,
+        required: false,
+        default: nil,
+        description: "Callback URL for async result delivery"
+      },
+      %{
+        key: :callback_timeout,
+        type: :integer,
+        required: false,
+        default: 60_000,
+        description: "How long to poll for callback result (milliseconds)"
       }
     ]
   end
@@ -169,7 +351,9 @@ defmodule Cympho.Adapters.HttpAdapter do
     with :ok <- validate_url(config["url"] || config[:url]),
          :ok <- validate_method(config["method"] || config[:method]),
          :ok <- validate_headers(config["headers"] || config[:headers]),
-         :ok <- validate_timeout(config["timeout"] || config[:timeout]) do
+         :ok <- validate_timeout(config["timeout"] || config[:timeout]),
+         :ok <- validate_auth_token(config["auth_token"] || config[:auth_token]),
+         :ok <- validate_callback_url(config["callback_url"] || config[:callback_url]) do
       :ok
     end
   end
@@ -226,4 +410,31 @@ defmodule Cympho.Adapters.HttpAdapter do
   end
 
   defp validate_timeout(_), do: {:error, "timeout must be an integer"}
+
+  defp validate_auth_token(nil), do: :ok
+
+  defp validate_auth_token(token) when is_binary(token) do
+    if String.trim(token) != "" do
+      :ok
+    else
+      {:error, "auth_token cannot be empty"}
+    end
+  end
+
+  defp validate_auth_token(_), do: {:error, "auth_token must be a string"}
+
+  defp validate_callback_url(nil), do: :ok
+
+  defp validate_callback_url(url) when is_binary(url) do
+    if String.trim(url) != "" do
+      case URI.parse(url) do
+        %URI{scheme: scheme} when scheme in ["http", "https"] -> :ok
+        _ -> {:error, "callback_url must be a valid HTTP/HTTPS URL"}
+      end
+    else
+      {:error, "callback_url cannot be empty"}
+    end
+  end
+
+  defp validate_callback_url(_), do: {:error, "callback_url must be a string"}
 end
