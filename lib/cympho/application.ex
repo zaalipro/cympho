@@ -30,6 +30,8 @@ defmodule Cympho.Application do
       {Cympho.Plugins.Supervisor, []},
       # Skill hot-reload for development
       {Cympho.Skills.HotReloader, []},
+      # Event store for WebSocket replay
+      Cympho.EventStore,
       CymphoWeb.Endpoint
     ]
 
