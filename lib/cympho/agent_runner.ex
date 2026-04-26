@@ -37,7 +37,7 @@ defmodule Cympho.AgentRunner do
     session_id
   end
 
-  defp build_claude_command(issue, _agent_id, resume?) do
+  defp build_claude_command(issue, _agent_id, resume?, opts \\ []) do
     base = [
       "claude",
       "-p",
@@ -69,12 +69,42 @@ defmodule Cympho.AgentRunner do
     ~s(bash -c '#{claude_cmd}' << 'PROMPT'\n#{prompt}\nPROMPT)
   end
 
-  defp build_prompt(issue) do
-    """
+  defp build_prompt(issue, opts \\ []) do
+    skills = Keyword.get(opts, :skills, [])
+
+    base_prompt = """
     Issue ID: #{issue.id}
     Title: #{issue.title}
 
     #{issue.description || "No description provided."}
+    """
+
+    if Enum.empty?(skills) do
+      String.trim(base_prompt)
+    else
+      skills_block = build_skills_prompt_block(skills)
+      """
+      #{String.trim(base_prompt)}
+
+      #{skills_block}
+      """
+      |> String.trim()
+    end
+  end
+
+  defp build_skills_prompt_block(skills) when is_list(skills) do
+    adapter = :claude_local
+
+    skill_fragments =
+      Enum.map(skills, fn skill ->
+        Cympho.Skills.Adapter.skill_prompt_fragment(adapter, skill)
+      end)
+
+    """
+    ## Available Skills
+
+    The following skills are available for use in this session:
+    #{Enum.join(skill_fragments, "\n")}
     """
     |> String.trim()
   end
