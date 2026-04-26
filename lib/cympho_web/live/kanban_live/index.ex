@@ -14,7 +14,7 @@ defmodule CymphoWeb.KanbanLive.Index do
     if connected?(socket) && socket.assigns[:current_company] do
       Issues.subscribe(socket.assigns.current_company.id)
       Cympho.Agents.subscribe(socket.assigns.current_company.id)
-      Events.subscribe_to_runs(socket.assigns.current_company.id)
+      CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
     end
     Phoenix.PubSub.subscribe(Cympho.PubSub, "agent_heartbeats")
 
@@ -137,10 +137,28 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   def handle_info({:agent_heartbeat_updated, agent_id, heartbeat_state}, socket) do
-    {:noreply,
-     update(socket, :agent_heartbeat_states, fn states ->
-       Map.put(states, agent_id, heartbeat_state)
-     end)}
+    socket =
+      if heartbeat_state.status in [:offline, :idle] do
+        agent = Enum.find(socket.assigns.agents, &(&1.id == agent_id))
+        name = if agent, do: agent.name, else: "Agent"
+        push_event(socket, "toast", %{message: "#{name} went #{heartbeat_state.status}", type: "warning", key: "agent_#{agent_id}_#{heartbeat_state.status}"})
+      else
+        socket
+      end
+    {:noreply, update(socket, :agent_heartbeat_states, fn states -> Map.put(states, agent_id, heartbeat_state) end)}
+  end
+
+  def handle_info({:run_status_changed, payload}, socket) do
+    socket = case payload do
+      %{new_status: "completed", agent_id: aid, issue_id: iid} ->
+        a = Enum.find(socket.assigns.agents, &(&1.id == aid))
+        push_event(socket, "toast", %{message: "#{if a, do: a.name, else: "Agent"} completed work on #{iid}", type: "success", key: "run_#{iid}_completed"})
+      %{new_status: "failed", agent_id: aid, issue_id: iid} ->
+        a = Enum.find(socket.assigns.agents, &(&1.id == aid))
+        push_event(socket, "toast", %{message: "#{if a, do: a.name, else: "Agent"} failed on #{iid}", type: "error", key: "run_#{iid}_failed"})
+      _ -> socket
+    end
+    {:noreply, socket}
   end
 
   def handle_info({:run_status, payload}, socket) do

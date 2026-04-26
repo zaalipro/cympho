@@ -27,6 +27,64 @@ const TimelineScroll = {
   }
 };
 
+// Toast notification hook
+const Toast = {
+  _queue: [],
+  _activeToasts: [],
+  _rateLimitMap: {},
+  _RATE_LIMIT_MS: 3000,
+  _MAX_ACTIVE: 5,
+  _DISMISS_MS: 5000,
+
+  mounted() {
+    this.handleEvent("toast", ({message, type, key}) => {
+      if (!this._rateLimited(key || message)) {
+        this._enqueue(message, type || "info");
+      }
+    });
+  },
+
+  _rateLimited(key) {
+    if (!key) return false;
+    const now = Date.now();
+    const lastShown = this._rateLimitMap[key];
+    if (lastShown && now - lastShown < this._RATE_LIMIT_MS) return true;
+    this._rateLimitMap[key] = now;
+    return false;
+  },
+
+  _enqueue(message, type) {
+    this._queue.push({message, type});
+    this._renderNext();
+  },
+
+  _renderNext() {
+    if (this._activeToasts.length >= this._MAX_ACTIVE || this._queue.length === 0) return;
+    const {message, type} = this._queue.shift();
+    const container = document.getElementById("toast-container");
+    if (!container) return;
+
+    const el = document.createElement("div");
+    el.className = `toast toast-${type}`;
+    el.textContent = message;
+    container.appendChild(el);
+    requestAnimationFrame(() => el.classList.add("toast-visible"));
+
+    const id = setTimeout(() => this._dismiss(el), this._DISMISS_MS);
+    this._activeToasts.push({el, id});
+  },
+
+  _dismiss(el) {
+    el.classList.remove("toast-visible");
+    el.classList.add("toast-exit");
+    setTimeout(() => {
+      el.remove();
+      this._activeToasts = this._activeToasts.filter(t => t.el !== el);
+      this._renderNext();
+    }, 300);
+  }
+};
+
 // Kanban drag-and-drop hook
 const KanbanSortable = {
   mounted() {
@@ -409,7 +467,7 @@ function initCompanySwitcher() {
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
 const liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
-  hooks: {TimelineScroll, KanbanSortable}
+  hooks: {TimelineScroll, KanbanSortable, Toast}
 });
 
 liveSocket.connect();
