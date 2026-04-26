@@ -220,8 +220,14 @@ defmodule Cympho.Documents do
     IssueDocument.changeset(document, attrs)
   end
 
-  defp broadcast_document_event(event) do
-    Phoenix.PubSub.broadcast(Cympho.PubSub, "documents", event)
+  defp broadcast_document_event({_event_type, document} = msg) do
+    topic =
+      case Repo.one(from i in Cympho.Issues.Issue, where: i.id == ^document.issue_id, select: i.company_id) do
+        nil -> "documents"
+        company_id -> "company:#{company_id}:documents"
+      end
+
+    Phoenix.PubSub.broadcast(Cympho.PubSub, topic, msg)
   end
 
   def subscribe(company_id) do
