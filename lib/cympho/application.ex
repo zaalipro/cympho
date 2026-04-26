@@ -30,6 +30,9 @@ defmodule Cympho.Application do
       {Cympho.Plugins.Supervisor, []},
       # Skill hot-reload for development
       {Cympho.Skills.HotReloader, []},
+      # Rate limiting
+      Cympho.RateLimiting.BroadcastDedup,
+      Cympho.RateLimiting.IpRateLimiter,
       CymphoWeb.Endpoint
     ]
 

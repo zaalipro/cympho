@@ -1,8 +1,47 @@
 defmodule CymphoWeb.CompanyChannel do
+  @moduledoc """
+  Main company channel handling WebSocket connections.
+
+  ## Rate Limiting
+
+  This channel enforces several rate limits to prevent abuse and flooding:
+
+  - **Per-socket message rate limit:** Each connected socket is limited to
+    10 events per second using a token bucket algorithm. Events exceeding
+    this limit receive a `{:error, %{reason: "rate_limited"}}` reply.
+
+  - **Heartbeat throttling:** Heartbeat events (`"heartbeat"` push) are
+    limited to 1 per second per client. Excess heartbeats are rejected
+    with a rate-limit error.
+
+  - **IP-based join rate limit:** Channel joins are limited to 10 per second
+    per IP address to prevent thundering herd attacks. Excess join attempts
+    receive `{:error, %{reason: "rate_limited"}}`.
+  """
+
   use CymphoWeb, :channel
+
+  alias Cympho.RateLimiting
 
   @impl true
   def join("company:" <> rest, payload, socket) do
+    ip = Map.get(socket.assigns, :ip_address, {127, 0, 0, 1})
+
+    case Cympho.RateLimiting.IpRateLimiter.check_join(ip) do
+      :ok ->
+        do_join(rest, payload, socket)
+
+      {:error, :rate_limited} ->
+        {:error, %{reason: "rate_limited"}}
+    end
+  end
+
+  @impl true
+  def join(_, _payload, _socket) do
+    {:error, %{reason: "invalid_topic"}}
+  end
+
+  defp do_join(rest, payload, socket) do
     case String.split(rest, ":", parts: 2) do
       [company_id] ->
         if socket.assigns.company_id == company_id do
@@ -22,23 +61,42 @@ defmodule CymphoWeb.CompanyChannel do
   end
 
   @impl true
-  def join(_, _payload, _socket) do
-    {:error, %{reason: "invalid_topic"}}
-  end
-
-  @impl true
   def handle_info(:after_join, socket) do
     {:noreply, socket}
   end
 
   @impl true
   def handle_in("ping", _payload, socket) do
-    {:reply, {:ok, %{pong: true}}, socket}
+    case RateLimiting.check_message_rate(socket) do
+      {:ok, socket} ->
+        {:reply, {:ok, %{pong: true}}, socket}
+
+      {:error, :rate_limited} ->
+        {:reply, {:error, %{reason: "rate_limited"}}, socket}
+    end
   end
 
   @impl true
-  def handle_in(event, payload, socket) do
-    {:noreply, socket}
+  def handle_in("heartbeat", payload, socket) do
+    with {:ok, socket} <- RateLimiting.check_heartbeat_throttle(socket),
+         {:ok, socket} <- RateLimiting.check_message_rate(socket) do
+      broadcast(socket, "heartbeat", payload)
+      {:noreply, socket}
+    else
+      {:error, :rate_limited} ->
+        {:reply, {:error, %{reason: "rate_limited"}}, socket}
+    end
+  end
+
+  @impl true
+  def handle_in(_event, _payload, socket) do
+    case RateLimiting.check_message_rate(socket) do
+      {:ok, socket} ->
+        {:noreply, socket}
+
+      {:error, :rate_limited} ->
+        {:reply, {:error, %{reason: "rate_limited"}}, socket}
+    end
   end
 
   defp dispatch_sub_topic(topic, "activities", _payload, socket) do

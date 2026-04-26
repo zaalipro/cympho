@@ -48,7 +48,7 @@ defmodule Cympho.Comments do
 
           issue ->
             issue = Repo.preload(issue, :comments)
-            Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:comments", {:comment_created, issue})
+            Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:comments", {:comment_created, issue})
         end
 
         CymphoWeb.Events.broadcast_comment(comment, :comment_created)
@@ -80,7 +80,7 @@ defmodule Cympho.Comments do
 
           issue ->
             issue = Repo.preload(issue, :comments)
-            Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:comments", {:comment_updated, issue})
+            Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:comments", {:comment_updated, issue})
         end
 
         CymphoWeb.Events.broadcast_comment(comment, :comment_updated)
@@ -106,7 +106,7 @@ defmodule Cympho.Comments do
 
           issue ->
             issue = Repo.preload(issue, :comments)
-            Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:comments", {:comment_deleted, issue})
+            Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:comments", {:comment_deleted, issue})
         end
 
         :ok
