@@ -70,7 +70,7 @@ defmodule Cympho.Adapters.CodexAdapter do
         [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}]
       )
 
-      send(port, {self(), {:command, "#{prompt}\n"}})
+      Port.command(port, "#{prompt}\n")
 
       result = collect_output(port, "", timeout)
       Port.close(port)

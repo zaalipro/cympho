@@ -65,7 +65,7 @@ defmodule Cympho.Adapters.CursorAdapter do
 
       port = Port.open({:spawn_executable, cursor_bin}, port_opts)
 
-      send(port, {self(), {:command, "#{prompt}\n"}})
+      Port.command(port, "#{prompt}\n")
 
       result = collect_output(port, "", timeout)
       Port.close(port)
@@ -129,28 +129,24 @@ defmodule Cympho.Adapters.CursorAdapter do
   defp parse_cursor_output(raw) do
     raw = String.trim(raw)
 
-    if raw == "" do
-      {:ok, %{"output" => ""}}
-    else
-      case String.split(raw, "\n") do
-        [line] ->
-          case Jason.decode(line) do
-            {:ok, json} -> {:ok, json}
-            {:error, _} -> {:ok, %{"output" => raw}}
-          end
+    case String.split(raw, "\n") do
+      [line] ->
+        case Jason.decode(line) do
+          {:ok, json} -> {:ok, json}
+          {:error, _} -> {:ok, %{"output" => raw}}
+        end
 
-        lines ->
-          parsed =
-            lines
-            |> Enum.map(&Jason.decode/1)
-            |> Enum.filter(fn
-              {:ok, _} -> true
-              _ -> false
-            end)
-            |> Enum.map(fn {:ok, m} -> m end)
+      lines ->
+        parsed =
+          lines
+          |> Enum.map(&Jason.decode/1)
+          |> Enum.filter(fn
+            {:ok, _} -> true
+            _ -> false
+          end)
+          |> Enum.map(fn {:ok, m} -> m end)
 
-          {:ok, %{"turns" => parsed}}
-      end
+        {:ok, %{"turns" => parsed}}
     end
   end
 
