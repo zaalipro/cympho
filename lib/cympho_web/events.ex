@@ -57,13 +57,13 @@ defmodule CymphoWeb.Events do
   @doc """
   Broadcast a run status change to WebSocket clients.
   """
-  def broadcast_run_status(%Run{id: run_id, issue_id: issue_id} = run, event_type) do
+  def broadcast_run_status(%Run{id: run_id, issue_id: issue_id, agent_id: agent_id, status: new_status} = run, event_type, old_status \\\ nil) do
     case Repo.get(Issue, issue_id) do
       nil -> :ok
       %Issue{company_id: company_id} ->
         topic = "company:#{company_id}:runs"
-        payload = build_run_payload(run, event_type)
-        CymphoWeb.Endpoint.broadcast(topic, "run_status", payload)
+        payload = build_run_payload(run, event_type, old_status)
+        Phoenix.PubSub.broadcast(Cympho.PubSub, topic, {:run_status_changed, payload})
     end
   end
 
@@ -143,12 +143,14 @@ defmodule CymphoWeb.Events do
     }
   end
 
-  defp build_run_payload(%Run{id: run_id, status: status, adapter: adapter, issue_id: issue_id}, event_type) do
+  defp build_run_payload(%Run{id: run_id, status: new_status, adapter: adapter, issue_id: issue_id, agent_id: agent_id}, event_type, old_status) do
     %{
-      event_type: event_type,
-      resource_id: run_id,
+      run_id: run_id,
       issue_id: issue_id,
-      status: status,
+      agent_id: agent_id,
+      old_status: old_status,
+      new_status: new_status,
+      event_type: event_type,
       adapter: adapter,
       timestamp: DateTime.utc_now() |> DateTime.to_iso8601()
     }

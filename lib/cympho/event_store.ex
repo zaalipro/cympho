@@ -25,7 +25,9 @@ defmodule Cympho.EventStore do
   def fetch_since(topic, nil, limit), do: GenServer.call(__MODULE__, {:fetch_latest, topic, limit})
   def fetch_since(topic, last_event_id, limit), do: GenServer.call(__MODULE__, {:fetch_since, topic, last_event_id, limit})
 
-  def count(topic), do: :ets.match_count(@table, {:_, topic, :_, :_})
+  def count(topic) do
+    :ets.match_object(@table, {:_, topic, :_, :_}) |> length()
+  end
 
   def purge_old(ttl_ms \\ 300_000), do: GenServer.call(__MODULE__, {:purge_old, ttl_ms})
 
@@ -74,7 +76,12 @@ defmodule Cympho.EventStore do
     deleted = :ets.foldl(fn
       {:__global_counter__, _}, acc -> acc
       {event_id, _, _, timestamp}, acc ->
-        if timestamp < cutoff, do: (:ets.delete(@table, event_id); acc + 1), else: acc
+        if timestamp < cutoff do
+          :ets.delete(@table, event_id)
+          acc + 1
+        else
+          acc
+        end
     end, 0, @table)
     {:reply, deleted, state}
   end
@@ -87,7 +94,7 @@ defmodule Cympho.EventStore do
   end
 
   defp trim_if_needed(state, topic) do
-    topic_count = count(topic)
+    topic_count = length(:ets.match_object(@table, {:_, topic, :_, :_}))
     if topic_count > state.max_per_topic do
       trim_count = topic_count - state.max_per_topic
       to_delete = :ets.match_object(@table, {:_, topic, :_, :_})
