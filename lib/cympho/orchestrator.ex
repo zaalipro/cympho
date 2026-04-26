@@ -24,7 +24,6 @@ defmodule Cympho.Orchestrator do
   defstruct [:issue, :agent_id, :session_id, turn_count: 0, tool_traces: %{}, opts: []]
 
   use GenServer
-  alias Cympho.Orchestrator.Session
   alias Cympho.{Issues, Comments, Agents, Activities, HeartbeatEngine}
 
   @heartbeat_tick_interval 30_000
@@ -108,13 +107,13 @@ defmodule Cympho.Orchestrator do
 
   @impl true
   def init({issue, agent_id, opts}) do
-    session = %Session{issue: issue, agent_id: agent_id, opts: opts}
+    session = %__MODULE__{issue: issue, agent_id: agent_id, opts: opts}
     session = create_pending_run(session, issue, agent_id)
     {:ok, session, {:continue, :start_session}}
   end
 
   @impl true
-  def handle_continue(:start_session, %Session{} = session) do
+  def handle_continue(:start_session, %__MODULE__{} = session) do
     issue = session.issue
     agent_id = session.agent_id
 
@@ -128,12 +127,12 @@ defmodule Cympho.Orchestrator do
   end
 
   @impl true
-  def handle_info({:session_started, session_id}, %Session{} = session) do
+  def handle_info({:session_started, session_id}, %__MODULE__{} = session) do
     {:noreply, %{session | session_id: session_id}}
   end
 
   @impl true
-  def handle_info({:tool_call_detected, _session_id, tool_call}, %Session{} = session) do
+  def handle_info({:tool_call_detected, _session_id, tool_call}, %__MODULE__{} = session) do
     issue = session.issue
     agent_id = session.agent_id
 
@@ -143,7 +142,7 @@ defmodule Cympho.Orchestrator do
   end
 
   @impl true
-  def handle_info({:turn_completed, _session_id, result}, %Session{} = session) do
+  def handle_info({:turn_completed, _session_id, result}, %__MODULE__{} = session) do
     issue = session.issue
     agent_id = session.agent_id
 
@@ -175,7 +174,7 @@ defmodule Cympho.Orchestrator do
   end
 
   @impl true
-  def handle_info({:turn_ended_with_error, _session_id, reason}, %Session{} = session) do
+  def handle_info({:turn_ended_with_error, _session_id, reason}, %__MODULE__{} = session) do
     issue = session.issue
     agent_id = session.agent_id
 
@@ -214,7 +213,7 @@ defmodule Cympho.Orchestrator do
   end
 
   @impl true
-  def handle_info(:heartbeat_tick, %Session{run_id: run_id} = session) when run_id != nil do
+  def handle_info(:heartbeat_tick, %__MODULE__{run_id: run_id} = session) when run_id != nil do
     record_heartbeat(session)
     schedule_heartbeat_tick()
     {:noreply, session}
@@ -225,7 +224,7 @@ defmodule Cympho.Orchestrator do
   end
 
   @impl true
-  def handle_call(:get_session_state, _from, %Session{} = session) do
+  def handle_call(:get_session_state, _from, %__MODULE__{} = session) do
     {:reply,
      %{
        issue_id: session.issue.id,
@@ -238,7 +237,7 @@ defmodule Cympho.Orchestrator do
   end
 
   @impl true
-  def terminate(reason, %Session{} = session) do
+  def terminate(reason, %__MODULE__{} = session) do
     send(Cympho.Orchestrator.Dispatcher, {:session_ended, session.issue.id, reason})
 
     _ =
@@ -268,9 +267,9 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp start_engine_run(%Session{run_id: nil}), do: :ok
+  defp start_engine_run(%__MODULE__{run_id: nil}), do: :ok
 
-  defp start_engine_run(%Session{run_id: run_id}) do
+  defp start_engine_run(%__MODULE__{run_id: run_id}) do
     try do
       {:ok, run} = HeartbeatEngine.get_run(run_id)
       HeartbeatEngine.start_run(run)
@@ -280,9 +279,9 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp complete_engine_run(%Session{run_id: nil}, _result), do: :ok
+  defp complete_engine_run(%__MODULE__{run_id: nil}, _result), do: :ok
 
-  defp complete_engine_run(%Session{run_id: run_id}, result) do
+  defp complete_engine_run(%__MODULE__{run_id: run_id}, result) do
     try do
       {:ok, run} = HeartbeatEngine.get_run(run_id)
       attrs = extract_run_attrs(result)
@@ -293,9 +292,9 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp fail_engine_run(%Session{run_id: nil}, _reason), do: :ok
+  defp fail_engine_run(%__MODULE__{run_id: nil}, _reason), do: :ok
 
-  defp fail_engine_run(%Session{run_id: run_id}, reason) do
+  defp fail_engine_run(%__MODULE__{run_id: run_id}, reason) do
     try do
       {:ok, run} = HeartbeatEngine.get_run(run_id)
       HeartbeatEngine.fail_run(run, to_string(reason))
@@ -305,9 +304,9 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp record_heartbeat(%Session{run_id: nil}), do: :ok
+  defp record_heartbeat(%__MODULE__{run_id: nil}), do: :ok
 
-  defp record_heartbeat(%Session{run_id: run_id}) do
+  defp record_heartbeat(%__MODULE__{run_id: run_id}) do
     try do
       {:ok, run} = HeartbeatEngine.get_run(run_id)
       HeartbeatEngine.record_heartbeat(run)
