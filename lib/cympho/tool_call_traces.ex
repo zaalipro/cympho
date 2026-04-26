@@ -176,7 +176,13 @@ defmodule Cympho.ToolCallTraces do
     |> Repo.all()
   end
 
-  def get_statistics(company_id, opts \\ []) do
+  def get_statistics(company_id, opts \\ [])
+
+  def get_statistics(nil, _opts) do
+    %{total_calls: 0, success_calls: 0, error_calls: 0, pending_calls: 0}
+  end
+
+  def get_statistics(company_id, opts) do
     start_date = Keyword.get(opts, :start_date)
     end_date = Keyword.get(opts, :end_date)
 
