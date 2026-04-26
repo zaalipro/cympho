@@ -4,13 +4,7 @@ defmodule Cympho.RateLimiting.BroadcastDedupTest do
   alias Cympho.RateLimiting.BroadcastDedup
 
   setup do
-    try do
-      GenServer.stop(BroadcastDedup)
-    catch
-      :exit, _ -> :ok
-    end
-
-    {:ok, _pid} = start_supervised({BroadcastDedup, []})
+    BroadcastDedup.reset()
     :ok
   end
 
