@@ -8,6 +8,7 @@ defmodule Cympho.WorkProducts do
     IssueWorkProduct
     |> where(issue_id: ^issue_id)
     |> order_by(desc: :inserted_at)
+    |> preload([:created_by_agent, :attachment])
     |> Repo.all()
   end
 
@@ -27,6 +28,8 @@ defmodule Cympho.WorkProducts do
          |> IssueWorkProduct.changeset(attrs)
          |> Repo.insert() do
       {:ok, work_product} ->
+        work_product = Repo.preload(work_product, [:created_by_agent, :attachment])
+
         Activities.log_activity(%{
           issue_id: work_product.issue_id,
           actor_type: "agent",
@@ -39,6 +42,12 @@ defmodule Cympho.WorkProducts do
           }
         })
 
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "issues",
+          {:work_product_created, work_product}
+        )
+
         {:ok, work_product}
 
       {:error, changeset} ->
@@ -47,12 +56,35 @@ defmodule Cympho.WorkProducts do
   end
 
   def update_work_product(%IssueWorkProduct{} = work_product, attrs) do
-    work_product
-    |> IssueWorkProduct.changeset(attrs)
-    |> Repo.update()
+    case work_product
+         |> IssueWorkProduct.changeset(attrs)
+         |> Repo.update() do
+      {:ok, updated} ->
+        updated = Repo.preload(updated, [:created_by_agent, :attachment])
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "issues",
+          {:work_product_updated, updated}
+        )
+        {:ok, updated}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
   end
 
   def delete_work_product(%IssueWorkProduct{} = work_product) do
-    Repo.delete(work_product)
+    case Repo.delete(work_product) do
+      {:ok, _} ->
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "issues",
+          {:work_product_deleted, work_product.issue_id}
+        )
+        :ok
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
   end
 end

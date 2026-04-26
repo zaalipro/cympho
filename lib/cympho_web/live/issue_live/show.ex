@@ -9,6 +9,8 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.HeartbeatEngine
   alias Cympho.IssueReadStates
   alias Cympho.IssueThreadInteractions
+  alias Cympho.WorkProducts
+  alias Cympho.ToolCallTraces
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -32,7 +34,9 @@ defmodule CymphoWeb.IssueLive.Show do
         comment_changeset = Comments.Comment.changeset(%Comments.Comment{}, %{})
         runs = HeartbeatEngine.list_runs_for_issue(issue.id)
         interactions = IssueThreadInteractions.list_interactions(issue.id)
-        timeline = build_timeline(issue, runs, interactions)
+        work_products = WorkProducts.list_work_products(issue.id)
+        tool_call_traces = ToolCallTraces.list_tool_call_traces(issue_id: issue.id)
+        timeline = build_timeline(issue, runs, interactions, work_products, tool_call_traces)
 
         {:ok,
          assign(socket,
@@ -46,8 +50,11 @@ defmodule CymphoWeb.IssueLive.Show do
            assignee_search: "",
            runs: runs,
            interactions: interactions,
+           work_products: work_products,
+           tool_call_traces: tool_call_traces,
            timeline: timeline,
-           scrolled_to_bottom: true
+           scrolled_to_bottom: true,
+           expanded_traces: %{}
          )}
 
       {:error, :not_found} ->
@@ -246,7 +253,7 @@ defmodule CymphoWeb.IssueLive.Show do
              "resolved_by_user_id" => user_id
            }) do
       interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, socket.assigns.work_products, socket.assigns.tool_call_traces)
       {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
     else
       {:error, :invalid_transition} ->
@@ -277,7 +284,7 @@ defmodule CymphoWeb.IssueLive.Show do
              "response" => response
            }) do
       interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, socket.assigns.work_products, socket.assigns.tool_call_traces)
       {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
     else
       {:error, :invalid_transition} ->
@@ -289,6 +296,13 @@ defmodule CymphoWeb.IssueLive.Show do
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to respond")}
     end
+  end
+
+  @impl true
+  def handle_event("toggle_trace", %{"id" => id}, socket) do
+    expanded_traces = socket.assigns.expanded_traces
+    new_state = Map.put(expanded_traces, id, !Map.get(expanded_traces, id, false))
+    {:noreply, assign(socket, :expanded_traces, new_state)}
   end
 
   @impl true
@@ -346,7 +360,7 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:interaction_created, interaction}, socket) do
     if socket.assigns.issue.id == interaction.issue_id do
       interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, socket.assigns.work_products, socket.assigns.tool_call_traces)
       {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
     else
       {:noreply, socket}
@@ -356,8 +370,48 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:interaction_updated, interaction}, socket) do
     if socket.assigns.issue.id == interaction.issue_id do
       interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, socket.assigns.work_products, socket.assigns.tool_call_traces)
       {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:work_product_created, work_product}, socket) do
+    if socket.assigns.issue.id == work_product.issue_id do
+      work_products = WorkProducts.list_work_products(socket.assigns.issue.id)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, socket.assigns.interactions, work_products, socket.assigns.tool_call_traces)
+      {:noreply, assign(socket, work_products: work_products, timeline: timeline)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:work_product_updated, work_product}, socket) do
+    if socket.assigns.issue.id == work_product.issue_id do
+      work_products = WorkProducts.list_work_products(socket.assigns.issue.id)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, socket.assigns.interactions, work_products, socket.assigns.tool_call_traces)
+      {:noreply, assign(socket, work_products: work_products, timeline: timeline)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:work_product_deleted, issue_id}, socket) do
+    if socket.assigns.issue.id == issue_id do
+      work_products = WorkProducts.list_work_products(socket.assigns.issue.id)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, socket.assigns.interactions, work_products, socket.assigns.tool_call_traces)
+      {:noreply, assign(socket, work_products: work_products, timeline: timeline)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:tool_call_trace_created, trace}, socket) do
+    if socket.assigns.issue.id == trace.issue_id do
+      tool_call_traces = ToolCallTraces.list_tool_call_traces(issue_id: socket.assigns.issue.id)
+      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, socket.assigns.interactions, socket.assigns.work_products, tool_call_traces)
+      {:noreply, assign(socket, tool_call_traces: tool_call_traces, timeline: timeline)}
     else
       {:noreply, socket}
     end
@@ -451,8 +505,8 @@ defmodule CymphoWeb.IssueLive.Show do
   defp try_string_to_priority("critical"), do: :critical
   defp try_string_to_priority(_), do: nil
 
-  # Build a unified timeline of comments, interactions, and runs
-  defp build_timeline(issue, runs, interactions) do
+  # Build a unified timeline of comments, interactions, runs, work_products, and tool_call_traces
+  defp build_timeline(issue, runs, interactions, work_products, tool_call_traces) do
     comments_timeline =
       Enum.map(issue.comments, fn comment ->
         %{
@@ -483,16 +537,42 @@ defmodule CymphoWeb.IssueLive.Show do
         }
       end)
 
+    work_products_timeline =
+      Enum.map(work_products, fn wp ->
+        %{
+          type: :work_product,
+          id: wp.id,
+          timestamp: wp.inserted_at,
+          data: wp
+        }
+      end)
+
+    tool_call_traces_timeline =
+      Enum.map(tool_call_traces, fn trace ->
+        %{
+          type: :tool_call_trace,
+          id: trace.id,
+          timestamp: trace.occurred_at,
+          data: trace
+        }
+      end)
+
     # Combine and sort by timestamp (newest last for chat view)
-    (comments_timeline ++ runs_timeline ++ interactions_timeline)
+    (comments_timeline ++ runs_timeline ++ interactions_timeline ++ work_products_timeline ++ tool_call_traces_timeline)
     |> Enum.sort_by(& &1.timestamp, DateTime)
   end
 
   # Rebuild timeline when issue updates (status changes, etc.)
   defp maybe_rebuild_timeline(socket) do
     interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-    timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions)
-    assign(socket, :timeline, timeline, :interactions, interactions)
+    work_products = WorkProducts.list_work_products(socket.assigns.issue.id)
+    tool_call_traces = ToolCallTraces.list_tool_call_traces(issue_id: socket.assigns.issue.id)
+    timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, work_products, tool_call_traces)
+    socket
+    |> assign(:timeline, timeline)
+    |> assign(:interactions, interactions)
+    |> assign(:work_products, work_products)
+    |> assign(:tool_call_traces, tool_call_traces)
   end
 
   # Format timestamp for timeline entries

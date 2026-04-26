@@ -75,8 +75,13 @@ defmodule Cympho.ToolCallTraces do
           changeset = ToolCallTrace.creation_changeset(attrs, prev_chain_hash)
 
           case Repo.insert(changeset) do
-            {:ok, trace} -> {:ok, Repo.preload(trace, [:agent, :issue, :company])}
-            error -> error
+            {:ok, trace} ->
+              trace = Repo.preload(trace, [:agent, :issue, :company])
+              maybe_broadcast_trace(trace)
+              {:ok, trace}
+
+            error ->
+              error
           end
       end
     end
@@ -91,9 +96,17 @@ defmodule Cympho.ToolCallTraces do
       attrs
     end
 
-    trace
-    |> ToolCallTrace.changeset(attrs)
-    |> Repo.update()
+    case trace
+         |> ToolCallTrace.changeset(attrs)
+         |> Repo.update() do
+      {:ok, updated} ->
+        updated = Repo.preload(updated, [:agent, :issue, :company])
+        maybe_broadcast_trace(updated)
+        {:ok, updated}
+
+      error ->
+        error
+    end
   end
 
   def verify_chain_integrity(company_id) do
@@ -242,5 +255,15 @@ defmodule Cympho.ToolCallTraces do
   defp maybe_filter_by_status(query, nil), do: query
   defp maybe_filter_by_status(query, status) do
     from t in query, where: t.status == ^status
+  end
+
+  defp maybe_broadcast_trace(trace) do
+    if trace.issue_id do
+      Phoenix.PubSub.broadcast(
+        Cympho.PubSub,
+        "issues",
+        {:tool_call_trace_created, trace}
+      )
+    end
   end
 end
