@@ -70,7 +70,7 @@ defmodule CymphoWeb.Components.CompanySwitcher do
 
     {:noreply,
      socket
-     |> push_redirect(to: "/switch-company/#{company_id}?return_to=#{return_to}")}
+     |> push_redirect(to: "/switch-company/#{company_id}?return_to=#{URI.encode_www_form(return_to)}")}
   end
 
   def handle_event("update_search", %{"query" => query}, socket) do
