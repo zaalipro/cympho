@@ -108,8 +108,8 @@
 
         <!-- Content Column -->
         <div class="flex-1 min-w-0">
-          {case entry.type do
-            :comment ->
+          <%= case entry.type do %>
+            <% :comment -> %>
               ~H"""
               <div class={"bg-surface border border-border rounded-lg p-4 #{if entry.data.author_type == "system", do: "bg-white/[0.03] border-dashed", else: ""}"}>
                 <div :if={entry.data.author_type != "system"} class="flex items-center justify-between mb-2">
@@ -145,7 +145,7 @@
               </div>
               """
 
-            :run ->
+            <% :run -> %>
               ~H"""
               <div class="bg-white/[0.02] border border-border/50 rounded-lg p-3">
                 <div class="flex items-center justify-between mb-2">
@@ -168,7 +168,7 @@
               </div>
               """
 
-            :interaction ->
+            <% :interaction -> %>
               ~H"""
               <div class="bg-surface border border-accent/30 rounded-lg p-4 space-y-3">
                 <div class="flex items-center justify-between">
@@ -259,13 +259,13 @@
               </div>
               """
 
-            _ ->
+            <% _ -> %>
               ~H"""
               <div class="text-xs text-text-quaternary">
                 Unknown entry type
               </div>
               """
-          end}
+          <% end %>
         </div>
       </div>
     </div>
