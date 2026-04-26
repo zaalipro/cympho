@@ -397,6 +397,16 @@ function initSidebarMobile() {
       overlay.classList.remove('hidden');
     });
   }
+
+  // Company switcher button in mobile header
+  const companySwitcherBtn = document.querySelector('[data-company-switcher-btn]');
+  if (companySwitcherBtn) {
+    companySwitcherBtn.addEventListener('click', () => {
+      if (window.openCompanySwitcher) {
+        window.openCompanySwitcher();
+      }
+    });
+  }
 }
 
 // Shortcuts modal handlers
