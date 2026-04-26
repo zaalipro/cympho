@@ -57,6 +57,9 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
   def name, do: "Claude Code"
 
   @impl true
+  def type, do: :claude_code
+
+  @impl true
   def available? do
     case System.cmd("which", ["claude"]) do
       {_, 0} -> true

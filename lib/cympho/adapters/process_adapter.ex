@@ -221,6 +221,9 @@ defmodule Cympho.Adapters.ProcessAdapter do
   def name, do: "Local Process"
 
   @impl true
+  def type, do: :process
+
+  @impl true
   def available? do
     # Process adapter is always available on Unix-like systems
     true

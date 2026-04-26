@@ -156,6 +156,9 @@ defmodule Cympho.Adapters.HttpAdapter do
   def name, do: "HTTP Webhook"
 
   @impl true
+  def type, do: :http
+
+  @impl true
   def available? do
     # HTTP adapter is always available
     true

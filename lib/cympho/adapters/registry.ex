@@ -81,6 +81,69 @@ defmodule Cympho.Adapters.Registry do
     :ok
   end
 
+  @doc """
+  Lists all registered adapter type atoms.
+  """
+  @spec all_types() :: [atom()]
+  def all_types do
+    all()
+    |> Enum.map(fn {key, _module} -> key end)
+    |> Enum.sort()
+  end
+
+  @doc """
+  Returns the ordered fallback chain for a given adapter type.
+
+  The chain is `[primary, default_adapter]` when primary differs from the
+  default, otherwise just `[default_adapter]`.
+  """
+  @spec fallback_chain(atom()) :: [atom()]
+  def fallback_chain(primary) when is_atom(primary) do
+    default = default_adapter()
+
+    if primary == default do
+      [primary]
+    else
+      [primary, default]
+    end
+  end
+
+  @doc """
+  Resolves an agent to its adapter module and config.
+
+  Walks the fallback chain starting from the agent's adapter type.
+  Returns `{:ok, module, config}` when an available adapter is found,
+  or `{:error, :no_adapter}` otherwise.
+  """
+  @spec resolve_agent(map()) :: {:ok, module(), map()} | {:error, :no_adapter}
+  def resolve_agent(%{adapter: adapter_type, config: config}) do
+    primary = adapter_type || default_adapter()
+    chain = fallback_chain(primary)
+
+    Enum.find_value(chain, {:error, :no_adapter}, fn type ->
+      case lookup(type) do
+        {:ok, module} ->
+          available = module_available?(module, config)
+          if available, do: {:ok, module, config}, else: nil
+
+        :error ->
+          nil
+      end
+    end)
+  end
+
+  def resolve_agent(%{adapter: adapter_type}) do
+    resolve_agent(%{adapter: adapter_type, config: %{}})
+  end
+
+  defp module_available?(module, config) do
+    if function_exported?(module, :available?, 1) do
+      module.available?(config)
+    else
+      module.available?()
+    end
+  end
+
   @impl true
   def init(_) do
     :ets.new(__MODULE__, [:named_table, :set, :protected, read_concurrency: true])

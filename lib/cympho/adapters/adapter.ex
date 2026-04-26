@@ -63,7 +63,21 @@ defmodule Cympho.Adapters.Adapter do
   @callback available?() :: boolean()
 
   @doc """
+  Whether the adapter is available given the provided config.
+  Delegates to `available?/0` by default — override when availability
+  depends on config (e.g. API key presence).
+  """
+  @callback available?(config :: map()) :: boolean()
+
+  @doc """
+  Returns the adapter type atom (e.g. `:claude_code`, `:codex`).
+  """
+  @callback type() :: atom()
+
+  @doc """
   Validates adapter-specific config. Returns `:ok` or `{:error, reason}`.
   """
   @callback validate_config(config :: map()) :: :ok | {:error, String.t()}
+
+  @optional_callbacks [available?: 1]
 end

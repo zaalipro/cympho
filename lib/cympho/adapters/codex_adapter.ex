@@ -113,6 +113,9 @@ defmodule Cympho.Adapters.CodexAdapter do
   def name, do: "OpenAI Codex"
 
   @impl true
+  def type, do: :codex
+
+  @impl true
   def available? do
     # Always available if configured
     api_key =

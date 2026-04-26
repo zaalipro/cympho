@@ -78,6 +78,9 @@ defmodule Cympho.Adapters.CursorAdapter do
   def name, do: "Cursor IDE"
 
   @impl true
+  def type, do: :cursor
+
+  @impl true
   def available? do
     case System.cmd("which", ["cursor"]) do
       {_, 0} -> true

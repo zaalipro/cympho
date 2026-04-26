@@ -196,6 +196,9 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   def name, do: "OpenClaw"
 
   @impl true
+  def type, do: :openclaw
+
+  @impl true
   def available? do
     endpoint = Application.get_env(:cympho, :openclaw_endpoint)
     not is_nil(endpoint)
