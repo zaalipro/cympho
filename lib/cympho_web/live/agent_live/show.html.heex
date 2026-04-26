@@ -3,13 +3,13 @@
     <:actions>
       <.app_link
         navigate={~p"/agents"}
-        class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors"
+        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
       >
         Back
       </.app_link>
       <.app_link
         navigate={~p"/agents/#{@agent.id}/edit"}
-        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors"
+        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-lg transition-colors"
       >
         Edit
       </.app_link>
@@ -23,16 +23,16 @@
       <.badge variant="pill" value={health_status_label(@agent.health_status)} />
     </div>
 
-    <div class="bg-surface border border-border rounded-card p-5 space-y-4">
-      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider">Instructions</h3>
+    <div class="bg-surface border border-border rounded-xl p-5 space-y-4">
+      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider">Instructions</h3>
       <p class="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">
         {@agent.instructions}
       </p>
     </div>
 
     <%= if @agent.instructions_path do %>
-      <div class="bg-surface border border-border rounded-card p-5 space-y-2">
-        <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider">
+      <div class="bg-surface border border-border rounded-xl p-5 space-y-2">
+        <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider">
           Instructions File
         </h3>
         <p class="text-sm text-text-secondary">
@@ -41,8 +41,8 @@
       </div>
     <% end %>
 
-    <div class="bg-surface border border-border rounded-card p-5 space-y-2">
-      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider">Configuration</h3>
+    <div class="bg-surface border border-border rounded-xl p-5 space-y-2">
+      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider">Configuration</h3>
       <div class="flex items-center gap-4">
         <span class="text-sm text-text-secondary">
           Max concurrent jobs: <span class="text-brand">{@agent.max_concurrent_jobs}</span>
@@ -52,8 +52,8 @@
     </div>
     
 <!-- Wake History -->
-    <div class="bg-surface border border-border rounded-card p-5 space-y-4">
-      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider">Wake History</h3>
+    <div class="bg-surface border border-border rounded-xl p-5 space-y-4">
+      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider">Wake History</h3>
       <div :if={Enum.empty?(@wake_history)} class="text-sm text-text-tertiary py-4 text-center">
         No wake history available.
       </div>

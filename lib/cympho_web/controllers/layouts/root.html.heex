@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={Plug.CSRFProtection.get_csrf_token()} />
     <title>{Map.get(assigns, :page_title, "Cympho")}</title>
+    <script>
+      (function(){var t=localStorage.getItem('cympho-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark')})();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -22,7 +25,7 @@
     >
     </script>
   </head>
-  <body class="bg-canvas text-text-primary font-inter antialiased min-h-screen">
+  <body class="bg-canvas text-text-primary font-sans antialiased min-h-screen">
     <div
       id="toast-container"
       phx-hook="Toast"
@@ -33,23 +36,37 @@
       <!-- Sidebar overlay for mobile -->
       <div
         id="sidebar-overlay"
-        class="fixed inset-0 bg-black/50 z-40 lg:hidden hidden"
+        class="fixed inset-0 bg-black/30 z-40 lg:hidden hidden"
       >
       </div>
-      
-<!-- Desktop sidebar / Mobile drawer -->
+
+      <!-- Desktop sidebar / Mobile drawer -->
       <aside
-        class="w-60 bg-panel border-r border-border-subtle flex-col fixed inset-y-0 left-0 z-50 hidden md:flex lg:translate-x-0 -translate-x-full transition-transform duration-200"
+        class="w-64 bg-panel border-r border-border flex-col fixed inset-y-0 left-0 z-50 hidden md:flex lg:translate-x-0 -translate-x-full transition-transform duration-200"
         id="sidebar"
       >
         <.company_rail company={assigns[:current_company]} />
         <.nav_rail current_path={@conn.request_path} />
-        <!-- Keyboard shortcuts hint -->
-        <div class="px-3 pb-4">
+        <!-- Bottom actions: theme toggle + shortcuts -->
+        <div class="px-3 pb-4 space-y-1">
+          <button
+            type="button"
+            onclick="window.toggleTheme && window.toggleTheme()"
+            class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-510 text-text-quaternary hover:text-text-secondary hover:bg-surface-hover transition-colors"
+          >
+            <svg class="w-4 h-4 dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+            <svg class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+            </svg>
+            <span class="dark:hidden">Light</span>
+            <span class="hidden dark:inline">Dark</span>
+          </button>
           <button
             type="button"
             data-shortcuts-btn
-            class="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-510 text-text-quaternary hover:text-text-secondary hover:bg-white/[0.04] transition-colors"
+            class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-510 text-text-quaternary hover:text-text-secondary hover:bg-surface-hover transition-colors"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -60,19 +77,17 @@
               />
             </svg>
             <span>Shortcuts</span>
-            <kbd class="text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary ml-auto">
-              ?
-            </kbd>
+            <kbd class="kbd ml-auto">?</kbd>
           </button>
         </div>
       </aside>
-      
-<!-- Mobile top bar -->
-      <header class="lg:hidden fixed top-0 left-0 right-0 z-30 h-14 bg-panel border-b border-border-subtle flex items-center justify-between px-4">
+
+      <!-- Mobile top bar -->
+      <header class="lg:hidden fixed top-0 left-0 right-0 z-30 h-16 bg-panel border-b border-border flex items-center justify-between px-4">
         <button
           type="button"
           data-mobile-menu-btn
-          class="p-2 -ml-2 rounded-md text-text-secondary hover:text-text-primary active:bg-white/[0.08] transition-colors"
+          class="p-2 -ml-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
@@ -86,17 +101,17 @@
         <button
           type="button"
           data-company-switcher-btn
-          class="flex items-center gap-2 px-2 -mx-2 rounded-md text-text-secondary hover:text-text-primary active:bg-white/[0.08] transition-colors"
+          class="flex items-center gap-2 px-2 -mx-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
         >
           <%= if @current_company do %>
             <%= if @current_company.logo_url do %>
               <img
                 src={@current_company.logo_url}
                 alt={@current_company.name}
-                class="w-5 h-5 rounded object-cover border border-border-subtle"
+                class="w-5 h-5 rounded object-cover border border-border"
               />
             <% else %>
-              <div class="w-5 h-5 rounded bg-brand/10 border border-border-subtle flex items-center justify-center">
+              <div class="w-5 h-5 rounded bg-brand/10 flex items-center justify-center">
                 <span class="text-[10px] font-590 text-brand">C</span>
               </div>
             <% end %>
@@ -120,24 +135,36 @@
             />
           </svg>
         </button>
-        <div class="w-9"></div>
+        <!-- Mobile theme toggle -->
+        <button
+          type="button"
+          onclick="window.toggleTheme && window.toggleTheme()"
+          class="p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+        >
+          <svg class="w-5 h-5 dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+          </svg>
+          <svg class="w-5 h-5 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+          </svg>
+        </button>
       </header>
-      
-<!-- Main content -->
-      <main class="flex-1 lg:ml-60 min-h-screen pt-14 lg:pt-0 pb-16 lg:pb-0">
+
+      <!-- Main content -->
+      <main class="flex-1 lg:ml-64 min-h-screen pt-16 lg:pt-0 pb-16 lg:pb-0">
         {@inner_content}
       </main>
     </div>
-    
-<!-- Mobile bottom navigation -->
+
+    <!-- Mobile bottom navigation -->
     <nav
-      class="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-panel border-t border-border-subtle safe-area-bottom"
+      class="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-panel border-t border-border safe-area-bottom"
       id="mobile-nav"
     >
       <div class="flex items-center justify-around h-14">
         <a
           href="/dashboard"
-          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-accent transition-colors min-w-[48px] min-h-[44px] justify-center"
+          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-brand transition-colors min-w-[48px] min-h-[44px] justify-center"
           data-mobile-nav-path="/dashboard"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -152,7 +179,7 @@
         </a>
         <a
           href="/issues"
-          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-accent transition-colors min-w-[48px] min-h-[44px] justify-center"
+          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-brand transition-colors min-w-[48px] min-h-[44px] justify-center"
           data-mobile-nav-path="/issues"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -167,7 +194,7 @@
         </a>
         <a
           href="/kanban"
-          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-accent transition-colors min-w-[48px] min-h-[44px] justify-center"
+          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-brand transition-colors min-w-[48px] min-h-[44px] justify-center"
           data-mobile-nav-path="/kanban"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -182,7 +209,7 @@
         </a>
         <a
           href="/agents"
-          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-accent transition-colors min-w-[48px] min-h-[44px] justify-center"
+          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-brand transition-colors min-w-[48px] min-h-[44px] justify-center"
           data-mobile-nav-path="/agents"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -197,7 +224,7 @@
         </a>
         <a
           href="/projects"
-          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-accent transition-colors min-w-[48px] min-h-[44px] justify-center"
+          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-brand transition-colors min-w-[48px] min-h-[44px] justify-center"
           data-mobile-nav-path="/projects"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -212,14 +239,14 @@
         </a>
       </div>
     </nav>
-    
-<!-- Command palette -->
+
+    <!-- Command palette -->
     <div
       id="command-palette"
-      class="hidden fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-black/50"
+      class="hidden fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-black/30"
     >
-      <div class="bg-panel border border-border rounded-panel shadow-dialog w-full max-w-lg mx-4 overflow-hidden">
-        <div class="flex items-center gap-3 px-4 border-b border-border-subtle">
+      <div class="bg-panel border border-border rounded-2xl shadow-dialog w-full max-w-lg mx-4 overflow-hidden">
+        <div class="flex items-center gap-3 px-4 border-b border-border">
           <svg
             class="w-4 h-4 text-text-quaternary shrink-0"
             fill="none"
@@ -240,9 +267,7 @@
             class="flex-1 bg-transparent text-text-primary text-sm py-3.5 placeholder:text-text-quaternary focus:outline-none"
             autocomplete="off"
           />
-          <kbd class="text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary shrink-0">
-            ESC
-          </kbd>
+          <kbd class="kbd shrink-0">ESC</kbd>
         </div>
         <div id="command-results" class="max-h-72 overflow-y-auto p-2">
           <div class="px-2 py-1.5 text-[10px] font-510 text-text-quaternary uppercase tracking-wider">
@@ -250,7 +275,7 @@
           </div>
           <a
             href="/issues"
-            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer"
+            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors cursor-pointer"
           >
             <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -261,13 +286,11 @@
               />
             </svg>
             <span>Go to Issues</span>
-            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">
-              G I
-            </kbd>
+            <kbd class="kbd ml-auto">G I</kbd>
           </a>
           <a
             href="/projects"
-            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer"
+            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors cursor-pointer"
           >
             <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -278,13 +301,11 @@
               />
             </svg>
             <span>Go to Projects</span>
-            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">
-              G P
-            </kbd>
+            <kbd class="kbd ml-auto">G P</kbd>
           </a>
           <a
             href="/kanban"
-            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer"
+            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors cursor-pointer"
           >
             <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -295,13 +316,11 @@
               />
             </svg>
             <span>Go to Kanban Board</span>
-            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">
-              G K
-            </kbd>
+            <kbd class="kbd ml-auto">G K</kbd>
           </a>
           <a
             href="/agents"
-            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer"
+            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors cursor-pointer"
           >
             <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -312,13 +331,11 @@
               />
             </svg>
             <span>Go to Agents</span>
-            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">
-              G A
-            </kbd>
+            <kbd class="kbd ml-auto">G A</kbd>
           </a>
           <a
             href="/goals"
-            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer"
+            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors cursor-pointer"
           >
             <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -329,13 +346,11 @@
               />
             </svg>
             <span>Go to Goals</span>
-            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">
-              G G
-            </kbd>
+            <kbd class="kbd ml-auto">G G</kbd>
           </a>
           <a
             href="/dashboard"
-            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer"
+            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors cursor-pointer"
           >
             <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -346,16 +361,14 @@
               />
             </svg>
             <span>Go to Dashboard</span>
-            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">
-              G D
-            </kbd>
+            <kbd class="kbd ml-auto">G D</kbd>
           </a>
           <div class="px-2 py-1.5 mt-1 text-[10px] font-510 text-text-quaternary uppercase tracking-wider">
             Actions
           </div>
           <a
             href="/issues/new"
-            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer"
+            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors cursor-pointer"
           >
             <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -366,13 +379,11 @@
               />
             </svg>
             <span>Create New Issue</span>
-            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">
-              C
-            </kbd>
+            <kbd class="kbd ml-auto">C</kbd>
           </a>
           <a
             href="/settings"
-            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-text-secondary hover:bg-white/[0.04] hover:text-text-primary transition-colors cursor-pointer"
+            class="command-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors cursor-pointer"
           >
             <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -388,26 +399,24 @@
               />
             </svg>
             <span>Settings</span>
-            <kbd class="ml-auto text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary">
-              G S
-            </kbd>
+            <kbd class="kbd ml-auto">G S</kbd>
           </a>
         </div>
       </div>
     </div>
-    
-<!-- Keyboard shortcuts cheatsheet -->
+
+    <!-- Keyboard shortcuts cheatsheet -->
     <div
       id="shortcuts-modal"
-      class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
+      class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-black/30"
     >
-      <div class="bg-panel border border-border rounded-panel shadow-dialog w-full max-w-md mx-4 overflow-hidden">
-        <div class="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
-          <h2 class="text-sm font-510 text-text-primary">Keyboard Shortcuts</h2>
+      <div class="bg-panel border border-border rounded-2xl shadow-dialog w-full max-w-md mx-4 overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-border">
+          <h2 class="font-serif text-sm font-serif text-text-primary">Keyboard Shortcuts</h2>
           <button
             type="button"
             data-close-shortcuts-btn
-            class="p-1 rounded-md text-text-quaternary hover:text-text-primary transition-colors"
+            class="p-1 rounded-lg text-text-quaternary hover:text-text-primary transition-colors"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -421,7 +430,7 @@
         </div>
         <div class="p-5 space-y-5 max-h-[60vh] overflow-y-auto">
           <div>
-            <h3 class="text-[10px] font-510 text-text-quaternary uppercase tracking-wider mb-2">
+            <h3 class="font-serif text-[10px] font-510 text-text-quaternary uppercase tracking-wider mb-2">
               General
             </h3>
             <div class="space-y-2">
@@ -430,6 +439,10 @@
                 <div class="flex gap-1">
                   <kbd class="kbd">Cmd</kbd><kbd class="kbd">Shift</kbd><kbd class="kbd">K</kbd>
                 </div>
+              </div>
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Toggle theme</span>
+                <kbd class="kbd">T</kbd>
               </div>
               <div class="flex items-center justify-between text-sm">
                 <span class="text-text-secondary">Show shortcuts</span>
@@ -442,7 +455,7 @@
             </div>
           </div>
           <div>
-            <h3 class="text-[10px] font-510 text-text-quaternary uppercase tracking-wider mb-2">
+            <h3 class="font-serif text-[10px] font-510 text-text-quaternary uppercase tracking-wider mb-2">
               Navigation
             </h3>
             <div class="space-y-2">
@@ -477,7 +490,7 @@
             </div>
           </div>
           <div>
-            <h3 class="text-[10px] font-510 text-text-quaternary uppercase tracking-wider mb-2">
+            <h3 class="font-serif text-[10px] font-510 text-text-quaternary uppercase tracking-wider mb-2">
               Actions
             </h3>
             <div class="space-y-2">
@@ -490,8 +503,8 @@
         </div>
       </div>
     </div>
-    
-<!-- Company switcher -->
+
+    <!-- Company switcher -->
     <.company_switcher_static
       companies={assigns[:user_companies] || []}
       current_company_id={if assigns[:current_company], do: @current_company.id, else: nil}

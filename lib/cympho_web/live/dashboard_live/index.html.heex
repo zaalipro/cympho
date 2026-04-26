@@ -2,31 +2,31 @@
   <.header title={@page_title} />
 
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-    <div class="bg-panel rounded-lg border border-border-subtle p-4">
+    <div class="bg-panel rounded-lg border border-border p-4">
       <p class="text-sm text-text-secondary">Active Agents</p>
-      <p class="text-3xl font-590 text-text-primary mt-1">
+      <p class="text-3xl font-serif font-medium text-text-primary mt-1">
         {@active_agents}<span class="text-base text-text-secondary"> / {@total_agents}</span>
       </p>
     </div>
-    <div class="bg-panel rounded-lg border border-border-subtle p-4">
+    <div class="bg-panel rounded-lg border border-border p-4">
       <p class="text-sm text-text-secondary">Total Issues</p>
-      <p class="text-3xl font-590 text-text-primary mt-1">{total_issues(@issue_status_counts)}</p>
+      <p class="text-3xl font-serif font-medium text-text-primary mt-1">{total_issues(@issue_status_counts)}</p>
     </div>
-    <div class="bg-panel rounded-lg border border-border-subtle p-4">
+    <div class="bg-panel rounded-lg border border-border p-4">
       <p class="text-sm text-text-secondary">Created (7d)</p>
-      <p class="text-3xl font-590 text-text-primary mt-1">
+      <p class="text-3xl font-serif font-medium text-text-primary mt-1">
         {throughput_total(@throughput.created)}
       </p>
     </div>
-    <div class="bg-panel rounded-lg border border-border-subtle p-4">
+    <div class="bg-panel rounded-lg border border-border p-4">
       <p class="text-sm text-text-secondary">Closed (7d)</p>
-      <p class="text-3xl font-590 text-text-primary mt-1">
+      <p class="text-3xl font-serif font-medium text-text-primary mt-1">
         {throughput_total(@throughput.closed)}
       </p>
     </div>
-    <div class="bg-panel rounded-lg border border-border-subtle p-4">
+    <div class="bg-panel rounded-lg border border-border p-4">
       <p class="text-sm text-text-secondary">Total Cost</p>
-      <p class="text-3xl font-590 text-text-primary mt-1">
+      <p class="text-3xl font-serif font-medium text-text-primary mt-1">
         {format_cost(@cost_summary.total_cost)}
       </p>
       <p class="text-xs text-text-quaternary mt-1">
@@ -36,8 +36,8 @@
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <div class="bg-panel rounded-lg border border-border-subtle p-5">
-      <h3 class="text-base font-590 text-text-primary mb-4">Issues by Status</h3>
+    <div class="bg-panel rounded-xl border border-border shadow-ring p-5">
+      <h3 class="font-serif text-base font-serif font-medium text-text-primary mb-4">Issues by Status</h3>
       <div class="space-y-3">
         <div
           :for={%{status: status, count: count} <- @issue_status_counts}
@@ -57,8 +57,8 @@
       </div>
     </div>
 
-    <div class="bg-panel rounded-lg border border-border-subtle p-5">
-      <h3 class="text-base font-590 text-text-primary mb-4">Agents by Status</h3>
+    <div class="bg-panel rounded-xl border border-border shadow-ring p-5">
+      <h3 class="font-serif text-base font-serif font-medium text-text-primary mb-4">Agents by Status</h3>
       <div class="space-y-3">
         <div
           :for={%{status: status, count: count} <- @agent_status_counts}
@@ -79,8 +79,8 @@
     </div>
   </div>
 
-  <div class="bg-panel rounded-lg border border-border-subtle p-5">
-    <h3 class="text-base font-590 text-text-primary mb-4">Issue Throughput (Last 7 Days)</h3>
+  <div class="bg-panel rounded-xl border border-border shadow-ring p-5">
+    <h3 class="font-serif text-base font-serif font-medium text-text-primary mb-4">Issue Throughput (Last 7 Days)</h3>
     <div class="flex items-end gap-1 h-40">
       <div
         :for={%{date: date, count: count} <- @throughput.created}
@@ -88,7 +88,7 @@
       >
         <span class="text-xs text-text-secondary">{count}</span>
         <div
-          class="w-full bg-blue-500/60 rounded-t"
+          class="w-full bg-brand/60 rounded-t"
           style={"height: #{chart_height(count, @throughput.created)}%"}
         >
         </div>
@@ -100,8 +100,8 @@
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <div class="bg-panel rounded-lg border border-border-subtle p-5">
-      <h3 class="text-base font-590 text-text-primary mb-4">Recent Activity</h3>
+    <div class="bg-panel rounded-xl border border-border shadow-ring p-5">
+      <h3 class="font-serif text-base font-serif font-medium text-text-primary mb-4">Recent Activity</h3>
       <div :if={Enum.empty?(@recent_activities)} class="text-sm text-text-secondary">
         No recent activity.
       </div>
@@ -128,8 +128,8 @@
     </div>
 
     <div class="space-y-6">
-      <div class="bg-panel rounded-lg border border-border-subtle p-5">
-        <h3 class="text-base font-590 text-text-primary mb-4">
+      <div class="bg-panel rounded-xl border border-border shadow-ring p-5">
+        <h3 class="font-serif text-base font-serif font-medium text-text-primary mb-4">
           Bottleneck Alerts
           <span
             :if={Enum.any?(@bottlenecks)}
@@ -164,8 +164,8 @@
         </div>
       </div>
 
-      <div class="bg-panel rounded-lg border border-border-subtle p-5">
-        <h3 class="text-base font-590 text-text-primary mb-4">Routine Health</h3>
+      <div class="bg-panel rounded-xl border border-border shadow-ring p-5">
+        <h3 class="font-serif text-base font-serif font-medium text-text-primary mb-4">Routine Health</h3>
         <div class="flex items-center gap-3">
           <span class="w-3 h-3 rounded-full bg-yellow-400 flex-shrink-0"></span>
           <span class="text-sm text-text-secondary">{@routine_health.message}</span>

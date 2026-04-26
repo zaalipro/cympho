@@ -14,7 +14,7 @@ defmodule CymphoWeb.Components.InteractionCard do
     ~H"""
     <div
       id={"interaction-#{@interaction.id}"}
-      class="bg-surface border border-border rounded-lg p-4 space-y-3"
+      class="bg-surface border border-border rounded-xl p-4 space-y-3"
     >
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
@@ -59,7 +59,7 @@ defmodule CymphoWeb.Components.InteractionCard do
       </p>
       <div
         :for={{task, idx} <- Enum.with_index(@tasks)}
-        class="flex items-start gap-2 p-2 bg-white/[0.03] rounded-md"
+        class="flex items-start gap-2 p-2 bg-subtle rounded-lg"
       >
         <span class="text-xs text-text-quaternary mt-0.5">{idx + 1}.</span>
         <div class="flex-1">
@@ -99,7 +99,7 @@ defmodule CymphoWeb.Components.InteractionCard do
           Answer: {Map.get(q, "answer")}
         </div>
       </div>
-      <div :if={Map.get(@interaction.payload, "response")} class="mt-2 p-2 bg-white/[0.03] rounded-md">
+      <div :if={Map.get(@interaction.payload, "response")} class="mt-2 p-2 bg-subtle rounded-lg">
         <p class="text-sm text-text-secondary">{Map.get(@interaction.payload, "response")}</p>
       </div>
     </div>
@@ -119,7 +119,7 @@ defmodule CymphoWeb.Components.InteractionCard do
       <p class="text-sm text-text-secondary">{@message}</p>
       <div
         :if={Map.get(@interaction.payload, "details")}
-        class="text-xs text-text-tertiary p-2 bg-white/[0.03] rounded-md"
+        class="text-xs text-text-tertiary p-2 bg-subtle rounded-lg"
       >
         {Map.get(@interaction.payload, "details")}
       </div>

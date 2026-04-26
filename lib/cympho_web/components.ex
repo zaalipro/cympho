@@ -10,7 +10,7 @@ defmodule CymphoWeb.Components do
   def header(assigns) do
     ~H"""
     <header {@rest}>
-      <h1 :if={@title}>{@title}</h1>
+      <h1 :if={@title} class="font-serif text-2xl font-medium text-text-primary">{@title}</h1>
       <p :if={@subtitle} class="text-text-secondary text-sm mt-1">{@subtitle}</p>
       <div class="header-actions">
         {render_slot(@inner_block)}
@@ -73,12 +73,13 @@ defmodule CymphoWeb.Components do
 
   def input(assigns) do
     ~H"""
-    <div class="form-group">
-      <label>{@label}</label>
+    <div class="space-y-1.5">
+      <label :if={@label} class="block text-xs font-510 text-text-secondary">{@label}</label>
       <textarea
         :if={@type == "textarea"}
         name={input_name(@field)}
         rows={@rows}
+        class="w-full bg-surface border border-border rounded-lg px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors"
         {@rest}
       ><%= input_value(@field) %></textarea>
       <input
@@ -87,6 +88,7 @@ defmodule CymphoWeb.Components do
         name={input_name(@field)}
         value={input_value(@field)}
         required={@required}
+        class="w-full bg-surface border border-border rounded-lg px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors"
         {@rest}
       />
     </div>
@@ -101,7 +103,15 @@ defmodule CymphoWeb.Components do
 
   def button(assigns) do
     ~H"""
-    <button type={@type} {@rest}>
+    <button
+      type={@type}
+      class={[
+        "inline-flex items-center justify-center gap-2 font-medium transition-colors rounded-lg",
+        button_variant(@variant),
+        button_size(@size)
+      ]}
+      {@rest}
+    >
       {render_slot(@inner_block)}
     </button>
     """
@@ -120,7 +130,7 @@ defmodule CymphoWeb.Components do
       <label class="block text-xs font-510 text-text-secondary">{@label}</label>
       <select
         name={@name}
-        class="w-full bg-white/[0.05] border border-border rounded-md px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
+        class="w-full bg-surface border border-border rounded-lg px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors appearance-none"
         {@rest}
       >
         <option
@@ -136,14 +146,23 @@ defmodule CymphoWeb.Components do
   end
 
   defp input_name(field), do: field.name
-
   defp input_value(field), do: field.value
+
+  defp button_variant("primary"), do: "bg-brand text-white hover:bg-accent"
+  defp button_variant("secondary"), do: "bg-button text-text-primary border border-border hover:bg-button-hover"
+  defp button_variant("ghost"), do: "text-text-secondary hover:bg-surface-hover"
+  defp button_variant("danger"), do: "bg-error text-white hover:bg-red-600"
+  defp button_variant(_), do: "bg-button text-text-primary border border-border hover:bg-button-hover"
+
+  defp button_size("sm"), do: "px-3 py-1.5 text-xs"
+  defp button_size("lg"), do: "px-6 py-3 text-base"
+  defp button_size(_), do: "px-4 py-2 text-sm"
 
   attr :field, :any, required: true
 
   def error(assigns) do
     ~H"""
-    <div :for={error <- List.wrap(@field.errors)} class="text-xs text-red-400 mt-1">
+    <div :for={error <- List.wrap(@field.errors)} class="text-xs text-error mt-1">
       {error}
     </div>
     """

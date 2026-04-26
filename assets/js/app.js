@@ -2,6 +2,21 @@ import "phoenix_html"
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 
+// Theme management
+function initTheme() {
+  const stored = localStorage.getItem('cympho-theme');
+  if (stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    document.documentElement.classList.add('dark');
+  } else {
+    document.documentElement.classList.remove('dark');
+  }
+}
+
+window.toggleTheme = function() {
+  const isDark = document.documentElement.classList.toggle('dark');
+  localStorage.setItem('cympho-theme', isDark ? 'dark' : 'light');
+};
+
 // Timeline scroll hook for chat-style auto-scroll
 const TimelineScroll = {
   mounted() {
@@ -310,11 +325,11 @@ function initCompanySwitcher() {
       const isCurrent = company.id === currentCompanyId;
 
       const item = document.createElement('div');
-      item.className = `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm cursor-pointer transition-colors ${isCurrent ? 'bg-white/[0.06] text-text-primary' : 'text-text-secondary hover:bg-white/[0.04] hover:text-text-primary'}`;
+      item.className = `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer transition-colors ${isCurrent ? 'bg-surface-hover text-text-primary' : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'}`;
       item.dataset.companyId = company.id;
 
       const logoDiv = document.createElement('div');
-      logoDiv.className = 'w-8 h-8 rounded-lg overflow-hidden border-l-2 border-brand flex items-center justify-center shrink-0 bg-brand/10';
+      logoDiv.className = 'w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center shrink-0 bg-brand/10';
 
       if (company.logo_url) {
         const img = document.createElement('img');
@@ -420,6 +435,7 @@ window.liveSocket = liveSocket;
 
 // Initialize after DOM ready
 document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
   highlightActiveNav();
   initCommandPalette();
   initCompanySwitcher();
@@ -427,8 +443,12 @@ document.addEventListener('DOMContentLoaded', () => {
   initShortcutsModal();
 
   // Re-highlight on LiveView navigation
-  liveSocket.addEventListener('phx:navigate', highlightActiveNav);
+  liveSocket.addEventListener('phx:navigate', () => {
+    initTheme();
+    highlightActiveNav();
+  });
   liveSocket.addEventListener('phx:page-loading-stop', () => {
+    initTheme();
     highlightActiveNav();
     initCompanySwitcher();
   });

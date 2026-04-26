@@ -187,8 +187,8 @@ defmodule CymphoWeb.ActivityLive.Index do
     <%= case @action do %>
       <% "title_changed" -> %>
         Changed title from
-        <code class="text-xs bg-white/[0.05] px-1 rounded">{@metadata["from"]}</code>
-        to <code class="text-xs bg-white/[0.05] px-1 rounded">{@metadata["to"]}</code>
+        <code class="text-xs bg-surface px-1 rounded">{@metadata["from"]}</code>
+        to <code class="text-xs bg-surface px-1 rounded">{@metadata["to"]}</code>
       <% "description_changed" -> %>
         Updated description
       <% "status_changed" -> %>

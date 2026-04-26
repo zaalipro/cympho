@@ -17,7 +17,7 @@
     <:actions>
       <.app_link
         navigate={~p"/agents"}
-        class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors"
+        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
       >
         Cancel
       </.app_link>
@@ -42,7 +42,7 @@
           min="1"
           max="10"
           value={@form[:max_concurrent_jobs].value || 3}
-          class="w-full h-2 bg-white/[0.05] rounded-lg appearance-none cursor-pointer accent-brand"
+          class="w-full h-2 bg-surface rounded-lg appearance-none cursor-pointer accent-brand"
         />
         <span class="text-sm text-brand font-510 w-8 text-center">
           {@form[:max_concurrent_jobs].value || 3}

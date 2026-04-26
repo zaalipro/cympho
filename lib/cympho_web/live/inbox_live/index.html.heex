@@ -10,7 +10,7 @@
       <form phx-change="select_agent">
         <select
           name="agent_id"
-          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+          class="bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-1.5"
         >
           <option value="">Select Agent</option>
           <%= for agent <- @agents do %>
@@ -24,7 +24,7 @@
       <form phx-change="filter_status">
         <select
           name="status"
-          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+          class="bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-1.5"
         >
           <option value="">All Statuses</option>
           <option value="unread" selected={@current_status == "unread"}>Unread</option>
@@ -50,7 +50,7 @@
     :if={@selected_agent_id == "" || is_nil(@selected_agent_id)}
     class="flex flex-col items-center justify-center py-20 text-center"
   >
-    <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
+    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
       <svg
         class="w-6 h-6 text-text-tertiary"
         fill="none"
@@ -71,7 +71,7 @@
   <div :if={@selected_agent_id != "" && @selected_agent_id != nil} class="space-y-2">
     <div
       :for={item <- @inbox_items}
-      class="group flex items-center gap-4 p-3 rounded-md hover:bg-white/[0.04] transition-colors border border-transparent hover:border-border-subtle"
+      class="group flex items-center gap-4 p-3 rounded-lg hover:bg-surface-hover transition-colors border border-transparent hover:border-border"
     >
       <div class="w-2 h-2 rounded-full shrink-0">
         <span class={["inline-block w-2 h-2 rounded-full", unread_dot(item.status)]}></span>
@@ -107,7 +107,7 @@
           type="button"
           phx-click="mark_read"
           phx-value-issue_id={item.issue_id}
-          class="p-1.5 rounded-md text-text-quaternary hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+          class="p-1.5 rounded-lg text-text-quaternary hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
           title="Mark as read"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -124,7 +124,7 @@
           type="button"
           phx-click="dismiss"
           phx-value-issue_id={item.issue_id}
-          class="p-1.5 rounded-md text-text-quaternary hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
+          class="p-1.5 rounded-lg text-text-quaternary hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
           title="Dismiss"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -141,7 +141,7 @@
           type="button"
           phx-click="archive"
           phx-value-issue_id={item.issue_id}
-          class="p-1.5 rounded-md text-text-quaternary hover:text-red-400 hover:bg-red-500/10 transition-colors"
+          class="p-1.5 rounded-lg text-text-quaternary hover:text-red-400 hover:bg-red-500/10 transition-colors"
           title="Archive"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -158,7 +158,7 @@
           type="button"
           phx-click="restore"
           phx-value-issue_id={item.issue_id}
-          class="p-1.5 rounded-md text-text-quaternary hover:text-green-400 hover:bg-green-500/10 transition-colors"
+          class="p-1.5 rounded-lg text-text-quaternary hover:text-green-400 hover:bg-green-500/10 transition-colors"
           title="Restore to unread"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -178,7 +178,7 @@
     :if={@selected_agent_id != "" && @selected_agent_id != nil && Enum.empty?(@inbox_items)}
     class="flex flex-col items-center justify-center py-20 text-center"
   >
-    <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
+    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
       <svg
         class="w-6 h-6 text-text-tertiary"
         fill="none"

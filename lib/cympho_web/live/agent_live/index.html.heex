@@ -3,7 +3,7 @@
     <:actions>
       <.app_link
         navigate={~p"/org-chart"}
-        class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-md transition-colors inline-flex items-center gap-2 mr-2"
+        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center gap-2 mr-2"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -24,7 +24,7 @@
       <% else %>
         <.app_link
           navigate={~p"/agents/new"}
-          class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 min-h-[44px] rounded-md transition-colors inline-flex items-center gap-2"
+          class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center gap-2"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
@@ -42,21 +42,21 @@
 
   <div
     :if={@flash && @flash[:info]}
-    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-md"
+    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-lg"
   >
     {@flash[:info]}
   </div>
 
   <div
     :if={@flash && @flash[:error]}
-    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-md"
+    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
   >
     {@flash[:error]}
   </div>
   
 <!-- Status Dashboard -->
-  <div class="mb-6 bg-surface border border-border rounded-card p-4">
-    <h2 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-4">
+  <div class="mb-6 bg-surface border border-border rounded-xl p-4">
+    <h2 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-4">
       Agent Status Overview
     </h2>
     <div class="grid grid-cols-5 gap-4">
@@ -86,13 +86,13 @@
 <!-- Running Agents Session Progress -->
   <div
     :if={(@status_counts[:running] || 0) > 0}
-    class="mb-6 bg-brand/5 border border-brand/20 rounded-card p-4"
+    class="mb-6 bg-brand/5 border border-brand/20 rounded-xl p-4"
   >
-    <h2 class="text-xs font-510 text-brand uppercase tracking-wider mb-4">Active Sessions</h2>
+    <h2 class="font-serif text-xs font-510 text-brand uppercase tracking-wider mb-4">Active Sessions</h2>
     <div class="space-y-3">
       <%= for agent <- Enum.filter(@agents, fn a -> a.status == :running end) do %>
         <% progress = @session_progress[agent.id] %>
-        <div class="flex items-center justify-between bg-white/[0.02] border border-border rounded-md p-3">
+        <div class="flex items-center justify-between bg-subtle border border-border rounded-lg p-3">
           <div class="flex-1">
             <div class="flex items-center gap-2">
               <span class="text-sm font-510 text-text-primary">{agent.name}</span>
@@ -118,7 +118,7 @@
           </div>
           <button
             type="button"
-            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
+            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
             phx-click="kill_session"
             phx-value-id={agent.id}
             data-confirm="Stop this agent's session?"
@@ -134,7 +134,7 @@
     <.card :for={agent <- @agents} id={"agent-#{agent.id}"}>
       <div class="p-5 space-y-3">
         <div class="flex items-center justify-between">
-          <h3 class="text-sm font-510 text-text-primary truncate">{agent.name}</h3>
+          <h3 class="font-serif text-sm font-510 text-text-primary truncate">{agent.name}</h3>
           <.badge variant="agent" value={to_string(agent.status)} />
         </div>
         <p class="text-xs text-text-tertiary">
@@ -146,14 +146,14 @@
         <div class="flex flex-wrap items-center gap-2 pt-2">
           <.app_link
             navigate={~p"/agents/#{agent.id}"}
-            class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors inline-flex items-center justify-center"
+            class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center justify-center"
           >
             View
           </.app_link>
           <%= if agent.status == :running do %>
             <button
               type="button"
-              class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
+              class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
               phx-click="kill_session"
               phx-value-id={agent.id}
               data-confirm="Stop this agent's session?"
@@ -164,7 +164,7 @@
           <%= if agent.status == :idle do %>
             <button
               type="button"
-              class="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
+              class="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
               phx-click="pause_agent"
               phx-value-id={agent.id}
             >
@@ -174,7 +174,7 @@
           <%= if agent.status == :sleeping do %>
             <button
               type="button"
-              class="bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
+              class="bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
               phx-click="resume_agent"
               phx-value-id={agent.id}
             >
@@ -183,7 +183,7 @@
           <% end %>
           <button
             type="button"
-            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
+            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
             phx-click="terminate_agent"
             phx-value-id={agent.id}
             data-confirm="Terminate this agent? This will stop any running sessions and mark the agent as offline."
@@ -192,7 +192,7 @@
           </button>
           <button
             type="button"
-            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
+            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
             phx-click="delete_agent"
             phx-value-id={agent.id}
             data-confirm="Delete this agent?"
@@ -208,7 +208,7 @@
     :if={Enum.empty?(@agents)}
     class="flex flex-col items-center justify-center py-20 text-center"
   >
-    <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
+    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
       <svg
         class="w-6 h-6 text-text-tertiary"
         fill="none"
@@ -226,7 +226,7 @@
     <p class="text-sm text-text-tertiary mb-4">No agents yet.</p>
     <.app_link
       navigate={~p"/agents/new"}
-      class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors"
+      class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
     >
       Create your first agent
     </.app_link>

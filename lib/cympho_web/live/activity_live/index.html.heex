@@ -11,7 +11,7 @@
       <form phx-change="filter" phx-submit="prevent">
         <select
           name="filter_action"
-          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+          class="bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-1.5"
         >
           <option value="">All Actions</option>
           <option value="created" selected={@filter_action == "created"}>Created</option>
@@ -56,7 +56,7 @@
       <form phx-change="filter" phx-submit="prevent">
         <select
           name="filter_actor_type"
-          class="bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-1.5"
+          class="bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-1.5"
         >
           <option value="">All Actors</option>
           <option value="agent" selected={@filter_actor_type == "agent"}>Agents</option>
@@ -78,7 +78,7 @@
   
 <!-- Activities List -->
   <div :if={@activities == []} class="flex flex-col items-center justify-center py-20 text-center">
-    <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
+    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
       <svg
         class="w-6 h-6 text-text-tertiary"
         fill="none"
@@ -99,10 +99,10 @@
   <div :if={@activities != []} class="space-y-2">
     <div
       :for={activity <- @activities}
-      class="group flex items-start gap-4 p-3 rounded-md hover:bg-white/[0.04] transition-colors border border-transparent hover:border-border-subtle"
+      class="group flex items-start gap-4 p-3 rounded-lg hover:bg-surface-hover transition-colors border border-transparent hover:border-border"
     >
       <!-- Icon -->
-      <div class="w-8 h-8 rounded-full bg-white/[0.05] flex items-center justify-center shrink-0">
+      <div class="w-8 h-8 rounded-full bg-surface flex items-center justify-center shrink-0">
         <span class="text-lg">{activity_icon(activity.action)}</span>
       </div>
       
@@ -163,7 +163,7 @@
         type="button"
         phx-click="load_prev"
         disabled={!has_prev_pages?(@pagination)}
-        class="px-3 py-1.5 text-xs rounded-md bg-white/[0.05] text-text-secondary disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white/[0.1] transition-colors"
+        class="px-3 py-1.5 text-xs rounded-lg bg-surface text-text-secondary disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-hover transition-colors"
       >
         Previous
       </button>
@@ -176,7 +176,7 @@
         type="button"
         phx-click="load_more"
         disabled={!has_more_pages?(@pagination)}
-        class="px-3 py-1.5 text-xs rounded-md bg-white/[0.05] text-text-secondary disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white/[0.1] transition-colors"
+        class="px-3 py-1.5 text-xs rounded-lg bg-surface text-text-secondary disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-hover transition-colors"
       >
         Next
       </button>

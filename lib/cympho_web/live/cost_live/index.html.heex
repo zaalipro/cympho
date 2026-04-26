@@ -22,9 +22,9 @@
 <!-- Budget Alerts -->
   <div
     :if={not Enum.empty?(@exceeded_budgets)}
-    class="mb-6 bg-red-500/10 border border-red-500/20 rounded-card p-4"
+    class="mb-6 bg-red-500/10 border border-red-500/20 rounded-xl p-4"
   >
-    <h3 class="text-sm font-510 text-red-400 mb-2">
+    <h3 class="font-serif text-sm font-510 text-red-400 mb-2">
       <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
           stroke-linecap="round"
@@ -47,9 +47,9 @@
 
   <div
     :if={not Enum.empty?(@approaching_budgets)}
-    class="mb-6 bg-amber-500/10 border border-amber-500/20 rounded-card p-4"
+    class="mb-6 bg-amber-500/10 border border-amber-500/20 rounded-xl p-4"
   >
-    <h3 class="text-sm font-510 text-amber-400 mb-2">
+    <h3 class="font-serif text-sm font-510 text-amber-400 mb-2">
       <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
           stroke-linecap="round"
@@ -72,7 +72,7 @@
   
 <!-- Summary Cards -->
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-    <div class="bg-surface border border-border rounded-card p-5">
+    <div class="bg-surface border border-border rounded-xl p-5">
       <div class="flex items-center justify-between mb-2">
         <span class="text-text-secondary text-xs uppercase tracking-wider">Total Cost</span>
         <svg class="w-5 h-5 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -88,7 +88,7 @@
       <div class="text-xs text-text-quaternary mt-1">Last {@days} days</div>
     </div>
 
-    <div class="bg-surface border border-border rounded-card p-5">
+    <div class="bg-surface border border-border rounded-xl p-5">
       <div class="flex items-center justify-between mb-2">
         <span class="text-text-secondary text-xs uppercase tracking-wider">Total Tokens</span>
         <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -106,7 +106,7 @@
       <div class="text-xs text-text-quaternary mt-1">Last {@days} days</div>
     </div>
 
-    <div class="bg-surface border border-border rounded-card p-5">
+    <div class="bg-surface border border-border rounded-xl p-5">
       <div class="flex items-center justify-between mb-2">
         <span class="text-text-secondary text-xs uppercase tracking-wider">Budget Limit</span>
         <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -122,7 +122,7 @@
       <div class="text-xs text-text-quaternary mt-1">Active budgets</div>
     </div>
 
-    <div class="bg-surface border border-border rounded-card p-5">
+    <div class="bg-surface border border-border rounded-xl p-5">
       <div class="flex items-center justify-between mb-2">
         <span class="text-text-secondary text-xs uppercase tracking-wider">Budget Spent</span>
         <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -149,8 +149,8 @@
   </div>
   
 <!-- Daily Cost Chart -->
-  <div class="bg-surface border border-border rounded-card p-6 mb-6">
-    <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+  <div class="bg-surface border border-border rounded-xl p-6 mb-6">
+    <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
       Daily Cost Trend
     </h2>
     <div class="h-40 flex items-end gap-1">
@@ -173,8 +173,8 @@
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
     <!-- Costs by Agent -->
-    <div class="bg-surface border border-border rounded-card p-6">
-      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+    <div class="bg-surface border border-border rounded-xl p-6">
+      <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
         Top Agents by Cost
       </h2>
       <div class="space-y-3">
@@ -211,8 +211,8 @@
     </div>
     
 <!-- Costs by Issue -->
-    <div class="bg-surface border border-border rounded-card p-6">
-      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+    <div class="bg-surface border border-border rounded-xl p-6">
+      <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
         Top Issues by Cost
       </h2>
       <div class="space-y-3">
@@ -251,8 +251,8 @@
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
     <!-- Costs by Model -->
-    <div class="bg-surface border border-border rounded-card p-6">
-      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+    <div class="bg-surface border border-border rounded-xl p-6">
+      <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
         Cost by Model
       </h2>
       <div class="space-y-3">
@@ -288,8 +288,8 @@
     </div>
     
 <!-- Costs by Provider -->
-    <div class="bg-surface border border-border rounded-card p-6">
-      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+    <div class="bg-surface border border-border rounded-xl p-6">
+      <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
         Cost by Provider
       </h2>
       <div class="space-y-3">
@@ -324,9 +324,9 @@
   </div>
   
 <!-- Active Budgets -->
-  <div class="bg-surface border border-border rounded-card p-6">
+  <div class="bg-surface border border-border rounded-xl p-6">
     <div class="flex items-center justify-between mb-4">
-      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider">
+      <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider">
         Active Budgets
       </h2>
       <.app_link

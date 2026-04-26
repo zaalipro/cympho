@@ -20,10 +20,10 @@ defmodule CymphoWeb.Components.CompanySwitcher do
         aria-modal="true"
         aria-labelledby="company-switcher-title"
       >
-        <div class="bg-panel border border-border rounded-panel shadow-dialog w-full max-w-lg mx-4 overflow-hidden">
+        <div class="bg-panel border border-border rounded-2xl shadow-dialog w-full max-w-lg mx-4 overflow-hidden">
           <div
             id="company-switcher-title"
-            class="flex items-center gap-3 px-4 border-b border-border-subtle"
+            class="flex items-center gap-3 px-4 border-b border-border"
           >
             <svg
               class="w-4 h-4 text-text-quaternary shrink-0"
@@ -49,7 +49,7 @@ defmodule CymphoWeb.Components.CompanySwitcher do
               value={@search_query}
               name="query"
             />
-            <kbd class="text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary shrink-0">
+            <kbd class="text-[10px] px-1.5 py-0.5 bg-surface border border-border rounded text-text-quaternary shrink-0">
               ESC
             </kbd>
           </div>
@@ -116,9 +116,9 @@ defmodule CymphoWeb.Components.CompanySwitcher do
     ~H"""
     <div
       class={[
-        "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm cursor-pointer transition-colors",
-        @is_current && "bg-white/[0.06] text-text-primary",
-        !@is_current && "text-text-secondary hover:bg-white/[0.04] hover:text-text-primary"
+        "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer transition-colors",
+        @is_current && "bg-surface-hover text-text-primary",
+        !@is_current && "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
       ]}
       phx-click={Phoenix.LiveView.JS.push("switch_company", value: %{id: @company.id})}
     >

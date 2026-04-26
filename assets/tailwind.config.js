@@ -1,9 +1,7 @@
-// See the Tailwind configuration guide for advanced usage
-// https://tailwindcss.com/docs/configuration
-
 const plugin = require("tailwindcss/plugin")
 
 module.exports = {
+  darkMode: 'class',
   content: [
     "./js/**/*.js",
     "../lib/cympho_web.ex",
@@ -12,26 +10,27 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        canvas: "#08090a",
-        panel: "#0f1011",
-        surface: "#191a1b",
-        "surface-hover": "#28282c",
-        "text-primary": "#f7f8f8",
-        "text-secondary": "#d0d6e0",
-        "text-tertiary": "#8a8f98",
-        "text-quaternary": "#62666d",
-        brand: "#5e6ad2",
-        accent: "#7170ff",
-        "accent-hover": "#828fff",
-        border: "rgba(255,255,255,0.08)",
-        "border-subtle": "rgba(255,255,255,0.05)",
-        success: "#27a644",
-        emerald: "#10b981",
-        line: "#141516",
-        "line-tertiary": "#18191a",
+        canvas: "var(--color-canvas)",
+        panel: "var(--color-panel)",
+        surface: "var(--color-surface)",
+        "surface-hover": "var(--color-surface-hover)",
+        subtle: "var(--color-subtle)",
+        "text-primary": "var(--color-text-primary)",
+        "text-secondary": "var(--color-text-secondary)",
+        "text-tertiary": "var(--color-text-tertiary)",
+        "text-quaternary": "var(--color-text-quaternary)",
+        brand: "var(--color-brand)",
+        accent: "var(--color-accent)",
+        "accent-hover": "var(--color-accent-hover)",
+        border: "var(--color-border)",
+        "border-subtle": "var(--color-border-subtle)",
+        success: "var(--color-success)",
+        error: "var(--color-error)",
+        button: "var(--color-button-bg)",
+        "button-hover": "var(--color-button-hover)",
       },
       fontFamily: {
-        inter: [
+        sans: [
           "Inter",
           "Inter Variable",
           "SF Pro Display",
@@ -46,6 +45,13 @@ module.exports = {
           "Helvetica Neue",
           "sans-serif",
         ],
+        serif: [
+          "Georgia",
+          "Cambria",
+          "Times New Roman",
+          "Times",
+          "serif",
+        ],
         mono: [
           "Berkeley Mono",
           "ui-monospace",
@@ -59,18 +65,19 @@ module.exports = {
         590: "590",
       },
       borderRadius: {
-        card: "8px",
-        panel: "12px",
-        large: "22px",
+        card: "12px",
+        panel: "16px",
+        large: "24px",
+        xl: "32px",
       },
       boxShadow: {
-        subtle: "rgba(0,0,0,0.03) 0px 1.2px 0px",
-        ring: "rgba(0,0,0,0.2) 0px 0px 0px 1px",
-        elevated: "rgba(0,0,0,0.4) 0px 2px 4px",
-        dialog:
-          "rgba(0,0,0,0) 0px 8px 2px, rgba(0,0,0,0.01) 0px 5px 2px, rgba(0,0,0,0.04) 0px 3px 2px, rgba(0,0,0,0.07) 0px 1px 1px, rgba(0,0,0,0.08) 0px 0px 1px",
-        focus: "rgba(0,0,0,0.1) 0px 4px 12px",
-        inset: "rgba(0,0,0,0.2) 0px 0px 12px 0px inset",
+        ring: "0px 0px 0px 1px var(--color-border)",
+        "ring-hover": "0px 0px 0px 1px var(--color-border-hover)",
+        elevated: "0px 0px 0px 1px var(--color-border), 0px 4px 24px rgba(0,0,0,0.05)",
+        focus: "0px 0px 0px 2px var(--color-brand)",
+        dialog: "0px 0px 0px 1px var(--color-border), 0px 8px 32px rgba(0,0,0,0.08)",
+        subtle: "0px 2px 8px rgba(0,0,0,0.04)",
+        inset: "inset 0px 0px 0px 1px rgba(0,0,0,0.06)",
       },
       letterSpacing: {
         display: "-1.056px",
@@ -81,7 +88,7 @@ module.exports = {
         small: "-0.165px",
       },
       lineHeight: {
-        display: "1.00",
+        display: "1.10",
         relaxed: "1.60",
       },
     },

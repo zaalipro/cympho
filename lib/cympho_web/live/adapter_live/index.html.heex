@@ -4,7 +4,7 @@
       <button
         type="button"
         phx-click="refresh_health"
-        class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-md transition-colors inline-flex items-center gap-2"
+        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center gap-2"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -21,21 +21,21 @@
 
   <div
     :if={@flash && @flash[:info]}
-    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-md"
+    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-lg"
   >
     {@flash[:info]}
   </div>
 
   <div
     :if={@flash && @flash[:error]}
-    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-md"
+    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
   >
     {@flash[:error]}
   </div>
   
 <!-- Status Overview -->
-  <div class="mb-6 bg-surface border border-border rounded-card p-4">
-    <h2 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-4">
+  <div class="mb-6 bg-surface border border-border rounded-xl p-4">
+    <h2 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-4">
       Adapter Status Overview
     </h2>
     <div class="grid grid-cols-3 gap-4">
@@ -67,7 +67,7 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span class="text-lg">{adapter_icon(adapter.key)}</span>
-            <h3 class="text-sm font-510 text-text-primary">{adapter.name}</h3>
+            <h3 class="font-serif text-sm font-510 text-text-primary">{adapter.name}</h3>
           </div>
           <%= with health <- Map.get(@health, adapter.key, %{status: :unknown}) do %>
             <span class={[
@@ -109,7 +109,7 @@
         <div class="flex flex-wrap items-center gap-2 pt-2">
           <.app_link
             navigate={~p"/adapters/#{adapter.key}"}
-            class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors inline-flex items-center justify-center"
+            class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center justify-center"
           >
             Configure
           </.app_link>
@@ -117,7 +117,7 @@
             type="button"
             phx-click="test_adapter"
             phx-value-key={adapter.key}
-            class="bg-brand/10 hover:bg-brand/20 text-brand border border-brand/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
+            class="bg-brand/10 hover:bg-brand/20 text-brand border border-brand/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
           >
             Test Health
           </button>
@@ -130,7 +130,7 @@
     :if={Enum.empty?(@adapters)}
     class="flex flex-col items-center justify-center py-20 text-center"
   >
-    <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
+    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
       <svg
         class="w-6 h-6 text-text-tertiary"
         fill="none"

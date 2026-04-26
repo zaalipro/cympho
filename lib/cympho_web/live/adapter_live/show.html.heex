@@ -19,14 +19,14 @@
 
   <div
     :if={@flash && @flash[:info]}
-    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-md"
+    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-lg"
   >
     {@flash[:info]}
   </div>
 
   <div
     :if={@flash && @flash[:error]}
-    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-md"
+    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
   >
     {@flash[:error]}
   </div>
@@ -35,21 +35,21 @@
     <!-- Left column: Health & Details -->
     <div class="space-y-6">
       <!-- Health Panel -->
-      <div class="bg-surface border border-border rounded-card p-5 space-y-4">
+      <div class="bg-surface border border-border rounded-xl p-5 space-y-4">
         <div class="flex items-center justify-between">
-          <h2 class="text-sm font-510 text-text-primary">Health Status</h2>
+          <h2 class="font-serif text-sm font-510 text-text-primary">Health Status</h2>
           <div class="flex items-center gap-2">
             <button
               type="button"
               phx-click="test_health"
-              class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+              class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
             >
               Refresh
             </button>
             <button
               type="button"
               phx-click="send_test_heartbeat"
-              class="bg-brand/10 hover:bg-brand/20 text-brand border border-brand/20 font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+              class="bg-brand/10 hover:bg-brand/20 text-brand border border-brand/20 font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
             >
               Test Heartbeat
             </button>
@@ -77,8 +77,8 @@
       </div>
       
 <!-- Adapter Details -->
-      <div class="bg-surface border border-border rounded-card p-5 space-y-4">
-        <h2 class="text-sm font-510 text-text-primary">Details</h2>
+      <div class="bg-surface border border-border rounded-xl p-5 space-y-4">
+        <h2 class="font-serif text-sm font-510 text-text-primary">Details</h2>
         <div class="space-y-3">
           <div class="flex items-center justify-between text-xs">
             <span class="text-text-tertiary">Key</span>
@@ -101,15 +101,15 @@
 <!-- Center + Right columns: Config & Agents -->
     <div class="lg:col-span-2 space-y-6">
       <!-- Configuration -->
-      <div class="bg-surface border border-border rounded-card p-5 space-y-4">
+      <div class="bg-surface border border-border rounded-xl p-5 space-y-4">
         <div class="flex items-center justify-between">
-          <h2 class="text-sm font-510 text-text-primary">Configuration</h2>
+          <h2 class="font-serif text-sm font-510 text-text-primary">Configuration</h2>
           <span class="text-xs text-text-tertiary">{length(@config_schema)} fields</span>
         </div>
 
         <div
           :if={@validation_error}
-          class="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-3 py-2 rounded-md"
+          class="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-3 py-2 rounded-lg"
         >
           {@validation_error}
         </div>
@@ -128,7 +128,7 @@
                 name={"config[#{field.key}]"}
                 value={Map.get(@config, field.key) || ""}
                 placeholder={if field.default, do: inspect(field.default), else: ""}
-                class="flex-1 bg-white/[0.04] border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder-text-quaternary focus:outline-none focus:border-brand transition-colors"
+                class="flex-1 bg-surface-hover border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-quaternary focus:outline-none focus:border-brand transition-colors"
               />
               <span class="text-[10px] text-text-quaternary">
                 {schema_type_label(field.type)}
@@ -139,7 +139,7 @@
           <div class="pt-2 border-t border-border">
             <button
               type="submit"
-              class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 min-h-[44px] rounded-md transition-colors"
+              class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 min-h-[44px] rounded-lg transition-colors"
             >
               Save Configuration
             </button>
@@ -148,9 +148,9 @@
       </div>
       
 <!-- Assigned Agents -->
-      <div class="bg-surface border border-border rounded-card p-5 space-y-4">
+      <div class="bg-surface border border-border rounded-xl p-5 space-y-4">
         <div class="flex items-center justify-between">
-          <h2 class="text-sm font-510 text-text-primary">Assigned Agents</h2>
+          <h2 class="font-serif text-sm font-510 text-text-primary">Assigned Agents</h2>
           <span class="text-xs text-text-tertiary">{length(@agents)} agent(s)</span>
         </div>
 
@@ -161,7 +161,7 @@
         <div :if={not Enum.empty?(@agents)} class="space-y-2">
           <div
             :for={agent <- @agents}
-            class="flex items-center justify-between bg-white/[0.02] border border-border rounded-md p-3"
+            class="flex items-center justify-between bg-subtle border border-border rounded-lg p-3"
           >
             <div class="flex items-center gap-3">
               <div class="flex-1">
@@ -179,7 +179,7 @@
             </div>
             <.app_link
               navigate={~p"/agents/#{agent.id}"}
-              class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-md transition-colors"
+              class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
             >
               View
             </.app_link>

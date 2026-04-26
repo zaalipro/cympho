@@ -6,10 +6,10 @@ defmodule CymphoWeb.Components.CompanyRail do
 
   def company_rail(assigns) do
     ~H"""
-    <div class="h-14 flex items-center justify-between px-4 border-b border-border-subtle" {@rest}>
+    <div class="h-16 flex items-center justify-between px-4 border-b border-border" {@rest}>
       <button
         type="button"
-        class="flex items-center gap-2 hover:bg-white/[0.04] -mx-4 px-4 py-3 transition-colors rounded-lg flex-1"
+        class="flex items-center gap-2 hover:bg-surface-hover -mx-4 px-4 py-3 transition-colors rounded-lg flex-1"
         onclick="window.openCompanySwitcher && window.openCompanySwitcher()"
       >
         <.company_display company={@company} />
@@ -30,7 +30,7 @@ defmodule CymphoWeb.Components.CompanyRail do
 
   def company_display(%{company: nil} = assigns) do
     ~H"""
-    <span class="text-lg font-590 tracking-tight text-text-primary">Cympho</span>
+    <span class="text-lg font-serif font-medium tracking-tight text-text-primary">Cympho</span>
     """
   end
 
@@ -39,16 +39,16 @@ defmodule CymphoWeb.Components.CompanyRail do
 
     ~H"""
     <div class="flex items-center gap-3">
-      <div :if={@company.logo_url} class="w-8 h-8 rounded-lg overflow-hidden border-l-2 border-brand">
+      <div :if={@company.logo_url} class="w-8 h-8 rounded-lg overflow-hidden">
         <img src={@company.logo_url} alt={@company.name} class="w-full h-full object-cover" />
       </div>
       <div
         :if={!@company.logo_url}
-        class="w-8 h-8 rounded-lg bg-brand/10 border-l-2 border-brand flex items-center justify-center"
+        class="w-8 h-8 rounded-lg bg-brand/10 flex items-center justify-center"
       >
         <span class="text-sm font-590 text-brand">{company_initials(@company.name)}</span>
       </div>
-      <span class="text-lg font-590 tracking-tight text-text-primary truncate hidden md:inline">
+      <span class="text-lg font-serif font-medium tracking-tight text-text-primary truncate hidden md:inline">
         {@company.name}
       </span>
     </div>

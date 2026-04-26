@@ -59,7 +59,7 @@ defmodule CymphoWeb.OrgChartLive do
       <div class="w-36 sm:w-44 lg:w-48 bg-surface border border-border rounded-lg p-3 sm:p-4 hover:border-brand/50 transition-colors cursor-pointer">
         <.app_link navigate={~p"/agents/#{@node.id}"} class="block">
           <div class="flex items-center justify-between mb-2">
-            <h3 class="text-xs sm:text-sm font-510 text-text-primary truncate flex-1">
+            <h3 class="font-serif text-xs sm:text-sm font-510 text-text-primary truncate flex-1">
               {@node.name}
             </h3>
             <div
@@ -92,7 +92,7 @@ defmodule CymphoWeb.OrgChartLive do
           </div>
 
           <div class="flex items-center gap-2 mt-3 text-xs text-text-tertiary">
-            <span class="bg-white/[0.05] px-2 py-1 rounded">
+            <span class="bg-surface px-2 py-1 rounded">
               {length(@node.children)} reports
             </span>
           </div>
@@ -101,7 +101,7 @@ defmodule CymphoWeb.OrgChartLive do
         <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity sm:opacity-0">
           <button
             type="button"
-            class="p-1 hover:bg-white/[0.1] rounded min-w-[32px] min-h-[32px] sm:min-w-0 sm:min-h-0"
+            class="p-1 hover:bg-surface-hover rounded min-w-[32px] min-h-[32px] sm:min-w-0 sm:min-h-0"
             phx-click={JS.push("show_actions", value: %{agent_id: @node.id})}
             data-agent-id={@node.id}
           >

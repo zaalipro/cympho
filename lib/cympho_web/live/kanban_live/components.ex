@@ -12,7 +12,7 @@ defmodule CymphoWeb.KanbanLive.Components do
   def issue_card(assigns) do
     ~H"""
     <div
-      class="kanban-card-enter bg-white/[0.02] border border-border rounded-md p-3 sm:p-4 space-y-2 hover:bg-white/[0.04] transition-colors cursor-grab active:cursor-grabbing min-h-[60px] sm:min-h-0"
+      class="kanban-card-enter bg-subtle border border-border rounded-lg p-3 sm:p-4 space-y-2 hover:bg-surface-hover transition-colors cursor-grab active:cursor-grabbing min-h-[60px] sm:min-h-0"
       data-issue-id={@issue.id}
     >
       <div class="text-sm font-510 text-text-primary leading-snug line-clamp-2 sm:line-clamp-1">
@@ -62,7 +62,7 @@ defmodule CymphoWeb.KanbanLive.Components do
   def empty_column_state(assigns) do
     ~H"""
     <div class="flex flex-col items-center justify-center py-8 text-center">
-      <div class="w-8 h-8 rounded-full bg-white/[0.03] flex items-center justify-center mb-2">
+      <div class="w-8 h-8 rounded-full bg-subtle flex items-center justify-center mb-2">
         {empty_column_icon(@status)}
       </div>
       <p class="text-xs text-text-quaternary">{empty_column_message(@status)}</p>
@@ -116,7 +116,7 @@ defmodule CymphoWeb.KanbanLive.Components do
   def priority_class(:high), do: "bg-red-500/20 text-red-400"
   def priority_class(:medium), do: "bg-yellow-500/20 text-yellow-400"
   def priority_class(:low), do: "bg-emerald-500/20 text-emerald-400"
-  def priority_class(_), do: "bg-white/[0.05] text-text-quaternary"
+  def priority_class(_), do: "bg-surface text-text-quaternary"
 
   defp heartbeat_dot_color(:idle), do: "bg-emerald-400"
   defp heartbeat_dot_color(:working), do: "bg-yellow-400 animate-pulse"

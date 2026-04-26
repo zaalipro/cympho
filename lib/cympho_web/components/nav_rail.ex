@@ -80,9 +80,8 @@ defmodule CymphoWeb.Components.NavRail do
     <.link
       navigate={@to}
       class={[
-        "nav-item flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-510 transition-colors",
-        "text-text-secondary hover:text-text-primary hover:bg-white/[0.04]",
-        "active:bg-white/[0.08]",
+        "nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-510 transition-colors",
+        "text-text-secondary hover:text-text-primary hover:bg-surface-hover",
         nav_active_class(@to, @current_path)
       ]}
       data-nav-path={@to}
@@ -98,7 +97,7 @@ defmodule CymphoWeb.Components.NavRail do
 
   defp nav_active_class(path, current_path) do
     if active_path?(path, current_path) do
-      "text-text-primary bg-white/[0.06]"
+      "text-text-primary bg-surface-hover"
     else
       ""
     end

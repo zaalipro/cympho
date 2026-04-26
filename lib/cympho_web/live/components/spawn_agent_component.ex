@@ -8,7 +8,7 @@ defmodule CymphoWeb.SpawnAgentComponent do
     ~H"""
     <div>
       <%= if @show_form do %>
-        <div class="bg-surface border border-border rounded-card p-5 mb-6">
+        <div class="bg-surface border border-border rounded-xl p-5 mb-6">
           <h4 class="text-sm font-510 text-text-primary mb-4">Spawn New Agent</h4>
           <.simple_form
             for={@form}
@@ -74,7 +74,7 @@ defmodule CymphoWeb.SpawnAgentComponent do
       <% else %>
         <button
           type="button"
-          class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2"
+          class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
           phx-click="show_form"
           phx-target={@myself}
         >

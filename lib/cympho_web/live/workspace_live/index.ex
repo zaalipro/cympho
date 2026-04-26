@@ -32,7 +32,7 @@ defmodule CymphoWeb.WorkspaceLive.Index do
         <%= for workspace <- @workspaces do %>
           <div class="bg-surface border border-border rounded-lg p-6 hover:border-brand/50 transition-colors">
             <.app_link navigate={~p"/workspaces/#{workspace.id}"}>
-              <h3 class="text-lg font-510 text-text-primary mb-2">
+              <h3 class="font-serif text-lg font-510 text-text-primary mb-2">
                 {workspace.name}
               </h3>
             </.app_link>
@@ -52,7 +52,7 @@ defmodule CymphoWeb.WorkspaceLive.Index do
                 <% end %>
 
                 <%= if workspace.source_type do %>
-                  <span class="bg-white/[0.05] text-text-tertiary text-xs px-2 py-1 rounded">
+                  <span class="bg-surface text-text-tertiary text-xs px-2 py-1 rounded">
                     {workspace.source_type}
                   </span>
                 <% end %>

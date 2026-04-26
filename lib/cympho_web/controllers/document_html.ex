@@ -21,7 +21,7 @@ defmodule CymphoWeb.DocumentHTML do
 
       <div class="space-y-2 max-h-[600px] overflow-y-auto">
         <%= for revision <- @revisions do %>
-          <div class="flex items-start gap-3 p-4 rounded-lg bg-white/[0.02] border border-border hover:bg-white/[0.04] transition-colors">
+          <div class="flex items-start gap-3 p-4 rounded-lg bg-subtle border border-border hover:bg-surface-hover transition-colors">
             <div class="flex-shrink-0">
               <div class="w-10 h-10 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-sm font-semibold">
                 {String.first(revision.author_type || "A")}
@@ -38,7 +38,7 @@ defmodule CymphoWeb.DocumentHTML do
                 </span>
               </div>
 
-              <h3 class="text-base font-semibold text-text-primary mb-1">{revision.title}</h3>
+              <h3 class="font-serif text-base font-semibold text-text-primary mb-1">{revision.title}</h3>
 
               <p :if={revision.change_summary} class="text-sm text-text-tertiary mb-2">
                 {revision.change_summary}
@@ -75,7 +75,7 @@ defmodule CymphoWeb.DocumentHTML do
         </.link>
       </div>
 
-      <div class="bg-white/[0.02] rounded-lg border border-border p-6">
+      <div class="bg-subtle rounded-lg border border-border p-6">
         <div class="flex items-center gap-3 mb-4 pb-4 border-b border-border">
           <div class="w-10 h-10 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-sm font-semibold">
             {String.first(@revision.author_type || "A")}

@@ -424,7 +424,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
         <div class="lg:col-span-2">
           <div class="bg-surface border border-border rounded-lg overflow-hidden">
             <div class="px-4 py-3 border-b border-border">
-              <h2 class="text-lg font-semibold text-text-primary">Traces</h2>
+              <h2 class="font-serif text-lg font-semibold text-text-primary">Traces</h2>
             </div>
 
             <%= if @traces == [] do %>
@@ -435,7 +435,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
             <% else %>
               <div class="overflow-x-auto">
                 <table class="w-full">
-                  <thead class="bg-white/[0.02]">
+                  <thead class="bg-subtle">
                     <tr>
                       <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
                         Seq
@@ -463,7 +463,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
                         class={
                           if @selected_trace && @selected_trace.id == trace.id,
                             do: "bg-brand/10 cursor-pointer",
-                            else: "hover:bg-white/[0.02] cursor-pointer"
+                            else: "hover:bg-subtle cursor-pointer"
                         }
                         phx-click="select_trace"
                         phx-value-id={trace.id}
@@ -508,10 +508,10 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
           <div class="lg:col-span-1">
             <div class="bg-surface border border-border rounded-lg sticky top-4">
               <div class="px-4 py-3 border-b border-border flex items-center justify-between">
-                <h2 class="text-lg font-semibold text-text-primary">Trace Details</h2>
+                <h2 class="font-serif text-lg font-semibold text-text-primary">Trace Details</h2>
                 <button
                   type="button"
-                  class="p-1 hover:bg-white/[0.1] rounded"
+                  class="p-1 hover:bg-surface-hover rounded"
                   phx-click="close_trace_details"
                 >
                   <svg

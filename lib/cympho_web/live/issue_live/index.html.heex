@@ -3,7 +3,7 @@
     <:actions>
       <.app_link
         navigate={~p"/issues/new"}
-        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2"
+        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -27,7 +27,7 @@
             name="search"
             value={@current_search}
             placeholder="Search issues..."
-            class="w-full bg-white/[0.05] border border-border text-text-primary text-sm rounded-md pl-9 pr-3 py-2 min-h-[44px] placeholder:text-text-quaternary"
+            class="w-full bg-surface border border-border text-text-primary text-sm rounded-lg pl-9 pr-3 py-2 min-h-[44px] placeholder:text-text-quaternary"
           />
           <svg
             class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-quaternary"
@@ -52,7 +52,7 @@
       <form phx-change="filter_status" class="col-span-1">
         <select
           name="status"
-          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
+          class="w-full bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-2 min-h-[44px]"
         >
           <option value="">All Statuses</option>
           <%= for status <- Cympho.Issues.Issue.status_options() do %>
@@ -66,7 +66,7 @@
       <form phx-change="filter_priority" class="col-span-1">
         <select
           name="priority"
-          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
+          class="w-full bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-2 min-h-[44px]"
         >
           <option value="">All Priorities</option>
           <%= for priority <- Cympho.Issues.Issue.priority_options() do %>
@@ -80,7 +80,7 @@
       <form phx-change="filter_assignee" class="col-span-2 sm:col-span-auto">
         <select
           name="assignee_id"
-          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
+          class="w-full bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-2 min-h-[44px]"
         >
           <option value="">All Assignees</option>
           <%= for agent <- @agents do %>
@@ -94,7 +94,7 @@
       <form phx-change="filter_project" class="col-span-2 sm:col-span-auto">
         <select
           name="project_id"
-          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
+          class="w-full bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-2 min-h-[44px]"
         >
           <option value="">All Projects</option>
           <%= for project <- @projects do %>
@@ -108,7 +108,7 @@
       <form phx-change="filter_label" class="col-span-2 sm:col-span-auto">
         <select
           name="label_id"
-          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
+          class="w-full bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-2 min-h-[44px]"
         >
           <option value="">All Labels</option>
           <%= for label <- @labels do %>
@@ -123,7 +123,7 @@
         :if={filters_active?(assigns)}
         type="button"
         phx-click="clear_filters"
-        class="col-span-2 sm:col-span-auto text-xs font-510 px-3 py-2 min-h-[44px] rounded-md border border-border text-text-secondary hover:text-text-primary hover:bg-white/[0.08] transition-colors"
+        class="col-span-2 sm:col-span-auto text-xs font-510 px-3 py-2 min-h-[44px] rounded-lg border border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
       >
         Clear all
       </button>
@@ -134,13 +134,13 @@
     <.app_link
       :for={issue <- @issues}
       navigate={~p"/issues/#{issue.id}"}
-      class="group flex items-center gap-4 p-3 rounded-md hover:bg-white/[0.04] transition-colors border border-transparent hover:border-border-subtle"
+      class="group flex items-center gap-4 p-3 rounded-lg hover:bg-surface-hover transition-colors border border-transparent hover:border-border"
     >
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-3">
           <span
             :if={@unread_issues[issue.id]}
-            class="w-2 h-2 rounded-full bg-blue-400 shrink-0"
+            class="w-2 h-2 rounded-full bg-brand shrink-0"
             title="Unread comments"
           >
           </span>
@@ -170,7 +170,7 @@
         </span>
         <button
           type="button"
-          class="opacity-0 group-hover:opacity-100 p-1.5 rounded-md text-text-quaternary hover:text-red-400 hover:bg-red-500/10 transition-all"
+          class="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-text-quaternary hover:text-red-400 hover:bg-red-500/10 transition-all"
           phx-click="delete_issue"
           phx-value-id={issue.id}
           data-confirm="Delete this issue?"
@@ -192,7 +192,7 @@
     :if={Enum.empty?(@issues)}
     class="flex flex-col items-center justify-center py-20 text-center"
   >
-    <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
+    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
       <svg
         class="w-6 h-6 text-text-tertiary"
         fill="none"
@@ -216,7 +216,7 @@
       type="button"
       phx-click="change_page"
       phx-value-page={@page - 1}
-      class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary text-sm px-4 py-2 rounded-md transition-colors"
+      class="bg-surface hover:bg-surface-hover border border-border text-text-secondary text-sm px-4 py-2 rounded-lg transition-colors"
     >
       Previous
     </button>
@@ -226,7 +226,7 @@
       type="button"
       phx-click="change_page"
       phx-value-page={@page + 1}
-      class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary text-sm px-4 py-2 rounded-md transition-colors"
+      class="bg-surface hover:bg-surface-hover border border-border text-text-secondary text-sm px-4 py-2 rounded-lg transition-colors"
     >
       Next
     </button>

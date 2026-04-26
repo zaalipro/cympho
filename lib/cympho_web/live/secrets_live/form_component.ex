@@ -71,7 +71,7 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="mb-6 p-4 bg-white/[0.02] border border-border rounded-md">
+    <div class="mb-6 p-4 bg-subtle border border-border rounded-lg">
       <.form for={@form} phx-target={@myself} phx-change="validate" phx-submit="save" id="secret-form">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <.input
@@ -124,13 +124,13 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
           <button
             type="button"
             phx-click={@on_cancel}
-            class="px-4 py-2 bg-white/[0.05] hover:bg-white/[0.1] text-text-secondary rounded-md text-sm font-medium transition-colors"
+            class="px-4 py-2 bg-surface hover:bg-surface-hover text-text-secondary rounded-lg text-sm font-medium transition-colors"
           >
             Cancel
           </button>
           <button
             type="submit"
-            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition-colors"
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
           >
             {if @form_mode == :create, do: "Create Secret", else: "Save Secret"}
           </button>

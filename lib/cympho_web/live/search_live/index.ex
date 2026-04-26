@@ -286,7 +286,7 @@ defmodule CymphoWeb.SearchLive.Index do
                   {priority_label(issue.priority)} priority
                 </span>
               </div>
-              <h3 class="text-base font-medium text-text-primary mb-1">{issue.title}</h3>
+              <h3 class="font-serif text-base font-medium text-text-primary mb-1">{issue.title}</h3>
               <p class="text-sm text-text-secondary line-clamp-2">{issue.description}</p>
               <div class="flex items-center gap-4 mt-2 text-xs text-text-tertiary">
                 <span :if={issue.assignee}>Assignee: {issue.assignee.name}</span>
@@ -318,7 +318,7 @@ defmodule CymphoWeb.SearchLive.Index do
           class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
         >
           <div class="flex items-center justify-between mb-2">
-            <h3 class="text-base font-medium text-text-primary">{agent.name}</h3>
+            <h3 class="font-serif text-base font-medium text-text-primary">{agent.name}</h3>
             <span
               class="w-2 h-2 rounded-full"
               style={"background-color: " <> agent_status_color(agent.status)}
@@ -351,7 +351,7 @@ defmodule CymphoWeb.SearchLive.Index do
           navigate={~p"/projects/#{project.id}"}
           class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
         >
-          <h3 class="text-base font-medium text-text-primary mb-1">{project.name}</h3>
+          <h3 class="font-serif text-base font-medium text-text-primary mb-1">{project.name}</h3>
           <p class="text-sm text-text-secondary line-clamp-2 mb-2">{project.description}</p>
           <div class="flex items-center gap-2 text-xs text-text-tertiary">
             <span class="capitalize">{project.status}</span>
@@ -381,7 +381,7 @@ defmodule CymphoWeb.SearchLive.Index do
           <div class="flex items-start justify-between">
             <div class="flex-1">
               <div class="flex items-center gap-2 mb-1">
-                <h3 class="text-base font-medium text-text-primary">{goal.title}</h3>
+                <h3 class="font-serif text-base font-medium text-text-primary">{goal.title}</h3>
                 <span class={[
                   "text-xs font-medium",
                   priority_color(String.to_existing_atom(goal.priority))

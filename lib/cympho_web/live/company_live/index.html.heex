@@ -3,7 +3,7 @@
     <:actions>
       <.app_link
         navigate={~p"/companies/new"}
-        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2"
+        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -20,22 +20,22 @@
 
   <div
     :if={@flash && @flash[:info]}
-    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-md"
+    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-lg"
   >
     {@flash[:info]}
   </div>
 
   <div
     :if={@flash && @flash[:error]}
-    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-md"
+    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
   >
     {@flash[:error]}
   </div>
 
-  <div class="bg-surface border border-border rounded-card overflow-hidden">
+  <div class="bg-surface border border-border rounded-xl overflow-hidden">
     <div class="overflow-x-auto">
       <table class="w-full">
-        <thead class="bg-white/[0.02] border-b border-border">
+        <thead class="bg-subtle border-b border-border">
           <tr>
             <th class="text-left text-xs font-510 text-text-secondary uppercase tracking-wider px-6 py-3">
               Name
@@ -53,7 +53,7 @@
         </thead>
         <tbody class="divide-y divide-border">
           <%= for company <- @companies do %>
-            <tr class="hover:bg-white/[0.02] transition-colors">
+            <tr class="hover:bg-subtle transition-colors">
               <td class="px-6 py-4">
                 <.app_link
                   navigate={~p"/companies/#{company}"}

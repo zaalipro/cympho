@@ -33,7 +33,7 @@
               type="text"
               name="title"
               value={@issue.title}
-              class="flex-1 bg-white/[0.05] border border-border rounded-md px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              class="flex-1 bg-surface border border-border rounded-lg px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
               autofocus
             />
             <.button type="submit" size="sm">Save</.button>
@@ -64,7 +64,7 @@
                     "w-8 h-8 rounded-full bg-brand/20 text-brand flex items-center justify-center text-xs font-510"
 
                   author_type == "system" ->
-                    "w-8 h-8 rounded-full bg-white/[0.03] border border-dashed border-border/50 flex items-center justify-center text-text-quaternary"
+                    "w-8 h-8 rounded-full bg-subtle border border-dashed border-border/50 flex items-center justify-center text-text-quaternary"
 
                   true ->
                     "w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-510"
@@ -74,10 +74,10 @@
                 "w-8 h-8 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xs font-510"
 
               :run ->
-                "w-8 h-8 rounded-full bg-white/[0.05] border border-border flex items-center justify-center text-text-quaternary"
+                "w-8 h-8 rounded-full bg-surface border border-border flex items-center justify-center text-text-quaternary"
 
               _ ->
-                "w-8 h-8 rounded-full bg-white/[0.05] border border-border flex items-center justify-center text-text-quaternary"
+                "w-8 h-8 rounded-full bg-surface border border-border flex items-center justify-center text-text-quaternary"
             end
           }>
             {case entry.type do
@@ -127,7 +127,7 @@
           <%= case entry.type do %>
             <% :comment -> %>
               ~H"""
-              <div class={"bg-surface border border-border rounded-lg p-4 #{if entry.data.author_type == "system", do: "bg-white/[0.03] border-dashed", else: ""}"}>
+              <div class={"bg-surface border border-border rounded-lg p-4 #{if entry.data.author_type == "system", do: "bg-subtle border-dashed", else: ""}"}>
                 <div
                   :if={entry.data.author_type != "system"}
                   class="flex items-center justify-between mb-2"
@@ -176,7 +176,7 @@
               """
             <% :run -> %>
               ~H"""
-              <div class="bg-white/[0.02] border border-border/50 rounded-lg p-3">
+              <div class="bg-subtle border border-border/50 rounded-lg p-3">
                 <div class="flex items-center justify-between mb-2">
                   <div class="flex items-center gap-2">
                     <span class={"w-2 h-2 rounded-full #{run_status_color(entry.data.status)}"}>
@@ -236,7 +236,7 @@
                         :for={
                           {task, idx} <- Enum.with_index(Map.get(entry.data.payload, "tasks", []))
                         }
-                        class="flex items-start gap-2 p-2 bg-white/[0.03] rounded-md"
+                        class="flex items-start gap-2 p-2 bg-subtle rounded-lg"
                       >
                         <span class="text-xs text-text-quaternary mt-0.5">{idx + 1}.</span>
                         <div class="flex-1">
@@ -298,7 +298,7 @@
                       </div>
                       <div
                         :if={Map.get(entry.data.payload, "response")}
-                        class="p-2 bg-white/[0.03] rounded-md"
+                        class="p-2 bg-subtle rounded-lg"
                       >
                         <p class="text-sm text-text-secondary">
                           {Map.get(entry.data.payload, "response")}
@@ -311,7 +311,7 @@
                         <textarea
                           name="response"
                           placeholder="Type your response..."
-                          class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[60px] resize-y"
+                          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[60px] resize-y"
                           required
                         ></textarea>
                         <.button type="submit" size="sm">Respond</.button>
@@ -324,7 +324,7 @@
                       </p>
                       <div
                         :if={Map.get(entry.data.payload, "details")}
-                        class="text-xs text-text-tertiary p-2 bg-white/[0.03] rounded-md"
+                        class="text-xs text-text-tertiary p-2 bg-subtle rounded-lg"
                       >
                         {Map.get(entry.data.payload, "details")}
                       </div>
@@ -390,7 +390,7 @@
     <!-- Description -->
     <div class="group">
       <div :if={@editing != "description"} class="relative">
-        <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+        <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
           Description
         </h3>
         <p class="text-sm text-text-secondary whitespace-pre-wrap leading-relaxed">
@@ -406,12 +406,12 @@
         </button>
       </div>
       <form :if={@editing == "description"} phx-submit="save_description" class="space-y-3">
-        <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+        <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
           Description
         </h3>
         <textarea
           name="description"
-          class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[120px] resize-y"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[120px] resize-y"
           autofocus
         ><%= @issue.description %></textarea>
         <div class="flex items-center gap-2">
@@ -425,7 +425,7 @@
     
 <!-- GitHub PR Link -->
     <div>
-      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
         GitHub PR
       </h3>
       <form phx-submit="update_github_pr_url" class="space-y-2">
@@ -434,7 +434,7 @@
           name="github_pr_url"
           value={@issue.github_pr_url || ""}
           placeholder="https://github.com/owner/repo/pull/123"
-          class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
         />
         <div class="flex items-center gap-2">
           <.button type="submit" size="sm">Save</.button>
@@ -452,11 +452,11 @@
     
 <!-- Status -->
     <div>
-      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Status</h3>
+      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Status</h3>
       <form phx-change="update_status">
         <select
           name="status"
-          class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
         >
           <option value={to_string(@issue.status)} selected>
             {@issue.status |> to_string() |> String.replace("_", " ") |> String.capitalize()} (current)
@@ -470,11 +470,11 @@
     
 <!-- Priority -->
     <div>
-      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Priority</h3>
+      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Priority</h3>
       <form phx-change="update_priority">
         <select
           name="priority"
-          class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
         >
           <option
             :for={p <- [:low, :medium, :high]}
@@ -489,9 +489,9 @@
     
 <!-- Assignee -->
     <div>
-      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Assignee</h3>
+      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Assignee</h3>
       <div :if={@issue.assignee} class="space-y-2">
-        <div class="flex items-center justify-between bg-white/[0.05] rounded-md px-3 py-2">
+        <div class="flex items-center justify-between bg-surface rounded-lg px-3 py-2">
           <div class="flex items-center gap-2">
             <div class="w-6 h-6 rounded-full bg-brand/20 flex items-center justify-center text-xs font-510 text-brand">
               {String.first(@issue.assignee.name) || "?"}
@@ -516,7 +516,7 @@
           name="q"
           value={@assignee_search}
           placeholder="Search agents..."
-          class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
         />
         <div :if={@assignee_search != ""} class="max-h-40 overflow-y-auto space-y-1">
           <button
@@ -524,7 +524,7 @@
             type="button"
             phx-click="assign_issue"
             phx-value-agent_id={agent.id}
-            class="w-full flex items-center gap-2 bg-white/[0.05] hover:bg-white/[0.08] rounded-md px-3 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors text-left"
+            class="w-full flex items-center gap-2 bg-surface hover:bg-surface-hover rounded-lg px-3 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors text-left"
           >
             <div class="w-5 h-5 rounded-full bg-brand/20 flex items-center justify-center text-[10px] font-510 text-brand">
               {String.first(agent.name) || "?"}
@@ -538,7 +538,7 @@
     
 <!-- Agent Spawn -->
     <div>
-      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Agent</h3>
+      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Agent</h3>
       <.button type="button" phx-click="toggle_agent_panel" size="sm" variant="ghost">
         {(@show_agent_panel && "Hide") || "Spawn"} Agent
       </.button>
@@ -551,7 +551,7 @@
           <select
             name="agent_id"
             required
-            class="w-full bg-white/[0.05] border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
+            class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors appearance-none"
           >
             <option value="">Choose an agent...</option>
             <option :for={agent <- @agents} value={agent.id}>
@@ -565,7 +565,7 @@
     
 <!-- Documents -->
     <div>
-      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
+      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
         Documents
       </h3>
       <div :if={Enum.empty?(@documents)} class="text-sm text-text-tertiary">
@@ -580,7 +580,7 @@
     
 <!-- Metadata -->
     <div class="space-y-2 text-sm">
-      <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Details</h3>
+      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Details</h3>
       <div class="flex justify-between">
         <span class="text-text-tertiary">Comments</span>
         <span class="text-text-secondary">{length(@issue.comments)}</span>

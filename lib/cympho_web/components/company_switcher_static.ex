@@ -13,10 +13,10 @@ defmodule CymphoWeb.Components.CompanySwitcherStatic do
     >
       <div
         id="company-switcher-modal"
-        class="hidden fixed inset-0 z-[70] flex items-start justify-center pt-[15vh] bg-black/50"
+        class="hidden fixed inset-0 z-[70] flex items-start justify-center pt-[15vh] bg-black/30"
       >
-        <div class="bg-panel border border-border rounded-panel shadow-dialog w-full max-w-lg mx-4 overflow-hidden">
-          <div class="flex items-center gap-3 px-4 border-b border-border-subtle">
+        <div class="bg-panel border border-border rounded-2xl shadow-dialog w-full max-w-lg mx-4 overflow-hidden">
+          <div class="flex items-center gap-3 px-4 border-b border-border">
             <svg
               class="w-4 h-4 text-text-quaternary shrink-0"
               fill="none"
@@ -37,9 +37,7 @@ defmodule CymphoWeb.Components.CompanySwitcherStatic do
               class="flex-1 bg-transparent text-text-primary text-sm py-3.5 placeholder:text-text-quaternary focus:outline-none"
               autocomplete="off"
             />
-            <kbd class="text-[10px] px-1.5 py-0.5 bg-white/[0.05] border border-border rounded text-text-quaternary shrink-0">
-              ESC
-            </kbd>
+            <kbd class="kbd shrink-0">ESC</kbd>
           </div>
           <div id="company-switcher-results" class="max-h-72 overflow-y-auto p-2">
             <div

@@ -145,9 +145,9 @@ defmodule CymphoWeb.IssueLive.MyIssues do
   def priority_color(:low), do: "text-gray-400"
   def priority_color(_), do: "text-gray-400"
 
-  def tab_active?("active", "active"), do: "bg-white/[0.08] text-text-primary"
-  def tab_active?("created_by_me", "created_by_me"), do: "bg-white/[0.08] text-text-primary"
-  def tab_active?("watching", "watching"), do: "bg-white/[0.08] text-text-primary"
-  def tab_active?("all", "all"), do: "bg-white/[0.08] text-text-primary"
+  def tab_active?("active", "active"), do: "bg-surface-hover text-text-primary"
+  def tab_active?("created_by_me", "created_by_me"), do: "bg-surface-hover text-text-primary"
+  def tab_active?("watching", "watching"), do: "bg-surface-hover text-text-primary"
+  def tab_active?("all", "all"), do: "bg-surface-hover text-text-primary"
   def tab_active?(_, _), do: "text-text-secondary hover:text-text-primary"
 end

@@ -45,7 +45,7 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
       <div class="bg-surface border border-border rounded-lg p-6 mb-8">
         <div class="flex items-center justify-between mb-4">
           <h1 class="text-2xl font-510 text-text-primary">{@workspace.name}</h1>
-          <span class="text-xs bg-white/[0.05] text-text-tertiary px-2 py-1 rounded">
+          <span class="text-xs bg-surface text-text-tertiary px-2 py-1 rounded">
             {@workspace.status}
           </span>
         </div>
@@ -83,13 +83,13 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div>
-          <h2 class="text-lg font-510 text-text-primary mb-4">Runtime Services</h2>
+          <h2 class="font-serif text-lg font-510 text-text-primary mb-4">Runtime Services</h2>
 
           <div class="space-y-3">
             <%= for svc <- @runtime_services do %>
               <div class="bg-surface border border-border rounded-lg p-4">
                 <div class="flex items-center justify-between">
-                  <h3 class="text-sm font-510 text-text-primary">{svc.service_name}</h3>
+                  <h3 class="font-serif text-sm font-510 text-text-primary">{svc.service_name}</h3>
                   <span class={"text-xs px-2 py-1 rounded #{service_status_classes(svc.status)}"}>
                     {svc.status}
                   </span>
@@ -134,14 +134,14 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
         </div>
 
         <div>
-          <h2 class="text-lg font-510 text-text-primary mb-4">Operations Log</h2>
+          <h2 class="font-serif text-lg font-510 text-text-primary mb-4">Operations Log</h2>
 
           <div class="space-y-3">
             <%= for op <- @operations do %>
               <div class="bg-surface border border-border rounded-lg p-4">
                 <div class="flex items-center justify-between">
-                  <h3 class="text-sm font-510 text-text-primary">{op.phase}</h3>
-                  <span class="text-xs bg-white/[0.05] text-text-tertiary px-2 py-1 rounded">
+                  <h3 class="font-serif text-sm font-510 text-text-primary">{op.phase}</h3>
+                  <span class="text-xs bg-surface text-text-tertiary px-2 py-1 rounded">
                     {op.status}
                   </span>
                 </div>
@@ -171,5 +171,5 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
   defp service_status_classes("running"), do: "bg-green-500/10 text-green-400"
   defp service_status_classes("stopped"), do: "bg-red-500/10 text-red-400"
   defp service_status_classes("error"), do: "bg-red-500/10 text-red-400"
-  defp service_status_classes(_), do: "bg-white/[0.05] text-text-tertiary"
+  defp service_status_classes(_), do: "bg-surface text-text-tertiary"
 end
