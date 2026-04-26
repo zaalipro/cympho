@@ -398,7 +398,10 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:issue_updated, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
       runs = HeartbeatEngine.list_runs_for_issue(updated_issue.id)
-      socket = assign(socket, issue: updated_issue, runs: runs)
+      socket =
+        socket
+        |> assign(issue: updated_issue, runs: runs)
+        |> push_event("toast", %{message: "Issue updated by another user", type: "info", key: "issue_#{updated_issue.id}_updated"})
       {:noreply, maybe_rebuild_timeline(socket)}
     else
       {:noreply, socket}
@@ -411,7 +414,10 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:comment_created, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      socket = assign(socket, :issue, updated_issue)
+      socket =
+        socket
+        |> assign(:issue, updated_issue)
+        |> push_event("toast", %{message: "New comment added", type: "info", key: "comment_#{updated_issue.id}_created"})
       {:noreply, maybe_rebuild_timeline(socket)}
     else
       {:noreply, socket}

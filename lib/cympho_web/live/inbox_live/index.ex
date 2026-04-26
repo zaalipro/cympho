@@ -16,6 +16,9 @@ defmodule CymphoWeb.InboxLive.Index do
       |> assign(:subscribed_agent_id, nil)
 
     if connected?(socket) do
+      if socket.assigns.selected_agent_id do
+        Inbox.subscribe(socket.assigns.selected_agent_id)
+      end
       if socket.assigns[:current_company] do
         CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
       end
@@ -65,6 +68,7 @@ defmodule CymphoWeb.InboxLive.Index do
     {:noreply, socket}
   end
 
+  @impl true
   def handle_info(msg, socket) do
     require Logger
     Logger.warning("Unhandled message in InboxLive.Index: #{inspect(msg)}")

@@ -14,6 +14,7 @@ defmodule CymphoWeb.KanbanLive.Index do
       Issues.subscribe(socket.assigns.current_company.id)
       Cympho.Agents.subscribe(socket.assigns.current_company.id)
       CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
+      CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
     end
     Phoenix.PubSub.subscribe(Cympho.PubSub, "agent_heartbeats")
 

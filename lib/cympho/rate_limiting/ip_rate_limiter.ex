@@ -22,59 +22,46 @@ defmodule Cympho.RateLimiting.IpRateLimiter do
 
   @impl true
   def init(_) do
-    table = :ets.new(__MODULE__, [:set, :named_table])
     schedule_cleanup()
-    {:ok, %{table: table}}
+    {:ok, %{entries: %{}}}
   end
 
   @impl true
-  def handle_call({:check_join, ip}, _from, state) do
+  def handle_call({:check_join, ip}, _from, %{entries: entries} = state) do
     now = System.monotonic_time(:millisecond)
 
-    result =
-      case :ets.lookup(state.table, ip) do
-        [{^ip, count, window_start}] when now - window_start < @window_ms ->
+    {result, entries} =
+      case Map.get(entries, ip) do
+        {count, window_start} when now - window_start < @window_ms ->
           if count < @max_joins_per_second do
-            :ets.insert(state.table, {ip, count + 1, window_start})
-            :ok
+            {:ok, Map.put(entries, ip, {count + 1, window_start})}
           else
-            {:error, :rate_limited}
+            {{:error, :rate_limited}, entries}
           end
 
         _ ->
-          :ets.insert(state.table, {ip, 1, now})
-          :ok
+          {:ok, Map.put(entries, ip, {1, now})}
       end
 
-    {:reply, result, state}
+    {:reply, result, %{state | entries: entries}}
   end
 
   @impl true
   def handle_call(:reset, _from, state) do
-    :ets.delete_all_objects(state.table)
-    {:reply, :ok, state}
+    {:reply, :ok, %{state | entries: %{}}}
   end
 
   @impl true
-  def handle_info(:cleanup, state) do
-    now = System.monotonic_time(:millisecond)
-    threshold = now - @window_ms
+  def handle_info(:cleanup, %{entries: entries} = state) do
+    threshold = System.monotonic_time(:millisecond) - @window_ms
 
-    :ets.foldl(
-      fn
-        {ip, _count, window_start}, acc when window_start < threshold ->
-          :ets.delete(state.table, ip)
-          acc
-
-        _, acc ->
-          acc
-      end,
-      :ok,
-      state.table
-    )
+    cleaned =
+      entries
+      |> Enum.reject(fn {_ip, {_count, window_start}} -> window_start < threshold end)
+      |> Map.new()
 
     schedule_cleanup()
-    {:noreply, state}
+    {:noreply, %{state | entries: cleaned}}
   end
 
   defp schedule_cleanup do

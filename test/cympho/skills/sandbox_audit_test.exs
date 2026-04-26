@@ -4,7 +4,7 @@ defmodule Cympho.Skills.Sandbox.AuditTest do
   alias Cympho.{Agents, Companies, Plugins}
 
   test "logs successful authorization" do
-    {:ok, company} = Companies.create_company(%{name: "Test Company"})
+    {:ok, company} = Companies.create_company(%{name: "Test Company", slug: "test-#{System.unique_integer()}"})
     {:ok, agent} = Agents.create_agent(%{name: "Agent", role: :engineer, company_id: company.id})
     Plugins.create_plugin(%{identifier: "system.sandbox", name: "Sandbox", version: "1.0.0", company_id: company.id})
     
@@ -15,7 +15,7 @@ defmodule Cympho.Skills.Sandbox.AuditTest do
   end
 
   test "logs denied authorization" do
-    {:ok, company} = Companies.create_company(%{name: "Test Company"})
+    {:ok, company} = Companies.create_company(%{name: "Test Company", slug: "test-#{System.unique_integer()}"})
     {:ok, agent} = Agents.create_agent(%{name: "Agent", role: :designer, company_id: company.id})
     
     :ok = Audit.log_decision(agent.id, :designer, "system.admin", {:error, :unauthorized, "requires cto"})
@@ -24,7 +24,7 @@ defmodule Cympho.Skills.Sandbox.AuditTest do
   end
 
   test "denied_attempts returns only denied attempts" do
-    {:ok, company} = Companies.create_company(%{name: "Test Company"})
+    {:ok, company} = Companies.create_company(%{name: "Test Company", slug: "test-#{System.unique_integer()}"})
     {:ok, agent} = Agents.create_agent(%{name: "Agent", role: :designer, company_id: company.id})
     
     Audit.log_decision(agent.id, :designer, "system.admin", {:error, :unauthorized, "requires cto"})

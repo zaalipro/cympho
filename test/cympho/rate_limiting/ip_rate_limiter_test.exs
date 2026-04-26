@@ -4,13 +4,7 @@ defmodule Cympho.RateLimiting.IpRateLimiterTest do
   alias Cympho.RateLimiting.IpRateLimiter
 
   setup do
-    try do
-      GenServer.stop(IpRateLimiter)
-    catch
-      :exit, _ -> :ok
-    end
-
-    {:ok, _pid} = start_supervised({IpRateLimiter, []})
+    IpRateLimiter.reset()
     :ok
   end
 

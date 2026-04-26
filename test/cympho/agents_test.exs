@@ -302,16 +302,14 @@ defmodule Cympho.AgentsTest do
   describe "spawn_agent/2" do
     setup [:start_heartbeat_supervisor]
 
-    test "creates agent and starts heartbeat process", %{agent: _parent_agent} do
-      parent_agent_id = "parent-#{:rand.uniform(10_000)}"
-
+    test "creates agent and starts heartbeat process", %{agent: parent_agent} do
       attrs = %{
         name: "Spawned Agent",
         role: :engineer,
         config: %{"test" => true}
       }
 
-      assert {:ok, agent} = Agents.spawn_agent(attrs, parent_agent_id)
+      assert {:ok, agent} = Agents.spawn_agent(attrs, parent_agent.id)
       assert agent.name == "Spawned Agent"
       assert agent.role == :engineer
 
@@ -332,12 +330,15 @@ defmodule Cympho.AgentsTest do
     end
 
     test "role pre-fill logic: CEO -> CTO", %{agent: _parent_agent} do
-      # The prefilled_role logic is in the component, not the context
-      # This test verifies the context creates the agent with given role
-      attrs = %{name: "CTO Spawned", role: :cto}
-      parent_agent_id = "ceo-#{:rand.uniform(10_000)}"
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "CEO Parent",
+          role: :ceo
+        })
 
-      assert {:ok, agent} = Agents.spawn_agent(attrs, parent_agent_id)
+      attrs = %{name: "CTO Spawned", role: :cto}
+
+      assert {:ok, agent} = Agents.spawn_agent(attrs, ceo.id)
       assert agent.role == :cto
 
       # Clean up
@@ -345,10 +346,15 @@ defmodule Cympho.AgentsTest do
     end
 
     test "role pre-fill logic: CTO -> Engineer", %{agent: _parent_agent} do
-      attrs = %{name: "Engineer Spawned", role: :engineer}
-      parent_agent_id = "cto-#{:rand.uniform(10_000)}"
+      {:ok, cto} =
+        Agents.create_agent(%{
+          name: "CTO Parent",
+          role: :cto
+        })
 
-      assert {:ok, agent} = Agents.spawn_agent(attrs, parent_agent_id)
+      attrs = %{name: "Engineer Spawned", role: :engineer}
+
+      assert {:ok, agent} = Agents.spawn_agent(attrs, cto.id)
       assert agent.role == :engineer
 
       # Clean up
