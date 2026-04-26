@@ -94,4 +94,9 @@ defmodule CymphoWeb.AgentLive.Show do
   end
 
   def format_datetime(_), do: "N/A"
+
+  defp health_status_label(:healthy), do: "Healthy"
+  defp health_status_label(:degraded), do: "Degraded"
+  defp health_status_label(:unhealthy), do: "Unhealthy"
+  defp health_status_label(_), do: "Unknown"
 end
