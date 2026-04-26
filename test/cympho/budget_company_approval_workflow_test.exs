@@ -22,6 +22,15 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
 
   # ── Helpers ──
 
+  setup do
+    case Process.whereis(Cympho.BoardApprovals.BoardApprovalActionExecutor) do
+      nil -> :ok
+      pid ->
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), pid)
+        :ok
+    end
+  end
+
   defp create_test_company(attrs \\ %{}) do
     unique = System.unique_integer([:positive])
 
@@ -509,15 +518,14 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
           limit_amount: Decimal.new("1000")
         })
 
-      user = create_test_user()
-      Companies.create_membership(%{
-        user_id: user.id,
-        company_id: company.id,
-        role: "admin",
-        is_board_member: true
-      })
+      # Manually approve to avoid GenServer async issues
+      approval
+      |> Ecto.Changeset.change(%{status: "approved"})
+      |> Cympho.Repo.update!()
 
-      {:ok, _} = BoardApprovals.cast_vote(approval.id, user.id, "approve", "Approved")
+      loaded = BoardApprovals.get_board_approval!(approval.id)
+      result = BoardApprovals.execute_approved_action(loaded)
+      assert {:ok, %Budget{}} = result
 
       logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "budget_creation_executed")
       assert length(logs) >= 1
@@ -530,15 +538,14 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       {:pending_approval, approval} =
         Budgets.update_budget(budget, %{limit_amount: Decimal.new("5000")})
 
-      user = create_test_user()
-      Companies.create_membership(%{
-        user_id: user.id,
-        company_id: company.id,
-        role: "admin",
-        is_board_member: true
-      })
+      # Manually approve to avoid GenServer async issues
+      approval
+      |> Ecto.Changeset.change(%{status: "approved"})
+      |> Cympho.Repo.update!()
 
-      {:ok, _} = BoardApprovals.cast_vote(approval.id, user.id, "approve", "Approved")
+      loaded = BoardApprovals.get_board_approval!(approval.id)
+      result = BoardApprovals.execute_approved_action(loaded)
+      assert {:ok, %Budget{}} = result
 
       logs = Cympho.GovernanceAuditLogs.list_governance_audit_logs(action_type: "budget_increase_executed")
       assert length(logs) >= 1

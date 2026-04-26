@@ -28,12 +28,11 @@ defmodule CymphoWeb.CoreComponents do
 
   attr :name, :string, required: true
   attr :class, :string, default: nil
+  attr :rest, :global
 
   def icon(assigns) do
     ~H"""
-    <span class={["heroicon", @class]} {@rest}>
-      <i class={@name}></i>
-    </span>
+    <span class={[@class]} {@rest} />
     """
   end
 end

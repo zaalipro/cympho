@@ -494,7 +494,11 @@ defmodule Cympho.BoardApprovals do
     ]
   end
 
-  defp maybe_trigger_action(%BoardApproval{status: "approved"} = board_approval) do
+  @doc """
+  Executes the approved action for a board approval.
+  Called by BoardApprovalActionExecutor GenServer for async execution.
+  """
+  def execute_approved_action(%BoardApproval{status: "approved"} = board_approval) do
     case board_approval.category do
       "agent_hire" ->
         trigger_agent_hire(board_approval)
@@ -522,7 +526,7 @@ defmodule Cympho.BoardApprovals do
     end
   end
 
-  defp maybe_trigger_action(_), do: :ok
+  def execute_approved_action(_), do: :ok
 
   defp trigger_agent_hire(board_approval) do
     proposal_data = board_approval.proposal_data || %{}
