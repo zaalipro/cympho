@@ -4,6 +4,7 @@ defmodule Cympho.Skills.Sandbox.Audit do
   """
   alias Cympho.{Agents.Agent, Plugins.PluginLog, Repo}
   alias Cympho.Skills.Plugin
+  import Ecto.Query
 
   def log_decision(agent_id, agent_role, capability, result) do
     plugin_id = get_audit_plugin_id()
