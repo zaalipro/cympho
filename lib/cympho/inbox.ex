@@ -10,6 +10,10 @@ defmodule Cympho.Inbox do
     Phoenix.PubSub.subscribe(@pubsub, "#{@topic}:#{agent_id}")
   end
 
+  def unsubscribe(agent_id) do
+    Phoenix.PubSub.unsubscribe(@pubsub, "#{@topic}:#{agent_id}")
+  end
+
   defp broadcast_change(agent_id, msg) do
     Phoenix.PubSub.broadcast(@pubsub, "#{@topic}:#{agent_id}", msg)
   end
@@ -20,8 +24,18 @@ defmodule Cympho.Inbox do
 
   def list_inbox_for_agent(agent_id, opts \\ []) do
     status = Keyword.get(opts, :status)
-    query = from(s in InboxState, where: s.agent_id == ^agent_id, order_by: [desc: s.inserted_at])
-    query = if status && status != "", do: where(query, status: ^status), else: query
+    limit = Keyword.get(opts, :limit, 100)
+    offset = Keyword.get(opts, :offset, 0)
+
+    query =
+      from(s in InboxState,
+        where: s.agent_id == ^agent_id,
+        order_by: [desc: s.inserted_at],
+        limit: ^limit,
+        offset: ^offset
+      )
+
+    query = if status, do: where(query, status: ^status), else: query
     Repo.all(query) |> Repo.preload([:issue])
   end
 
@@ -94,21 +108,27 @@ defmodule Cympho.Inbox do
   end
 
   def ensure_inbox_entry(issue_id, agent_id) do
-    case get_inbox_state(issue_id, agent_id) do
-      nil ->
-        case %InboxState{}
-             |> InboxState.changeset(%{issue_id: issue_id, agent_id: agent_id, status: "unread"})
-             |> Repo.insert() do
-          {:ok, created} ->
-            broadcast_change(agent_id, {:inbox_created, created})
-            {:ok, created}
+    changeset =
+      %InboxState{}
+      |> InboxState.changeset(%{issue_id: issue_id, agent_id: agent_id, status: "unread"})
 
-          error ->
-            error
+    case Repo.insert(
+           changeset,
+           on_conflict: :nothing,
+           conflict_target: [:issue_id, :agent_id]
+         ) do
+      {:ok, _created} ->
+        case get_inbox_state(issue_id, agent_id) do
+          nil ->
+            {:error, :not_found}
+
+          state ->
+            broadcast_change(agent_id, {:inbox_created, state})
+            {:ok, state}
         end
 
-      existing ->
-        {:ok, existing}
+      {:error, changeset} ->
+        {:error, changeset}
     end
   end
 end

@@ -1,5 +1,7 @@
 import Config
 
+config :cympho, env: :test
+
 config :cympho, Cympho.Repo,
   username: System.get_env("TEST_DB_USER") || "paperclip",
   password: System.get_env("TEST_DB_PASSWORD") || "paperclip",
