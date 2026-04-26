@@ -238,29 +238,9 @@ defmodule Cympho.Skills.HotReloader do
   end
 
   defp find_plugin_by_identifier(%{"identifier" => identifier}) do
-    # Fallback: look up plugin by identifier alone and use its company_id
-    # This is safe in dev where plugin identifiers are typically unique
-    # In production with multi-tenant, manifests should include company_slug
-    query =
-      from p in Plugin,
-      where: p.identifier == ^identifier,
-      limit: 2,
-      select: {p.id, p.company_id}
-
-    case Repo.all(query) do
-      [] -> {:error, :plugin_not_found}
-      [{plugin_id, company_id}] ->
-        case Plugins.get_plugin_by_identifier(identifier, company_id) do
-          {:ok, plugin} -> {:ok, plugin}
-          error -> error
-        end
-      [_first, _second | _] ->
-        Logger.warning("Multiple plugins found with identifier #{identifier}, using first match. " <>
-                       "Consider adding company_slug to manifest for unambiguous lookup.")
-        # Use the first match
-        [{_plugin_id, company_id} | _] = Repo.all(query)
-        Plugins.get_plugin_by_identifier(identifier, company_id)
-    end
+    Logger.error("Manifest for #{identifier} is missing required 'company_slug' field. " <>
+                 "Cannot determine company context for hot-reload.")
+    {:error, {:missing_company_context, identifier}}
   end
 
   defp find_plugin_by_identifier(_), do: {:error, :missing_identifier}

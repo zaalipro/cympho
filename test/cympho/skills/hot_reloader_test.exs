@@ -36,6 +36,7 @@ defmodule Cympho.Skills.HotReloaderTest do
     # Write test manifest
     manifest = %{
       "identifier" => "test_skill",
+      "company_slug" => company.slug,
       "name" => "Test Skill",
       "description" => "A test skill for hot-reload",
       "version" => "1.0.0",
@@ -88,10 +89,11 @@ defmodule Cympho.Skills.HotReloaderTest do
       assert count >= 1
     end
 
-    test "updates plugin manifests in the database" do
+    test "updates plugin manifests in the database", %{company: company} do
       # Update the manifest file
       updated_manifest = %{
         "identifier" => "test_skill",
+        "company_slug" => company.slug,
         "name" => "Updated Test Skill",
         "description" => "Updated description",
         "version" => "1.1.0",
@@ -105,7 +107,7 @@ defmodule Cympho.Skills.HotReloaderTest do
       assert {:ok, _count} = HotReloader.reload_all()
 
       # Verify the database was updated
-      assert {:ok, plugin} = Plugins.get_plugin_by_identifier("test_skill", company_id_for_test())
+      assert {:ok, plugin} = Plugins.get_plugin_by_identifier("test_skill", company.id)
       assert plugin.manifest["name"] == "Updated Test Skill"
       assert plugin.manifest["version"] == "1.1.0"
     end
@@ -139,16 +141,27 @@ defmodule Cympho.Skills.HotReloaderTest do
       unknown_manifest = Path.join(@manifest_dir, "unknown.json")
       File.write!(unknown_manifest, Jason.encode!(%{"identifier" => "unknown_skill"}))
 
-      assert {:error, :plugin_not_found} = HotReloader.reload_manifest(unknown_manifest)
+      assert {:error, {:missing_company_context, "unknown_skill"}} = HotReloader.reload_manifest(unknown_manifest)
+    end
+
+    test "returns not_found for plugin with valid company_slug but non-existent identifier", %{company: company} do
+      unknown_manifest = Path.join(@manifest_dir, "unknown_with_company.json")
+      File.write!(unknown_manifest, Jason.encode!(%{
+        "identifier" => "nonexistent_skill",
+        "company_slug" => company.slug
+      }))
+
+      assert {:error, :not_found} = HotReloader.reload_manifest(unknown_manifest)
     end
   end
 
   describe "manifest file changes" do
-    test "hot-reloads when manifest file is modified" do
+    test "hot-reloads when manifest file is modified", %{company: company} do
       # This test would require more complex setup with actual file watching
       # For now, we test the manual reload which is what happens in the background
       updated_manifest = %{
         "identifier" => "test_skill",
+        "company_slug" => company.slug,
         "name" => "Hot Reloaded Skill",
         "description" => "This was hot-reloaded",
         "version" => "2.0.0",
@@ -165,10 +178,11 @@ defmodule Cympho.Skills.HotReloaderTest do
   end
 
   describe "error handling" do
-    test "falls back to last known good manifest on reload failure" do
+    test "falls back to last known good manifest on reload failure", %{company: company} do
       # Create a valid manifest
       valid_manifest = %{
         "identifier" => "test_skill",
+        "company_slug" => company.slug,
         "name" => "Valid Skill",
         "description" => "Valid description",
         "version" => "1.0.0",
@@ -189,18 +203,9 @@ defmodule Cympho.Skills.HotReloaderTest do
       assert {:error, :invalid_json} = HotReloader.reload_manifest(@test_manifest)
 
       # Database should still have the valid manifest
-      assert {:ok, plugin} = Plugins.get_plugin_by_identifier("test_skill", company_id_for_test())
+      assert {:ok, plugin} = Plugins.get_plugin_by_identifier("test_skill", company.id)
       assert plugin.manifest["version"] == "1.0.0"
     end
   end
 
-  defp company_id_for_test do
-    import Ecto.Query
-
-    from(c in Cympho.Companies.Company,
-      limit: 1,
-      select: c.id
-    )
-    |> Repo.one()
-  end
 end
