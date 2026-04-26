@@ -4,9 +4,7 @@ defmodule Cympho.RateLimiting.BroadcastDedupTest do
   alias Cympho.RateLimiting.BroadcastDedup
 
   setup do
-    if :ets.whereis(BroadcastDedup) != :undefined do
-      :ets.delete_all_objects(BroadcastDedup)
-    end
+    BroadcastDedup.reset()
     :ok
   end
 

@@ -12,28 +12,47 @@ defmodule Cympho.RateLimiting.IpRateLimiter do
   end
 
   def check_join(ip) do
-    now = System.monotonic_time(:millisecond)
+    GenServer.call(__MODULE__, {:check_join, ip})
+  end
 
-    case :ets.lookup(__MODULE__, ip) do
-      [{^ip, count, window_start}] when now - window_start < @window_ms ->
-        if count < @max_joins_per_second do
-          :ets.insert(__MODULE__, {ip, count + 1, window_start})
-          :ok
-        else
-          {:error, :rate_limited}
-        end
-
-      _ ->
-        :ets.insert(__MODULE__, {ip, 1, now})
-        :ok
-    end
+  @doc false
+  def reset do
+    GenServer.call(__MODULE__, :reset)
   end
 
   @impl true
   def init(_) do
-    table = :ets.new(__MODULE__, [:set, :named_table, :public, read_concurrency: true])
+    table = :ets.new(__MODULE__, [:set, :named_table])
     schedule_cleanup()
     {:ok, %{table: table}}
+  end
+
+  @impl true
+  def handle_call({:check_join, ip}, _from, state) do
+    now = System.monotonic_time(:millisecond)
+
+    result =
+      case :ets.lookup(state.table, ip) do
+        [{^ip, count, window_start}] when now - window_start < @window_ms ->
+          if count < @max_joins_per_second do
+            :ets.insert(state.table, {ip, count + 1, window_start})
+            :ok
+          else
+            {:error, :rate_limited}
+          end
+
+        _ ->
+          :ets.insert(state.table, {ip, 1, now})
+          :ok
+      end
+
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call(:reset, _from, state) do
+    :ets.delete_all_objects(state.table)
+    {:reply, :ok, state}
   end
 
   @impl true
@@ -44,14 +63,14 @@ defmodule Cympho.RateLimiting.IpRateLimiter do
     :ets.foldl(
       fn
         {ip, _count, window_start}, acc when window_start < threshold ->
-          :ets.delete(__MODULE__, ip)
+          :ets.delete(state.table, ip)
           acc
 
         _, acc ->
           acc
       end,
       :ok,
-      __MODULE__
+      state.table
     )
 
     schedule_cleanup()
