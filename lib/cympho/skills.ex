@@ -110,8 +110,8 @@ defmodule Cympho.Skills do
   """
   def remove_skill_from_agent(agent_id, plugin_id) do
     query =
-      from as in AgentSkill,
-      where: as.agent_id == ^agent_id and as.plugin_id == ^plugin_id
+      from agent_skill in AgentSkill,
+      where: agent_skill.agent_id == ^agent_id and agent_skill.plugin_id == ^plugin_id
 
     case Repo.one(query) do
       nil -> {:error, :not_found}
