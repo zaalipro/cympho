@@ -357,6 +357,15 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
+  def handle_info({:new_comment_on_read_issue, _issue_id, _comment_id}, socket) do
+    case Issues.get_issue(socket.assigns.issue.id) do
+      {:ok, issue} ->
+        {:noreply, assign(socket, :issue, issue)}
+      {:error, _} ->
+        {:noreply, socket}
+    end
+  end
+
   def handle_info({:interaction_created, interaction}, socket) do
     if socket.assigns.issue.id == interaction.issue_id do
       interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)

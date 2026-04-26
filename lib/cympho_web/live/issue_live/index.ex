@@ -4,10 +4,15 @@ defmodule CymphoWeb.IssueLive.Index do
   alias Cympho.Agents
   alias Cympho.Projects
   alias Cympho.Labels
+  alias Cympho.IssueReadStates
 
   @impl true
   def mount(_params, _session, socket) do
     Issues.subscribe()
+
+    if socket.assigns[:current_user] do
+      IssueReadStates.subscribe(socket.assigns.current_user.id)
+    end
 
     socket =
       socket
@@ -15,6 +20,7 @@ defmodule CymphoWeb.IssueLive.Index do
       |> assign(:agents, Agents.list_agents())
       |> assign(:projects, Projects.list_projects())
       |> assign(:labels, Labels.list_labels())
+      |> assign(:unread_issues, %{})
 
     {:ok, socket}
   end
@@ -22,6 +28,16 @@ defmodule CymphoWeb.IssueLive.Index do
   @impl true
   def handle_params(params, _url, socket) do
     paginated = Issues.list_issues_paginated(params)
+    current_user = socket.assigns[:current_user]
+
+    unread_issues =
+      if current_user do
+        Enum.into(paginated.issues, %{}, fn issue ->
+          {issue.id, IssueReadStates.has_unread?(current_user.id, issue.id)}
+        end)
+      else
+        %{}
+      end
 
     socket =
       socket
@@ -36,6 +52,7 @@ defmodule CymphoWeb.IssueLive.Index do
       |> assign(:current_assignee_id, params["assignee_id"] || "")
       |> assign(:current_project_id, params["project_id"] || "")
       |> assign(:current_label_id, params["label_id"] || "")
+      |> assign(:unread_issues, unread_issues)
 
     {:noreply, socket}
   end
@@ -44,6 +61,30 @@ defmodule CymphoWeb.IssueLive.Index do
   def handle_info({:issue_created, _issue}, socket), do: {:noreply, reload(socket)}
   def handle_info({:issue_updated, _issue}, socket), do: {:noreply, reload(socket)}
   def handle_info({:issue_deleted, _id}, socket), do: {:noreply, reload(socket)}
+
+  def handle_info({:issue_read_state_updated, issue_id}, socket) do
+    current_user = socket.assigns[:current_user]
+
+    if current_user do
+      has_unread = IssueReadStates.has_unread?(current_user.id, issue_id)
+      unread_issues = Map.put(socket.assigns.unread_issues, issue_id, has_unread)
+      {:noreply, assign(socket, :unread_issues, unread_issues)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:new_comment_on_read_issue, issue_id, _comment_id}, socket) do
+    current_user = socket.assigns[:current_user]
+
+    if current_user do
+      has_unread = IssueReadStates.has_unread?(current_user.id, issue_id)
+      unread_issues = Map.put(socket.assigns.unread_issues, issue_id, has_unread)
+      {:noreply, assign(socket, :unread_issues, unread_issues)}
+    else
+      {:noreply, socket}
+    end
+  end
 
   @impl true
   def handle_event("delete_issue", %{"id" => id}, socket) do
@@ -57,8 +98,7 @@ defmodule CymphoWeb.IssueLive.Index do
   end
 
   def handle_event("filter_priority", %{"priority" => priority}, socket) do
-    {:noreply,
-     push_patch(socket, to: build_url(socket, %{"priority" => priority, "page" => "1"}))}
+    {:noreply, push_patch(socket, to: build_url(socket, %{"priority" => priority, "page" => "1"}))}
   end
 
   def handle_event("search", %{"search" => search}, socket) do
@@ -66,18 +106,15 @@ defmodule CymphoWeb.IssueLive.Index do
   end
 
   def handle_event("filter_assignee", %{"assignee_id" => assignee_id}, socket) do
-    {:noreply,
-     push_patch(socket, to: build_url(socket, %{"assignee_id" => assignee_id, "page" => "1"}))}
+    {:noreply, push_patch(socket, to: build_url(socket, %{"assignee_id" => assignee_id, "page" => "1"}))}
   end
 
   def handle_event("filter_project", %{"project_id" => project_id}, socket) do
-    {:noreply,
-     push_patch(socket, to: build_url(socket, %{"project_id" => project_id, "page" => "1"}))}
+    {:noreply, push_patch(socket, to: build_url(socket, %{"project_id" => project_id, "page" => "1"}))}
   end
 
   def handle_event("filter_label", %{"label_id" => label_id}, socket) do
-    {:noreply,
-     push_patch(socket, to: build_url(socket, %{"label_id" => label_id, "page" => "1"}))}
+    {:noreply, push_patch(socket, to: build_url(socket, %{"label_id" => label_id, "page" => "1"}))}
   end
 
   def handle_event("change_page", %{"page" => page}, socket) do
@@ -100,11 +137,22 @@ defmodule CymphoWeb.IssueLive.Index do
     }
 
     paginated = Issues.list_issues_paginated(params)
+    current_user = socket.assigns[:current_user]
+
+    unread_issues =
+      if current_user do
+        Enum.into(paginated.issues, %{}, fn issue ->
+          {issue.id, IssueReadStates.has_unread?(current_user.id, issue.id)}
+        end)
+      else
+        %{}
+      end
 
     socket
     |> assign(:issues, paginated.issues)
     |> assign(:total, paginated.total)
     |> assign(:total_pages, paginated.total_pages)
+    |> assign(:unread_issues, unread_issues)
   end
 
   defp build_url(socket, overrides) do
