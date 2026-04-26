@@ -26,6 +26,8 @@ defmodule Cympho.Application do
       {Registry, keys: :unique, name: Cympho.PluginRegistry},
       Cympho.Plugins.Registry,
       {Cympho.Plugins.Supervisor, []},
+      # Skill hot-reload for development
+      {Cympho.Skills.HotReloader, []},
       CymphoWeb.Endpoint
     ]
 

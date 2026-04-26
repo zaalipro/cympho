@@ -24,6 +24,8 @@ config :cympho, dev_routes: true
 
 config :logger, :console, format: "[$level] $message\n"
 
+config :cympho, :skill_manifest_dir, "priv/skill_manifests"
+
 config :phoenix, :stacktrace_depth, 20
 
 config :phoenix, :plug_init_mode, :runtime

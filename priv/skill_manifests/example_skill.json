@@ -1,0 +1,8 @@
+{
+  "identifier": "example_skill",
+  "name": "Example Skill",
+  "description": "An example skill manifest for development hot-reload testing",
+  "version": "1.0.0",
+  "author": "Cympho Development",
+  "dependencies": {}
+}
