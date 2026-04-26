@@ -20,7 +20,7 @@ defmodule CymphoWeb.Live.CompanySwitcherHelper do
     # This requires a redirect to set the new session value
     {:noreply,
      socket
-     |> push_redirect(to: "/?company_id=#{company_id}")}
+     |> push_redirect(to: "/?company_id=#{URI.encode_www_form(company_id)}")}
   end
 
   @doc """

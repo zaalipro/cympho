@@ -70,6 +70,7 @@ defmodule CymphoWeb.Components.NavRail do
         nav_active_class(@to, @current_path)
       ]}
       data-nav-path={@to}
+      aria-current={if active_path?(@to, @current_path), do: "page", else: nil}
     >
       <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         {@icon}
