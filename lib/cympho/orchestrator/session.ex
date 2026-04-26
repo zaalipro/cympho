@@ -14,7 +14,8 @@ defmodule Cympho.Orchestrator.Session do
     tool_traces: %{},
     last_result: nil,
     last_error: nil,
-    last_output_time: nil
+    last_output_time: nil,
+    opts: []
   ]
 
   @type status :: :idle | :running | :failed | :completed

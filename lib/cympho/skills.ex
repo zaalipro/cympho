@@ -148,7 +148,6 @@ defmodule Cympho.Skills do
     |> Plugin.changeset(attrs)
     |> Repo.update()
   end
-end
 
   @doc """
   Returns available skills for an agent as a list of maps for LLM prompts.

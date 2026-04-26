@@ -52,19 +52,19 @@ defmodule Cympho.Adapters.CodexAdapter do
   end
 
   defp run_codex(prompt, config) do
-    codex_bin = find_codex_binary()
-    model = config[:model] || config["model"] || @default_model
-    timeout = config[:timeout] || config["timeout"] || @default_timeout
-
-    args = [
-      "--model", to_string(model),
-      "--format", "json",
-      "--quiet"
-    ]
-
-    env = build_env(config)
-
     try do
+      codex_bin = find_codex_binary()
+      model = config[:model] || config["model"] || @default_model
+      timeout = config[:timeout] || config["timeout"] || @default_timeout
+
+      args = [
+        "--model", to_string(model),
+        "--format", "json",
+        "--quiet"
+      ]
+
+      env = build_env(config)
+
       port = Port.open(
         {:spawn_executable, codex_bin},
         [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}]
