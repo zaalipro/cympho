@@ -57,11 +57,12 @@ defmodule Cympho.Adapters.ProcessAdapter do
           opts
         end
 
-      spawn(fn ->
+      # Spawn a long-lived process to manage the port and handle its messages
+      spawn_link(fn ->
         run_process(session_id, command, args, opts, recipient_pid, config)
       end)
 
-      {:ok, session_id}
+      {:ok, self()}
     end
   end
 
@@ -102,29 +103,19 @@ defmodule Cympho.Adapters.ProcessAdapter do
   defp run_process(session_id, command, args, opts, recipient_pid, config) do
     send(recipient_pid, {:session_started, session_id})
 
-    # Build the full command
-    full_cmd = build_full_command(command, args)
+    # Use spawn_executable with explicit args to avoid shell injection
+    # Convert command to charlist for Port.open
+    command_charlist = String.to_charlist(command)
 
-    port = Port.open({:spawn, full_cmd}, opts)
+    # Add args to port opts
+    opts_with_args = opts ++ [{:args, args}]
+
+    port = Port.open({:spawn_executable, command_charlist}, opts_with_args)
 
     timeout = config[:timeout] || config["timeout"] || 300_000
 
     wait_for_process(port, session_id, recipient_pid, timeout, <<>>)
   end
-
-  defp build_full_command(command, args) do
-    # Escape arguments properly for shell
-    escaped_args = Enum.map(args, fn arg -> escape_shell_arg(arg) end)
-    "#{command} #{Enum.join(escaped_args, " ")}"
-  end
-
-  defp escape_shell_arg(arg) when is_binary(arg) do
-    # Simple shell escaping - wrap in single quotes and escape single quotes
-    escaped = String.replace(arg, "'", "'\\''")
-    "'#{escaped}'"
-  end
-
-  defp escape_shell_arg(arg), do: escape_shell_arg(to_string(arg))
 
   defp wait_for_process(port, session_id, recipient_pid, timeout, acc) do
     receive do
