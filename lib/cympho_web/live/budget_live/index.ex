@@ -5,7 +5,7 @@ defmodule CymphoWeb.BudgetLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    Budgets.subscribe()
+    Budgets.subscribe(socket.assigns.current_company.id)
 
     {:ok,
      socket

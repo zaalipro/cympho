@@ -4,7 +4,7 @@ defmodule CymphoWeb.ApprovalLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    Approvals.subscribe()
+    Approvals.subscribe(socket.assigns.current_company.id)
 
     {:ok,
      assign(socket,

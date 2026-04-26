@@ -5,7 +5,7 @@ defmodule CymphoWeb.IssueLive.MyIssues do
 
   @impl true
   def mount(_params, _session, socket) do
-    Issues.subscribe()
+    Issues.subscribe(socket.assigns.current_company.id)
 
     {:ok,
      socket

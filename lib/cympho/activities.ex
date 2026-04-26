@@ -55,15 +55,18 @@ defmodule Cympho.Activities do
     {activities, total || 0}
   end
 
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "activities")
+  def subscribe(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:activities")
   end
 
   def log_activity(attrs) when is_map(attrs) do
     case %Activity{} |> Activity.changeset(attrs) |> Repo.insert() do
       {:ok, activity} ->
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "activities", {:activity_created, activity})
-        CymphoWeb.Endpoint.broadcast("activities:*", "activity_created", activity)
+        company_id = attrs[:company_id]
+        if company_id do
+          Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{company_id}:activities", {:activity_created, activity})
+        end
+        CymphoWeb.Endpoint.broadcast("company:#{company_id}:activities", "activity_created", activity)
         CymphoWeb.Endpoint.broadcast("issue:#{activity.issue_id}", "activity_created", activity)
         {:ok, activity}
 

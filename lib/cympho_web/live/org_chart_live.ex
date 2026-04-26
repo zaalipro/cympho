@@ -4,7 +4,7 @@ defmodule CymphoWeb.OrgChartLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    Agents.subscribe()
+    Agents.subscribe(socket.assigns.current_company.id)
 
     org_chart = Agents.get_org_chart()
 

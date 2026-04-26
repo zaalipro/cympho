@@ -224,8 +224,8 @@ defmodule Cympho.Documents do
     Phoenix.PubSub.broadcast(Cympho.PubSub, "documents", event)
   end
 
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "documents")
+  def subscribe(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:documents")
   end
 
   defp has_pending_approvals?(issue_id) do

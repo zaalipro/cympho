@@ -4,7 +4,7 @@ defmodule CymphoWeb.ProjectLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    Projects.subscribe()
+    Projects.subscribe(socket.assigns.current_company.id)
 
     case Projects.get_project(id) do
       {:ok, project} ->

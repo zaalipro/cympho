@@ -5,7 +5,7 @@ defmodule CymphoWeb.ActivityLive.DashboardComponent do
   @impl true
   def update(%{issue_id: issue_id} = assigns, socket) do
     if connected?(socket) do
-      Activities.subscribe()
+      Activities.subscribe(socket.assigns.current_company.id)
     end
 
     statistics = Activities.get_activity_statistics(issue_id)

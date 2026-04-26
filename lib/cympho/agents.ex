@@ -90,7 +90,7 @@ defmodule Cympho.Agents do
     |> Repo.insert()
     |> case do
       {:ok, agent} ->
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_created, agent})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{agent.company_id}:agents", {:agent_created, agent})
         {:ok, agent}
 
       {:error, changeset} ->
@@ -115,7 +115,7 @@ defmodule Cympho.Agents do
     |> Repo.update()
     |> case do
       {:ok, updated} ->
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_updated, updated})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:agents", {:agent_updated, updated})
         {:ok, updated}
 
       {:error, changeset} ->
@@ -140,7 +140,7 @@ defmodule Cympho.Agents do
     Repo.delete(agent)
     |> case do
       {:ok, _} ->
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_deleted, agent.id})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{agent.company_id}:agents", {:agent_deleted, agent.id})
         {:ok, agent}
 
       {:error, changeset} ->
@@ -158,8 +158,8 @@ defmodule Cympho.Agents do
   @doc """
   Subscribes to agent updates.
   """
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "agents")
+  def subscribe(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:agents")
   end
 
   @doc """
@@ -497,7 +497,7 @@ defmodule Cympho.Agents do
     |> Repo.update()
     |> case do
       {:ok, updated} ->
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "agents", {:agent_updated, updated})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:agents", {:agent_updated, updated})
         {:ok, updated}
 
       {:error, changeset} ->

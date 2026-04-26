@@ -6,7 +6,7 @@ defmodule CymphoWeb.ActivityLive.FeedComponent do
   def update(%{issue_id: issue_id} = assigns, socket) do
     if connected?(socket) do
       CymphoWeb.Endpoint.subscribe("issue:#{issue_id}")
-      Activities.subscribe()
+      Activities.subscribe(socket.assigns.current_company.id)
     end
 
     activities = Activities.list_activities(issue_id)

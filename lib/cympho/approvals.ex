@@ -72,7 +72,7 @@ defmodule Cympho.Approvals do
           })
         end)
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "approvals", {:approval_created, approval})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, scoped_topic(approval), {:approval_created, approval})
         {:ok, approval}
 
       {:error, _operation, changeset, _changes} ->
@@ -109,7 +109,7 @@ defmodule Cympho.Approvals do
           })
         end)
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "approvals", {:approval_resolved, updated})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, scoped_topic(updated), {:approval_resolved, updated})
         maybe_wake_agent(updated)
         {:ok, updated}
 
@@ -127,7 +127,7 @@ defmodule Cympho.Approvals do
       |> Repo.update()
       |> case do
         {:ok, updated} ->
-          Phoenix.PubSub.broadcast(Cympho.PubSub, "approvals", {:approval_cancelled, updated})
+          Phoenix.PubSub.broadcast(Cympho.PubSub, scoped_topic(updated), {:approval_cancelled, updated})
           {:ok, updated}
 
         {:error, changeset} ->
@@ -170,8 +170,16 @@ defmodule Cympho.Approvals do
     |> Repo.preload([:requested_by, :resolved_by, :issues])
   end
 
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "approvals")
+  def subscribe(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:approvals")
+  end
+
+  defp scoped_topic(%Approval{} = approval) do
+    approval = Repo.preload(approval, :issues)
+    case approval.issues do
+      [issue | _] -> "company:#{issue.company_id}:approvals"
+      [] -> "approvals"
+    end
   end
 
   defp maybe_wake_agent(%Approval{} = approval) do

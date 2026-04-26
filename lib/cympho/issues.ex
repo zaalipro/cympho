@@ -176,13 +176,14 @@ defmodule Cympho.Issues do
       {:ok, issue} ->
         Activities.log_activity(%{
           issue_id: issue.id,
+          company_id: issue.company_id,
           actor_type: Map.get(attrs, :actor_type, "system"),
           actor_id: Map.get(attrs, :actor_id),
           action: "created",
           metadata: %{title: issue.title}
         })
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_created, issue})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_created, issue})
         CymphoWeb.Events.broadcast_issue_update(issue, :issue_created)
         {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
@@ -217,7 +218,7 @@ defmodule Cympho.Issues do
     with {:ok, updated} <- do_update_issue(issue, attrs) do
       updated = Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])
       Activities.log_issue_changes(old_issue, updated, attrs)
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, updated})
+      Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:issues", {:issue_updated, updated})
 
       event_type = determine_update_event_type(old_issue, updated, attrs)
       CymphoWeb.Events.broadcast_issue_update(updated, event_type, build_update_metadata(old_issue, updated, attrs))
@@ -510,12 +511,13 @@ defmodule Cympho.Issues do
 
             Activities.log_activity(%{
               issue_id: blocked_issue.id,
+              company_id: blocked_issue.company_id,
               actor_type: "system",
               action: "blocker_added",
               metadata: %{blocker_id: blocker_issue.id}
             })
 
-            Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
+            Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_updated, issue})
             {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
           {:error, reason} ->
@@ -570,12 +572,13 @@ defmodule Cympho.Issues do
 
       Activities.log_activity(%{
         issue_id: blocked_issue.id,
+        company_id: blocked_issue.company_id,
         actor_type: "system",
         action: "blocker_removed",
         metadata: %{blocker_id: blocker_issue.id}
       })
 
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_updated, issue})
+      Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_updated, issue})
       {:ok, issue}
     end
   end
@@ -586,7 +589,7 @@ defmodule Cympho.Issues do
     case Repo.delete(issue) do
       {:ok, _issue} ->
         Approvals.cancel_pending_for_issue(issue.id)
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "issues", {:issue_deleted, issue.id})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_deleted, issue.id})
         :ok
 
       {:error, changeset} ->
@@ -808,8 +811,8 @@ defmodule Cympho.Issues do
     base
   end
 
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "issues")
+  def subscribe(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:issues")
   end
 
   def change_issue(%Issue{} = issue, attrs \\ %{}) do

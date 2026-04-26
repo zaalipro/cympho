@@ -4,7 +4,7 @@ defmodule CymphoWeb.AgentLive.Index do
 
   @impl true
   def mount(_params, session, socket) do
-    Agents.subscribe()
+    Agents.subscribe(socket.assigns.current_company.id)
 
     current_agent = session["current_agent"]
     full_agent = current_agent && Agents.get_agent(current_agent.id) |> then(fn {:ok, a} -> a end)

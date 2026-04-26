@@ -5,7 +5,7 @@ defmodule CymphoWeb.AgentLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    Agents.subscribe()
+    Agents.subscribe(socket.assigns.current_company.id)
 
     case Agents.get_agent(id) do
       {:ok, agent} ->

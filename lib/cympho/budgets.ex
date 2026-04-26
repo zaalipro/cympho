@@ -123,7 +123,7 @@ defmodule Cympho.Budgets do
           }
         )
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "budgets", {:budget_created, budget})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{budget.company_id}:budgets", {:budget_created, budget})
         {:ok, budget}
 
       error ->
@@ -174,7 +174,7 @@ defmodule Cympho.Budgets do
           }
         )
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "budgets", {:budget_updated, updated})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:budgets", {:budget_updated, updated})
         {:ok, updated}
 
       error ->
@@ -214,7 +214,7 @@ defmodule Cympho.Budgets do
           remaining: Budget.available_amount(updated)
         })
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "budgets", {:budget_spent, updated})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:budgets", {:budget_spent, updated})
         {:ok, updated}
 
       error ->
@@ -274,7 +274,7 @@ defmodule Cympho.Budgets do
           }
         )
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "budgets", {:budget_deleted, deleted})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{deleted.company_id}:budgets", {:budget_deleted, deleted})
         {:ok, deleted}
 
       error ->
@@ -285,8 +285,8 @@ defmodule Cympho.Budgets do
   @doc """
   Subscribes to budget events.
   """
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "budgets")
+  def subscribe(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:budgets")
   end
 
   defp get_active_budget(scope_type, scope_id) do
@@ -320,7 +320,7 @@ defmodule Cympho.Budgets do
 
       Phoenix.PubSub.broadcast(
         Cympho.PubSub,
-        "budgets",
+        "company:#{budget.company_id}:budgets",
         {:budget_threshold_reached, budget}
       )
     end
@@ -340,7 +340,7 @@ defmodule Cympho.Budgets do
         }
       )
 
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "budgets", {:budget_hard_stop, budget})
+      Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{budget.company_id}:budgets", {:budget_hard_stop, budget})
     end
   end
 
