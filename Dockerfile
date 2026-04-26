@@ -1,7 +1,4 @@
-FROM elixir:1.16-alpine
-
-# Install Erlang runtime
-RUN apt-get update && apt-get install -y erlang && rm -rf /var/lib/apt/lists/*
+FROM elixir:1.19.5-otp-28-alpine
 
 WORKDIR /app
 
@@ -17,7 +14,7 @@ COPY config config
 RUN mix release
 
 # Final image
-FROM alpine:3.19
+FROM alpine:3.21
 RUN apk add --no-cache bash openssl
 WORKDIR /app
 COPY --from=0 /app/_build/prod/rel/cympho .
