@@ -75,9 +75,9 @@ defmodule Cympho.Adapters.ProcessAdapter do
     issue_json = Jason.encode!(%{
       id: issue.id,
       title: issue.title,
-      description: issue.description,
-      status: issue.status,
-      priority: issue.priority,
+      description: Map.get(issue, :description),
+      status: Map.get(issue, :status),
+      priority: Map.get(issue, :priority),
       agent_id: agent_id
     })
 
@@ -94,7 +94,9 @@ defmodule Cympho.Adapters.ProcessAdapter do
         {to_string(k), to_string(v)}
       end)
 
-    base_env ++ custom_env_list
+    # Convert to charlist format for Port.open
+    (base_env ++ custom_env_list)
+    |> Enum.map(fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
   end
 
   defp run_process(session_id, command, args, opts, recipient_pid, config) do
