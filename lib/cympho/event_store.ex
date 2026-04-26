@@ -25,7 +25,7 @@ defmodule Cympho.EventStore do
   def fetch_since(topic, nil, limit), do: GenServer.call(__MODULE__, {:fetch_latest, topic, limit})
   def fetch_since(topic, last_event_id, limit), do: GenServer.call(__MODULE__, {:fetch_since, topic, last_event_id, limit})
 
-  def count(topic), do: :ets.match_count(@table, {:_, topic, :_, :_})
+  def count(topic), do: length(:ets.match_object(@table, {:_, topic, :_, :_}))
 
   def purge_old(ttl_ms \\ 300_000), do: GenServer.call(__MODULE__, {:purge_old, ttl_ms})
 

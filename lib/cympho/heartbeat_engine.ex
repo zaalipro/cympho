@@ -104,7 +104,7 @@ defmodule Cympho.HeartbeatEngine do
   """
   @spec cancel_run(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t()}
   def cancel_run(%Run{status: status} = run) when status in ~w(pending running) do
-    now = DateTime.utc_now()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     run
     |> change(%{status: "cancelled", completed_at: now, last_heartbeat_at: now})
@@ -318,7 +318,10 @@ defmodule Cympho.HeartbeatEngine do
     |> Repo.update()
   end
 
-  defp tap_ok({:ok, val}, fun), do: {:ok, fun.(val)}
+  defp tap_ok({:ok, val}, fun) do
+    fun.(val)
+    {:ok, val}
+  end
   defp tap_ok({:error, _} = err, _fun), do: err
 
   defp change(%Run{} = run, attrs), do: Ecto.Changeset.change(run, attrs)
