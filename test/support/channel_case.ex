@@ -37,6 +37,8 @@ defmodule CymphoWeb.ChannelCase do
 
   setup tags do
     Cympho.DataCase.setup_sandbox(tags)
+    Cympho.RateLimiting.IpRateLimiter.reset()
+    Cympho.RateLimiting.BroadcastDedup.reset()
     :ok
   end
 end
