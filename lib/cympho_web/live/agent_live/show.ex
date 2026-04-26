@@ -4,6 +4,10 @@ defmodule CymphoWeb.AgentLive.Show do
   alias Cympho.Wakes
 
   @impl true
+  def mount(%{"id" => "new"}, _session, socket) do
+    {:ok, push_navigate(socket, to: ~p"/agents")}
+  end
+
   def mount(%{"id" => id}, _session, socket) do
     if connected?(socket) && socket.assigns[:current_company] do
       Agents.subscribe(socket.assigns.current_company.id)
