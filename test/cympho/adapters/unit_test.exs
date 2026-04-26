@@ -276,11 +276,11 @@ defmodule Cympho.Adapters.UnitTest do
       }
       agent_id = "agent-456"
 
-      # Use a shell command that prints the environment variable
+      # Use /bin/echo to test basic process spawning with environment variables
       parent = self()
       config = %{
-        command: "sh",
-        args: ["-c", "echo $ISSUE_PAYLOAD"]
+        command: "/bin/echo",
+        args: ["test"]
       }
 
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
@@ -290,9 +290,26 @@ defmodule Cympho.Adapters.UnitTest do
       assert_receive {:session_started, ^ref}
       assert_receive {:turn_completed, ^ref, result}
 
+      # Verify basic output works
+      assert result.output =~ "test"
+
+      # Now test with environment variable using a simple shell script
+      parent = self()
+      config = %{
+        command: "/bin/sh",
+        args: ["-c", "echo ${ISSUE_PAYLOAD}"]
+      }
+
+      ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
+
+      assert_receive {:session_started, ^ref}
+      assert_receive {:turn_completed, ^ref, result}
+
       # Verify that issue payload was passed in JSON format
-      assert result.output =~ "ISSUE-123"
-      assert result.output =~ "Test Issue"
+      # The output is valid JSON, so it's returned as a map
+      assert is_map(result)
+      assert result["id"] == "ISSUE-123"
+      assert result["title"] == "Test Issue"
     end
 
     test "run/4 handles JSON output" do
