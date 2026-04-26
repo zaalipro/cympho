@@ -13,8 +13,8 @@ defmodule Cympho.Skills.ResolverTest do
       %{company: company, agent: agent}
     end
 
-    test "returns error for agent with no skills", %{agent: agent} do
-      assert {:error, :no_skills} = Resolver.resolve(agent.id)
+    test "returns error for agent with no skills", %{company: company, agent: agent} do
+      assert {:error, :no_skills} = Resolver.resolve(agent.id, company.id)
     end
 
     test "returns error for invalid ID type" do
@@ -40,7 +40,7 @@ defmodule Cympho.Skills.ResolverTest do
 
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: plugin.id})
 
-      assert {:ok, [resolved_plugin]} = Resolver.resolve(agent.id)
+      assert {:ok, [resolved_plugin]} = Resolver.resolve(agent.id, company.id)
       assert resolved_plugin.id == plugin.id
     end
 
@@ -80,7 +80,7 @@ defmodule Cympho.Skills.ResolverTest do
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: base_plugin.id})
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: derived_plugin.id})
 
-      assert {:ok, [base, derived]} = Resolver.resolve(agent.id)
+      assert {:ok, [base, derived]} = Resolver.resolve(agent.id, company.id)
       assert base.identifier == "base-skill"
       assert derived.identifier == "derived-skill"
     end
@@ -121,7 +121,7 @@ defmodule Cympho.Skills.ResolverTest do
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: plugin_a.id})
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: plugin_b.id})
 
-      assert {:error, :circular_dependency, _path} = Resolver.resolve(agent.id)
+      assert {:error, :circular_dependency, _path} = Resolver.resolve(agent.id, company.id)
     end
 
     test "caches resolved skills", %{company: company, agent: agent} do
@@ -143,10 +143,10 @@ defmodule Cympho.Skills.ResolverTest do
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: plugin.id})
 
       # First call resolves
-      assert {:ok, [_]} = Resolver.resolve(agent.id)
+      assert {:ok, [_]} = Resolver.resolve(agent.id, company.id)
 
       # Second call uses cache
-      assert {:ok, [_]} = Resolver.resolve(agent.id)
+      assert {:ok, [_]} = Resolver.resolve(agent.id, company.id)
     end
   end
 
@@ -174,16 +174,16 @@ defmodule Cympho.Skills.ResolverTest do
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: plugin.id})
 
       # Warm the cache
-      {:ok, _} = Resolver.resolve(agent.id)
+      {:ok, _} = Resolver.resolve(agent.id, company.id)
 
-      %{agent: agent, plugin: plugin}
+      %{company: company, agent: agent, plugin: plugin}
     end
 
-    test "invalidates cached resolution", %{agent: agent} do
+    test "invalidates cached resolution", %{company: company, agent: agent} do
       assert :ok = Resolver.invalidate(agent.id)
 
       # Cache is cleared, but re-resolution should still work
-      assert {:ok, [_]} = Resolver.resolve(agent.id)
+      assert {:ok, [_]} = Resolver.resolve(agent.id, company.id)
     end
 
     test "returns error for invalid ID type" do
@@ -216,7 +216,7 @@ defmodule Cympho.Skills.ResolverTest do
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: plugin.id})
 
       # Warm the cache
-      {:ok, _} = Resolver.resolve(agent.id)
+      {:ok, _} = Resolver.resolve(agent.id, company.id)
 
       :ok
     end
@@ -273,7 +273,7 @@ defmodule Cympho.Skills.ResolverTest do
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: plugin.id})
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: dep.id})
 
-      assert {:ok, [^dep, ^plugin]} = Resolver.resolve(agent.id)
+      assert {:ok, [^dep, ^plugin]} = Resolver.resolve(agent.id, company.id)
     end
 
     test "resolves caret version requirement", %{company: company, agent: agent} do
@@ -311,7 +311,7 @@ defmodule Cympho.Skills.ResolverTest do
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: plugin.id})
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: dep.id})
 
-      assert {:ok, [^dep, ^plugin]} = Resolver.resolve(agent.id)
+      assert {:ok, [^dep, ^plugin]} = Resolver.resolve(agent.id, company.id)
     end
 
     test "resolves tilde version requirement", %{company: company, agent: agent} do
@@ -349,7 +349,7 @@ defmodule Cympho.Skills.ResolverTest do
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: plugin.id})
       Repo.insert(%AgentSkill{agent_id: agent.id, plugin_id: dep.id})
 
-      assert {:ok, [^dep, ^plugin]} = Resolver.resolve(agent.id)
+      assert {:ok, [^dep, ^plugin]} = Resolver.resolve(agent.id, company.id)
     end
   end
 end

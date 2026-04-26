@@ -112,6 +112,44 @@ defmodule Cympho.HeartbeatEngineTest do
       assert {:ok, cancelled} = HeartbeatEngine.cancel_run(run)
       assert cancelled.status == "cancelled"
     end
+
+    test "broadcasts run_cancelled via PubSub" do
+      company_id = Ecto.UUID.generate()
+      issue_id = Ecto.UUID.generate()
+      agent_id = Ecto.UUID.generate()
+
+      Cympho.Repo.insert!(%Cympho.Companies.Company{
+        id: company_id,
+        name: "Test Co",
+        slug: "test-co-#{:rand.uniform(100_000)}"
+      })
+
+      Cympho.Repo.insert!(%Cympho.Issues.Issue{
+        id: issue_id,
+        title: "Test",
+        company_id: company_id
+      })
+
+      insert_agent(agent_id)
+
+      {:ok, run} =
+               HeartbeatEngine.create_run(%{
+                 agent_id: agent_id,
+                 issue_id: issue_id,
+                 adapter: "claude_local"
+               })
+
+      Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:runs")
+
+      assert {:ok, _cancelled} = HeartbeatEngine.cancel_run(run)
+
+      assert_received {:run_status_changed,
+                       %{
+                         event_type: :run_cancelled,
+                         new_status: "cancelled",
+                         old_status: "pending"
+                       }}
+    end
   end
 
   describe "record_heartbeat/1" do

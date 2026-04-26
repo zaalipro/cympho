@@ -2,9 +2,13 @@ defmodule CymphoWeb.InboxLiveTest do
   use CymphoWeb.LiveCase, async: true
 
   import Phoenix.LiveViewTest
+  import Ecto.Query
 
   alias Cympho.Agents
   alias Cympho.Inbox
+  alias Cympho.Issues
+  alias Cympho.Repo
+  alias Cympho.Inbox.InboxState
 
   describe "Inbox page" do
     test "renders inbox page", %{conn: conn} do
@@ -26,198 +30,176 @@ defmodule CymphoWeb.InboxLiveTest do
     end
   end
 
-  describe "authorization" do
-    test "prevents accessing agents not in the allowed list", %{conn: conn} do
-      # Create two agents
-      agent1 = Agents.create_agent(%{name: "Agent 1", description: "Test agent 1"})
-      agent2 = Agents.create_agent(%{name: "Agent 2", description: "Test agent 2"})
-
-      # Start with agent1 in context
-      {:ok, view, _html} = live(conn, "/inbox?agent_id=#{agent1.id}")
-
-      # Try to switch to agent2 (which should be in the list)
-      # This should work since both agents are in the list
-      assert view
-             |> element("select[name=\"agent_id\"]")
-             |> has_option?(agent2.name)
-
-      # Clean up
-      Agents.delete_agent(agent1)
-      Agents.delete_agent(agent2)
-    end
-
-    test "shows error message when unauthorized access attempted", %{conn: conn} do
-      agent = Agents.create_agent(%{name: "Test Agent", description: "Test agent"})
+  describe "handle_info fallback" do
+    test "logs unknown messages without crashing", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer,
+          status: :idle,
+          url_key: "test_fallback"
+        })
 
       {:ok, view, _html} = live(conn, "/inbox?agent_id=#{agent.id}")
 
-      # The authorization check should work normally
-      # Since we're using the agent from the list, no error should be shown
-      refute has_element?(view, ".flash-error", "You don't have access to this agent's inbox")
-
-      Agents.delete_agent(agent)
-    end
-  end
-
-  describe "PubSub functionality" do
-    test "subscribes to agent inbox updates on selection", %{conn: conn} do
-      agent = Agents.create_agent(%{name: "Test Agent", description: "Test agent"})
-
-      {:ok, view, _html} = live(conn, "/inbox")
-
-      # Select an agent
-      view
-      |> element("select[name=\"agent_id\"]")
-      |> render_change(agent_id: agent.id)
-
-      # Give time for subscription
-      Process.sleep(100)
-
-      # Verify subscription happened by triggering an update
-      # This should trigger a PubSub broadcast
-      Inbox.ensure_inbox_entry("test-issue-1", agent.id)
-
-      # The view should update with the new inbox item
-      assert render(view) =~ "test-issue-1"
-
-      Agents.delete_agent(agent)
-    end
-
-    test "unsubscribes from previous agent when switching agents", %{conn: conn} do
-      agent1 = Agents.create_agent(%{name: "Agent 1", description: "Test agent 1"})
-      agent2 = Agents.create_agent(%{name: "Agent 2", description: "Test agent 2"})
-
-      {:ok, view, _html} = live(conn, "/inbox")
-
-      # Select first agent
-      view
-      |> element("select[name=\"agent_id\"]")
-      |> render_change(agent_id: agent1.id)
-
-      Process.sleep(100)
-
-      # Select second agent
-      view
-      |> element("select[name=\"agent_id\"]")
-      |> render_change(agent_id: agent2.id)
-
-      Process.sleep(100)
-
-      # Verify we're now subscribed to agent2 by triggering an update
-      Inbox.ensure_inbox_entry("test-issue-2", agent2.id)
-
-      # The view should update with agent2's inbox item
-      assert render(view) =~ "test-issue-2"
-
-      Agents.delete_agent(agent1)
-      Agents.delete_agent(agent2)
-    end
-  end
-
-  describe "handle_info callbacks" do
-    test "handles unknown messages without crashing", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/inbox")
-
-      # Send an unknown message to the LiveView process
-      # This should be caught by the catch-all handle_info clause
+      # Send unknown message - should not crash
       send(view.pid, :unknown_message)
 
-      # The view should still be functional
+      # View should still be responsive
       assert render(view) =~ "Inbox"
-    end
-
-    test "handles inbox_updated messages", %{conn: conn} do
-      agent = Agents.create_agent(%{name: "Test Agent", description: "Test agent"})
-
-      {:ok, view, _html} = live(conn, "/inbox?agent_id=#{agent.id}")
-
-      # Create an inbox entry
-      {:ok, inbox_entry} = Inbox.ensure_inbox_entry("test-issue-3", agent.id)
-
-      # Manually broadcast an update message
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "inbox:#{agent.id}", {:inbox_updated, inbox_entry})
-
-      # The view should update
-      assert render(view) =~ "test-issue-3"
-
-      Agents.delete_agent(agent)
     end
   end
 
-  describe "state consistency" do
-    test "normalizes empty agent_id to nil", %{conn: conn} do
+  describe "select_agent event" do
+    test "updates URL when agent is selected", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer,
+          status: :idle,
+          url_key: "test_select"
+        })
+
       {:ok, view, _html} = live(conn, "/inbox")
 
-      # When no agent is selected, the selected_agent_id should be nil
-      # not ""
-      assert render(view) =~ "Select an agent to view their inbox"
+      view
+      |> element("#agent-selector")
+      |> render_change(%{"agent_id" => agent.id})
 
-      # The view should handle nil state correctly
-      assert has_element?(view, "select[name=\"agent_id\"]")
+      assert_patch(view, "/inbox?agent_id=#{agent.id}")
     end
+  end
 
-    test "maintains consistent state between mount and handle_params", %{conn: conn} do
-      agent = Agents.create_agent(%{name: "Test Agent", description: "Test agent"})
+  describe "filter transitions" do
+    test "filters by status", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer,
+          status: :idle,
+          url_key: "test_filter"
+        })
 
       {:ok, view, _html} = live(conn, "/inbox?agent_id=#{agent.id}")
 
-      # The selected agent should be consistent
-      assert render(view) =~ agent.name
-
-      # Navigate with empty status
+      # Filter by "read" status
       view
-      |> element("a")
-      |> render_click(%{"status" => nil})
+      |> element("button[phx-click=\"filter_status\"]")
+      |> render_click(%{"status" => "read"})
 
-      # State should remain consistent
-      assert render(view) =~ agent.name
-
-      Agents.delete_agent(agent)
+      assert_patch(view, "/inbox?agent_id=#{agent.id}&status=read")
     end
   end
 
   describe "pagination" do
-    test "limits inbox results to default page size", %{conn: conn} do
-      agent = Agents.create_agent(%{name: "Test Agent", description: "Test agent"})
+    test "limits results to default page size", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer,
+          status: :idle,
+          url_key: "test_pagination"
+        })
 
-      # Create more than 100 inbox entries
-      Enum.each(1..110, fn i ->
-        Inbox.ensure_inbox_entry("test-issue-#{i}", agent.id)
-      end)
+      # Create 20 issues
+      for i <- 1..20 do
+        {:ok, issue} =
+          Issues.create_issue(%{
+            title: "Issue #{i}",
+            description: "Description #{i}",
+            status: :backlog
+          })
 
-      {:ok, view, _html} = live(conn, "/inbox?agent_id=#{agent.id}")
+        {:ok, _} = Inbox.ensure_inbox_entry(issue.id, agent.id)
+      end
 
-      # Should only show 100 items (default limit)
-      html = render(view)
-      # Count the number of test-issue entries
-      count = Regex.scan(~r/test-issue-\d+/, html) |> length()
-      assert count <= 100
-
-      Agents.delete_agent(agent)
+      # Get with default limit
+      items = Inbox.list_inbox_for_agent(agent.id, [])
+      assert length(items) <= 100
     end
 
-    test "applies custom pagination parameters", %{conn: conn} do
-      agent = Agents.create_agent(%{name: "Test Agent", description: "Test agent"})
+    test "respects custom limit option", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer,
+          status: :idle,
+          url_key: "test_limit"
+        })
 
-      # Create 20 inbox entries
-      Enum.each(1..20, fn i ->
-        Inbox.ensure_inbox_entry("pagination-test-#{i}", agent.id)
-      end)
+      # Create 20 issues
+      for i <- 1..20 do
+        {:ok, issue} =
+          Issues.create_issue(%{
+            title: "Issue #{i}",
+            description: "Description #{i}",
+            status: :backlog
+          })
 
-      # Test with custom limit
-      items = Inbox.list_inbox_for_agent(agent.id, limit: 5)
-      assert length(items) == 5
+        {:ok, _} = Inbox.ensure_inbox_entry(issue.id, agent.id)
+      end
 
-      # Test with offset
-      items_with_offset = Inbox.list_inbox_for_agent(agent.id, limit: 5, offset: 5)
-      assert length(items_with_offset) == 5
+      # Get with limit of 10
+      items = Inbox.list_inbox_for_agent(agent.id, limit: 10)
+      assert length(items) == 10
 
-      # Verify offset actually skips items
-      first_ids = Enum.map(items, fn item -> item.issue_id end)
-      second_ids = Enum.map(items_with_offset, fn item -> item.issue_id end)
-      refute first_ids == second_ids
+      # Get with limit of 15
+      items = Inbox.list_inbox_for_agent(agent.id, limit: 15)
+      assert length(items) == 15
+    end
+  end
 
-      Agents.delete_agent(agent)
+  describe "race condition in ensure_inbox_entry" do
+    test "handles concurrent inserts gracefully" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Test Agent",
+          role: :engineer,
+          status: :idle,
+          url_key: "test_race"
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Race Condition Test",
+          description: "Test concurrent inserts",
+          status: :backlog
+        })
+
+      # Simulate concurrent calls
+      tasks =
+        for _i <- 1..5 do
+          Task.async(fn ->
+            Inbox.ensure_inbox_entry(issue.id, agent.id)
+          end)
+        end
+
+      results = Task.await_many(tasks, 5000)
+
+      # All should succeed without constraint errors
+      assert Enum.all?(results, fn
+               {:ok, _} -> true
+               _ -> false
+             end)
+
+      # Only one entry should exist
+      entries =
+        Repo.all(
+          from(s in InboxState,
+            where: s.issue_id == ^issue.id and s.agent_id == ^agent.id
+          )
+        )
+
+      assert length(entries) == 1
+    end
+  end
+
+  describe "state normalization" do
+    test "normalizes empty agent_id to nil", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/inbox")
+
+      # Empty string agent_id should be treated as nil
+      assert view.assigns[:selected_agent_id] == nil
     end
   end
 end

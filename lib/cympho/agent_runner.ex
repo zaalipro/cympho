@@ -28,7 +28,7 @@ defmodule Cympho.AgentRunner do
     resume? = opts[:resume] || false
     stall_timeout = opts[:stall_timeout] || @stall_timeout
 
-    cmd = build_claude_command(issue, agent_id, resume?)
+    cmd = build_claude_command(issue, agent_id, resume?, opts)
 
     spawn(fn ->
       do_run(session_id, cmd, cwd, recipient_pid, stall_timeout)
@@ -47,7 +47,7 @@ defmodule Cympho.AgentRunner do
       "--no-input"
     ]
 
-    prompt = build_prompt(issue)
+    prompt = build_prompt(issue, opts)
 
     args =
       if resume? do

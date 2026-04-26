@@ -45,6 +45,7 @@ defmodule CymphoWeb.CompanyChannel do
     case String.split(rest, ":", parts: 2) do
       [company_id] ->
         if socket.assigns.company_id == company_id do
+          socket = assign_last_event_id(socket, payload)
           send(self(), :after_join)
           {:ok, socket}
         else
@@ -62,6 +63,7 @@ defmodule CymphoWeb.CompanyChannel do
 
   @impl true
   def handle_info(:after_join, socket) do
+    socket = maybe_replay_events(socket)
     {:noreply, socket}
   end
 
@@ -76,12 +78,14 @@ defmodule CymphoWeb.CompanyChannel do
     end
   end
 
+  # Phoenix serializes handle_in calls per socket process, so
+  # check_heartbeat_throttle/1 does not need its own concurrency guard.
   @impl true
   def handle_in("heartbeat", payload, socket) do
     with {:ok, socket} <- RateLimiting.check_heartbeat_throttle(socket),
          {:ok, socket} <- RateLimiting.check_message_rate(socket) do
       broadcast(socket, "heartbeat", payload)
-      {:noreply, socket}
+      {:reply, :ok, socket}
     else
       {:error, :rate_limited} ->
         {:reply, {:error, %{reason: "rate_limited"}}, socket}
@@ -98,6 +102,26 @@ defmodule CymphoWeb.CompanyChannel do
         {:reply, {:error, %{reason: "rate_limited"}}, socket}
     end
   end
+
+  defp assign_last_event_id(socket, %{"last_event_id" => last_id}) when is_integer(last_id) do
+    Phoenix.Socket.assign(socket, :last_event_id, last_id)
+  end
+
+  defp assign_last_event_id(socket, _payload), do: socket
+
+  defp maybe_replay_events(%{assigns: %{last_event_id: last_id}} = socket) do
+    case Cympho.EventStore.fetch_since(socket.topic, last_id) do
+      {:ok, events} ->
+        for event <- events, do: push(socket, "replay", event)
+        socket
+
+      {:error, :replay_window_expired} ->
+        push(socket, "replay_expired", %{reason: "replay_window_expired"})
+        socket
+    end
+  end
+
+  defp maybe_replay_events(socket), do: socket
 
   defp dispatch_sub_topic(topic, "activities", _payload, socket) do
     CymphoWeb.ActivityChannel.join(topic, %{}, socket)

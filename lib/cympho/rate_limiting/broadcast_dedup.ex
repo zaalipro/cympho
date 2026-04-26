@@ -12,32 +12,48 @@ defmodule Cympho.RateLimiting.BroadcastDedup do
 
   def should_broadcast?(topic, event, payload) do
     key = {topic, event, :erlang.phash2(payload)}
-    check_and_mark(key)
+    GenServer.call(__MODULE__, {:check_and_mark, key})
   end
 
   def should_broadcast_pubsub?(topic, message) do
     key = {:pubsub, topic, :erlang.phash2(message)}
-    check_and_mark(key)
+    GenServer.call(__MODULE__, {:check_and_mark, key})
   end
 
-  defp check_and_mark(key) do
-    now = System.monotonic_time(:millisecond)
-
-    case :ets.lookup(__MODULE__, key) do
-      [{^key, expires_at}] when expires_at > now ->
-        false
-
-      _ ->
-        :ets.insert(__MODULE__, {key, now + @dedup_window_ms})
-        true
-    end
+  @doc false
+  def reset do
+    GenServer.call(__MODULE__, :reset)
   end
 
   @impl true
   def init(_) do
-    table = :ets.new(__MODULE__, [:set, :named_table, :public, read_concurrency: true])
+    table = :ets.new(__MODULE__, [:set, :named_table])
     schedule_cleanup()
     {:ok, %{table: table}}
+  end
+
+  @impl true
+  def handle_call({:check_and_mark, key}, _from, state) do
+    now = System.monotonic_time(:millisecond)
+    expires_at = now + @dedup_window_ms
+
+    result =
+      case :ets.lookup(state.table, key) do
+        [{^key, existing_expires}] when existing_expires > now ->
+          false
+
+        _ ->
+          :ets.insert(state.table, {key, expires_at})
+          true
+      end
+
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call(:reset, _from, state) do
+    :ets.delete_all_objects(state.table)
+    {:reply, :ok, state}
   end
 
   @impl true
@@ -47,14 +63,14 @@ defmodule Cympho.RateLimiting.BroadcastDedup do
     :ets.foldl(
       fn
         {key, expires_at}, acc when expires_at <= now ->
-          :ets.delete(__MODULE__, key)
+          :ets.delete(state.table, key)
           acc
 
         _, acc ->
           acc
       end,
       :ok,
-      __MODULE__
+      state.table
     )
 
     schedule_cleanup()
