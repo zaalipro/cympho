@@ -159,13 +159,15 @@ defmodule Cympho.Skills do
       plugins = list_skills_for_agent(agent_id)
 
       Enum.map(plugins, fn plugin ->
+        manifest = plugin.manifest || %{}
+
         %{
           identifier: plugin.identifier,
           name: plugin.name,
           version: plugin.version || "0.0.0",
           capabilities: plugin.capabilities || [],
           description: plugin.description,
-          entrypoint: plugin.entrypoint
+          entrypoint: Map.get(manifest, "entrypoint")
         }
       end)
     rescue
