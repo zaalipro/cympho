@@ -69,7 +69,7 @@ defmodule Cympho.AgentRunner do
     ~s(bash -c '#{claude_cmd}' << 'PROMPT'\n#{prompt}\nPROMPT)
   end
 
-  defp build_prompt(issue, opts \\ []) do
+  def build_prompt(issue, opts \\ []) do
     skills = Keyword.get(opts, :skills, [])
 
     base_prompt = """
