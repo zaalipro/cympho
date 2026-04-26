@@ -223,6 +223,8 @@ defmodule CymphoWeb.Router do
 
     get "/agents/:id/inbox", AgentController, :inbox
     patch "/agents/:id/status", AgentController, :update_status
+    get "/agents/:id/health", AgentController, :health_status
+    get "/agents/health", AgentController, :all_health_statuses
 
     get "/issues/:issue_id/attachments", AttachmentController, :index
     post "/issues/:issue_id/attachments", AttachmentController, :create

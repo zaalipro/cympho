@@ -6,6 +6,7 @@ defmodule CymphoWeb.AgentLive.Show do
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     Agents.subscribe(socket.assigns.current_company.id)
+    Cympho.AgentAdapters.HealthChecker.subscribe()
 
     case Agents.get_agent(id) do
       {:ok, agent} ->
@@ -52,6 +53,21 @@ defmodule CymphoWeb.AgentLive.Show do
 
   def handle_info({:agent_deleted, _deleted_id}, socket) do
     {:noreply, push_navigate(socket, to: ~p"/agents")}
+  end
+
+  def handle_info({:health_status_changed, %{agent_id: agent_id}}, socket) do
+    if socket.assigns.agent.id == agent_id do
+      # Refresh agent to get latest health_status
+      case Agents.get_agent(agent_id) do
+        {:ok, updated_agent} ->
+          {:noreply, assign(socket, :agent, updated_agent)}
+
+        {:error, :not_found} ->
+          {:noreply, socket}
+      end
+    else
+      {:noreply, socket}
+    end
   end
 
   def status_label(:idle), do: "Idle"

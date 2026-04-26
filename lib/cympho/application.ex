@@ -23,6 +23,7 @@ defmodule Cympho.Application do
       {Finch, name: Cympho.Finch},
       # Adapter system
       Cympho.Adapters.Registry,
+      {Cympho.AgentAdapters.HealthChecker, []},
       # Plugin system
       {Registry, keys: :unique, name: Cympho.PluginRegistry},
       Cympho.Plugins.Registry,
