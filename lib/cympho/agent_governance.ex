@@ -100,8 +100,8 @@ defmodule Cympho.AgentGovernance do
   @doc """
   Subscribes to agent governance events.
   """
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "agents")
+  def subscribe(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:agents")
   end
 
   defp request_board_approval_for_pause(agent, opts, actor) do

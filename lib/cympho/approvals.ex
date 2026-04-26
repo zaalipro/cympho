@@ -149,9 +149,10 @@ defmodule Cympho.Approvals do
     {count, _} = Repo.update_all(query, set: [status: :cancelled])
 
     if count > 0 do
+      company_id = issue_company_id_for_approval(issue_id)
       Phoenix.PubSub.broadcast(
         Cympho.PubSub,
-        "approvals",
+        company_id && "company:#{company_id}:approvals" || "approvals",
         {:approvals_cancelled_for_issue, issue_id}
       )
     end
@@ -174,14 +175,6 @@ defmodule Cympho.Approvals do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:approvals")
   end
 
-  defp scoped_topic(%Approval{} = approval) do
-    approval = Repo.preload(approval, :issues)
-    case approval.issues do
-      [issue | _] -> "company:#{issue.company_id}:approvals"
-      [] -> "approvals"
-    end
-  end
-
   defp maybe_wake_agent(%Approval{} = approval) do
     approval = Repo.preload(approval, :requested_by)
 
@@ -192,5 +185,22 @@ defmodule Cympho.Approvals do
         _ -> :ok
       end
     end
+  end
+
+  defp scoped_topic(%Approval{} = approval) do
+    approval = Repo.preload(approval, [:issues, :requested_by])
+    case approval.issues do
+      [issue | _] -> "company:#{issue.company_id}:approvals"
+      [] ->
+        case approval.requested_by do
+          %Cympho.Agents.Agent{company_id: company_id} when not is_nil(company_id) ->
+            "company:#{company_id}:approvals"
+          _ -> "approvals"
+        end
+    end
+  end
+
+  defp issue_company_id_for_approval(issue_id) do
+    Repo.one(from i in Cympho.Issues.Issue, where: i.id == ^issue_id, select: i.company_id)
   end
 end

@@ -10,9 +10,10 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    company_id = socket.assigns.current_company.id
-    Issues.subscribe(company_id)
-    Cympho.Agents.subscribe(company_id)
+    if connected?(socket) && socket.assigns[:current_company] do
+      Issues.subscribe(socket.assigns.current_company.id)
+      Cympho.Agents.subscribe(socket.assigns.current_company.id)
+    end
     Phoenix.PubSub.subscribe(Cympho.PubSub, "agent_heartbeats")
 
     projects = Projects.list_projects()

@@ -1,11 +1,13 @@
 defmodule CymphoWeb.ActivityLive.DashboardComponent do
   use CymphoWeb, :live_component
+  import Ecto.Query
   alias Cympho.Activities
 
   @impl true
   def update(%{issue_id: issue_id} = assigns, socket) do
     if connected?(socket) do
-      Activities.subscribe(socket.assigns.current_company.id)
+      company_id = Cympho.Repo.one(from i in Cympho.Issues.Issue, where: i.id == ^issue_id, select: i.company_id)
+      if company_id, do: Activities.subscribe(company_id)
     end
 
     statistics = Activities.get_activity_statistics(issue_id)

@@ -8,7 +8,9 @@ defmodule CymphoWeb.IssueLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    Issues.subscribe(socket.assigns.current_company.id)
+    if connected?(socket) && socket.assigns[:current_company] do
+      Issues.subscribe(socket.assigns.current_company.id)
+    end
 
     if socket.assigns[:current_user] do
       IssueReadStates.subscribe(socket.assigns.current_user.id)

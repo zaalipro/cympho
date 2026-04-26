@@ -5,8 +5,9 @@ defmodule CymphoWeb.AgentLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    Agents.subscribe(socket.assigns.current_company.id)
-    Cympho.AgentAdapters.HealthChecker.subscribe()
+    if connected?(socket) && socket.assigns[:current_company] do
+      Agents.subscribe(socket.assigns.current_company.id)
+    end
 
     case Agents.get_agent(id) do
       {:ok, agent} ->
@@ -55,30 +56,11 @@ defmodule CymphoWeb.AgentLive.Show do
     {:noreply, push_navigate(socket, to: ~p"/agents")}
   end
 
-  def handle_info({:health_status_changed, %{agent_id: agent_id}}, socket) do
-    if socket.assigns.agent.id == agent_id do
-      # Refresh agent to get latest health_status
-      case Agents.get_agent(agent_id) do
-        {:ok, updated_agent} ->
-          {:noreply, assign(socket, :agent, updated_agent)}
-
-        {:error, :not_found} ->
-          {:noreply, socket}
-      end
-    else
-      {:noreply, socket}
-    end
-  end
-
   def status_label(:idle), do: "Idle"
   def status_label(:running), do: "Running"
   def status_label(:error), do: "Error"
   def status_label(:sleeping), do: "Sleeping"
   def status_label(:offline), do: "Offline"
-
-  def health_status_label(:healthy), do: "Healthy"
-  def health_status_label(:degraded), do: "Degraded"
-  def health_status_label(:unavailable), do: "Unavailable"
 
   def role_label(:engineer), do: "Engineer"
   def role_label(:ceo), do: "CEO"

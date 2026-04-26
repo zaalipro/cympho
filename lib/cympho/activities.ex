@@ -62,11 +62,9 @@ defmodule Cympho.Activities do
   def log_activity(attrs) when is_map(attrs) do
     case %Activity{} |> Activity.changeset(attrs) |> Repo.insert() do
       {:ok, activity} ->
-        company_id = attrs[:company_id]
-        if company_id do
-          Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{company_id}:activities", {:activity_created, activity})
-        end
-        CymphoWeb.Endpoint.broadcast("company:#{company_id}:activities", "activity_created", activity)
+        company_id = issue_company_id(activity.issue_id)
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{company_id}:activities", {:activity_created, activity})
+        CymphoWeb.Endpoint.broadcast("activities:*", "activity_created", activity)
         CymphoWeb.Endpoint.broadcast("issue:#{activity.issue_id}", "activity_created", activity)
         {:ok, activity}
 
@@ -196,4 +194,6 @@ defmodule Cympho.Activities do
       latest: List.last(activities)
     }
   end
+
+  defp issue_company_id(issue_id), do: Repo.one(from i in Cympho.Issues.Issue, where: i.id == ^issue_id, select: i.company_id)
 end

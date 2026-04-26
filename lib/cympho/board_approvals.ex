@@ -163,6 +163,8 @@ defmodule Cympho.BoardApprovals do
           {:board_approval_resolved, updated}
         )
 
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "system:board_approvals", {:board_approval_resolved, updated})
+
         # Execution is handled by BoardApprovalActionExecutor GenServer
         # to prevent race conditions and ensure consistent async processing
 
@@ -197,6 +199,8 @@ defmodule Cympho.BoardApprovals do
             "company:#{updated.company_id}:approvals",
             {:board_approval_cancelled, updated}
           )
+
+          Phoenix.PubSub.broadcast(Cympho.PubSub, "system:board_approvals", {:board_approval_cancelled, updated})
 
           {:ok, updated}
 
