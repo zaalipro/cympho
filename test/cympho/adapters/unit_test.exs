@@ -14,6 +14,10 @@ defmodule Cympho.Adapters.UnitTest do
       assert ClaudeCodeAdapter.name() == "Claude Code"
     end
 
+    test "type/0 returns :claude_code" do
+      assert ClaudeCodeAdapter.type() == :claude_code
+    end
+
     test "config_schema/0 returns valid schema" do
       schema = ClaudeCodeAdapter.config_schema()
 
@@ -24,25 +28,61 @@ defmodule Cympho.Adapters.UnitTest do
       assert api_key_entry != nil
       assert api_key_entry.type == :string
       assert api_key_entry.required == false
+
+      resume_entry = Enum.find(schema, fn e -> e.key == :resume end)
+      assert resume_entry != nil
+      assert resume_entry.type == :boolean
     end
 
     test "validate_config/1 with valid config" do
       assert :ok = ClaudeCodeAdapter.validate_config(%{stall_timeout: 60_000})
       assert :ok = ClaudeCodeAdapter.validate_config(%{})
+      assert :ok = ClaudeCodeAdapter.validate_config(%{resume: true})
+      assert :ok = ClaudeCodeAdapter.validate_config(%{resume: false})
+    end
+
+    test "validate_config/1 accepts atom and string keys" do
+      assert :ok = ClaudeCodeAdapter.validate_config(%{"stall_timeout" => 60_000})
+      assert :ok = ClaudeCodeAdapter.validate_config(%{stall_timeout: 60_000})
     end
 
     test "validate_config/1 with invalid stall_timeout" do
       assert {:error, _} = ClaudeCodeAdapter.validate_config(%{stall_timeout: -1})
       assert {:error, _} = ClaudeCodeAdapter.validate_config(%{stall_timeout: "invalid"})
+      assert {:error, _} = ClaudeCodeAdapter.validate_config(%{stall_timeout: 5_000_000})
     end
 
-    test "health_check/1 returns health result" do
+    test "validate_config/1 with invalid resume" do
+      assert {:error, _} = ClaudeCodeAdapter.validate_config(%{resume: "yes"})
+      assert {:error, _} = ClaudeCodeAdapter.validate_config(%{resume: 1})
+    end
+
+    test "validate_config/1 with invalid cwd" do
+      assert {:error, _} = ClaudeCodeAdapter.validate_config(%{cwd: 123})
+      assert {:error, _} = ClaudeCodeAdapter.validate_config(%{cwd: "/nonexistent/dir"})
+    end
+
+    test "health_check/1 returns well-formed result" do
       result = ClaudeCodeAdapter.health_check(%{})
 
       assert Map.has_key?(result, :status)
       assert Map.has_key?(result, :checked_at)
-      assert result.status in [:healthy, :unhealthy]
-      assert is_binary(result.message)
+      assert Map.has_key?(result, :message)
+      assert result.status in [:healthy, :degraded, :unhealthy]
+      assert %DateTime{} = result.checked_at
+    end
+
+    test "health_check/1 with api key reports healthy or degraded" do
+      result = ClaudeCodeAdapter.health_check(%{api_key: "sk-test-key"})
+      assert result.status in [:healthy, :degraded]
+    end
+
+    test "available?/1 returns boolean" do
+      assert is_boolean(ClaudeCodeAdapter.available?(%{}))
+    end
+
+    test "available?/0 delegates to available?/1" do
+      assert ClaudeCodeAdapter.available?() == ClaudeCodeAdapter.available?(%{})
     end
   end
 
