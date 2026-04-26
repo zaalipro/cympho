@@ -63,7 +63,7 @@ defmodule Cympho.PrincipalPermissions.PrincipalPermissionGrant do
   defp validate_permission_format(changeset) do
     case get_change(changeset, :permission) do
       nil -> changeset
-      permission -> validate_format(changeset, :permission, ~r/^[a-z_]+(\.[a-z_]+)*$/)
+      _permission -> validate_format(changeset, :permission, ~r/^[a-z_]+(\.[a-z_]+)*$/)
     end
   end
 

@@ -68,7 +68,6 @@ defmodule CymphoWeb.AgentLive.Show do
   def status_label(:sleeping), do: "Sleeping"
   def status_label(:offline), do: "Offline"
 
-
   def role_label(:engineer), do: "Engineer"
   def role_label(:ceo), do: "CEO"
   def role_label(:cto), do: "CTO"

@@ -11,7 +11,7 @@ defmodule Cympho.Skills.Resolver do
   """
 
   use GenServer
-  alias Cympho.Skills.{Plugin, Loader}
+  alias Cympho.Skills.Plugin
   alias Cympho.{Repo, Skills.AgentSkill}
   import Ecto.Query
 
@@ -62,14 +62,14 @@ defmodule Cympho.Skills.Resolver do
 
   def resolve(_, _), do: {:error, :invalid_id}
 
-  def resolve(_), do: {:error, :invalid_id}
-
   def resolve(agent_id) when is_binary(agent_id) do
     # Deprecated: use resolve/2 with explicit company_id for proper security
     require Logger
     Logger.warning("Resolver.resolve/1 is deprecated, use resolve/2 with company_id")
     resolve(agent_id, nil)
   end
+
+  def resolve(_), do: {:error, :invalid_id}
 
   @doc """
   Invalidates the resolution cache for an agent.
@@ -272,7 +272,7 @@ defmodule Cympho.Skills.Resolver do
   defp caret_match?(version, requirement) do
     case {Version.parse(version), Version.parse(requirement)} do
       {{:ok, v}, {:ok, r}} ->
-        v.major == r.major and v >= r
+        v.major == r.major and Version.compare(v, r) != :lt
 
       _ ->
         false
@@ -282,7 +282,7 @@ defmodule Cympho.Skills.Resolver do
   defp tilde_match?(version, requirement) do
     case {Version.parse(version), Version.parse(requirement)} do
       {{:ok, v}, {:ok, r}} ->
-        v.major == r.major and v.minor == r.minor and v >= r
+        v.major == r.major and v.minor == r.minor and Version.compare(v, r) != :lt
 
       _ ->
         false

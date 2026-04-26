@@ -7,6 +7,7 @@ defmodule CymphoWeb.CoreComponents do
   attr :on_cancel, JS, default: %JS{}
   attr :title, :string, default: nil
   slot :inner_block, required: true
+  slot :footer
 
   def modal(assigns) do
     ~H"""
@@ -15,6 +16,9 @@ defmodule CymphoWeb.CoreComponents do
       <div class="relative bg-zinc-900 rounded-lg p-6 max-w-lg w-full mx-4 z-10">
         <h2 :if={@title} class="text-lg font-semibold mb-4">{@title}</h2>
         {render_slot(@inner_block)}
+        <div :if={@footer != []} class="mt-4">
+          {render_slot(@footer)}
+        </div>
       </div>
     </div>
     """

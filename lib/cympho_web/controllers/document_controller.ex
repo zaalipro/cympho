@@ -80,7 +80,7 @@ defmodule CymphoWeb.DocumentController do
     case Documents.get_document_by_key(issue_id, key) do
       {:ok, document} ->
         case Documents.rollback_to_revision(document, revision_id, author_id, author_type) do
-          {:ok, updated} ->
+          {:ok, _updated} ->
             conn
             |> put_flash(:info, "Rolled back to revision #{revision_id}")
             |> redirect(to: ~p"/issues/#{issue_id}")

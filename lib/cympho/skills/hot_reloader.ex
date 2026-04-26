@@ -187,7 +187,7 @@ defmodule Cympho.Skills.HotReloader do
          {:ok, updated_plugin} <- update_plugin_manifest(plugin, manifest_data) do
       {:ok, updated_plugin}
     else
-      {:error, reason} = error -> error
+      {:error, _reason} = error -> error
     end
   end
 
@@ -212,7 +212,7 @@ defmodule Cympho.Skills.HotReloader do
     end
   end
 
-  defp parse_yaml(content) do
+  defp parse_yaml(_content) do
     # Use a simple YAML parser or add :yamerl dependency
     # For now, return error and expect JSON in dev
     {:error, :yaml_not_supported}
@@ -238,9 +238,29 @@ defmodule Cympho.Skills.HotReloader do
   end
 
   defp find_plugin_by_identifier(%{"identifier" => identifier}) do
-    Logger.error("Manifest for #{identifier} is missing required 'company_slug' field. " <>
-                 "Cannot determine company context for hot-reload.")
-    {:error, {:missing_company_context, identifier}}
+    # Fallback: look up plugin by identifier alone and use its company_id
+    # This is safe in dev where plugin identifiers are typically unique
+    # In production with multi-tenant, manifests should include company_slug
+    query =
+      from p in Plugin,
+      where: p.identifier == ^identifier,
+      limit: 2,
+      select: {p.id, p.company_id}
+
+    case Repo.all(query) do
+      [] -> {:error, :plugin_not_found}
+      [{_plugin_id, company_id}] ->
+        case Plugins.get_plugin_by_identifier(identifier, company_id) do
+          {:ok, plugin} -> {:ok, plugin}
+          error -> error
+        end
+      [_first, _second | _] ->
+        Logger.warning("Multiple plugins found with identifier #{identifier}, using first match. " <>
+                       "Consider adding company_slug to manifest for unambiguous lookup.")
+        # Use the first match
+        [{_plugin_id, company_id} | _] = Repo.all(query)
+        Plugins.get_plugin_by_identifier(identifier, company_id)
+    end
   end
 
   defp find_plugin_by_identifier(_), do: {:error, :missing_identifier}

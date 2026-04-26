@@ -37,7 +37,7 @@ defmodule Cympho.AgentRunner do
     session_id
   end
 
-  defp build_claude_command(issue, _agent_id, resume?, opts \\ []) do
+  defp build_claude_command(issue, _agent_id, resume?, opts) do
     base = [
       "claude",
       "-p",
@@ -69,7 +69,7 @@ defmodule Cympho.AgentRunner do
     ~s(bash -c '#{claude_cmd}' << 'PROMPT'\n#{prompt}\nPROMPT)
   end
 
-  def build_prompt(issue, opts \\ []) do
+  defp build_prompt(issue, opts \\ []) do
     skills = Keyword.get(opts, :skills, [])
 
     base_prompt = """

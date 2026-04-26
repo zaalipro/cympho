@@ -582,7 +582,7 @@ defmodule Cympho.Companies do
   end
 
   defp import_labels(labels, company_id) do
-    errors = []
+    _errors = []
 
     result =
       Enum.reduce(labels, %{}, fn label_data, acc ->

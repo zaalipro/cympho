@@ -9,11 +9,10 @@ defmodule CymphoWeb.UserAuth do
   - Assigns :current_user, :user_companies, :current_company to socket
   """
 
-  import Phoenix.LiveView
   import Phoenix.Component, only: [assign: 3]
   import Ecto.Query
   alias Cympho.Users
-  alias Cympho.Companies
+  
 
   def on_mount(:default, _params, session, socket) do
     socket =
@@ -102,7 +101,7 @@ defmodule CymphoWeb.UserAuth do
     assign(socket, :current_company, company)
   end
 
-  defp fallback_company(user, companies) do
+  defp fallback_company(_user, companies) do
     # If the session company or user default company is not in the user's memberships,
     # fall back to the first company in their memberships
     List.first(companies)

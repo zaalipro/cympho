@@ -37,7 +37,7 @@ defmodule Cympho.Companies.Company do
     case get_change(changeset, :logo_url) do
       nil -> changeset
       "" -> changeset
-      url -> validate_format(changeset, :logo_url, ~r/^https?:\/\/.+/, message: "must be a valid URL")
+      _url -> validate_format(changeset, :logo_url, ~r/^https?:\/\/.+/, message: "must be a valid URL")
     end
   end
 

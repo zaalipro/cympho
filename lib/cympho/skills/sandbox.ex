@@ -3,7 +3,6 @@ defmodule Cympho.Skills.Sandbox do
   Capability-based permission enforcement for skills.
   """
   alias Cympho.{Agents.Agent, Skills.Sandbox.Audit, Repo}
-  import Ecto.Query
 
   @role_hierarchy [cto: 5, ceo: 4, engineer: 3, product_manager: 2, designer: 1]
 

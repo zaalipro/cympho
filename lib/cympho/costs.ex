@@ -6,7 +6,7 @@ defmodule Cympho.Costs do
   alias Cympho.Repo
   alias Cympho.Finances.TokenUsage
   alias Cympho.Budgets.Budget
-  alias Cympho.Companies.Company
+  
 
   def summary(company_id, days \\ 30) do
     since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)

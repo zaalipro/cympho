@@ -706,7 +706,7 @@ defmodule Cympho.Agents do
 
   defp build_ancestors(%Agent{parent: nil}), do: []
 
-  defp build_ancestors(%Agent{parent: parent} = agent) do
+  defp build_ancestors(%Agent{parent: parent} = _agent) do
     [parent | build_ancestors(parent)]
   end
 

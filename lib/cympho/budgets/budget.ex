@@ -4,7 +4,6 @@ defmodule Cympho.Budgets.Budget do
   """
   use Ecto.Schema
   import Ecto.Changeset
-  import Ecto.Query
 
   alias Cympho.Companies.Company
   alias Cympho.Projects.Project

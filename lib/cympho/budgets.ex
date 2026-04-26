@@ -57,6 +57,13 @@ defmodule Cympho.Budgets do
   end
 
   @doc """
+  Returns an `%Ecto.Changeset{}` for tracking budget changes.
+  """
+  def change_budget(%Budget{} = budget, attrs \\ %{}) do
+    Budget.changeset(budget, attrs)
+  end
+
+  @doc """
   Creates a budget directly, bypassing governance gates.
   Used by the approval executor to enact board-approved budget changes.
   """

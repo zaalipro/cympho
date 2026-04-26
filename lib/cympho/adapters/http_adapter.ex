@@ -46,7 +46,7 @@ defmodule Cympho.Adapters.HttpAdapter do
 
       case make_http_request(method, url, headers, payload, timeout) do
         {:ok, response} ->
-          handle_response(response, callback_url, config)
+          handle_response({:ok, response}, callback_url, config)
 
         {:error, reason} ->
           {:error, {:http_error, reason}}
@@ -76,7 +76,7 @@ defmodule Cympho.Adapters.HttpAdapter do
   defp handle_response({:ok, data}, _callback_url, _config), do: {:ok, data}
   defp handle_response({:error, _reason} = error, nil, _config), do: error
 
-  defp handle_response({:error, reason}, callback_url, config) do
+  defp handle_response({:error, _reason}, callback_url, config) do
     # If callback URL is configured and initial request failed, poll for result
     poll_timeout = config[:callback_timeout] || config["callback_timeout"] || 60_000
     poll_interval = config[:poll_interval] || config["poll_interval"] || 2000
@@ -173,19 +173,6 @@ defmodule Cympho.Adapters.HttpAdapter do
     end
   end
 
-  defp parse_response(%{status: status, body: body}) when status in 200..299 do
-    case Jason.decode(body) do
-      {:ok, data} -> {:ok, data}
-      {:error, _} -> {:ok, %{raw_body: body, status: status}}
-    end
-  end
-
-  defp parse_response(%{status: status, body: body}) do
-    case Jason.decode(body) do
-      {:ok, data} -> {:error, {:http_error, status, data}}
-      {:error, _} -> {:error, {:http_error, status, body}}
-    end
-  end
 
   defp normalize_method(method) when is_atom(method), do: method
   defp normalize_method(method) when is_binary(method) do
@@ -232,7 +219,7 @@ defmodule Cympho.Adapters.HttpAdapter do
       {:ok, %Finch.Response{status: status}} ->
         %{status: :unhealthy, message: "Endpoint returned error status (HEAD #{status})", checked_at: DateTime.utc_now()}
 
-      {:error, %Finch.Error{} = error} ->
+      {:error, %Finch.Error{}} ->
         do_get_health_check(url, headers, timeout)
 
       {:error, reason} ->

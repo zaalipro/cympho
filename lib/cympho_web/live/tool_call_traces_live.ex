@@ -239,6 +239,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
   def format_json(_), do: ""
 
+  @impl true
   def render(assigns) do
     ~H"""
     <div class="container mx-auto px-4 py-8">

@@ -27,8 +27,6 @@ defmodule Cympho.Orchestrator do
   alias Cympho.{Issues, Comments, Agents, Activities, HeartbeatEngine, AgentAdapters}
 
   @heartbeat_tick_interval 30_000
-  @failure_table :cympho_adapter_failures
-  @max_adapter_failures 3
 
   @registry Cympho.OrchestratorRegistry
 
@@ -371,26 +369,6 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp resolve_adapter(session) do
-    adapter_type = Keyword.get(session.opts || [], :adapter, nil)
-    config = Keyword.get(session.opts || [], :adapter_config, %{})
-
-    cond do
-      is_nil(adapter_type) ->
-        {:ok, Cympho.Adapters.ClaudeCodeAdapter}
-
-      true ->
-        case AgentAdapters.resolve(%{adapter: adapter_type, config: config}) do
-          {:ok, module, _config} ->
-            {:ok, module}
-
-          {:error, :no_adapter} ->
-            :logger.warning("[Orchestrator] Unknown adapter: #{adapter_type}")
-            {:error, {:unknown_adapter, adapter_type}}
-        end
-    end
-  end
-
   defp handle_adapter_error(session, {:unknown_adapter, adapter_type}) do
     issue = session.issue
     agent_id = session.agent_id
@@ -431,12 +409,6 @@ defmodule Cympho.Orchestrator do
     set_agent_idle(agent_id)
 
     {:stop, :normal, session}
-  end
-
-  defp run_opts(session) do
-    skills = Keyword.get(session.opts || [], :skills, [])
-    adapter_config = Keyword.get(session.opts || [], :adapter_config, %{})
-    [skills: skills, config: adapter_config]
   end
 
   defp process_tool_results(result, tool_traces) when is_map(result) do
@@ -524,7 +496,7 @@ defmodule Cympho.Orchestrator do
     end)
   end
 
-  defp capture_tool_call(tool_call, issue, agent_id, tool_traces \\ %{}) do
+  defp capture_tool_call(tool_call, issue, agent_id, tool_traces) do
     try do
       attrs = %{
         trace_type: "tool_invocation",

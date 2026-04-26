@@ -4,7 +4,6 @@ defmodule Cympho.ExecutionPolicies.ExecutionStageResult do
   """
   use Ecto.Schema
   import Ecto.Changeset
-  import Ecto.Query
 
   alias Cympho.ExecutionPolicies.ExecutionPolicy
   alias Cympho.Companies.Company

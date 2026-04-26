@@ -65,7 +65,7 @@ defmodule CymphoWeb.RateLimiter do
 
     :ets.insert(@table, {{key, kind, now}, true})
 
-    count = :ets.match_count(@table, {{{key, kind, :_}, :_}})
+    count = length(:ets.match_object(@table, {{key, kind, :_}, :_}))
 
     result =
       if count <= max_per_sec do

@@ -2,6 +2,7 @@ defmodule CymphoWeb.Components do
   use Phoenix.Component
 
   attr :title, :string, default: nil
+  attr :subtitle, :string, default: nil
   attr :rest, :global
   slot :inner_block
   slot :actions
@@ -10,6 +11,7 @@ defmodule CymphoWeb.Components do
     ~H"""
     <header {@rest}>
       <h1 :if={@title}>{@title}</h1>
+      <p :if={@subtitle} class="text-text-secondary text-sm mt-1">{@subtitle}</p>
       <div class="header-actions">
         {render_slot(@inner_block)}
       </div>
@@ -54,11 +56,19 @@ defmodule CymphoWeb.Components do
     """
   end
 
-  attr :field, :any, required: true
-  attr :label, :string, required: true
+  attr :field, :any, default: nil
+  attr :label, :string, default: nil
   attr :type, :string, default: "text"
   attr :required, :boolean, default: false
+  attr :disabled, :boolean, default: false
   attr :rows, :integer, default: nil
+  attr :options, :list, default: nil
+  attr :step, :string, default: nil
+  attr :max, :string, default: nil
+  attr :min, :string, default: nil
+  attr :name, :string, default: nil
+  attr :value, :any, default: nil
+  attr :phx_change, :string, default: nil
   attr :rest, :global
 
   def input(assigns) do
@@ -85,6 +95,7 @@ defmodule CymphoWeb.Components do
 
   attr :type, :string, default: "submit"
   attr :variant, :string, default: nil
+  attr :size, :string, default: nil
   attr :rest, :global
   slot :inner_block, required: true
 
@@ -100,6 +111,7 @@ defmodule CymphoWeb.Components do
   attr :label, :string, required: true
   attr :options, :list, required: true
   attr :value, :string, default: nil
+  attr :required, :boolean, default: false
   attr :rest, :global
 
   def select(assigns) do

@@ -2,7 +2,6 @@ defmodule Cympho.Plugins.Worker do
   @moduledoc """
   Worker behavior for plugin processes.
   """
-  use GenServer
 
   defmacro __using__(_opts) do
     quote do

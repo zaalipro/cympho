@@ -5,7 +5,7 @@ defmodule CymphoWeb.HeartbeatsChannel do
   @impl true
   def join("company:" <> rest, _payload, socket) do
     case String.split(rest, ":", parts: 3) do
-      [company_id, "issues", issue_id] ->
+      [company_id, "issues", _issue_id] ->
         if socket.assigns.company_id == company_id do
           send(self(), :after_join)
           {:ok, socket}

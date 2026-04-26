@@ -23,7 +23,6 @@ defmodule CymphoWeb.ActivityLive.DashboardComponent do
     {:ok, socket}
   end
 
-  @impl true
   def handle_info({:activity_created, _activity}, socket) do
     activities = Activities.list_activities(socket.assigns.issue_id)
     statistics = Activities.get_activity_statistics(socket.assigns.issue_id)
@@ -32,7 +31,6 @@ defmodule CymphoWeb.ActivityLive.DashboardComponent do
      assign(socket, activities: activities, statistics: statistics, chart_data: prepare_chart_data(activities))}
   end
 
-  @impl true
   def handle_info(_, socket) do
     {:noreply, socket}
   end
@@ -64,35 +62,4 @@ defmodule CymphoWeb.ActivityLive.DashboardComponent do
     }
   end
 
-  defp max_count(chart_data) do
-    chart_data.by_action
-    |> Enum.map(fn {_action, count} -> count end)
-    |> Enum.max(fn -> 0 end)
-  end
-
-  defp action_color(action) do
-    case action do
-      "created" -> "#5e6ad2"
-      "title_changed" -> "#7170ff"
-      "description_changed" -> "#828fff"
-      "status_changed" -> "#27a644"
-      "assigned" -> "#10b981"
-      "unassigned" -> "#f59e0b"
-      "blocker_added" -> "#ef4444"
-      "blocker_removed" -> "#22c55e"
-      "comment_added" -> "#3b82f6"
-      "approval_created" -> "#8b5cf6"
-      "approval_resolved" -> "#a78bfa"
-      "heartbeat_started" -> "#ec4899"
-      "heartbeat_completed" -> "#22c55e"
-      "heartbeat_failed" -> "#ef4444"
-      "cost_incurred" -> "#f59e0b"
-      "budget_threshold_exceeded" -> "#dc2626"
-      _ -> "#6b7280"
-    end
-  end
-
-  defp actor_color("agent"), do: "#5e6ad2"
-  defp actor_color("user"), do: "#7170ff"
-  defp actor_color("system"), do: "#8a8f98"
 end

@@ -106,7 +106,7 @@ defmodule CymphoWeb.CompanyImportLive do
     result =
       try do
         case Companies.import_company(import_data, slug_strategy: slug_strategy) do
-          {:ok, %{company: company}} = result ->
+          {:ok, %{company: company}} = _result ->
             # Emit a pubsub notification for real-time updates
             CymphoWeb.Endpoint.broadcast("companies:lobby", "company_imported", %{
               company_id: company.id
@@ -114,7 +114,7 @@ defmodule CymphoWeb.CompanyImportLive do
 
             {:ok, company}
 
-          {:error, reason} = error ->
+          {:error, _reason} = error ->
             error
         end
       rescue
@@ -247,7 +247,7 @@ defmodule CymphoWeb.CompanyImportLive do
                   {Enum.at(@uploads.import_file.entries, 0).client_name}
                 </div>
                 <div class="text-text-tertiary text-xs">
-                  {Number.Delimit.number_to_human(Enum.at(@uploads.import_file.entries, 0).client_size, precision: 2)}
+                  {format_file_size(Enum.at(@uploads.import_file.entries, 0).client_size)}
                 </div>
               </div>
             </div>
@@ -283,7 +283,7 @@ defmodule CymphoWeb.CompanyImportLive do
     """
   end
 
-  defp render_step(%{step: :preview, import_data: import_data} = assigns) do
+  defp render_step(%{step: :preview, import_data: _import_data} = assigns) do
     ~H"""
     <div class="space-y-6">
       <div class="bg-surface border border-border rounded-card p-6">
@@ -405,7 +405,7 @@ defmodule CymphoWeb.CompanyImportLive do
     """
   end
 
-  defp render_step(%{step: :complete, import_result: import_result} = assigns) do
+  defp render_step(%{step: :complete, import_result: _import_result} = assigns) do
     ~H"""
     <div class="space-y-6">
       <div class={result_container_class(@import_result)}>

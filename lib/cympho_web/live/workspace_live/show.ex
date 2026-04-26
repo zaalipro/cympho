@@ -1,7 +1,7 @@
 defmodule CymphoWeb.WorkspaceLive.Show do
   use CymphoWeb, :live_view
 
-  alias Cympho.{Workspace, Issues, Projects, Agents, Repo}
+  alias Cympho.{Workspace, Issues, Projects, Repo}
 
   @impl true
   def mount(%{"issue_id" => issue_id}, _session, socket) do

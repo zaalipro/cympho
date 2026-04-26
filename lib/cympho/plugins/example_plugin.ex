@@ -5,7 +5,6 @@ defmodule Cympho.Plugins.ExamplePlugin do
   use Cympho.Plugins.Worker
   require Logger
 
-  @impl true
   def handle_init(state) do
     alias Cympho.Plugins.HostServices
 
@@ -53,8 +52,7 @@ defmodule Cympho.Plugins.ExamplePlugin do
     {:ok, %{state | status: :running, api_key: api_key}}
   end
 
-  @impl true
-  def handle_info({:process_issue, issue_id}, state) do
+  def handle_message({:process_issue, issue_id}, state) do
     alias Cympho.Plugins.HostServices
 
     HostServices.log(
@@ -99,8 +97,7 @@ defmodule Cympho.Plugins.ExamplePlugin do
     end
   end
 
-  @impl true
-  def handle_info(:heartbeat, state) do
+  def handle_message(:heartbeat, state) do
     # Regular heartbeat for health checks
     Cympho.Plugins.set_plugin_state(
       state.plugin.id,
@@ -112,20 +109,17 @@ defmodule Cympho.Plugins.ExamplePlugin do
     {:noreply, state}
   end
 
-  @impl true
-  def handle_info(message, state) do
+  def handle_message(message, state) do
     # Log unhandled messages
     Logger.warning("Example plugin received unhandled message: #{inspect(message)}")
     {:noreply, state}
   end
 
-  @impl true
-  def handle_call(:get_status, _from, state) do
+  def handle_request(:get_status, _from, state) do
     {:reply, {:ok, state.status}, state}
   end
 
-  @impl true
-  def handle_call({:execute_task, task}, _from, state) do
+  def handle_request({:execute_task, task}, _from, state) do
     alias Cympho.Plugins.HostServices
 
     HostServices.log(
@@ -139,8 +133,7 @@ defmodule Cympho.Plugins.ExamplePlugin do
     {:reply, :ok, state}
   end
 
-  @impl true
-  def handle_cast({:update_config, config}, state) do
+  def handle_cast_request({:update_config, config}, state) do
     alias Cympho.Plugins.HostServices
 
     # Update plugin settings
@@ -151,7 +144,6 @@ defmodule Cympho.Plugins.ExamplePlugin do
     {:noreply, state}
   end
 
-  @impl true
   def handle_terminate(_reason, state) do
     alias Cympho.Plugins.HostServices
 

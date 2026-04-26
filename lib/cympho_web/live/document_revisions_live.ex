@@ -1,8 +1,6 @@
 defmodule CymphoWeb.DocumentRevisionsLive do
   use CymphoWeb, :live_component
 
-  alias Cympho.Documents
-
   @doc """
   Renders a list of revisions for a document.
   """

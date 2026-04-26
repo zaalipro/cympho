@@ -254,7 +254,7 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   defp validate_context(nil), do: :ok
 
   defp validate_context(context) when is_map(context) do
-    if Enum.all?(context, fn {k, v} -> is_binary(k) end) do
+    if Enum.all?(context, fn {k, _v} -> is_binary(k) end) do
       :ok
     else
       {:error, "context must be a map with string keys"}

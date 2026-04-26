@@ -1,7 +1,6 @@
 defmodule CymphoWeb.ActivityLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Activities
-  alias Cympho.Companies
 
   @impl true
   def mount(_params, _session, socket) do
@@ -166,13 +165,6 @@ defmodule CymphoWeb.ActivityLive.Index do
     end
   end
 
-  defp actor_link(%{actor_type: "agent", actor_id: id, metadata: %{agent_name: name}}) do
-    ~p{/agents/#{id}}
-  end
-  defp actor_link(%{actor_type: "user", actor_id: id}) do
-    ~p{/profile/#{id}}
-  end
-  defp actor_link(_), do: "#"
 
   defp actor_name(%{actor_type: "system"}), do: "System"
   defp actor_name(%{actor_type: "agent", metadata: %{agent_name: name}}), do: name

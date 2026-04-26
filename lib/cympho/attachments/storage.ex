@@ -7,7 +7,6 @@ defmodule Cympho.Attachments.Storage do
   """
 
   alias Cympho.Attachments.Storage.LocalStorage
-  alias Cympho.Attachments.Storage.S3Storage
 
   @doc """
   Store a file upload and return the relative path/key.

@@ -1,6 +1,5 @@
 defmodule CymphoWeb.Components.CompanyRail do
   use Phoenix.Component
-  alias Cympho.Companies.Company
 
   attr :company, :map, default: nil
   attr :rest, :global
@@ -31,15 +30,16 @@ defmodule CymphoWeb.Components.CompanyRail do
   end
 
   def company_display(%{company: company} = assigns) do
+    assigns = assign(assigns, :company, company)
     ~H"""
     <div class="flex items-center gap-3">
-      <div :if={company.logo_url} class="w-8 h-8 rounded-lg overflow-hidden border-l-2 border-brand">
-        <img src={company.logo_url} alt={company.name} class="w-full h-full object-cover" />
+      <div :if={@company.logo_url} class="w-8 h-8 rounded-lg overflow-hidden border-l-2 border-brand">
+        <img src={@company.logo_url} alt={@company.name} class="w-full h-full object-cover" />
       </div>
-      <div :if={!company.logo_url} class="w-8 h-8 rounded-lg bg-brand/10 border-l-2 border-brand flex items-center justify-center">
-        <span class="text-sm font-590 text-brand">{company_initials(company.name)}</span>
+      <div :if={!@company.logo_url} class="w-8 h-8 rounded-lg bg-brand/10 border-l-2 border-brand flex items-center justify-center">
+        <span class="text-sm font-590 text-brand">{company_initials(@company.name)}</span>
       </div>
-      <span class="text-lg font-590 tracking-tight text-text-primary truncate hidden md:inline">{company.name}</span>
+      <span class="text-lg font-590 tracking-tight text-text-primary truncate hidden md:inline">{@company.name}</span>
     </div>
     """
   end

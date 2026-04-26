@@ -1,6 +1,5 @@
 defmodule CymphoWeb.Components.CompanySwitcher do
   use Phoenix.LiveComponent
-  alias Cympho.Companies
 
   attr :companies, :list, default: []
   attr :current_company_id, :string, default: nil
@@ -70,7 +69,7 @@ defmodule CymphoWeb.Components.CompanySwitcher do
 
     {:noreply,
      socket
-     |> push_redirect(to: "/switch-company/#{company_id}?return_to=#{URI.encode_www_form(return_to)}")}
+     |> push_navigate(to: "/switch-company/#{company_id}?return_to=#{URI.encode_www_form(return_to)}")}
   end
 
   def handle_event("update_search", %{"query" => query}, socket) do
@@ -88,7 +87,7 @@ defmodule CymphoWeb.Components.CompanySwitcher do
         @is_current && "bg-white/[0.06] text-text-primary",
         !@is_current && "text-text-secondary hover:bg-white/[0.04] hover:text-text-primary"
       ]}
-      phx-click={JS.push("switch_company", value: %{id: @company.id})}
+      phx-click={Phoenix.LiveView.JS.push("switch_company", value: %{id: @company.id})}
     >
       <div class="w-8 h-8 rounded-lg overflow-hidden border-l-2 border-brand flex items-center justify-center shrink-0 bg-brand/10">
         <img :if={@company.logo_url} src={@company.logo_url} alt={@company.name} class="w-full h-full object-cover" />

@@ -3,7 +3,7 @@ defmodule CymphoWeb.SkillLive.FormComponent do
 
   alias Cympho.Skills
   alias Cympho.Companies
-  alias Cympho.Projects
+  
 
   @impl true
   def update(%{skill: skill} = assigns, socket) do

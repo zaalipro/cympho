@@ -16,7 +16,6 @@ defmodule CymphoWeb.Events do
   alias Cympho.Issues.Issue
   alias Cympho.Comments.Comment
   alias Cympho.HeartbeatEngine.Run
-  alias Cympho.Agents.Agent
 
   @doc """
   Broadcast an issue update event to WebSocket clients.
@@ -57,7 +56,7 @@ defmodule CymphoWeb.Events do
   @doc """
   Broadcast a run status change to WebSocket clients.
   """
-  def broadcast_run_status(%Run{id: run_id, issue_id: issue_id} = run, event_type) do
+  def broadcast_run_status(%Run{id: _run_id, issue_id: issue_id} = run, event_type) do
     case Repo.get(Issue, issue_id) do
       nil -> :ok
       %Issue{company_id: company_id} ->

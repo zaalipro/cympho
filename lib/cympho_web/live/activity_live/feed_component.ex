@@ -28,7 +28,6 @@ defmodule CymphoWeb.ActivityLive.FeedComponent do
     {:noreply, socket}
   end
 
-  @impl true
   def handle_info({:activity_created, activity}, socket) do
     activities = [activity | socket.assigns.activities]
     statistics = Activities.get_activity_statistics(socket.assigns.issue_id)
@@ -36,7 +35,6 @@ defmodule CymphoWeb.ActivityLive.FeedComponent do
     {:noreply, assign(socket, activities: activities, statistics: statistics)}
   end
 
-  @impl true
   def handle_info(_, socket) do
     {:noreply, socket}
   end

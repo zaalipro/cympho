@@ -4,7 +4,7 @@ defmodule CymphoWeb.CommentsChannel do
   @impl true
   def join("company:" <> rest, _payload, socket) do
     case String.split(rest, ":", parts: 3) do
-      [company_id, "project", project_id] ->
+      [company_id, "project", _project_id] ->
         if socket.assigns.company_id == company_id do
           send(self(), :after_join)
           {:ok, socket}

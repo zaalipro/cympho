@@ -137,7 +137,7 @@ defmodule Cympho.Documents do
           |> Ecto.Multi.update(:document, IssueDocument.changeset(document, %{body: revision.body, title: revision.title}))
           |> Repo.transaction()
           |> case do
-            {:ok, %{new_revision: new_revision, document: updated}} ->
+            {:ok, %{new_revision: _new_revision, document: updated}} ->
               broadcast_document_event({:document_updated, updated})
               {:ok, updated}
 
@@ -176,7 +176,7 @@ defmodule Cympho.Documents do
   end
 
   # Simple line diff algorithm
-  defp compute_line_diff(old_lines, new_lines, acc \\ []) do
+  defp compute_line_diff(old_lines, new_lines, _acc) do
     {old_rest, new_rest, ops} = diff_lines(old_lines, new_lines, [], [])
 
     diff = Enum.reverse(ops)
@@ -197,12 +197,12 @@ defmodule Cympho.Documents do
     {Enum.reverse(same_ops), [], new_lines, Enum.reverse(diff_ops) ++ additions}
   end
 
-  defp diff_lines([old_head | old_rest] = old_lines, [new_head | new_rest] = new_lines, same_ops, diff_ops) do
+  defp diff_lines([old_head | old_rest] = _old_lines, [new_head | new_rest] = _new_lines, same_ops, diff_ops) do
     if old_head == new_head do
       diff_lines(old_rest, new_rest, [old_head | same_ops], diff_ops)
     else
       # Find the length of the common prefix
-      {common_prefix, old_remainder, new_remainder} = find_common_sequence(old_rest, new_rest, [old_head], [new_head])
+      {_common_prefix, old_remainder, new_remainder} = find_common_sequence(old_rest, new_rest, [old_head], [new_head])
 
       # Flush same_ops if any
       same_ops_flushed = if same_ops != [], do: [%{type: :same, lines: Enum.reverse(same_ops)}], else: []
@@ -211,7 +211,7 @@ defmodule Cympho.Documents do
     end
   end
 
-  defp find_common_sequence(old_lines, new_lines, old_prefix, new_prefix) do
+  defp find_common_sequence(old_lines, _new_lines, old_prefix, new_prefix) do
     # Simple approach: return what we have
     {Enum.reverse(old_prefix), old_lines, Enum.reverse(new_prefix)}
   end

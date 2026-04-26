@@ -55,7 +55,7 @@ defmodule Cympho.Workspaces.PreviewUrl do
   Returns a list of {port, service_name, confidence} tuples.
   """
   def auto_discover_ports(cwd) when is_binary(cwd) do
-    case System.cmd("lsof", ["-i", "-P", "-n", "-p", "#{System.get_pid()}"], cd: cwd) do
+    case System.cmd("lsof", ["-i", "-P", "-n", "-p", "#{System.pid()}"], cd: cwd) do
       {output, 0} ->
         discover_from_lsof_output(output)
 
