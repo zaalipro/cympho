@@ -24,9 +24,11 @@ defmodule Cympho.Orchestrator do
   defstruct [:issue, :agent_id, :session_id, :run_id, :status, turn_count: 0, tool_traces: %{}, opts: []]
 
   use GenServer
-  alias Cympho.{Issues, Comments, Agents, Activities, HeartbeatEngine}
+  alias Cympho.{Issues, Comments, Agents, Activities, HeartbeatEngine, AgentAdapters}
 
   @heartbeat_tick_interval 30_000
+  @failure_table :cympho_adapter_failures
+  @max_adapter_failures 3
 
   @registry Cympho.OrchestratorRegistry
 
@@ -114,16 +116,21 @@ defmodule Cympho.Orchestrator do
 
   @impl true
   def handle_continue(:start_session, %__MODULE__{} = session) do
-    issue = session.issue
-    agent_id = session.agent_id
+    agent_map = build_agent_map(session)
 
-    start_engine_run(session)
-    schedule_heartbeat_tick()
+    case AgentAdapters.resolve(agent_map) do
+      {:ok, module, config} ->
+        start_engine_run(session)
+        schedule_heartbeat_tick()
 
-    runner = runner_module(session)
-    session_id = runner.run(issue, agent_id, self(), run_opts(session))
+        opts = run_opts(session, config)
+        session_id = module.run(session.issue, session.agent_id, self(), opts)
 
-    {:noreply, %{session | session_id: session_id}}
+        {:noreply, %{session | session_id: session_id}}
+
+      {:error, error} ->
+        handle_resolution_error(session, error)
+    end
   end
 
   @impl true
@@ -169,6 +176,7 @@ defmodule Cympho.Orchestrator do
     })
 
     set_agent_idle(agent_id)
+    reset_adapter_failure(agent_id)
 
     {:stop, :normal, session}
   end
@@ -363,22 +371,66 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp runner_module(session) do
-    if Application.get_env(:cympho, :env) == :test do
-      Cympho.AgentAdapters.MockAdapter
-    else
-      resolve_adapter(session)
-    end
-  end
-
   defp resolve_adapter(session) do
     adapter_type = Keyword.get(session.opts || [], :adapter, nil)
     config = Keyword.get(session.opts || [], :adapter_config, %{})
 
-    case adapter_type && Cympho.AgentAdapters.resolve(%{adapter: adapter_type, config: config}) do
-      {:ok, module, _config} -> module
-      _ -> Cympho.Adapters.ClaudeCodeAdapter
+    cond do
+      is_nil(adapter_type) ->
+        {:ok, Cympho.Adapters.ClaudeCodeAdapter}
+
+      true ->
+        case AgentAdapters.resolve(%{adapter: adapter_type, config: config}) do
+          {:ok, module, _config} ->
+            {:ok, module}
+
+          {:error, :no_adapter} ->
+            :logger.warning("[Orchestrator] Unknown adapter: #{adapter_type}")
+            {:error, {:unknown_adapter, adapter_type}}
+        end
     end
+  end
+
+  defp handle_adapter_error(session, {:unknown_adapter, adapter_type}) do
+    issue = session.issue
+    agent_id = session.agent_id
+
+    error_body = "Adapter resolution failed: unknown adapter `#{adapter_type}`. Check agent configuration."
+
+    {:ok, _} =
+      Comments.create_comment(%{
+        body: error_body,
+        author_type: "agent",
+        author_id: agent_id,
+        issue_id: issue.id
+      })
+
+    Issues.transition_issue(issue, :blocked)
+    set_agent_idle(agent_id)
+
+    {:stop, :normal, session}
+  end
+
+  defp handle_adapter_error(session, reason) do
+    issue = session.issue
+    agent_id = session.agent_id
+
+    :logger.error("[Orchestrator] Adapter resolution failed for issue #{issue.id}: #{inspect(reason)}")
+
+    error_body = "Adapter resolution failed: #{inspect(reason)}"
+
+    {:ok, _} =
+      Comments.create_comment(%{
+        body: error_body,
+        author_type: "agent",
+        author_id: agent_id,
+        issue_id: issue.id
+      })
+
+    Issues.transition_issue(issue, :blocked)
+    set_agent_idle(agent_id)
+
+    {:stop, :normal, session}
   end
 
   defp run_opts(session) do
