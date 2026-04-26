@@ -13,8 +13,13 @@ defmodule CymphoWeb.InboxLive.Index do
       |> assign(:agents, agents)
       |> assign(:selected_agent_id, List.first(agents) && List.first(agents).id)
 
-    if connected?(socket) && socket.assigns.selected_agent_id do
-      Inbox.subscribe(socket.assigns.selected_agent_id)
+    if connected?(socket) do
+      if socket.assigns.selected_agent_id do
+        Inbox.subscribe(socket.assigns.selected_agent_id)
+      end
+      if socket.assigns[:current_company] do
+        CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
+      end
     end
 
     {:ok, socket}
@@ -41,6 +46,22 @@ defmodule CymphoWeb.InboxLive.Index do
 
   def handle_info({:inbox_created, _state}, socket) do
     {:noreply, load_inbox(socket)}
+  end
+
+  def handle_info({:run_status_changed, payload}, socket) do
+    selected_agent_id = socket.assigns[:selected_agent_id]
+    socket = if payload[:agent_id] == selected_agent_id do
+      {message, type} = case payload do
+        %{new_status: "completed"} -> {"Agent completed a run", "success"}
+        %{new_status: "failed"} -> {"Agent run failed", "error"}
+        %{new_status: "cancelled"} -> {"Agent run cancelled", "warning"}
+        _ -> {"Agent run status changed", "info"}
+      end
+      push_event(socket, "toast", %{message: message, type: type, key: "run_#{payload[:run_id]}"})
+    else
+      socket
+    end
+    {:noreply, socket}
   end
 
   @impl true
