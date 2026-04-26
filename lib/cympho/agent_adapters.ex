@@ -55,12 +55,12 @@ defmodule Cympho.AgentAdapters do
     resolve(%{adapter: adapter_type, config: %{}})
   end
 
-  defp resolve_chain([], _config, _found_any, []), do: {:error, :unknown_adapter}
+  defp resolve_chain([], _config, true, []), do: {:error, :no_adapter_available}
 
   defp resolve_chain([], _config, _found_any, config_errors) when config_errors != [],
     do: {:error, {:config_invalid, Enum.reverse(config_errors)}}
 
-  defp resolve_chain([], _config, true, []), do: {:error, :no_adapter_available}
+  defp resolve_chain([], _config, false, []), do: {:error, :unknown_adapter}
 
   defp resolve_chain([type | rest], config, found_any, config_errors) do
     case Registry.lookup(type) do
@@ -70,6 +70,14 @@ defmodule Cympho.AgentAdapters do
         else
           case module.validate_config(config) do
             :ok ->
+              # Log config errors if we're falling back after previous failures
+              if config_errors != [] do
+                require Logger
+                Logger.warning("""
+                Adapter #{type} resolved successfully, but previous adapters in fallback chain failed config validation:
+                #{format_config_errors(Enum.reverse(config_errors))}
+                """)
+              end
               {:ok, module, config}
 
             {:error, reason} ->
@@ -80,6 +88,12 @@ defmodule Cympho.AgentAdapters do
       :error ->
         resolve_chain(rest, config, found_any, config_errors)
     end
+  end
+
+  defp format_config_errors(errors) do
+    errors
+    |> Enum.map(fn {type, reason} -> "- #{type}: #{reason}" end)
+    |> Enum.join("\n")
   end
 
   defp module_available?(module, config) do

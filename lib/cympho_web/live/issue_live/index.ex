@@ -5,11 +5,13 @@ defmodule CymphoWeb.IssueLive.Index do
   alias Cympho.Projects
   alias Cympho.Labels
   alias Cympho.IssueReadStates
+  alias CymphoWeb.Events
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) && socket.assigns[:current_company] do
       Issues.subscribe(socket.assigns.current_company.id)
+      Events.subscribe_to_runs(socket.assigns.current_company.id)
     end
 
     if socket.assigns[:current_user] do
@@ -63,6 +65,11 @@ defmodule CymphoWeb.IssueLive.Index do
   def handle_info({:issue_created, _issue}, socket), do: {:noreply, reload(socket)}
   def handle_info({:issue_updated, _issue}, socket), do: {:noreply, reload(socket)}
   def handle_info({:issue_deleted, _id}, socket), do: {:noreply, reload(socket)}
+
+  def handle_info({:run_status, payload}, socket) do
+    {type, msg} = Events.run_status_toast(payload)
+    {:noreply, socket |> push_event("toast", %{message: msg, type: type}) |> reload()}
+  end
 
   def handle_info({:issue_read_state_updated, issue_id}, socket) do
     current_user = socket.assigns[:current_user]

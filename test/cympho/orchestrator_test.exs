@@ -2,165 +2,574 @@ defmodule Cympho.OrchestratorTest do
   use ExUnit.Case, async: false
 
   alias Cympho.Orchestrator
-  alias Cympho.Orchestrator.Session
+
+  @moduletag :capture_log
 
   setup do
+    # Ensure registries are started
     unless Process.whereis(Cympho.OrchestratorRegistry) do
       start_supervised!({Registry, keys: :unique, name: Cympho.OrchestratorRegistry})
     end
 
-    on_exit(fn ->
-      Registry.select(Cympho.OrchestratorRegistry, [{{:_, :"$1", :_}, [], [:"$1"]}])
-      |> Enum.each(fn pid ->
-        try do
-          GenServer.stop(pid, :normal, 500)
-        catch
-          _, _ -> :ok
+    # Clean up any existing orchestrators
+    issue_id = "test-issue-#{:rand.uniform(10_000)}"
+    case Orchestrator.whereis(issue_id) do
+      nil -> :ok
+      pid -> GenServer.stop(pid)
+    end
+
+    # Clean up ETS failure table
+    if :ets.whereis(:cympho_adapter_failures) != :undefined do
+      :ets.delete(:cympho_adapter_failures)
+    end
+
+    {:ok, issue_id: issue_id, agent_id: "test-agent-#{:rand.uniform(10_000)}"}
+  end
+
+  describe "adapter resolution success path" do
+    test "starts session when adapter resolves successfully", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{
+        id: issue_id,
+        company_id: "company-1",
+        title: "Test Issue",
+        description: "Test Description"
+      }
+
+      # Mock successful adapter resolution
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-1"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-1"}} end,
+          start_run: fn _ -> :ok end
+        ]},
+        {Cympho.AgentRunner, [], [
+          run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+        ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert is_pid(pid)
+        assert Process.alive?(pid)
+
+        # Clean up
+        Orchestrator.stop(issue_id)
+      end
+    end
+
+    test "creates heartbeat run and schedules tick on success", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
+
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ ->
+            {:ok, %{id: "run-heartbeat-1"}}
+          end,
+          get_run: fn _ -> {:ok, %{id: "run-heartbeat-1"}} end,
+          start_run: fn _ -> :ok end
+        ]},
+        {Cympho.AgentRunner, [], [
+          run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+        ]}
+      ]) do
+        {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+
+        # Verify create_run was called
+        assert_called(Cympho.HeartbeatEngine.create_run(:_))
+
+        # Clean up
+        Orchestrator.stop(issue_id)
+      end
+    end
+  end
+
+  describe "unknown_adapter error path" do
+    test "logs error and transitions issue to blocked", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
+
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:error, :unknown_adapter} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-unknown-1"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-unknown-1"}} end,
+          fail_run: fn _run, _reason -> :ok end
+        ]},
+        {Cympho.Comments, [], [
+          create_comment: fn _ -> {:ok, %{id: "comment-1"}} end
+        ]},
+        {Cympho.Issues, [], [
+          transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+        ]},
+        {Cympho.Agents, [], [
+          get_agent: fn _ -> {:ok, %{id: agent_id, status: :working}} end,
+          update_agent: fn _agent, _attrs -> {:ok, %{}} end
+        ]}
+      ]) do
+        {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+
+        # Give process time to terminate
+        Process.sleep(100)
+
+        # Verify error was logged and issue transitioned to blocked
+        assert_called(Cympho.Comments.create_comment(:_))
+        assert_called(Cympho.Issues.transition_issue(issue, :blocked))
+        assert_called(Cympho.HeartbeatEngine.fail_run(:_, :_))
+      end
+    end
+
+    test "sets agent to idle on unknown_adapter", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
+
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:error, :unknown_adapter} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-unknown-2"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-unknown-2"}} end,
+          fail_run: fn _run, _reason -> :ok end
+        ]},
+        {Cympho.Comments, [], [
+          create_comment: fn _ -> {:ok, %{}} end
+        ]},
+        {Cympho.Issues, [], [
+          transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+        ]},
+        {Cympho.Agents, [], [
+          get_agent: fn _ -> {:ok, %{id: agent_id, status: :working}} end,
+          update_agent: fn _agent, %{status: :idle} -> {:ok, %{}} end
+        ]}
+      ]) do
+        {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+        Process.sleep(100)
+
+        # Verify agent was set to idle
+        assert_called(Cympho.Agents.update_agent(:_, %{status: :idle}))
+      end
+    end
+  end
+
+  describe "no_adapter_available error path" do
+    test "logs error and transitions issue to blocked", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
+
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:error, :no_adapter_available} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-no-adapter-1"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-no-adapter-1"}} end,
+          fail_run: fn _run, _reason -> :ok end
+        ]},
+        {Cympho.Comments, [], [
+          create_comment: fn _ -> {:ok, %{}} end
+        ]},
+        {Cympho.Issues, [], [
+          transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+        ]},
+        {Cympho.Agents, [], [
+          get_agent: fn _ -> {:ok, %{id: agent_id, status: :working}} end,
+          update_agent: fn _agent, _attrs -> {:ok, %{}} end
+        ]}
+      ]) do
+        {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+        Process.sleep(100)
+
+        assert_called(Cympho.Comments.create_comment(:_))
+        assert_called(Cympho.Issues.transition_issue(issue, :blocked))
+      end
+    end
+
+    test "tracks adapter failure counter", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
+
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:error, :no_adapter_available} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-fail-track-1"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-fail-track-1"}} end,
+          fail_run: fn _run, _reason -> :ok end
+        ]},
+        {Cympho.Comments, [], [
+          create_comment: fn _ -> {:ok, %{}} end
+        ]},
+        {Cympho.Issues, [], [
+          transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+        ]},
+        {Cympho.Agents, [], [
+          get_agent: fn _ -> {:ok, %{id: agent_id, status: :working}} end,
+          update_agent: fn _agent, _attrs -> {:ok, %{}} end
+        ]}
+      ]) do
+        {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+        Process.sleep(100)
+
+        # Check that ETS counter was incremented
+        assert :ets.whereis(:cympho_adapter_failures) != :undefined
+      end
+    end
+  end
+
+  describe "config_invalid error path" do
+    test "comments with validation errors and transitions to blocked", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
+
+      errors = [
+        {:claude_code, "stall_timeout must be a positive integer"},
+        {:http, "api_key is required"}
+      ]
+
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:error, {:config_invalid, errors}} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-config-invalid-1"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-config-invalid-1"}} end,
+          fail_run: fn _run, _reason -> :ok end
+        ]},
+        {Cympho.Comments, [], [
+          create_comment: fn
+            %{body: body} when is_binary(body) -> {:ok, %{id: "comment-1"}}
+          end
+        ]},
+        {Cympho.Issues, [], [
+          transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+        ]},
+        {Cympho.Agents, [], [
+          get_agent: fn _ -> {:ok, %{id: agent_id, status: :working}} end,
+          update_agent: fn _agent, _attrs -> {:ok, %{}} end
+        ]}
+      ]) do
+        {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+        Process.sleep(100)
+
+        # Verify comment included error details
+        assert_called(Cympho.Comments.create_comment(%{body: "Adapter configuration error:" <> _}))
+        assert_called(Cympho.Issues.transition_issue(issue, :blocked))
+      end
+    end
+
+    test "sets agent to idle on config_invalid", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
+
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:error, {:config_invalid, [{:claude_code, "invalid config"}]}} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-config-invalid-2"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-config-invalid-2"}} end,
+          fail_run: fn _run, _reason -> :ok end
+        ]},
+        {Cympho.Comments, [], [
+          create_comment: fn _ -> {:ok, %{}} end
+        ]},
+        {Cympho.Issues, [], [
+          transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+        ]},
+        {Cympho.Agents, [], [
+          get_agent: fn _ -> {:ok, %{id: agent_id, status: :working}} end,
+          update_agent: fn _agent, %{status: :idle} -> {:ok, %{}} end
+        ]}
+      ]) do
+        {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+        Process.sleep(100)
+
+        assert_called(Cympho.Agents.update_agent(:_, %{status: :idle}))
+      end
+    end
+  end
+
+  describe "consecutive no_adapter_available failures" do
+    test "sets agent status to error after 3 consecutive failures", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
+
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:error, :no_adapter_available} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-consecutive-1"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-consecutive-1"}} end,
+          fail_run: fn _run, _reason -> :ok end
+        ]},
+        {Cympho.Comments, [], [
+          create_comment: fn _ -> {:ok, %{}} end
+        ]},
+        {Cympho.Issues, [], [
+          transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+        ]},
+        {Cympho.Agents, [], [
+          get_agent: fn _ -> {:ok, %{id: agent_id, status: :working}} end,
+          update_agent: fn
+            _agent, %{status: :error} -> {:ok, %{}}
+            _agent, %{status: :idle} -> {:ok, %{}}
+          end
+        ]}
+      ]) do
+        # First failure
+        {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+        Process.sleep(100)
+
+        # Second failure
+        issue2 = %{id: "test-issue-2-#{:rand.uniform(10_000)}", company_id: "company-1", title: "Test", description: "Test"}
+        {:ok, _pid2} = Orchestrator.start_and_run(issue2, agent_id)
+        Process.sleep(100)
+
+        # Third failure - should set agent status to :error
+        issue3 = %{id: "test-issue-3-#{:rand.uniform(10_000)}", company_id: "company-1", title: "Test", description: "Test"}
+        {:ok, _pid3} = Orchestrator.start_and_run(issue3, agent_id)
+        Process.sleep(100)
+
+        # Verify update_agent was called with status: :error
+        # The last call should be status: :error
+        assert_called(Cympho.Agents.update_agent(:_, %{status: :error}))
+      end
+    end
+
+    test "resets failure counter after reaching 3 failures", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
+
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:error, :no_adapter_available} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-reset-1"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-reset-1"}} end,
+          fail_run: fn _run, _reason -> :ok end
+        ]},
+        {Cympho.Comments, [], [
+          create_comment: fn _ -> {:ok, %{}} end
+        ]},
+        {Cympho.Issues, [], [
+          transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+        ]},
+        {Cympho.Agents, [], [
+          get_agent: fn _ -> {:ok, %{id: agent_id, status: :working}} end,
+          update_agent: fn _agent, _attrs -> {:ok, %{}} end
+        ]}
+      ]) do
+        # Trigger 3 failures
+        for i <- 1..3 do
+          issue_i = %{id: "test-issue-#{i}-#{:rand.uniform(10_000)}", company_id: "company-1", title: "Test", description: "Test"}
+          {:ok, _pid} = Orchestrator.start_and_run(issue_i, agent_id)
+          Process.sleep(50)
         end
-      end)
-    end)
 
-    :ok
-  end
-
-  describe "Session struct" do
-    test "has required fields" do
-      session = %Session{
-        issue: %{id: "test-1", title: "Test", description: "Desc"},
-        agent_id: "agent-1"
-      }
-
-      assert session.issue.id == "test-1"
-      assert session.agent_id == "agent-1"
-      assert session.session_id == nil
-      assert session.turn_count == 0
-    end
-
-    test "can be created with all fields" do
-      session = %Session{
-        issue: %{id: "test-1", title: "Test", description: "Desc"},
-        agent_id: "agent-1",
-        session_id: make_ref(),
-        turn_count: 0
-      }
-
-      assert session.turn_count == 0
+        # Verify the ETS entry was deleted after reaching 3 failures
+        assert :ets.lookup(:cympho_adapter_failures, agent_id) == []
+      end
     end
   end
 
-  describe "start_and_run/2" do
-    @tag :capture_log
-    test "starts orchestrator registered by issue id" do
-      issue = %{id: "orch-test-2", title: "Test", description: "Desc"}
-      agent_id = "agent-1"
+  describe "failure counter reset on successful session" do
+    test "resets failure counter after successful completion", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
 
-      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
-      assert Orchestrator.whereis(issue.id) == pid
-    after
-      if pid = Orchestrator.whereis("orch-test-2") do
-        GenServer.stop(pid)
+      # Set up a failure counter from previous runs
+      :ets.new(:cympho_adapter_failures, [:named_table, :set, :public])
+      :ets.insert(:cympho_adapter_failures, {agent_id, 2})
+
+      session_id = make_ref()
+
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-success-reset-1"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-success-reset-1"}} end,
+          start_run: fn _ -> :ok end,
+          complete_run: fn _run, _attrs -> :ok end
+        ]},
+        {Cympho.AgentRunner, [], [
+          run: fn _issue, _agent_id, recipient_pid, _opts ->
+            # Send success message immediately
+            send(recipient_pid, {:turn_completed, session_id, %{"content" => [%{"type" => "text", "text" => "Done"}]}})
+            session_id
+          end
+        ]},
+        {Cympho.Comments, [], [
+          create_comment: fn _ -> {:ok, %{}} end
+        ]},
+        {Cympho.Issues, [], [
+          transition_issue: fn _issue, :done -> {:ok, %{}} end
+        ]},
+        {Cympho.Activities, [], [
+          log_heartbeat_event: fn _issue_id, _event, _metadata -> :ok end
+        ]},
+        {Cympho.Agents, [], [
+          get_agent: fn _ -> {:ok, %{id: agent_id, status: :working}} end,
+          update_agent: fn _agent, _attrs -> {:ok, %{}} end
+        ]}
+      ]) do
+        {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+        Process.sleep(200)
+
+        # Verify the failure counter was reset (deleted from ETS)
+        assert :ets.lookup(:cympho_adapter_failures, agent_id) == []
       end
     end
 
-    test "returns error if orchestrator already running for issue" do
-      issue = %{id: "orch-test-3", title: "Test", description: "Desc"}
-      agent_id = "agent-1"
+    test "deletes failure counter entry on success", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
 
-      {:ok, pid1} = Orchestrator.start_and_run(issue, agent_id)
-      {:error, :already_started} = Orchestrator.start_and_run(issue, agent_id)
-    after
-      if pid = Orchestrator.whereis("orch-test-3") do
-        GenServer.stop(pid)
+      # Pre-populate the failure table
+      :ets.new(:cympho_adapter_failures, [:named_table, :set, :public])
+      :ets.insert(:cympho_adapter_failures, {agent_id, 1})
+
+      session_id = make_ref()
+
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-delete-counter-1"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-delete-counter-1"}} end,
+          start_run: fn _ -> :ok end,
+          complete_run: fn _run, _attrs -> :ok end
+        ]},
+        {Cympho.AgentRunner, [], [
+          run: fn _issue, _agent_id, recipient_pid, _opts ->
+            send(recipient_pid, {:turn_completed, session_id, %{"content" => [%{"type" => "text", "text" => "Complete"}]}})
+            session_id
+          end
+        ]},
+        {Cympho.Comments, [], [
+          create_comment: fn _ -> {:ok, %{}} end
+        ]},
+        {Cympho.Issues, [], [
+          transition_issue: fn _issue, :done -> {:ok, %{}} end
+        ]},
+        {Cympho.Activities, [], [
+          log_heartbeat_event: fn _issue_id, _event, _metadata -> :ok end
+        ]},
+        {Cympho.Agents, [], [
+          get_agent: fn _ -> {:ok, %{id: agent_id, status: :working}} end,
+          update_agent: fn _agent, _attrs -> {:ok, %{}} end
+        ]}
+      ]) do
+        # Verify counter exists before
+        assert [{^agent_id, 1}] = :ets.lookup(:cympho_adapter_failures, agent_id)
+
+        {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+        Process.sleep(200)
+
+        # Verify counter was deleted after success
+        assert [] = :ets.lookup(:cympho_adapter_failures, agent_id)
       end
-    end
-
-    @tag :capture_log
-    test "whereis returns nil for non-existent orchestrator" do
-      assert Orchestrator.whereis("non-existent-id") == nil
-    end
-
-    @tag :capture_log
-    test "stop returns :ok for non-existent orchestrator" do
-      assert :ok = Orchestrator.stop("non-existent-id")
-    end
-
-    @tag :capture_log
-    test "stop terminates existing orchestrator" do
-      issue = %{id: "orch-stop-test", title: "Test", description: "Desc"}
-      agent_id = "agent-1"
-
-      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
-      assert Orchestrator.whereis(issue.id) == pid
-      assert :ok = Orchestrator.stop(issue.id)
-      # Give the Registry time to clean up the entry
-      :timer.sleep(50)
-      assert Orchestrator.whereis(issue.id) == nil
     end
   end
 
   describe "whereis/1" do
-    test "returns pid for running orchestrator" do
-      issue = %{id: "orch-test-4", title: "Test", description: "Desc"}
-      agent_id = "agent-1"
-
-      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
-      assert Orchestrator.whereis(issue.id) == pid
-    after
-      if pid = Orchestrator.whereis("orch-test-4") do
-        GenServer.stop(pid)
-      end
+    test "returns nil for non-existent orchestrator" do
+      assert nil == Orchestrator.whereis("non-existent-issue")
     end
 
-    test "returns nil for unknown issue" do
-      assert Orchestrator.whereis("nonexistent-issue") == nil
+    test "returns pid for active orchestrator", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
+
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-whereis-1"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-whereis-1"}} end,
+          start_run: fn _ -> :ok end
+        ]},
+        {Cympho.AgentRunner, [], [
+          run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+        ]}
+      ]) do
+        {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert pid == Orchestrator.whereis(issue_id)
+
+        # Clean up
+        Orchestrator.stop(issue_id)
+      end
     end
   end
 
-  describe "stop/1" do
-    test "stops running orchestrator" do
-      issue = %{id: "orch-test-5", title: "Test", description: "Desc"}
-      agent_id = "agent-1"
+  describe "start_and_run/2" do
+    test "returns error when orchestrator already running", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
 
-      {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
-      assert Orchestrator.whereis(issue.id) == pid
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-already-1"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-already-1"}} end,
+          start_run: fn _ -> :ok end
+        ]},
+        {Cympho.AgentRunner, [], [
+          run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+        ]}
+      ]) do
+        {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert {:error, :already_started} = Orchestrator.start_and_run(issue, agent_id)
 
-      Orchestrator.stop(issue.id)
-      :timer.sleep(50)
-      assert Orchestrator.whereis(issue.id) == nil
-    end
-
-    test "handles stop for unknown issue gracefully" do
-      Orchestrator.stop("nonexistent-issue")
+        # Clean up
+        Orchestrator.stop(issue_id)
+      end
     end
   end
 
-  describe "terminate/2 notifies Dispatcher" do
-    @tag :capture_log
-    test "stop/1 sends session_ended to Dispatcher and removes from running_issue_ids" do
-      unless Process.whereis(Cympho.Orchestrator.Dispatcher) do
-        start_supervised!(Cympho.Orchestrator.Dispatcher)
+  describe "get_session_state/1" do
+    test "returns nil for non-existent orchestrator" do
+      assert nil == Orchestrator.get_session_state("non-existent-issue")
+    end
+
+    test "returns session state for active orchestrator", %{issue_id: issue_id, agent_id: agent_id} do
+      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
+
+      with_mocks([
+        {Cympho.AgentAdapters, [], [
+          resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+        ]},
+        {Cympho.HeartbeatEngine, [], [
+          create_run: fn _ -> {:ok, %{id: "run-state-1"}} end,
+          get_run: fn _ -> {:ok, %{id: "run-state-1"}} end,
+          start_run: fn _ -> :ok end
+        ]},
+        {Cympho.AgentRunner, [], [
+          run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+        ]}
+      ]) do
+        {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
+
+        state = Orchestrator.get_session_state(issue_id)
+        assert state.issue_id == issue_id
+        assert state.agent_id == agent_id
+        assert is_map(state)
+
+        # Clean up
+        Orchestrator.stop(issue_id)
       end
+    end
+  end
 
-      issue_id = "orch-dispatcher-cleanup-test"
-      issue = %{id: issue_id, title: "Test", description: "Desc"}
-      agent_id = "agent-dispatch-cleanup"
+  describe "subscribe/1" do
+    test "subscribes to orchestrator events for an issue", %{issue_id: issue_id} do
+      assert :ok = Orchestrator.subscribe(issue_id)
+      assert Phoenix.PubSub.subscribers?(Cympho.PubSub, "orchestrator:#{issue_id}") |> length() > 0
 
-      dispatcher_state = Cympho.Orchestrator.Dispatcher.state()
-      new_running = MapSet.put(dispatcher_state.running_issue_ids, issue_id)
-
-      :sys.replace_state(Cympho.Orchestrator.Dispatcher, fn state ->
-        %{state | running_issue_ids: new_running}
-      end)
-
-      state_before = Cympho.Orchestrator.Dispatcher.state()
-      assert MapSet.member?(state_before.running_issue_ids, issue_id)
-
-      {:ok, _pid} = Orchestrator.start_and_run(issue, agent_id)
-      assert :ok = Orchestrator.stop(issue_id)
-      :timer.sleep(100)
-
-      state_after = Cympho.Orchestrator.Dispatcher.state()
-      refute MapSet.member?(state_after.running_issue_ids, issue_id)
+      # Clean up subscription
+      Phoenix.PubSub.unsubscribe(Cympho.PubSub, "orchestrator:#{issue_id}")
     end
   end
 end

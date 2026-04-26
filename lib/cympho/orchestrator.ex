@@ -123,7 +123,7 @@ defmodule Cympho.Orchestrator do
         start_engine_run(session)
         schedule_heartbeat_tick()
 
-        opts = run_opts(session, config)
+        opts = run_opts(session, config, module)
         session_id = module.run(session.issue, session.agent_id, self(), opts)
 
         {:noreply, %{session | session_id: session_id}}
@@ -362,81 +362,149 @@ defmodule Cympho.Orchestrator do
   defp extract_result_content(_), do: "No content returned"
 
   defp set_agent_idle(agent_id) do
-    case Agents.get_agent(agent_id) do
-      {:ok, agent} ->
-        Agents.update_agent(agent, %{status: :idle})
+    try do
+      case Agents.get_agent(agent_id) do
+        {:ok, agent} ->
+          Agents.update_agent(agent, %{status: :idle})
 
-      {:error, _} ->
-        :error
+        {:error, _} ->
+          :error
+      end
+    rescue
+      _ -> :error
     end
   end
 
-  defp resolve_adapter(session) do
-    adapter_type = Keyword.get(session.opts || [], :adapter, nil)
-    config = Keyword.get(session.opts || [], :adapter_config, %{})
+  defp build_agent_map(session) do
+    adapter_type = Keyword.get(session.opts || [], :adapter)
 
-    cond do
-      is_nil(adapter_type) ->
-        {:ok, Cympho.Adapters.ClaudeCodeAdapter}
+    {adapter_type, config} =
+      if adapter_type do
+        {adapter_type, Keyword.get(session.opts || [], :adapter_config, %{})}
+      else
+        try do
+          case Agents.get_agent(session.agent_id) do
+            {:ok, agent} ->
+              {agent.adapter, Keyword.get(session.opts || [], :adapter_config, %{})}
 
-      true ->
-        case AgentAdapters.resolve(%{adapter: adapter_type, config: config}) do
-          {:ok, module, _config} ->
-            {:ok, module}
-
-          {:error, :no_adapter} ->
-            :logger.warning("[Orchestrator] Unknown adapter: #{adapter_type}")
-            {:error, {:unknown_adapter, adapter_type}}
+            {:error, _} ->
+              {nil, %{}}
+          end
+        rescue
+          _ -> {nil, %{}}
         end
+      end
+
+    %{adapter: adapter_type, config: config}
+  end
+
+  defp run_opts(session, resolved_config, adapter_module) do
+    skills = Keyword.get(session.opts || [], :skills, [])
+    [skills: skills, config: resolved_config, adapter_module: adapter_module]
+  end
+
+  defp handle_resolution_error(session, error) do
+    issue = session.issue
+    agent_id = session.agent_id
+
+    {log_level, message} = resolution_error_info(error)
+
+    :logger.log(
+      log_level,
+      "[Orchestrator] Adapter resolution failed for issue #{issue.id}, agent #{agent_id}: #{message}"
+    )
+
+    fail_engine_run(session, message)
+    safe_create_comment(issue, agent_id, message)
+    safe_transition_blocked(issue)
+
+    if error == :no_adapter_available do
+      track_adapter_failure(agent_id)
+    else
+      set_agent_idle(agent_id)
+    end
+
+    {:stop, :normal, session}
+  end
+
+  defp resolution_error_info(:unknown_adapter) do
+    {:warning, "Unknown adapter type. No matching adapter registered."}
+  end
+
+  defp resolution_error_info(:no_adapter_available) do
+    {:error, "No adapter available. All adapters in the fallback chain are unavailable."}
+  end
+
+  defp resolution_error_info({:config_invalid, errors}) do
+    details =
+      errors
+      |> Enum.map(fn {type, reason} -> "#{type}: #{reason}" end)
+      |> Enum.join("; ")
+
+    {:warning, "Adapter configuration error: #{details}"}
+  end
+
+  defp safe_create_comment(issue, agent_id, body) do
+    try do
+      Comments.create_comment(%{
+        body: body,
+        author_type: "system",
+        author_id: agent_id,
+        issue_id: issue.id
+      })
+    rescue
+      _ -> :ok
     end
   end
 
-  defp handle_adapter_error(session, {:unknown_adapter, adapter_type}) do
-    issue = session.issue
-    agent_id = session.agent_id
+  defp safe_transition_blocked(issue) do
+    try do
+      case Issues.transition_issue(issue, :blocked) do
+        {:ok, _} ->
+          :logger.info("[Orchestrator] Issue #{issue.id} transitioned to :blocked after resolution failure")
 
-    error_body = "Adapter resolution failed: unknown adapter `#{adapter_type}`. Check agent configuration."
-
-    {:ok, _} =
-      Comments.create_comment(%{
-        body: error_body,
-        author_type: "agent",
-        author_id: agent_id,
-        issue_id: issue.id
-      })
-
-    Issues.transition_issue(issue, :blocked)
-    set_agent_idle(agent_id)
-
-    {:stop, :normal, session}
+        {:error, reason} ->
+          :logger.error("[Orchestrator] Failed to transition issue #{issue.id} to :blocked: #{inspect(reason)}")
+      end
+    rescue
+      _ -> :ok
+    end
   end
 
-  defp handle_adapter_error(session, reason) do
-    issue = session.issue
-    agent_id = session.agent_id
+  defp track_adapter_failure(agent_id) do
+    ensure_failure_table()
+    count = :ets.update_counter(@failure_table, agent_id, {2, 1}, {agent_id, 0})
 
-    :logger.error("[Orchestrator] Adapter resolution failed for issue #{issue.id}: #{inspect(reason)}")
+    if count >= @max_adapter_failures do
+      try do
+        case Agents.get_agent(agent_id) do
+          {:ok, agent} -> Agents.update_agent(agent, %{status: :error})
+          {:error, _} -> :ok
+        end
+      rescue
+        _ -> :ok
+      end
 
-    error_body = "Adapter resolution failed: #{inspect(reason)}"
-
-    {:ok, _} =
-      Comments.create_comment(%{
-        body: error_body,
-        author_type: "agent",
-        author_id: agent_id,
-        issue_id: issue.id
-      })
-
-    Issues.transition_issue(issue, :blocked)
-    set_agent_idle(agent_id)
-
-    {:stop, :normal, session}
+      :ets.delete(@failure_table, agent_id)
+    else
+      set_agent_idle(agent_id)
+    end
   end
 
-  defp run_opts(session) do
-    skills = Keyword.get(session.opts || [], :skills, [])
-    adapter_config = Keyword.get(session.opts || [], :adapter_config, %{})
-    [skills: skills, config: adapter_config]
+  defp reset_adapter_failure(agent_id) do
+    try do
+      if :ets.whereis(@failure_table) != :undefined do
+        :ets.delete(@failure_table, agent_id)
+      end
+    rescue
+      _ -> :ok
+    end
+  end
+
+  defp ensure_failure_table do
+    if :ets.whereis(@failure_table) == :undefined do
+      :ets.new(@failure_table, [:named_table, :set, :public, read_concurrency: true])
+    end
   end
 
   defp process_tool_results(result, tool_traces) when is_map(result) do
@@ -570,4 +638,14 @@ defmodule Cympho.Orchestrator do
         {tool_traces, nil}
     end
   end
+
+  defp build_agent_map(session) do
+    %{adapter: Keyword.get(session.opts || [], :adapter), config: Keyword.get(session.opts || [], :adapter_config, %{})}
+  end
+
+  defp run_opts(session, config) do
+    [skills: Keyword.get(session.opts || [], :skills, []), config: config]
+  end
+
+  defp reset_adapter_failure(_agent_id), do: :ok
 end

@@ -111,7 +111,7 @@ defmodule Cympho.Decisions do
           })
         )
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "decisions", {:decision_created, decision})
+        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{decision.company_id}:decisions", {:decision_created, decision})
 
         maybe_mark_parent_superseded(decision)
 
@@ -284,10 +284,10 @@ defmodule Cympho.Decisions do
   end
 
   @doc """
-  Subscribes to decision events.
+  Subscribes to decision events for a specific company.
   """
-  def subscribe do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "decisions")
+  def subscribe(company_id) do
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:decisions")
   end
 
   @nil_uuid "00000000-0000-0000-0000-000000000000"
@@ -310,7 +310,7 @@ defmodule Cympho.Decisions do
       from(d in Decision, where: d.id == ^parent_id)
       |> Repo.update_all(set: [status: "superseded"])
 
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "decisions", {:decision_superseded, parent_id})
+      Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{decision.company_id}:decisions", {:decision_superseded, parent_id})
     end
 
     :ok

@@ -73,6 +73,17 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   end
 
   defp make_openclaw_request(endpoint, api_key, payload) do
+    # Ensure inets application is started before using :httpc
+    case Application.ensure_all_started(:inets) do
+      {:ok, _} ->
+        do_make_openclaw_request(endpoint, api_key, payload)
+
+      {:error, reason} ->
+        {:error, {:inets_start_failed, reason}}
+    end
+  end
+
+  defp do_make_openclaw_request(endpoint, api_key, payload) do
     url = build_openclaw_url(endpoint)
 
     headers = [
@@ -153,6 +164,17 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   defp check_openclaw_health(endpoint) do
     health_url = String.trim_trailing(endpoint, "/") <> "/openclaw/v1/health"
 
+    # Ensure inets is started before using :httpc
+    case Application.ensure_all_started(:inets) do
+      {:ok, _} ->
+        do_health_check_request(health_url)
+
+      {:error, _reason} ->
+        %{status: :unhealthy, message: "Failed to start inets application", checked_at: DateTime.utc_now()}
+    end
+  end
+
+  defp do_health_check_request(health_url) do
     case :httpc.request(:get, {health_url, []}, [], []) do
       {:ok, {{_, 200, _}, _, _}} ->
         %{status: :healthy, message: "OpenClaw endpoint reachable", checked_at: DateTime.utc_now()}

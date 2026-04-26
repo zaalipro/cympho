@@ -57,6 +57,21 @@ defmodule Cympho.ApprovalsTest do
       assert {:ok, %Approval{} = approval} = Approvals.create_approval(attrs)
       assert approval.payload["summary"] == "Test summary"
     end
+
+    test "broadcasts to company-scoped topic when creating approval without issues" do
+      company = insert_company()
+      agent = insert_agent(company_id: company.id)
+
+      attrs = %{
+        type: "request_board_approval",
+        requested_by_agent_id: agent.id
+      }
+
+      Approvals.subscribe(company.id)
+      {:ok, _approval} = Approvals.create_approval(attrs)
+
+      assert_received {:approval_created, _}
+    end
   end
 
   describe "resolve_approval/3" do
@@ -99,6 +114,17 @@ defmodule Cympho.ApprovalsTest do
       agent = insert_agent(company_id: company.id)
       issue = insert_issue(company_id: company.id)
       {:ok, approval} = create_test_approval(agent, issue)
+
+      Approvals.subscribe(company.id)
+      {:ok, _} = Approvals.resolve_approval(approval.id, :approved, %{})
+
+      assert_received {:approval_resolved, _}
+    end
+
+    test "broadcasts to company-scoped topic when approval has no issues" do
+      company = insert_company()
+      agent = insert_agent(company_id: company.id)
+      {:ok, approval} = create_test_approval(agent)
 
       Approvals.subscribe(company.id)
       {:ok, _} = Approvals.resolve_approval(approval.id, :approved, %{})

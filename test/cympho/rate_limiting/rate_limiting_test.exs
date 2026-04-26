@@ -7,15 +7,19 @@ defmodule Cympho.RateLimitingTest do
     test "allows up to 10 events before rate limiting" do
       socket = %Phoenix.Socket{assigns: %{}}
 
-      result =
-        Enum.reduce_while(1..12, {:ok, socket}, fn _, {:ok, sock} ->
-          case RateLimiting.check_message_rate(sock) do
-            {:ok, new_sock} -> {:cont, {:ok, new_sock}}
-            {:error, _} = err -> {:halt, err}
+      results =
+        for _ <- 1..12 do
+          case RateLimiting.check_message_rate(socket) do
+            {:ok, new_socket} -> {:ok, new_socket.assigns.rate_limit_bucket.tokens}
+            {:error, :rate_limited} -> :rate_limited
           end
-        end)
+        end
 
-      assert {:error, :rate_limited} = result
+      allowed = Enum.filter(results, &match?({:ok, _}, &1))
+      rate_limited = Enum.filter(results, &(&1 == :rate_limited))
+
+      assert length(allowed) == 10
+      assert length(rate_limited) == 2
     end
 
     test "refills tokens over time" do

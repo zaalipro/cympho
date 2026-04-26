@@ -4,13 +4,9 @@ defmodule Cympho.RateLimiting.BroadcastDedupTest do
   alias Cympho.RateLimiting.BroadcastDedup
 
   setup do
-    try do
-      GenServer.stop(BroadcastDedup)
-    catch
-      :exit, _ -> :ok
+    if :ets.whereis(BroadcastDedup) != :undefined do
+      :ets.delete_all_objects(BroadcastDedup)
     end
-
-    {:ok, _pid} = start_supervised({BroadcastDedup, []})
     :ok
   end
 
