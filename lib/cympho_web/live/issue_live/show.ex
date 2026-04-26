@@ -17,6 +17,7 @@ defmodule CymphoWeb.IssueLive.Show do
     if connected?(socket) && socket.assigns[:current_company] do
       Issues.subscribe(socket.assigns.current_company.id)
       Comments.subscribe(socket.assigns.current_company.id)
+      CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
     end
     Documents.subscribe()
 
@@ -524,6 +525,24 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:turn_ended_with_error, _session_id, reason}, socket) do
     {:noreply, put_flash(socket, :error, "Agent error: #{inspect(reason)}")}
+  end
+
+  def handle_info({:run_status_changed, payload}, socket) do
+    issue_id = socket.assigns.issue.id
+    if payload[:issue_id] == issue_id do
+      {message, type} = case payload do
+        %{new_status: "running"} -> {"Run started", "info"}
+        %{new_status: "completed"} -> {"Run completed successfully", "success"}
+        %{new_status: "failed"} -> {"Run failed", "error"}
+        %{new_status: "cancelled"} -> {"Run cancelled", "warning"}
+        _ -> {"Run status updated", "info"}
+      end
+      runs = HeartbeatEngine.list_runs_for_issue(issue_id)
+      socket = socket |> assign(:runs, runs) |> push_event("toast", %{message: message, type: type, key: "run_#{issue_id}_#{payload[:new_status]}"})
+      {:noreply, maybe_rebuild_timeline(socket)}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({:document_updated, updated_document}, socket) do

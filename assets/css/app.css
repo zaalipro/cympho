@@ -371,3 +371,23 @@ button, a, select, input[type="submit"] {
     width: 100%;
   }
 }
+
+/* Toast notifications */
+.toast {
+  pointer-events: auto;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  max-width: 360px;
+  opacity: 0;
+  transform: translateX(20px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.toast-visible { opacity: 1; transform: translateX(0); }
+.toast-exit { opacity: 0; transform: translateX(20px); }
+.toast-info    { background: rgba(113, 112, 255, 0.15); color: #a5a4ff; border: 1px solid rgba(113, 112, 255, 0.2); }
+.toast-success { background: rgba(39, 166, 68, 0.15); color: #4ade80; border: 1px solid rgba(39, 166, 68, 0.2); }
+.toast-warning { background: rgba(234, 179, 8, 0.15); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.2); }
+.toast-error   { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2); }
