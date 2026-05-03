@@ -103,7 +103,7 @@ defmodule Cympho.OrchestratorTest do
   end
 
   describe "unknown_adapter error path" do
-    test "logs error and transitions issue to blocked", %{issue_id: issue_id, agent_id: agent_id} do
+    test "logs error and releases issue for retry", %{issue_id: issue_id, agent_id: agent_id} do
       issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
 
       with_mocks([
@@ -123,7 +123,7 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.Issues, [],
          [
-           transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+           transition_issue: fn _issue, :todo -> {:ok, %{}} end
          ]},
         {Cympho.Agents, [],
          [
@@ -136,9 +136,9 @@ defmodule Cympho.OrchestratorTest do
         # Give process time to terminate
         Process.sleep(100)
 
-        # Verify error was logged and issue transitioned to blocked
+        # Verify error was logged and issue was released for retry
         assert_called(Cympho.Comments.create_comment(:_))
-        assert_called(Cympho.Issues.transition_issue(issue, :blocked))
+        assert_called(Cympho.Issues.transition_issue(issue, :todo))
         assert_called(Cympho.HeartbeatEngine.fail_run(:_, :_))
       end
     end
@@ -163,7 +163,7 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.Issues, [],
          [
-           transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+           transition_issue: fn _issue, :todo -> {:ok, %{}} end
          ]},
         {Cympho.Agents, [],
          [
@@ -181,7 +181,7 @@ defmodule Cympho.OrchestratorTest do
   end
 
   describe "no_adapter_available error path" do
-    test "logs error and transitions issue to blocked", %{issue_id: issue_id, agent_id: agent_id} do
+    test "logs error and releases issue for retry", %{issue_id: issue_id, agent_id: agent_id} do
       issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
 
       with_mocks([
@@ -201,7 +201,7 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.Issues, [],
          [
-           transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+           transition_issue: fn _issue, :todo -> {:ok, %{}} end
          ]},
         {Cympho.Agents, [],
          [
@@ -213,7 +213,7 @@ defmodule Cympho.OrchestratorTest do
         Process.sleep(100)
 
         assert_called(Cympho.Comments.create_comment(:_))
-        assert_called(Cympho.Issues.transition_issue(issue, :blocked))
+        assert_called(Cympho.Issues.transition_issue(issue, :todo))
       end
     end
 
@@ -237,7 +237,7 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.Issues, [],
          [
-           transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+           transition_issue: fn _issue, :todo -> {:ok, %{}} end
          ]},
         {Cympho.Agents, [],
          [
@@ -255,7 +255,7 @@ defmodule Cympho.OrchestratorTest do
   end
 
   describe "config_invalid error path" do
-    test "comments with validation errors and transitions to blocked", %{
+    test "comments with validation errors and releases issue for retry", %{
       issue_id: issue_id,
       agent_id: agent_id
     } do
@@ -285,7 +285,7 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.Issues, [],
          [
-           transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+           transition_issue: fn _issue, :todo -> {:ok, %{}} end
          ]},
         {Cympho.Agents, [],
          [
@@ -298,7 +298,7 @@ defmodule Cympho.OrchestratorTest do
 
         # Verify comment included error details
         assert_called(Cympho.Comments.create_comment(:_))
-        assert_called(Cympho.Issues.transition_issue(issue, :blocked))
+        assert_called(Cympho.Issues.transition_issue(issue, :todo))
       end
     end
 
@@ -322,7 +322,7 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.Issues, [],
          [
-           transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+           transition_issue: fn _issue, :todo -> {:ok, %{}} end
          ]},
         {Cympho.Agents, [],
          [
@@ -362,7 +362,7 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.Issues, [],
          [
-           transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+           transition_issue: fn _issue, :todo -> {:ok, %{}} end
          ]},
         {Cympho.Agents, [],
          [
@@ -428,7 +428,7 @@ defmodule Cympho.OrchestratorTest do
          ]},
         {Cympho.Issues, [],
          [
-           transition_issue: fn _issue, :blocked -> {:ok, %{}} end
+           transition_issue: fn _issue, :todo -> {:ok, %{}} end
          ]},
         {Cympho.Agents, [],
          [
@@ -497,9 +497,11 @@ defmodule Cympho.OrchestratorTest do
          [
            create_comment: fn _ -> {:ok, %{}} end
          ]},
-        {Cympho.Issues, [],
+        {Cympho.AgentActions, [],
          [
-           transition_issue: fn _issue, :done -> {:ok, %{}} end
+           parse: fn _ -> {:ok, [%{"type" => "approve_issue"}]} end,
+           execute: fn _issue, _agent_id, _actions -> {:ok, %{issue: issue, results: []}} end,
+           unresolved_current_issue?: fn _issue, _agent_id -> false end
          ]},
         {Cympho.Activities, [],
          [
@@ -556,9 +558,11 @@ defmodule Cympho.OrchestratorTest do
          [
            create_comment: fn _ -> {:ok, %{}} end
          ]},
-        {Cympho.Issues, [],
+        {Cympho.AgentActions, [],
          [
-           transition_issue: fn _issue, :done -> {:ok, %{}} end
+           parse: fn _ -> {:ok, [%{"type" => "approve_issue"}]} end,
+           execute: fn _issue, _agent_id, _actions -> {:ok, %{issue: issue, results: []}} end,
+           unresolved_current_issue?: fn _issue, _agent_id -> false end
          ]},
         {Cympho.Activities, [],
          [

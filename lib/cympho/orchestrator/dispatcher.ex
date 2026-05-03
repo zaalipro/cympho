@@ -1,15 +1,16 @@
 defmodule Cympho.Orchestrator.Dispatcher do
   @moduledoc """
-  Polls the DB for unassigned issues and dispatches agent sessions.
+  Polls the DB for runnable issues and dispatches agent sessions.
 
   Configuration (app env):
     - :poll_interval          — ms between polls (default 30_000)
     - :max_concurrent_agents — max simultaneous dispatches (default 3)
-    - :active_states         — issue states considered runnable (default [:todo, :in_progress])
+    - :active_states         — issue states considered runnable (default [:todo, :in_review])
     - :terminal_states       — issue states that stop reconciliation (default [:done, :cancelled])
 
-  The dispatcher finds unassigned issues in active states, checks out each one
-  for the configured agent, then starts an Orchestrator session.
+  The dispatcher finds assigned or unassigned issues in active states, checks
+  each one out for a company-scoped eligible agent, then starts an Orchestrator
+  session.
   """
 
   use GenServer, restart: :permanent
@@ -19,12 +20,14 @@ defmodule Cympho.Orchestrator.Dispatcher do
   alias Cympho.Orchestrator
   alias Cympho.Issues
   alias Cympho.Agents
+  alias Cympho.Companies.Company
+  alias Cympho.Agents.Agent
 
   @poll_interval Application.compile_env(:cympho, [:orchestrator, :poll_interval], 30_000)
   @max_concurrent Application.compile_env(:cympho, [:orchestrator, :max_concurrent_agents], 3)
   @active_states Application.compile_env(:cympho, [:orchestrator, :active_states], [
                    :todo,
-                   :in_progress
+                   :in_review
                  ])
   @terminal_states Application.compile_env(:cympho, [:orchestrator, :terminal_states], [
                      :done,
@@ -32,6 +35,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
                    ])
   @max_retries Application.compile_env(:cympho, [:orchestrator, :max_retries], 5)
   @base_backoff_ms Application.compile_env(:cympho, [:orchestrator, :base_backoff_ms], 30_000)
+  @enabled_default Application.compile_env(:cympho, [:orchestrator, :enabled], true)
 
   # Client
 
@@ -49,11 +53,23 @@ defmodule Cympho.Orchestrator.Dispatcher do
     GenServer.call(__MODULE__, :state)
   end
 
+  @doc "Requests an immediate poll when the dispatcher is running."
+  def poll_now do
+    case Process.whereis(__MODULE__) do
+      nil ->
+        {:error, :not_started}
+
+      pid ->
+        send(pid, :poll)
+        :ok
+    end
+  end
+
   # Server
 
   @impl true
   def init(_opts) do
-    schedule_poll()
+    if enabled?(), do: schedule_poll()
     {:ok, State.new()}
   end
 
@@ -69,9 +85,14 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   @impl true
   def handle_info(:poll, %State{} = state) do
-    state = do_poll(state)
-    schedule_poll()
-    {:noreply, state}
+    if enabled?() do
+      state = do_poll(state)
+      schedule_poll()
+      {:noreply, state}
+    else
+      broadcast_state(state)
+      {:noreply, state}
+    end
   end
 
   @impl true
@@ -87,18 +108,27 @@ defmodule Cympho.Orchestrator.Dispatcher do
     Process.send_after(self(), :poll, @poll_interval)
   end
 
+  defp enabled? do
+    :cympho
+    |> Application.get_env(:orchestrator, [])
+    |> Keyword.get(:enabled, @enabled_default)
+  end
+
   defp do_poll(%State{} = state) do
     state
     |> reconcile_running()
     |> fetch_and_dispatch()
   end
 
-  defp reconcile_running(%State{running_issue_ids: running} = state)
-       when map_size(running) == 0 do
-    state
+  defp reconcile_running(%State{running_issue_ids: running} = state) do
+    if MapSet.size(running) == 0 do
+      state
+    else
+      do_reconcile_running(state)
+    end
   end
 
-  defp reconcile_running(%State{running_issue_ids: running} = state) do
+  defp do_reconcile_running(%State{running_issue_ids: running} = state) do
     stopped_ids =
       Enum.flat_map(MapSet.to_list(running), fn issue_id ->
         case Issues.get_issue(issue_id) do
@@ -122,20 +152,22 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   defp fetch_and_dispatch(%State{running_issue_ids: running, retry_attempts: retries} = state) do
-    available_slots = @max_concurrent - map_size(running)
+    available_slots = @max_concurrent - MapSet.size(running)
 
     if available_slots <= 0 do
       broadcast_state(state)
       state
     else
-      candidates = fetch_candidate_issues(available_slots)
+      candidates = fetch_candidate_issues(available_slots * 4)
       now = :os.system_time(:millisecond)
 
       ready_candidates =
-        Enum.reject(candidates, fn issue ->
-          retry_entry = retries[issue.id]
-          retry_entry && retry_entry.next_retry_at > now
+        candidates
+        |> Enum.reject(fn issue ->
+          MapSet.member?(running, issue.id) ||
+            (retries[issue.id] && retries[issue.id].next_retry_at > now)
         end)
+        |> Enum.take(available_slots)
 
       Enum.reduce(ready_candidates, state, &dispatch_issue/2)
     end
@@ -145,8 +177,10 @@ defmodule Cympho.Orchestrator.Dispatcher do
     active_states = @active_states
 
     Cympho.Issues.Issue
-    |> where([i], i.status in ^active_states and is_nil(i.assignee_id))
-    |> preload([:blocked_by])
+    |> join(:left, [i], c in Company, on: c.id == i.company_id)
+    |> where([i, c], i.status in ^active_states)
+    |> where([i, c], is_nil(i.company_id) or c.status == "active")
+    |> preload([:blocked_by, :assignee])
     |> order_by([i],
       asc:
         fragment(
@@ -241,12 +275,59 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   defp agent_for_issue(%Cympho.Issues.Issue{} = issue) do
+    case assigned_agent_for_issue(issue) do
+      {:ok, agent} ->
+        {:ok, agent}
+
+      :unassigned ->
+        routed_agent_for_issue(issue)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp assigned_agent_for_issue(%Cympho.Issues.Issue{assignee_id: nil}), do: :unassigned
+
+  defp assigned_agent_for_issue(%Cympho.Issues.Issue{} = issue) do
+    case Agents.get_agent(issue.assignee_id) do
+      {:ok, %Agent{} = agent} ->
+        required_role = Router.infer_role(issue)
+
+        cond do
+          agent.status != :idle ->
+            {:error, :no_agent_available}
+
+          Agents.is_agent_at_capacity?(agent) ->
+            {:error, :no_agent_available}
+
+          not same_company?(issue, agent) ->
+            {:error, :no_agent_available}
+
+          not Cympho.Issues.Issue.role_authorized?(agent.role, required_role) ->
+            {:error, :no_agent_available}
+
+          true ->
+            {:ok, agent}
+        end
+
+      {:error, _} ->
+        {:error, :no_agent_available}
+    end
+  end
+
+  defp routed_agent_for_issue(%Cympho.Issues.Issue{} = issue) do
     primary_role = Router.infer_role(issue)
     fallback_roles = Router.fallback_chain(primary_role)
     all_roles = [primary_role | fallback_roles]
 
     Enum.each(all_roles, fn role ->
-      eligible = Agents.list_eligible_agents(role)
+      eligible =
+        if issue.company_id do
+          Agents.list_eligible_agents(role, issue.company_id)
+        else
+          Agents.list_eligible_agents(role)
+        end
 
       case Router.select_agent(role, eligible) do
         {:ok, agent} -> throw({:found, agent})
@@ -258,6 +339,14 @@ defmodule Cympho.Orchestrator.Dispatcher do
   catch
     {:found, agent} -> {:ok, agent}
   end
+
+  defp same_company?(%Cympho.Issues.Issue{company_id: nil}, _agent), do: true
+  defp same_company?(_issue, %Agent{company_id: nil}), do: true
+
+  defp same_company?(%Cympho.Issues.Issue{company_id: company_id}, %Agent{company_id: company_id}),
+       do: true
+
+  defp same_company?(_issue, _agent), do: false
 
   defp broadcast_state(%State{} = state) do
     Phoenix.PubSub.broadcast(Cympho.PubSub, "orchestrator:dispatcher", {:dispatcher_state, state})

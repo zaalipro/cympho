@@ -625,7 +625,7 @@ defmodule Cympho.Issues do
         {:error, :already_assigned}
 
       current_issue.assignee_id == agent_id ->
-        {:ok, preload_issue(current_issue)}
+        refresh_existing_checkout(current_issue, agent, required_role)
 
       current_issue.status in [:done, :cancelled] ->
         {:error, :terminal_issue}
@@ -716,10 +716,46 @@ defmodule Cympho.Issues do
     end
   end
 
+  defp refresh_existing_checkout(%Issue{} = issue, %Agent{} = agent, required_role) do
+    cond do
+      issue.status in [:done, :cancelled] ->
+        {:error, :terminal_issue}
+
+      Agents.is_agent_at_capacity?(agent) and issue.status != :in_progress ->
+        {:error, :agent_at_capacity}
+
+      not Issue.role_authorized?(agent.role, required_role) ->
+        {:error, :chain_of_command_violation}
+
+      issue.status in [:todo, :in_review, :backlog, :blocked] ->
+        now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+        attrs =
+          %{
+            status: :in_progress,
+            checked_out_at: now,
+            started_at: issue.started_at || now,
+            actor_type: "agent",
+            actor_id: agent.id
+          }
+          |> maybe_put_assigned_role_map(required_role)
+
+        update_issue(issue, attrs)
+
+      true ->
+        {:ok, preload_issue(issue)}
+    end
+  end
+
   defp maybe_put_assigned_role(set_fields, nil), do: set_fields
 
   defp maybe_put_assigned_role(set_fields, role),
     do: Keyword.put(set_fields, :assigned_role, to_string(role))
+
+  defp maybe_put_assigned_role_map(attrs, nil), do: attrs
+
+  defp maybe_put_assigned_role_map(attrs, role),
+    do: Map.put(attrs, :assigned_role, to_string(role))
 
   defp atomic_release(%Issue{} = issue, target_status, opts) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)

@@ -17,7 +17,17 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   """
   @spec infer_role(map()) :: :ceo | :cto | :engineer
   def infer_role(issue) do
-    text = "#{issue.title} #{issue.description || ""}" |> String.downcase()
+    case assigned_role(issue) do
+      role when role in [:ceo, :cto, :engineer] ->
+        role
+
+      _ ->
+        infer_role_from_text(issue)
+    end
+  end
+
+  defp infer_role_from_text(issue) do
+    text = "#{field(issue, :title)} #{field(issue, :description) || ""}" |> String.downcase()
 
     cond do
       matches_any?(text, @strategic_keywords) -> :ceo
@@ -26,6 +36,22 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
       true -> :engineer
     end
   end
+
+  defp assigned_role(issue) do
+    case field(issue, :assigned_role) do
+      role when is_atom(role) -> role
+      role when is_binary(role) -> role_to_atom(role)
+      _ -> nil
+    end
+  end
+
+  defp role_to_atom("ceo"), do: :ceo
+  defp role_to_atom("cto"), do: :cto
+  defp role_to_atom("engineer"), do: :engineer
+  defp role_to_atom(_), do: nil
+
+  defp field(%{} = map, key), do: Map.get(map, key) || Map.get(map, Atom.to_string(key))
+  defp field(_issue, _key), do: nil
 
   @doc """
   Selects the least-loaded eligible agent for the given role.

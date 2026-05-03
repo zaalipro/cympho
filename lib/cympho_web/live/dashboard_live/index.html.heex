@@ -6,7 +6,26 @@
       </p>
       <h1 class="mt-1 text-2xl font-590 text-text-primary">Command Center</h1>
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class={"inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-510 #{autonomy_badge_class(@autonomy_status)}"}>
+        {status_label(@autonomy_status)}
+      </span>
+      <button
+        :if={@company && @autonomy_status == :active}
+        type="button"
+        phx-click="pause_company"
+        class="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
+      >
+        Pause
+      </button>
+      <button
+        :if={@company && @autonomy_status == :paused}
+        type="button"
+        phx-click="resume_company"
+        class="rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover transition-colors"
+      >
+        Resume
+      </button>
       <.app_link
         navigate={~p"/onboarding"}
         class="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
@@ -24,21 +43,36 @@
 
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
     <div class="bg-panel rounded-lg border border-border p-4">
+      <p class="text-sm text-text-secondary">Queued Work</p>
+      <p class="text-3xl font-medium text-text-primary mt-1">
+        {@queued_work}
+      </p>
+      <p class="text-xs text-text-quaternary mt-1">
+        Total Issues {total_issues(@issue_status_counts)}
+      </p>
+    </div>
+    <div class="bg-panel rounded-lg border border-border p-4">
+      <p class="text-sm text-text-secondary">Running</p>
+      <p class="text-3xl font-medium text-text-primary mt-1">
+        {@running_work}
+      </p>
+      <p class="text-xs text-text-quaternary mt-1">
+        Checked out by agents
+      </p>
+    </div>
+    <div class="bg-panel rounded-lg border border-border p-4">
+      <p class="text-sm text-text-secondary">Blocked</p>
+      <p class="text-3xl font-medium text-text-primary mt-1">
+        {@blocked_work}
+      </p>
+      <p class="text-xs text-text-quaternary mt-1">
+        Needs action
+      </p>
+    </div>
+    <div class="bg-panel rounded-lg border border-border p-4">
       <p class="text-sm text-text-secondary">Active Agents</p>
       <p class="text-3xl font-medium text-text-primary mt-1">
         {@active_agents}<span class="text-base text-text-secondary"> / {@total_agents}</span>
-      </p>
-    </div>
-    <div class="bg-panel rounded-lg border border-border p-4">
-      <p class="text-sm text-text-secondary">Total Issues</p>
-      <p class="text-3xl font-medium text-text-primary mt-1">
-        {total_issues(@issue_status_counts)}
-      </p>
-    </div>
-    <div class="bg-panel rounded-lg border border-border p-4">
-      <p class="text-sm text-text-secondary">Created (7d)</p>
-      <p class="text-3xl font-medium text-text-primary mt-1">
-        {throughput_total(@throughput.created)}
       </p>
     </div>
     <div class="bg-panel rounded-lg border border-border p-4">
@@ -46,14 +80,10 @@
       <p class="text-3xl font-medium text-text-primary mt-1">
         {throughput_total(@throughput.closed)}
       </p>
-    </div>
-    <div class="bg-panel rounded-lg border border-border p-4">
-      <p class="text-sm text-text-secondary">Total Cost</p>
-      <p class="text-3xl font-medium text-text-primary mt-1">
-        {format_cost(@cost_summary.total_cost)}
-      </p>
       <p class="text-xs text-text-quaternary mt-1">
-        {format_tokens(@cost_summary.total_input_tokens + @cost_summary.total_output_tokens)} tokens / {@cost_summary.total_runs} runs
+        Created (7d) {throughput_total(@throughput.created)} / Total Cost {format_cost(
+          @cost_summary.total_cost
+        )}
       </p>
     </div>
   </div>

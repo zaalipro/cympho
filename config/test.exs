@@ -22,6 +22,8 @@ config :logger, level: :warning
 
 config :cympho, :skill_manifest_dir, "test/support/skill_manifests"
 
+config :cympho, :orchestrator, enabled: false
+
 config :phoenix, :plug_init_mode, :runtime
 
 config :swoosh, :api_client, Swoosh.ApiClient.Test

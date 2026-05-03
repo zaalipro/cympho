@@ -170,10 +170,12 @@ defmodule Cympho.Wakes do
 
     case AgentHeartbeat.trigger_heartbeat(agent_id) do
       :ok ->
+        _ = Cympho.Orchestrator.Dispatcher.poll_now()
         Logger.info("Wakes: triggered heartbeat for agent #{agent_id}, reason: #{reason}")
         {:ok, agent_wake}
 
       {:error, :not_found} ->
+        _ = Cympho.Orchestrator.Dispatcher.poll_now()
         Logger.warning("Wakes: agent heartbeat process not found for #{agent_id}")
         {:ok, agent_wake}
     end

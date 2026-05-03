@@ -48,6 +48,25 @@ defmodule Cympho.Companies do
     do_update_company(company, attrs)
   end
 
+  def pause_company(%Company{} = company, reason \\ "Paused from dashboard") do
+    execute_company_update(company, %{
+      status: "paused",
+      paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
+      paused_reason: reason
+    })
+  end
+
+  def resume_company(%Company{} = company) do
+    execute_company_update(company, %{
+      status: "active",
+      paused_at: nil,
+      paused_reason: nil
+    })
+  end
+
+  def active?(%Company{status: "active"}), do: true
+  def active?(_company), do: false
+
   defp do_update_company(%Company{} = company, attrs) do
     company
     |> Company.changeset(attrs)
@@ -60,6 +79,12 @@ defmodule Cympho.Companies do
           "Company updated: #{updated.name}",
           resource: updated,
           metadata: %{changes: Map.keys(attrs)}
+        )
+
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.id}:company",
+          {:company_updated, updated}
         )
 
         {:ok, updated}

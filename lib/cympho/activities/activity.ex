@@ -35,6 +35,7 @@ defmodule Cympho.Activities.Activity do
     heartbeat_started
     heartbeat_completed
     heartbeat_failed
+    agent_action
     cost_incurred
     budget_threshold_exceeded
     feedback_submitted

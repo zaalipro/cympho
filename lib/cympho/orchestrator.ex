@@ -33,7 +33,18 @@ defmodule Cympho.Orchestrator do
   ]
 
   use GenServer
-  alias Cympho.{Issues, Comments, Agents, Activities, HeartbeatEngine, AgentAdapters}
+
+  alias Cympho.{
+    Issues,
+    Comments,
+    Agents,
+    Activities,
+    HeartbeatEngine,
+    AgentAdapters,
+    AgentActions
+  }
+
+  alias Cympho.Issues.Issue
 
   @heartbeat_tick_interval 30_000
 
@@ -170,20 +181,24 @@ defmodule Cympho.Orchestrator do
 
     body = extract_result_content(result)
 
-    {:ok, _comment} =
-      Comments.create_comment(%{
-        body: body,
-        author_type: "agent",
-        author_id: agent_id,
-        issue_id: issue.id
-      })
+    create_agent_comment(issue, agent_id, body)
 
-    Issues.transition_issue(issue, :done)
+    action_result = handle_agent_actions(issue, agent_id, body)
 
-    Activities.log_heartbeat_event(issue.id, :completed, %{
-      agent_id: agent_id,
-      turn_count: session.turn_count + 1
-    })
+    case action_result do
+      :ok ->
+        Activities.log_heartbeat_event(issue.id, :completed, %{
+          agent_id: agent_id,
+          turn_count: session.turn_count + 1
+        })
+
+      {:error, reason} ->
+        Activities.log_heartbeat_event(issue.id, :failed, %{
+          agent_id: agent_id,
+          turn_count: session.turn_count + 1,
+          reason: inspect(reason)
+        })
+    end
 
     set_agent_idle(agent_id)
     reset_adapter_failure(agent_id)
@@ -215,15 +230,7 @@ defmodule Cympho.Orchestrator do
         issue_id: issue.id
       })
 
-    case Issues.transition_issue(issue, :blocked) do
-      {:ok, _} ->
-        :logger.info("[Orchestrator] Issue #{issue.id} transitioned to :blocked after error")
-
-      {:error, reason} ->
-        :logger.error(
-          "[Orchestrator] Failed to transition issue #{issue.id} to :blocked: #{inspect(reason)}"
-        )
-    end
+    block_issue(issue)
 
     set_agent_idle(agent_id)
 
@@ -472,6 +479,69 @@ defmodule Cympho.Orchestrator do
 
   defp extract_result_content(_), do: "No content returned"
 
+  defp handle_agent_actions(issue, agent_id, body) do
+    with {:ok, actions} <- AgentActions.parse(body),
+         {:ok, _result} <- AgentActions.execute(issue, agent_id, actions) do
+      if AgentActions.unresolved_current_issue?(issue, agent_id) do
+        block_issue_with_comment(issue, "Agent actions did not resolve the current issue.")
+        {:error, :unresolved_current_issue}
+      else
+        :ok
+      end
+    else
+      {:error, reason} ->
+        block_issue_with_comment(
+          issue,
+          "Agent response did not include a valid cympho-actions block: #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  defp create_agent_comment(issue, agent_id, body) do
+    case Comments.create_comment(%{
+           body: body,
+           author_type: "agent",
+           author_id: agent_id,
+           issue_id: issue.id
+         }) do
+      {:ok, _comment} ->
+        :ok
+
+      {:error, reason} ->
+        :logger.warning("[Orchestrator] Failed to create agent comment: #{inspect(reason)}")
+    end
+  end
+
+  defp block_issue_with_comment(issue, reason) do
+    _ =
+      Comments.create_comment(%{
+        body: reason,
+        author_type: "system",
+        author_id: "00000000-0000-0000-0000-000000000000",
+        issue_id: issue.id
+      })
+
+    block_issue(issue)
+  end
+
+  defp block_issue(%Issue{} = issue) do
+    case Issues.update_issue(issue, %{
+           status: :blocked,
+           assignee_id: nil,
+           checkout_run_id: nil,
+           checked_out_at: nil
+         }) do
+      {:ok, _updated} -> :ok
+      {:error, _reason} -> Issues.transition_issue(issue, :blocked)
+    end
+  end
+
+  defp block_issue(issue) do
+    Issues.transition_issue(issue, :blocked)
+  end
+
   defp set_agent_idle(agent_id) do
     case safe_get_agent(agent_id) do
       {:ok, agent} ->
@@ -501,15 +571,8 @@ defmodule Cympho.Orchestrator do
 
     fail_engine_run(session, {:unknown_adapter, adapter_type})
 
-    {:ok, _} =
-      Comments.create_comment(%{
-        body: error_body,
-        author_type: "agent",
-        author_id: agent_id,
-        issue_id: issue.id
-      })
-
-    Issues.transition_issue(issue, :blocked)
+    create_agent_comment(issue, agent_id, error_body)
+    release_issue_after_adapter_error(issue)
     set_agent_idle(agent_id)
 
     {:stop, :normal, session}
@@ -531,18 +594,27 @@ defmodule Cympho.Orchestrator do
 
     fail_engine_run(session, reason)
 
-    {:ok, _} =
-      Comments.create_comment(%{
-        body: error_body,
-        author_type: "agent",
-        author_id: agent_id,
-        issue_id: issue.id
-      })
-
-    Issues.transition_issue(issue, :blocked)
+    create_agent_comment(issue, agent_id, error_body)
+    release_issue_after_adapter_error(issue)
     set_agent_idle(agent_id)
 
     {:stop, :normal, session}
+  end
+
+  defp release_issue_after_adapter_error(%Issue{} = issue) do
+    case Issues.force_release_issue(issue, :todo) do
+      {:ok, _updated} ->
+        :ok
+
+      {:error, reason} ->
+        :logger.warning(
+          "[Orchestrator] Failed to release issue after adapter error: #{inspect(reason)}"
+        )
+    end
+  end
+
+  defp release_issue_after_adapter_error(issue) do
+    Issues.transition_issue(issue, :todo)
   end
 
   defp process_tool_results(result, tool_traces) when is_map(result) do

@@ -26,7 +26,7 @@ defmodule Cympho.Adapters.CodexAdapter do
   defp do_run(session_id, issue, agent_id, recipient_pid, config) do
     send(recipient_pid, {:session_started, session_id})
 
-    prompt = build_prompt(issue, agent_id)
+    prompt = Cympho.AgentPrompt.build(issue, agent_id)
 
     case run_codex(prompt, config) do
       {:ok, output} ->
@@ -35,20 +35,6 @@ defmodule Cympho.Adapters.CodexAdapter do
       {:error, reason} ->
         send(recipient_pid, {:turn_ended_with_error, session_id, reason})
     end
-  end
-
-  defp build_prompt(issue, agent_id) do
-    """
-    You are agent #{agent_id} working on the following issue:
-
-    Issue ID: #{issue[:id] || issue.id}
-    Title: #{issue[:title] || issue.title}
-
-    #{issue[:description] || issue.description || "No description provided."}
-
-    Please analyze this issue and provide your response.
-    """
-    |> String.trim()
   end
 
   defp run_codex(prompt, config) do

@@ -1,6 +1,8 @@
 defmodule CymphoWeb.DashboardLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Dashboard
+  alias Cympho.Companies
+  alias Cympho.Orchestrator.Dispatcher
   alias CymphoWeb.Events
 
   @impl true
@@ -8,6 +10,11 @@ defmodule CymphoWeb.DashboardLive.Index do
     if connected?(socket) && socket.assigns[:current_company] do
       :timer.send_interval(:timer.seconds(30), self(), :refresh)
       Events.subscribe_to_runs(socket.assigns.current_company.id)
+
+      Phoenix.PubSub.subscribe(
+        Cympho.PubSub,
+        "company:#{socket.assigns.current_company.id}:company"
+      )
     end
 
     socket =
@@ -28,6 +35,10 @@ defmodule CymphoWeb.DashboardLive.Index do
     {:noreply, assign_metrics(socket)}
   end
 
+  def handle_info({:company_updated, company}, socket) do
+    {:noreply, socket |> assign(:current_company, company) |> assign_metrics()}
+  end
+
   def handle_info({:run_status, payload}, socket) do
     type =
       case payload[:event_type] do
@@ -41,11 +52,53 @@ defmodule CymphoWeb.DashboardLive.Index do
     {:noreply, socket |> push_event("toast", %{message: msg, type: type}) |> assign_metrics()}
   end
 
+  @impl true
+  def handle_event("pause_company", _params, socket) do
+    with company when not is_nil(company) <- current_company(socket),
+         {:ok, updated} <- Companies.pause_company(company, "Paused from dashboard") do
+      {:noreply,
+       socket
+       |> assign(:current_company, updated)
+       |> assign_metrics()
+       |> push_event("toast", %{message: "Autonomy paused", type: "warning"})}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("resume_company", _params, socket) do
+    with company when not is_nil(company) <- current_company(socket),
+         {:ok, updated} <- Companies.resume_company(company) do
+      _ = Dispatcher.poll_now()
+
+      {:noreply,
+       socket
+       |> assign(:current_company, updated)
+       |> assign_metrics()
+       |> push_event("toast", %{message: "Autonomy resumed", type: "success"})}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
   defp assign_metrics(socket) do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
     summary = Dashboard.summary(company_id)
+    company = current_company(socket)
+
+    queued =
+      status_count(summary.issue_status_counts, :todo) +
+        status_count(summary.issue_status_counts, :in_review)
+
+    running = status_count(summary.issue_status_counts, :in_progress)
+    blocked = status_count(summary.issue_status_counts, :blocked)
 
     socket
+    |> assign(:company, company)
+    |> assign(:autonomy_status, autonomy_status(company))
+    |> assign(:queued_work, queued)
+    |> assign(:running_work, running)
+    |> assign(:blocked_work, blocked)
     |> assign(:active_agents, summary.active_agents)
     |> assign(:total_agents, summary.total_agents)
     |> assign(:active_agent_list, summary.active_agent_list)
@@ -58,6 +111,32 @@ defmodule CymphoWeb.DashboardLive.Index do
     |> assign(:cost_summary, summary.cost_summary)
   end
 
+  defp current_company(socket) do
+    case socket.assigns[:current_company] do
+      %{id: id} = company ->
+        try do
+          Companies.get_company!(id)
+        rescue
+          _ -> company
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp status_count(counts, status) do
+    counts
+    |> Enum.find_value(0, fn
+      %{status: ^status, count: count} -> count
+      _ -> nil
+    end)
+  end
+
+  defp autonomy_status(%{status: "paused"}), do: :paused
+  defp autonomy_status(%{status: "active"}), do: :active
+  defp autonomy_status(_), do: :unconfigured
+
   def status_label(:backlog), do: "Backlog"
   def status_label(:todo), do: "To Do"
   def status_label(:in_progress), do: "In Progress"
@@ -68,7 +147,14 @@ defmodule CymphoWeb.DashboardLive.Index do
   def status_label(:idle), do: "Idle"
   def status_label(:running), do: "Running"
   def status_label(:error), do: "Error"
+  def status_label(:active), do: "Active"
+  def status_label(:paused), do: "Paused"
+  def status_label(:unconfigured), do: "Unconfigured"
   def status_label(other), do: String.capitalize(to_string(other))
+
+  def autonomy_badge_class(:active), do: "border-green-500/25 bg-green-500/10 text-green-400"
+  def autonomy_badge_class(:paused), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-400"
+  def autonomy_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
   def total_issues(counts) do
     Enum.reduce(counts, 0, fn %{count: c}, acc -> acc + c end)
@@ -154,6 +240,7 @@ defmodule CymphoWeb.DashboardLive.Index do
   def activity_icon("blocker_added"), do: "bg-red-400"
   def activity_icon("blocker_removed"), do: "bg-orange-400"
   def activity_icon("heartbeat"), do: "bg-gray-400"
+  def activity_icon("agent_action"), do: "bg-brand"
   def activity_icon(_), do: "bg-gray-400"
 
   def activity_label("created"), do: "Created"
@@ -163,5 +250,6 @@ defmodule CymphoWeb.DashboardLive.Index do
   def activity_label("blocker_added"), do: "Blocker Added"
   def activity_label("blocker_removed"), do: "Blocker Removed"
   def activity_label("heartbeat"), do: "Heartbeat"
+  def activity_label("agent_action"), do: "Agent Action"
   def activity_label(other), do: String.capitalize(to_string(other))
 end
