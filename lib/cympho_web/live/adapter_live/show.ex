@@ -15,7 +15,7 @@ defmodule CymphoWeb.AdapterLive.Show do
 
         config =
           agents
-          |> Enum.find(fn a -> a.adapter == key end, fn -> nil end)
+          |> Enum.find(fn agent -> agent.adapter == key end)
           |> case do
             nil -> default_config(adapter.config_schema)
             agent -> Map.merge(default_config(adapter.config_schema), agent.config || %{})

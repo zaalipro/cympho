@@ -90,6 +90,7 @@
     -moz-osx-font-smoothing: grayscale;
     font-feature-settings: "cv01", "ss03";
     -webkit-tap-highlight-color: transparent;
+    overflow-x: hidden;
   }
 
   body {
@@ -98,6 +99,7 @@
     color: var(--color-text-primary);
     font-feature-settings: "cv01", "ss03";
     overscroll-behavior: none;
+    overflow-x: hidden;
   }
 
   ::selection {
@@ -149,14 +151,57 @@
 }
 
 /* Active navigation highlight */
+.nav-item {
+  position: relative;
+}
+
 .nav-item[data-active="true"] {
   color: var(--color-text-primary);
   background: var(--color-surface-hover);
 }
 
+.nav-item[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  width: 2px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--color-brand);
+  transform: translateY(-50%);
+}
+
+.nav-item[data-active="true"] svg {
+  color: var(--color-brand);
+}
+
 /* Active mobile bottom nav */
 .mobile-nav-item[data-active="true"] {
   color: var(--color-brand);
+}
+
+.linear-panel {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+
+.linear-field {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  outline: none;
+}
+
+.linear-field:focus {
+  border-color: rgba(94, 106, 210, 0.75);
+  box-shadow: 0 0 0 2px rgba(94, 106, 210, 0.22);
+}
+
+#kanban-board[data-drag-unavailable="true"] .kanban-card-actions {
+  opacity: 1;
 }
 
 /* Touch-friendly tap targets */

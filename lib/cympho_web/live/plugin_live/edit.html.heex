@@ -1,0 +1,85 @@
+<div class="p-6 lg:p-8 max-w-3xl mx-auto w-full min-w-0">
+  <.header title={@page_title} subtitle="Update plugin metadata and runtime settings.">
+    <:actions>
+      <.app_link
+        navigate={~p"/plugins/#{@plugin.id}"}
+        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+      >
+        Back
+      </.app_link>
+    </:actions>
+  </.header>
+
+  <.form
+    for={@form}
+    phx-change="validate"
+    phx-submit="save"
+    class="space-y-5 rounded-xl border border-border bg-surface p-5"
+  >
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <.input field={@form[:name]} label="Name" required />
+      <.input field={@form[:identifier]} label="Identifier" required />
+      <.input field={@form[:version]} label="Version" required />
+      <.input field={@form[:author]} label="Author" />
+      <.input
+        type="select"
+        field={@form[:status]}
+        label="Status"
+        options={[
+          {"Installed", "installed"},
+          {"Active", "active"},
+          {"Disabled", "disabled"},
+          {"Error", "error"}
+        ]}
+      />
+      <.input
+        type="select"
+        field={@form[:enabled]}
+        label="Enabled"
+        value={to_string(@form[:enabled].value)}
+        options={[{"Enabled", "true"}, {"Disabled", "false"}]}
+      />
+    </div>
+
+    <.input type="textarea" field={@form[:description]} label="Description" rows={3} />
+
+    <.input
+      name="plugin[capabilities]"
+      label="Capabilities"
+      value={capabilities_value(@form[:capabilities].value)}
+      placeholder="tool_access, issue_write"
+    />
+
+    <.input
+      type="textarea"
+      name="plugin[manifest_json]"
+      label="Manifest JSON"
+      value={json_value(@form[:manifest].value)}
+      rows={8}
+      required
+    />
+
+    <.input
+      type="textarea"
+      name="plugin[settings_json]"
+      label="Settings JSON"
+      value={json_value(@form[:settings].value)}
+      rows={5}
+    />
+
+    <div class="flex items-center justify-end gap-2 border-t border-border pt-4">
+      <.app_link
+        navigate={~p"/plugins/#{@plugin.id}"}
+        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+      >
+        Cancel
+      </.app_link>
+      <button
+        type="submit"
+        class="rounded-lg bg-brand px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-accent"
+      >
+        Save Changes
+      </button>
+    </div>
+  </.form>
+</div>

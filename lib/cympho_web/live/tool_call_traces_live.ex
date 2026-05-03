@@ -250,17 +250,14 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="container mx-auto px-4 py-8">
-      <div class="mb-6">
-        <h1 class="text-2xl font-bold text-text-primary mb-2">Tool Call Traces</h1>
-        <p class="text-text-secondary">Browse and verify immutable tool-call chains</p>
-      </div>
+    <div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0">
+      <.header title="Tool Call Traces" subtitle="Browse and verify immutable tool-call chains." />
 
       <div class="mb-6 flex flex-wrap gap-4 items-center justify-between">
         <div class="flex gap-2">
           <button
             type="button"
-            class="px-4 py-2 bg-brand hover:bg-brand/90 text-white rounded-lg transition-colors"
+            class="rounded-lg bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-white transition-colors hover:bg-accent"
             phx-click="verify_integrity"
           >
             Verify Integrity
@@ -269,7 +266,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
           <button
             :if={!@export_data_json}
             type="button"
-            class="px-4 py-2 bg-surface border border-border hover:border-brand/50 text-text-primary rounded-lg transition-colors"
+            class="rounded-lg border border-border bg-button px-4 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
             phx-click="export_json"
           >
             Export JSON
@@ -279,7 +276,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
             :if={@export_data_json}
             download={"tool-traces-#{Date.utc_today()}.json"}
             href={"data:application/json;charset=utf-8,#{URI.encode(@export_data_json)}"}
-            class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors inline-flex items-center gap-2"
+            class="inline-flex items-center gap-2 rounded-lg border border-success/20 bg-success/10 px-4 py-2 min-h-[40px] text-sm font-510 text-success transition-colors hover:bg-success/15"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -295,7 +292,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
           <button
             :if={!@export_data_csv}
             type="button"
-            class="px-4 py-2 bg-surface border border-border hover:border-brand/50 text-text-primary rounded-lg transition-colors"
+            class="rounded-lg border border-border bg-button px-4 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
             phx-click="export_csv"
           >
             Export CSV
@@ -305,7 +302,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
             :if={@export_data_csv}
             download={"tool-traces-#{Date.utc_today()}.csv"}
             href={"data:text/csv;charset=utf-8,#{URI.encode(@export_data_csv)}"}
-            class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors inline-flex items-center gap-2"
+            class="inline-flex items-center gap-2 rounded-lg border border-success/20 bg-success/10 px-4 py-2 min-h-[40px] text-sm font-510 text-success transition-colors hover:bg-success/15"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -319,29 +316,29 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
           </a>
         </div>
 
-        <div class={"text-sm font-medium " <> integrity_status_color(@integrity_status)}>
+        <div class={"text-sm font-510 " <> integrity_status_color(@integrity_status)}>
           {integrity_status_label(@integrity_status)}
         </div>
       </div>
 
-      <form phx-submit="filter" class="mb-6 bg-surface border border-border rounded-lg p-4">
+      <form phx-submit="filter" class="mb-6 bg-surface border border-border rounded-xl p-4">
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
           <div>
-            <label class="block text-sm font-medium text-text-secondary mb-1">Tool Name</label>
+            <label class="block text-xs font-510 text-text-secondary mb-1.5">Tool Name</label>
             <input
               type="text"
               name="filter[tool_name]"
               value={@filters.tool_name}
               placeholder="Filter by tool name..."
-              class="w-full px-3 py-2 bg-black/[0.2] border border-border rounded-lg text-text-primary placeholder-text-secondary focus:outline-none focus:border-brand/50"
+              class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
             />
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-text-secondary mb-1">Status</label>
+            <label class="block text-xs font-510 text-text-secondary mb-1.5">Status</label>
             <select
               name="filter[status]"
-              class="w-full px-3 py-2 bg-black/[0.2] border border-border rounded-lg text-text-primary focus:outline-none focus:border-brand/50"
+              class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
             >
               <option value="">All Statuses</option>
               <option value="success" selected={@filters.status == "success"}>Success</option>
@@ -352,10 +349,10 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-text-secondary mb-1">Agent</label>
+            <label class="block text-xs font-510 text-text-secondary mb-1.5">Agent</label>
             <select
               name="filter[agent_id]"
-              class="w-full px-3 py-2 bg-black/[0.2] border border-border rounded-lg text-text-primary focus:outline-none focus:border-brand/50"
+              class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
             >
               <option value="">All Agents</option>
               <%= for agent <- @agents do %>
@@ -367,13 +364,13 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-text-secondary mb-1">Issue ID</label>
+            <label class="block text-xs font-510 text-text-secondary mb-1.5">Issue ID</label>
             <input
               type="text"
               name="filter[issue_id]"
               value={@filters.issue_id}
               placeholder="Filter by issue ID..."
-              class="w-full px-3 py-2 bg-black/[0.2] border border-border rounded-lg text-text-primary placeholder-text-secondary focus:outline-none focus:border-brand/50"
+              class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
             />
           </div>
         </div>
@@ -381,14 +378,14 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
         <div class="flex gap-2">
           <button
             type="submit"
-            class="px-4 py-2 bg-brand hover:bg-brand/90 text-white rounded-lg transition-colors"
+            class="rounded-lg bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-white transition-colors hover:bg-accent"
           >
             Apply Filters
           </button>
 
           <button
             type="button"
-            class="px-4 py-2 bg-surface border border-border hover:border-brand/50 text-text-primary rounded-lg transition-colors"
+            class="rounded-lg border border-border bg-button px-4 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
             phx-click="clear_filters"
           >
             Clear Filters
@@ -398,33 +395,33 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
       <%= if @statistics do %>
         <div class="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div class="bg-surface border border-border rounded-lg p-4">
+          <div class="bg-surface border border-border rounded-xl p-4">
             <div class="text-text-secondary text-sm mb-1">Total Calls</div>
-            <div class="text-2xl font-bold text-text-primary">{@statistics.total_calls}</div>
+            <div class="text-2xl font-590 text-text-primary">{@statistics.total_calls}</div>
           </div>
 
-          <div class="bg-surface border border-border rounded-lg p-4">
+          <div class="bg-surface border border-border rounded-xl p-4">
             <div class="text-text-secondary text-sm mb-1">Success</div>
-            <div class="text-2xl font-bold text-green-400">{@statistics.success_calls}</div>
+            <div class="text-2xl font-590 text-green-400">{@statistics.success_calls}</div>
           </div>
 
-          <div class="bg-surface border border-border rounded-lg p-4">
+          <div class="bg-surface border border-border rounded-xl p-4">
             <div class="text-text-secondary text-sm mb-1">Errors</div>
-            <div class="text-2xl font-bold text-red-400">{@statistics.error_calls}</div>
+            <div class="text-2xl font-590 text-red-400">{@statistics.error_calls}</div>
           </div>
 
-          <div class="bg-surface border border-border rounded-lg p-4">
+          <div class="bg-surface border border-border rounded-xl p-4">
             <div class="text-text-secondary text-sm mb-1">Pending</div>
-            <div class="text-2xl font-bold text-yellow-400">{@statistics.pending_calls}</div>
+            <div class="text-2xl font-590 text-yellow-400">{@statistics.pending_calls}</div>
           </div>
         </div>
       <% end %>
 
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div class="lg:col-span-2">
-          <div class="bg-surface border border-border rounded-lg overflow-hidden">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 min-w-0">
+        <div class="lg:col-span-2 min-w-0">
+          <div class="bg-surface border border-border rounded-xl overflow-hidden">
             <div class="px-4 py-3 border-b border-border">
-              <h2 class="font-serif text-lg font-semibold text-text-primary">Traces</h2>
+              <h2 class="text-sm font-590 text-text-primary">Traces</h2>
             </div>
 
             <%= if @traces == [] do %>
@@ -506,9 +503,9 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
         <%= if @selected_trace do %>
           <div class="lg:col-span-1">
-            <div class="bg-surface border border-border rounded-lg sticky top-4">
+            <div class="bg-surface border border-border rounded-xl sticky top-4">
               <div class="px-4 py-3 border-b border-border flex items-center justify-between">
-                <h2 class="font-serif text-lg font-semibold text-text-primary">Trace Details</h2>
+                <h2 class="text-sm font-590 text-text-primary">Trace Details</h2>
                 <button
                   type="button"
                   class="p-1 hover:bg-surface-hover rounded"

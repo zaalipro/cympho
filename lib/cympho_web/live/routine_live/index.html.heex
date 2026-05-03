@@ -1,64 +1,126 @@
-<.header>
-  {@page_title}
-  <:actions>
-    <.link navigate={~p"/routines/new"} class="phx-btn">
-      New Routine
-    </.link>
-  </:actions>
-</.header>
+<div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0">
+  <.header title={@page_title} subtitle="Recurring autonomous work for company operations.">
+    <:actions>
+      <.app_link
+        navigate={~p"/routines/new"}
+        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 min-h-[40px] rounded-lg transition-colors inline-flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M12 4v16m8-8H4"
+          />
+        </svg>
+        New Routine
+      </.app_link>
+    </:actions>
+  </.header>
 
-<div class="routines-grid">
-  <div :for={routine <- @routines} class="routine-card" id={"routine-#{routine.id}"}>
-    <div class="card-header">
-      <h3>{routine.name}</h3>
-      <span class={"status-badge status-#{routine.status}"}>{routine.status}</span>
-    </div>
-    <p class="card-description">{routine.description}</p>
-    <div class="card-meta">
-      <span class="priority-badge priority-{routine.priority}">{routine.priority}</span>
-      <span class="policy-badge">{routine.concurrency_policy}</span>
-    </div>
-    <div class="card-actions">
-      <.link navigate={~p"/routines/#{routine.id}"} class="phx-btn-secondary">
-        View
-      </.link>
-      <.link navigate={~p"/routines/#{routine.id}/edit"} class="phx-btn-secondary">
-        Edit
-      </.link>
-      <button
-        :if={routine.status == :active}
-        type="button"
-        class="pause-btn"
-        phx-click="pause_routine"
-        phx-value-id={routine.id}
-        data-confirm="Pause this routine?"
-      >
-        Pause
-      </button>
-      <button
-        :if={routine.status == :paused}
-        type="button"
-        class="resume-btn"
-        phx-click="resume_routine"
-        phx-value-id={routine.id}
-        data-confirm="Resume this routine?"
-      >
-        Resume
-      </button>
-      <button
-        :if={routine.status != :archived}
-        type="button"
-        class="delete-btn"
-        phx-click="delete_routine"
-        phx-value-id={routine.id}
-        data-confirm="Archive this routine?"
-      >
-        Archive
-      </button>
+  <div class="grid grid-cols-1 gap-3">
+    <div
+      :for={routine <- @routines}
+      id={"routine-#{routine.id}"}
+      class="rounded-xl border border-border bg-surface p-4 transition-colors hover:border-border-hover hover:bg-surface-hover"
+    >
+      <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div class="min-w-0 flex-1">
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <.app_link
+              navigate={~p"/routines/#{routine.id}"}
+              class="truncate text-sm font-590 text-text-primary hover:text-brand"
+            >
+              {routine.name}
+            </.app_link>
+            <span class={[
+              "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510",
+              routine_status_class(routine.status)
+            ]}>
+              {routine_label(routine.status)}
+            </span>
+            <span class={[
+              "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510",
+              routine_priority_class(routine.priority)
+            ]}>
+              {routine_label(routine.priority)}
+            </span>
+          </div>
+          <p class="max-w-3xl text-sm leading-5 text-text-tertiary">
+            {routine.description || "No description provided."}
+          </p>
+          <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
+            <span>{routine_label(routine.concurrency_policy)}</span>
+            <span>Catch-up: {routine_label(routine.catch_up_policy)}</span>
+            <span>Cap {routine.catch_up_cap}</span>
+          </div>
+        </div>
+
+        <div class="flex shrink-0 flex-wrap items-center gap-2">
+          <.app_link
+            navigate={~p"/routines/#{routine.id}"}
+            class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+          >
+            View
+          </.app_link>
+          <.app_link
+            navigate={~p"/routines/#{routine.id}/edit"}
+            class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+          >
+            Edit
+          </.app_link>
+          <button
+            :if={routine.status == :active}
+            type="button"
+            class="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs font-510 text-amber-400 transition-colors hover:bg-amber-500/15"
+            phx-click="pause_routine"
+            phx-value-id={routine.id}
+            data-confirm="Pause this routine?"
+          >
+            Pause
+          </button>
+          <button
+            :if={routine.status == :paused}
+            type="button"
+            class="rounded-lg border border-success/20 bg-success/10 px-3 py-2 text-xs font-510 text-success transition-colors hover:bg-success/15"
+            phx-click="resume_routine"
+            phx-value-id={routine.id}
+            data-confirm="Resume this routine?"
+          >
+            Resume
+          </button>
+          <button
+            :if={routine.status != :archived}
+            type="button"
+            class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-510 text-red-400 transition-colors hover:bg-red-500/15"
+            phx-click="delete_routine"
+            phx-value-id={routine.id}
+            data-confirm="Archive this routine?"
+          >
+            Archive
+          </button>
+        </div>
+      </div>
     </div>
   </div>
-</div>
 
-<div :if={Enum.empty?(@routines)} class="empty-state">
-  <p>No routines yet. Create your first routine to get started.</p>
+  <div
+    :if={Enum.empty?(@routines)}
+    class="rounded-xl border border-border bg-surface px-6 py-16 text-center"
+  >
+    <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-subtle text-text-tertiary">
+      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 006.34 4.36M4 15a8 8 0 0013.66 4.64"
+        />
+      </svg>
+    </div>
+    <h2 class="text-sm font-590 text-text-primary">No routines yet</h2>
+    <p class="mt-1 text-sm text-text-tertiary">
+      Create the first routine to schedule autonomous work.
+    </p>
+  </div>
 </div>

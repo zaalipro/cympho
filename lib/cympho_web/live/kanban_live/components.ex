@@ -12,23 +12,29 @@ defmodule CymphoWeb.KanbanLive.Components do
   def issue_card(assigns) do
     ~H"""
     <div
-      class="kanban-card-enter bg-surface border border-border rounded-lg p-3 space-y-2 hover:bg-surface-hover hover:border-border-hover transition-colors cursor-grab active:cursor-grabbing min-h-[72px]"
+      class="kanban-card-enter group rounded-xl border border-border bg-surface p-3.5 shadow-ring transition-colors hover:border-border-hover hover:bg-surface-hover cursor-grab active:cursor-grabbing min-h-[104px]"
       data-issue-id={@issue.id}
     >
-      <div class="flex items-center justify-between gap-2">
-        <span class="text-[11px] font-mono text-text-tertiary">
+      <div class="mb-2 flex items-center justify-between gap-2">
+        <span class="font-mono text-[11px] text-text-quaternary">
           {@issue.identifier || "CYM-" <> String.slice(@issue.id, 0, 4)}
         </span>
-        <span class={"h-1.5 w-1.5 rounded-full " <> status_pin_class(@issue.status)}></span>
+        <span class={"h-1.5 w-1.5 shrink-0 rounded-full " <> status_pin_class(@issue.status)}></span>
       </div>
-      <div class="text-sm font-510 text-text-primary leading-snug line-clamp-2 sm:line-clamp-1">
+
+      <.link
+        navigate={"/issues/#{@issue.id}"}
+        class="block text-sm font-590 leading-5 text-text-primary line-clamp-2 hover:text-white"
+        data-no-drag
+      >
         {@issue.title}
-      </div>
-      <div class="flex items-center gap-2 flex-wrap">
-        <span class={"text-[10px] font-510 px-2 py-1 rounded-full " <> priority_class(@issue.priority)}>
+      </.link>
+
+      <div class="mt-3 flex items-center gap-2 flex-wrap">
+        <span class={"rounded-full px-2 py-0.5 text-[10px] font-510 " <> priority_class(@issue.priority)}>
           {@issue.priority}
         </span>
-        <span class="text-xs text-text-quaternary flex items-center gap-1">
+        <span class="flex items-center gap-1 text-xs text-text-quaternary">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               stroke-linecap="round"
@@ -48,7 +54,7 @@ defmodule CymphoWeb.KanbanLive.Components do
           <% hb_state = Index.get_heartbeat_state(@agent_heartbeat_states, @issue.assignee.id) %>
           <span class="flex items-center gap-1">
             <span class={"w-1.5 h-1.5 rounded-full " <> heartbeat_dot_color(hb_state.status)}></span>
-            <span class="text-xs text-text-quaternary truncate max-w-[100px]">
+            <span class="max-w-[110px] truncate text-xs text-text-quaternary">
               {@issue.assignee.name}
             </span>
           </span>
@@ -66,7 +72,10 @@ defmodule CymphoWeb.KanbanLive.Components do
       </div>
       <% next_statuses = Index.valid_next_statuses(@issue.status) %>
       <%= if next_statuses != [] do %>
-        <div class="flex items-center gap-1.5 pt-1" data-no-drag>
+        <div
+          class="kanban-card-actions mt-3 flex items-center gap-1.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+          data-no-drag
+        >
           <span class="text-[10px] font-510 text-text-quaternary">Move</span>
           <%= for next_status <- next_statuses do %>
             <button
@@ -75,7 +84,7 @@ defmodule CymphoWeb.KanbanLive.Components do
               phx-value-id={@issue.id}
               phx-value-to_status={next_status}
               data-kanban-action
-              class="rounded border border-border bg-panel px-1.5 py-0.5 text-[10px] font-510 text-text-tertiary hover:border-border-hover hover:bg-surface-hover hover:text-text-primary transition-colors"
+              class="rounded-md border border-border bg-panel px-1.5 py-0.5 text-[10px] font-510 text-text-tertiary hover:border-border-hover hover:bg-surface-hover hover:text-text-primary transition-colors"
               style="min-height: 20px;"
               title={"Move to #{Index.status_label(next_status)}"}
             >
@@ -92,8 +101,8 @@ defmodule CymphoWeb.KanbanLive.Components do
 
   def empty_column_state(assigns) do
     ~H"""
-    <div class="flex flex-col items-center justify-center py-8 text-center">
-      <div class="w-8 h-8 rounded-full bg-subtle flex items-center justify-center mb-2">
+    <div class="flex min-h-[180px] flex-col items-center justify-center rounded-lg border border-dashed border-border bg-canvas/40 px-4 py-8 text-center">
+      <div class="w-8 h-8 rounded-lg bg-subtle flex items-center justify-center mb-2">
         {empty_column_icon(@status)}
       </div>
       <p class="text-xs text-text-quaternary">{empty_column_message(@status)}</p>

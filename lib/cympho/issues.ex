@@ -321,7 +321,9 @@ defmodule Cympho.Issues do
     old_issue = issue
 
     with {:ok, updated} <- do_update_issue(issue, attrs) do
-      updated = Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])
+      updated =
+        Repo.preload(updated, [:comments, :blocked_by, :blocks, :assignee, :labels], force: true)
+
       Activities.log_issue_changes(old_issue, updated, attrs)
 
       Cympho.RateLimiting.dedup_pubsub(

@@ -2,6 +2,7 @@ defmodule Cympho.Activities do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Activities.Activity
+  alias Cympho.Issues.Issue
 
   def list_activities(issue_id) do
     Activity |> where(issue_id: ^issue_id) |> order_by(asc: :inserted_at) |> Repo.all()
@@ -16,7 +17,7 @@ defmodule Cympho.Activities do
     # Build base query joining with issues to filter by company
     query =
       from(a in Activity,
-        join: i in "issues",
+        join: i in Issue,
         on: a.issue_id == i.id,
         where: i.company_id == ^company_id,
         order_by: [desc: a.inserted_at]
@@ -41,6 +42,7 @@ defmodule Cympho.Activities do
     # Get total count before pagination
     total =
       query
+      |> exclude(:order_by)
       |> select([a], count(a.id))
       |> Repo.one()
 

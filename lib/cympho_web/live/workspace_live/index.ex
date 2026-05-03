@@ -4,7 +4,7 @@ defmodule CymphoWeb.WorkspaceLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    workspaces = Workspaces.list_project_workspaces_for_company(nil)
+    workspaces = Workspaces.list_project_workspaces_for_company(current_company_id(socket))
     {:ok, assign(socket, :workspaces, workspaces)}
   end
 
@@ -19,6 +19,14 @@ defmodule CymphoWeb.WorkspaceLive.Index do
   end
 
   defp apply_action(socket, nil, params), do: apply_action(socket, :index, params)
+
+  defp current_company_id(socket) do
+    case socket.assigns do
+      %{current_company: %{id: id}} -> id
+      %{current_user: %{company_id: id}} -> id
+      _ -> nil
+    end
+  end
 
   @impl true
   def render(assigns) do

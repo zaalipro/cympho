@@ -138,10 +138,13 @@ defmodule CymphoWeb.IssueLive.Show do
       {:ok, status_atom} ->
         case Issues.transition_issue(socket.assigns.issue, status_atom) do
           {:ok, issue} ->
-            {:noreply, assign(socket, issue: issue)}
+            {:noreply,
+             socket
+             |> assign(issue: issue)
+             |> put_flash(:info, "Status updated to #{status}")}
 
           {:error, :invalid_transition} ->
-            {:noreply, put_flash(socket, :error, "Invalid status transition")}
+            {:noreply, put_flash(socket, :error, "Invalid transition")}
 
           {:error, :blocked_by_active_issues} ->
             {:noreply, put_flash(socket, :error, "Issue is blocked by active issues")}
@@ -165,8 +168,8 @@ defmodule CymphoWeb.IssueLive.Show do
 
       atom ->
         case Issues.update_issue(socket.assigns.issue, %{priority: atom}) do
-          {:ok, _issue} ->
-            {:noreply, socket}
+          {:ok, issue} ->
+            {:noreply, socket |> assign(issue: issue) |> put_flash(:info, "Priority updated")}
 
           {:error, _changeset} ->
             {:noreply, put_flash(socket, :error, "Failed to update priority")}
@@ -187,16 +190,35 @@ defmodule CymphoWeb.IssueLive.Show do
   @impl true
   def handle_event("save_title", %{"title" => title}, socket) do
     case Issues.update_issue(socket.assigns.issue, %{title: title}) do
-      {:ok, issue} -> {:noreply, assign(socket, issue: issue, editing: nil)}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update title")}
+      {:ok, issue} ->
+        {:noreply,
+         socket
+         |> assign(issue: issue, editing: nil)
+         |> put_flash(:info, "Title updated")}
+
+      {:error, _} ->
+        message =
+          if String.trim(title) == "" do
+            "Title cannot be empty"
+          else
+            "Failed to update title"
+          end
+
+        {:noreply, put_flash(socket, :error, message)}
     end
   end
 
   @impl true
   def handle_event("save_description", %{"description" => description}, socket) do
     case Issues.update_issue(socket.assigns.issue, %{description: description}) do
-      {:ok, issue} -> {:noreply, assign(socket, issue: issue, editing: nil)}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update description")}
+      {:ok, issue} ->
+        {:noreply,
+         socket
+         |> assign(issue: issue, editing: nil)
+         |> put_flash(:info, "Description updated")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update description")}
     end
   end
 
@@ -221,19 +243,35 @@ defmodule CymphoWeb.IssueLive.Show do
     {:noreply, assign(socket, assignee_search: q)}
   end
 
+  def handle_event("search_assignee", %{"value" => q}, socket) do
+    {:noreply, assign(socket, assignee_search: q)}
+  end
+
   @impl true
   def handle_event("assign_issue", %{"agent_id" => agent_id}, socket) do
     case Issues.update_issue(socket.assigns.issue, %{assignee_id: agent_id}) do
-      {:ok, issue} -> {:noreply, assign(socket, issue: issue, assignee_search: "")}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to assign issue")}
+      {:ok, issue} ->
+        {:noreply,
+         socket
+         |> assign(issue: issue, assignee_search: "")
+         |> put_flash(:info, "Assignee updated")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to assign issue")}
     end
   end
 
   @impl true
   def handle_event("unassign_issue", _params, socket) do
     case Issues.update_issue(socket.assigns.issue, %{assignee_id: nil}) do
-      {:ok, issue} -> {:noreply, assign(socket, issue: issue)}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to unassign issue")}
+      {:ok, issue} ->
+        {:noreply,
+         socket
+         |> assign(issue: issue)
+         |> put_flash(:info, "Assignee removed")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to unassign issue")}
     end
   end
 
@@ -692,8 +730,8 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   defp valid_status_options(current_status) do
-    current_status
-    |> Cympho.Issues.StateMachine.valid_transitions()
+    Cympho.Issues.Issue.status_options()
+    |> Enum.reject(&(&1 == current_status))
     |> Enum.map(fn status ->
       {status |> to_string() |> String.replace("_", " ") |> String.capitalize(),
        to_string(status)}
@@ -744,11 +782,21 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
-  def format_cost(cost) when not is_nil(cost) do
-    "$" <> :erlang.float_to_binary(cost / 1, decimals: 4)
+  def format_cost(cost) do
+    "$" <>
+      (cost
+       |> decimal_or_zero()
+       |> Decimal.round(4)
+       |> Decimal.to_string(:normal))
   end
 
-  def format_cost(_), do: "$0.00"
+  def positive_cost?(cost), do: Decimal.compare(decimal_or_zero(cost), Decimal.new("0")) == :gt
+
+  defp decimal_or_zero(%Decimal{} = value), do: value
+  defp decimal_or_zero(value) when is_integer(value), do: Decimal.new(value)
+  defp decimal_or_zero(value) when is_float(value), do: Decimal.from_float(value)
+  defp decimal_or_zero(value) when is_binary(value), do: Decimal.new(value)
+  defp decimal_or_zero(_), do: Decimal.new("0")
 
   def format_tokens(tokens) when is_integer(tokens) do
     tokens

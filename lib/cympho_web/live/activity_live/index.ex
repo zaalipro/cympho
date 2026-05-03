@@ -142,9 +142,13 @@ defmodule CymphoWeb.ActivityLive.Index do
   defp format_timestamp(nil), do: ""
 
   defp format_timestamp(datetime) do
-    datetime
-    |> DateTime.shift_zone!("America/Los_Angeles")
-    |> Calendar.strftime("%b %d, %Y %I:%M %p")
+    datetime =
+      case DateTime.shift_zone(datetime, "America/Los_Angeles") do
+        {:ok, shifted} -> shifted
+        {:error, _reason} -> datetime
+      end
+
+    Calendar.strftime(datetime, "%b %d, %Y %I:%M %p")
   end
 
   defp activity_icon(action) do

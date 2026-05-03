@@ -11,37 +11,34 @@ defmodule Cympho.Costs do
     since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
 
     total_cost =
-      TokenUsage
-      |> where([tu], tu.company_id == ^company_id)
+      token_usage_query(company_id)
       |> where([tu], tu.inserted_at >= ^since)
       |> Repo.aggregate(:sum, :cost_usd)
-      |> Decimal.new()
+      |> decimal_or_zero()
 
     total_tokens =
-      TokenUsage
-      |> where([tu], tu.company_id == ^company_id)
+      token_usage_query(company_id)
       |> where([tu], tu.inserted_at >= ^since)
       |> Repo.aggregate(:sum, :total_tokens)
+      |> integer_or_zero()
 
     budget_limit =
-      Budget
-      |> where([b], b.company_id == ^company_id)
+      budget_query(company_id)
       |> where([b], b.status == "active")
       |> Repo.aggregate(:sum, :limit_amount)
-      |> Decimal.new()
+      |> decimal_or_zero()
 
     budget_spent =
-      Budget
-      |> where([b], b.company_id == ^company_id)
+      budget_query(company_id)
       |> where([b], b.status == "active")
       |> Repo.aggregate(:sum, :spent_amount)
-      |> Decimal.new()
+      |> decimal_or_zero()
 
     %{
-      total_cost: total_cost || Decimal.new("0"),
-      total_tokens: total_tokens || 0,
-      budget_limit: budget_limit || Decimal.new("0"),
-      budget_spent: budget_spent || Decimal.new("0"),
+      total_cost: total_cost,
+      total_tokens: total_tokens,
+      budget_limit: budget_limit,
+      budget_spent: budget_spent,
       days: days
     }
   end
@@ -49,8 +46,7 @@ defmodule Cympho.Costs do
   def by_agent(company_id, days \\ 30, limit \\ 10) do
     since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
 
-    TokenUsage
-    |> where([tu], tu.company_id == ^company_id)
+    token_usage_query(company_id)
     |> where([tu], tu.inserted_at >= ^since)
     |> where([tu], not is_nil(tu.agent_id))
     |> group_by([tu], tu.agent_id)
@@ -69,8 +65,7 @@ defmodule Cympho.Costs do
   def by_issue(company_id, days \\ 30, limit \\ 10) do
     since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
 
-    TokenUsage
-    |> where([tu], tu.company_id == ^company_id)
+    token_usage_query(company_id)
     |> where([tu], tu.inserted_at >= ^since)
     |> where([tu], not is_nil(tu.issue_id))
     |> group_by([tu], tu.issue_id)
@@ -89,8 +84,7 @@ defmodule Cympho.Costs do
   def by_model(company_id, days \\ 30) do
     since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
 
-    TokenUsage
-    |> where([tu], tu.company_id == ^company_id)
+    token_usage_query(company_id)
     |> where([tu], tu.inserted_at >= ^since)
     |> group_by([tu], [tu.provider, tu.model])
     |> select([tu], %{
@@ -107,8 +101,7 @@ defmodule Cympho.Costs do
   def by_provider(company_id, days \\ 30) do
     since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
 
-    TokenUsage
-    |> where([tu], tu.company_id == ^company_id)
+    token_usage_query(company_id)
     |> where([tu], tu.inserted_at >= ^since)
     |> group_by([tu], tu.provider)
     |> select([tu], %{
@@ -124,8 +117,7 @@ defmodule Cympho.Costs do
   def daily_costs(company_id, days \\ 30) do
     since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
 
-    TokenUsage
-    |> where([tu], tu.company_id == ^company_id)
+    token_usage_query(company_id)
     |> where([tu], tu.inserted_at >= ^since)
     |> group_by([tu], fragment("date(?)", tu.inserted_at))
     |> select([tu], %{
@@ -139,24 +131,21 @@ defmodule Cympho.Costs do
   end
 
   def active_budgets(company_id) do
-    Budget
-    |> where([b], b.company_id == ^company_id)
+    budget_query(company_id)
     |> where([b], b.status == "active")
     |> order_by([b], desc: b.limit_amount)
     |> Repo.all()
   end
 
   def approaching_threshold_budgets(company_id) do
-    Budget
-    |> where([b], b.company_id == ^company_id)
+    budget_query(company_id)
     |> where([b], b.status == "active")
     |> Repo.all()
     |> Enum.filter(&Budget.at_threshold?/1)
   end
 
   def exceeded_budgets(company_id) do
-    Budget
-    |> where([b], b.company_id == ^company_id)
+    budget_query(company_id)
     |> where([b], b.status == "exhausted")
     |> order_by([b], desc: b.updated_at)
     |> limit(10)
@@ -198,4 +187,19 @@ defmodule Cympho.Costs do
       Map.put(result, :issue, issues[result.issue_id])
     end)
   end
+
+  defp token_usage_query(nil), do: TokenUsage
+  defp token_usage_query(company_id), do: where(TokenUsage, [tu], tu.company_id == ^company_id)
+
+  defp budget_query(nil), do: Budget
+  defp budget_query(company_id), do: where(Budget, [b], b.company_id == ^company_id)
+
+  defp decimal_or_zero(%Decimal{} = value), do: value
+  defp decimal_or_zero(value) when is_integer(value), do: Decimal.new(value)
+  defp decimal_or_zero(value) when is_float(value), do: Decimal.from_float(value)
+  defp decimal_or_zero(value) when is_binary(value), do: Decimal.new(value)
+  defp decimal_or_zero(_), do: Decimal.new("0")
+
+  defp integer_or_zero(value) when is_integer(value), do: value
+  defp integer_or_zero(_), do: 0
 end

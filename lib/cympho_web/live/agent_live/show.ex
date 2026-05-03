@@ -63,6 +63,7 @@ defmodule CymphoWeb.AgentLive.Show do
   def health_status_label(:healthy), do: "Healthy"
   def health_status_label(:degraded), do: "Degraded"
   def health_status_label(:unhealthy), do: "Unhealthy"
+  def health_status_label(:unavailable), do: "Unavailable"
   def health_status_label(:unknown), do: "Unknown"
   def health_status_label(_), do: "Unknown"
 
@@ -77,6 +78,7 @@ defmodule CymphoWeb.AgentLive.Show do
   def role_label(:cto), do: "CTO"
   def role_label(:product_manager), do: "Product Manager"
   def role_label(:designer), do: "Designer"
+  def role_label(role), do: role |> to_string() |> String.replace("_", " ") |> String.capitalize()
 
   def wake_reason_label("issue_commented"), do: "Comment received"
   def wake_reason_label("issue_comment_mentioned"), do: "Mentioned in comment"
@@ -92,4 +94,41 @@ defmodule CymphoWeb.AgentLive.Show do
   end
 
   def format_datetime(_), do: "N/A"
+
+  defp agent_initials(agent) do
+    agent.name
+    |> String.split(~r/\s+/, trim: true)
+    |> Enum.take(2)
+    |> Enum.map(&String.first/1)
+    |> Enum.join()
+    |> String.upcase()
+  end
+
+  defp role_avatar_class(:ceo), do: "bg-brand/15 text-brand"
+  defp role_avatar_class(:cto), do: "bg-sky-500/15 text-sky-300"
+  defp role_avatar_class(:engineer), do: "bg-emerald-500/15 text-emerald-300"
+  defp role_avatar_class(:product_manager), do: "bg-amber-500/15 text-amber-300"
+  defp role_avatar_class(:designer), do: "bg-fuchsia-500/15 text-fuchsia-300"
+  defp role_avatar_class(_), do: "bg-subtle text-text-secondary"
+
+  defp status_pill_class(:running), do: "border-brand/30 bg-brand/10 text-brand"
+  defp status_pill_class(:idle), do: "border-border bg-surface text-text-secondary"
+  defp status_pill_class(:sleeping), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  defp status_pill_class(:paused), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  defp status_pill_class(:error), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  defp status_pill_class(:offline), do: "border-border bg-surface text-text-quaternary"
+  defp status_pill_class(_), do: "border-border bg-surface text-text-secondary"
+
+  defp health_pill_class(:healthy), do: "border-success/25 bg-success/10 text-success"
+  defp health_pill_class(:degraded), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  defp health_pill_class(:unhealthy), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  defp health_pill_class(:unavailable), do: "border-border bg-surface text-text-quaternary"
+  defp health_pill_class(_), do: "border-border bg-surface text-text-secondary"
+
+  defp adapter_label(nil), do: "No adapter"
+  defp adapter_label(""), do: "No adapter"
+  defp adapter_label(adapter), do: to_string(adapter)
+
+  defp reports_count(%{children: children}) when is_list(children), do: length(children)
+  defp reports_count(_), do: 0
 end

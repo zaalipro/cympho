@@ -46,6 +46,7 @@ defmodule CymphoWeb.Router do
       live "/approvals/:id", ApprovalLive.Show
       live "/board-approvals/:id", BoardApprovalLive.Show
       live "/agents", AgentLive.Index
+      live "/agents/new", AgentLive.New
       live "/agents/:id", AgentLive.Show
       live "/adapters", AdapterLive.Index
       live "/adapters/:key", AdapterLive.Show
@@ -71,10 +72,10 @@ defmodule CymphoWeb.Router do
       live "/skills/:id/edit", SkillLive.Edit
       live "/plugins", PluginLive.Index
       live "/plugins/new", PluginLive.New
+      live "/plugins/marketplace", PluginMarketplaceLive.Index
       live "/plugins/:id", PluginLive.Show
       live "/plugins/:id/edit", PluginLive.Edit
       live "/plugins/:id/settings", PluginLive.Show, :settings
-      live "/plugins/marketplace", PluginMarketplaceLive.Index
       live "/search", SearchLive.Index
       live "/workspace/:issue_id", WorkspaceLive.Show
       live "/workspaces", WorkspaceLive.Index
@@ -87,7 +88,6 @@ defmodule CymphoWeb.Router do
 
     live_session :board_governed,
       on_mount: [{CymphoWeb.UserAuth, :default}, {CymphoWeb.Live.BoardAuth, :default}] do
-      live "/agents/new", AgentLive.New
       live "/agents/:id/edit", AgentLive.Edit
       live "/budgets", BudgetLive.Index
       live "/budgets/new", BudgetLive.Index, :new

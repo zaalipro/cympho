@@ -1,11 +1,11 @@
-<div class="p-6 lg:p-8 max-w-2xl mx-auto">
+<div class="mx-auto max-w-3xl px-6 py-8 lg:px-8">
   <%= if @pending_approval_id do %>
-    <div class="mb-4 p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-      <p class="text-sm text-blue-400">
+    <div class="mb-5 rounded-lg border border-blue-500/20 bg-blue-500/10 px-4 py-3">
+      <p class="text-sm leading-5 text-blue-300">
         Agent hire requires board approval. A request has been submitted and is pending review.
         <.app_link
           navigate={~p"/board-approvals/#{@pending_approval_id}"}
-          class="text-blue-400 underline hover:text-blue-300"
+          class="text-blue-300 underline hover:text-blue-200"
         >
           View approval request
         </.app_link>
@@ -13,29 +13,54 @@
     </div>
   <% end %>
 
-  <.header title="New Agent">
+  <.header
+    title="New Agent"
+    subtitle="Create an autonomous teammate with a role, operating instructions, and runtime adapter."
+  >
     <:actions>
       <.app_link
         navigate={~p"/agents"}
-        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
+        class="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
       >
         Cancel
       </.app_link>
     </:actions>
   </.header>
 
-  <.simple_form for={@form} phx-submit="save">
-    <.input field={@form[:name]} label="Name" />
-    <.input field={@form[:instructions]} label="Instructions" type="textarea" />
-    <.select
-      name="agent[role]"
-      label="Role"
-      options={[Engineer: "engineer", CEO: "ceo", CTO: "cto"]}
-    />
-    <.input field={@form[:adapter]} label="Adapter" placeholder="e.g., anthropic" />
+  <section class="rounded-lg border border-border bg-surface/70 shadow-sm">
+    <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-5 p-5">
+      <div class="grid gap-5 sm:grid-cols-2">
+        <.input field={@form[:name]} label="Name" required placeholder="Elixir Engineer" />
+        <.input field={@form[:role]} type="select" label="Role" required options={role_options()} />
+      </div>
 
-    <:actions>
-      <.button type="submit">Create Agent</.button>
-    </:actions>
-  </.simple_form>
+      <.input
+        field={@form[:adapter]}
+        type="select"
+        label="Adapter"
+        required
+        options={adapter_options()}
+      />
+
+      <.input
+        field={@form[:instructions]}
+        label="Instructions"
+        type="textarea"
+        rows={8}
+        placeholder="Describe the agent's responsibilities, constraints, and working style."
+      />
+
+      <:actions>
+        <div class="flex items-center justify-end gap-2 border-t border-border pt-5">
+          <.app_link
+            navigate={~p"/agents"}
+            class="rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+          >
+            Cancel
+          </.app_link>
+          <.button type="submit" variant="primary">Create Agent</.button>
+        </div>
+      </:actions>
+    </.simple_form>
+  </section>
 </div>

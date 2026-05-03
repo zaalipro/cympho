@@ -44,6 +44,18 @@
         </div>
       </div>
     </div>
+    <div
+      :if={@flash["info"]}
+      class="mx-4 mt-4 rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-sm text-brand lg:mx-6"
+    >
+      {@flash["info"]}
+    </div>
+    <div
+      :if={@flash["error"]}
+      class="mx-4 mt-4 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-300 lg:mx-6"
+    >
+      {@flash["error"]}
+    </div>
     
 <!-- Timeline Stream -->
     <div
@@ -57,7 +69,7 @@
           <div class={
             case entry.type do
               :comment ->
-                author_type = get_in(entry.data, [:author_type])
+                author_type = Map.get(entry.data, :author_type)
 
                 cond do
                   author_type == "agent" ->
@@ -82,7 +94,7 @@
           }>
             {case entry.type do
               :comment ->
-                author_type = get_in(entry.data, [:author_type])
+                author_type = Map.get(entry.data, :author_type)
 
                 cond do
                   author_type == "agent" ->
@@ -139,8 +151,8 @@
                           agent = Enum.find(@all_agents, &(&1.id == entry.data.author_id))
                           if agent, do: agent.name, else: "Agent"
 
-                        true ->
-                          "User"
+                        _ ->
+                          entry.data.author_id || "User"
                       end}
                     </span>
                     <span
@@ -197,7 +209,7 @@
                   <span :if={entry.data.input_tokens > 0 or entry.data.output_tokens > 0}>
                     {format_tokens(entry.data.input_tokens + entry.data.output_tokens)} tokens
                   </span>
-                  <span :if={entry.data.cost_usd && entry.data.cost_usd > 0}>
+                  <span :if={positive_cost?(entry.data.cost_usd)}>
                     {format_cost(entry.data.cost_usd)}
                   </span>
                 </div>
@@ -366,6 +378,9 @@
     
 <!-- Sticky Composer -->
     <div class="p-4 lg:p-6 border-t border-border bg-surface/50">
+      <div class="mb-2 text-xs font-510 uppercase tracking-wider text-text-secondary">
+        Add Comment
+      </div>
       <form id="comment-form" phx-submit="add_comment" class="space-y-3">
         <div class="flex gap-2">
           <div class="flex-1">
@@ -497,15 +512,21 @@
               {String.first(@issue.assignee.name) || "?"}
             </div>
             <span class="text-sm text-text-secondary">{@issue.assignee.name}</span>
-            <.badge variant="agent" value={to_string(@issue.assignee.status)} />
+            <.badge
+              variant="agent"
+              value={to_string(@issue.assignee.status)}
+              data-status={to_string(@issue.assignee.status)}
+            />
           </div>
           <button
             type="button"
             phx-click="unassign_issue"
             class="text-text-quaternary hover:text-red-400 transition-colors text-xs"
             data-confirm="Unassign this issue?"
+            title="Remove assignee"
           >
             <.icon name="hero-x-mark" class="w-3 h-3" />
+            <span class="sr-only">Remove</span>
           </button>
         </div>
       </div>

@@ -82,6 +82,18 @@ defmodule Cympho.EventStore do
 
   @impl true
   def handle_call({:purge_old, ttl_ms}, _from, state) do
+    {deleted, state} = do_purge_old(ttl_ms, state)
+    {:reply, deleted, state}
+  end
+
+  @impl true
+  def handle_info(:purge_tick, state) do
+    {_deleted, state} = do_purge_old(300_000, state)
+    Process.send_after(self(), :purge_tick, 60_000)
+    {:noreply, state}
+  end
+
+  defp do_purge_old(ttl_ms, state) do
     cutoff = System.system_time(:millisecond) - ttl_ms
 
     deleted =
@@ -91,26 +103,32 @@ defmodule Cympho.EventStore do
             acc
 
           {event_id, _, _, timestamp}, acc ->
-            if timestamp < cutoff,
-              do:
-                (
-                  :ets.delete(@table, event_id)
-                  acc + 1
-                ),
-              else: acc
+            if timestamp < cutoff do
+              :ets.delete(@table, event_id)
+              acc + 1
+            else
+              acc
+            end
         end,
         0,
         @table
       )
 
-    {:reply, deleted, state}
+    {deleted, %{state | min_ids: recompute_min_ids()}}
   end
 
-  @impl true
-  def handle_info(:purge_tick, state) do
-    purge_old(300_000)
-    Process.send_after(self(), :purge_tick, 60_000)
-    {:noreply, state}
+  defp recompute_min_ids do
+    :ets.foldl(
+      fn
+        {:__global_counter__, _}, acc ->
+          acc
+
+        {event_id, topic, _, _}, acc ->
+          Map.update(acc, topic, event_id, &min(&1, event_id))
+      end,
+      %{},
+      @table
+    )
   end
 
   defp trim_if_needed(state, topic) do

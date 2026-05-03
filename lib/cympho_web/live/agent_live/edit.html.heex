@@ -1,11 +1,11 @@
-<div class="p-6 lg:p-8 max-w-2xl mx-auto">
+<div class="mx-auto max-w-3xl px-6 py-8 lg:px-8">
   <%= if @pending_approval_id do %>
-    <div class="mb-4 p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-      <p class="text-sm text-blue-400">
+    <div class="mb-5 rounded-lg border border-blue-500/20 bg-blue-500/10 px-4 py-3">
+      <p class="text-sm leading-5 text-blue-300">
         Agent role change requires board approval. A request has been submitted and is pending review.
         <.app_link
           navigate={~p"/board-approvals/#{@pending_approval_id}"}
-          class="text-blue-400 underline hover:text-blue-300"
+          class="text-blue-300 underline hover:text-blue-200"
         >
           View approval request
         </.app_link>
@@ -13,61 +13,82 @@
     </div>
   <% end %>
 
-  <.header title="Edit Agent">
+  <.header
+    title="Edit Agent"
+    subtitle="Update runtime settings, role, and operating instructions."
+  >
     <:actions>
       <.app_link
         navigate={~p"/agents"}
-        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
+        class="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
       >
         Cancel
       </.app_link>
     </:actions>
   </.header>
 
-  <.simple_form for={@form} phx-submit="save">
-    <.input field={@form[:name]} label="Name" />
-    <.input field={@form[:instructions]} label="Instructions" type="textarea" />
-    <.input
-      field={@form[:instructions_path]}
-      label="Instructions File Path"
-      placeholder="e.g., agents/engineer/AGENTS.md"
-    />
-
-    <div class="space-y-1.5">
-      <label class="block text-xs font-510 text-text-secondary">Max Concurrent Jobs</label>
-      <div class="flex items-center gap-3">
-        <input
-          type="range"
-          name="agent[max_concurrent_jobs]"
-          min="1"
-          max="10"
-          value={@form[:max_concurrent_jobs].value || 3}
-          class="w-full h-2 bg-surface rounded-lg appearance-none cursor-pointer accent-brand"
-        />
-        <span class="text-sm text-brand font-510 w-8 text-center">
-          {@form[:max_concurrent_jobs].value || 3}
-        </span>
+  <section class="rounded-lg border border-border bg-surface/70 shadow-sm">
+    <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-5 p-5">
+      <div class="grid gap-5 sm:grid-cols-2">
+        <.input field={@form[:name]} label="Name" required />
+        <.input field={@form[:role]} type="select" label="Role" required options={role_options()} />
       </div>
-      <p class="text-xs text-text-quaternary">
-        Number of issues this agent can handle simultaneously
-      </p>
-    </div>
 
-    <.select
-      name="agent[role]"
-      label="Role"
-      options={[
-        Engineer: "engineer",
-        CEO: "ceo",
-        CTO: "cto",
-        Designer: "designer",
-        PM: "product_manager"
-      ]}
-    />
-    <.input field={@form[:adapter]} label="Adapter" placeholder="e.g., anthropic" />
+      <div class="grid gap-5 sm:grid-cols-2">
+        <.input
+          field={@form[:adapter]}
+          type="select"
+          label="Adapter"
+          required
+          options={adapter_options()}
+        />
 
-    <:actions>
-      <.button type="submit">Update Agent</.button>
-    </:actions>
-  </.simple_form>
+        <div class="space-y-1.5">
+          <label class="block text-xs font-510 text-text-secondary">Max Concurrent Jobs</label>
+          <div class="flex h-10 items-center gap-3 rounded-lg border border-border bg-surface px-3">
+            <input
+              type="range"
+              name="agent[max_concurrent_jobs]"
+              min="1"
+              max="10"
+              value={@form[:max_concurrent_jobs].value || 3}
+              class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-surface-hover accent-brand"
+            />
+            <span class="w-8 text-center text-sm font-590 text-brand">
+              {@form[:max_concurrent_jobs].value || 3}
+            </span>
+          </div>
+          <p class="text-xs text-text-quaternary">
+            Number of issues this agent can handle simultaneously
+          </p>
+        </div>
+      </div>
+
+      <.input
+        field={@form[:instructions]}
+        label="Instructions"
+        type="textarea"
+        rows={8}
+        placeholder="Describe this agent's responsibilities, constraints, and working style."
+      />
+
+      <.input
+        field={@form[:instructions_path]}
+        label="Instructions File Path"
+        placeholder="agents/engineer/AGENTS.md"
+      />
+
+      <:actions>
+        <div class="flex items-center justify-end gap-2 border-t border-border pt-5">
+          <.app_link
+            navigate={~p"/agents"}
+            class="rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+          >
+            Cancel
+          </.app_link>
+          <.button type="submit" variant="primary">Update Agent</.button>
+        </div>
+      </:actions>
+    </.simple_form>
+  </section>
 </div>

@@ -25,14 +25,14 @@
     >
     </script>
   </head>
-  <body class="bg-canvas text-text-primary font-sans antialiased min-h-screen">
+  <body class="bg-canvas text-text-primary font-sans antialiased min-h-screen overflow-x-hidden">
     <div
       id="toast-container"
       phx-hook="Toast"
       class="fixed top-4 right-4 z-[70] flex flex-col gap-2 pointer-events-none"
     >
     </div>
-    <div class="flex min-h-screen">
+    <div class="flex min-h-screen w-full overflow-x-hidden">
       <!-- Sidebar overlay for mobile -->
       <div
         id="sidebar-overlay"
@@ -42,17 +42,17 @@
       
 <!-- Desktop sidebar / Mobile drawer -->
       <aside
-        class="w-64 bg-panel border-r border-border flex-col fixed inset-y-0 left-0 z-50 hidden md:flex lg:translate-x-0 -translate-x-full transition-transform duration-200"
+        class="w-64 shrink-0 bg-panel/95 border-r border-border flex flex-col fixed inset-y-0 left-0 z-50 -translate-x-full lg:translate-x-0 transition-transform duration-200"
         id="sidebar"
       >
         <.company_rail company={assigns[:current_company]} />
         <.nav_rail current_path={@conn.request_path} />
         <!-- Bottom actions: theme toggle + shortcuts -->
-        <div class="px-3 pb-4 space-y-1">
+        <div class="border-t border-border px-2.5 py-3 space-y-0.5">
           <button
             type="button"
             onclick="window.toggleTheme && window.toggleTheme()"
-            class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-510 text-text-quaternary hover:text-text-secondary hover:bg-surface-hover transition-colors"
+            class="w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-510 text-text-quaternary hover:text-text-secondary hover:bg-surface-hover transition-colors"
           >
             <svg class="w-4 h-4 dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -81,7 +81,7 @@
           <button
             type="button"
             data-shortcuts-btn
-            class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-510 text-text-quaternary hover:text-text-secondary hover:bg-surface-hover transition-colors"
+            class="w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-510 text-text-quaternary hover:text-text-secondary hover:bg-surface-hover transition-colors"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -181,7 +181,7 @@
       </header>
       
 <!-- Main content -->
-      <main class="flex-1 lg:ml-64 min-h-screen pt-16 lg:pt-0 pb-16 lg:pb-0">
+      <main class="flex-1 min-w-0 overflow-x-hidden lg:ml-64 min-h-screen pt-16 lg:pt-0 pb-16 lg:pb-0">
         {@inner_content}
       </main>
     </div>

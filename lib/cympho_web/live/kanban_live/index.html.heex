@@ -21,15 +21,18 @@
 
 <div
   id="kanban-board"
-  class="p-4 sm:p-6 lg:p-8 h-[calc(100vh-64px)] flex flex-col bg-canvas"
+  class="p-4 sm:p-6 lg:p-8 h-[calc(100vh-64px)] lg:h-screen flex flex-col overflow-hidden bg-canvas"
   phx-hook="KanbanSortable"
 >
-  <.header title={@page_title}>
+  <.header
+    title={@page_title}
+    subtitle="Move autonomous work from strategy to execution."
+  >
     <:actions>
       <div class="flex items-center gap-3">
         <.app_link
           navigate={~p"/issues"}
-          class="hidden sm:inline-flex items-center rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
+          class="hidden sm:inline-flex items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
         >
           List
         </.app_link>
@@ -37,7 +40,7 @@
         <form phx-change="filter_project">
           <select
             name="project_id"
-            class="bg-surface border border-border rounded-lg px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+            class="linear-field h-10 px-3 text-sm"
           >
             <option value="" selected={is_nil(@selected_project_id)}>All Projects</option>
             <%= for project <- @projects do %>
@@ -51,14 +54,14 @@
         <button
           type="button"
           phx-click="toggle_swimlanes"
-          class={"text-xs font-510 px-3 py-1.5 rounded-lg border transition-colors " <> if(@swimlane_mode, do: "bg-accent/20 border-accent/30 text-accent", else: "bg-surface border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover")}
+          class={"h-10 rounded-lg border px-3 text-sm font-510 transition-colors " <> if(@swimlane_mode, do: "bg-accent/20 border-accent/30 text-accent", else: "bg-panel border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover")}
         >
           {if @swimlane_mode, do: "Flat View", else: "Swimlanes"}
         </button>
 
         <.app_link
           navigate={~p"/issues/new"}
-          class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
+          class="bg-brand hover:bg-accent-hover text-white font-510 text-sm px-3 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
@@ -89,11 +92,11 @@
   </div>
 
   <%!-- Filter bar --%>
-  <div class="flex flex-col sm:flex-row sm:items-center gap-2 mt-3 mb-4">
+  <div class="linear-panel mb-4 flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
     <form phx-change="filter_assignee" class="flex-shrink-0 w-full sm:w-auto">
       <select
         name="assignee_id"
-        class="w-full sm:w-auto bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[44px]"
+        class="linear-field h-10 w-full px-3 text-sm sm:w-auto"
       >
         <option value="">Assignee</option>
         <%= for agent <- @agents do %>
@@ -107,7 +110,7 @@
     <form phx-change="filter_priority" class="flex-shrink-0 w-full sm:w-auto">
       <select
         name="priority"
-        class="w-full sm:w-auto bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[44px]"
+        class="linear-field h-10 w-full px-3 text-sm sm:w-auto"
       >
         <option value="">Priority</option>
         <option value="critical" selected={@filter_priority == :critical}>Critical</option>
@@ -137,7 +140,7 @@
           name="query"
           value={@filter_search}
           placeholder="Search title, assignee, priority..."
-          class="w-full bg-surface border border-border rounded-lg pl-9 pr-8 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[44px]"
+          class="linear-field h-10 w-full pl-9 pr-8 text-sm placeholder:text-text-quaternary"
         />
         <%= if @filter_search != "" do %>
           <button
@@ -162,7 +165,7 @@
       <button
         type="button"
         phx-click="clear_filters"
-        class="text-xs font-510 px-3 py-2 min-h-[44px] rounded-lg border border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors flex-shrink-0 w-full sm:w-auto"
+        class="h-10 rounded-lg border border-border bg-panel px-3 text-sm font-510 text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors flex-shrink-0 w-full sm:w-auto"
       >
         Clear filters
         <span class="ml-1.5 bg-accent/20 text-accent px-1.5 rounded-full">
@@ -232,8 +235,8 @@
         </div>
       </div>
     <% else %>
-      <div class="flex-1 overflow-y-auto lg:overflow-x-auto lg:overflow-y-hidden">
-        <div class="flex flex-col lg:flex-row gap-3 lg:h-full lg:min-w-max">
+      <div class="flex-1 overflow-y-auto lg:overflow-x-auto lg:overflow-y-hidden rounded-xl border border-border bg-panel/30 p-3">
+        <div class="flex flex-col lg:flex-row gap-3 lg:h-full lg:min-w-max pb-2">
           <%= for status <- status_columns() do %>
             <% issues = issues_for_status(computed, status) %>
             <% limit = wip_limit(@selected_project, status) %>
@@ -257,8 +260,8 @@
                 <span class="text-xs text-text-quaternary mt-2">{count}</span>
               </div>
             <% else %>
-              <div class={"w-full lg:w-[280px] flex flex-col bg-panel border rounded-lg min-h-[180px] lg:h-full " <> if(exceeded, do: "border-red-500/50", else: "border-border")}>
-                <div class="px-3 py-2.5 border-b border-border flex items-center justify-between bg-panel rounded-t-lg">
+              <div class={"w-full lg:w-[280px] xl:w-[304px] flex flex-col bg-panel/90 border rounded-xl min-h-[180px] lg:h-full " <> if(exceeded, do: "border-red-500/50", else: "border-border")}>
+                <div class="sticky top-0 z-10 px-3 py-2.5 border-b border-border flex items-center justify-between bg-panel rounded-t-xl">
                   <div class="flex items-center gap-2">
                     <button
                       type="button"

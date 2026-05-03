@@ -5,9 +5,16 @@ port =
 
 config :cympho, env: config_env()
 
-config :cympho, CymphoWeb.Endpoint,
-  url: [host: System.get_env("APP_HOST") || "localhost", port: port],
-  cache_static_manifest: "priv/static/cache_manifest.json"
+endpoint_config = [url: [host: System.get_env("APP_HOST") || "localhost", port: port]]
+
+endpoint_config =
+  if config_env() == :prod do
+    Keyword.put(endpoint_config, :cache_static_manifest, "priv/static/cache_manifest.json")
+  else
+    endpoint_config
+  end
+
+config :cympho, CymphoWeb.Endpoint, endpoint_config
 
 if (database_url = System.get_env("DATABASE_URL")) && config_env() != :test do
   config :cympho, Cympho.Repo,

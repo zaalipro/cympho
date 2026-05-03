@@ -1,167 +1,240 @@
-<.header>
-  {@page_title}
-</.header>
+<div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0">
+  <.header title={@page_title} subtitle="Notification channels and event delivery preferences." />
 
-<div :if={@user == nil} class="settings-empty">
-  <p>No users found. Create a user first via the API.</p>
-</div>
+  <div
+    :if={@user == nil}
+    class="rounded-xl border border-border bg-surface px-6 py-16 text-center"
+  >
+    <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-subtle text-text-tertiary">
+      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+        />
+      </svg>
+    </div>
+    <h2 class="text-sm font-590 text-text-primary">No users found</h2>
+    <p class="mt-1 text-sm text-text-tertiary">
+      Create a user first, then notification settings will appear here.
+    </p>
+  </div>
 
-<div :if={@user != nil} class="settings-container">
-  <div class="settings-section">
-    <h2>Notification Channels</h2>
-    <p class="settings-description">Choose how you want to receive notifications.</p>
+  <div
+    :if={@user == nil and @users != []}
+    class="mt-4 rounded-xl border border-border bg-surface p-4"
+  >
+    <h2 class="mb-3 text-xs font-590 uppercase tracking-wider text-text-secondary">Users</h2>
+    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      <button
+        :for={user <- @users}
+        type="button"
+        phx-click="select_user"
+        phx-value-user_id={user.id}
+        class="rounded-lg border border-border bg-button px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+      >
+        {user.email || user.name || user.id}
+      </button>
+    </div>
+  </div>
 
-    <div class="channel-cards">
-      <!-- Email Channel -->
-      <div class="channel-card" id="channel-email">
-        <div class="channel-header">
-          <div class="channel-info">
-            <h3>Email</h3>
-            <span class="channel-status">
-              {if channel_enabled?(@prefs, "email"), do: "Enabled", else: "Disabled"}
-            </span>
-          </div>
-          <button
-            type="button"
-            class={"toggle-btn #{if channel_enabled?(@prefs, "email"), do: "toggle-on", else: "toggle-off"}"}
-            phx-click="toggle_channel"
-            phx-value-channel="email"
-          >
-            {if channel_enabled?(@prefs, "email"), do: "ON", else: "OFF"}
-          </button>
-        </div>
-        <p class="channel-detail">Notifications sent to: {@user.email}</p>
+  <div :if={@user != nil} class="space-y-6">
+    <section class="rounded-xl border border-border bg-surface p-5">
+      <div class="mb-4">
+        <h2 class="text-sm font-590 text-text-primary">Notification Channels</h2>
+        <p class="mt-1 text-sm text-text-tertiary">
+          Choose how Cympho sends operational updates.
+        </p>
       </div>
-      
-<!-- Telegram Channel -->
-      <div class="channel-card" id="channel-telegram">
-        <div class="channel-header">
-          <div class="channel-info">
-            <h3>Telegram</h3>
-            <span class="channel-status">
-              {if channel_enabled?(@prefs, "telegram"), do: "Enabled", else: "Disabled"}
-            </span>
+
+      <div class="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <div id="channel-email" class="rounded-lg border border-border bg-panel p-4">
+          <div class="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-590 text-text-primary">Email</h3>
+              <p class="mt-1 text-xs text-text-quaternary">{@user.email}</p>
+            </div>
+            <button
+              type="button"
+              class={channel_toggle_class(channel_enabled?(@prefs, "email"))}
+              phx-click="toggle_channel"
+              phx-value-channel="email"
+            >
+              {if channel_enabled?(@prefs, "email"), do: "On", else: "Off"}
+            </button>
           </div>
-          <button
-            type="button"
-            class={"toggle-btn #{if channel_enabled?(@prefs, "telegram"), do: "toggle-on", else: "toggle-off"}"}
-            phx-click="toggle_channel"
-            phx-value-channel="telegram"
-          >
-            {if channel_enabled?(@prefs, "telegram"), do: "ON", else: "OFF"}
-          </button>
+          <p class="text-xs leading-5 text-text-tertiary">Account and issue notifications.</p>
         </div>
-        <div class="channel-detail">
-          <div :if={telegram_chat_id(@prefs, @user) != ""}>
-            <p>Linked chat ID: <code>{telegram_chat_id(@prefs, @user)}</code></p>
-            <span :if={@telegram_verify_status == :verified} class="badge badge-success">
-              Verified
+
+        <div id="channel-telegram" class="rounded-lg border border-border bg-panel p-4">
+          <div class="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-590 text-text-primary">Telegram</h3>
+              <p class="mt-1 text-xs text-text-quaternary">
+                {if telegram_chat_id(@prefs, @user) == "",
+                  do: "Not linked",
+                  else: telegram_chat_id(@prefs, @user)}
+              </p>
+            </div>
+            <button
+              type="button"
+              class={channel_toggle_class(channel_enabled?(@prefs, "telegram"))}
+              phx-click="toggle_channel"
+              phx-value-channel="telegram"
+            >
+              {if channel_enabled?(@prefs, "telegram"), do: "On", else: "Off"}
+            </button>
+          </div>
+          <div
+            :if={telegram_chat_id(@prefs, @user) != ""}
+            class="flex flex-wrap items-center gap-2"
+          >
+            <span
+              :if={@telegram_verify_status in [:verified, :linked]}
+              class="rounded-md border border-success/20 bg-success/10 px-2 py-0.5 text-xs font-510 text-success"
+            >
+              {if @telegram_verify_status == :verified, do: "Verified", else: "Linked"}
             </span>
-            <span :if={@telegram_verify_status == :linked} class="badge badge-info">Linked</span>
-            <button type="button" class="phx-btn-secondary" phx-click="verify_telegram">
-              Verify Connection
+            <button
+              type="button"
+              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+              phx-click="verify_telegram"
+            >
+              Verify
             </button>
           </div>
           <form
             :if={telegram_chat_id(@prefs, @user) == ""}
             phx-submit="link_telegram"
-            class="inline-form"
+            class="flex gap-2"
           >
             <input
               type="text"
               name="telegram_chat_id"
-              placeholder="Enter Telegram Chat ID"
+              placeholder="Telegram chat ID"
               value={@telegram_chat_id_input}
               required
+              class="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
             />
-            <button type="submit" class="phx-btn">Link</button>
+            <button
+              type="submit"
+              class="rounded-lg bg-brand px-3 py-2 text-xs font-510 text-white transition-colors hover:bg-accent"
+            >
+              Link
+            </button>
           </form>
         </div>
-      </div>
-      
-<!-- Webhook Channel -->
-      <div class="channel-card" id="channel-webhook">
-        <div class="channel-header">
-          <div class="channel-info">
-            <h3>Webhook</h3>
-            <span class="channel-status">
-              {if channel_enabled?(@prefs, "webhook"), do: "Enabled", else: "Disabled"}
-            </span>
+
+        <div id="channel-webhook" class="rounded-lg border border-border bg-panel p-4">
+          <div class="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-590 text-text-primary">Webhook</h3>
+              <p class="mt-1 text-xs text-text-quaternary">
+                {if webhook_url(@prefs, @user) == "",
+                  do: "No endpoint",
+                  else: webhook_url(@prefs, @user)}
+              </p>
+            </div>
+            <button
+              type="button"
+              class={channel_toggle_class(channel_enabled?(@prefs, "webhook"))}
+              phx-click="toggle_channel"
+              phx-value-channel="webhook"
+            >
+              {if channel_enabled?(@prefs, "webhook"), do: "On", else: "Off"}
+            </button>
           </div>
-          <button
-            type="button"
-            class={"toggle-btn #{if channel_enabled?(@prefs, "webhook"), do: "toggle-on", else: "toggle-off"}"}
-            phx-click="toggle_channel"
-            phx-value-channel="webhook"
-          >
-            {if channel_enabled?(@prefs, "webhook"), do: "ON", else: "OFF"}
-          </button>
-        </div>
-        <div class="channel-detail">
-          <form phx-submit="update_webhook_url" class="inline-form">
+          <form phx-submit="update_webhook_url" class="flex gap-2">
             <input
               type="url"
               name="webhook_url"
               placeholder="https://example.com/webhook"
               value={webhook_url(@prefs, @user)}
+              class="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
             />
-            <button type="submit" class="phx-btn">Save URL</button>
+            <button
+              type="submit"
+              class="rounded-lg bg-brand px-3 py-2 text-xs font-510 text-white transition-colors hover:bg-accent"
+            >
+              Save
+            </button>
           </form>
-          <button
-            :if={webhook_url(@prefs, @user) != ""}
-            type="button"
-            class="phx-btn-secondary"
-            phx-click="test_webhook"
-          >
-            Test Ping
-          </button>
-          <div :if={@webhook_test_result != nil} class="test-result">
-            <span :if={match?({:ok, _}, @webhook_test_result)} class="badge badge-success">
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              :if={webhook_url(@prefs, @user) != ""}
+              type="button"
+              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+              phx-click="test_webhook"
+            >
+              Test Ping
+            </button>
+            <span
+              :if={match?({:ok, _}, @webhook_test_result)}
+              class="rounded-md border border-success/20 bg-success/10 px-2 py-0.5 text-xs font-510 text-success"
+            >
               Test passed
             </span>
-            <span :if={match?({:error, _}, @webhook_test_result)} class="badge badge-error">
+            <span
+              :if={match?({:error, _}, @webhook_test_result)}
+              class="rounded-md border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-xs font-510 text-red-400"
+            >
               Test failed
             </span>
           </div>
         </div>
       </div>
-    </div>
-  </div>
+    </section>
 
-  <div class="settings-section">
-    <h2>Event Notifications</h2>
-    <p class="settings-description">
-      Choose which events trigger notifications for each channel.
-    </p>
+    <section class="rounded-xl border border-border bg-surface p-5">
+      <div class="mb-4">
+        <h2 class="text-sm font-590 text-text-primary">Event Notifications</h2>
+        <p class="mt-1 text-sm text-text-tertiary">
+          Choose which events are delivered per channel.
+        </p>
+      </div>
 
-    <div class="event-grid">
-      <div :for={pref <- @prefs} class="event-channel-group" id={"events-#{pref.channel_type}"}>
-        <div class="event-channel-header">
-          <h3>{String.capitalize(pref.channel_type)}</h3>
-          <button
-            type="button"
-            class={"toggle-btn #{if pref.enabled, do: "toggle-on", else: "toggle-off"}"}
-            phx-click="toggle_pref_enabled"
-            phx-value-pref_id={pref.id}
-          >
-            {if pref.enabled, do: "ON", else: "OFF"}
-          </button>
-        </div>
-        <div class="event-toggles">
-          <div :for={event <- ~w(issue_assigned comment status_change)} class="event-toggle">
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div
+          :for={pref <- @prefs}
+          id={"events-#{pref.channel_type}"}
+          class="rounded-lg border border-border bg-panel p-4"
+        >
+          <div class="mb-3 flex items-center justify-between">
+            <h3 class="text-sm font-590 text-text-primary">
+              {String.capitalize(pref.channel_type)}
+            </h3>
             <button
               type="button"
-              class={"event-toggle-btn #{if event_enabled?(pref, event), do: "event-on", else: "event-off"}"}
+              class={channel_toggle_class(pref.enabled)}
+              phx-click="toggle_pref_enabled"
+              phx-value-pref_id={pref.id}
+            >
+              {if pref.enabled, do: "On", else: "Off"}
+            </button>
+          </div>
+          <div class="space-y-2">
+            <button
+              :for={event <- ~w(issue_assigned comment status_change)}
+              type="button"
+              class={event_toggle_class(event_enabled?(pref, event))}
               phx-click="toggle_event"
               phx-value-pref_id={pref.id}
               phx-value-event={event}
             >
-              {if event_enabled?(pref, event), do: "&#10003;", else: "&#10007;"}
+              <span>{format_event(event)}</span>
+              <span>{if event_enabled?(pref, event), do: "On", else: "Off"}</span>
             </button>
-            <span class="event-label">{format_event(event)}</span>
           </div>
         </div>
       </div>
-    </div>
+
+      <div
+        :if={Enum.empty?(@prefs)}
+        class="rounded-lg border border-dashed border-border p-8 text-center"
+      >
+        <p class="text-sm text-text-tertiary">No notification preferences are configured.</p>
+      </div>
+    </section>
   </div>
 </div>

@@ -162,6 +162,11 @@ function highlightActiveNav() {
     const navPath = el.dataset.navPath;
     const isActive = path === navPath || path.startsWith(navPath + '/');
     el.setAttribute('data-active', isActive ? 'true' : 'false');
+    if (isActive) {
+      el.setAttribute('aria-current', 'page');
+    } else {
+      el.removeAttribute('aria-current');
+    }
   });
 
   // Mobile bottom nav
@@ -456,13 +461,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Re-highlight on LiveView navigation
   window.addEventListener('phx:navigate', () => {
-    initTheme();
-    highlightActiveNav();
+    window.requestAnimationFrame(() => {
+      initTheme();
+      highlightActiveNav();
+    });
   });
   window.addEventListener('phx:page-loading-stop', () => {
-    initTheme();
-    highlightActiveNav();
-    initCompanySwitcher();
+    window.requestAnimationFrame(() => {
+      initTheme();
+      highlightActiveNav();
+      initCompanySwitcher();
+    });
   });
 });
 

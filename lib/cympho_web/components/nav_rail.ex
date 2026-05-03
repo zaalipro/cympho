@@ -6,7 +6,7 @@ defmodule CymphoWeb.Components.NavRail do
 
   def nav_rail(assigns) do
     ~H"""
-    <nav class="flex-1 py-4 px-3 space-y-1" {@rest}>
+    <nav class="flex-1 overflow-y-auto py-3 px-2.5 space-y-0.5" {@rest}>
       <.nav_link
         to="/dashboard"
         label="Dashboard"
@@ -152,29 +152,23 @@ defmodule CymphoWeb.Components.NavRail do
     <.link
       navigate={@to}
       class={[
-        "nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-510 transition-colors",
-        "text-text-secondary hover:text-text-primary hover:bg-surface-hover",
-        nav_active_class(@to, @current_path)
+        "nav-item flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-510 transition-colors",
+        "text-text-tertiary hover:text-text-primary hover:bg-surface-hover"
       ]}
       data-nav-path={@to}
+      data-active={if active_path?(@to, @current_path), do: "true", else: "false"}
       aria-current={if active_path?(@to, @current_path), do: "page", else: nil}
     >
       <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        {@icon}
+        {Phoenix.HTML.raw(@icon)}
       </svg>
       <span class="hidden md:inline">{@label}</span>
     </.link>
     """
   end
 
-  defp nav_active_class(path, current_path) do
-    if active_path?(path, current_path) do
-      "text-text-primary bg-surface-hover"
-    else
-      ""
-    end
-  end
-
   defp active_path?("/", current_path), do: current_path == "/"
-  defp active_path?(path, current_path), do: String.starts_with?(current_path, path)
+
+  defp active_path?(path, current_path),
+    do: current_path == path or String.starts_with?(current_path, path <> "/")
 end

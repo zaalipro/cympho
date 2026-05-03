@@ -250,6 +250,34 @@ defmodule CymphoWeb.IssueLive.Index do
   defp status_label(:cancelled), do: "Cancelled"
   defp status_label(other), do: String.capitalize(to_string(other))
 
+  defp issue_identifier(%{identifier: identifier})
+       when is_binary(identifier) and identifier != "",
+       do: identifier
+
+  defp issue_identifier(%{issue_number: number}) when is_integer(number), do: "CYM-#{number}"
+  defp issue_identifier(%{id: id}) when is_binary(id), do: "CYM-#{String.slice(id, 0, 4)}"
+  defp issue_identifier(_), do: "CYM"
+
+  defp issue_description(description) when is_binary(description) and description != "",
+    do: description
+
+  defp issue_description(_), do: "No description"
+
+  defp status_badge_class(:backlog), do: "bg-text-quaternary/15 text-text-tertiary"
+  defp status_badge_class(:todo), do: "bg-brand/12 text-brand"
+  defp status_badge_class(:in_progress), do: "bg-amber-500/15 text-amber-300"
+  defp status_badge_class(:in_review), do: "bg-sky-500/15 text-sky-300"
+  defp status_badge_class(:done), do: "bg-success/15 text-success"
+  defp status_badge_class(:blocked), do: "bg-red-500/15 text-red-300"
+  defp status_badge_class(:cancelled), do: "bg-text-quaternary/15 text-text-tertiary"
+  defp status_badge_class(_), do: "bg-subtle text-text-secondary"
+
+  defp priority_badge_class(:critical), do: "bg-red-500/15 text-red-300"
+  defp priority_badge_class(:high), do: "bg-orange-500/15 text-orange-300"
+  defp priority_badge_class(:medium), do: "bg-amber-500/15 text-amber-300"
+  defp priority_badge_class(:low), do: "bg-text-quaternary/15 text-text-tertiary"
+  defp priority_badge_class(_), do: "bg-subtle text-text-secondary"
+
   defp filters_active?(assigns) do
     assigns.current_status != "" or assigns.current_priority != "" or
       assigns.current_search != "" or assigns.current_assignee_id != "" or

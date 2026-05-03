@@ -9,13 +9,17 @@ defmodule CymphoWeb.Components do
 
   def header(assigns) do
     ~H"""
-    <header {@rest}>
-      <h1 :if={@title} class="font-serif text-2xl font-medium text-text-primary">{@title}</h1>
-      <p :if={@subtitle} class="text-text-secondary text-sm mt-1">{@subtitle}</p>
-      <div class="header-actions">
+    <header class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between" {@rest}>
+      <div class="min-w-0">
+        <h1 :if={@title} class="text-[22px] leading-7 font-590 tracking-tight text-text-primary">
+          {@title}
+        </h1>
+        <p :if={@subtitle} class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
+          {@subtitle}
+        </p>
         {render_slot(@inner_block)}
       </div>
-      <div :if={@actions != []} class="header-actions">
+      <div :if={@actions != []} class="flex flex-wrap items-center gap-2 sm:justify-end">
         {render_slot(@actions)}
       </div>
     </header>
@@ -72,25 +76,56 @@ defmodule CymphoWeb.Components do
   attr :rest, :global
 
   def input(assigns) do
+    assigns = assign(assigns, :errors, input_errors(assigns.field))
+
     ~H"""
     <div class="space-y-1.5">
       <label :if={@label} class="block text-xs font-510 text-text-secondary">{@label}</label>
       <textarea
         :if={@type == "textarea"}
-        name={input_name(@field)}
+        name={input_name(@field, @name)}
         rows={@rows}
-        class="w-full bg-surface border border-border rounded-lg px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors"
+        class={[
+          "w-full bg-surface border rounded-lg px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors",
+          input_border_class(@errors)
+        ]}
         {@rest}
-      ><%= input_value(@field) %></textarea>
-      <input
-        :if={@type != "textarea"}
-        type={@type}
-        name={input_name(@field)}
-        value={input_value(@field)}
+      ><%= input_value(@field, @value) %></textarea>
+      <select
+        :if={@type == "select"}
+        name={input_name(@field, @name)}
         required={@required}
-        class="w-full bg-surface border border-border rounded-lg px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors"
+        disabled={@disabled}
+        class={[
+          "w-full bg-surface border rounded-lg px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors",
+          input_border_class(@errors)
+        ]}
+        {@rest}
+      >
+        <option
+          :for={{label, value} <- select_options(@options)}
+          value={value}
+          selected={to_string(input_value(@field, @value)) == to_string(value)}
+        >
+          {label}
+        </option>
+      </select>
+      <input
+        :if={@type not in ["textarea", "select"]}
+        type={@type}
+        name={input_name(@field, @name)}
+        value={input_value(@field, @value)}
+        required={@required}
+        disabled={@disabled}
+        class={[
+          "w-full bg-surface border rounded-lg px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors",
+          input_border_class(@errors)
+        ]}
         {@rest}
       />
+      <p :for={error <- @errors} class="text-xs text-error">
+        {error}
+      </p>
     </div>
     """
   end
@@ -145,8 +180,22 @@ defmodule CymphoWeb.Components do
     """
   end
 
-  defp input_name(field), do: field.name
-  defp input_value(field), do: field.value
+  defp input_name(_field, name) when is_binary(name), do: name
+  defp input_name(%{name: name}, _name), do: name
+  defp input_name(_, _), do: nil
+
+  defp input_value(_field, value) when not is_nil(value), do: value
+  defp input_value(%{value: value}, _value), do: value
+  defp input_value(_, _), do: nil
+
+  defp select_options(nil), do: []
+
+  defp select_options(options) do
+    Enum.map(options, fn
+      {label, value} -> {label, value}
+      value -> {value, value}
+    end)
+  end
 
   defp button_variant("primary"), do: "bg-brand text-white hover:bg-accent"
 
@@ -166,10 +215,32 @@ defmodule CymphoWeb.Components do
   attr :field, :any, required: true
 
   def error(assigns) do
+    assigns = assign(assigns, :errors, input_errors(assigns.field))
+
     ~H"""
-    <div :for={error <- List.wrap(@field.errors)} class="text-xs text-error mt-1">
+    <div :for={error <- @errors} class="text-xs text-error mt-1">
       {error}
     </div>
     """
   end
+
+  defp input_errors(nil), do: []
+  defp input_errors(%{errors: errors}), do: Enum.map(errors, &format_input_error/1)
+  defp input_errors(_), do: []
+
+  defp format_input_error({message, opts}) when is_binary(message) and is_list(opts) do
+    Enum.reduce(opts, message, fn
+      {key, value}, acc ->
+        String.replace(acc, "%{#{key}}", to_string(value))
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp format_input_error(message) when is_binary(message), do: message
+  defp format_input_error(message), do: inspect(message)
+
+  defp input_border_class([]), do: "border-border"
+  defp input_border_class(_), do: "border-error/60"
 end
