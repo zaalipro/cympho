@@ -60,9 +60,11 @@ defmodule Cympho.Activities do
   end
 
   def log_activity(attrs) when is_map(attrs) do
+    attrs = put_company_id(attrs)
+
     case %Activity{} |> Activity.changeset(attrs) |> Repo.insert() do
       {:ok, activity} ->
-        company_id = issue_company_id(activity.issue_id)
+        company_id = activity.company_id || issue_company_id(activity.issue_id)
 
         Cympho.RateLimiting.dedup_pubsub(
           Cympho.PubSub,
@@ -90,9 +92,10 @@ defmodule Cympho.Activities do
     |> Enum.each(fn {action, metadata} ->
       log_activity(%{
         issue_id: new_issue.id,
+        company_id: new_issue.company_id,
         actor_type: Map.get(attrs, :actor_type, "system"),
         actor_id: Map.get(attrs, :actor_id),
-        action: action,
+        action: to_string(action),
         metadata: metadata
       })
     end)
@@ -209,4 +212,19 @@ defmodule Cympho.Activities do
 
   defp issue_company_id(issue_id),
     do: Repo.one(from i in Cympho.Issues.Issue, where: i.id == ^issue_id, select: i.company_id)
+
+  defp put_company_id(%{company_id: company_id} = attrs) when not is_nil(company_id), do: attrs
+
+  defp put_company_id(%{"company_id" => company_id} = attrs) when not is_nil(company_id),
+    do: attrs
+
+  defp put_company_id(%{issue_id: issue_id} = attrs) when not is_nil(issue_id) do
+    Map.put(attrs, :company_id, issue_company_id(issue_id))
+  end
+
+  defp put_company_id(%{"issue_id" => issue_id} = attrs) when not is_nil(issue_id) do
+    Map.put(attrs, "company_id", issue_company_id(issue_id))
+  end
+
+  defp put_company_id(attrs), do: attrs
 end

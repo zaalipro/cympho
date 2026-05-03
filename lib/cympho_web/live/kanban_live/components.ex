@@ -12,9 +12,15 @@ defmodule CymphoWeb.KanbanLive.Components do
   def issue_card(assigns) do
     ~H"""
     <div
-      class="kanban-card-enter bg-subtle border border-border rounded-lg p-3 sm:p-4 space-y-2 hover:bg-surface-hover transition-colors cursor-grab active:cursor-grabbing min-h-[60px] sm:min-h-0"
+      class="kanban-card-enter bg-surface border border-border rounded-lg p-3 space-y-2 hover:bg-surface-hover hover:border-border-hover transition-colors cursor-grab active:cursor-grabbing min-h-[72px]"
       data-issue-id={@issue.id}
     >
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-[11px] font-mono text-text-tertiary">
+          {@issue.identifier || "CYM-" <> String.slice(@issue.id, 0, 4)}
+        </span>
+        <span class={"h-1.5 w-1.5 rounded-full " <> status_pin_class(@issue.status)}></span>
+      </div>
       <div class="text-sm font-510 text-text-primary leading-snug line-clamp-2 sm:line-clamp-1">
         {@issue.title}
       </div>
@@ -33,6 +39,11 @@ defmodule CymphoWeb.KanbanLive.Components do
           </svg>
           {length(@issue.comments)}
         </span>
+        <%= if length(@issue.blocked_by || []) > 0 do %>
+          <span class="text-xs text-red-400">
+            {length(@issue.blocked_by)} blockers
+          </span>
+        <% end %>
         <%= if @issue.assignee do %>
           <% hb_state = Index.get_heartbeat_state(@agent_heartbeat_states, @issue.assignee.id) %>
           <span class="flex items-center gap-1">
@@ -106,21 +117,37 @@ defmodule CymphoWeb.KanbanLive.Components do
     )
   end
 
+  defp empty_column_icon(:cancelled) do
+    Phoenix.HTML.raw(
+      ~s|<svg class="w-4 h-4 text-text-quaternary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>|
+    )
+  end
+
   defp empty_column_message(:backlog), do: "No unplanned work"
   defp empty_column_message(:todo), do: "Nothing queued up"
   defp empty_column_message(:in_progress), do: "Nothing in flight"
   defp empty_column_message(:in_review), do: "Nothing to review"
   defp empty_column_message(:done), do: "No completed work yet"
   defp empty_column_message(:blocked), do: "No blockers"
+  defp empty_column_message(:cancelled), do: "No cancelled work"
 
+  def priority_class(:critical), do: "bg-red-500/20 text-red-300"
   def priority_class(:high), do: "bg-red-500/20 text-red-400"
   def priority_class(:medium), do: "bg-yellow-500/20 text-yellow-400"
   def priority_class(:low), do: "bg-emerald-500/20 text-emerald-400"
   def priority_class(_), do: "bg-surface text-text-quaternary"
 
   defp heartbeat_dot_color(:idle), do: "bg-emerald-400"
+  defp heartbeat_dot_color(:running), do: "bg-yellow-400 animate-pulse"
   defp heartbeat_dot_color(:working), do: "bg-yellow-400 animate-pulse"
   defp heartbeat_dot_color(:error), do: "bg-red-400"
+  defp heartbeat_dot_color(:paused), do: "bg-text-tertiary"
   defp heartbeat_dot_color(:offline), do: "bg-text-quaternary"
   defp heartbeat_dot_color(_), do: "bg-text-quaternary"
+
+  defp status_pin_class(:in_progress), do: "bg-yellow-400 animate-pulse"
+  defp status_pin_class(:blocked), do: "bg-red-400"
+  defp status_pin_class(:done), do: "bg-emerald-400"
+  defp status_pin_class(:cancelled), do: "bg-text-tertiary"
+  defp status_pin_class(_), do: "bg-text-quaternary"
 end

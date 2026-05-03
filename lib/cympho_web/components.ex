@@ -149,10 +149,15 @@ defmodule CymphoWeb.Components do
   defp input_value(field), do: field.value
 
   defp button_variant("primary"), do: "bg-brand text-white hover:bg-accent"
-  defp button_variant("secondary"), do: "bg-button text-text-primary border border-border hover:bg-button-hover"
+
+  defp button_variant("secondary"),
+    do: "bg-button text-text-primary border border-border hover:bg-button-hover"
+
   defp button_variant("ghost"), do: "text-text-secondary hover:bg-surface-hover"
   defp button_variant("danger"), do: "bg-error text-white hover:bg-red-600"
-  defp button_variant(_), do: "bg-button text-text-primary border border-border hover:bg-button-hover"
+
+  defp button_variant(_),
+    do: "bg-button text-text-primary border border-border hover:bg-button-hover"
 
   defp button_size("sm"), do: "px-3 py-1.5 text-xs"
   defp button_size("lg"), do: "px-6 py-3 text-base"

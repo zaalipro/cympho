@@ -10,6 +10,7 @@ defmodule Cympho.Activities.Activity do
     field :actor_id, :string
     field :action, :string
     field :metadata, :map, default: %{}
+    belongs_to :company, Cympho.Companies.Company
     belongs_to :issue, Issue
     timestamps(type: :utc_datetime, updated_at: false)
   end
@@ -20,6 +21,7 @@ defmodule Cympho.Activities.Activity do
     title_changed
     description_changed
     status_changed
+    priority_changed
     assigned
     unassigned
     blocker_added
@@ -27,6 +29,9 @@ defmodule Cympho.Activities.Activity do
     comment_added
     approval_created
     approval_resolved
+    approval_approved
+    approval_rejected
+    approval_requested_changes
     heartbeat_started
     heartbeat_completed
     heartbeat_failed
@@ -39,10 +44,11 @@ defmodule Cympho.Activities.Activity do
 
   def changeset(activity, attrs) do
     activity
-    |> cast(attrs, [:issue_id, :actor_type, :actor_id, :action, :metadata])
+    |> cast(attrs, [:issue_id, :company_id, :actor_type, :actor_id, :action, :metadata])
     |> validate_required([:issue_id, :actor_type, :action])
     |> validate_inclusion(:actor_type, @valid_actor_types)
     |> validate_inclusion(:action, @valid_actions)
     |> foreign_key_constraint(:issue_id)
+    |> foreign_key_constraint(:company_id)
   end
 end

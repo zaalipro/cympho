@@ -19,10 +19,14 @@ defmodule CymphoWeb.IssueController do
         json(conn, %{data: CymphoWeb.IssueJSON.issue_data(issue)})
 
       {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> put_view(json: CymphoWeb.ErrorJSON)
-        |> render(:"404")
+        not_found(conn)
     end
+  end
+
+  defp not_found(conn) do
+    conn
+    |> put_status(:not_found)
+    |> put_view(json: CymphoWeb.ErrorJSON)
+    |> render(:"404")
   end
 end

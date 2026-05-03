@@ -21,9 +21,9 @@ defmodule CymphoWeb.IssueLive.Index do
     socket =
       socket
       |> assign(:page_title, "All Issues")
-      |> assign(:agents, Agents.list_agents())
-      |> assign(:projects, Projects.list_projects())
-      |> assign(:labels, Labels.list_labels())
+      |> assign(:agents, list_agents(socket))
+      |> assign(:projects, list_projects(socket))
+      |> assign(:labels, list_labels(socket))
       |> assign(:unread_issues, %{})
 
     {:ok, socket}
@@ -31,7 +31,7 @@ defmodule CymphoWeb.IssueLive.Index do
 
   @impl true
   def handle_params(params, _url, socket) do
-    paginated = Issues.list_issues_paginated(params)
+    paginated = Issues.list_issues_paginated(with_company_scope(socket, params))
     current_user = socket.assigns[:current_user]
 
     unread_issues =
@@ -105,9 +105,14 @@ defmodule CymphoWeb.IssueLive.Index do
 
   @impl true
   def handle_event("delete_issue", %{"id" => id}, socket) do
-    issue = Issues.get_issue!(id)
-    :ok = Issues.delete_issue(issue)
-    {:noreply, reload(socket)}
+    case get_issue(socket, id) do
+      {:ok, issue} ->
+        :ok = Issues.delete_issue(issue)
+        {:noreply, reload(socket)}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Issue not found")}
+    end
   end
 
   def handle_event("filter_status", %{"status" => status}, socket) do
@@ -157,7 +162,7 @@ defmodule CymphoWeb.IssueLive.Index do
       "page" => to_string(socket.assigns.page)
     }
 
-    paginated = Issues.list_issues_paginated(params)
+    paginated = Issues.list_issues_paginated(with_company_scope(socket, params))
     current_user = socket.assigns[:current_user]
 
     unread_issues =
@@ -201,12 +206,48 @@ defmodule CymphoWeb.IssueLive.Index do
     ~p"/issues?#{query}"
   end
 
+  defp with_company_scope(socket, params) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Map.put(params, "company_id", company_id)
+      _ -> params
+    end
+  end
+
+  defp list_agents(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Agents.list_agents_by_company(company_id)
+      _ -> Agents.list_agents()
+    end
+  end
+
+  defp list_projects(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Projects.list_projects_by_company(company_id)
+      _ -> Projects.list_projects()
+    end
+  end
+
+  defp list_labels(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Labels.list_labels_by_company(company_id)
+      _ -> Labels.list_labels()
+    end
+  end
+
+  defp get_issue(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Issues.get_company_issue(company_id, id)
+      _ -> Issues.get_issue(id)
+    end
+  end
+
   defp status_label(:backlog), do: "Backlog"
   defp status_label(:todo), do: "To Do"
   defp status_label(:in_progress), do: "In Progress"
   defp status_label(:in_review), do: "In Review"
   defp status_label(:done), do: "Done"
   defp status_label(:blocked), do: "Blocked"
+  defp status_label(:cancelled), do: "Cancelled"
   defp status_label(other), do: String.capitalize(to_string(other))
 
   defp filters_active?(assigns) do

@@ -24,7 +24,9 @@
     </div>
 
     <div class="bg-surface border border-border rounded-xl p-5 space-y-4">
-      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider">Instructions</h3>
+      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider">
+        Instructions
+      </h3>
       <p class="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">
         {@agent.instructions}
       </p>
@@ -42,7 +44,9 @@
     <% end %>
 
     <div class="bg-surface border border-border rounded-xl p-5 space-y-2">
-      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider">Configuration</h3>
+      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider">
+        Configuration
+      </h3>
       <div class="flex items-center gap-4">
         <span class="text-sm text-text-secondary">
           Max concurrent jobs: <span class="text-brand">{@agent.max_concurrent_jobs}</span>
@@ -50,10 +54,12 @@
         <.badge variant="pill" value={Map.get(@agent, :adapter) || "No adapter"} />
       </div>
     </div>
-    
+
 <!-- Wake History -->
     <div class="bg-surface border border-border rounded-xl p-5 space-y-4">
-      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider">Wake History</h3>
+      <h3 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider">
+        Wake History
+      </h3>
       <div :if={Enum.empty?(@wake_history)} class="text-sm text-text-tertiary py-4 text-center">
         No wake history available.
       </div>

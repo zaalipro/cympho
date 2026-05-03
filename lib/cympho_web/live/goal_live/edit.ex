@@ -4,7 +4,7 @@ defmodule CymphoWeb.GoalLive.Edit do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case Goals.get_goal(id) do
+    case get_scoped_goal(socket, id) do
       {:ok, goal} ->
         changeset = Goals.change_goal(goal)
         {:ok, assign(socket, goal: goal, form: to_form(changeset))}
@@ -22,6 +22,21 @@ defmodule CymphoWeb.GoalLive.Edit do
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
+    end
+  end
+
+  defp get_scoped_goal(socket, id) do
+    with {:ok, goal} <- Goals.get_goal(id),
+         :ok <- authorize_goal(socket, goal) do
+      {:ok, goal}
+    end
+  end
+
+  defp authorize_goal(socket, goal) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} when goal.company_id == company_id -> :ok
+      nil -> :ok
+      _ -> {:error, :not_found}
     end
   end
 end

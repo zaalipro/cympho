@@ -38,7 +38,9 @@ defmodule CymphoWeb.DocumentHTML do
                 </span>
               </div>
 
-              <h3 class="font-serif text-base font-semibold text-text-primary mb-1">{revision.title}</h3>
+              <h3 class="font-serif text-base font-semibold text-text-primary mb-1">
+                {revision.title}
+              </h3>
 
               <p :if={revision.change_summary} class="text-sm text-text-tertiary mb-2">
                 {revision.change_summary}

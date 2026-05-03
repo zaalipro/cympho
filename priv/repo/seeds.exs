@@ -1,32 +1,23 @@
-alias Cympho.Issues
-alias Cympho.Comments
+alias Cympho.Companies
 
-{:ok, issue1} = Issues.create_issue(%{
-  title: "First Issue",
-  description: "This is the first issue in the system",
-  status: :backlog,
-  priority: :high
-})
+case Companies.list_companies() do
+  [] ->
+    {:ok, %{company: company, agents: agents, first_issue: issue}} =
+      Companies.create_autonomous_company(%{
+        name: "Cympho Labs",
+        goal_title: "Build and operate an autonomous software company",
+        issue_prefix: "CYM",
+        engineer_count: 3,
+        adapter: :codex
+      })
 
-{:ok, _issue2} = Issues.create_issue(%{
-  title: "Second Issue",
-  description: "This is the second issue for testing",
-  status: :in_progress,
-  priority: :medium
-})
+    IO.puts("""
+    Seeded autonomous company:
+      Company: #{company.name}
+      Agents: #{Enum.map_join(agents, ", ", & &1.name)}
+      First issue: #{issue.identifier} #{issue.title}
+    """)
 
-{:ok, _comment1} = Comments.create_comment(%{
-  body: "This is a comment on the first issue",
-  author_type: "user",
-  author_id: "alice-123",
-  issue_id: issue1.id
-})
-
-{:ok, _comment2} = Comments.create_comment(%{
-  body: "Another comment here",
-  author_type: "user",
-  author_id: "bob-456",
-  issue_id: issue1.id
-})
-
-IO.puts("Seeded issues and comments successfully")
+  companies ->
+    IO.puts("Skipping seeds; #{length(companies)} companies already exist.")
+end

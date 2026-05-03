@@ -21,14 +21,15 @@
         "To Do": "todo",
         "In Progress": "in_progress",
         "In Review": "in_review",
+        Blocked: "blocked",
         Done: "done",
-        Blocked: "blocked"
+        Cancelled: "cancelled"
       ]}
     />
     <.select
       name="issue[priority]"
       label="Priority"
-      options={[Low: "low", Medium: "medium", High: "high"]}
+      options={[Critical: "critical", High: "high", Medium: "medium", Low: "low"]}
     />
 
     <:actions>

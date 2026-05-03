@@ -5,13 +5,19 @@ defmodule Cympho.Companies do
   alias Cympho.Companies.CompanyMembership
   alias Cympho.Companies.CompanyInvite
   alias Cympho.Companies.JoinRequest
+  alias Cympho.Agents.Agent
   alias Cympho.BoardApprovals
   alias Cympho.GovernanceAuditLogs
+  alias Cympho.Goals.Goal
+  alias Cympho.Issues.Issue
+  alias Cympho.Projects.Project
 
   # ── Company CRUD ──
 
   def list_companies do
-    Repo.all(Company)
+    Company
+    |> order_by([c], asc: c.inserted_at, asc: c.name)
+    |> Repo.all()
   end
 
   def get_company!(id), do: Repo.get!(Company, id)
@@ -118,6 +124,233 @@ defmodule Cympho.Companies do
 
   def change_company(%Company{} = company, attrs \\ %{}) do
     Company.changeset(company, attrs)
+  end
+
+  @doc """
+  Creates a Paperclip-style autonomous starter company.
+
+  The template creates a company, one project, one top-level company goal, a CEO,
+  CTO, and engineers reporting through the CTO, then queues the CEO's first
+  strategy issue. It is intentionally local-trusted: no user account is required.
+  """
+  def create_autonomous_company(attrs \\ %{}) do
+    name = attrs[:name] || attrs["name"] || "Autonomous Software Company"
+
+    goal_title =
+      attrs[:goal_title] || attrs["goal_title"] || "Build and run the business autonomously"
+
+    requested_prefix = attrs[:issue_prefix] || attrs["issue_prefix"] || "LLM"
+    issue_prefix = unique_project_prefix(requested_prefix)
+    engineer_count = attrs[:engineer_count] || attrs["engineer_count"] || 2
+    adapter = normalize_adapter(attrs[:adapter] || attrs["adapter"] || :codex)
+
+    Repo.transaction(fn ->
+      company =
+        %Company{}
+        |> Company.changeset(%{
+          name: name,
+          slug: unique_slug(name),
+          description: "An autonomous AI company with a CEO, CTO, and engineering team.",
+          status: "active",
+          issue_prefix: issue_prefix,
+          issue_counter: 1,
+          budget_monthly_cents:
+            attrs[:budget_monthly_cents] || attrs["budget_monthly_cents"] || 0,
+          require_board_approval_for_new_agents: false,
+          governance_config: %{
+            "autonomy_mode" => "autonomous_default",
+            "approval_gates" => ["budget_override", "dangerous_runtime_action"]
+          },
+          brand_color: "#5e6ad2"
+        })
+        |> Repo.insert!()
+
+      project =
+        %Project{}
+        |> Project.changeset(%{
+          company_id: company.id,
+          name: "Company OS",
+          description: "Default operating project for autonomous company work.",
+          prefix: issue_prefix,
+          status: :active,
+          settings: %{"wip_limits" => %{"in_progress" => engineer_count + 2}}
+        })
+        |> Repo.insert!()
+
+      goal =
+        %Goal{}
+        |> Goal.changeset(%{
+          company_id: company.id,
+          project_id: project.id,
+          title: goal_title,
+          description: "Top-level company objective. CEO decomposes this into executable work.",
+          priority: "critical",
+          status: "active"
+        })
+        |> Repo.insert!()
+
+      ceo =
+        create_template_agent!(%{
+          company_id: company.id,
+          project_id: project.id,
+          name: "CEO",
+          title: "Chief Executive Officer",
+          role: :ceo,
+          adapter: adapter,
+          max_concurrent_jobs: 1,
+          capabilities: %{
+            "strategy" => true,
+            "planning" => true,
+            "budgeting" => true,
+            "hiring" => true
+          },
+          instructions:
+            "Own the company goal, break strategy into goals and issues, delegate through the CTO, and keep the company running without waiting for humans unless a configured governance gate is hit."
+        })
+
+      cto =
+        create_template_agent!(%{
+          company_id: company.id,
+          project_id: project.id,
+          parent_id: ceo.id,
+          created_by_agent_id: ceo.id,
+          name: "CTO",
+          title: "Chief Technology Officer",
+          role: :cto,
+          adapter: adapter,
+          max_concurrent_jobs: 2,
+          capabilities: %{
+            "architecture" => true,
+            "review" => true,
+            "triage" => true,
+            "technical_planning" => true
+          },
+          instructions:
+            "Translate CEO strategy into technical plans, review engineering work, unblock engineers, and maintain execution quality."
+        })
+
+      engineers =
+        for index <- 1..engineer_count do
+          create_template_agent!(%{
+            company_id: company.id,
+            project_id: project.id,
+            parent_id: cto.id,
+            created_by_agent_id: cto.id,
+            name: "Engineer #{index}",
+            title: "Software Engineer",
+            role: :engineer,
+            adapter: adapter,
+            max_concurrent_jobs: 1,
+            capabilities: %{
+              "implementation" => true,
+              "testing" => true,
+              "debugging" => true
+            },
+            instructions:
+              "Implement assigned issues end to end, leave comments with results, and surface blockers explicitly."
+          })
+        end
+
+      issue =
+        %Issue{}
+        |> Issue.changeset(%{
+          company_id: company.id,
+          project_id: project.id,
+          goal_id: goal.id,
+          assignee_id: ceo.id,
+          issue_number: 1,
+          identifier: "#{issue_prefix}-1",
+          title: "Create the first autonomous execution plan",
+          description:
+            "Break the company goal into CEO, CTO, and engineering work. Create follow-up issues for the first execution cycle.",
+          status: :todo,
+          priority: :critical,
+          assigned_role: "ceo",
+          origin_type: "onboarding",
+          request_depth: 0
+        })
+        |> Repo.insert!()
+
+      %{
+        company: company,
+        project: project,
+        goal: goal,
+        agents: [ceo, cto | engineers],
+        first_issue: issue
+      }
+    end)
+  end
+
+  defp create_template_agent!(attrs) do
+    %Agent{}
+    |> Agent.changeset(
+      Map.merge(attrs, %{
+        status: :idle,
+        context_mode: "company",
+        runtime_config: %{"autonomous" => true}
+      })
+    )
+    |> Repo.insert!()
+  end
+
+  defp normalize_adapter(adapter) when is_atom(adapter), do: adapter
+
+  defp normalize_adapter(adapter) when is_binary(adapter) do
+    try do
+      String.to_existing_atom(adapter)
+    rescue
+      ArgumentError -> :codex
+    end
+  end
+
+  defp unique_slug(name) do
+    base =
+      name
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9]+/, "-")
+      |> String.trim("-")
+      |> case do
+        "" -> "company"
+        slug -> slug
+      end
+      |> String.slice(0, 42)
+
+    unique_slug(base, 0)
+  end
+
+  defp unique_slug(base, 0) do
+    if get_company_by_slug(base), do: unique_slug(base, 1), else: base
+  end
+
+  defp unique_slug(base, suffix) do
+    candidate = "#{base}-#{suffix}"
+    if get_company_by_slug(candidate), do: unique_slug(base, suffix + 1), else: candidate
+  end
+
+  defp unique_project_prefix(prefix) do
+    base =
+      prefix
+      |> to_string()
+      |> String.upcase()
+      |> String.replace(~r/[^A-Z0-9]+/, "")
+      |> case do
+        "" -> "LLM"
+        value -> String.slice(value, 0, 7)
+      end
+
+    unique_project_prefix(base, 0)
+  end
+
+  defp unique_project_prefix(base, 0) do
+    if Repo.get_by(Project, prefix: base), do: unique_project_prefix(base, 1), else: base
+  end
+
+  defp unique_project_prefix(base, suffix) do
+    candidate = "#{base}#{suffix}"
+
+    if Repo.get_by(Project, prefix: candidate),
+      do: unique_project_prefix(base, suffix + 1),
+      else: candidate
   end
 
   # ── Multi-tenancy scoping ──

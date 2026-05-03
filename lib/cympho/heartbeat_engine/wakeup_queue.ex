@@ -30,7 +30,8 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
           where:
             w.agent_id == ^agent_id and
               w.issue_id == ^issue_id and
-              w.reason == ^reason,
+              w.reason == ^reason and
+              w.status == "pending",
           order_by: [desc: w.inserted_at],
           limit: 1
       )
@@ -42,6 +43,7 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
           agent_id: agent_id,
           issue_id: issue_id,
           reason: reason,
+          status: "pending",
           triggered_by_type: triggered_by_type,
           triggered_by_id: triggered_by_id,
           metadata: metadata
@@ -63,15 +65,15 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
 
   @doc """
   Dequeues the next wake event for a given agent.
-  Returns the most recent pending wake for the agent, or nil.
+  Returns the oldest pending wake for the agent, or nil.
   """
   @spec dequeue(String.t()) :: {:ok, AgentWake.t()} | {:error, :empty}
   def dequeue(agent_id) do
     wake =
       Repo.one(
         from w in AgentWake,
-          where: w.agent_id == ^agent_id,
-          order_by: [desc: w.inserted_at, desc: w.id],
+          where: w.agent_id == ^agent_id and w.status == "pending",
+          order_by: [asc: w.inserted_at, asc: w.id],
           limit: 1
       )
 
@@ -88,7 +90,7 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
   def pending_count(agent_id) do
     Repo.one(
       from w in AgentWake,
-        where: w.agent_id == ^agent_id,
+        where: w.agent_id == ^agent_id and w.status == "pending",
         select: count(w.id)
     )
   end
@@ -101,10 +103,20 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
     limit = Keyword.get(opts, :limit, 20)
 
     AgentWake
-    |> where(agent_id: ^agent_id)
+    |> where([w], w.agent_id == ^agent_id and w.status == "pending")
     |> order_by([w], desc: w.inserted_at)
     |> limit(^limit)
     |> Repo.all()
+  end
+
+  @doc """
+  Marks a wake as consumed after an agent has started processing it.
+  """
+  @spec mark_consumed(AgentWake.t()) :: {:ok, AgentWake.t()} | {:error, Ecto.Changeset.t()}
+  def mark_consumed(%AgentWake{} = wake) do
+    wake
+    |> AgentWake.changeset(%{status: "consumed", consumed_at: DateTime.utc_now()})
+    |> Repo.update()
   end
 
   defp merge_metadata(existing, new) do

@@ -55,7 +55,8 @@ defmodule CymphoWeb.UserAuth do
 
     companies =
       if is_nil(user) do
-        []
+        Cympho.Companies.list_companies()
+        |> Enum.map(fn c -> %{id: c.id, name: c.name, logo_url: c.logo_url} end)
       else
         # Load all companies the user is a member of
         query =
@@ -78,9 +79,8 @@ defmodule CymphoWeb.UserAuth do
 
     company =
       cond do
-        # Guest users have no company
         is_nil(user) ->
-          nil
+          List.first(companies)
 
         # Try session company_id first
         session["company_id"] ->

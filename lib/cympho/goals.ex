@@ -4,14 +4,21 @@ defmodule Cympho.Goals do
   alias Cympho.Goals.Goal
   alias Cympho.Issues.Issue
 
-  def list_goals, do: Repo.all(Goal)
+  def list_goals do
+    Goal
+    |> order_by([g], asc: g.inserted_at)
+    |> Repo.all()
+  end
 
   def list_goals_by_project(project_id) do
     Goal |> where(project_id: ^project_id) |> Repo.all()
   end
 
   def list_goals_by_company(company_id) do
-    Goal |> where(company_id: ^company_id) |> Repo.all()
+    Goal
+    |> where(company_id: ^company_id)
+    |> order_by([g], asc: g.inserted_at)
+    |> Repo.all()
   end
 
   def list_root_goals_by_project(project_id) do

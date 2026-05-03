@@ -500,7 +500,7 @@ defmodule Cympho.IssuesTest do
 
       assert {:ok, checked_out} = Issues.checkout_issue(issue, agent, :engineer)
       assert checked_out.assignee_id == agent.id
-      assert checked_out.assigned_role == :engineer
+      assert checked_out.assigned_role == "engineer"
     end
 
     test "engineer can checkout issue with no required role" do
@@ -567,7 +567,7 @@ defmodule Cympho.IssuesTest do
 
       assert {:ok, checked_out} = Issues.checkout_issue(issue, agent, :engineer)
       assert checked_out.assignee_id == agent.id
-      assert checked_out.assigned_role == :engineer
+      assert checked_out.assigned_role == "engineer"
     end
 
     test "cto cannot checkout issue requiring ceo role" do
@@ -743,9 +743,8 @@ defmodule Cympho.IssuesTest do
       assert updated.status == :todo
     end
 
-    test "backlog -> in_progress is valid", %{issue: issue} do
-      assert {:ok, updated} = Issues.transition_issue(issue, :in_progress)
-      assert updated.status == :in_progress
+    test "backlog -> in_progress is invalid; work must be queued first", %{issue: issue} do
+      assert {:error, :invalid_transition} = Issues.transition_issue(issue, :in_progress)
     end
 
     test "backlog -> done is invalid", %{issue: issue} do
@@ -759,32 +758,34 @@ defmodule Cympho.IssuesTest do
     end
 
     test "in_progress -> in_review is valid", %{issue: issue} do
-      {:ok, in_progress_issue} = Issues.transition_issue(issue, :in_progress)
+      {:ok, todo_issue} = Issues.transition_issue(issue, :todo)
+      {:ok, in_progress_issue} = Issues.transition_issue(todo_issue, :in_progress)
       assert {:ok, updated} = Issues.transition_issue(in_progress_issue, :in_review)
       assert updated.status == :in_review
     end
 
     test "in_review -> done is valid", %{issue: issue} do
-      {:ok, in_progress_issue} = Issues.transition_issue(issue, :in_progress)
+      {:ok, todo_issue} = Issues.transition_issue(issue, :todo)
+      {:ok, in_progress_issue} = Issues.transition_issue(todo_issue, :in_progress)
       {:ok, in_review_issue} = Issues.transition_issue(in_progress_issue, :in_review)
       assert {:ok, updated} = Issues.transition_issue(in_review_issue, :done)
       assert updated.status == :done
     end
 
     test "in_review -> in_progress is valid (changes requested)", %{issue: issue} do
-      {:ok, in_progress_issue} = Issues.transition_issue(issue, :in_progress)
+      {:ok, todo_issue} = Issues.transition_issue(issue, :todo)
+      {:ok, in_progress_issue} = Issues.transition_issue(todo_issue, :in_progress)
       {:ok, in_review_issue} = Issues.transition_issue(in_progress_issue, :in_review)
       assert {:ok, updated} = Issues.transition_issue(in_review_issue, :in_progress)
       assert updated.status == :in_progress
     end
 
-    test "done -> in_progress is valid (reopen)", %{issue: issue} do
+    test "done is terminal", %{issue: issue} do
       {:ok, done_issue} = Issues.transition_issue(issue, :todo)
       {:ok, done_issue} = Issues.transition_issue(done_issue, :in_progress)
       {:ok, done_issue} = Issues.transition_issue(done_issue, :in_review)
       {:ok, done_issue} = Issues.transition_issue(done_issue, :done)
-      assert {:ok, updated} = Issues.transition_issue(done_issue, :in_progress)
-      assert updated.status == :in_progress
+      assert {:error, :invalid_transition} = Issues.transition_issue(done_issue, :in_progress)
     end
   end
 
@@ -893,33 +894,32 @@ defmodule Cympho.IssuesTest do
 
   describe "StateMachine.valid_transitions/1" do
     test "backlog transitions" do
-      assert StateMachine.valid_transitions(:backlog) == [:todo, :in_progress, :blocked]
+      assert StateMachine.valid_transitions(:backlog) == [:todo, :cancelled]
     end
 
     test "todo transitions" do
-      assert StateMachine.valid_transitions(:todo) == [:in_progress, :blocked]
+      assert StateMachine.valid_transitions(:todo) == [:in_progress, :blocked, :cancelled]
     end
 
     test "in_progress transitions" do
-      assert StateMachine.valid_transitions(:in_progress) == [:in_review, :blocked]
+      assert StateMachine.valid_transitions(:in_progress) == [
+               :in_review,
+               :blocked,
+               :done,
+               :cancelled
+             ]
     end
 
     test "in_review transitions" do
-      assert StateMachine.valid_transitions(:in_review) == [:done, :in_progress]
+      assert StateMachine.valid_transitions(:in_review) == [:done, :in_progress, :cancelled]
     end
 
-    test "done transitions (reopen or block)" do
-      assert StateMachine.valid_transitions(:done) == [:in_progress, :blocked]
+    test "done transitions" do
+      assert StateMachine.valid_transitions(:done) == []
     end
 
-    test "blocked transitions (can go anywhere)" do
-      assert StateMachine.valid_transitions(:blocked) == [
-               :backlog,
-               :todo,
-               :in_progress,
-               :in_review,
-               :done
-             ]
+    test "blocked transitions" do
+      assert StateMachine.valid_transitions(:blocked) == [:todo, :in_progress, :cancelled]
     end
   end
 
@@ -1014,7 +1014,8 @@ defmodule Cympho.IssuesTest do
         })
 
       issue = Issues.get_issue!(issue.id)
-      {:ok, in_progress} = Issues.transition_issue(issue, :in_progress)
+      {:ok, todo} = Issues.transition_issue(issue, :todo)
+      {:ok, in_progress} = Issues.transition_issue(todo, :in_progress)
       {:ok, in_review} = Issues.transition_issue(in_progress, :in_review)
       {:ok, _done} = Issues.transition_issue(in_review, :done)
 
@@ -1037,7 +1038,8 @@ defmodule Cympho.IssuesTest do
         })
 
       issue = Issues.get_issue!(issue.id)
-      {:ok, in_progress} = Issues.transition_issue(issue, :in_progress)
+      {:ok, todo} = Issues.transition_issue(issue, :todo)
+      {:ok, in_progress} = Issues.transition_issue(todo, :in_progress)
       {:ok, blocked} = Issues.transition_issue(in_progress, :blocked)
       {:ok, _cancelled} = Issues.transition_issue(blocked, :cancelled)
 
@@ -1079,7 +1081,8 @@ defmodule Cympho.IssuesTest do
       {:ok, _} = Cympho.Approvals.resolve_approval(approval.id, :approved, %{})
 
       issue = Issues.get_issue!(issue.id)
-      {:ok, in_progress} = Issues.transition_issue(issue, :in_progress)
+      {:ok, todo} = Issues.transition_issue(issue, :todo)
+      {:ok, in_progress} = Issues.transition_issue(todo, :in_progress)
       {:ok, in_review} = Issues.transition_issue(in_progress, :in_review)
       {:ok, _done} = Issues.transition_issue(in_review, :done)
 

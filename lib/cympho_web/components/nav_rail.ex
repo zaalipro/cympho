@@ -32,6 +32,14 @@ defmodule CymphoWeb.Components.NavRail do
         current_path={@current_path}
       />
       <.nav_link
+        to="/kanban"
+        label="Board"
+        icon={
+          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>|
+        }
+        current_path={@current_path}
+      />
+      <.nav_link
         to="/projects"
         label="Projects"
         icon={
@@ -40,10 +48,74 @@ defmodule CymphoWeb.Components.NavRail do
         current_path={@current_path}
       />
       <.nav_link
+        to="/goals"
+        label="Goals"
+        icon={
+          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z"/>|
+        }
+        current_path={@current_path}
+      />
+      <.nav_link
         to="/agents"
         label="Agents"
         icon={
           ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.131A8 8 0 008 3.239c-4.828 4.596-5.212 11.611-.647 16.656A21.866 21.866 0 0012 21.942a21.866 21.866 0 003.99-.385M19.337 17.81a15.79 15.79 0 01-2.326 1.575"/>|
+        }
+        current_path={@current_path}
+      />
+      <.nav_link
+        to="/org-chart"
+        label="Org"
+        icon={
+          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v4m0 0H8m4 0h4M6 18h12M6 18a2 2 0 100-4 2 2 0 000 4zm12 0a2 2 0 100-4 2 2 0 000 4zM12 6a2 2 0 100-4 2 2 0 000 4z"/>|
+        }
+        current_path={@current_path}
+      />
+      <.nav_link
+        to="/approvals"
+        label="Approvals"
+        icon={
+          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5 2a8 8 0 11-16 0 8 8 0 0116 0z"/>|
+        }
+        current_path={@current_path}
+      />
+      <.nav_link
+        to="/costs"
+        label="Costs"
+        icon={
+          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-2.21 0-4 .895-4 2s1.79 2 4 2 4 .895 4 2-1.79 2-4 2m0-8V6m0 10v2"/>|
+        }
+        current_path={@current_path}
+      />
+      <.nav_link
+        to="/activity"
+        label="Activity"
+        icon={
+          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 12h4l2-6 4 12 2-6h4"/>|
+        }
+        current_path={@current_path}
+      />
+      <.nav_link
+        to="/routines"
+        label="Routines"
+        icon={
+          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 006.34 4.36M4 15a8 8 0 0013.66 4.64"/>|
+        }
+        current_path={@current_path}
+      />
+      <.nav_link
+        to="/workspaces"
+        label="Workspaces"
+        icon={
+          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7a2 2 0 012-2h5l2 2h5a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"/>|
+        }
+        current_path={@current_path}
+      />
+      <.nav_link
+        to="/plugins"
+        label="Plugins"
+        icon={
+          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9h8M8 15h8M9 3h6a2 2 0 012 2v1h1a2 2 0 012 2v8a2 2 0 01-2 2h-1v1a2 2 0 01-2 2H9a2 2 0 01-2-2v-1H6a2 2 0 01-2-2V8a2 2 0 012-2h1V5a2 2 0 012-2z"/>|
         }
         current_path={@current_path}
       />

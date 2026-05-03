@@ -13,6 +13,10 @@ defmodule Cympho.Wakes.AgentWake do
     belongs_to :issue, Issue
 
     field :reason, :string
+    field :status, :string, default: "pending"
+    field :attempt_count, :integer, default: 0
+    field :last_error, :string
+    field :consumed_at, :utc_datetime
     field :triggered_by_type, :string
     field :triggered_by_id, :string
     field :metadata, :map, default: %{}
@@ -28,12 +32,18 @@ defmodule Cympho.Wakes.AgentWake do
       :agent_id,
       :issue_id,
       :reason,
+      :status,
+      :attempt_count,
+      :last_error,
+      :consumed_at,
       :triggered_by_type,
       :triggered_by_id,
       :metadata
     ])
     |> validate_required([:agent_id, :reason])
     |> validate_inclusion(:reason, @reasons)
+    |> validate_inclusion(:status, ~w(pending running consumed failed cancelled))
+    |> validate_number(:attempt_count, greater_than_or_equal_to: 0)
     |> validate_inclusion(:triggered_by_type, ["agent", "user", "system"])
     |> foreign_key_constraint(:agent_id)
     |> foreign_key_constraint(:issue_id)

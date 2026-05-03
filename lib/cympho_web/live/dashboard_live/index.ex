@@ -42,11 +42,13 @@ defmodule CymphoWeb.DashboardLive.Index do
   end
 
   defp assign_metrics(socket) do
-    summary = Dashboard.summary()
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+    summary = Dashboard.summary(company_id)
 
     socket
     |> assign(:active_agents, summary.active_agents)
     |> assign(:total_agents, summary.total_agents)
+    |> assign(:active_agent_list, summary.active_agent_list)
     |> assign(:agent_status_counts, summary.agent_status_counts)
     |> assign(:issue_status_counts, summary.issue_status_counts)
     |> assign(:throughput, summary.throughput)
@@ -62,6 +64,7 @@ defmodule CymphoWeb.DashboardLive.Index do
   def status_label(:in_review), do: "In Review"
   def status_label(:done), do: "Done"
   def status_label(:blocked), do: "Blocked"
+  def status_label(:cancelled), do: "Cancelled"
   def status_label(:idle), do: "Idle"
   def status_label(:running), do: "Running"
   def status_label(:error), do: "Error"
@@ -93,6 +96,7 @@ defmodule CymphoWeb.DashboardLive.Index do
   def status_dot_color(:in_review), do: "bg-purple-400"
   def status_dot_color(:done), do: "bg-green-400"
   def status_dot_color(:blocked), do: "bg-red-400"
+  def status_dot_color(:cancelled), do: "bg-gray-500"
   def status_dot_color(_), do: "bg-gray-400"
 
   def status_bar_color(:backlog), do: "bg-gray-400"
@@ -101,17 +105,31 @@ defmodule CymphoWeb.DashboardLive.Index do
   def status_bar_color(:in_review), do: "bg-purple-400"
   def status_bar_color(:done), do: "bg-green-400"
   def status_bar_color(:blocked), do: "bg-red-400"
+  def status_bar_color(:cancelled), do: "bg-gray-500"
   def status_bar_color(_), do: "bg-gray-400"
 
   def agent_status_dot(:idle), do: "bg-green-400"
   def agent_status_dot(:running), do: "bg-blue-400"
   def agent_status_dot(:error), do: "bg-red-400"
+  def agent_status_dot(:paused), do: "bg-gray-500"
+  def agent_status_dot(:terminated), do: "bg-gray-700"
   def agent_status_dot(_), do: "bg-gray-400"
 
   def agent_status_bar(:idle), do: "bg-green-400"
   def agent_status_bar(:running), do: "bg-blue-400"
   def agent_status_bar(:error), do: "bg-red-400"
+  def agent_status_bar(:paused), do: "bg-gray-500"
+  def agent_status_bar(:terminated), do: "bg-gray-700"
   def agent_status_bar(_), do: "bg-gray-400"
+
+  def agent_initials(agent) do
+    (agent.name || "?")
+    |> String.split(~r/\s+/, trim: true)
+    |> Enum.take(2)
+    |> Enum.map(&String.first/1)
+    |> Enum.join()
+    |> String.upcase()
+  end
 
   def format_cost(cost) when not is_nil(cost) do
     "$" <> :erlang.float_to_binary(Decimal.to_float(cost), decimals: 2)

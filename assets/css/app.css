@@ -5,76 +5,76 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 /* ============================================
-   Claude/Anthropic-Inspired Design Tokens
+   Linear-inspired Design Tokens from DESIGN.md
    ============================================ */
 
 :root {
   /* Surface & Background */
-  --color-canvas:        #f5f4ed;
-  --color-panel:         #faf9f5;
-  --color-surface:       #ffffff;
-  --color-surface-hover: #f0eee6;
-  --color-subtle:        rgba(0,0,0,0.03);
+  --color-canvas:        #010102;
+  --color-panel:         #0f1011;
+  --color-surface:       #141516;
+  --color-surface-hover: #18191a;
+  --color-subtle:        rgba(255,255,255,0.04);
 
   /* Text */
-  --color-text-primary:   #141413;
-  --color-text-secondary: #5e5d59;
-  --color-text-tertiary:  #87867f;
-  --color-text-quaternary:#a8a79e;
+  --color-text-primary:   #f7f8f8;
+  --color-text-secondary: #d0d6e0;
+  --color-text-tertiary:  #8a8f98;
+  --color-text-quaternary:#62666d;
 
   /* Brand */
-  --color-brand:        #c96442;
-  --color-accent:       #b85a3a;
-  --color-accent-hover: #a04e30;
+  --color-brand:        #5e6ad2;
+  --color-accent:       #5e6ad2;
+  --color-accent-hover: #828fff;
 
   /* Borders */
-  --color-border:       #e8e6dc;
-  --color-border-subtle:#f0eee6;
-  --color-border-hover: #d8d6ca;
+  --color-border:       #23252a;
+  --color-border-subtle:#18191a;
+  --color-border-hover: #34343a;
 
   /* Semantic */
-  --color-success:      #3d8b4f;
-  --color-error:        #b53333;
+  --color-success:      #27a644;
+  --color-error:        #ef4444;
 
   /* Buttons */
-  --color-button-bg:    #e8e6dc;
-  --color-button-hover: #d8d6ca;
+  --color-button-bg:    #141516;
+  --color-button-hover: #18191a;
 
   /* Selection */
-  --color-selection:    rgba(201, 100, 66, 0.2);
+  --color-selection:    rgba(94, 106, 210, 0.28);
 
   /* Scrollbar */
-  --color-scrollbar:    rgba(0, 0, 0, 0.12);
-  --color-scrollbar-hover: rgba(0, 0, 0, 0.2);
+  --color-scrollbar:    rgba(255, 255, 255, 0.12);
+  --color-scrollbar-hover: rgba(255, 255, 255, 0.2);
 }
 
 .dark {
-  --color-canvas:        #141413;
-  --color-panel:         #1c1c1a;
-  --color-surface:       #30302e;
-  --color-surface-hover: #3a3a37;
+  --color-canvas:        #010102;
+  --color-panel:         #0f1011;
+  --color-surface:       #141516;
+  --color-surface-hover: #18191a;
   --color-subtle:        rgba(255,255,255,0.05);
 
-  --color-text-primary:   #faf9f5;
-  --color-text-secondary: #b0aea5;
-  --color-text-tertiary:  #87867f;
-  --color-text-quaternary:#626058;
+  --color-text-primary:   #f7f8f8;
+  --color-text-secondary: #d0d6e0;
+  --color-text-tertiary:  #8a8f98;
+  --color-text-quaternary:#62666d;
 
-  --color-brand:        #d4805a;
-  --color-accent:       #e09070;
-  --color-accent-hover: #eca080;
+  --color-brand:        #5e6ad2;
+  --color-accent:       #5e6ad2;
+  --color-accent-hover: #828fff;
 
-  --color-border:       #30302e;
-  --color-border-subtle:#262624;
-  --color-border-hover: #3a3a37;
+  --color-border:       #23252a;
+  --color-border-subtle:#18191a;
+  --color-border-hover: #34343a;
 
   --color-success:      #4ade80;
   --color-error:        #ef4444;
 
-  --color-button-bg:    #30302e;
-  --color-button-hover: #3a3a37;
+  --color-button-bg:    #141516;
+  --color-button-hover: #18191a;
 
-  --color-selection:    rgba(212, 128, 90, 0.3);
+  --color-selection:    rgba(94, 106, 210, 0.3);
 
   --color-scrollbar:    rgba(255, 255, 255, 0.1);
   --color-scrollbar-hover: rgba(255, 255, 255, 0.15);

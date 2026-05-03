@@ -11,12 +11,14 @@ defmodule CymphoWeb.AgentLive.Index do
     current_agent = session["current_agent"]
     full_agent = current_agent && Agents.get_agent(current_agent.id) |> then(fn {:ok, a} -> a end)
 
+    company_id = current_company_id(socket)
+
     socket =
-      assign(socket, :agents, Agents.list_agents())
+      assign(socket, :agents, list_agents(company_id))
       |> assign(:current_agent_id, current_agent && current_agent.id)
       |> assign(:current_agent_role, current_agent && current_agent.role)
       |> assign(:current_agent, full_agent)
-      |> assign(:status_counts, Agents.count_by_status())
+      |> assign(:status_counts, status_counts(company_id))
       |> assign(:session_progress, %{})
 
     if connected?(socket) do
@@ -168,6 +170,10 @@ defmodule CymphoWeb.AgentLive.Index do
   def status_label(:error), do: "Error"
   def status_label(:sleeping), do: "Sleeping"
   def status_label(:offline), do: "Offline"
+  def status_label(:active), do: "Active"
+  def status_label(:paused), do: "Paused"
+  def status_label(:pending_approval), do: "Pending Approval"
+  def status_label(:terminated), do: "Terminated"
 
   def role_label(:engineer), do: "Engineer"
   def role_label(:ceo), do: "CEO"
@@ -194,4 +200,14 @@ defmodule CymphoWeb.AgentLive.Index do
   end
 
   def format_elapsed(_), do: "0s"
+
+  defp current_company_id(socket) do
+    socket.assigns[:current_company] && socket.assigns.current_company.id
+  end
+
+  defp list_agents(nil), do: Agents.list_agents()
+  defp list_agents(company_id), do: Agents.list_agents_by_company(company_id)
+
+  defp status_counts(nil), do: Agents.count_by_status()
+  defp status_counts(company_id), do: Agents.count_by_status(company_id)
 end

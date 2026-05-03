@@ -3,27 +3,23 @@ defmodule Cympho.Issues.StateMachine do
 
   State machine for Issue status transitions.
 
-  Valid transitions for 7-state kanban:
-  - backlog -> todo
-  - todo -> in_progress
-  - in_progress -> in_review
-  - in_review -> done
-  - in_review -> in_progress (changes requested)
-  - done -> in_progress (reopened)
-  - any -> blocked
-  - any -> cancelled
-  - blocked -> previous status (unblocked)
-  - cancelled -> todo (reopened)
+  Paperclip V1 transitions:
+  - backlog -> todo | cancelled
+  - todo -> in_progress | blocked | cancelled
+  - in_progress -> in_review | blocked | done | cancelled
+  - in_review -> in_progress | done | cancelled
+  - blocked -> todo | in_progress | cancelled
+  - done/cancelled are terminal
   """
 
   @valid_transitions %{
-    backlog: [:todo, :in_progress, :blocked, :cancelled],
+    backlog: [:todo, :cancelled],
     todo: [:in_progress, :blocked, :cancelled],
-    in_progress: [:in_review, :blocked, :cancelled],
+    in_progress: [:in_review, :blocked, :done, :cancelled],
     in_review: [:done, :in_progress, :cancelled],
-    done: [:in_progress, :blocked],
-    blocked: [:backlog, :todo, :in_progress, :in_review, :done, :cancelled],
-    cancelled: [:todo, :in_progress]
+    done: [],
+    blocked: [:todo, :in_progress, :cancelled],
+    cancelled: []
   }
 
   def valid_transition?(from_status, to_status)

@@ -9,98 +9,120 @@ defmodule Cympho.Dashboard do
   alias Cympho.Agents.Agent
   alias Cympho.Issues.Issue
 
-  def active_agents_count do
-    Repo.one(
-      from a in Agent,
-        where: a.status in [:idle, :running],
-        select: count(a.id)
-    )
+  def active_agents_count(company_id \\ nil) do
+    Agent
+    |> scoped(company_id)
+    |> where([a], a.status in [:idle, :running, :active])
+    |> select([a], count(a.id))
+    |> Repo.one()
   end
 
-  def total_agents_count do
-    Repo.one(from a in Agent, select: count(a.id))
+  def total_agents_count(company_id \\ nil) do
+    Agent
+    |> scoped(company_id)
+    |> select([a], count(a.id))
+    |> Repo.one()
   end
 
-  def issues_created_per_day(days \\ 7) do
+  def issues_created_per_day(days \\ 7, company_id \\ nil) do
     since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
 
-    Repo.all(
-      from i in Issue,
-        where: i.inserted_at >= ^since,
-        group_by: fragment("date(?)", i.inserted_at),
-        order_by: fragment("date(?)", i.inserted_at),
-        select: %{
-          date: fragment("date(?)", i.inserted_at),
-          count: count(i.id)
-        }
-    )
+    Issue
+    |> scoped(company_id)
+    |> where([i], i.inserted_at >= ^since)
+    |> group_by([i], fragment("date(?)", i.inserted_at))
+    |> order_by([i], fragment("date(?)", i.inserted_at))
+    |> select([i], %{
+      date: fragment("date(?)", i.inserted_at),
+      count: count(i.id)
+    })
+    |> Repo.all()
   end
 
-  def issues_closed_per_day(days \\ 7) do
+  def issues_closed_per_day(days \\ 7, company_id \\ nil) do
     since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
 
-    Repo.all(
-      from i in Issue,
-        where: i.status == :done and i.updated_at >= ^since,
-        group_by: fragment("date(?)", i.updated_at),
-        order_by: fragment("date(?)", i.updated_at),
-        select: %{
-          date: fragment("date(?)", i.updated_at),
-          count: count(i.id)
-        }
-    )
+    Issue
+    |> scoped(company_id)
+    |> where([i], i.status == :done and i.updated_at >= ^since)
+    |> group_by([i], fragment("date(?)", i.updated_at))
+    |> order_by([i], fragment("date(?)", i.updated_at))
+    |> select([i], %{
+      date: fragment("date(?)", i.updated_at),
+      count: count(i.id)
+    })
+    |> Repo.all()
   end
 
-  def bottleneck_issues(stale_days \\ 7) do
+  def bottleneck_issues(stale_days \\ 7, company_id \\ nil) do
     cutoff = DateTime.utc_now() |> DateTime.add(-stale_days * 86400, :second)
 
-    Repo.all(
-      from i in Issue,
-        where: i.status == :in_review and i.updated_at < ^cutoff,
-        order_by: [asc: i.updated_at],
-        preload: [:assignee, :project],
-        limit: 20
-    )
+    Issue
+    |> scoped(company_id)
+    |> where([i], i.status == :in_review and i.updated_at < ^cutoff)
+    |> order_by([i], asc: i.updated_at)
+    |> preload([:assignee, :project])
+    |> limit(20)
+    |> Repo.all()
   end
 
-  def issue_status_counts do
-    Repo.all(
-      from i in Issue,
-        group_by: i.status,
-        select: %{status: i.status, count: count(i.id)}
-    )
+  def issue_status_counts(company_id \\ nil) do
+    Issue
+    |> scoped(company_id)
+    |> group_by([i], i.status)
+    |> select([i], %{status: i.status, count: count(i.id)})
+    |> Repo.all()
   end
 
-  def agent_status_counts do
-    Repo.all(
-      from a in Agent,
-        group_by: a.status,
-        select: %{status: a.status, count: count(a.id)}
-    )
+  def agent_status_counts(company_id \\ nil) do
+    Agent
+    |> scoped(company_id)
+    |> group_by([a], a.status)
+    |> select([a], %{status: a.status, count: count(a.id)})
+    |> Repo.all()
   end
 
-  def summary do
+  def active_agents(company_id \\ nil, limit \\ 8) do
+    Agent
+    |> scoped(company_id)
+    |> where([a], a.status in [:idle, :running, :active, :error, :paused])
+    |> order_by([a],
+      asc:
+        fragment(
+          "CASE ? WHEN 'running' THEN 0 WHEN 'idle' THEN 1 WHEN 'error' THEN 2 ELSE 3 END",
+          a.status
+        ),
+      asc: fragment("CASE ? WHEN 'ceo' THEN 0 WHEN 'cto' THEN 1 ELSE 2 END", a.role),
+      asc: a.inserted_at
+    )
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  def summary(company_id \\ nil) do
     %{
-      active_agents: active_agents_count(),
-      total_agents: total_agents_count(),
-      agent_status_counts: agent_status_counts(),
-      issue_status_counts: issue_status_counts(),
+      active_agents: active_agents_count(company_id),
+      total_agents: total_agents_count(company_id),
+      active_agent_list: active_agents(company_id),
+      agent_status_counts: agent_status_counts(company_id),
+      issue_status_counts: issue_status_counts(company_id),
       throughput: %{
-        created: issues_created_per_day(),
-        closed: issues_closed_per_day()
+        created: issues_created_per_day(7, company_id),
+        closed: issues_closed_per_day(7, company_id)
       },
-      bottlenecks: Enum.map(bottleneck_issues(), &bottle_neck_to_map/1),
+      bottlenecks: Enum.map(bottleneck_issues(7, company_id), &bottle_neck_to_map/1),
       routine_health: routine_health(),
-      recent_activities: recent_activities(10),
-      cost_summary: cost_summary()
+      recent_activities: recent_activities(10, company_id),
+      cost_summary: cost_summary(company_id)
     }
   end
 
-  def recent_activities(limit \\ 20) do
+  def recent_activities(limit \\ 20, company_id \\ nil) do
     import Ecto.Query
 
     try do
       Cympho.Activities.Activity
+      |> scoped(company_id)
       |> order_by([a], desc: a.inserted_at)
       |> limit(^limit)
       |> Repo.all()
@@ -109,13 +131,14 @@ defmodule Cympho.Dashboard do
     end
   end
 
-  def cost_summary do
+  def cost_summary(company_id \\ nil) do
     import Ecto.Query
 
     try do
       runs =
         Cympho.HeartbeatEngine.Run
-        |> where([r], r.status == "completed")
+        |> scoped(company_id)
+        |> where([r], r.status in ["completed", "succeeded"])
         |> Repo.all()
 
       total_cost =
@@ -154,6 +177,9 @@ defmodule Cympho.Dashboard do
   def routine_health do
     %{status: "unavailable", message: "Routine execution tracking not yet configured"}
   end
+
+  defp scoped(query, nil), do: query
+  defp scoped(query, company_id), do: where(query, [q], q.company_id == ^company_id)
 
   defp bottle_neck_to_map(issue) do
     %{

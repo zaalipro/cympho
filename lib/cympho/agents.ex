@@ -23,6 +23,10 @@ defmodule Cympho.Agents do
   def list_agents_by_company(company_id) do
     Agent
     |> where(company_id: ^company_id)
+    |> order_by([a],
+      asc: fragment("CASE ? WHEN 'ceo' THEN 0 WHEN 'cto' THEN 1 ELSE 2 END", a.role),
+      asc: a.inserted_at
+    )
     |> Repo.all()
   end
 
@@ -41,6 +45,12 @@ defmodule Cympho.Agents do
   def list_agents_by_status(status) when is_atom(status) do
     Agent
     |> where(status: ^status)
+    |> Repo.all()
+  end
+
+  def list_agents_by_status(status, company_id) when is_atom(status) do
+    Agent
+    |> where(status: ^status, company_id: ^company_id)
     |> Repo.all()
   end
 
@@ -195,6 +205,13 @@ defmodule Cympho.Agents do
   def list_eligible_agents(role) when is_atom(role) do
     Agent
     |> where(role: ^role, status: :idle)
+    |> Repo.all()
+    |> Enum.reject(&is_agent_at_capacity?/1)
+  end
+
+  def list_eligible_agents(role, company_id) when is_atom(role) do
+    Agent
+    |> where(role: ^role, status: :idle, company_id: ^company_id)
     |> Repo.all()
     |> Enum.reject(&is_agent_at_capacity?/1)
   end
@@ -542,7 +559,31 @@ defmodule Cympho.Agents do
       select: {a.status, count(a.id)}
     )
     |> Repo.all()
-    |> Enum.into(%{idle: 0, running: 0, error: 0, sleeping: 0, offline: 0})
+    |> Enum.into(default_status_counts())
+  end
+
+  def count_by_status(company_id) do
+    from(a in Agent,
+      where: a.company_id == ^company_id,
+      group_by: a.status,
+      select: {a.status, count(a.id)}
+    )
+    |> Repo.all()
+    |> Enum.into(default_status_counts())
+  end
+
+  defp default_status_counts do
+    %{
+      idle: 0,
+      running: 0,
+      error: 0,
+      sleeping: 0,
+      offline: 0,
+      active: 0,
+      paused: 0,
+      pending_approval: 0,
+      terminated: 0
+    }
   end
 
   @doc """
@@ -671,6 +712,16 @@ defmodule Cympho.Agents do
     build_org_tree(roots)
   end
 
+  def get_org_chart(company_id) do
+    roots =
+      Agent
+      |> where([a], a.company_id == ^company_id and is_nil(a.parent_id))
+      |> preload([:children])
+      |> Repo.all()
+
+    build_org_tree(roots)
+  end
+
   defp build_org_tree(agents) when is_list(agents) do
     Enum.map(agents, &build_org_tree/1)
   end
@@ -751,10 +802,10 @@ defmodule Cympho.Agents do
   end
 
   @doc """
-  Pauses an agent by setting status to :sleeping.
+  Pauses an agent by setting status to :paused.
   """
   def pause_agent(%Agent{} = agent) do
-    update_agent(agent, %{status: :sleeping})
+    update_agent(agent, %{status: :paused, paused_at: DateTime.utc_now()})
   end
 
   def pause_agent(agent_id) when is_binary(agent_id) do
@@ -765,10 +816,10 @@ defmodule Cympho.Agents do
   end
 
   @doc """
-  Resumes a sleeping agent by setting status to :idle.
+  Resumes a paused agent by setting status to :idle.
   """
   def resume_agent(%Agent{} = agent) do
-    update_agent(agent, %{status: :idle})
+    update_agent(agent, %{status: :idle, paused_at: nil, pause_reason: nil})
   end
 
   def resume_agent(agent_id) when is_binary(agent_id) do
@@ -779,18 +830,18 @@ defmodule Cympho.Agents do
   end
 
   @doc """
-  Terminates an agent by setting status to :offline.
+  Terminates an agent by setting status to :terminated.
   """
   def terminate_agent(%Agent{} = agent) do
     case agent.status do
       :running ->
         case kill_session(agent.id) do
-          :ok -> update_agent(agent, %{status: :offline})
+          :ok -> update_agent(agent, %{status: :terminated, terminated_at: DateTime.utc_now()})
           error -> error
         end
 
       _ ->
-        update_agent(agent, %{status: :offline})
+        update_agent(agent, %{status: :terminated, terminated_at: DateTime.utc_now()})
     end
   end
 

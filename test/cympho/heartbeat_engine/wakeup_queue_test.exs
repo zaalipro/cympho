@@ -91,12 +91,12 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
   end
 
   describe "dequeue/1" do
-    test "returns the most recent wake for an agent", %{
+    test "returns the oldest pending wake for an agent", %{
       agent: agent,
       issue: issue,
       issue2: issue2
     } do
-      {:ok, _} =
+      {:ok, first} =
         WakeupQueue.enqueue(%{
           agent_id: agent.id,
           issue_id: issue.id,
@@ -106,7 +106,7 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
       # Ensure different timestamp
       Process.sleep(1100)
 
-      {:ok, latest} =
+      {:ok, _latest} =
         WakeupQueue.enqueue(%{
           agent_id: agent.id,
           issue_id: issue2.id,
@@ -114,7 +114,7 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
         })
 
       assert {:ok, dequeued} = WakeupQueue.dequeue(agent.id)
-      assert dequeued.id == latest.id
+      assert dequeued.id == first.id
     end
 
     test "returns error when no wakes exist" do

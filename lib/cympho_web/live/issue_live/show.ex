@@ -28,7 +28,7 @@ defmodule CymphoWeb.IssueLive.Show do
       IssueReadStates.subscribe(current_user.id)
     end
 
-    case Issues.get_issue(id) do
+    case get_scoped_issue(socket, id) do
       {:ok, issue} ->
         # Auto-mark as read for the current user
         if current_user do
@@ -48,8 +48,8 @@ defmodule CymphoWeb.IssueLive.Show do
            issue: issue,
            comment_changeset: comment_changeset,
            comment_form: to_form(comment_changeset),
-           agents: Agents.list_agents_by_status(:idle),
-           all_agents: Agents.list_agents(),
+           agents: list_idle_agents(socket),
+           all_agents: list_company_agents(socket),
            show_agent_panel: false,
            editing: nil,
            assignee_search: "",
@@ -79,7 +79,7 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   defp apply_action(socket, :show, id) do
-    case Issues.get_issue(id) do
+    case get_scoped_issue(socket, id) do
       {:ok, issue} ->
         socket
         |> assign(:page_title, issue.title)
@@ -130,16 +130,23 @@ defmodule CymphoWeb.IssueLive.Show do
       "in_progress" => :in_progress,
       "in_review" => :in_review,
       "done" => :done,
-      "blocked" => :blocked
+      "blocked" => :blocked,
+      "cancelled" => :cancelled
     }
 
     case Map.fetch(status_atoms, status) do
       {:ok, status_atom} ->
-        case Issues.update_issue(socket.assigns.issue, %{status: status_atom}) do
-          {:ok, _issue} ->
-            {:noreply, socket}
+        case Issues.transition_issue(socket.assigns.issue, status_atom) do
+          {:ok, issue} ->
+            {:noreply, assign(socket, issue: issue)}
 
-          {:error, _changeset} ->
+          {:error, :invalid_transition} ->
+            {:noreply, put_flash(socket, :error, "Invalid status transition")}
+
+          {:error, :blocked_by_active_issues} ->
+            {:noreply, put_flash(socket, :error, "Issue is blocked by active issues")}
+
+          {:error, _reason} ->
             {:noreply, put_flash(socket, :error, "Failed to update status")}
         end
 
@@ -239,19 +246,30 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_event("spawn_agent", %{"agent_id" => agent_id}, socket) do
     issue = socket.assigns.issue
 
-    case Orchestrator.start_and_run(issue, agent_id) do
-      {:ok, _pid} ->
-        {:ok, _updated_agent} =
-          Agents.update_agent(%Agents.Agent{id: agent_id}, %{status: :running})
-
-        {:noreply,
-         socket
-         |> put_flash(:info, "Agent spawned successfully")
-         |> assign(:show_agent_panel, false)
-         |> assign(:agents, Agents.list_agents_by_status(:idle))}
-
+    with {:ok, checked_out} <- Issues.checkout_issue(issue, agent_id),
+         {:ok, _pid} <- Orchestrator.start_and_run(checked_out, agent_id),
+         {:ok, agent} <- Agents.get_agent(agent_id),
+         {:ok, _updated_agent} <- Agents.update_agent(agent, %{status: :running}) do
+      {:noreply,
+       socket
+       |> put_flash(:info, "Agent started successfully")
+       |> assign(:issue, checked_out)
+       |> assign(:show_agent_panel, false)
+       |> assign(:agents, list_idle_agents(socket))}
+    else
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Failed to spawn agent: #{inspect(reason)}")}
+    end
+  end
+
+  @impl true
+  def handle_event("release_issue", _params, socket) do
+    case Issues.release_issue(socket.assigns.issue) do
+      {:ok, issue} ->
+        {:noreply, assign(socket, issue: issue)}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to release issue: #{inspect(reason)}")}
     end
   end
 
@@ -674,17 +692,12 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   defp valid_status_options(current_status) do
-    all = [
-      {"Backlog", "backlog"},
-      {"Todo", "todo"},
-      {"In progress", "in_progress"},
-      {"In review", "in_review"},
-      {"Done", "done"},
-      {"Blocked", "blocked"}
-    ]
-
-    current_str = to_string(current_status)
-    Enum.reject(all, fn {_, value} -> value == current_str end)
+    current_status
+    |> Cympho.Issues.StateMachine.valid_transitions()
+    |> Enum.map(fn status ->
+      {status |> to_string() |> String.replace("_", " ") |> String.capitalize(),
+       to_string(status)}
+    end)
   end
 
   defp filtered_agents(all_agents, search) do
@@ -709,6 +722,27 @@ defmodule CymphoWeb.IssueLive.Show do
   def run_status_label("pending"), do: "Pending"
   def run_status_label("cancelled"), do: "Cancelled"
   def run_status_label(other), do: String.capitalize(to_string(other))
+
+  defp get_scoped_issue(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Issues.get_company_issue(company_id, id)
+      _ -> Issues.get_issue(id)
+    end
+  end
+
+  defp list_idle_agents(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Agents.list_agents_by_status(:idle, company_id)
+      _ -> Agents.list_agents_by_status(:idle)
+    end
+  end
+
+  defp list_company_agents(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Agents.list_agents_by_company(company_id)
+      _ -> Agents.list_agents()
+    end
+  end
 
   def format_cost(cost) when not is_nil(cost) do
     "$" <> :erlang.float_to_binary(cost / 1, decimals: 4)

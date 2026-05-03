@@ -409,7 +409,7 @@ defmodule Cympho.OrchestratorTest do
       issue_id: issue_id,
       agent_id: agent_id
     } do
-      issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
+      _issue = %{id: issue_id, company_id: "company-1", title: "Test", description: "Test"}
 
       with_mocks([
         {Cympho.AgentAdapters, [],
@@ -689,13 +689,15 @@ defmodule Cympho.OrchestratorTest do
 
   describe "subscribe/1" do
     test "subscribes to orchestrator events for an issue", %{issue_id: issue_id} do
+      topic = "orchestrator:#{issue_id}"
+
       assert :ok = Orchestrator.subscribe(issue_id)
 
-      assert Phoenix.PubSub.subscribers?(Cympho.PubSub, "orchestrator:#{issue_id}") |> length() >
-               0
+      Phoenix.PubSub.broadcast(Cympho.PubSub, topic, :test_subscription)
+      assert_receive :test_subscription
 
       # Clean up subscription
-      Phoenix.PubSub.unsubscribe(Cympho.PubSub, "orchestrator:#{issue_id}")
+      Phoenix.PubSub.unsubscribe(Cympho.PubSub, topic)
     end
   end
 end

@@ -40,7 +40,7 @@
       >
       </div>
 
-      <!-- Desktop sidebar / Mobile drawer -->
+<!-- Desktop sidebar / Mobile drawer -->
       <aside
         class="w-64 bg-panel border-r border-border flex-col fixed inset-y-0 left-0 z-50 hidden md:flex lg:translate-x-0 -translate-x-full transition-transform duration-200"
         id="sidebar"
@@ -55,10 +55,25 @@
             class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-510 text-text-quaternary hover:text-text-secondary hover:bg-surface-hover transition-colors"
           >
             <svg class="w-4 h-4 dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
+              />
             </svg>
-            <svg class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+            <svg
+              class="w-4 h-4 hidden dark:block"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+              />
             </svg>
             <span class="dark:hidden">Light</span>
             <span class="hidden dark:inline">Dark</span>
@@ -82,7 +97,7 @@
         </div>
       </aside>
 
-      <!-- Mobile top bar -->
+<!-- Mobile top bar -->
       <header class="lg:hidden fixed top-0 left-0 right-0 z-30 h-16 bg-panel border-b border-border flex items-center justify-between px-4">
         <button
           type="button"
@@ -142,21 +157,36 @@
           class="p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
         >
           <svg class="w-5 h-5 dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
+            />
           </svg>
-          <svg class="w-5 h-5 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+          <svg
+            class="w-5 h-5 hidden dark:block"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+            />
           </svg>
         </button>
       </header>
 
-      <!-- Main content -->
+<!-- Main content -->
       <main class="flex-1 lg:ml-64 min-h-screen pt-16 lg:pt-0 pb-16 lg:pb-0">
         {@inner_content}
       </main>
     </div>
 
-    <!-- Mobile bottom navigation -->
+<!-- Mobile bottom navigation -->
     <nav
       class="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-panel border-t border-border safe-area-bottom"
       id="mobile-nav"
@@ -240,7 +270,7 @@
       </div>
     </nav>
 
-    <!-- Command palette -->
+<!-- Command palette -->
     <div
       id="command-palette"
       class="hidden fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-black/30"
@@ -405,7 +435,7 @@
       </div>
     </div>
 
-    <!-- Keyboard shortcuts cheatsheet -->
+<!-- Keyboard shortcuts cheatsheet -->
     <div
       id="shortcuts-modal"
       class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-black/30"
@@ -504,7 +534,7 @@
       </div>
     </div>
 
-    <!-- Company switcher -->
+<!-- Company switcher -->
     <.company_switcher_static
       companies={assigns[:user_companies] || []}
       current_company_id={if assigns[:current_company], do: @current_company.id, else: nil}

@@ -1,10 +1,23 @@
 defmodule Cympho.Labels do
   @moduledoc "Labels context."
 
+  import Ecto.Query, warn: false
+
   alias Cympho.Repo
   alias Cympho.Labels.Label
 
-  def list_labels, do: Repo.all(Label)
+  def list_labels do
+    Label
+    |> order_by([l], asc: l.name)
+    |> Repo.all()
+  end
+
+  def list_labels_by_company(company_id) do
+    Label
+    |> where(company_id: ^company_id)
+    |> order_by([l], asc: l.name)
+    |> Repo.all()
+  end
 
   def get_label!(id), do: Repo.get!(Label, id)
 

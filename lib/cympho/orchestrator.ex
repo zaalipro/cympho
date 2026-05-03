@@ -47,6 +47,8 @@ defmodule Cympho.Orchestrator do
   """
   @spec start_and_run(map(), String.t()) :: {:ok, pid()} | {:error, atom()}
   def start_and_run(%{id: issue_id} = issue, agent_id, opts \\ []) when is_binary(agent_id) do
+    ensure_adapter_failure_table()
+
     case Registry.lookup(@registry, issue_id) do
       [{_pid, _}] ->
         {:error, :already_started}
@@ -254,7 +256,9 @@ defmodule Cympho.Orchestrator do
 
   @impl true
   def terminate(reason, %__MODULE__{} = session) do
-    send(Cympho.Orchestrator.Dispatcher, {:session_ended, session.issue.id, reason})
+    if dispatcher = Process.whereis(Cympho.Orchestrator.Dispatcher) do
+      send(dispatcher, {:session_ended, session.issue.id, reason})
+    end
 
     _ =
       :logger.info(
@@ -268,19 +272,114 @@ defmodule Cympho.Orchestrator do
 
   defp create_pending_run(session, issue, agent_id) do
     try do
-      {:ok, run} =
-        HeartbeatEngine.create_run(%{
-          agent_id: agent_id,
-          issue_id: issue.id,
-          adapter: "claude_local"
-        })
+      adapter =
+        case safe_get_agent(agent_id) do
+          {:ok, agent} -> agent |> agent_adapter() |> adapter_name()
+          {:error, _} -> "claude_code"
+        end
 
-      %{session | run_id: run.id}
+      run_attrs = %{
+        company_id: Map.get(issue, :company_id),
+        agent_id: agent_id,
+        issue_id: issue.id,
+        adapter: adapter,
+        invocation_source: Keyword.get(session.opts || [], :invocation_source, "heartbeat")
+      }
+
+      case HeartbeatEngine.create_run(run_attrs) do
+        {:ok, run} ->
+          %{session | run_id: run.id}
+
+        {:error, reason} ->
+          :logger.warning("[Orchestrator] Failed to create engine run: #{inspect(reason)}")
+          session
+      end
     rescue
       e ->
         :logger.warning("[Orchestrator] Failed to create engine run: #{inspect(e)}")
         session
     end
+  end
+
+  defp safe_get_agent(agent_id) do
+    Agents.get_agent(agent_id)
+  rescue
+    _ -> {:error, :not_found}
+  end
+
+  defp agent_adapter(agent), do: Map.get(agent, :adapter)
+
+  defp agent_config(agent) do
+    Map.merge(Map.get(agent, :config, %{}) || %{}, Map.get(agent, :runtime_config, %{}) || %{})
+  end
+
+  defp adapter_name(nil), do: "claude_code"
+  defp adapter_name(adapter), do: to_string(adapter)
+
+  defp build_agent_map(session) do
+    configured_adapter = Keyword.get(session.opts || [], :adapter)
+    configured_adapter_config = Keyword.get(session.opts || [], :adapter_config)
+
+    case safe_get_agent(session.agent_id) do
+      {:ok, agent} ->
+        %{
+          adapter: configured_adapter || agent_adapter(agent),
+          config: configured_adapter_config || agent_config(agent)
+        }
+
+      {:error, _} ->
+        %{
+          adapter: configured_adapter,
+          config: configured_adapter_config || %{}
+        }
+    end
+  end
+
+  defp run_opts(session, config) do
+    skills = Keyword.get(session.opts || [], :skills, [])
+    [skills: skills, config: config]
+  end
+
+  defp handle_resolution_error(session, error) do
+    handle_adapter_error(session, error)
+  end
+
+  defp reset_adapter_failure(agent_id) do
+    if adapter_failure_table_exists?() do
+      :ets.delete(:cympho_adapter_failures, agent_id)
+    end
+
+    :ok
+  end
+
+  defp record_adapter_failure(agent_id) do
+    table = ensure_adapter_failure_table()
+
+    new_count =
+      case :ets.lookup(table, agent_id) do
+        [{^agent_id, count}] -> count + 1
+        [] -> 1
+      end
+
+    if new_count >= 3 do
+      set_agent_error(agent_id)
+      :ets.delete(table, agent_id)
+    else
+      :ets.insert(table, {agent_id, new_count})
+    end
+
+    new_count
+  end
+
+  defp ensure_adapter_failure_table do
+    case :ets.whereis(:cympho_adapter_failures) do
+      :undefined -> :ets.new(:cympho_adapter_failures, [:named_table, :set, :public])
+      _ -> :cympho_adapter_failures
+    end
+  end
+
+  defp adapter_failure_table_exists? do
+    :ets.whereis(:cympho_adapter_failures) != :undefined
   end
 
   defp start_engine_run(%__MODULE__{run_id: nil}), do: :ok
@@ -313,7 +412,7 @@ defmodule Cympho.Orchestrator do
   defp fail_engine_run(%__MODULE__{run_id: run_id}, reason) do
     try do
       {:ok, run} = HeartbeatEngine.get_run(run_id)
-      HeartbeatEngine.fail_run(run, to_string(reason))
+      HeartbeatEngine.fail_run(run, reason_to_string(reason))
     rescue
       e ->
         :logger.warning("[Orchestrator] Failed to fail engine run: #{inspect(e)}")
@@ -347,6 +446,10 @@ defmodule Cympho.Orchestrator do
   defp parse_cost(val) when is_binary(val), do: Decimal.new(val)
   defp parse_cost(val), do: Decimal.new("#{val}")
 
+  defp reason_to_string(reason) when is_binary(reason), do: reason
+  defp reason_to_string(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp reason_to_string(reason), do: inspect(reason)
+
   defp schedule_heartbeat_tick do
     Process.send_after(self(), :heartbeat_tick, @heartbeat_tick_interval)
   end
@@ -370,9 +473,19 @@ defmodule Cympho.Orchestrator do
   defp extract_result_content(_), do: "No content returned"
 
   defp set_agent_idle(agent_id) do
-    case Agents.get_agent(agent_id) do
+    case safe_get_agent(agent_id) do
       {:ok, agent} ->
         Agents.update_agent(agent, %{status: :idle})
+
+      {:error, _} ->
+        :error
+    end
+  end
+
+  defp set_agent_error(agent_id) do
+    case safe_get_agent(agent_id) do
+      {:ok, agent} ->
+        Agents.update_agent(agent, %{status: :error})
 
       {:error, _} ->
         :error
@@ -385,6 +498,8 @@ defmodule Cympho.Orchestrator do
 
     error_body =
       "Adapter resolution failed: unknown adapter `#{adapter_type}`. Check agent configuration."
+
+    fail_engine_run(session, {:unknown_adapter, adapter_type})
 
     {:ok, _} =
       Comments.create_comment(%{
@@ -409,6 +524,12 @@ defmodule Cympho.Orchestrator do
     )
 
     error_body = "Adapter resolution failed: #{inspect(reason)}"
+
+    if reason == :no_adapter_available do
+      record_adapter_failure(agent_id)
+    end
+
+    fail_engine_run(session, reason)
 
     {:ok, _} =
       Comments.create_comment(%{
@@ -560,25 +681,5 @@ defmodule Cympho.Orchestrator do
         :logger.error("[Orchestrator] Error capturing tool call: #{inspect(e)}")
         {tool_traces, nil}
     end
-  end
-
-  defp build_agent_map(session) do
-    %{
-      adapter: Keyword.get(session.opts || [], :adapter),
-      config: Keyword.get(session.opts || [], :adapter_config, %{})
-    }
-  end
-
-  defp run_opts(session, config) do
-    skills = Keyword.get(session.opts || [], :skills, [])
-    [skills: skills, config: config]
-  end
-
-  defp handle_resolution_error(session, error) do
-    handle_adapter_error(session, error)
-  end
-
-  defp reset_adapter_failure(_agent_id) do
-    :ok
   end
 end

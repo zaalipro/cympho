@@ -80,12 +80,12 @@ module.exports = {
         inset: "inset 0px 0px 0px 1px rgba(0,0,0,0.06)",
       },
       letterSpacing: {
-        display: "-1.056px",
-        "display-lg": "-1.408px",
-        "display-xl": "-1.584px",
-        tight: "-0.704px",
-        caption: "-0.13px",
-        small: "-0.165px",
+        display: "0",
+        "display-lg": "0",
+        "display-xl": "0",
+        tight: "0",
+        caption: "0",
+        small: "0",
       },
       lineHeight: {
         display: "1.10",
