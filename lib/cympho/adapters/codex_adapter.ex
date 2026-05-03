@@ -17,18 +17,22 @@ defmodule Cympho.Adapters.CodexAdapter do
     config = opts[:config] || %{}
 
     spawn(fn ->
-      do_run(session_id, issue, agent_id, recipient_pid, config)
+      do_run(session_id, issue, agent_id, recipient_pid, config, opts)
     end)
 
     session_id
   end
 
-  defp do_run(session_id, issue, agent_id, recipient_pid, config) do
+  defp do_run(session_id, issue, agent_id, recipient_pid, config, opts) do
     send(recipient_pid, {:session_started, session_id})
 
-    prompt = Cympho.AgentPrompt.build(issue, agent_id)
+    prompt =
+      Cympho.AgentPrompt.build(issue, agent_id,
+        skills: Keyword.get(opts, :skills, []),
+        runtime_context: Keyword.get(opts, :runtime_context)
+      )
 
-    case run_codex(prompt, config) do
+    case run_codex(prompt, config, opts) do
       {:ok, output} ->
         send(recipient_pid, {:turn_completed, session_id, output})
 
@@ -37,7 +41,7 @@ defmodule Cympho.Adapters.CodexAdapter do
     end
   end
 
-  defp run_codex(prompt, config) do
+  defp run_codex(prompt, config, opts) do
     try do
       codex_bin = find_codex_binary()
       model = config[:model] || config["model"] || @default_model
@@ -51,12 +55,13 @@ defmodule Cympho.Adapters.CodexAdapter do
         "--quiet"
       ]
 
-      env = build_env(config)
+      env = build_env(config, opts)
 
       port =
         Port.open(
           {:spawn_executable, codex_bin},
-          [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}]
+          [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}] ++
+            cwd_opt(config, opts)
         )
 
       Port.command(port, "#{prompt}\n")
@@ -122,13 +127,16 @@ defmodule Cympho.Adapters.CodexAdapter do
     System.find_executable("codex") || raise "codex binary not found in PATH"
   end
 
-  defp build_env(config) do
+  defp build_env(config, opts) do
+    runtime_env = Keyword.get(opts, :env, %{}) || runtime_context_env(opts[:runtime_context])
+
     api_key =
       config[:api_key] || config["api_key"] ||
+        runtime_env["OPENAI_API_KEY"] || runtime_env[:OPENAI_API_KEY] ||
         Application.get_env(:cympho, :openai_api_key) ||
         System.get_env("OPENAI_API_KEY")
 
-    base = [{"TERM", "dumb"}]
+    base = [{"TERM", "dumb"} | normalize_env(runtime_env, ["OPENAI_API_KEY"])]
 
     if api_key do
       [{"OPENAI_API_KEY", api_key} | base]
@@ -136,6 +144,30 @@ defmodule Cympho.Adapters.CodexAdapter do
       base
     end
   end
+
+  defp cwd_opt(config, opts) do
+    case opts[:cwd] || config[:cwd] || config["cwd"] do
+      nil -> []
+      cwd -> [{:cd, cwd}]
+    end
+  end
+
+  defp runtime_context_env(%Cympho.RuntimeContext{env: env}) when is_map(env), do: env
+  defp runtime_context_env(_), do: %{}
+
+  defp normalize_env(env, skip_keys) when is_map(env) do
+    Enum.flat_map(env, fn {key, value} ->
+      key = to_string(key)
+
+      if key in skip_keys do
+        []
+      else
+        [{key, to_string(value)}]
+      end
+    end)
+  end
+
+  defp normalize_env(_env, _skip_keys), do: []
 
   @impl true
   def health_check(config) do

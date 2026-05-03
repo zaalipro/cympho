@@ -159,7 +159,7 @@ defmodule Cympho.Secrets do
   def list_secrets_for_agent(agent_id) do
     case Cympho.Agents.get_agent(agent_id) do
       {:ok, agent} ->
-        company_id = get_company_id_from_config(agent.config)
+        company_id = agent.company_id || get_company_id_from_config(agent.config)
 
         if company_id do
           Secret
@@ -167,6 +167,7 @@ defmodule Cympho.Secrets do
           |> where(
             [s],
             (s.scope == "company" and s.company_id == ^company_id) or
+              (s.scope == "instance" and s.company_id == ^company_id) or
               (s.scope == "agent" and s.scope_id == ^agent_id)
           )
           |> order_by([s], asc: s.key)

@@ -1,7 +1,7 @@
 defmodule Cympho.AgentActionsTest do
   use Cympho.DataCase, async: false
 
-  alias Cympho.{AgentActions, Comments, Companies, Issues}
+  alias Cympho.{AgentActions, Comments, Companies, Issues, WorkProducts}
 
   describe "parse/1" do
     test "parses a valid cympho-actions block" do
@@ -138,6 +138,51 @@ defmodule Cympho.AgentActionsTest do
       assert updated.status == :blocked
       assert updated.assignee_id == nil
       assert Enum.any?(comments, &(&1.body == "Missing API key"))
+    end
+
+    test "attach_work_product records agent output", %{issue: issue, engineer: engineer} do
+      actions = [
+        %{
+          "type" => "attach_work_product",
+          "kind" => "document",
+          "title" => "Implementation notes",
+          "description" => "Summary of the completed work.",
+          "payload" => %{"files" => ["README.md"]},
+          "metadata" => %{"source" => "agent"}
+        }
+      ]
+
+      assert {:ok, %{results: [%{type: "attach_work_product", work_product_id: id}]}} =
+               AgentActions.execute(issue, engineer, actions)
+
+      [work_product] = WorkProducts.list_work_products(issue.id)
+      assert work_product.id == id
+      assert work_product.created_by_agent_id == engineer.id
+      assert work_product.title == "Implementation notes"
+      assert work_product.kind == "document"
+      assert work_product.payload["files"] == ["README.md"]
+    end
+
+    test "set_pr_url updates the issue PR URL", %{issue: issue, engineer: engineer} do
+      url = "https://github.com/example/repo/pull/42"
+      actions = [%{"type" => "set_pr_url", "url" => url, "notes" => "PR is ready"}]
+
+      assert {:ok, _} = AgentActions.execute(issue, engineer, actions)
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.github_pr_url == url
+    end
+
+    test "handoff releases issue to a target role", %{issue: issue, ceo: ceo} do
+      actions = [%{"type" => "handoff", "role" => "cto", "reason" => "Needs technical plan"}]
+
+      assert {:ok, %{results: [%{type: "handoff", role: "cto"}]}} =
+               AgentActions.execute(issue, ceo, actions)
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.status == :todo
+      assert updated.assignee_id == nil
+      assert updated.assigned_role == "cto"
     end
   end
 end

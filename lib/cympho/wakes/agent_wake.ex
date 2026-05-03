@@ -24,7 +24,7 @@ defmodule Cympho.Wakes.AgentWake do
     timestamps(type: :utc_datetime, updated_at: false)
   end
 
-  @reasons ~w(issue_commented issue_comment_mentioned issue_blockers_resolved issue_children_completed execution_policy_stage_transition)
+  @reasons ~w(issue_commented issue_comment_mentioned issue_blockers_resolved issue_children_completed execution_policy_stage_transition manual_dispatch company_resumed routine_triggered agent_handoff runtime_retry)
 
   def changeset(agent_wake, attrs) do
     agent_wake

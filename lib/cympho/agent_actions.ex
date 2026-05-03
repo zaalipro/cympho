@@ -8,7 +8,7 @@ defmodule Cympho.AgentActions do
 
   import Ecto.Query, warn: false
 
-  alias Cympho.{Activities, Agents, Comments, Issues, Repo}
+  alias Cympho.{Activities, Agents, Comments, Issues, Repo, WorkProducts}
   alias Cympho.Agents.Agent
   alias Cympho.Issues.Issue
 
@@ -20,9 +20,13 @@ defmodule Cympho.AgentActions do
     request_changes
     block_issue
     comment
+    attach_work_product
+    set_pr_url
+    handoff
   )
   @roles ~w(ceo cto engineer)
   @priorities ~w(low medium high critical)
+  @work_product_kinds ~w(code_change document url artifact other)
 
   @type action :: map()
 
@@ -170,6 +174,31 @@ defmodule Cympho.AgentActions do
         with :ok <- require_string(action, "body") do
           {:ok, action}
         end
+
+      "attach_work_product" ->
+        with :ok <- require_string(action, "title"),
+             :ok <- validate_work_product_kind(Map.get(action, "kind", "other")),
+             :ok <- validate_optional_map(action, "payload"),
+             :ok <- validate_optional_map(action, "metadata") do
+          {:ok,
+           Map.merge(action, %{
+             "kind" => Map.get(action, "kind", "other"),
+             "description" => Map.get(action, "description", ""),
+             "payload" => Map.get(action, "payload", %{}),
+             "metadata" => Map.get(action, "metadata", %{})
+           })}
+        end
+
+      "set_pr_url" ->
+        with :ok <- require_string(action, "url"),
+             :ok <- validate_url(action["url"]) do
+          {:ok, action}
+        end
+
+      "handoff" ->
+        with :ok <- validate_role(action["role"]) do
+          {:ok, action}
+        end
     end
   end
 
@@ -266,6 +295,55 @@ defmodule Cympho.AgentActions do
     end
   end
 
+  defp execute_action(issue, agent, %{"type" => "attach_work_product"} = action) do
+    attrs = %{
+      issue_id: issue.id,
+      created_by_agent_id: agent.id,
+      kind: action["kind"] || "other",
+      title: action["title"],
+      description: action["description"] || "",
+      url: action["url"],
+      payload: action["payload"] || %{},
+      metadata: action["metadata"] || %{}
+    }
+
+    case WorkProducts.create_work_product(attrs) do
+      {:ok, work_product} ->
+        {:ok, %{type: "attach_work_product", work_product_id: work_product.id}}
+
+      error ->
+        error
+    end
+  end
+
+  defp execute_action(issue, agent, %{"type" => "set_pr_url"} = action) do
+    update_workflow_issue(issue, agent, %{github_pr_url: action["url"]})
+    |> with_optional_agent_comment(issue, agent, action["notes"], nil)
+    |> result_for("set_pr_url")
+  end
+
+  defp execute_action(issue, agent, %{"type" => "handoff"} = action) do
+    reason = action["reason"] || "Handing off to #{action["role"]}."
+
+    with {:ok, updated} <-
+           update_workflow_issue(issue, agent, %{
+             status: :todo,
+             assignee_id: nil,
+             checkout_run_id: nil,
+             checked_out_at: nil,
+             assigned_role: action["role"]
+           }),
+         {:ok, _comment} <- maybe_agent_comment(issue, agent, reason) do
+      _ =
+        Cympho.Orchestrator.Dispatcher.enqueue_wake(updated.id, "agent_handoff", %{
+          "from_agent_id" => agent.id,
+          "role" => action["role"]
+        })
+
+      {:ok, %{type: "handoff", issue_id: updated.id, role: action["role"]}}
+    end
+  end
+
   defp update_workflow_issue(issue, agent, attrs) do
     attrs =
       attrs
@@ -338,6 +416,31 @@ defmodule Cympho.AgentActions do
 
   defp validate_priority(priority) when priority in @priorities, do: :ok
   defp validate_priority(_priority), do: {:error, {:invalid_priority, @priorities}}
+
+  defp validate_work_product_kind(kind) when kind in @work_product_kinds, do: :ok
+
+  defp validate_work_product_kind(_kind),
+    do: {:error, {:invalid_work_product_kind, @work_product_kinds}}
+
+  defp validate_optional_map(action, field) do
+    case Map.get(action, field) do
+      nil -> :ok
+      value when is_map(value) -> :ok
+      _ -> {:error, {:invalid_map, field}}
+    end
+  end
+
+  defp validate_url(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) ->
+        :ok
+
+      _ ->
+        {:error, {:invalid_url, "url"}}
+    end
+  end
+
+  defp validate_url(_url), do: {:error, {:invalid_url, "url"}}
 
   defp normalize_string_keys(map) do
     Map.new(map, fn

@@ -19,7 +19,7 @@
     </script>
     <script
       src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"
-      integrity="sha256-bQqDH8GbS66FHBx3NVPKC2C+2qKzdC/2kBm5vopsQT0="
+      integrity="sha256-bQqDH8GbS66FF5etM5MVfoYa+3hiRZwRImNZsn4sQzc="
       crossorigin="anonymous"
       referrerpolicy="no-referrer"
     >
@@ -39,7 +39,7 @@
         class="fixed inset-0 bg-black/30 z-40 lg:hidden hidden"
       >
       </div>
-
+      
 <!-- Desktop sidebar / Mobile drawer -->
       <aside
         class="w-64 bg-panel border-r border-border flex-col fixed inset-y-0 left-0 z-50 hidden md:flex lg:translate-x-0 -translate-x-full transition-transform duration-200"
@@ -96,7 +96,7 @@
           </button>
         </div>
       </aside>
-
+      
 <!-- Mobile top bar -->
       <header class="lg:hidden fixed top-0 left-0 right-0 z-30 h-16 bg-panel border-b border-border flex items-center justify-between px-4">
         <button
@@ -179,13 +179,13 @@
           </svg>
         </button>
       </header>
-
+      
 <!-- Main content -->
       <main class="flex-1 lg:ml-64 min-h-screen pt-16 lg:pt-0 pb-16 lg:pb-0">
         {@inner_content}
       </main>
     </div>
-
+    
 <!-- Mobile bottom navigation -->
     <nav
       class="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-panel border-t border-border safe-area-bottom"
@@ -269,7 +269,7 @@
         </a>
       </div>
     </nav>
-
+    
 <!-- Command palette -->
     <div
       id="command-palette"
@@ -434,7 +434,7 @@
         </div>
       </div>
     </div>
-
+    
 <!-- Keyboard shortcuts cheatsheet -->
     <div
       id="shortcuts-modal"
@@ -533,7 +533,7 @@
         </div>
       </div>
     </div>
-
+    
 <!-- Company switcher -->
     <.company_switcher_static
       companies={assigns[:user_companies] || []}

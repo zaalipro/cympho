@@ -20,6 +20,7 @@ defmodule Cympho.AgentPrompt do
       issue_block(issue),
       agent_block(agent_or_id, agent),
       context_block(issue),
+      runtime_block(Keyword.get(opts, :runtime_context)),
       action_contract_block(),
       skills_block(skills)
     ]
@@ -82,6 +83,20 @@ defmodule Cympho.AgentPrompt do
   defp context_line(_label, nil), do: nil
   defp context_line(label, value), do: "#{label}: #{value}"
 
+  defp runtime_block(%Cympho.RuntimeContext{} = context) do
+    lines =
+      [
+        context_line("Run", context.run_id),
+        context_line("Workspace", context.cwd),
+        context_line("Workspace source", context.metadata["workspace_source"])
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    if Enum.empty?(lines), do: nil, else: Enum.join(["Runtime" | lines], "\n")
+  end
+
+  defp runtime_block(_context), do: nil
+
   defp action_contract_block do
     """
     Required response contract:
@@ -96,6 +111,9 @@ defmodule Cympho.AgentPrompt do
     - request_changes: role, reason
     - block_issue: reason
     - comment: body
+    - attach_work_product: title, kind, description, url, payload, metadata
+    - set_pr_url: url, notes
+    - handoff: role, reason
 
     Example:
     ```cympho-actions

@@ -20,6 +20,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
   alias Cympho.Orchestrator
   alias Cympho.Issues
   alias Cympho.Agents
+  alias Cympho.Runtime
+  alias Cympho.HeartbeatEngine.WakeupQueue
   alias Cympho.Companies.Company
   alias Cympho.Agents.Agent
 
@@ -65,6 +67,44 @@ defmodule Cympho.Orchestrator.Dispatcher do
     end
   end
 
+  @doc "Requests an immediate poll scoped to one company."
+  def poll_company(company_id) when is_binary(company_id) do
+    case Process.whereis(__MODULE__) do
+      nil ->
+        {:error, :not_started}
+
+      pid ->
+        send(pid, {:poll_company, company_id})
+        :ok
+    end
+  end
+
+  @doc """
+  Enqueues a wake for an issue's current assignee, or polls for assignment when
+  the issue is unassigned.
+  """
+  def enqueue_wake(issue_id, reason, metadata \\ %{}) when is_binary(issue_id) do
+    with {:ok, issue} <- Issues.get_issue(issue_id) do
+      if issue.assignee_id do
+        result =
+          WakeupQueue.enqueue(%{
+            agent_id: issue.assignee_id,
+            issue_id: issue.id,
+            reason: to_string(reason),
+            triggered_by_type: "system",
+            metadata: metadata
+          })
+
+        _ = Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id)
+        _ = poll_now()
+        result
+      else
+        _ = poll_now()
+        {:ok, :queued_for_dispatch}
+      end
+    end
+  end
+
   # Server
 
   @impl true
@@ -96,6 +136,18 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   @impl true
+  def handle_info({:poll_company, company_id}, %State{} = state) do
+    if enabled?() do
+      state = do_poll(state, company_id)
+      broadcast_state(state)
+      {:noreply, state}
+    else
+      broadcast_state(state)
+      {:noreply, state}
+    end
+  end
+
+  @impl true
   def handle_info({:session_ended, issue_id, _reason}, %State{} = state) do
     new_state = %{state | running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id)}
     broadcast_state(new_state)
@@ -114,10 +166,10 @@ defmodule Cympho.Orchestrator.Dispatcher do
     |> Keyword.get(:enabled, @enabled_default)
   end
 
-  defp do_poll(%State{} = state) do
+  defp do_poll(%State{} = state, company_id \\ nil) do
     state
     |> reconcile_running()
-    |> fetch_and_dispatch()
+    |> fetch_and_dispatch(company_id)
   end
 
   defp reconcile_running(%State{running_issue_ids: running} = state) do
@@ -151,14 +203,17 @@ defmodule Cympho.Orchestrator.Dispatcher do
     end
   end
 
-  defp fetch_and_dispatch(%State{running_issue_ids: running, retry_attempts: retries} = state) do
+  defp fetch_and_dispatch(
+         %State{running_issue_ids: running, retry_attempts: retries} = state,
+         company_id
+       ) do
     available_slots = @max_concurrent - MapSet.size(running)
 
     if available_slots <= 0 do
       broadcast_state(state)
       state
     else
-      candidates = fetch_candidate_issues(available_slots * 4)
+      candidates = fetch_candidate_issues(available_slots * 4, company_id)
       now = :os.system_time(:millisecond)
 
       ready_candidates =
@@ -173,13 +228,23 @@ defmodule Cympho.Orchestrator.Dispatcher do
     end
   end
 
-  defp fetch_candidate_issues(limit) do
+  defp fetch_candidate_issues(limit, company_id) do
     active_states = @active_states
 
-    Cympho.Issues.Issue
-    |> join(:left, [i], c in Company, on: c.id == i.company_id)
-    |> where([i, c], i.status in ^active_states)
-    |> where([i, c], is_nil(i.company_id) or c.status == "active")
+    query =
+      Cympho.Issues.Issue
+      |> join(:left, [i], c in Company, on: c.id == i.company_id)
+      |> where([i, c], i.status in ^active_states)
+      |> where([i, c], is_nil(i.company_id) or c.status == "active")
+
+    query =
+      if company_id do
+        where(query, [i, _c], i.company_id == ^company_id)
+      else
+        query
+      end
+
+    query
     |> preload([:blocked_by, :assignee])
     |> order_by([i],
       asc:
@@ -202,49 +267,61 @@ defmodule Cympho.Orchestrator.Dispatcher do
         {:ok, agent} ->
           required_role = Router.infer_role(issue)
 
-          case Issues.checkout_issue(issue, agent, required_role) do
-            {:ok, checked_out} ->
-              case Orchestrator.start_and_run(checked_out, agent.id) do
-                {:ok, _pid} ->
-                  new_running = MapSet.put(state.running_issue_ids, issue.id)
-                  new_retries = Map.delete(state.retry_attempts, issue.id)
-
-                  new_state = %{
-                    state
-                    | running_issue_ids: new_running,
-                      retry_attempts: new_retries
-                  }
-
-                  broadcast_state(new_state)
-                  new_state
-
-                {:error, reason} ->
-                  :logger.warning(
-                    "[Dispatcher] Failed to start orchestrator for issue #{issue.id}: #{inspect(reason)}"
-                  )
-
-                  record_dispatch_failure(issue, state, :orchestrator_start_failed)
-              end
-
-            {:error, :already_assigned} ->
-              :logger.info(
-                "[Dispatcher] Issue #{issue.id} already assigned by another process (race condition handled)"
-              )
-
-              state
+          case Runtime.dispatchable?(issue, agent) do
+            :ok ->
+              checkout_and_start(issue, agent, required_role, state)
 
             {:error, reason} ->
               :logger.warning(
-                "[Dispatcher] Failed to checkout issue #{issue.id}: #{inspect(reason)}"
+                "[Dispatcher] Runtime preflight blocked issue #{issue.id}: #{inspect(reason)}"
               )
 
-              record_dispatch_failure(issue, state, :checkout_failed)
+              record_dispatch_failure(issue, state, {:preflight_failed, reason})
           end
 
         {:error, :no_agent_available} ->
           :logger.info("[Dispatcher] No eligible agent available for issue #{issue.id}")
           record_dispatch_failure(issue, state, :no_agent)
       end
+    end
+  end
+
+  defp checkout_and_start(issue, agent, required_role, %State{} = state) do
+    case Issues.checkout_issue(issue, agent, required_role) do
+      {:ok, checked_out} ->
+        case Orchestrator.start_and_run(checked_out, agent.id) do
+          {:ok, _pid} ->
+            new_running = MapSet.put(state.running_issue_ids, issue.id)
+            new_retries = Map.delete(state.retry_attempts, issue.id)
+
+            new_state = %{
+              state
+              | running_issue_ids: new_running,
+                retry_attempts: new_retries
+            }
+
+            broadcast_state(new_state)
+            new_state
+
+          {:error, reason} ->
+            :logger.warning(
+              "[Dispatcher] Failed to start orchestrator for issue #{issue.id}: #{inspect(reason)}"
+            )
+
+            record_dispatch_failure(issue, state, :orchestrator_start_failed)
+        end
+
+      {:error, :already_assigned} ->
+        :logger.info(
+          "[Dispatcher] Issue #{issue.id} already assigned by another process (race condition handled)"
+        )
+
+        state
+
+      {:error, reason} ->
+        :logger.warning("[Dispatcher] Failed to checkout issue #{issue.id}: #{inspect(reason)}")
+
+        record_dispatch_failure(issue, state, :checkout_failed)
     end
   end
 

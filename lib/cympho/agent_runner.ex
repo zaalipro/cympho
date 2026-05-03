@@ -27,11 +27,12 @@ defmodule Cympho.AgentRunner do
     cwd = opts[:cwd] || Cympho.Workspace.workspace_path(issue.id)
     resume? = opts[:resume] || false
     stall_timeout = opts[:stall_timeout] || @stall_timeout
+    env = opts[:env] || runtime_context_env(opts[:runtime_context])
 
     cmd = build_claude_command(issue, agent_id, resume?, opts)
 
     spawn(fn ->
-      do_run(session_id, cmd, cwd, recipient_pid, stall_timeout)
+      do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, env)
     end)
 
     session_id
@@ -77,8 +78,11 @@ defmodule Cympho.AgentRunner do
     Cympho.AgentPrompt.build(issue, agent_id, opts)
   end
 
-  defp do_run(session_id, cmd, cwd, recipient_pid, stall_timeout) do
-    env = [{"ANTHROPIC_API_KEY", api_key()} | env_whitelist()]
+  defp do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, runtime_env) do
+    anthropic_api_key =
+      runtime_env["ANTHROPIC_API_KEY"] || runtime_env[:ANTHROPIC_API_KEY] || api_key()
+
+    env = [{"ANTHROPIC_API_KEY", anthropic_api_key} | runtime_env(runtime_env) ++ env_whitelist()]
 
     port =
       Port.open({:spawn, cmd}, [
@@ -162,6 +166,23 @@ defmodule Cympho.AgentRunner do
     |> Enum.map(fn key -> {key, System.get_env(key)} end)
     |> Enum.reject(fn {_, val} -> is_nil(val) end)
   end
+
+  defp runtime_context_env(%Cympho.RuntimeContext{env: env}) when is_map(env), do: env
+  defp runtime_context_env(_), do: %{}
+
+  defp runtime_env(env) when is_map(env) do
+    Enum.flat_map(env, fn {key, value} ->
+      key = to_string(key)
+
+      if key == "ANTHROPIC_API_KEY" do
+        []
+      else
+        [{key, to_string(value)}]
+      end
+    end)
+  end
+
+  defp runtime_env(_env), do: []
 
   defp extract_and_send_tool_calls(result, session_id, recipient_pid) when is_map(result) do
     content = result["content"] || []

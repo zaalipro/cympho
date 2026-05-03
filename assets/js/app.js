@@ -121,22 +121,34 @@ const KanbanSortable = {
   },
   _initSortables() {
     const hook = this;
+    if (typeof window.Sortable !== "function") {
+      this.el.dataset.dragUnavailable = "true";
+      return;
+    }
+
+    this.el.dataset.dragUnavailable = "false";
     const columns = this.el.querySelectorAll("[data-kanban-column]");
     columns.forEach(column => {
-      const sortable = new window.Sortable(column, {
-        group: "kanban",
-        ghostClass: "opacity-30",
-        dragClass: "rotate-2",
-        animation: 150,
-        onEnd(evt) {
-          const issueId = evt.item.dataset.issueId;
-          const toStatus = evt.to.dataset.kanbanColumn;
-          const fromStatus = evt.from.dataset.kanbanColumn;
-          if (fromStatus === toStatus) return;
-          hook.pushEvent("transition_issue", {id: issueId, to_status: toStatus});
-        }
-      });
-      this.sortables.push(sortable);
+      try {
+        const sortable = new window.Sortable(column, {
+          group: "kanban",
+          ghostClass: "opacity-30",
+          dragClass: "rotate-2",
+          animation: 150,
+          filter: "a, button, input, textarea, select, [data-no-drag]",
+          preventOnFilter: false,
+          onEnd(evt) {
+            const issueId = evt.item.dataset.issueId;
+            const toStatus = evt.to.dataset.kanbanColumn;
+            const fromStatus = evt.from.dataset.kanbanColumn;
+            if (fromStatus === toStatus) return;
+            hook.pushEvent("transition_issue", {id: issueId, to_status: toStatus});
+          }
+        });
+        this.sortables.push(sortable);
+      } catch (_error) {
+        this.el.dataset.dragUnavailable = "true";
+      }
     });
   }
 };
@@ -443,11 +455,11 @@ document.addEventListener('DOMContentLoaded', () => {
   initShortcutsModal();
 
   // Re-highlight on LiveView navigation
-  liveSocket.addEventListener('phx:navigate', () => {
+  window.addEventListener('phx:navigate', () => {
     initTheme();
     highlightActiveNav();
   });
-  liveSocket.addEventListener('phx:page-loading-stop', () => {
+  window.addEventListener('phx:page-loading-stop', () => {
     initTheme();
     highlightActiveNav();
     initCompanySwitcher();

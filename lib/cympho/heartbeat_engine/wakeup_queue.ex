@@ -25,16 +25,12 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
     metadata = Map.get(attrs, :metadata, %{})
 
     existing =
-      Repo.one(
-        from w in AgentWake,
-          where:
-            w.agent_id == ^agent_id and
-              w.issue_id == ^issue_id and
-              w.reason == ^reason and
-              w.status == "pending",
-          order_by: [desc: w.inserted_at],
-          limit: 1
-      )
+      AgentWake
+      |> where([w], w.agent_id == ^agent_id and w.reason == ^reason and w.status == "pending")
+      |> where_issue(issue_id)
+      |> order_by([w], desc: w.inserted_at)
+      |> limit(1)
+      |> Repo.one()
 
     case existing do
       nil ->
@@ -118,6 +114,24 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
     |> AgentWake.changeset(%{status: "consumed", consumed_at: DateTime.utc_now()})
     |> Repo.update()
   end
+
+  @doc """
+  Marks all pending wakes for an agent/issue pair as consumed.
+  """
+  @spec consume_for(String.t(), String.t()) :: :ok
+  def consume_for(agent_id, issue_id) do
+    now = DateTime.utc_now()
+
+    AgentWake
+    |> where([w], w.agent_id == ^agent_id and w.status == "pending")
+    |> where_issue(issue_id)
+    |> Repo.update_all(set: [status: "consumed", consumed_at: now])
+
+    :ok
+  end
+
+  defp where_issue(query, nil), do: where(query, [w], is_nil(w.issue_id))
+  defp where_issue(query, issue_id), do: where(query, [w], w.issue_id == ^issue_id)
 
   defp merge_metadata(existing, new) do
     Map.merge(existing || %{}, new || %{})

@@ -64,6 +64,26 @@ defmodule CymphoWeb.KanbanLive.Components do
           </a>
         <% end %>
       </div>
+      <% next_statuses = Index.valid_next_statuses(@issue.status) %>
+      <%= if next_statuses != [] do %>
+        <div class="flex items-center gap-1.5 pt-1" data-no-drag>
+          <span class="text-[10px] font-510 text-text-quaternary">Move</span>
+          <%= for next_status <- next_statuses do %>
+            <button
+              type="button"
+              phx-click="transition_issue"
+              phx-value-id={@issue.id}
+              phx-value-to_status={next_status}
+              data-kanban-action
+              class="rounded border border-border bg-panel px-1.5 py-0.5 text-[10px] font-510 text-text-tertiary hover:border-border-hover hover:bg-surface-hover hover:text-text-primary transition-colors"
+              style="min-height: 20px;"
+              title={"Move to #{Index.status_label(next_status)}"}
+            >
+              {compact_status_label(next_status)}
+            </button>
+          <% end %>
+        </div>
+      <% end %>
     </div>
     """
   end
@@ -150,4 +170,12 @@ defmodule CymphoWeb.KanbanLive.Components do
   defp status_pin_class(:done), do: "bg-emerald-400"
   defp status_pin_class(:cancelled), do: "bg-text-tertiary"
   defp status_pin_class(_), do: "bg-text-quaternary"
+
+  defp compact_status_label(:backlog), do: "Backlog"
+  defp compact_status_label(:todo), do: "Todo"
+  defp compact_status_label(:in_progress), do: "Doing"
+  defp compact_status_label(:in_review), do: "Review"
+  defp compact_status_label(:blocked), do: "Blocked"
+  defp compact_status_label(:done), do: "Done"
+  defp compact_status_label(:cancelled), do: "Cancel"
 end

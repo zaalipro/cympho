@@ -26,6 +26,7 @@ defmodule Cympho.Orchestrator do
     :agent_id,
     :session_id,
     :run_id,
+    :runtime_context,
     :status,
     turn_count: 0,
     tool_traces: %{},
@@ -41,7 +42,8 @@ defmodule Cympho.Orchestrator do
     Activities,
     HeartbeatEngine,
     AgentAdapters,
-    AgentActions
+    AgentActions,
+    Runtime
   }
 
   alias Cympho.Issues.Issue
@@ -136,20 +138,19 @@ defmodule Cympho.Orchestrator do
 
   @impl true
   def handle_continue(:start_session, %__MODULE__{} = session) do
-    agent_map = build_agent_map(session)
-
-    case AgentAdapters.resolve(agent_map) do
-      {:ok, module, config} ->
+    case prepare_runtime(session) do
+      {:ok, module, config, runtime_context} ->
         start_engine_run(session)
+        consume_pending_wakes(session.agent_id, session.issue.id)
         schedule_heartbeat_tick()
 
-        opts = run_opts(session, config)
+        opts = run_opts(session, config, runtime_context)
         session_id = module.run(session.issue, session.agent_id, self(), opts)
 
-        {:noreply, %{session | session_id: session_id}}
+        {:noreply, %{session | session_id: session_id, runtime_context: runtime_context}}
 
       {:error, error} ->
-        handle_resolution_error(session, error)
+        handle_preflight_or_resolution_error(session, error)
     end
   end
 
@@ -342,14 +343,123 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp run_opts(session, config) do
+  defp prepare_runtime(%__MODULE__{issue: %Issue{} = issue} = session) do
+    case safe_get_agent(session.agent_id) do
+      {:ok, %Cympho.Agents.Agent{} = agent} ->
+        opts =
+          session.opts
+          |> Keyword.take([:adapter, :adapter_config, :skills, :cwd])
+          |> Keyword.put(:run_id, session.run_id)
+
+        case Runtime.preflight(issue, agent, opts) do
+          {:ok, context} ->
+            {:ok, context.adapter, context.adapter_config, context}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      _ ->
+        prepare_legacy_runtime(session)
+    end
+  end
+
+  defp prepare_runtime(%__MODULE__{} = session), do: prepare_legacy_runtime(session)
+
+  defp prepare_legacy_runtime(%__MODULE__{} = session) do
+    agent_map = build_agent_map(session)
+
+    case AgentAdapters.resolve(agent_map) do
+      {:ok, module, config} -> {:ok, module, config, nil}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp run_opts(session, config, nil) do
     skills = Keyword.get(session.opts || [], :skills, [])
     [skills: skills, config: config]
+  end
+
+  defp run_opts(_session, _config, %Cympho.RuntimeContext{} = context) do
+    [
+      skills: context.skills,
+      config: context.adapter_config,
+      cwd: context.cwd,
+      env: context.env,
+      runtime_context: context
+    ]
+  end
+
+  defp handle_preflight_or_resolution_error(session, error)
+       when error in [:unknown_adapter, :no_adapter_available] or
+              (is_tuple(error) and tuple_size(error) > 0 and elem(error, 0) == :config_invalid) do
+    handle_resolution_error(session, error)
+  end
+
+  defp handle_preflight_or_resolution_error(session, error) do
+    handle_preflight_error(session, error)
   end
 
   defp handle_resolution_error(session, error) do
     handle_adapter_error(session, error)
   end
+
+  defp consume_pending_wakes(agent_id, issue_id) do
+    Cympho.HeartbeatEngine.WakeupQueue.consume_for(agent_id, issue_id)
+  rescue
+    _ -> :ok
+  end
+
+  defp handle_preflight_error(session, reason) do
+    issue = session.issue
+    agent_id = session.agent_id
+
+    :logger.warning(
+      "[Orchestrator] Runtime preflight failed for issue #{issue.id}: #{inspect(reason)}"
+    )
+
+    fail_engine_run(session, reason)
+
+    create_agent_comment(
+      issue,
+      agent_id,
+      "Runtime preflight failed: #{format_preflight_error(reason)}"
+    )
+
+    if retryable_preflight_error?(reason) do
+      release_issue_after_adapter_error(issue)
+    else
+      block_issue(issue)
+    end
+
+    set_agent_idle(agent_id)
+
+    {:stop, :normal, session}
+  end
+
+  defp retryable_preflight_error?(:company_paused), do: true
+  defp retryable_preflight_error?({:agent_unavailable, _status}), do: true
+  defp retryable_preflight_error?(_reason), do: false
+
+  defp format_preflight_error({:agent_unavailable, status}),
+    do: "agent is #{status}"
+
+  defp format_preflight_error({:budget_blocked, info}),
+    do:
+      "budget policy #{info.policy_id} is exhausted for #{info.scope} scope in the #{info.period} period"
+
+  defp format_preflight_error({:workspace_unavailable, cwd}),
+    do: "workspace cwd is unavailable: #{cwd}"
+
+  defp format_preflight_error({:workspace_error, reason}),
+    do: "workspace setup failed: #{inspect(reason)}"
+
+  defp format_preflight_error(:company_paused), do: "company is paused"
+
+  defp format_preflight_error(:company_mismatch),
+    do: "issue and agent belong to different companies"
+
+  defp format_preflight_error(reason), do: inspect(reason)
 
   defp reset_adapter_failure(agent_id) do
     if adapter_failure_table_exists?() do

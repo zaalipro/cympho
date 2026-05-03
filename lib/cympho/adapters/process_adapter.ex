@@ -19,7 +19,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
   end
 
   defp do_run(session_id, issue, agent_id, recipient_pid, opts) do
-    config = opts[:config] || %{}
+    config = runtime_config(opts[:config] || %{}, opts)
 
     case start_process(issue, agent_id, config, recipient_pid, session_id) do
       {:ok, _pid} ->
@@ -100,6 +100,21 @@ defmodule Cympho.Adapters.ProcessAdapter do
     (base_env ++ custom_env_list)
     |> Enum.map(fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
   end
+
+  defp runtime_config(config, opts) do
+    runtime_env = Keyword.get(opts, :env, %{}) || runtime_context_env(opts[:runtime_context])
+    cwd = opts[:cwd] || config[:cwd] || config["cwd"]
+    configured_env = config[:env] || config["env"] || %{}
+
+    config
+    |> Map.delete(:env)
+    |> Map.delete("env")
+    |> Map.put_new("cwd", cwd)
+    |> Map.put("env", Map.merge(configured_env, runtime_env))
+  end
+
+  defp runtime_context_env(%Cympho.RuntimeContext{env: env}) when is_map(env), do: env
+  defp runtime_context_env(_), do: %{}
 
   defp run_process(session_id, command, args, opts, recipient_pid, config) do
     send(recipient_pid, {:session_started, session_id})
