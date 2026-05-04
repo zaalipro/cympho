@@ -502,23 +502,19 @@ defmodule Cympho.Issues do
            issue.execution_state.current_stage_type == :executor do
         case ExecutionPolicies.get_execution_policy(issue.execution_policy_id) do
           {:ok, policy} ->
-            approved_state = ExecutionState.approve(issue.execution_state, issue.execution_state.current_participant)
+            approved_state =
+              ExecutionState.approve(
+                issue.execution_state,
+                issue.execution_state.current_participant
+              )
 
             case ExecutionState.advance(approved_state, policy, issue.execution_state.current_participant) do
               {:ok, next_state} ->
                 next_assignee = resolve_next_assignee(next_state.current_participant)
-
-                Map.merge(attrs, %{
-                  execution_state: next_state,
-                  assignee_id: next_assignee
-                })
+                Map.merge(attrs, %{execution_state: next_state, assignee_id: next_assignee})
 
               {:done, final_state} ->
-                Map.merge(attrs, %{
-                  execution_state: final_state,
-                  status: :done,
-                  assignee_id: nil
-                })
+                Map.merge(attrs, %{execution_state: final_state, status: :done, assignee_id: nil})
             end
 
           {:error, _} ->
@@ -559,6 +555,15 @@ defmodule Cympho.Issues do
         :ok
     end
   end
+
+  defp resolve_next_assignee(participant_id) when is_binary(participant_id) do
+    case Agents.get_agent(participant_id) do
+      {:ok, _agent} -> participant_id
+      {:error, _} -> nil
+    end
+  end
+
+  defp resolve_next_assignee(_), do: nil
 
   defp cancel_pending_approvals(issue_id) do
     try do

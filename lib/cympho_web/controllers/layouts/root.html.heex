@@ -6,7 +6,7 @@
     <meta name="csrf-token" content={Plug.CSRFProtection.get_csrf_token()} />
     <title>{Map.get(assigns, :page_title, "Cympho")}</title>
     <script>
-      (function(){var t=localStorage.getItem('cympho-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark')})();
+      (function(){var t=localStorage.getItem('cympho-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.setAttribute('data-theme','dark')})();
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -26,6 +26,7 @@
     </script>
   </head>
   <body class="bg-canvas text-text-primary font-sans antialiased min-h-screen overflow-x-hidden">
+    <a href="#main-content" class="skip-to-content">Skip to main content</a>
     <div
       id="toast-container"
       phx-hook="Toast"
@@ -181,7 +182,7 @@
       </header>
       
 <!-- Main content -->
-      <main class="flex-1 min-w-0 overflow-x-hidden lg:ml-64 min-h-screen pt-16 lg:pt-0 pb-16 lg:pb-0">
+      <main id="main-content" class="flex-1 min-w-0 overflow-x-hidden lg:ml-64 min-h-screen pt-16 lg:pt-0 pb-16 lg:pb-0">
         {@inner_content}
       </main>
     </div>
