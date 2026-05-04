@@ -1027,25 +1027,32 @@ defmodule Cympho.Agents do
     |> Repo.aggregate(:count)
   end
 
-  defp get_agent_budget_status(%Agent{budget_id: nil}), do: nil
+  defp get_agent_budget_status(%Agent{budget: budget}) when budget == %{} or budget == nil,
+    do: nil
 
-  defp get_agent_budget_status(%Agent{budget_id: budget_id}) do
-    case Cympho.Budgets.get_budget(budget_id) do
-      nil ->
-        nil
+  defp get_agent_budget_status(%Agent{budget: budget}) when is_map(budget) do
+    budget_id = Map.get(budget, "budget_id") || Map.get(budget, :budget_id)
 
-      budget ->
-        %{
-          limit: budget.limit_amount,
-          spent: budget.spent_amount,
-          remaining: Decimal.sub(budget.limit_amount, budget.spent_amount),
-          percentage:
-            if Decimal.gt?(budget.limit_amount, 0) do
-              Decimal.mult(Decimal.div(budget.spent_amount, budget.limit_amount), 100)
-            else
-              Decimal.from_integer(0)
-            end
-        }
+    if is_nil(budget_id) do
+      nil
+    else
+      case Cympho.Budgets.get_budget(budget_id) do
+        nil ->
+          nil
+
+        budget ->
+          %{
+            limit: budget.limit_amount,
+            spent: budget.spent_amount,
+            remaining: Decimal.sub(budget.limit_amount, budget.spent_amount),
+            percentage:
+              if Decimal.gt?(budget.limit_amount, 0) do
+                Decimal.mult(Decimal.div(budget.spent_amount, budget.limit_amount), 100)
+              else
+                Decimal.from_integer(0)
+              end
+          }
+      end
     end
   end
 
@@ -1053,7 +1060,7 @@ defmodule Cympho.Agents do
 
   defp calculate_idle_ratio(agents) when is_list(agents) do
     total = length(agents)
-    idle = Enum.count(agents, & &1.status == :idle)
+    idle = Enum.count(agents, &(&1.status == :idle))
 
     if total > 0 do
       Float.round(idle / total * 100, 1)

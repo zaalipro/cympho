@@ -188,23 +188,26 @@ defmodule Cympho.Budgets do
         )
 
         # Record audit event if threshold changed
-        if Map.has_key?(attrs, :threshold_alert_percentage) or Map.has_key?(attrs, "threshold_alert_percentage") do
+        if Map.has_key?(attrs, :threshold_alert_percentage) or
+             Map.has_key?(attrs, "threshold_alert_percentage") do
           old_threshold = budget.threshold_alert_percentage
           new_threshold = updated.threshold_alert_percentage
 
           if old_threshold != new_threshold do
-            {actor_type, actor_id} = case actor do
-              {type, id} -> {to_string(type), id}
-              _ -> {"system", "budget_update"}
-            end
+            {actor_type, actor_id} =
+              case actor do
+                {type, id} -> {to_string(type), id}
+                _ -> {"system", "budget_update"}
+              end
 
-            _ = Instrumenter.record_budget_change(
-              updated,
-              old_threshold,
-              new_threshold,
-              actor_type,
-              actor_id
-            )
+            _ =
+              Instrumenter.record_budget_change(
+                updated,
+                old_threshold,
+                new_threshold,
+                actor_type,
+                actor_id
+              )
           end
         end
 
