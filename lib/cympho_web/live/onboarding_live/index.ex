@@ -32,6 +32,7 @@ defmodule CymphoWeb.OnboardingLive.Index do
       |> assign(:page_title, "Get Started")
       |> assign(:steps, @steps)
       |> assign(:current_step, 0)
+      |> assign(:bootstrap_result, nil)
       |> assign(:company_form, %{
         "name" => "Autonomous Software Company",
         "goal_title" => "Build and run the business autonomously",
@@ -78,22 +79,22 @@ defmodule CymphoWeb.OnboardingLive.Index do
       |> Map.update("engineer_count", 2, &parse_engineer_count/1)
 
     case Companies.create_autonomous_company(attrs) do
-      {:ok, _result} ->
+      {:ok, result} ->
         {:noreply,
          socket
-         |> put_flash(:info, "Autonomous company created.")
-         |> push_navigate(to: ~p"/kanban")}
+         |> assign(:bootstrap_result, result)
+         |> assign(:current_step, 3)}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Could not create company: #{inspect(reason)}")}
     end
   end
 
-  defp parse_engineer_count(value) when is_integer(value), do: max(1, min(value, 8))
+  defp parse_engineer_count(value) when is_integer(value), do: max(0, min(value, 8))
 
   defp parse_engineer_count(value) when is_binary(value) do
     case Integer.parse(value) do
-      {count, _} -> max(1, min(count, 8))
+      {count, _} -> max(0, min(count, 8))
       :error -> 2
     end
   end

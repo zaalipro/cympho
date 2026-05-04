@@ -3,6 +3,7 @@ defmodule Cympho.CompaniesTest do
 
   alias Cympho.Companies
   alias Cympho.Companies.{Company, CompanyInvite, JoinRequest}
+  alias Cympho.Goals.Goal
 
   describe "companies" do
     test "create_company/1 with valid data creates a company" do
@@ -169,6 +170,63 @@ defmodule Cympho.CompaniesTest do
       assert {:ok, result} = Companies.import_company(data, slug_strategy: :suffix)
       assert result.company.slug != "collide-corp"
       assert String.contains?(result.company.slug, "collide-corp")
+    end
+  end
+
+  describe "create_autonomous_company/1" do
+    test "creates company with agents, goal, project, and seed issues" do
+      assert {:ok, result} =
+               Companies.create_autonomous_company(%{
+                 name: "Bootstrap Test Co",
+                 goal_title: "Build something great",
+                 engineer_count: 2
+               })
+
+      assert %Company{name: "Bootstrap Test Co"} = result.company
+      assert result.project.name == "Company OS"
+      assert %Goal{title: "Build something great", goal_type: :mission} = result.goal
+      assert length(result.agents) == 4
+
+      [ceo, cto, eng1, eng2] = result.agents
+      assert ceo.role == :ceo
+      assert cto.role == :cto
+      assert cto.parent_id == ceo.id
+      assert eng1.role == :engineer
+      assert eng1.parent_id == cto.id
+      assert eng2.role == :engineer
+      assert eng2.parent_id == cto.id
+
+      assert length(result.seed_issues) == 5
+      assert Enum.all?(result.seed_issues, &(&1.goal_id == result.goal.id))
+      assert Enum.all?(result.seed_issues, &(&1.origin_type == "onboarding"))
+    end
+
+    test "works with zero engineers" do
+      assert {:ok, result} =
+               Companies.create_autonomous_company(%{
+                 name: "No Eng Co",
+                 engineer_count: 0
+               })
+
+      assert length(result.agents) == 2
+      [ceo, cto] = result.agents
+      assert ceo.role == :ceo
+      assert cto.role == :cto
+
+      eng_issue = Enum.find(result.seed_issues, &(&1.assigned_role == "cto" and &1.issue_number == 4))
+      assert eng_issue.assignee_id == cto.id
+    end
+
+    test "creates goal with mission type" do
+      assert {:ok, result} = Companies.create_autonomous_company(%{name: "Mission Co"})
+      assert result.goal.goal_type == :mission
+    end
+
+    test "handles duplicate company names with unique slugs" do
+      Companies.create_company(%{name: "Collision Co", slug: "collision-co"})
+
+      assert {:ok, _result} =
+               Companies.create_autonomous_company(%{name: "Collision Co", engineer_count: 3})
     end
   end
 end

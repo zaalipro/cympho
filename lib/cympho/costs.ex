@@ -114,6 +114,87 @@ defmodule Cympho.Costs do
     |> Repo.all()
   end
 
+  @doc """
+  Aggregate costs by goal including all descendant goal costs via recursive CTE.
+  """
+  def by_goal(company_id, days \\ 30, limit \\ 10) do
+    since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
+
+    descendants_sql =
+      "SELECT id AS ancestor_id, id AS descendant_id FROM goals " <>
+        "UNION ALL " <>
+        "SELECT d.ancestor_id, g.id AS descendant_id " <>
+        "FROM goal_descendants d JOIN goals g ON g.parent_id = d.descendant_id"
+
+    from(g in Cympho.Goals.Goal, as: :goal)
+    |> join(:inner, [goal: g], d in fragment("^goal_descendants"), on: d.ancestor_id == g.id)
+    |> where([goal: g], g.company_id == ^company_id)
+    |> join(:inner, [goal: g, d: d], tu in TokenUsage,
+      on: tu.goal_id == d.descendant_id and tu.inserted_at >= ^since and tu.company_id == ^company_id
+    )
+    |> group_by([goal: g], [g.id, g.title, g.goal_type])
+    |> select([goal: g, d: d, tu: tu], %{
+      goal_id: g.id,
+      title: g.title,
+      goal_type: g.goal_type,
+      total_cost: sum(tu.cost_usd),
+      total_tokens: sum(tu.total_tokens),
+      request_count: count(tu.id)
+    })
+    |> order_by([tu: tu], desc: sum(tu.cost_usd))
+    |> limit(^limit)
+    |> with_cte("goal_descendants", as: fragment(^descendants_sql))
+    |> Repo.all()
+  end
+
+  @doc """
+  Aggregate costs by mission (root goals) including all descendant costs via recursive CTE.
+  """
+  def by_mission(company_id, days \\ 30) do
+    since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
+
+    descendants_sql =
+      "SELECT id AS ancestor_id, id AS descendant_id FROM goals WHERE goal_type = 'mission' " <>
+        "UNION ALL " <>
+        "SELECT d.ancestor_id, g.id AS descendant_id " <>
+        "FROM goal_descendants d JOIN goals g ON g.parent_id = d.descendant_id"
+
+    from(m in Cympho.Goals.Goal, as: :mission)
+    |> where([mission: m], m.company_id == ^company_id and m.goal_type == ^:mission)
+    |> join(:inner, [mission: m], d in fragment("^goal_descendants"), on: d.ancestor_id == m.id)
+    |> join(:inner, [mission: m, d: d], tu in TokenUsage,
+      on: tu.goal_id == d.descendant_id and tu.inserted_at >= ^since and tu.company_id == ^company_id
+    )
+    |> group_by([mission: m], [m.id, m.title])
+    |> select([mission: m, d: d, tu: tu], %{
+      mission_id: m.id,
+      title: m.title,
+      total_cost: sum(tu.cost_usd),
+      total_tokens: sum(tu.total_tokens),
+      request_count: count(tu.id)
+    })
+    |> order_by([tu: tu], desc: sum(tu.cost_usd))
+    |> with_cte("goal_descendants", as: fragment(^descendants_sql))
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns daily cost data suitable for sparkline visualization.
+  """
+  def sparkline(company_id, days \\ 7) do
+    since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
+
+    token_usage_query(company_id)
+    |> where([tu], tu.inserted_at >= ^since)
+    |> group_by([tu], fragment("date(?)", tu.inserted_at))
+    |> select([tu], %{
+      date: fragment("date(?)", tu.inserted_at),
+      total_cost: sum(tu.cost_usd)
+    })
+    |> order_by([tu], fragment("date(?)", tu.inserted_at))
+    |> Repo.all()
+  end
+
   def daily_costs(company_id, days \\ 30) do
     since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
 
