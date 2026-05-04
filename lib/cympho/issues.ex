@@ -528,9 +528,17 @@ defmodule Cympho.Issues do
             issue.execution_state.current_stage_type == :executor ->
           case ExecutionPolicies.get_execution_policy(issue.execution_policy_id) do
             {:ok, policy} ->
-              approved_state = ExecutionState.approve(issue.execution_state, issue.execution_state.current_participant)
+              approved_state =
+                ExecutionState.approve(
+                  issue.execution_state,
+                  issue.execution_state.current_participant
+                )
 
-              case ExecutionState.advance(approved_state, policy, issue.execution_state.current_participant) do
+              case ExecutionState.advance(
+                     approved_state,
+                     policy,
+                     issue.execution_state.current_participant
+                   ) do
                 {:ok, next_state} ->
                   next_assignee = resolve_next_assignee(next_state.current_participant)
 
@@ -1104,7 +1112,6 @@ defmodule Cympho.Issues do
     end
   end
 
-
   @doc """
   Handles a decision (approve/request_changes) for an issue with an execution policy.
   Advances the execution state and assigns the issue to the next participant.
@@ -1196,7 +1203,10 @@ defmodule Cympho.Issues do
 
       :request_changes ->
         changes_state = ExecutionState.request_changes(issue.execution_state, decided_by)
-        executor_id = ExecutionState.original_executor(issue.execution_state) || changes_state.current_participant
+
+        executor_id =
+          ExecutionState.original_executor(issue.execution_state) ||
+            changes_state.current_participant
 
         update_issue(issue, %{
           execution_state: changes_state,
@@ -1363,7 +1373,11 @@ defmodule Cympho.Issues do
         "Human approval required",
         "Issue \"#{issue.title}\" requires human approval at stage #{next_state.current_stage_index + 1}.",
         user.id,
-        %{issue_id: issue.id, stage_index: next_state.current_stage_index, type: "human_approval_required"}
+        %{
+          issue_id: issue.id,
+          stage_index: next_state.current_stage_index,
+          type: "human_approval_required"
+        }
       )
     end)
   end
