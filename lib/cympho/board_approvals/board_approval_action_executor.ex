@@ -13,7 +13,9 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
   use GenServer
 
   alias Cympho.Agents
+  alias Cympho.Agents.Agent
   alias Cympho.BoardApprovals
+  alias Cympho.BoardApprovals.BoardApproval
   alias Cympho.GovernanceAuditLogs
   alias Cympho.Repo
 
@@ -66,12 +68,11 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
     pending_approvals =
       Repo.all(
-        from ba in "board_approvals",
+        from ba in BoardApproval,
           where:
             ba.status == "approved" and
               ba.category in ["agent_hire", "agent_promotion"] and
-              is_nil(ba.inserted_at) == false,
-          select: ba
+              is_nil(ba.inserted_at) == false
       )
 
     Enum.each(pending_approvals, fn approval ->
@@ -101,7 +102,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     import Ecto.Query
 
     Repo.exists?(
-      from a in "agents",
+      from a in Agent,
         where: a.board_approval_id == ^approval_id
     )
   end

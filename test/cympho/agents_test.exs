@@ -3,6 +3,7 @@ defmodule Cympho.AgentsTest do
 
   alias Cympho.Agents
   alias Cympho.Agents.Agent
+  alias Cympho.Companies
 
   setup do
     {:ok, agent} =
@@ -10,6 +11,30 @@ defmodule Cympho.AgentsTest do
         name: "Test Agent",
         role: :engineer,
         status: :idle
+      })
+
+    %{agent: agent}
+  end
+
+  defp create_company(_context) do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Test Company",
+        slug: "test-company-#{System.unique_integer([:positive])}"
+      })
+
+    %{company: company}
+  end
+
+  defp create_agent(%{company: company}) do
+    {:ok, agent} =
+      Agents.create_agent(%{
+        company_id: company.id,
+        name: "Setup Agent",
+        role: :engineer,
+        status: :idle,
+        adapter: :process,
+        config: %{"command" => "echo"}
       })
 
     %{agent: agent}
@@ -437,7 +462,7 @@ defmodule Cympho.AgentsTest do
           company_id: company.id,
           name: "CTO",
           role: :cto,
-          status: :busy,
+          status: :running,
           adapter: :process,
           config: %{"command" => "echo"}
         })
@@ -457,7 +482,7 @@ defmodule Cympho.AgentsTest do
           company_id: company.id,
           name: "Engineer 2",
           role: :engineer,
-          status: :busy,
+          status: :running,
           adapter: :process,
           config: %{"command" => "echo"}
         })
@@ -466,7 +491,7 @@ defmodule Cympho.AgentsTest do
 
       assert stats.total == 4
       assert stats.by_role == %{ceo: 1, cto: 1, engineer: 2}
-      assert stats.by_status == %{idle: 2, busy: 2}
+      assert stats.by_status == %{idle: 2, running: 2}
       assert stats.idle_ratio == 50.0
     end
   end
