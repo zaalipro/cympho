@@ -29,8 +29,9 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
   def init(_opts) do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "system:board_approvals")
 
-    # Recover any pending approvals that may have been missed during downtime
-    send(self(), :recover_pending_approvals)
+    if Mix.env() == :prod do
+      send(self(), :recover_pending_approvals)
+    end
 
     {:ok, %{}}
   end
@@ -66,22 +67,15 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
     pending_approvals =
       Repo.all(
-        from ba in "board_approvals",
+        from ba in BoardApprovals.BoardApproval,
           where:
             ba.status == "approved" and
-              ba.category in ["agent_hire", "agent_promotion"] and
-              is_nil(ba.inserted_at) == false,
-          select: ba
+              ba.category in ["agent_hire", "agent_promotion"]
       )
 
     Enum.each(pending_approvals, fn approval ->
       case BoardApprovals.get_board_approval(approval.id) do
-        nil ->
-          # Approval was deleted, skip
-          :ok
-
-        %BoardApprovals.BoardApproval{} = full_approval ->
-          # Check if already executed by looking for the agent
+        {:ok, full_approval} ->
           already_executed? =
             case full_approval.category do
               "agent_hire" -> agent_created_for_approval?(approval.id)
@@ -92,6 +86,9 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
           unless already_executed? do
             execute_with_retry(full_approval, 0)
           end
+
+        {:error, :not_found} ->
+          :ok
       end
     end)
   end
@@ -101,7 +98,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     import Ecto.Query
 
     Repo.exists?(
-      from a in "agents",
+      from a in Agents.Agent,
         where: a.board_approval_id == ^approval_id
     )
   end
