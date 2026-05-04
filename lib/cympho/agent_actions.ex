@@ -196,7 +196,11 @@ defmodule Cympho.AgentActions do
         end
 
       "handoff" ->
-        with :ok <- validate_role(action["role"]) do
+        with :ok <- validate_role(action["role"]),
+             :ok <- validate_optional_string(action, "summary"),
+             :ok <- validate_optional_string(action, "remaining"),
+             :ok <- validate_optional_string(action, "decisions"),
+             :ok <- validate_optional_string_or_list(action, "file_paths") do
           {:ok, action}
         end
     end
@@ -214,27 +218,46 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "create_issue"} = action) do
-    attrs = %{
-      title: action["title"],
-      description: action["description"] || "",
-      priority: action["priority"] || "medium",
-      status: :todo,
-      company_id: issue.company_id,
-      project_id: issue.project_id,
-      goal_id: issue.goal_id,
-      parent_id: issue.id,
-      assigned_role: action["role"],
-      created_by_agent_id: agent.id,
-      origin_type: "agent_action",
-      origin_id: issue.id,
-      request_depth: (issue.request_depth || 0) + 1,
-      actor_type: "agent",
-      actor_id: agent.id
-    }
+    case find_recent_duplicate(issue.company_id, action["title"], issue.goal_id) do
+      %Issue{} = existing ->
+        comment_body =
+          "Duplicate creation attempt by #{agent.name || agent.id}. " <>
+            "An issue with this title already exists.\n\n" <>
+            (action["description"] || "")
 
-    case Issues.create_issue(attrs) do
-      {:ok, created} -> {:ok, %{type: "create_issue", issue_id: created.id}}
-      error -> error
+        with {:ok, _comment} <-
+               Comments.create_comment(%{
+                 body: comment_body,
+                 author_type: "system",
+                 author_id: "00000000-0000-0000-0000-000000000000",
+                 issue_id: existing.id
+               }) do
+          {:ok, %{type: "create_issue", issue_id: existing.id, duplicate: true}}
+        end
+
+      nil ->
+        attrs = %{
+          title: action["title"],
+          description: action["description"] || "",
+          priority: action["priority"] || "medium",
+          status: :todo,
+          company_id: issue.company_id,
+          project_id: issue.project_id,
+          goal_id: issue.goal_id,
+          parent_id: issue.id,
+          assigned_role: action["role"],
+          created_by_agent_id: agent.id,
+          origin_type: "agent_action",
+          origin_id: issue.id,
+          request_depth: (issue.request_depth || 0) + 1,
+          actor_type: "agent",
+          actor_id: agent.id
+        }
+
+        case Issues.create_issue(attrs) do
+          {:ok, created} -> {:ok, %{type: "create_issue", issue_id: created.id}}
+          error -> error
+        end
     end
   end
 
@@ -323,7 +346,8 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "handoff"} = action) do
-    reason = action["reason"] || "Handing off to #{action["role"]}."
+    handoff_reason = action["reason"] || "Handing off to #{action["role"]}."
+    context_body = build_handoff_context(issue, agent, action, handoff_reason)
 
     with {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
@@ -333,7 +357,8 @@ defmodule Cympho.AgentActions do
              checked_out_at: nil,
              assigned_role: action["role"]
            }),
-         {:ok, _comment} <- maybe_agent_comment(issue, agent, reason) do
+         {:ok, _comment} <- maybe_agent_comment(issue, agent, handoff_reason),
+         {:ok, _context_comment} <- system_comment(issue, context_body) do
       _ =
         Cympho.Orchestrator.Dispatcher.enqueue_wake(updated.id, "agent_handoff", %{
           "from_agent_id" => agent.id,
@@ -342,6 +367,90 @@ defmodule Cympho.AgentActions do
 
       {:ok, %{type: "handoff", issue_id: updated.id, role: action["role"]}}
     end
+  end
+
+  defp find_recent_duplicate(company_id, title, goal_id) do
+    since = DateTime.utc_now() |> DateTime.add(-24, :hour)
+
+    query =
+      from(i in Issue,
+        where:
+          i.company_id == ^company_id and
+            i.title == ^title and
+            i.inserted_at >= ^since,
+        limit: 1
+      )
+
+    query =
+      if goal_id do
+        from(i in query, where: i.goal_id == ^goal_id)
+      else
+        from(i in query, where: is_nil(i.goal_id))
+      end
+
+    Repo.one(query)
+  end
+
+  defp build_handoff_context(issue, agent, action, reason) do
+    lines = [
+      "**Handoff Context**",
+      "",
+      "- **From:** #{agent.name || agent.id} (#{agent.role})",
+      "- **To role:** #{action["role"]}",
+      "- **Issue:** #{issue.title} (#{issue.identifier || issue.id})",
+      ""
+    ]
+
+    lines =
+      if reason do
+        lines ++ ["**Reason:** #{reason}", ""]
+      else
+        lines
+      end
+
+    lines =
+      if action["summary"] do
+        lines ++ ["**Summary of work done:**", action["summary"], ""]
+      else
+        lines
+      end
+
+    lines =
+      if action["remaining"] do
+        lines ++ ["**What remains:**", action["remaining"], ""]
+      else
+        lines
+      end
+
+    lines =
+      if action["decisions"] do
+        lines ++ ["**Key decisions:**", action["decisions"], ""]
+      else
+        lines
+      end
+
+    lines =
+      if action["file_paths"] do
+        paths = action["file_paths"]
+
+        path_list =
+          if is_list(paths) do
+            paths
+          else
+            String.split(paths, ",")
+          end
+
+        lines ++
+          [
+            "**Relevant file paths:**",
+            Enum.map_join(path_list, "\n", &"- #{String.trim(&1)}"),
+            ""
+          ]
+      else
+        lines
+      end
+
+    Enum.join(lines, "\n")
   end
 
   defp update_workflow_issue(issue, agent, attrs) do
@@ -441,6 +550,23 @@ defmodule Cympho.AgentActions do
   end
 
   defp validate_url(_url), do: {:error, {:invalid_url, "url"}}
+
+  defp validate_optional_string(action, field) do
+    case Map.get(action, field) do
+      nil -> :ok
+      value when is_binary(value) -> :ok
+      _ -> {:error, {:invalid_string, field}}
+    end
+  end
+
+  defp validate_optional_string_or_list(action, field) do
+    case Map.get(action, field) do
+      nil -> :ok
+      value when is_binary(value) -> :ok
+      value when is_list(value) -> :ok
+      _ -> {:error, {:invalid_string_or_list, field}}
+    end
+  end
 
   defp normalize_string_keys(map) do
     Map.new(map, fn
