@@ -255,53 +255,108 @@ defmodule Cympho.Companies do
         })
 
       engineers =
-        for index <- 1..engineer_count do
-          create_template_agent!(%{
-            company_id: company.id,
-            project_id: project.id,
-            parent_id: cto.id,
-            created_by_agent_id: cto.id,
-            name: "Engineer #{index}",
-            title: "Software Engineer",
-            role: :engineer,
-            adapter: adapter,
-            max_concurrent_jobs: 1,
-            capabilities: %{
-              "implementation" => true,
-              "testing" => true,
-              "debugging" => true
-            },
-            instructions:
-              "Implement assigned issues end to end, leave comments with results, and surface blockers explicitly."
-          })
+        if engineer_count > 0 do
+          for index <- 1..engineer_count do
+            create_template_agent!(%{
+              company_id: company.id,
+              project_id: project.id,
+              parent_id: cto.id,
+              created_by_agent_id: cto.id,
+              name: "Engineer #{index}",
+              title: "Software Engineer",
+              role: :engineer,
+              adapter: adapter,
+              max_concurrent_jobs: 1,
+              capabilities: %{
+                "implementation" => true,
+                "testing" => true,
+                "debugging" => true
+              },
+              instructions:
+                "Implement assigned issues end to end, leave comments with results, and surface blockers explicitly."
+            })
+          end
+        else
+          []
         end
 
-      issue =
-        %Issue{}
-        |> Issue.changeset(%{
-          company_id: company.id,
-          project_id: project.id,
-          goal_id: goal.id,
-          assignee_id: ceo.id,
-          issue_number: 1,
-          identifier: "#{issue_prefix}-1",
+      first_engineer = List.first(engineers, cto)
+
+      seed_specs = [
+        %{
+          number: 1,
           title: "Create the first autonomous execution plan",
           description:
             "Break the company goal into CEO, CTO, and engineering work. Create follow-up issues for the first execution cycle.",
-          status: :todo,
           priority: :critical,
-          assigned_role: "ceo",
-          origin_type: "onboarding",
-          request_depth: 0
-        })
-        |> Repo.insert!()
+          assignee_id: ceo.id,
+          assigned_role: "ceo"
+        },
+        %{
+          number: 2,
+          title: "Set up the engineering environment and CI pipeline",
+          description:
+            "Establish the development environment, linting, formatting, and CI pipeline so engineers can ship reliably.",
+          priority: :high,
+          assignee_id: cto.id,
+          assigned_role: "cto"
+        },
+        %{
+          number: 3,
+          title: "Define the technical architecture",
+          description:
+            "Research and document the core technical architecture: stack choices, data model, API surface, and deployment strategy.",
+          priority: :high,
+          assignee_id: cto.id,
+          assigned_role: "cto"
+        },
+        %{
+          number: 4,
+          title: "Implement the first core feature",
+          description:
+            "Pick the highest-value feature from the execution plan and implement it end to end with tests.",
+          priority: :medium,
+          assignee_id: first_engineer.id,
+          assigned_role: if(first_engineer == cto, do: "cto", else: "engineer")
+        },
+        %{
+          number: 5,
+          title: "Ship a working demo for stakeholder review",
+          description:
+            "Package the first iteration into a reviewable demo. Document what works, what's missing, and what's next.",
+          priority: :medium,
+          assignee_id: ceo.id,
+          assigned_role: "ceo"
+        }
+      ]
+
+      seed_issues =
+        for spec <- seed_specs do
+          %Issue{}
+          |> Issue.changeset(%{
+            company_id: company.id,
+            project_id: project.id,
+            goal_id: goal.id,
+            assignee_id: spec.assignee_id,
+            issue_number: spec.number,
+            identifier: "#{issue_prefix}-#{spec.number}",
+            title: spec.title,
+            description: spec.description,
+            status: :todo,
+            priority: spec.priority,
+            assigned_role: spec.assigned_role,
+            origin_type: "onboarding",
+            request_depth: 0
+          })
+          |> Repo.insert!()
+        end
 
       %{
         company: company,
         project: project,
         goal: goal,
         agents: [ceo, cto | engineers],
-        first_issue: issue
+        seed_issues: seed_issues
       }
     end)
   end

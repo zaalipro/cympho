@@ -195,32 +195,95 @@
     
 <!-- Ready step -->
     <div :if={@current_step == 3} class="bg-panel border border-border rounded-2xl p-6 mb-6">
-      <div class="flex flex-col items-center gap-4 text-center">
-        <div class="w-16 h-16 rounded-full bg-emerald/10 flex items-center justify-center">
-          <svg class="w-8 h-8 text-emerald" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-        </div>
-        <div>
+      <div class="flex flex-col gap-4">
+        <div class="flex flex-col items-center gap-3 text-center">
+          <div class="w-14 h-14 rounded-full bg-emerald/10 flex items-center justify-center">
+            <svg
+              class="w-7 h-7 text-emerald"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+          </div>
           <p class="text-sm text-text-secondary">
-            You're ready to start using Cympho. Create your first project or jump straight to the issue board.
+            Your autonomous company is ready. Here's what was created:
           </p>
         </div>
-        <div class="flex gap-3 w-full">
+
+        <%= if @bootstrap_result do %>
+          <div class="space-y-2 text-sm">
+            <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
+              <span class="text-text-secondary">Company</span>
+              <span class="text-text-primary font-590">{@bootstrap_result.company.name}</span>
+            </div>
+            <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
+              <span class="text-text-secondary">Project</span>
+              <.app_link
+                navigate={~p"/projects"}
+                class="text-accent hover:text-accent-hover font-590"
+              >
+                {@bootstrap_result.project.name}
+              </.app_link>
+            </div>
+            <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
+              <span class="text-text-secondary">Mission</span>
+              <span
+                class="text-text-primary truncate max-w-[200px]"
+                title={@bootstrap_result.goal.title}
+              >
+                {@bootstrap_result.goal.title}
+              </span>
+            </div>
+            <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">
+              <span class="text-text-secondary">Agents</span>
+              <span class="text-text-primary font-590">
+                {length(@bootstrap_result.agents)} ({Enum.map_join(
+                  @bootstrap_result.agents,
+                  ", ",
+                  &String.capitalize(to_string(&1.role))
+                )})
+              </span>
+            </div>
+            <div class="py-1.5 px-3">
+              <span class="text-text-secondary text-xs">Seed issues</span>
+              <div class="mt-1.5 space-y-1">
+                <%= for issue <- @bootstrap_result.seed_issues do %>
+                  <div class="flex items-center gap-2">
+                    <.app_link
+                      navigate={~p"/issues/#{issue.id}"}
+                      class="text-xs text-accent hover:text-accent-hover font-mono"
+                    >
+                      {issue.identifier}
+                    </.app_link>
+                    <span class="text-xs text-text-tertiary truncate">{issue.title}</span>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+          </div>
+        <% else %>
+          <p class="text-sm text-text-tertiary text-center">
+            You're ready to start using Cympho. Create your first project or jump straight to the issue board.
+          </p>
+        <% end %>
+
+        <div class="flex gap-3 w-full pt-2">
           <.app_link
-            navigate={~p"/projects/new"}
-            class="flex-1 text-center bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2.5 rounded-lg transition-colors"
+            navigate={~p"/kanban"}
+            class="flex-1 text-center bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-590 text-sm px-4 py-2.5 rounded-lg transition-colors"
           >
-            Create Project
+            Kanban Board
           </.app_link>
           <.app_link
             navigate={~p"/issues"}
-            class="flex-1 text-center bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2.5 rounded-lg transition-colors"
+            class="flex-1 text-center bg-brand hover:bg-accent text-white font-590 text-sm px-4 py-2.5 rounded-lg transition-colors"
           >
             Go to Issues
           </.app_link>
