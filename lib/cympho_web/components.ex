@@ -76,15 +76,15 @@ defmodule CymphoWeb.Components do
   attr :message, :string, default: nil
   attr :icon, :string, default: nil
   attr :class, :any, default: nil
-  slot :icon
+  slot :icon_slot
   slot :actions
 
   def empty_state(assigns) do
     ~H"""
     <div class={["flex flex-col items-center justify-center px-6 py-16 text-center", @class]}>
       <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface text-text-tertiary">
-        <%= if @icon != [] || @icon do %>
-          {render_slot(@icon)}
+        <%= if @icon_slot != [] || @icon do %>
+          {render_slot(@icon_slot)}
         <% else %>
           <.empty_state_icon icon="default" />
         <% end %>

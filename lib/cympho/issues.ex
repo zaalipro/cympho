@@ -448,6 +448,9 @@ defmodule Cympho.Issues do
 
   def transition_issue(%Issue{} = issue, new_status, agent_id) when is_binary(agent_id) do
     cond do
+      new_status == :in_review and ExecutionState.active?(issue.execution_state) ->
+        do_transition(issue, new_status)
+
       new_status == :in_review ->
         with {:ok, agent} <- Agents.get_agent(agent_id),
              :ok <- validate_reviewer_role(agent),
@@ -492,7 +495,36 @@ defmodule Cympho.Issues do
   end
 
   defp do_transition(%Issue{} = issue, new_status) do
-    with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
+    attrs = %{status: new_status}
+
+    attrs =
+      if new_status == :in_review and ExecutionState.active?(issue.execution_state) and
+           issue.execution_state.current_stage_type == :executor do
+        case ExecutionPolicies.get_execution_policy(issue.execution_policy_id) do
+          {:ok, policy} ->
+            approved_state =
+              ExecutionState.approve(
+                issue.execution_state,
+                issue.execution_state.current_participant
+              )
+
+            case ExecutionState.advance(approved_state, policy, issue.execution_state.current_participant) do
+              {:ok, next_state} ->
+                next_assignee = resolve_next_assignee(next_state.current_participant)
+                Map.merge(attrs, %{execution_state: next_state, assignee_id: next_assignee})
+
+              {:done, final_state} ->
+                Map.merge(attrs, %{execution_state: final_state, status: :done, assignee_id: nil})
+            end
+
+          {:error, _} ->
+            attrs
+        end
+      else
+        attrs
+      end
+
+    with {:ok, updated} <- update_issue(issue, attrs) do
       if new_status == :done do
         unblock_dependents(issue.id)
         _ = Wakes.notify_children_completed(updated)
@@ -523,6 +555,15 @@ defmodule Cympho.Issues do
         :ok
     end
   end
+
+  defp resolve_next_assignee(participant_id) when is_binary(participant_id) do
+    case Agents.get_agent(participant_id) do
+      {:ok, _agent} -> participant_id
+      {:error, _} -> nil
+    end
+  end
+
+  defp resolve_next_assignee(_), do: nil
 
   defp cancel_pending_approvals(issue_id) do
     try do

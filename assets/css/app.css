@@ -86,7 +86,7 @@ html[data-theme="dark"] {
 
 /* Respect OS color scheme preference when user hasn't set explicit choice */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root:not([data-theme]) {
     --color-canvas:        #010102;
     --color-panel:         #0f1011;
     --color-surface:       #141516;

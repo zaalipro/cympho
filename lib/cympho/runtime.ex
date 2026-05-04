@@ -41,6 +41,7 @@ defmodule Cympho.Runtime do
           | {:budget_blocked, map()}
           | {:workspace_unavailable, String.t()}
           | {:workspace_error, term()}
+          | {:stage_gate_blocked, atom()}
 
   @spec preflight(Issue.t(), Agent.t() | binary(), keyword()) ::
           {:ok, RuntimeContext.t()} | {:error, preflight_error()}
@@ -49,6 +50,7 @@ defmodule Cympho.Runtime do
   def preflight(%Issue{} = issue, %Agent{} = agent, opts) do
     with :ok <- verify_company(issue, agent),
          :ok <- verify_agent(agent, issue, opts),
+         :ok <- verify_stage_gate(issue, agent),
          {:ok, env} <- resolve_env(agent),
          {:ok, adapter, adapter_config} <- resolve_adapter(agent, env, opts),
          {:ok, budget} <- verify_budget(issue, agent),
@@ -118,6 +120,42 @@ defmodule Cympho.Runtime do
 
       %Company{} = company ->
         if Companies.active?(company), do: :ok, else: {:error, :company_paused}
+    end
+  end
+
+
+  defp verify_stage_gate(%Issue{execution_policy_id: nil}, _agent), do: :ok
+
+  defp verify_stage_gate(%Issue{execution_state: state}, _agent)
+       when state == %{} or is_nil(state),
+       do: :ok
+
+  defp verify_stage_gate(%Issue{} = issue, %Agent{} = agent) do
+    alias Cympho.Issues.ExecutionState
+    alias Cympho.ExecutionPolicies
+
+    state = issue.execution_state
+
+    if ExecutionState.active?(state) do
+      case ExecutionPolicies.get_execution_policy(issue.execution_policy_id) do
+        {:ok, policy} ->
+          cond do
+            ExecutionState.require_human?(state, policy) ->
+              {:error, {:stage_gate_blocked, :require_human}}
+
+            not ExecutionState.stage_complete?(state) and
+                state.current_participant != agent.id ->
+              {:error, {:stage_gate_blocked, :stage_incomplete}}
+
+            true ->
+              :ok
+          end
+
+        {:error, _} ->
+          :ok
+      end
+    else
+      :ok
     end
   end
 
