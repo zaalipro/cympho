@@ -448,6 +448,9 @@ defmodule Cympho.Issues do
 
   def transition_issue(%Issue{} = issue, new_status, agent_id) when is_binary(agent_id) do
     cond do
+      new_status == :in_review and ExecutionState.active?(issue.execution_state) ->
+        do_transition(issue, new_status)
+
       new_status == :in_review ->
         with {:ok, agent} <- Agents.get_agent(agent_id),
              :ok <- validate_reviewer_role(agent),
@@ -492,14 +495,47 @@ defmodule Cympho.Issues do
   end
 
   defp do_transition(%Issue{} = issue, new_status) do
-    with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
-      if new_status == :done do
+    attrs = %{status: new_status}
+
+    attrs =
+      if new_status == :in_review and ExecutionState.active?(issue.execution_state) and
+           issue.execution_state.current_stage_type == :executor do
+        case ExecutionPolicies.get_execution_policy(issue.execution_policy_id) do
+          {:ok, policy} ->
+            approved_state = ExecutionState.approve(issue.execution_state, issue.execution_state.current_participant)
+
+            case ExecutionState.advance(approved_state, policy, issue.execution_state.current_participant) do
+              {:ok, next_state} ->
+                next_assignee = resolve_next_assignee(next_state.current_participant)
+
+                Map.merge(attrs, %{
+                  execution_state: next_state,
+                  assignee_id: next_assignee
+                })
+
+              {:done, final_state} ->
+                Map.merge(attrs, %{
+                  execution_state: final_state,
+                  status: :done,
+                  assignee_id: nil
+                })
+            end
+
+          {:error, _} ->
+            attrs
+        end
+      else
+        attrs
+      end
+
+    with {:ok, updated} <- update_issue(issue, attrs) do
+      if updated.status == :done do
         unblock_dependents(issue.id)
         _ = Wakes.notify_children_completed(updated)
         maybe_complete_parent(updated)
       end
 
-      if new_status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
+      if updated.status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
       {:ok, updated}
     end
   end
@@ -1025,6 +1061,15 @@ defmodule Cympho.Issues do
     end
   end
 
+  defp resolve_next_assignee(participant_id) when is_binary(participant_id) do
+    case Agents.get_agent(participant_id) do
+      {:ok, _agent} -> participant_id
+      {:error, _} -> nil
+    end
+  end
+
+  defp resolve_next_assignee(_), do: nil
+
   @doc """
   Handles a decision (approve/request_changes) for an issue with an execution policy.
   Advances the execution state and assigns the issue to the next participant.
@@ -1043,7 +1088,37 @@ defmodule Cympho.Issues do
         {:error, :unauthorized}
 
       true ->
-        do_execution_policy_decision(issue, decision, decided_by)
+        policy = ExecutionPolicies.get_execution_policy!(issue.execution_policy_id)
+
+        with :ok <- check_require_different_actor(issue, policy, decided_by),
+             :ok <- check_require_human(issue, policy, decided_by) do
+          do_execution_policy_decision(issue, decision, decided_by)
+        end
+    end
+  end
+
+  defp check_require_different_actor(issue, policy, decided_by) do
+    if ExecutionState.require_different_actor?(issue.execution_state, policy) do
+      executor_id = ExecutionState.original_executor(issue.execution_state)
+
+      if decided_by == executor_id do
+        {:error, :require_different_actor}
+      else
+        :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp check_require_human(issue, policy, decided_by) do
+    if ExecutionState.require_human?(issue.execution_state, policy) do
+      case Agents.get_agent(decided_by) do
+        {:ok, _agent} -> {:error, :require_human}
+        {:error, _} -> :ok
+      end
+    else
+      :ok
     end
   end
 
@@ -1061,9 +1136,10 @@ defmodule Cympho.Issues do
               execution_state: final_state,
               assignee_id: nil
             })
-            |> tap(fn {:ok, _} ->
+            |> tap(fn {:ok, updated} ->
               unblock_dependents(issue.id)
               _ = Wakes.notify_children_completed(issue)
+              maybe_trigger_verification(updated)
             end)
 
           {:ok, next_state} ->
@@ -1075,7 +1151,11 @@ defmodule Cympho.Issues do
               status: :in_review
             })
             |> tap(fn {:ok, _} ->
-              wake_next_participant(next_assignee, issue.id)
+              if ExecutionState.require_human?(next_state, policy) do
+                notify_human_approval_needed(issue, next_state)
+              else
+                wake_next_participant(next_assignee, issue.id)
+              end
             end)
         end
 
@@ -1232,5 +1312,67 @@ defmodule Cympho.Issues do
   defp goal_id_changed?(attrs, issue) do
     new_goal_id = get_param(attrs, :goal_id)
     new_goal_id != nil and new_goal_id != issue.goal_id
+  end
+
+  defp notify_human_approval_needed(issue, next_state) do
+    company_users =
+      from(u in Cympho.Users.User,
+        join: m in Cympho.Companies.CompanyMembership,
+        on: m.user_id == u.id,
+        where: m.company_id == ^issue.company_id
+      )
+      |> Repo.all()
+
+    Enum.each(company_users, fn user ->
+      Cympho.Notifications.notify_async(
+        "Human approval required",
+        "Issue \"#{issue.title}\" requires human approval at stage #{next_state.current_stage_index + 1}.",
+        user.id,
+        %{issue_id: issue.id, stage_index: next_state.current_stage_index, type: "human_approval_required"}
+      )
+    end)
+  end
+
+  defp maybe_trigger_verification(%Issue{company_id: nil}), do: :ok
+
+  defp maybe_trigger_verification(%Issue{} = issue) do
+    case Repo.get(Company, issue.company_id) do
+      %Company{governance_config: %{"require_verification" => true}} ->
+        create_verification_issue(issue)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp create_verification_issue(%Issue{} = issue) do
+    verifier_role = "engineer"
+
+    attrs = %{
+      title: "Verify: #{issue.title}",
+      description: "Automated verification issue. Verify the work done on parent issue.",
+      priority: :medium,
+      status: :todo,
+      company_id: issue.company_id,
+      project_id: issue.project_id,
+      goal_id: issue.goal_id,
+      parent_id: issue.id,
+      assigned_role: verifier_role,
+      created_by_agent_id: issue.assignee_id,
+      origin_type: "verification",
+      origin_id: issue.id,
+      request_depth: (issue.request_depth || 0) + 1,
+      actor_type: "system",
+      actor_id: "00000000-0000-0000-0000-000000000000"
+    }
+
+    case create_issue(attrs) do
+      {:ok, _verification_issue} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to create verification issue for #{issue.id}: #{inspect(reason)}")
+        :ok
+    end
   end
 end
