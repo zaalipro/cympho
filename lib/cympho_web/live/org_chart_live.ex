@@ -75,6 +75,7 @@ defmodule CymphoWeb.OrgChartLive do
       id="org-chart-page"
       class="min-h-screen bg-canvas px-4 py-5 sm:px-6 lg:px-8"
       phx-hook="OrgChartExport"
+      id="org-chart-export"
     >
       <div class="mx-auto max-w-7xl">
         <.header

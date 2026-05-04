@@ -49,19 +49,43 @@ defmodule Cympho.Companies do
   end
 
   def pause_company(%Company{} = company, reason \\ "Paused from dashboard") do
-    execute_company_update(company, %{
-      status: "paused",
-      paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
-      paused_reason: reason
-    })
+    case execute_company_update(company, %{
+           status: "paused",
+           paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
+           paused_reason: reason
+         }) do
+      {:ok, updated} = result ->
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.id}:company",
+          {:company_paused, updated}
+        )
+
+        result
+
+      error ->
+        error
+    end
   end
 
   def resume_company(%Company{} = company) do
-    execute_company_update(company, %{
-      status: "active",
-      paused_at: nil,
-      paused_reason: nil
-    })
+    case execute_company_update(company, %{
+           status: "active",
+           paused_at: nil,
+           paused_reason: nil
+         }) do
+      {:ok, updated} = result ->
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.id}:company",
+          {:company_resumed, updated}
+        )
+
+        result
+
+      error ->
+        error
+    end
   end
 
   def active?(%Company{status: "active"}), do: true
