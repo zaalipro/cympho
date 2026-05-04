@@ -242,7 +242,14 @@ defmodule Cympho.Orchestrator do
   def handle_info(:heartbeat_tick, %__MODULE__{run_id: run_id} = session) when run_id != nil do
     record_heartbeat(session)
     schedule_heartbeat_tick()
-    {:noreply, session}
+    case check_company_status(session) do
+      :ok -> {:noreply, session}
+      {:stop, :company_paused} ->
+        create_agent_comment(session.issue, session.agent_id, "Session stopped: company paused.")
+        release_issue_after_adapter_error(session.issue)
+        set_agent_idle(session.agent_id)
+        {:stop, :normal, session}
+    end
   end
 
   def handle_info(:heartbeat_tick, session) do
@@ -569,6 +576,16 @@ defmodule Cympho.Orchestrator do
 
   defp schedule_heartbeat_tick do
     Process.send_after(self(), :heartbeat_tick, @heartbeat_tick_interval)
+  end
+
+  defp check_company_status(%__MODULE__{issue: %Issue{company_id: nil}}), do: :ok
+  defp check_company_status(%__MODULE__{issue: %Issue{company_id: company_id}}) do
+    case Cympho.Companies.get_company!(company_id) do
+      %{status: "active"} -> :ok
+      _ -> {:stop, :company_paused}
+    end
+  rescue
+    Ecto.NoResultsError -> {:stop, :company_paused}
   end
 
   ## Private — original helpers
