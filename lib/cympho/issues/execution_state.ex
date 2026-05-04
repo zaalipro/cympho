@@ -214,7 +214,10 @@ defmodule Cympho.Issues.ExecutionState do
   falling back to the current participant.
   """
   @spec original_executor(t()) :: binary() | nil
-  def original_executor(%{return_assignee: assignee}) when is_binary(assignee), do: assignee
+  def original_executor(%{history: [first | _]}) do
+    first.participant
+  end
+
   def original_executor(%{current_participant: participant}), do: participant
   def original_executor(_), do: nil
 
