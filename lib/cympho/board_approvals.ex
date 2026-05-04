@@ -8,6 +8,7 @@ defmodule Cympho.BoardApprovals do
   alias Cympho.BoardApprovals.{BoardApproval, BoardApprovalVote}
   alias Cympho.GovernanceAuditLogs
   alias Cympho.Decisions
+  alias Cympho.AuditTrail.Instrumenter
 
   @nil_uuid "00000000-0000-0000-0000-000000000000"
 
@@ -118,6 +119,14 @@ defmodule Cympho.BoardApprovals do
             vote: vote,
             board_approval_id: board_approval_id
           }
+        )
+
+        # Record audit event for board vote
+        _ = Instrumenter.record_board_vote(
+          board_approval,
+          vote,
+          "user",
+          user_id
         )
 
         Phoenix.PubSub.broadcast(

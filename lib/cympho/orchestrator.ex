@@ -43,7 +43,8 @@ defmodule Cympho.Orchestrator do
     HeartbeatEngine,
     AgentAdapters,
     AgentActions,
-    Runtime
+    Runtime,
+    AuditTrail.Instrumenter
   }
 
   alias Cympho.Issues.Issue
@@ -156,6 +157,7 @@ defmodule Cympho.Orchestrator do
 
   @impl true
   def handle_info({:session_started, session_id}, %__MODULE__{} = session) do
+    _ = Instrumenter.record_session_event(session, "started")
     {:noreply, %{session | session_id: session_id}}
   end
 
@@ -166,6 +168,15 @@ defmodule Cympho.Orchestrator do
 
     {updated_tool_traces, _trace_id} =
       capture_tool_call(tool_call, issue, agent_id, session.tool_traces)
+
+    # Record tool call
+    _ =
+      Instrumenter.record_tool_call(
+        session,
+        tool_call["name"],
+        tool_call["input"] || %{},
+        "[in_progress]"
+      )
 
     {:noreply, %{session | turn_count: session.turn_count + 1, tool_traces: updated_tool_traces}}
   end
@@ -179,6 +190,12 @@ defmodule Cympho.Orchestrator do
     updated_tool_traces = process_tool_results(result, session.tool_traces)
 
     complete_engine_run(%{session | tool_traces: updated_tool_traces}, result)
+
+    # Record session completion
+    _ =
+      Instrumenter.record_session_event(session, "completed", %{
+        "turn_count" => session.turn_count + 1
+      })
 
     body = extract_result_content(result)
 
@@ -242,10 +259,22 @@ defmodule Cympho.Orchestrator do
   def handle_info(:heartbeat_tick, %__MODULE__{run_id: run_id} = session) when run_id != nil do
     record_heartbeat(session)
     schedule_heartbeat_tick()
+
     case check_company_status(session) do
-      :ok -> {:noreply, session}
+      :ok ->
+        {:noreply, session}
+
       {:stop, :company_paused} ->
-        create_agent_comment(session.issue, session.agent_id, "Session stopped: company paused.")
+        :logger.warning(
+          "[Orchestrator] Company paused during active session for issue #{session.issue.id}, stopping gracefully"
+        )
+
+        create_agent_comment(
+          session.issue,
+          session.agent_id,
+          "Session stopped: company was paused. Issue released for re-dispatch when company resumes."
+        )
+
         release_issue_after_adapter_error(session.issue)
         set_agent_idle(session.agent_id)
         {:stop, :normal, session}
@@ -579,6 +608,7 @@ defmodule Cympho.Orchestrator do
   end
 
   defp check_company_status(%__MODULE__{issue: %Issue{company_id: nil}}), do: :ok
+
   defp check_company_status(%__MODULE__{issue: %Issue{company_id: company_id}}) do
     case Cympho.Companies.get_company!(company_id) do
       %{status: "active"} -> :ok

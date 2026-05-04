@@ -210,8 +210,7 @@ defmodule Cympho.Issues.ExecutionState do
   def stage_complete?(_), do: false
 
   @doc """
-  Returns the original executor — the return_assignee when available,
-  falling back to the current participant.
+  Returns the original executor from history, falling back to current participant.
   """
   @spec original_executor(t()) :: binary() | nil
   def original_executor(%{history: [first | _]}) do
