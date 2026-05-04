@@ -181,8 +181,219 @@ defmodule Cympho.Companies do
   The template creates a company, one project, one top-level company goal, a CEO,
   CTO, and engineers reporting through the CTO, then queues the CEO's first
   strategy issue. It is intentionally local-trusted: no user account is required.
+
+  Optionally loads from a pre-built template by template_id when :template_id is provided.
   """
   def create_autonomous_company(attrs \\ %{}) do
+    template_id = attrs[:template_id] || attrs["template_id"]
+
+    if template_id do
+      create_company_from_template(template_id, attrs)
+    else
+      do_create_autonomous_company(attrs)
+    end
+  end
+
+  defp create_company_from_template(template_id, attrs) do
+    template_path = template_file_path(template_id)
+
+    if template_path && File.exists?(template_path) do
+      {:ok, template_data} = Jason.decode(File.read!(template_path))
+
+      template_data
+      |> Map.get("company", %{})
+      |> Map.merge(%{
+        "name" => attrs[:name] || attrs["name"] || Map.get(template_data["company"] || %{}, "name", "Company"),
+        "slug" => nil,
+        "issue_prefix" => attrs[:issue_prefix] || attrs["issue_prefix"] || Map.get(template_data["company"] || %{}, "issue_prefix", "LLM")
+      })
+      |> Map.delete("id")
+      |> create_autonomous_company_from_template(template_data, Map.delete(attrs, :goal_title) |> Map.delete("goal_title"))
+    else
+      do_create_autonomous_company(attrs)
+    end
+  end
+
+  defp template_file_path(template_id) do
+    :cympho
+    |> :code.priv_dir()
+    |> Path.join("repo/seeds/templates/#{template_id}.json")
+  end
+
+  defp create_autonomous_company_from_template(company_attrs, template_data, attrs) do
+    Repo.transaction(fn ->
+      company =
+        %Company{}
+        |> Company.changeset(%{
+          name: company_attrs["name"],
+          slug: unique_slug(company_attrs["name"]),
+          description: Map.get(company_attrs, "description", ""),
+          status: Map.get(company_attrs, "status", "active"),
+          issue_prefix: company_attrs["issue_prefix"],
+          issue_counter: 1,
+          budget_monthly_cents: Map.get(company_attrs, "budget_monthly_cents", 0),
+          require_board_approval_for_new_agents: Map.get(company_attrs, "require_board_approval_for_new_agents", false),
+          governance_config: Map.get(company_attrs, "governance_config", %{}),
+          brand_color: Map.get(company_attrs, "brand_color", "#5e6ad2")
+        })
+        |> Repo.insert!()
+
+      project =
+        %Project{}
+        |> Project.changeset(%{
+          company_id: company.id,
+          name: "Company OS",
+          description: "Default operating project.",
+          prefix: company_attrs["issue_prefix"],
+          status: :active,
+          settings: %{"wip_limits" => %{"in_progress" => 5}}
+        })
+        |> Repo.insert!()
+
+      goal =
+        %Goal{}
+        |> Goal.changeset(%{
+          company_id: company.id,
+          project_id: project.id,
+          title: attrs[:goal_title] || attrs["goal_title"] || "Company Goal",
+          description: "Top-level company objective.",
+          priority: "critical",
+          status: "active"
+        })
+        |> Repo.insert!()
+
+      # Create agents from template
+      template_agents = Map.get(template_data, "agents", [])
+      agents = create_template_agents_from_template(template_agents, company.id, project.id)
+
+      # Create labels
+      template_labels = Map.get(template_data, "labels", [])
+      label_id_map = create_labels_from_template(template_labels, company.id)
+
+      # Create issues from template
+      template_issues = Map.get(template_data, "issues", [])
+      seed_issues = create_issues_from_template(template_issues, company.id, project.id, goal.id, agents, label_id_map, company_attrs["issue_prefix"])
+
+      %{
+        company: company,
+        project: project,
+        goal: goal,
+        agents: agents,
+        seed_issues: seed_issues
+      }
+    end)
+  end
+
+  defp create_template_agents_from_template(template_agents, company_id, project_id) do
+    Enum.map(template_agents, fn agent_data ->
+      agent =
+        %Agent{}
+        |> Agent.changeset(%{
+          company_id: company_id,
+          project_id: project_id,
+          name: agent_data["name"],
+          title: Map.get(agent_data, "title"),
+          role: normalize_role(Map.get(agent_data, "role", :engineer)),
+          adapter: normalize_adapter(Map.get(agent_data, "adapter", :codex)),
+          url_key: Map.get(agent_data, "url_key") || agent_data["name"] |> String.downcase() |> String.replace(" ", "-"),
+          max_concurrent_jobs: Map.get(agent_data, "max_concurrent_jobs", 1),
+          capabilities: Map.get(agent_data, "capabilities", %{}),
+          instructions: Map.get(agent_data, "instructions", ""),
+          status: :idle,
+          context_mode: Map.get(agent_data, "context_mode", "company"),
+          runtime_config: Map.get(agent_data, "runtime_config", %{"autonomous" => true})
+        })
+        |> Repo.insert!()
+
+      agent
+    end)
+  end
+
+  defp normalize_role(role) when is_binary(role) do
+    String.to_existing_atom(role)
+  rescue
+    ArgumentError -> :engineer
+  end
+
+  defp normalize_role(role) when is_atom(role), do: role
+
+  defp create_labels_from_template(template_labels, company_id) do
+    Enum.reduce(template_labels, %{}, fn label_data, acc ->
+      label =
+        %Cympho.Labels.Label{}
+        |> Cympho.Labels.Label.changeset(%{
+          company_id: company_id,
+          name: label_data["name"],
+          color: Map.get(label_data, "color", "#6B7280"),
+          description: Map.get(label_data, "description")
+        })
+        |> Repo.insert!()
+
+      Map.put(acc, label_data["name"], label.id)
+    end)
+  end
+
+  defp create_issues_from_template(template_issues, company_id, project_id, goal_id, agents, label_id_map, prefix) do
+    agent_by_role = Enum.group_by(agents, &to_string(&1.role))
+
+    template_issues
+    |> Enum.with_index(1)
+    |> Enum.map(fn {issue_data, idx} ->
+      assignee = find_assignee(issue_data, agents, agent_by_role)
+      label_ids = Enum.map(List.wrap(issue_data["labels"] || []), fn name -> Map.get(label_id_map, name) end) |> Enum.filter(& &1)
+
+      issue =
+        %Issue{}
+        |> Issue.changeset(%{
+          company_id: company_id,
+          project_id: project_id,
+          goal_id: goal_id,
+          assignee_id: assignee && assignee.id,
+          issue_number: idx,
+          identifier: "#{prefix}-#{idx}",
+          title: issue_data["title"],
+          description: Map.get(issue_data, "description", ""),
+          status: :todo,
+          priority: normalize_priority(Map.get(issue_data, "priority", "medium")),
+          assigned_role: issue_data["assigned_role"],
+          origin_type: "onboarding",
+          request_depth: 0
+        })
+        |> Repo.insert!()
+
+      if length(label_ids) > 0 do
+        issue
+        |> Repo.preload(:labels)
+        |> Issue.changeset(%{})
+        |> Ecto.Changeset.put_assoc(:labels, Repo.all(from l in Cympho.Labels.Label, where: l.id in ^label_ids))
+        |> Repo.update()
+      end
+
+      issue
+    end)
+  end
+
+  defp find_assignee(issue_data, agents, agent_by_role) do
+    assigned_role = issue_data["assigned_role"]
+
+    cond do
+      assigned_role && Map.has_key?(agent_by_role, assigned_role) ->
+        List.first(Map.get(agent_by_role, assigned_role))
+
+      true ->
+        List.first(agents)
+    end
+  end
+
+  defp normalize_priority(priority) when is_binary(priority) do
+    String.to_existing_atom(priority)
+  rescue
+    ArgumentError -> :medium
+  end
+
+  defp normalize_priority(priority) when is_atom(priority), do: priority
+
+  defp do_create_autonomous_company(attrs) do
     name = attrs[:name] || attrs["name"] || "Autonomous Software Company"
 
     goal_title =
@@ -702,6 +913,10 @@ defmodule Cympho.Companies do
       issues: export_issues(company_id),
       goals: export_goals(company_id),
       labels: export_labels(company_id),
+      execution_policies: export_execution_policies(),
+      skills: export_skills(company_id),
+      routines: export_routines(company_id),
+      workspace_configs: export_workspace_configs(company_id),
       exported_at: DateTime.utc_now() |> DateTime.to_iso8601(),
       version: 1
     }
@@ -748,6 +963,64 @@ defmodule Cympho.Companies do
 
   defp export_labels(company_id) do
     list_company_labels(company_id)
+    |> Enum.map(&scrub/1)
+  end
+
+  defp export_execution_policies do
+    Cympho.ExecutionPolicies.list_execution_policies()
+    |> Enum.map(&scrub/1)
+  end
+
+  defp export_skills(company_id) do
+    agent_ids = list_company_agents(company_id) |> Enum.map(& &1.id)
+
+    agent_skills =
+      from(as in Cympho.Skills.AgentSkill,
+        where: as.agent_id in ^agent_ids,
+        preload: [:agent, :plugin]
+      )
+      |> Repo.all()
+      |> Enum.map(fn as ->
+        %{
+          agent_id: as.agent_id,
+          agent_url_key: as.agent && as.agent.url_key,
+          plugin_identifier: as.plugin && as.plugin.identifier,
+          locked_version: as.locked_version
+        }
+      end)
+
+    %{agent_skills: agent_skills, plugins: export_plugins()}
+  end
+
+  defp export_plugins do
+    from(p in Cympho.Plugins.Plugin, where: p.status == "installed")
+    |> Repo.all()
+    |> Enum.map(&scrub/1)
+  end
+
+  defp export_routines(company_id) do
+    agent_ids = list_company_agents(company_id) |> Enum.map(& &1.id)
+
+    routines =
+      from(r in Cympho.Routines.Routine,
+        where: r.agent_id in ^agent_ids,
+        preload: [triggers: [:routine]]
+      )
+      |> Repo.all()
+      |> Enum.map(fn routine ->
+        routine
+        |> scrub()
+        |> Map.put(:triggers, Enum.map(routine.triggers, &scrub/1))
+      end)
+
+    routines
+  end
+
+  defp export_workspace_configs(company_id) do
+    from(pw in Cympho.Workspaces.ProjectWorkspace,
+      where: pw.company_id == ^company_id
+    )
+    |> Repo.all()
     |> Enum.map(&scrub/1)
   end
 
@@ -824,6 +1097,23 @@ defmodule Cympho.Companies do
           label_id_map
         )
 
+      # Import execution policies
+      import_execution_policies(Map.get(data, :execution_policies, []))
+
+      # Import plugins and skills
+      {plugin_id_map, _} = import_plugins_and_skills(Map.get(data, :skills, %{}), agent_id_map, company.id)
+
+      # Import routines
+      import_routines(
+        Map.get(data, :routines, []),
+        company.id,
+        agent_id_map,
+        project_id_map
+      )
+
+      # Import workspace configs
+      import_workspace_configs(Map.get(data, :workspace_configs, []), company.id, project_id_map)
+
       %{
         company: company,
         id_maps: %{
@@ -831,7 +1121,8 @@ defmodule Cympho.Companies do
           agents: agent_id_map,
           issues: issue_id_map,
           labels: label_id_map,
-          users: user_id_map
+          users: user_id_map,
+          plugins: plugin_id_map
         }
       }
     end)
@@ -1153,6 +1444,173 @@ defmodule Cympho.Companies do
       id_map when is_map(id_map) ->
         id_map
     end
+  end
+
+  # Execution policies are global; import by name match or create if new
+  defp import_execution_policies(policies) do
+    Enum.each(policies, fn policy_data ->
+      existing =
+        Repo.all(from p in Cympho.ExecutionPolicies.ExecutionPolicy, where: p.name == ^policy_data.name)
+        |> List.first()
+
+      if is_nil(existing) do
+        attrs = %{
+          name: policy_data.name,
+          stage_configs: Map.get(policy_data, :stage_configs, [])
+        }
+
+        Repo.insert(%Cympho.ExecutionPolicies.ExecutionPolicy{} |> Cympho.ExecutionPolicies.ExecutionPolicy.changeset(attrs))
+      end
+    end)
+  end
+
+  # Returns {plugin_id_map, agent_skill_results}
+  defp import_plugins_and_skills(%{plugins: plugins, agent_skills: agent_skills}, agent_id_map, company_id) do
+    # First import plugins scoped to company
+    plugin_id_map =
+      Enum.reduce(plugins, %{}, fn plugin_data, acc ->
+        existing =
+          Repo.one(from p in Cympho.Plugins.Plugin,
+            where: p.identifier == ^plugin_data.identifier and p.company_id == ^company_id,
+            limit: 1)
+          |> case do
+            nil ->
+              attrs = %{
+                identifier: plugin_data.identifier,
+                version: Map.get(plugin_data, :version),
+                name: Map.get(plugin_data, :name),
+                description: Map.get(plugin_data, :description),
+                author: Map.get(plugin_data, :author),
+                manifest: Map.get(plugin_data, :manifest, %{}),
+                capabilities: Map.get(plugin_data, :capabilities, []),
+                enabled: Map.get(plugin_data, :enabled, true),
+                settings: Map.get(plugin_data, :settings, %{}),
+                company_id: company_id
+              }
+
+              case Repo.insert(%Cympho.Plugins.Plugin{} |> Cympho.Plugins.Plugin.changeset(attrs)) do
+                {:ok, plugin} -> plugin
+                {:error, _} -> nil
+              end
+
+            plugin ->
+              plugin
+          end
+
+        if existing do
+          Map.put(acc, Map.get(plugin_data, :id), existing.id)
+        else
+          acc
+        end
+      end)
+
+    # Then import agent_skills
+    Enum.each(agent_skills, fn as_data ->
+      new_agent_id = Map.get(agent_id_map, Map.get(as_data, :agent_id))
+
+      plugin_identifier = Map.get(as_data, :plugin_identifier)
+
+      plugin =
+        if plugin_identifier do
+          Repo.one(from p in Cympho.Plugins.Plugin,
+            where: p.identifier == ^plugin_identifier and p.company_id == ^company_id,
+            limit: 1)
+        else
+          nil
+        end
+
+      if new_agent_id && plugin do
+        attrs = %{
+          agent_id: new_agent_id,
+          plugin_id: plugin.id,
+          locked_version: Map.get(as_data, :locked_version)
+        }
+
+        case Repo.insert(%Cympho.Skills.AgentSkill{} |> Cympho.Skills.AgentSkill.changeset(attrs)) do
+          {:ok, _} -> :ok
+          {:error, _} -> :ok
+        end
+      end
+    end)
+
+    {plugin_id_map, :ok}
+  end
+
+  defp import_routines(routines, _company_id, agent_id_map, project_id_map) do
+    Enum.each(routines, fn routine_data ->
+      new_agent_id = remap_id(agent_id_map, Map.get(routine_data, :agent_id))
+      new_project_id = remap_id(project_id_map, Map.get(routine_data, :project_id))
+
+      attrs = %{
+        name: routine_data.name,
+        description: Map.get(routine_data, :description),
+        status: Map.get(routine_data, :status, :active),
+        concurrency_policy: Map.get(routine_data, :concurrency_policy, :coalesce_if_active),
+        catch_up_policy: Map.get(routine_data, :catch_up_policy, :skip_missed),
+        catch_up_cap: Map.get(routine_data, :catch_up_cap, 5),
+        priority: Map.get(routine_data, :priority, :medium),
+        agent_id: new_agent_id,
+        project_id: new_project_id
+      }
+
+      case Repo.insert(%Cympho.Routines.Routine{} |> Cympho.Routines.Routine.changeset(attrs)) do
+        {:ok, routine} ->
+          # Import triggers
+          triggers = Map.get(routine_data, :triggers, [])
+          import_routine_triggers(triggers, routine.id)
+
+        {:error, _} ->
+          :ok
+      end
+    end)
+  end
+
+  defp import_routine_triggers(triggers, routine_id) do
+    Enum.each(triggers, fn trigger_data ->
+      attrs = %{
+        type: trigger_data.type,
+        cron_expression: Map.get(trigger_data, :cron_expression),
+        public_id: Map.get(trigger_data, :public_id),
+        secret_hash: Map.get(trigger_data, :secret_hash),
+        enabled: Map.get(trigger_data, :enabled, true),
+        routine_id: routine_id
+      }
+
+      case Repo.insert(%Cympho.RoutineTriggers.RoutineTrigger{} |> Cympho.RoutineTriggers.RoutineTrigger.changeset(attrs)) do
+        {:ok, _} -> :ok
+        {:error, _} -> :ok
+      end
+    end)
+  end
+
+  defp import_workspace_configs(configs, company_id, project_id_map) do
+    Enum.each(configs, fn config_data ->
+      new_project_id = remap_id(project_id_map, Map.get(config_data, :project_id))
+
+      attrs = %{
+        name: config_data.name,
+        cwd: Map.get(config_data, :cwd),
+        repo_url: Map.get(config_data, :repo_url),
+        repo_ref: Map.get(config_data, :repo_ref),
+        default_ref: Map.get(config_data, :default_ref),
+        metadata: Map.get(config_data, :metadata, %{}),
+        is_primary: Map.get(config_data, :is_primary, false),
+        source_type: Map.get(config_data, :source_type),
+        visibility: Map.get(config_data, :visibility),
+        setup_command: Map.get(config_data, :setup_command),
+        cleanup_command: Map.get(config_data, :cleanup_command),
+        remote_provider: Map.get(config_data, :remote_provider),
+        remote_workspace_ref: Map.get(config_data, :remote_workspace_ref),
+        shared_workspace_key: Map.get(config_data, :shared_workspace_key),
+        company_id: company_id,
+        project_id: new_project_id
+      }
+
+      case Repo.insert(%Cympho.Workspaces.ProjectWorkspace{} |> Cympho.Workspaces.ProjectWorkspace.changeset(attrs)) do
+        {:ok, _} -> :ok
+        {:error, _} -> :ok
+      end
+    end)
   end
 
   defp remap_id(_map, nil), do: nil

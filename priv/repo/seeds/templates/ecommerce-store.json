@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "template": {
+    "name": "E-commerce Store",
+    "description": "A vertically-integrated e-commerce company handling product development, supply chain, and retail operations.",
+    "categories": ["ecommerce", "retail", "operations"]
+  },
+  "company": {
+    "name": "CommerceOps",
+    "slug": "commerceops",
+    "description": "A modern e-commerce company with vertically-integrated operations.",
+    "status": "active",
+    "issue_prefix": "EC",
+    "issue_counter": 1,
+    "budget_monthly_cents": 600000,
+    "require_board_approval_for_new_agents": false,
+    "governance_config": {
+      "autonomy_mode": "autonomous_default",
+      "approval_gates": ["budget_override", "dangerous_runtime_action"]
+    },
+    "brand_color": "#10b981"
+  },
+  "projects": [
+    {
+      "name": "Product",
+      "description": "Product development and sourcing",
+      "prefix": "PRD",
+      "status": "active",
+      "settings": {"wip_limits": {"in_progress": 5}}
+    },
+    {
+      "name": "Operations",
+      "description": "Supply chain and fulfillment",
+      "prefix": "OPS",
+      "status": "active",
+      "settings": {"wip_limits": {"in_progress": 4}}
+    },
+    {
+      "name": "Marketing",
+      "description": "Customer acquisition and retention",
+      "prefix": "MKT",
+      "status": "active",
+      "settings": {"wip_limits": {"in_progress": 4}}
+    }
+  ],
+  "goals": [
+    {
+      "title": "Build a profitable e-commerce brand",
+      "description": "Create a vertically-integrated e-commerce operation with healthy margins and loyal customers.",
+      "priority": "critical",
+      "status": "active"
+    },
+    {
+      "title": "Launch the first product line",
+      "description": "Source, brand, and launch the first product line with initial customers.",
+      "priority": "critical",
+      "status": "active"
+    }
+  ],
+  "agents": [
+    {
+      "name": "CEO",
+      "title": "Chief Executive Officer",
+      "role": "ceo",
+      "url_key": "ceo",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"strategy": true, "planning": true, "budgeting": true, "hiring": true},
+      "instructions": "Own the company goal, break strategy into goals and issues, delegate through the CTO, and keep the company running without waiting for humans unless a configured governance gate is hit.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "CTO",
+      "title": "Chief Operating Officer",
+      "role": "cto",
+      "url_key": "cto",
+      "max_concurrent_jobs": 2,
+      "capabilities": {"architecture": true, "review": true, "triage": true, "operations": true},
+      "instructions": "Translate CEO strategy into operational plans, manage supply chain and fulfillment, and maintain operational excellence.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "Engineer 1",
+      "title": "Full-Stack Engineer",
+      "role": "engineer",
+      "url_key": "engineer-1",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"implementation": true, "testing": true, "debugging": true},
+      "instructions": "Implement assigned issues end to end, leave comments with results, and surface blockers explicitly.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "Head of Product",
+      "title": "Head of Product",
+      "role": "product",
+      "url_key": "head-of-product",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"product": true, "research": true, "planning": true},
+      "instructions": "Drive product strategy, identify and evaluate product opportunities, and work with suppliers and engineers.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "Head of Marketing",
+      "title": "Head of Marketing",
+      "role": "marketing",
+      "url_key": "head-of-marketing",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"marketing": true, "seo": true, "content": true},
+      "instructions": "Build brand awareness, drive customer acquisition through digital marketing, and manage customer retention programs.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    }
+  ],
+  "issues": [
+    {
+      "title": "Research and select first product category",
+      "description": "Analyze market opportunities, competitor products, and supplier landscape to identify the best first product category.",
+      "status": "todo",
+      "priority": "critical",
+      "assigned_role": "head-of-product"
+    },
+    {
+      "title": "Set up the e-commerce platform",
+      "description": "Evaluate Shopify, WooCommerce, or custom solution, and configure the storefront with payments and shipping.",
+      "status": "todo",
+      "priority": "high",
+      "assigned_role": "cto"
+    },
+    {
+      "title": "Source and vet first supplier",
+      "description": "Identify potential suppliers, negotiate terms, and set up the initial supply chain relationship.",
+      "status": "todo",
+      "priority": "high",
+      "assigned_role": "head-of-product"
+    },
+    {
+      "title": "Design brand identity and product packaging",
+      "description": "Create the brand visual identity, logo, and packaging design for the first product line.",
+      "status": "todo",
+      "priority": "medium",
+      "assigned_role": "head-of-product"
+    },
+    {
+      "title": "Launch paid acquisition campaigns",
+      "description": "Set up and launch initial paid search and social media campaigns to drive first customers.",
+      "status": "todo",
+      "priority": "medium",
+      "assigned_role": "head-of-marketing"
+    }
+  ],
+  "labels": [
+    {"name": "bug", "color": "#ef4444", "description": "Something broken"},
+    {"name": "product", "color": "#3b82f6", "description": "Product development"},
+    {"name": "operations", "color": "#8b5cf6", "description": "Operations and logistics"},
+    {"name": "marketing", "color": "#22c55e", "description": "Marketing tasks"}
+  ],
+  "execution_policies": [],
+  "skills": {"plugins": [], "agent_skills": []},
+  "routines": [],
+  "workspace_configs": []
+}

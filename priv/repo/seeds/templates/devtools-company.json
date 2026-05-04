@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "template": {
+    "name": "DevTools Company",
+    "description": "A developer tools company building CLI tools, libraries, and infrastructure for software engineers.",
+    "categories": ["devtools", "infrastructure", "open-source"]
+  },
+  "company": {
+    "name": "DevTools Inc",
+    "slug": "devtools",
+    "description": "Building the tools developers love.",
+    "status": "active",
+    "issue_prefix": "DT",
+    "issue_counter": 1,
+    "budget_monthly_cents": 400000,
+    "require_board_approval_for_new_agents": false,
+    "governance_config": {
+      "autonomy_mode": "autonomous_default",
+      "approval_gates": ["budget_override", "dangerous_runtime_action"]
+    },
+    "brand_color": "#8b5cf6"
+  },
+  "projects": [
+    {
+      "name": "Core Product",
+      "description": "Main developer tools product",
+      "prefix": "DT",
+      "status": "active",
+      "settings": {"wip_limits": {"in_progress": 4}}
+    },
+    {
+      "name": "Developer Experience",
+      "description": "Improving internal tooling and developer productivity",
+      "prefix": "DX",
+      "status": "active",
+      "settings": {"wip_limits": {"in_progress": 3}}
+    }
+  ],
+  "goals": [
+    {
+      "title": "Build developer tools that scale",
+      "description": "Create best-in-class developer tools used by thousands of engineers worldwide.",
+      "priority": "critical",
+      "status": "active"
+    },
+    {
+      "title": "Ship a production-ready CLI tool",
+      "description": "Design, build, and release a CLI tool with excellent developer experience.",
+      "priority": "critical",
+      "status": "active"
+    }
+  ],
+  "agents": [
+    {
+      "name": "CEO",
+      "title": "Chief Executive Officer",
+      "role": "ceo",
+      "url_key": "ceo",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"strategy": true, "planning": true, "budgeting": true, "hiring": true},
+      "instructions": "Own the company goal, break strategy into goals and issues, delegate through the CTO, and keep the company running without waiting for humans unless a configured governance gate is hit.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "CTO",
+      "title": "Chief Technology Officer",
+      "role": "cto",
+      "url_key": "cto",
+      "max_concurrent_jobs": 2,
+      "capabilities": {"architecture": true, "review": true, "triage": true, "technical_planning": true},
+      "instructions": "Translate CEO strategy into technical plans, review engineering work, unblock engineers, and maintain execution quality.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "Engineer 1",
+      "title": "Senior Software Engineer",
+      "role": "engineer",
+      "url_key": "engineer-1",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"implementation": true, "testing": true, "debugging": true},
+      "instructions": "Implement assigned issues end to end, leave comments with results, and surface blockers explicitly.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "Engineer 2",
+      "title": "Software Engineer",
+      "role": "engineer",
+      "url_key": "engineer-2",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"implementation": true, "testing": true, "debugging": true},
+      "instructions": "Implement assigned issues end to end, leave comments with results, and surface blockers explicitly.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "DevRel",
+      "title": "Developer Relations Engineer",
+      "role": "devrel",
+      "url_key": "devrel",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"documentation": true, "community": true, "examples": true},
+      "instructions": "Build developer community, create documentation and examples, and represent the company at conferences and online.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    }
+  ],
+  "issues": [
+    {
+      "title": "Design the CLI tool architecture",
+      "description": "Research best practices for CLI design, define the command structure, and design the plugin system.",
+      "status": "todo",
+      "priority": "critical",
+      "assigned_role": "cto"
+    },
+    {
+      "title": "Set up the monorepo and build system",
+      "description": "Establish the repository structure, build tooling, testing framework, and release automation.",
+      "status": "todo",
+      "priority": "high",
+      "assigned_role": "cto"
+    },
+    {
+      "title": "Implement the core CLI commands",
+      "description": "Build the initial set of commands: init, build, test, and deploy.",
+      "status": "todo",
+      "priority": "high",
+      "assigned_role": "engineer"
+    },
+    {
+      "title": "Write the getting started guide",
+      "description": "Create a comprehensive getting started guide with installation, configuration, and first commands.",
+      "status": "todo",
+      "priority": "medium",
+      "assigned_role": "devrel"
+    }
+  ],
+  "labels": [
+    {"name": "bug", "color": "#ef4444", "description": "Something isn't working"},
+    {"name": "enhancement", "color": "#22c55e", "description": "Improvement to existing feature"},
+    {"name": "documentation", "color": "#3b82f6", "description": "Docs and guides"},
+    {"name": "performance", "color": "#f97316", "description": "Performance improvement"}
+  ],
+  "execution_policies": [],
+  "skills": {"plugins": [], "agent_skills": []},
+  "routines": [],
+  "workspace_configs": []
+}

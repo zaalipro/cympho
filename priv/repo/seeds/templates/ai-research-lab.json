@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "template": {
+    "name": "AI Research Lab",
+    "description": "An AI research organization conducting fundamental and applied research in machine learning.",
+    "categories": ["ai", "research", "ml", "science"]
+  },
+  "company": {
+    "name": "AI Research Lab",
+    "slug": "ai-research",
+    "description": "Advancing the frontier of artificial intelligence through rigorous research.",
+    "status": "active",
+    "issue_prefix": "RL",
+    "issue_counter": 1,
+    "budget_monthly_cents": 800000,
+    "require_board_approval_for_new_agents": true,
+    "governance_config": {
+      "autonomy_mode": "autonomous_default",
+      "approval_gates": ["budget_override", "dangerous_runtime_action", "hire_agent"]
+    },
+    "brand_color": "#06b6d4"
+  },
+  "projects": [
+    {
+      "name": "Core Research",
+      "description": "Fundamental ML research",
+      "prefix": "RES",
+      "status": "active",
+      "settings": {"wip_limits": {"in_progress": 3}}
+    },
+    {
+      "name": "Applied ML",
+      "description": "Applied research with practical applications",
+      "prefix": "APP",
+      "status": "active",
+      "settings": {"wip_limits": {"in_progress": 4}}
+    }
+  ],
+  "goals": [
+    {
+      "title": "Advance the state of AI research",
+      "description": "Conduct groundbreaking research that advances the field of artificial intelligence.",
+      "priority": "critical",
+      "status": "active"
+    },
+    {
+      "title": "Publish 5 papers in top-tier venues",
+      "description": "Produce rigorous, reproducible research published at NeurIPS, ICML, or similar.",
+      "priority": "high",
+      "status": "active"
+    }
+  ],
+  "agents": [
+    {
+      "name": "CEO",
+      "title": "Chief Executive Officer",
+      "role": "ceo",
+      "url_key": "ceo",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"strategy": true, "planning": true, "budgeting": true, "hiring": true},
+      "instructions": "Own the company goal, break strategy into goals and issues, delegate through the CTO, and keep the company running without waiting for humans unless a configured governance gate is hit.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "CTO",
+      "title": "Chief Research Officer",
+      "role": "cto",
+      "url_key": "cto",
+      "max_concurrent_jobs": 2,
+      "capabilities": {"architecture": true, "review": true, "triage": true, "technical_planning": true},
+      "instructions": "Lead the research direction, review papers and experiments, and maintain scientific rigor across all work.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "Research Scientist 1",
+      "title": "Research Scientist",
+      "role": "engineer",
+      "url_key": "research-scientist-1",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"implementation": true, "testing": true, "research": true},
+      "instructions": "Design and execute ML experiments, analyze results rigorously, and document findings in papers and reports.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "Research Engineer",
+      "title": "Research Engineer",
+      "role": "engineer",
+      "url_key": "research-engineer",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"implementation": true, "testing": true, "debugging": true},
+      "instructions": "Build research infrastructure, implement ML pipelines, and support experiments with robust tooling.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "MLOps Engineer",
+      "title": "MLOps Engineer",
+      "role": "engineer",
+      "url_key": "mlops-engineer",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"implementation": true, "infrastructure": true, "debugging": true},
+      "instructions": "Manage compute infrastructure, maintain experiment tracking, and ensure reproducible ML workflows.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    }
+  ],
+  "issues": [
+    {
+      "title": "Define the research agenda for Q1",
+      "description": "Survey the literature, identify promising research directions, and create a prioritized research plan.",
+      "status": "todo",
+      "priority": "critical",
+      "assigned_role": "cto"
+    },
+    {
+      "title": "Set up experiment tracking infrastructure",
+      "description": "Deploy Weights & Biases or similar, configure experiment logging, and document best practices.",
+      "status": "todo",
+      "priority": "high",
+      "assigned_role": "mlops-engineer"
+    },
+    {
+      "title": "Reproduce baseline results from published paper",
+      "description": "Select a relevant recent paper and reproduce its main results as a foundation for new research.",
+      "status": "todo",
+      "priority": "high",
+      "assigned_role": "research-scientist"
+    },
+    {
+      "title": "Build the data processing pipeline",
+      "description": "Design and implement a robust data processing pipeline for the research dataset.",
+      "status": "todo",
+      "priority": "high",
+      "assigned_role": "research-engineer"
+    }
+  ],
+  "labels": [
+    {"name": "research", "color": "#3b82f6", "description": "Research tasks"},
+    {"name": "infrastructure", "color": "#8b5cf6", "description": "Infrastructure work"},
+    {"name": "paper", "color": "#22c55e", "description": "Paper writing"},
+    {"name": "experiment", "color": "#f97316", "description": "ML experiments"}
+  ],
+  "execution_policies": [],
+  "skills": {"plugins": [], "agent_skills": []},
+  "routines": [],
+  "workspace_configs": []
+}

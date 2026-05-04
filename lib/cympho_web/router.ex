@@ -56,6 +56,7 @@ defmodule CymphoWeb.Router do
       live "/routines/:id", RoutineLive.Show
       live "/routines/:id/edit", RoutineLive.Edit
       live "/onboarding", OnboardingLive.Index
+      live "/onboarding/import", CompanyImportLive
       live "/settings", SettingsLive.Index
       live "/execution-policies", ExecutionPolicyLive.Index
       live "/execution-policies/new", ExecutionPolicyLive.New

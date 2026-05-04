@@ -2,11 +2,54 @@ defmodule CymphoWeb.OnboardingLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Companies
 
+  @templates [
+    %{
+      id: "saas-startup",
+      name: "SaaS Startup",
+      description: "B2B SaaS company with CEO, CTO, engineers, and marketing team.",
+      icon: "🚀",
+      color: "#5e6ad2"
+    },
+    %{
+      id: "devtools-company",
+      name: "DevTools Company",
+      description: "Developer tools company with CLI tools, libraries, and DevRel.",
+      icon: "🔧",
+      color: "#8b5cf6"
+    },
+    %{
+      id: "content-platform",
+      name: "Content Platform",
+      description: "AI-augmented media company with editorial and distribution teams.",
+      icon: "📝",
+      color: "#ec4899"
+    },
+    %{
+      id: "ai-research-lab",
+      name: "AI Research Lab",
+      description: "ML research organization with scientists and MLOps engineers.",
+      icon: "🧪",
+      color: "#06b6d4"
+    },
+    %{
+      id: "ecommerce-store",
+      name: "E-commerce Store",
+      description: "Vertically-integrated e-commerce with product, ops, and marketing.",
+      icon: "🛒",
+      color: "#10b981"
+    }
+  ]
+
   @steps [
     %{
       id: :welcome,
       title: "Start an autonomous company",
       description: "Create a CEO, CTO, engineers, goal, project, and first issue"
+    },
+    %{
+      id: :templates,
+      title: "Choose a template",
+      description: "Start from scratch or pick a pre-built company template"
     },
     %{
       id: :workspace,
@@ -33,6 +76,8 @@ defmodule CymphoWeb.OnboardingLive.Index do
       |> assign(:steps, @steps)
       |> assign(:current_step, 0)
       |> assign(:bootstrap_result, nil)
+      |> assign(:selected_template, nil)
+      |> assign(:templates, @templates)
       |> assign(:company_form, %{
         "name" => "Autonomous Software Company",
         "goal_title" => "Build and run the business autonomously",
@@ -77,16 +122,72 @@ defmodule CymphoWeb.OnboardingLive.Index do
     attrs =
       params
       |> Map.update("engineer_count", 2, &parse_engineer_count/1)
+      |> Map.merge(
+        if(socket.assigns.selected_template,
+          do: %{"template_id" => socket.assigns.selected_template.id},
+          else: %{}
+        )
+      )
 
     case Companies.create_autonomous_company(attrs) do
       {:ok, result} ->
         {:noreply,
          socket
          |> assign(:bootstrap_result, result)
-         |> assign(:current_step, 3)}
+         |> assign(:current_step, 4)}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Could not create company: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("select_template", %{"template_id" => template_id}, socket) do
+    template = Enum.find(socket.assigns.templates, fn t -> t.id == template_id end)
+
+    if template do
+      form =
+        case template_id do
+          "saas-startup" -> %{
+            "name" => "SaaS Startup Co",
+            "goal_title" => "Build and grow a profitable B2B SaaS product",
+            "issue_prefix" => "SAS",
+            "engineer_count" => "2"
+          }
+          "devtools-company" -> %{
+            "name" => "DevTools Inc",
+            "goal_title" => "Build developer tools that scale",
+            "issue_prefix" => "DT",
+            "engineer_count" => "2"
+          }
+          "content-platform" -> %{
+            "name" => "ContentOps Media",
+            "goal_title" => "Build a scalable content operation",
+            "issue_prefix" => "CP",
+            "engineer_count" => "2"
+          }
+          "ai-research-lab" -> %{
+            "name" => "AI Research Lab",
+            "goal_title" => "Advance the state of AI research",
+            "issue_prefix" => "RL",
+            "engineer_count" => "3"
+          }
+          "ecommerce-store" -> %{
+            "name" => "CommerceOps",
+            "goal_title" => "Build a profitable e-commerce brand",
+            "issue_prefix" => "EC",
+            "engineer_count" => "1"
+          }
+          _ ->
+            socket.assigns.company_form
+        end
+
+      {:noreply,
+       socket
+       |> assign(:selected_template, template)
+       |> assign(:company_form, form)
+       |> assign(:current_step, 2)}
+    else
+      {:noreply, socket}
     end
   end
 

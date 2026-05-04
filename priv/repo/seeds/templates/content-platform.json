@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "template": {
+    "name": "Content Platform",
+    "description": "A media company that creates, curates, and distributes content at scale using AI agents.",
+    "categories": ["media", "content", "publishing"]
+  },
+  "company": {
+    "name": "ContentOps Media",
+    "slug": "contentops",
+    "description": "AI-powered content creation and distribution at scale.",
+    "status": "active",
+    "issue_prefix": "CP",
+    "issue_counter": 1,
+    "budget_monthly_cents": 300000,
+    "require_board_approval_for_new_agents": false,
+    "governance_config": {
+      "autonomy_mode": "autonomous_default",
+      "approval_gates": ["budget_override", "dangerous_runtime_action"]
+    },
+    "brand_color": "#ec4899"
+  },
+  "projects": [
+    {
+      "name": "Editorial",
+      "description": "Content creation and editorial pipeline",
+      "prefix": "ED",
+      "status": "active",
+      "settings": {"wip_limits": {"in_progress": 8}}
+    },
+    {
+      "name": "Distribution",
+      "description": "Content distribution and audience growth",
+      "prefix": "DS",
+      "status": "active",
+      "settings": {"wip_limits": {"in_progress": 4}}
+    }
+  ],
+  "goals": [
+    {
+      "title": "Build a scalable content operation",
+      "description": "Create an AI-augmented content pipeline that produces high-quality content consistently.",
+      "priority": "critical",
+      "status": "active"
+    },
+    {
+      "title": "Grow audience to 100k monthly readers",
+      "description": "Build an engaged audience through SEO, social, and email marketing.",
+      "priority": "high",
+      "status": "active"
+    }
+  ],
+  "agents": [
+    {
+      "name": "CEO",
+      "title": "Chief Executive Officer",
+      "role": "ceo",
+      "url_key": "ceo",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"strategy": true, "planning": true, "budgeting": true, "hiring": true},
+      "instructions": "Own the company goal, break strategy into goals and issues, delegate through the CTO, and keep the company running without waiting for humans unless a configured governance gate is hit.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "CTO",
+      "title": "Chief Technology Officer",
+      "role": "cto",
+      "url_key": "cto",
+      "max_concurrent_jobs": 2,
+      "capabilities": {"architecture": true, "review": true, "triage": true, "technical_planning": true},
+      "instructions": "Translate CEO strategy into technical plans, review engineering work, unblock engineers, and maintain execution quality.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "Editor-in-Chief",
+      "title": "Editor-in-Chief",
+      "role": "editor",
+      "url_key": "editor-in-chief",
+      "max_concurrent_jobs": 2,
+      "capabilities": {"editing": true, "strategy": true, "planning": true},
+      "instructions": "Lead the editorial strategy, manage content quality, and coordinate with writers and AI agents.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "Engineer 1",
+      "title": "Software Engineer",
+      "role": "engineer",
+      "url_key": "engineer-1",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"implementation": true, "testing": true, "debugging": true},
+      "instructions": "Implement assigned issues end to end, leave comments with results, and surface blockers explicitly.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "Content Writer 1",
+      "title": "AI-Assisted Content Writer",
+      "role": "writer",
+      "url_key": "writer-1",
+      "max_concurrent_jobs": 2,
+      "capabilities": {"writing": true, "research": true, "seo": true},
+      "instructions": "Produce high-quality content using AI assistance, conduct research, and optimize for SEO and reader engagement.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    }
+  ],
+  "issues": [
+    {
+      "title": "Define the content calendar and topic strategy",
+      "description": "Research trending topics, define content pillars, and create a 30-day editorial calendar.",
+      "status": "todo",
+      "priority": "critical",
+      "assigned_role": "editor"
+    },
+    {
+      "title": "Set up the content management system",
+      "description": "Evaluate and configure a CMS that supports AI-assisted writing workflows and multi-channel publishing.",
+      "status": "todo",
+      "priority": "high",
+      "assigned_role": "cto"
+    },
+    {
+      "title": "Write 5 SEO-optimized articles",
+      "description": "Produce 5 long-form articles targeting high-value keywords in the technology space.",
+      "status": "todo",
+      "priority": "high",
+      "assigned_role": "writer"
+    },
+    {
+      "title": "Build the email newsletter infrastructure",
+      "description": "Set up email list management, newsletter templates, and automated delivery.",
+      "status": "todo",
+      "priority": "medium",
+      "assigned_role": "engineer"
+    },
+    {
+      "title": "Set up social media distribution pipeline",
+      "description": "Automate content posting to Twitter, LinkedIn, and other platforms with scheduling and analytics.",
+      "status": "todo",
+      "priority": "medium",
+      "assigned_role": "cto"
+    }
+  ],
+  "labels": [
+    {"name": "breaking", "color": "#ef4444", "description": "Breaking news"},
+    {"name": "analysis", "color": "#3b82f6", "description": "In-depth analysis"},
+    {"name": "tutorial", "color": "#22c55e", "description": "How-to guides"},
+    {"name": "opinion", "color": "#f97316", "description": "Opinion pieces"}
+  ],
+  "execution_policies": [],
+  "skills": {"plugins": [], "agent_skills": []},
+  "routines": [],
+  "workspace_configs": []
+}

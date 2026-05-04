@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "template": {
+    "name": "SaaS Startup",
+    "description": "A B2B SaaS company with CEO, CTO, and engineering team focused on shipping a product rapidly.",
+    "categories": ["saas", "b2b", "product"]
+  },
+  "company": {
+    "name": "SaaS Startup Co",
+    "slug": "saas-startup",
+    "description": "A B2B SaaS company building modern software for businesses.",
+    "status": "active",
+    "issue_prefix": "SAS",
+    "issue_counter": 1,
+    "budget_monthly_cents": 500000,
+    "require_board_approval_for_new_agents": false,
+    "governance_config": {
+      "autonomy_mode": "autonomous_default",
+      "approval_gates": ["budget_override", "dangerous_runtime_action"]
+    },
+    "brand_color": "#5e6ad2"
+  },
+  "projects": [
+    {
+      "name": "Product",
+      "description": "Core product development",
+      "prefix": "SAS",
+      "status": "active",
+      "settings": {"wip_limits": {"in_progress": 5}}
+    },
+    {
+      "name": "Go-to-Market",
+      "description": "Marketing, sales, and customer success",
+      "prefix": "GTM",
+      "status": "active",
+      "settings": {"wip_limits": {"in_progress": 3}}
+    }
+  ],
+  "goals": [
+    {
+      "title": "Launch and grow a profitable B2B SaaS product",
+      "description": "Build a sustainable SaaS business with recurring revenue and happy customers.",
+      "priority": "critical",
+      "status": "active"
+    },
+    {
+      "title": "Ship MVP and get first 10 paying customers",
+      "description": "Validate product-market fit with real customers paying real money.",
+      "priority": "critical",
+      "status": "active"
+    }
+  ],
+  "agents": [
+    {
+      "name": "CEO",
+      "title": "Chief Executive Officer",
+      "role": "ceo",
+      "url_key": "ceo",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"strategy": true, "planning": true, "budgeting": true, "hiring": true},
+      "instructions": "Own the company goal, break strategy into goals and issues, delegate through the CTO, and keep the company running without waiting for humans unless a configured governance gate is hit.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "CTO",
+      "title": "Chief Technology Officer",
+      "role": "cto",
+      "url_key": "cto",
+      "max_concurrent_jobs": 2,
+      "capabilities": {"architecture": true, "review": true, "triage": true, "technical_planning": true},
+      "instructions": "Translate CEO strategy into technical plans, review engineering work, unblock engineers, and maintain execution quality.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "Engineer 1",
+      "title": "Senior Software Engineer",
+      "role": "engineer",
+      "url_key": "engineer-1",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"implementation": true, "testing": true, "debugging": true},
+      "instructions": "Implement assigned issues end to end, leave comments with results, and surface blockers explicitly.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    },
+    {
+      "name": "Head of Marketing",
+      "title": "Head of Marketing",
+      "role": "marketing",
+      "url_key": "head-of-marketing",
+      "max_concurrent_jobs": 1,
+      "capabilities": {"content": true, "seo": true, "campaigns": true},
+      "instructions": "Drive awareness, generate leads, and support sales with high-quality marketing content and campaigns.",
+      "context_mode": "company",
+      "runtime_config": {"autonomous": true}
+    }
+  ],
+  "issues": [
+    {
+      "title": "Define and document the MVP feature set",
+      "description": "Work with CEO to define the minimum viable product that can be shipped to early customers. Document features, prioritize, and create follow-up implementation issues.",
+      "status": "todo",
+      "priority": "critical",
+      "assigned_role": "cto"
+    },
+    {
+      "title": "Set up CI/CD pipeline and development environment",
+      "description": "Establish the development environment, linting, formatting, CI pipeline, and deployment automation so engineers can ship reliably.",
+      "status": "todo",
+      "priority": "high",
+      "assigned_role": "cto"
+    },
+    {
+      "title": "Implement core authentication and user management",
+      "description": "Build the authentication system with signup, login, password reset, and team invitations.",
+      "status": "todo",
+      "priority": "high",
+      "assigned_role": "engineer"
+    },
+    {
+      "title": "Build landing page and marketing site",
+      "description": "Create a high-converting landing page with pricing, features, and a waitlist signup.",
+      "status": "todo",
+      "priority": "medium",
+      "assigned_role": "marketing"
+    },
+    {
+      "title": "Design the billing and subscription system",
+      "description": "Research payment providers, design the subscription tiers, and implement the billing integration.",
+      "status": "todo",
+      "priority": "medium",
+      "assigned_role": "cto"
+    }
+  ],
+  "labels": [
+    {"name": "bug", "color": "#ef4444", "description": "Something isn't working"},
+    {"name": "feature", "color": "#22c55e", "description": "New feature request"},
+    {"name": "urgent", "color": "#f97316", "description": "Requires immediate attention"},
+    {"name": "customer", "color": "#3b82f6", "description": "Customer-reported"}
+  ],
+  "execution_policies": [],
+  "skills": {"plugins": [], "agent_skills": []},
+  "routines": [],
+  "workspace_configs": []
+}

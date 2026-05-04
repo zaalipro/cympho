@@ -112,8 +112,65 @@
       </div>
     </div>
     
+<!-- Templates step -->
+    <div :if={@current_step == 1} class="space-y-4 mb-6">
+      <div class="grid grid-cols-1 gap-3">
+        <%= for template <- @templates do %>
+          <button
+            type="button"
+            phx-click="select_template"
+            phx-value-template_id={template.id}
+            class="text-left bg-panel border border-border rounded-xl p-4 hover:border-accent/50 hover:bg-surface transition-all group"
+          >
+            <div class="flex items-start gap-3">
+              <div
+                class="w-10 h-10 rounded-lg flex items-center justify-center text-xl shrink-0"
+                style={"background-color: #{template.color}20; border: 1px solid #{template.color}40"}
+              >
+                {template.icon}
+              </div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-590 text-text-primary">{template.name}</span>
+                  <svg
+                    class="w-4 h-4 text-text-quaternary group-hover:text-accent transition-colors"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+                </div>
+                <p class="text-xs text-text-tertiary mt-0.5">{template.description}</p>
+              </div>
+            </div>
+          </button>
+        <% end %>
+      </div>
+      <div class="flex items-center justify-between">
+        <.app_link
+          navigate={~p"/onboarding/import"}
+          class="text-sm text-text-tertiary hover:text-text-secondary transition-colors"
+        >
+          Import from URL →
+        </.app_link>
+        <button
+          type="button"
+          phx-click="next_step"
+          class="text-sm text-text-tertiary hover:text-text-secondary transition-colors"
+        >
+          Start from scratch →
+        </button>
+      </div>
+    </div>
+
 <!-- Workspace step -->
-    <div :if={@current_step == 1} class="bg-panel border border-border rounded-2xl p-6 mb-6">
+    <div :if={@current_step == 2} class="bg-panel border border-border rounded-2xl p-6 mb-6">
       <form
         id="company-starter-form"
         phx-change="update_company_form"
@@ -168,7 +225,7 @@
     </div>
     
 <!-- Shortcuts step -->
-    <div :if={@current_step == 2} class="bg-panel border border-border rounded-2xl p-6 mb-6">
+    <div :if={@current_step == 3} class="bg-panel border border-border rounded-2xl p-6 mb-6">
       <div class="space-y-3">
         <div class="flex items-center justify-between text-sm">
           <span class="text-text-secondary">Command palette</span>
@@ -194,7 +251,7 @@
     </div>
     
 <!-- Ready step -->
-    <div :if={@current_step == 3} class="bg-panel border border-border rounded-2xl p-6 mb-6">
+    <div :if={@current_step == 4} class="bg-panel border border-border rounded-2xl p-6 mb-6">
       <div class="flex flex-col gap-4">
         <div class="flex flex-col items-center gap-3 text-center">
           <div class="w-14 h-14 rounded-full bg-emerald/10 flex items-center justify-center">
