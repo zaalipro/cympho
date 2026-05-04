@@ -72,9 +72,11 @@ defmodule CymphoWeb do
       import CymphoWeb.Components.Badge
       import CymphoWeb.Components.Card
       import CymphoWeb.Components.Combobox
+      import CymphoWeb.Components.ColorSwatchPicker
       import CymphoWeb.Components.CompanyRail
       import CymphoWeb.Components.CompanySwitcherStatic
       import CymphoWeb.Components.NavRail
+      import CymphoWeb.Components.UserMenu
       import CymphoWeb.Gettext
 
       unquote(verified_routes())

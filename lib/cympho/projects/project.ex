@@ -12,6 +12,7 @@ defmodule Cympho.Projects.Project do
     field :prefix, :string
     field :repo_url, :string
     field :github_webhook_secret, :string
+    field :color, :string
     field :settings, :map, default: %{}
 
     belongs_to :company, Cympho.Companies.Company
@@ -28,6 +29,7 @@ defmodule Cympho.Projects.Project do
       :prefix,
       :repo_url,
       :github_webhook_secret,
+      :color,
       :settings,
       :company_id
     ])
@@ -36,8 +38,26 @@ defmodule Cympho.Projects.Project do
     |> validate_length(:prefix, min: 2, max: 10)
     |> validate_format(:prefix, ~r/^[A-Z]+$/, message: "must be uppercase, 2-10 characters")
     |> validate_repo_url()
+    |> validate_color()
     |> unique_constraint(:prefix)
     |> assoc_constraint(:company)
+  end
+
+  defp validate_color(changeset) do
+    case get_change(changeset, :color) do
+      nil ->
+        changeset
+
+      "" ->
+        put_change(changeset, :color, nil)
+
+      hex ->
+        if String.match?(hex, ~r/^#[0-9a-fA-F]{6}$/) do
+          put_change(changeset, :color, String.downcase(hex))
+        else
+          add_error(changeset, :color, "must be a 6-digit hex like #5e6ad2")
+        end
+    end
   end
 
   defp validate_repo_url(changeset) do

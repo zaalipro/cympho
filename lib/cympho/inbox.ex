@@ -22,6 +22,21 @@ defmodule Cympho.Inbox do
     Repo.get_by(InboxState, issue_id: issue_id, agent_id: agent_id)
   end
 
+  @doc """
+  Total unread inbox items across all agents in the given company.
+  Used by the sidebar badge.
+  """
+  def unread_count_for_company(company_id) do
+    from(s in InboxState,
+      join: a in Cympho.Agents.Agent,
+      on: a.id == s.agent_id,
+      where: a.company_id == ^company_id and s.status == "unread",
+      select: count(s.id)
+    )
+    |> Repo.one()
+    |> Kernel.||(0)
+  end
+
   def list_inbox_for_agent(agent_id, opts \\ []) do
     status = Keyword.get(opts, :status)
     limit = Keyword.get(opts, :limit, 100)

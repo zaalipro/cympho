@@ -1,174 +1,310 @@
 defmodule CymphoWeb.Components.NavRail do
+  @moduledoc """
+  The Cympho sidebar.
+
+  Sections:
+    1. Primary action  — New issue
+    2. Top-level pins  — Dashboard, Board, Inbox (with unread badge)
+    3. WORK            — Issues, Goals, Routines
+    4. PROJECTS        — color dot · name · open-issue count, capped at 6
+    5. AGENTS          — role icon · name · live status dot, capped at 8
+
+    The "More" section (Org / Approvals / Costs / Activity / Workspaces /
+    Plugins / Skills / Adapters / Tool traces / Settings) lives in the
+    user menu at the bottom of the sidebar — see `UserMenu`.
+  """
   use Phoenix.Component
+  use Phoenix.VerifiedRoutes,
+    endpoint: CymphoWeb.Endpoint,
+    router: CymphoWeb.Router
+
+  @projects_visible 6
+  @agents_visible 8
 
   attr :current_path, :string, required: true
+  attr :projects, :list, default: []
+  attr :agents, :list, default: []
+  attr :inbox_count, :integer, default: 0
   attr :rest, :global
 
   def nav_rail(assigns) do
+    {visible_projects, hidden_projects_count} = take_with_overflow(assigns.projects, @projects_visible)
+    {visible_agents, hidden_agents_count} = take_with_overflow(assigns.agents, @agents_visible)
+
+    assigns =
+      assigns
+      |> assign(:visible_projects, visible_projects)
+      |> assign(:hidden_projects_count, hidden_projects_count)
+      |> assign(:visible_agents, visible_agents)
+      |> assign(:hidden_agents_count, hidden_agents_count)
+
     ~H"""
-    <nav class="flex-1 overflow-y-auto py-3 px-2.5 space-y-0.5" {@rest}>
+    <nav class="flex-1 overflow-y-auto py-2.5 px-2 space-y-0.5" {@rest}>
+      <.primary_action />
+
+      <div class="h-1.5"></div>
+
+      <.nav_link to={~p"/dashboard"} label="Dashboard" icon="hero-squares-2x2-mini" current_path={@current_path} />
+      <.nav_link to={~p"/kanban"} label="Board" icon="hero-view-columns-mini" current_path={@current_path} />
       <.nav_link
-        to="/dashboard"
-        label="Dashboard"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/inbox"
+        to={~p"/inbox"}
         label="Inbox"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>|
-        }
+        icon="hero-inbox-mini"
+        current_path={@current_path}
+        badge={@inbox_count}
+      />
+
+      <.section_header label="Work" />
+      <.nav_link to={~p"/issues"} label="Issues" icon="hero-clipboard-document-list-mini" current_path={@current_path} />
+      <.nav_link to={~p"/goals"} label="Goals" icon="hero-flag-mini" current_path={@current_path} />
+      <.nav_link to={~p"/routines"} label="Routines" icon="hero-arrow-path-rounded-square-mini" current_path={@current_path} />
+
+      <.section_header label="Projects" action_to={~p"/projects/new"} action_label="New project" />
+      <p
+        :if={@visible_projects == []}
+        class="px-3 py-1.5 text-xs text-text-quaternary italic"
+      >
+        No projects yet.
+      </p>
+      <.project_row
+        :for={project <- @visible_projects}
+        project={project}
         current_path={@current_path}
       />
-      <.nav_link
-        to="/issues"
-        label="Issues"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/>|
-        }
+      <.link
+        :if={@hidden_projects_count > 0}
+        navigate={~p"/projects"}
+        class="block px-3 py-1.5 text-[12px] text-text-quaternary hover:text-text-secondary"
+      >
+        Show {@hidden_projects_count} more…
+      </.link>
+
+      <.section_header label="Agents" action_to={~p"/agents/new"} action_label="New agent" />
+      <p
+        :if={@visible_agents == []}
+        class="px-3 py-1.5 text-xs text-text-quaternary italic"
+      >
+        No agents yet.
+      </p>
+      <.agent_row
+        :for={agent <- @visible_agents}
+        agent={agent}
         current_path={@current_path}
+        leadership?={leadership?(agent)}
       />
-      <.nav_link
-        to="/kanban"
-        label="Board"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/projects"
-        label="Projects"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/goals"
-        label="Goals"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/agents"
-        label="Agents"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.131A8 8 0 008 3.239c-4.828 4.596-5.212 11.611-.647 16.656A21.866 21.866 0 0012 21.942a21.866 21.866 0 003.99-.385M19.337 17.81a15.79 15.79 0 01-2.326 1.575"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/org-chart"
-        label="Org"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v4m0 0H8m4 0h4M6 18h12M6 18a2 2 0 100-4 2 2 0 000 4zm12 0a2 2 0 100-4 2 2 0 000 4zM12 6a2 2 0 100-4 2 2 0 000 4z"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/approvals"
-        label="Approvals"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5 2a8 8 0 11-16 0 8 8 0 0116 0z"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/costs"
-        label="Costs"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-2.21 0-4 .895-4 2s1.79 2 4 2 4 .895 4 2-1.79 2-4 2m0-8V6m0 10v2"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/activity"
-        label="Activity"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 12h4l2-6 4 12 2-6h4"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/routines"
-        label="Routines"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 006.34 4.36M4 15a8 8 0 0013.66 4.64"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/workspaces"
-        label="Workspaces"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7a2 2 0 012-2h5l2 2h5a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/plugins"
-        label="Plugins"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9h8M8 15h8M9 3h6a2 2 0 012 2v1h1a2 2 0 012 2v8a2 2 0 01-2 2h-1v1a2 2 0 01-2 2H9a2 2 0 01-2-2v-1H6a2 2 0 01-2-2V8a2 2 0 012-2h1V5a2 2 0 012-2z"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/adapters"
-        label="Adapters"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/tool-call-traces"
-        label="Tool Traces"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>|
-        }
-        current_path={@current_path}
-      />
-      <.nav_link
-        to="/settings"
-        label="Settings"
-        icon={
-          ~s|<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>|
-        }
-        current_path={@current_path}
-      />
+      <.link
+        :if={@hidden_agents_count > 0}
+        navigate={~p"/agents"}
+        class="block px-3 py-1.5 text-[12px] text-text-quaternary hover:text-text-secondary"
+      >
+        Show {@hidden_agents_count} more…
+      </.link>
+
+      <div class="h-3"></div>
     </nav>
     """
   end
 
+  ## ── Sections ───────────────────────────────────────────────────
+
+  defp primary_action(assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-quick-create-trigger
+      class={[
+        "w-full flex items-center gap-2.5 px-3 py-2 rounded-md",
+        "text-[13px] font-510 text-text-primary",
+        "bg-brand/15 hover:bg-brand/25 border border-brand/30",
+        "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+      ]}
+    >
+      <span class="hero-pencil-square-mini w-4 h-4 text-brand"></span>
+      <span class="flex-1 text-left">New issue</span>
+      <kbd class="kbd">C</kbd>
+    </button>
+    """
+  end
+
+  attr :label, :string, required: true
+  attr :action_to, :string, default: nil
+  attr :action_label, :string, default: nil
+
+  defp section_header(assigns) do
+    ~H"""
+    <div class="flex items-center justify-between px-3 pt-3 pb-1">
+      <span class="text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+        {@label}
+      </span>
+      <.link
+        :if={@action_to}
+        navigate={@action_to}
+        aria-label={@action_label}
+        title={@action_label}
+        class="p-1 -mr-1 rounded text-text-quaternary hover:text-text-primary hover:bg-surface-hover transition-colors"
+      >
+        <span class="hero-plus-mini w-3.5 h-3.5"></span>
+      </.link>
+    </div>
+    """
+  end
+
+  ## ── Top-level link ─────────────────────────────────────────────
+
+  attr :to, :string, required: true
+  attr :label, :string, required: true
+  attr :icon, :string, required: true
+  attr :current_path, :string, required: true
+  attr :badge, :integer, default: 0
+
   defp nav_link(assigns) do
+    active? = active?(assigns.to, assigns.current_path)
+    assigns = assign(assigns, :active?, active?)
+
     ~H"""
     <.link
       navigate={@to}
       class={[
-        "nav-item flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-510 transition-colors",
-        "text-text-tertiary hover:text-text-primary hover:bg-surface-hover"
+        "flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] font-510 transition-colors",
+        if(@active?,
+          do: "bg-surface-hover text-text-primary",
+          else: "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        )
       ]}
       data-nav-path={@to}
-      data-active={if active_path?(@to, @current_path), do: "true", else: "false"}
-      aria-current={if active_path?(@to, @current_path), do: "page", else: nil}
+      aria-current={if @active?, do: "page", else: nil}
     >
-      <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        {Phoenix.HTML.raw(@icon)}
-      </svg>
-      <span class="hidden md:inline">{@label}</span>
+      <span class={[@icon, "w-4 h-4 shrink-0"]}></span>
+      <span class="flex-1 truncate">{@label}</span>
+      <span
+        :if={@badge && @badge > 0}
+        class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500/90 text-white text-[10px] font-590"
+      >
+        {@badge}
+      </span>
     </.link>
     """
   end
 
-  defp active_path?("/", current_path), do: current_path == "/"
+  ## ── Project row ────────────────────────────────────────────────
 
-  defp active_path?(path, current_path),
-    do: current_path == path or String.starts_with?(current_path, path <> "/")
+  attr :project, :map, required: true
+  attr :current_path, :string, required: true
+
+  defp project_row(assigns) do
+    href = ~p"/projects/#{assigns.project.id}"
+    assigns = assign(assigns, :href, href)
+    assigns = assign(assigns, :active?, active?(href, assigns.current_path))
+
+    ~H"""
+    <.link
+      navigate={@href}
+      class={[
+        "flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] font-510 transition-colors",
+        if(@active?,
+          do: "bg-surface-hover text-text-primary",
+          else: "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        )
+      ]}
+    >
+      <span
+        class="h-2.5 w-2.5 rounded-full shrink-0 border border-white/10"
+        style={"background-color: #{@project.color || "#6b7280"}"}
+        aria-hidden="true"
+      ></span>
+      <span class="flex-1 truncate">{@project.name}</span>
+      <span
+        :if={(@project[:open_count] || 0) > 0}
+        class="text-[11px] text-text-quaternary tabular-nums"
+      >
+        {@project.open_count}
+      </span>
+    </.link>
+    """
+  end
+
+  ## ── Agent row ──────────────────────────────────────────────────
+
+  attr :agent, :map, required: true
+  attr :current_path, :string, required: true
+  attr :leadership?, :boolean, default: false
+
+  defp agent_row(assigns) do
+    href = ~p"/agents/#{assigns.agent.id}"
+    assigns = assign(assigns, :href, href)
+    assigns = assign(assigns, :active?, active?(href, assigns.current_path))
+
+    ~H"""
+    <.link
+      navigate={@href}
+      class={[
+        "flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] font-510 transition-colors",
+        if(@active?,
+          do: "bg-surface-hover text-text-primary",
+          else: "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        )
+      ]}
+    >
+      <span class={[role_icon(@agent.role), "w-4 h-4 shrink-0", role_icon_color(@agent.role)]}></span>
+      <span class="flex-1 truncate">{@agent.name}</span>
+      <span
+        class="h-1.5 w-1.5 rounded-full shrink-0"
+        title={status_label(@agent.status)}
+        style={"background-color: #{status_color(@agent.status)}"}
+      ></span>
+    </.link>
+    """
+  end
+
+  ## ── Helpers ────────────────────────────────────────────────────
+
+  defp leadership?(%{role: r}) when r in [:ceo, :cto], do: true
+  defp leadership?(_), do: false
+
+  defp take_with_overflow(list, n) when is_list(list) do
+    case length(list) do
+      total when total <= n -> {list, 0}
+      total -> {Enum.take(list, n), total - n}
+    end
+  end
+
+  defp active?("/", current_path), do: current_path == "/"
+
+  defp active?(path, current_path),
+    do: current_path == path or String.starts_with?(current_path || "", path <> "/")
+
+  defp role_icon(:ceo), do: "hero-sparkles-mini"
+  defp role_icon(:cto), do: "hero-cpu-chip-mini"
+  defp role_icon(:engineer), do: "hero-wrench-screwdriver-mini"
+  defp role_icon(:product_manager), do: "hero-clipboard-document-check-mini"
+  defp role_icon(:designer), do: "hero-paint-brush-mini"
+  defp role_icon(_), do: "hero-user-mini"
+
+  defp role_icon_color(:ceo), do: "text-brand"
+  defp role_icon_color(:cto), do: "text-sky-300"
+  defp role_icon_color(:engineer), do: "text-emerald-300"
+  defp role_icon_color(:product_manager), do: "text-amber-300"
+  defp role_icon_color(:designer), do: "text-fuchsia-300"
+  defp role_icon_color(_), do: "text-text-quaternary"
+
+  defp status_color(:running), do: "#10b981"
+  defp status_color(:active), do: "#10b981"
+  defp status_color(:sleeping), do: "#f59e0b"
+  defp status_color(:paused), do: "#f59e0b"
+  defp status_color(:pending_approval), do: "#a855f7"
+  defp status_color(:error), do: "#ef4444"
+  defp status_color(:offline), do: "#3b3d44"
+  defp status_color(:terminated), do: "#3b3d44"
+  defp status_color(_), do: "#6b7280"
+
+  defp status_label(:running), do: "Running"
+  defp status_label(:active), do: "Active"
+  defp status_label(:sleeping), do: "Sleeping"
+  defp status_label(:paused), do: "Paused"
+  defp status_label(:pending_approval), do: "Pending approval"
+  defp status_label(:error), do: "Error"
+  defp status_label(:offline), do: "Offline"
+  defp status_label(:idle), do: "Idle"
+  defp status_label(:terminated), do: "Terminated"
+  defp status_label(other), do: to_string(other)
 end

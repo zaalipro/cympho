@@ -31,6 +31,24 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Sidebar projection: id, name, role, status.
+  CEO/CTO pinned at top, then alphabetical. Excludes terminated agents.
+  """
+  def list_for_sidebar(company_id) do
+    Agent
+    |> where(
+      [a],
+      a.company_id == ^company_id and a.governance_status != "terminated"
+    )
+    |> order_by([a],
+      asc: fragment("CASE ? WHEN 'ceo' THEN 0 WHEN 'cto' THEN 1 ELSE 2 END", a.role),
+      asc: a.name
+    )
+    |> select([a], %{id: a.id, name: a.name, role: a.role, status: a.status})
+    |> Repo.all()
+  end
+
+  @doc """
   Returns agents with the specified role.
   """
   def list_agents_by_role(role) when is_atom(role) do

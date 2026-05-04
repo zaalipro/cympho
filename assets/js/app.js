@@ -676,11 +676,112 @@ const Combobox = {
   }
 };
 
+// User menu popover at the bottom of the sidebar.
+const UserMenu = {
+  mounted() {
+    this.trigger = this.el.querySelector('[data-user-menu-trigger]');
+    this.popover = this.el.querySelector('[data-user-menu-popover]');
+    if (!this.trigger || !this.popover) return;
+
+    this.toggle = (e) => {
+      e.stopPropagation();
+      const isOpen = !this.popover.classList.contains('hidden');
+      this._setOpen(!isOpen);
+    };
+
+    this.outside = (e) => {
+      if (!this.el.contains(e.target)) this._setOpen(false);
+    };
+
+    this.escape = (e) => {
+      if (e.key === 'Escape') this._setOpen(false);
+    };
+
+    this.handleAction = (e) => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const action = btn.dataset.action;
+      this._setOpen(false);
+      if (action === 'open-shortcuts') {
+        const m = document.getElementById('shortcuts-modal');
+        if (m) m.classList.remove('hidden');
+      } else if (action === 'open-command-palette') {
+        const p = document.getElementById('command-palette');
+        if (p) {
+          p.classList.remove('hidden');
+          const input = document.getElementById('command-input');
+          if (input) requestAnimationFrame(() => input.focus());
+        }
+      }
+    };
+
+    this.trigger.addEventListener('click', this.toggle);
+    document.addEventListener('click', this.outside);
+    document.addEventListener('keydown', this.escape);
+    this.popover.addEventListener('click', this.handleAction);
+  },
+  destroyed() {
+    document.removeEventListener('click', this.outside);
+    document.removeEventListener('keydown', this.escape);
+  },
+  _setOpen(open) {
+    if (open) {
+      this.popover.classList.remove('hidden');
+      this.trigger.setAttribute('aria-expanded', 'true');
+    } else {
+      this.popover.classList.add('hidden');
+      this.trigger.setAttribute('aria-expanded', 'false');
+    }
+  }
+};
+
+// Color swatch picker — clicking a preset fills the hex input + preview.
+// Typing in the hex input live-updates the preview and the active swatch.
+const ColorSwatchPicker = {
+  mounted() {
+    this.input = this.el.querySelector('[data-hex-input]');
+    this.preview = this.el.querySelector('[data-color-preview]');
+    if (!this.input) return;
+
+    this.swatches = Array.from(this.el.querySelectorAll('[data-swatch]'));
+
+    this.onSwatch = (e) => {
+      const hex = e.currentTarget.dataset.hex;
+      this.input.value = hex;
+      this.input.dispatchEvent(new Event('input', {bubbles: true}));
+      this._refresh();
+    };
+
+    this.onInput = () => this._refresh();
+
+    this.swatches.forEach((s) => s.addEventListener('click', this.onSwatch));
+    this.input.addEventListener('input', this.onInput);
+    this._refresh();
+  },
+  _refresh() {
+    const v = (this.input.value || '').toLowerCase().trim();
+    if (this.preview && /^#[0-9a-f]{6}$/.test(v)) this.preview.style.backgroundColor = v;
+    this.swatches.forEach((s) => {
+      const active = s.dataset.hex.toLowerCase() === v;
+      s.style.borderColor = active ? 'white' : 'rgba(255,255,255,0.15)';
+    });
+  }
+};
+
+// Sidebar primary "New issue" button — open the quick-create modal.
+document.addEventListener('click', (e) => {
+  const trig = e.target.closest('[data-quick-create-trigger]');
+  if (trig && typeof window.openQuickCreate === 'function') {
+    e.preventDefault();
+    window.openQuickCreate();
+  }
+});
+
 // Boot
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
 const liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
-  hooks: {TimelineScroll, KanbanSortable, Toast, OrgChartExport, Combobox}
+  hooks: {TimelineScroll, KanbanSortable, Toast, OrgChartExport, Combobox, UserMenu, ColorSwatchPicker}
 });
 
 liveSocket.connect();

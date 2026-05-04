@@ -21,6 +21,29 @@ defmodule Cympho.Projects do
   end
 
   @doc """
+  Sidebar projection: id, name, color, open_issue_count.
+  Active projects only. Sorted: most-recently-touched first.
+  """
+  def list_for_sidebar(company_id) do
+    open_statuses = [:backlog, :todo, :in_progress, :in_review, :blocked]
+
+    from(p in Project,
+      left_join: i in Cympho.Issues.Issue,
+      on: i.project_id == p.id and i.status in ^open_statuses,
+      where: p.company_id == ^company_id and p.status == :active,
+      group_by: [p.id, p.name, p.color, p.updated_at],
+      order_by: [desc: p.updated_at, asc: p.name],
+      select: %{
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        open_count: count(i.id)
+      }
+    )
+    |> Repo.all()
+  end
+
+  @doc """
   Gets a single project by id.
   """
   def get_project!(id), do: Repo.get!(Project, id)
