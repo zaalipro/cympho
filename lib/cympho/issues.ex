@@ -525,13 +525,13 @@ defmodule Cympho.Issues do
       end
 
     with {:ok, updated} <- update_issue(issue, attrs) do
-      if new_status == :done do
+      if updated.status == :done do
         unblock_dependents(issue.id)
         _ = Wakes.notify_children_completed(updated)
         maybe_complete_parent(updated)
       end
 
-      if new_status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
+      if updated.status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
       {:ok, updated}
     end
   end
@@ -1084,7 +1084,33 @@ defmodule Cympho.Issues do
         {:error, :unauthorized}
 
       true ->
-        do_execution_policy_decision(issue, decision, decided_by)
+        policy = ExecutionPolicies.get_execution_policy!(issue.execution_policy_id)
+
+        with :ok <- check_require_different_actor(issue, policy, decided_by),
+             :ok <- check_require_human(issue, policy, decided_by) do
+          do_execution_policy_decision(issue, decision, decided_by)
+        end
+    end
+  end
+
+  defp check_require_different_actor(issue, policy, decided_by) do
+    if ExecutionState.require_different_actor?(issue.execution_state, policy) do
+      executor_id = ExecutionState.original_executor(issue.execution_state)
+
+      if decided_by == executor_id, do: {:error, :require_different_actor}, else: :ok
+    else
+      :ok
+    end
+  end
+
+  defp check_require_human(issue, policy, decided_by) do
+    if ExecutionState.require_human?(issue.execution_state, policy) do
+      case Agents.get_agent(decided_by) do
+        {:ok, _agent} -> {:error, :require_human}
+        {:error, _} -> :ok
+      end
+    else
+      :ok
     end
   end
 
@@ -1097,27 +1123,35 @@ defmodule Cympho.Issues do
 
         case ExecutionState.advance(approved_state, policy, decided_by) do
           {:done, final_state} ->
-            update_issue(issue, %{
-              status: :done,
-              execution_state: final_state,
-              assignee_id: nil
-            })
-            |> tap(fn {:ok, _} ->
-              unblock_dependents(issue.id)
-              _ = Wakes.notify_children_completed(issue)
-            end)
+            {:ok, updated} =
+              update_issue(issue, %{
+                status: :done,
+                execution_state: final_state,
+                assignee_id: nil
+              })
+
+            unblock_dependents(issue.id)
+            _ = Wakes.notify_children_completed(updated)
+            maybe_trigger_verification(updated)
+            {:ok, updated}
 
           {:ok, next_state} ->
-            next_assignee = next_state.current_participant
+            next_assignee = resolve_next_assignee(next_state.current_participant)
 
-            update_issue(issue, %{
-              execution_state: next_state,
-              assignee_id: next_assignee,
-              status: :in_review
-            })
-            |> tap(fn {:ok, _} ->
+            {:ok, updated} =
+              update_issue(issue, %{
+                execution_state: next_state,
+                assignee_id: next_assignee,
+                status: :in_review
+              })
+
+            if ExecutionState.require_human?(next_state, policy) do
+              notify_human_approval_needed(updated, next_state)
+            else
               wake_next_participant(next_assignee, issue.id)
-            end)
+            end
+
+            {:ok, updated}
         end
 
       :request_changes ->
@@ -1132,6 +1166,66 @@ defmodule Cympho.Issues do
         |> tap(fn {:ok, _} ->
           wake_executor(executor_id, issue.id)
         end)
+    end
+  end
+
+  defp notify_human_approval_needed(issue, next_state) do
+    company_users =
+      from(u in Cympho.Users.User,
+        join: m in Cympho.Companies.CompanyMembership,
+        on: m.user_id == u.id,
+        where: m.company_id == ^issue.company_id
+      )
+      |> Repo.all()
+
+    Enum.each(company_users, fn user ->
+      Cympho.Notifications.notify_async(
+        "Human approval required",
+        "Issue \"#{issue.title}\" requires human approval at stage #{next_state.current_stage_index + 1}.",
+        user.id,
+        %{issue_id: issue.id, stage_index: next_state.current_stage_index, type: "human_approval_required"}
+      )
+    end)
+  end
+
+  defp maybe_trigger_verification(%Issue{company_id: nil}), do: :ok
+
+  defp maybe_trigger_verification(%Issue{} = issue) do
+    case Repo.get(Company, issue.company_id) do
+      %Company{governance_config: %{"require_verification" => true}} ->
+        create_verification_issue(issue)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp create_verification_issue(%Issue{} = issue) do
+    attrs = %{
+      title: "Verify: #{issue.title}",
+      description: "Automated verification issue. Verify the work done on parent issue.",
+      priority: :medium,
+      status: :todo,
+      company_id: issue.company_id,
+      project_id: issue.project_id,
+      goal_id: issue.goal_id,
+      parent_id: issue.id,
+      assigned_role: "engineer",
+      created_by_agent_id: issue.assignee_id,
+      origin_type: "verification",
+      origin_id: issue.id,
+      request_depth: (issue.request_depth || 0) + 1,
+      actor_type: "system",
+      actor_id: "00000000-0000-0000-0000-000000000000"
+    }
+
+    case create_issue(attrs) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to create verification issue for #{issue.id}: #{inspect(reason)}")
+        :ok
     end
   end
 
