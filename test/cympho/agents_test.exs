@@ -444,7 +444,7 @@ defmodule Cympho.AgentsTest do
           company_id: company.id,
           name: "CTO",
           role: :cto,
-          status: :busy,
+          status: :running,
           adapter: :process,
           config: %{"command" => "echo"}
         })
@@ -464,7 +464,7 @@ defmodule Cympho.AgentsTest do
           company_id: company.id,
           name: "Engineer 2",
           role: :engineer,
-          status: :busy,
+          status: :running,
           adapter: :process,
           config: %{"command" => "echo"}
         })
@@ -473,7 +473,7 @@ defmodule Cympho.AgentsTest do
 
       assert stats.total == 4
       assert stats.by_role == %{ceo: 1, cto: 1, engineer: 2}
-      assert stats.by_status == %{idle: 2, busy: 2}
+      assert stats.by_status == %{idle: 2, running: 2}
       assert stats.idle_ratio == 50.0
     end
   end
