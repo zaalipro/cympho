@@ -511,14 +511,15 @@ defmodule Cympho.AgentActions do
     })
 
     # Record audit event for agent action
-    _ = Instrumenter.record_agent_action(
-      %{
-        action_type: action["type"],
-        params: Map.drop(action, ["type"])
-      },
-      issue,
-      agent.id
-    )
+    _ =
+      Instrumenter.record_agent_action(
+        %{
+          action_type: action["type"],
+          params: Map.drop(action, ["type"])
+        },
+        issue,
+        agent.id
+      )
   end
 
   defp require_string(action, field) do

@@ -102,7 +102,10 @@ defmodule CymphoWeb.Components.Skeleton do
       phx-connected={@connected_class}
       {@rest}
     >
-      <div class={["opacity-0 transition-opacity duration-200", @loading_class || "phx-loading:opacity-100"]}>
+      <div class={[
+        "opacity-0 transition-opacity duration-200",
+        @loading_class || "phx-loading:opacity-100"
+      ]}>
         {render_slot(@inner_block)}
       </div>
     </div>

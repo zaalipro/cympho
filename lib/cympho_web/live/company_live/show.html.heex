@@ -1,8 +1,20 @@
 <div class="p-6 lg:p-8 max-w-6xl mx-auto">
   <.header title={@company.name}>
     <:actions>
-      <button :if={@company.status == "active"} phx-click="show_pause_modal" class="bg-yellow-600 hover:bg-yellow-500 text-white font-510 text-sm px-4 py-2 rounded-lg">Pause Company</button>
-      <button :if={@company.status == "paused"} phx-click="show_resume_modal" class="bg-green-600 hover:bg-green-500 text-white font-510 text-sm px-4 py-2 rounded-lg">Resume Company</button>
+      <button
+        :if={@company.status == "active"}
+        phx-click="show_pause_modal"
+        class="bg-yellow-600 hover:bg-yellow-500 text-white font-510 text-sm px-4 py-2 rounded-lg"
+      >
+        Pause Company
+      </button>
+      <button
+        :if={@company.status == "paused"}
+        phx-click="show_resume_modal"
+        class="bg-green-600 hover:bg-green-500 text-white font-510 text-sm px-4 py-2 rounded-lg"
+      >
+        Resume Company
+      </button>
 
       <.app_link
         navigate={~p"/companies/#{@company}/export"}
@@ -84,9 +96,17 @@
 
     <div class="bg-surface border border-border rounded-xl p-6">
       <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
-        Status</div>
-      <div class="text-2xl font-510"><span :if={@company.status == "active"} class="text-green-400">Active</span><span :if={@company.status == "paused"} class="text-yellow-400">Paused</span></div>
-      <div :if={@company.paused_reason} class="text-xs text-text-secondary mt-1">{@company.paused_reason}</div>
+        Status
+      </div>
+      <div class="text-2xl font-510">
+        <span :if={@company.status == "active"} class="text-green-400">Active</span><span
+          :if={@company.status == "paused"}
+          class="text-yellow-400"
+        >Paused</span>
+      </div>
+      <div :if={@company.paused_reason} class="text-xs text-text-secondary mt-1">
+        {@company.paused_reason}
+      </div>
     </div>
 
     <div class="bg-surface border border-border rounded-xl p-6">
@@ -166,9 +186,58 @@
     </div>
   </div>
 
-
-  <div :if={@show_pause_modal} class="fixed inset-0 z-50 flex items-center justify-center"><div class="fixed inset-0 bg-black/60" phx-click="hide_pause_modal"></div><div class="relative bg-surface border border-border rounded-xl p-6 max-w-md w-full mx-4"><h3 class="text-lg font-510 text-text-primary mb-2">Pause Company</h3><p class="text-sm text-text-secondary mb-4">Pause all agents and stop dispatching.</p><input type="text" phx-change="update_pause_reason" value={@pause_reason} name="pause_reason" class="w-full bg-black/20 border border-border rounded-lg px-3 py-2 text-sm mb-4" placeholder="Reason" /><div class="flex justify-end gap-3"><button phx-click="hide_pause_modal" class="px-4 py-2 text-sm border border-border rounded-lg">Cancel</button><button phx-click="pause_company" data-confirm="Pause?" class="px-4 py-2 text-sm font-510 bg-yellow-600 text-white rounded-lg">Pause</button></div></div></div>
-  <div :if={@show_resume_modal} class="fixed inset-0 z-50 flex items-center justify-center"><div class="fixed inset-0 bg-black/60" phx-click="hide_resume_modal"></div><div class="relative bg-surface border border-border rounded-xl p-6 max-w-md w-full mx-4"><h3 class="text-lg font-510 text-text-primary mb-2">Resume Company</h3><p class="text-sm text-text-secondary mb-4">Resume agents and re-enable dispatching.</p><div class="flex justify-end gap-3"><button phx-click="hide_resume_modal" class="px-4 py-2 text-sm border border-border rounded-lg">Cancel</button><button phx-click="resume_company" data-confirm="Resume?" class="px-4 py-2 text-sm font-510 bg-green-600 text-white rounded-lg">Resume</button></div></div></div>
+  <div :if={@show_pause_modal} class="fixed inset-0 z-50 flex items-center justify-center">
+    <div class="fixed inset-0 bg-black/60" phx-click="hide_pause_modal"></div>
+    <div class="relative bg-surface border border-border rounded-xl p-6 max-w-md w-full mx-4">
+      <h3 class="text-lg font-510 text-text-primary mb-2">Pause Company</h3>
+      <p class="text-sm text-text-secondary mb-4">Pause all agents and stop dispatching.</p>
+      <input
+        type="text"
+        phx-change="update_pause_reason"
+        value={@pause_reason}
+        name="pause_reason"
+        class="w-full bg-black/20 border border-border rounded-lg px-3 py-2 text-sm mb-4"
+        placeholder="Reason"
+      />
+      <div class="flex justify-end gap-3">
+        <button
+          phx-click="hide_pause_modal"
+          class="px-4 py-2 text-sm border border-border rounded-lg"
+        >
+          Cancel
+        </button>
+        <button
+          phx-click="pause_company"
+          data-confirm="Pause?"
+          class="px-4 py-2 text-sm font-510 bg-yellow-600 text-white rounded-lg"
+        >
+          Pause
+        </button>
+      </div>
+    </div>
+  </div>
+  <div :if={@show_resume_modal} class="fixed inset-0 z-50 flex items-center justify-center">
+    <div class="fixed inset-0 bg-black/60" phx-click="hide_resume_modal"></div>
+    <div class="relative bg-surface border border-border rounded-xl p-6 max-w-md w-full mx-4">
+      <h3 class="text-lg font-510 text-text-primary mb-2">Resume Company</h3>
+      <p class="text-sm text-text-secondary mb-4">Resume agents and re-enable dispatching.</p>
+      <div class="flex justify-end gap-3">
+        <button
+          phx-click="hide_resume_modal"
+          class="px-4 py-2 text-sm border border-border rounded-lg"
+        >
+          Cancel
+        </button>
+        <button
+          phx-click="resume_company"
+          data-confirm="Resume?"
+          class="px-4 py-2 text-sm font-510 bg-green-600 text-white rounded-lg"
+        >
+          Resume
+        </button>
+      </div>
+    </div>
+  </div>
   <.live_component
     :if={@live_action in [:edit]}
     module={CymphoWeb.CompanyLive.FormComponent}

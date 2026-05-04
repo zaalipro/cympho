@@ -123,7 +123,6 @@ defmodule Cympho.Runtime do
     end
   end
 
-
   defp verify_stage_gate(%Issue{execution_policy_id: nil}, _agent), do: :ok
 
   defp verify_stage_gate(%Issue{execution_state: state}, _agent)

@@ -117,17 +117,19 @@ defmodule Cympho.Decisions do
         )
 
         # Record audit event for decision creation
-        {actor_type, actor_id} = case actor || extract_actor(decision) do
-          {type, id} -> {to_string(type), id}
-          _ -> {"system", "decision_creation"}
-        end
+        {actor_type, actor_id} =
+          case actor || extract_actor(decision) do
+            {type, id} -> {to_string(type), id}
+            _ -> {"system", "decision_creation"}
+          end
 
-        _ = Instrumenter.record_decision(
-          decision,
-          "created",
-          actor_type,
-          actor_id
-        )
+        _ =
+          Instrumenter.record_decision(
+            decision,
+            "created",
+            actor_type,
+            actor_id
+          )
 
         Phoenix.PubSub.broadcast(
           Cympho.PubSub,
@@ -239,60 +241,62 @@ defmodule Cympho.Decisions do
     original_decision = Repo.get!(Decision, decision_id)
 
     if Decision.can_reverse?(original_decision) do
-      result = Repo.transaction(fn ->
-        attrs = %{
-          decision_type: original_decision.decision_type,
-          decision_key: "#{original_decision.decision_key}_reversal",
-          outcome: "reversed",
-          reasoning: reasoning,
-          actor_type: elem(actor, 0),
-          actor_id: elem(actor, 1),
-          resource_type: original_decision.resource_type,
-          resource_id: original_decision.resource_id,
-          parent_decision_id: original_decision.id,
-          context: Map.put(original_decision.context, :reversal_reasoning, reasoning),
-          reversible: false,
-          company_id: original_decision.company_id,
-          metadata:
-            Map.put(
-              original_decision.metadata,
-              :reversing_original_decision_id,
-              original_decision.id
-            )
-        }
+      result =
+        Repo.transaction(fn ->
+          attrs = %{
+            decision_type: original_decision.decision_type,
+            decision_key: "#{original_decision.decision_key}_reversal",
+            outcome: "reversed",
+            reasoning: reasoning,
+            actor_type: elem(actor, 0),
+            actor_id: elem(actor, 1),
+            resource_type: original_decision.resource_type,
+            resource_id: original_decision.resource_id,
+            parent_decision_id: original_decision.id,
+            context: Map.put(original_decision.context, :reversal_reasoning, reasoning),
+            reversible: false,
+            company_id: original_decision.company_id,
+            metadata:
+              Map.put(
+                original_decision.metadata,
+                :reversing_original_decision_id,
+                original_decision.id
+              )
+          }
 
-        with {:ok, reversing_decision} <-
-               %Decision{}
-               |> Decision.create_changeset(attrs)
-               |> Repo.insert(),
-             {:ok, _updated_original} <-
-               original_decision
-               |> Decision.reversal_changeset(%{reversed_by_id: reversing_decision.id})
-               |> Repo.update(),
-             {:ok, _reversal_link} <-
-               %DecisionReversal{}
-               |> DecisionReversal.changeset(%{
-                 reasoning: reasoning,
-                 actor_type: safe_actor_type(actor),
-                 actor_id: safe_actor_id(actor),
-                 original_decision_id: original_decision.id,
-                 reversing_decision_id: reversing_decision.id,
-                 company_id: original_decision.company_id
-               })
-               |> Repo.insert() do
-          # Record audit event for decision reversal
-          _ = Instrumenter.record_decision(
-            reversing_decision,
-            "reversed",
-            to_string(elem(actor, 0)),
-            elem(actor, 1)
-          )
+          with {:ok, reversing_decision} <-
+                 %Decision{}
+                 |> Decision.create_changeset(attrs)
+                 |> Repo.insert(),
+               {:ok, _updated_original} <-
+                 original_decision
+                 |> Decision.reversal_changeset(%{reversed_by_id: reversing_decision.id})
+                 |> Repo.update(),
+               {:ok, _reversal_link} <-
+                 %DecisionReversal{}
+                 |> DecisionReversal.changeset(%{
+                   reasoning: reasoning,
+                   actor_type: safe_actor_type(actor),
+                   actor_id: safe_actor_id(actor),
+                   original_decision_id: original_decision.id,
+                   reversing_decision_id: reversing_decision.id,
+                   company_id: original_decision.company_id
+                 })
+                 |> Repo.insert() do
+            # Record audit event for decision reversal
+            _ =
+              Instrumenter.record_decision(
+                reversing_decision,
+                "reversed",
+                to_string(elem(actor, 0)),
+                elem(actor, 1)
+              )
 
-          reversing_decision
-        else
-          {:error, changeset} -> Repo.rollback(changeset)
-        end
-      end)
+            reversing_decision
+          else
+            {:error, changeset} -> Repo.rollback(changeset)
+          end
+        end)
 
       case result do
         {:ok, _} = ok -> ok
