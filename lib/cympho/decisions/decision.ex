@@ -70,7 +70,14 @@ defmodule Cympho.Decisions.Decision do
       :actor_id,
       :company_id
     ])
-    |> validate_inclusion(:outcome, ["approved", "denied", "deferred", "cancelled", "implemented", "reversed"])
+    |> validate_inclusion(:outcome, [
+      "approved",
+      "denied",
+      "deferred",
+      "cancelled",
+      "implemented",
+      "reversed"
+    ])
     |> validate_inclusion(:status, ["active", "expired", "reversed", "superseded"])
     |> validate_decision_key_unique()
     |> validate_effective_at()
@@ -97,7 +104,9 @@ defmodule Cympho.Decisions.Decision do
   def active?(%Decision{}), do: false
 
   def expired?(%Decision{expires_at: nil}), do: false
-  def expired?(%Decision{expires_at: expires_at}), do: DateTime.compare(expires_at, DateTime.utc_now()) == :lt
+
+  def expired?(%Decision{expires_at: expires_at}),
+    do: DateTime.compare(expires_at, DateTime.utc_now()) == :lt
 
   def reversible?(%Decision{reversible: true, reversed_by_id: nil}), do: true
   def reversible?(%Decision{}), do: false

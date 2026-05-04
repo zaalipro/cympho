@@ -1,1 +1,315 @@
-<div></div>
+<div class="activity-dashboard" id={"activity-dashboard-#{@issue_id}"}>
+  <div class="dashboard-header">
+    <h3>Activity Dashboard</h3>
+    <span class="total-events">{@statistics.total} events</span>
+  </div>
+
+  <div class="dashboard-grid">
+    <!-- Activity by Action (Bar Chart) -->
+    <div class="chart-card">
+      <h4>Activities by Type</h4>
+      <div class="bar-chart">
+        {max = max_count(@chart_data)}
+        <%= for {action, count} <- @chart_data.by_action do %>
+          <div class="bar-row">
+            <span class="bar-label">
+              {String.replace(action, "_", " ") |> String.capitalize()}
+            </span>
+            <div class="bar-container">
+              <div
+                class="bar-fill"
+                style={"width: #{if(max > 0, do: "#{count * 100 / max}%", else: "0%")}; background-color: #{action_color(action)};"}
+              >
+                <span class="bar-value">{count}</span>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+    
+<!-- Activity by Actor (Donut Chart) -->
+    <div class="chart-card">
+      <h4>Activities by Actor</h4>
+      <div class="donut-chart-container">
+        <svg viewBox="0 0 100 100" class="donut-chart">
+          {{total, _} =
+            Enum.reduce(@chart_data.by_actor, {0, 0}, fn {_actor, count}, {acc, _offset} ->
+              {acc + count, acc}
+            end)}
+          <%= {_total, _} = Enum.reduce(@chart_data.by_actor, {total, 0}, fn {actor, count}, {remaining, offset} -> %>
+            <% percentage = if total > 0, do: count * 100 / total, else: 0 %>
+            <% dash_array = "#{percentage * 2.83} #{100 - percentage * 2.83}" %>
+            <% rotation = offset * 3.6 %>
+            <circle
+              cx="50"
+              cy="50"
+              r="40"
+              fill="none"
+              stroke={actor_color(actor)}
+              stroke-width="20"
+              stroke-dasharray={dash_array}
+              transform={"rotate(#{rotation} 50 50)"}
+              class="donut-segment"
+            />
+            {{remaining - count, offset + count}}
+          <% end) %>
+          <text x="50" y="50" text-anchor="middle" dy="0.3em" class="donut-center">
+            {total}
+          </text>
+        </svg>
+        <div class="donut-legend">
+          <%= for {actor, count} <- @chart_data.by_actor do %>
+            <div class="legend-item">
+              <span class="legend-color" style={"background-color: #{actor_color(actor)};"}>
+              </span>
+              <span class="legend-label">{String.capitalize(actor)}</span>
+              <span class="legend-value">{count}</span>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    </div>
+    
+<!-- Timeline (Line Chart) -->
+    <div class="chart-card full-width">
+      <h4>Activity Timeline</h4>
+      <div class="timeline-chart">
+        <%= if length(@chart_data.timeline) > 0 do %>
+          <% max_timeline =
+            Enum.max_by(@chart_data.timeline, fn {_date, count} -> count end) |> elem(1) %>
+          <svg viewBox="0 0 100 50" class="timeline-svg">
+            <%= {points, _} = Enum.reduce(@chart_data.timeline, {[], 0}, fn {_date, count}, {acc, idx} -> %>
+              <% x =
+                if length(@chart_data.timeline) > 1,
+                  do: idx * 100 / (length(@chart_data.timeline) - 1),
+                  else: 50 %>
+              <% y = if max_timeline > 0, do: 50 - count * 40 / max_timeline, else: 50 %>
+              {{[{x, y} | acc], idx + 1}}
+            <% end) %>
+            <% points = Enum.reverse(points) %>
+            <polyline
+              points={Enum.map_join(points, fn {x, y} -> "#{x},#{y}" end, " ")}
+              fill="none"
+              stroke="#7170ff"
+              stroke-width="2"
+              class="timeline-line"
+            />
+
+            <%= for {{x, y}, idx} <- Enum.with_index(points) do %>
+              <circle cx={x} cy={y} r="3" fill="#7170ff" class="timeline-point">
+                <title>
+                  {Enum.at(@chart_data.timeline, idx) |> elem(0) |> Calendar.strftime("%b %d")}: {Enum.at(
+                    @chart_data.timeline,
+                    idx
+                  )
+                  |> elem(1)}
+                </title>
+              </circle>
+            <% end %>
+          </svg>
+          <div class="timeline-labels">
+            <%= for {date, _count} <- @chart_data.timeline do %>
+              <span class="timeline-date">{Calendar.strftime(date, "%b %d")}</span>
+            <% end %>
+          </div>
+        <% else %>
+          <p class="no-data">No activity data available</p>
+        <% end %>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .activity-dashboard {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 20px;
+  }
+
+  .dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+
+  .dashboard-header h3 {
+    font-size: 18px;
+    font-weight: 590;
+    color: #f7f8f8;
+    margin: 0;
+  }
+
+  .total-events {
+    font-size: 13px;
+    color: #8a8f98;
+  }
+
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+  }
+
+  .chart-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    padding: 16px;
+  }
+
+  .chart-card.full-width {
+    grid-column: 1 / -1;
+  }
+
+  .chart-card h4 {
+    font-size: 14px;
+    font-weight: 510;
+    color: #d0d6e0;
+    margin: 0 0 16px 0;
+  }
+
+  .bar-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .bar-label {
+    font-size: 12px;
+    color: #8a8f98;
+    min-width: 120px;
+    text-align: right;
+  }
+
+  .bar-container {
+    flex: 1;
+    height: 24px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .bar-fill {
+    height: 100%;
+    transition: width 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 8px;
+  }
+
+  .bar-value {
+    font-size: 11px;
+    font-weight: 510;
+    color: #f7f8f8;
+  }
+
+  .donut-chart-container {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .donut-chart {
+    width: 150px;
+    height: 150px;
+  }
+
+  .donut-segment {
+    transition: opacity 0.2s;
+  }
+
+  .donut-segment:hover {
+    opacity: 0.8;
+  }
+
+  .donut-center {
+    font-size: 20px;
+    font-weight: 590;
+    fill: #f7f8f8;
+  }
+
+  .donut-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+  }
+
+  .legend-label {
+    font-size: 13px;
+    color: #d0d6e0;
+  }
+
+  .legend-value {
+    font-size: 13px;
+    font-weight: 510;
+    color: #f7f8f8;
+    margin-left: auto;
+  }
+
+  .timeline-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .timeline-svg {
+    width: 100%;
+    height: 100px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 4px;
+  }
+
+  .timeline-line {
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .timeline-point {
+    transition: r 0.2s;
+    cursor: pointer;
+  }
+
+  .timeline-point:hover {
+    r: 5;
+  }
+
+  .timeline-labels {
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .timeline-date {
+    font-size: 11px;
+    color: #62666d;
+  }
+
+  .no-data {
+    text-align: center;
+    color: #62666d;
+    font-size: 13px;
+  }
+</style>

@@ -2,14 +2,12 @@ defmodule Cympho.Plugins.Worker do
   @moduledoc """
   Worker behavior for plugin processes.
   """
-  use GenServer
 
   defmacro __using__(_opts) do
     quote do
       use GenServer
-      @behaviour Cympho.Plugins.Worker
 
-      @impl true
+      @impl GenServer
       def init(args) do
         plugin = Keyword.fetch!(args, :plugin)
         company_id = Keyword.fetch!(args, :company_id)
@@ -22,7 +20,6 @@ defmodule Cympho.Plugins.Worker do
 
         case handle_init(state) do
           {:ok, state} -> {:ok, state}
-          {:stop, reason} -> {:stop, reason}
         end
       end
 
@@ -60,7 +57,7 @@ defmodule Cympho.Plugins.Worker do
     end
   end
 
-  @callback init(keyword()) :: {:ok, map()} | {:stop, term()}
+  @callback init(keyword()) :: {:ok, map()}
   @callback handle_message(term(), map()) :: {:noreply, map()} | {:stop, term(), map()}
   @callback handle_request(term(), term(), map()) :: {:reply, term(), map()} | {:noreply, map()}
   @callback handle_cast_request(term(), map()) :: {:noreply, map()}

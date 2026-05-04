@@ -8,6 +8,7 @@ defmodule CymphoWeb.ProjectLive.Index do
     if connected?(socket) && socket.assigns[:current_company] do
       Projects.subscribe(socket.assigns.current_company.id)
     end
+
     {:ok, assign(socket, :projects, Projects.list_projects())}
   end
 

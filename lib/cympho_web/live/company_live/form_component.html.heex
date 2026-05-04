@@ -14,14 +14,14 @@
   </.header>
 
   <.simple_form
-    for={@changeset}
+    for={@form}
     id="company-form"
     phx-target={@myself}
     phx-change="validate"
     phx-submit="save"
   >
     <.input
-      field={@changeset[:name]}
+      field={@form[:name]}
       type="text"
       label="Company Name"
       placeholder="Acme Corp"
@@ -29,7 +29,7 @@
     />
 
     <.input
-      field={@changeset[:slug]}
+      field={@form[:slug]}
       type="text"
       label="Slug"
       placeholder="acme-corp"

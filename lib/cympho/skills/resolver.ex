@@ -11,7 +11,7 @@ defmodule Cympho.Skills.Resolver do
   """
 
   use GenServer
-  alias Cympho.Skills.{Plugin, Loader}
+  alias Cympho.Skills.Plugin
   alias Cympho.{Repo, Skills.AgentSkill}
   import Ecto.Query
 
@@ -62,14 +62,14 @@ defmodule Cympho.Skills.Resolver do
 
   def resolve(_, _), do: {:error, :invalid_id}
 
-  def resolve(_), do: {:error, :invalid_id}
-
   def resolve(agent_id) when is_binary(agent_id) do
     # Deprecated: use resolve/2 with explicit company_id for proper security
     require Logger
     Logger.warning("Resolver.resolve/1 is deprecated, use resolve/2 with company_id")
     resolve(agent_id, nil)
   end
+
+  def resolve(_), do: {:error, :invalid_id}
 
   @doc """
   Invalidates the resolution cache for an agent.
@@ -116,11 +116,14 @@ defmodule Cympho.Skills.Resolver do
   defp do_resolve(agent_id, company_id) do
     with {:ok, agent_skills} <- fetch_agent_skills(agent_id, company_id),
          {:ok, plugin_map} <- build_plugin_map(agent_skills),
-         {:ok, {resolved_ids, _resolved_set}} <- resolve_dependencies(plugin_map, [], MapSet.new()) do
+         {:ok, {resolved_ids, _resolved_set}} <-
+           resolve_dependencies(plugin_map, [], MapSet.new()) do
       # Look up actual plugin structs by ID in dependency order
-      plugins = Enum.map(resolved_ids, fn plugin_id ->
-        Enum.find(agent_skills, fn p -> p.id == plugin_id end)
-      end)
+      plugins =
+        Enum.map(resolved_ids, fn plugin_id ->
+          Enum.find(agent_skills, fn p -> p.id == plugin_id end)
+        end)
+
       {:ok, plugins}
     end
   end
@@ -128,15 +131,15 @@ defmodule Cympho.Skills.Resolver do
   defp fetch_agent_skills(agent_id, company_id) do
     query =
       from agent_skill in AgentSkill,
-      join: agent in Cympho.Agents.Agent,
-      on: agent_skill.agent_id == agent.id,
-      join: plugin in Plugin,
-      on: agent_skill.plugin_id == plugin.id,
-      where: agent.id == ^agent_id,
-      where: agent.company_id == ^company_id,
-      where: plugin.company_id == ^company_id,
-      where: plugin.enabled == true,
-      select: plugin
+        join: agent in Cympho.Agents.Agent,
+        on: agent_skill.agent_id == agent.id,
+        join: plugin in Plugin,
+        on: agent_skill.plugin_id == plugin.id,
+        where: agent.id == ^agent_id,
+        where: agent.company_id == ^company_id,
+        where: plugin.company_id == ^company_id,
+        where: plugin.enabled == true,
+        select: plugin
 
     case Repo.all(query) do
       [] -> {:error, :no_skills}
@@ -197,7 +200,14 @@ defmodule Cympho.Skills.Resolver do
     else
       plugin = Map.get(plugin_map, plugin_id)
 
-      case resolve_plugin_dependencies(plugin, plugin_map, ordered_list, resolved, MapSet.put(visiting, plugin_id), [plugin_id | path]) do
+      case resolve_plugin_dependencies(
+             plugin,
+             plugin_map,
+             ordered_list,
+             resolved,
+             MapSet.put(visiting, plugin_id),
+             [plugin_id | path]
+           ) do
         {:ok, new_ordered_list, new_resolved} ->
           # Add plugin after all its dependencies (append for proper topological order)
           {:ok, new_ordered_list ++ [plugin_id], MapSet.put(new_resolved, plugin_id)}
@@ -234,7 +244,7 @@ defmodule Cympho.Skills.Resolver do
     matching_plugins =
       Enum.filter(plugin_map, fn {_id, plugin} ->
         plugin.identifier == identifier and
-        version_satisfies?(plugin.version, version_req)
+          version_satisfies?(plugin.version, version_req)
       end)
 
     case matching_plugins do
@@ -246,7 +256,8 @@ defmodule Cympho.Skills.Resolver do
 
   # Simple semver compatibility check
   # Supports exact match (^1.0.0), caret (^1.2.3), and tilde (~1.2.3) requirements
-  defp version_satisfies?(version, requirement) when is_binary(version) and is_binary(requirement) do
+  defp version_satisfies?(version, requirement)
+       when is_binary(version) and is_binary(requirement) do
     cond do
       String.starts_with?(requirement, "^") ->
         requirement_version = String.slice(requirement, 1..String.length(requirement)//1)
@@ -272,7 +283,7 @@ defmodule Cympho.Skills.Resolver do
   defp caret_match?(version, requirement) do
     case {Version.parse(version), Version.parse(requirement)} do
       {{:ok, v}, {:ok, r}} ->
-        v.major == r.major and v >= r
+        v.major == r.major and Version.compare(v, r) != :lt
 
       _ ->
         false
@@ -282,7 +293,7 @@ defmodule Cympho.Skills.Resolver do
   defp tilde_match?(version, requirement) do
     case {Version.parse(version), Version.parse(requirement)} do
       {{:ok, v}, {:ok, r}} ->
-        v.major == r.major and v.minor == r.minor and v >= r
+        v.major == r.major and v.minor == r.minor and Version.compare(v, r) != :lt
 
       _ ->
         false

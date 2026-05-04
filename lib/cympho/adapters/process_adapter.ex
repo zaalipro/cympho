@@ -19,7 +19,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
   end
 
   defp do_run(session_id, issue, agent_id, recipient_pid, opts) do
-    config = opts[:config] || %{}
+    config = runtime_config(opts[:config] || %{}, opts)
 
     case start_process(issue, agent_id, config, recipient_pid, session_id) do
       {:ok, _pid} ->
@@ -73,14 +73,15 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
   defp build_env(issue, agent_id, config) do
     # Encode issue payload as JSON for the subprocess
-    issue_json = Jason.encode!(%{
-      id: issue.id,
-      title: issue.title,
-      description: Map.get(issue, :description),
-      status: Map.get(issue, :status),
-      priority: Map.get(issue, :priority),
-      agent_id: agent_id
-    })
+    issue_json =
+      Jason.encode!(%{
+        id: issue.id,
+        title: issue.title,
+        description: Map.get(issue, :description),
+        status: Map.get(issue, :status),
+        priority: Map.get(issue, :priority),
+        agent_id: agent_id
+      })
 
     base_env = [
       {"ISSUE_PAYLOAD", issue_json},
@@ -99,6 +100,21 @@ defmodule Cympho.Adapters.ProcessAdapter do
     (base_env ++ custom_env_list)
     |> Enum.map(fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
   end
+
+  defp runtime_config(config, opts) do
+    runtime_env = Keyword.get(opts, :env, %{}) || runtime_context_env(opts[:runtime_context])
+    cwd = opts[:cwd] || config[:cwd] || config["cwd"]
+    configured_env = config[:env] || config["env"] || %{}
+
+    config
+    |> Map.delete(:env)
+    |> Map.delete("env")
+    |> Map.put_new("cwd", cwd)
+    |> Map.put("env", Map.merge(configured_env, runtime_env))
+  end
+
+  defp runtime_context_env(%Cympho.RuntimeContext{env: env}) when is_map(env), do: env
+  defp runtime_context_env(_), do: %{}
 
   defp run_process(session_id, command, args, opts, recipient_pid, config) do
     send(recipient_pid, {:session_started, session_id})
@@ -128,11 +144,10 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
       {^port, {:exit_status, code}} ->
         send(recipient_pid, {:turn_ended_with_error, session_id, {:exit_code, code, acc}})
-
-      after
-        timeout ->
-          Port.close(port)
-          send(recipient_pid, {:turn_ended_with_error, session_id, :timeout})
+    after
+      timeout ->
+        Port.close(port)
+        send(recipient_pid, {:turn_ended_with_error, session_id, :timeout})
     end
   end
 
@@ -167,7 +182,11 @@ defmodule Cympho.Adapters.ProcessAdapter do
             run_health_check_command(command, config)
 
           _ ->
-            %{status: :degraded, message: "Command not found in PATH", checked_at: DateTime.utc_now()}
+            %{
+              status: :degraded,
+              message: "Command not found in PATH",
+              checked_at: DateTime.utc_now()
+            }
         end
     end
   end
@@ -182,16 +201,28 @@ defmodule Cympho.Adapters.ProcessAdapter do
              cd: config[:cwd] || config["cwd"]
            ) do
         {_, 0} ->
-          %{status: :healthy, message: "Command available and healthy", checked_at: DateTime.utc_now()}
+          %{
+            status: :healthy,
+            message: "Command available and healthy",
+            checked_at: DateTime.utc_now()
+          }
 
         {_output, _code} ->
           # Command doesn't support --health-check, but it exists, so return healthy
-          %{status: :healthy, message: "Command available (no health check)", checked_at: DateTime.utc_now()}
+          %{
+            status: :healthy,
+            message: "Command available (no health check)",
+            checked_at: DateTime.utc_now()
+          }
       end
     rescue
       _ ->
         # If System.cmd fails entirely (e.g., command not executable), still return healthy since we confirmed it exists
-        %{status: :healthy, message: "Command available (no health check)", checked_at: DateTime.utc_now()}
+        %{
+          status: :healthy,
+          message: "Command available (no health check)",
+          checked_at: DateTime.utc_now()
+        }
     end
   end
 

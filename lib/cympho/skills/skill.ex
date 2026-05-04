@@ -23,7 +23,18 @@ defmodule Cympho.Skills.Skill do
 
   def changeset(skill, attrs) do
     skill
-    |> cast(attrs, [:identifier, :name, :description, :version, :author, :manifest, :enabled, :settings, :company_id, :project_id])
+    |> cast(attrs, [
+      :identifier,
+      :name,
+      :description,
+      :version,
+      :author,
+      :manifest,
+      :enabled,
+      :settings,
+      :company_id,
+      :project_id
+    ])
     |> validate_required([:identifier, :name, :manifest])
     |> unique_constraint([:identifier, :company_id])
     |> assoc_constraint(:company)

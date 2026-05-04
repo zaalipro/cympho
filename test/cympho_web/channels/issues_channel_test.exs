@@ -7,7 +7,11 @@ defmodule CymphoWeb.IssuesChannelTest do
       {:ok, socket} = connect_jwt(company_id, Ecto.UUID.generate())
 
       assert {:ok, _reply, _socket} =
-               subscribe_and_join(socket, CymphoWeb.CompanyChannel, "company:#{company_id}:issues")
+               subscribe_and_join(
+                 socket,
+                 CymphoWeb.CompanyChannel,
+                 "company:#{company_id}:issues"
+               )
     end
 
     test "rejects when company_id does not match socket" do

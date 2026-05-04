@@ -17,18 +17,22 @@ defmodule Cympho.Adapters.CodexAdapter do
     config = opts[:config] || %{}
 
     spawn(fn ->
-      do_run(session_id, issue, agent_id, recipient_pid, config)
+      do_run(session_id, issue, agent_id, recipient_pid, config, opts)
     end)
 
     session_id
   end
 
-  defp do_run(session_id, issue, agent_id, recipient_pid, config) do
+  defp do_run(session_id, issue, agent_id, recipient_pid, config, opts) do
     send(recipient_pid, {:session_started, session_id})
 
-    prompt = build_prompt(issue, agent_id)
+    prompt =
+      Cympho.AgentPrompt.build(issue, agent_id,
+        skills: Keyword.get(opts, :skills, []),
+        runtime_context: Keyword.get(opts, :runtime_context)
+      )
 
-    case run_codex(prompt, config) do
+    case run_codex(prompt, config, opts) do
       {:ok, output} ->
         send(recipient_pid, {:turn_completed, session_id, output})
 
@@ -37,38 +41,28 @@ defmodule Cympho.Adapters.CodexAdapter do
     end
   end
 
-  defp build_prompt(issue, agent_id) do
-    """
-    You are agent #{agent_id} working on the following issue:
-
-    Issue ID: #{issue[:id] || issue.id}
-    Title: #{issue[:title] || issue.title}
-
-    #{issue[:description] || issue.description || "No description provided."}
-
-    Please analyze this issue and provide your response.
-    """
-    |> String.trim()
-  end
-
-  defp run_codex(prompt, config) do
+  defp run_codex(prompt, config, opts) do
     try do
       codex_bin = find_codex_binary()
       model = config[:model] || config["model"] || @default_model
       timeout = config[:timeout] || config["timeout"] || @default_timeout
 
       args = [
-        "--model", to_string(model),
-        "--format", "json",
+        "--model",
+        to_string(model),
+        "--format",
+        "json",
         "--quiet"
       ]
 
-      env = build_env(config)
+      env = build_env(config, opts)
 
-      port = Port.open(
-        {:spawn_executable, codex_bin},
-        [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}]
-      )
+      port =
+        Port.open(
+          {:spawn_executable, codex_bin},
+          [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}] ++
+            cwd_opt(config, opts)
+        )
 
       Port.command(port, "#{prompt}\n")
 
@@ -133,12 +127,16 @@ defmodule Cympho.Adapters.CodexAdapter do
     System.find_executable("codex") || raise "codex binary not found in PATH"
   end
 
-  defp build_env(config) do
-    api_key = config[:api_key] || config["api_key"] ||
-      Application.get_env(:cympho, :openai_api_key) ||
-      System.get_env("OPENAI_API_KEY")
+  defp build_env(config, opts) do
+    runtime_env = Keyword.get(opts, :env, %{}) || runtime_context_env(opts[:runtime_context])
 
-    base = [{"TERM", "dumb"}]
+    api_key =
+      config[:api_key] || config["api_key"] ||
+        runtime_env["OPENAI_API_KEY"] || runtime_env[:OPENAI_API_KEY] ||
+        Application.get_env(:cympho, :openai_api_key) ||
+        System.get_env("OPENAI_API_KEY")
+
+    base = [{"TERM", "dumb"} | normalize_env(runtime_env, ["OPENAI_API_KEY"])]
 
     if api_key do
       [{"OPENAI_API_KEY", api_key} | base]
@@ -147,16 +145,48 @@ defmodule Cympho.Adapters.CodexAdapter do
     end
   end
 
+  defp cwd_opt(config, opts) do
+    case opts[:cwd] || config[:cwd] || config["cwd"] do
+      nil -> []
+      cwd -> [{:cd, cwd}]
+    end
+  end
+
+  defp runtime_context_env(%Cympho.RuntimeContext{env: env}) when is_map(env), do: env
+  defp runtime_context_env(_), do: %{}
+
+  defp normalize_env(env, skip_keys) when is_map(env) do
+    Enum.flat_map(env, fn {key, value} ->
+      key = to_string(key)
+
+      if key in skip_keys do
+        []
+      else
+        [{key, to_string(value)}]
+      end
+    end)
+  end
+
+  defp normalize_env(_env, _skip_keys), do: []
+
   @impl true
   def health_check(config) do
     api_key = get_api_key(config)
 
     cond do
       is_nil(api_key) or api_key == "" ->
-        %{status: :unhealthy, message: "OpenAI API key not configured", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "OpenAI API key not configured",
+          checked_at: DateTime.utc_now()
+        }
 
       is_nil(System.find_executable("codex")) ->
-        %{status: :degraded, message: "codex binary not found in PATH", checked_at: DateTime.utc_now()}
+        %{
+          status: :degraded,
+          message: "codex binary not found in PATH",
+          checked_at: DateTime.utc_now()
+        }
 
       true ->
         %{status: :healthy, message: "Codex adapter ready", checked_at: DateTime.utc_now()}
@@ -166,11 +196,41 @@ defmodule Cympho.Adapters.CodexAdapter do
   @impl true
   def config_schema do
     [
-      %{key: :api_key, type: :string, required: true, default: nil, description: "OpenAI API key"},
-      %{key: :model, type: :string, required: false, default: @default_model, description: "Model to use"},
-      %{key: :temperature, type: :float, required: false, default: 0.7, description: "Sampling temperature (0.0 - 2.0)"},
-      %{key: :max_tokens, type: :integer, required: false, default: 2000, description: "Maximum tokens to generate"},
-      %{key: :timeout, type: :integer, required: false, default: @default_timeout, description: "CLI process timeout (ms)"}
+      %{
+        key: :api_key,
+        type: :string,
+        required: true,
+        default: nil,
+        description: "OpenAI API key"
+      },
+      %{
+        key: :model,
+        type: :string,
+        required: false,
+        default: @default_model,
+        description: "Model to use"
+      },
+      %{
+        key: :temperature,
+        type: :float,
+        required: false,
+        default: 0.7,
+        description: "Sampling temperature (0.0 - 2.0)"
+      },
+      %{
+        key: :max_tokens,
+        type: :integer,
+        required: false,
+        default: 2000,
+        description: "Maximum tokens to generate"
+      },
+      %{
+        key: :timeout,
+        type: :integer,
+        required: false,
+        default: @default_timeout,
+        description: "CLI process timeout (ms)"
+      }
     ]
   end
 
@@ -227,14 +287,20 @@ defmodule Cympho.Adapters.CodexAdapter do
   defp validate_model(_), do: {:error, "model must be a string"}
 
   defp validate_temperature(nil), do: :ok
+
   defp validate_temperature(temp) when is_float(temp) or is_integer(temp) do
-    if temp >= 0.0 and temp <= 2.0, do: :ok, else: {:error, "temperature must be between 0.0 and 2.0"}
+    if temp >= 0.0 and temp <= 2.0,
+      do: :ok,
+      else: {:error, "temperature must be between 0.0 and 2.0"}
   end
+
   defp validate_temperature(_), do: {:error, "temperature must be a number"}
 
   defp validate_max_tokens(nil), do: :ok
+
   defp validate_max_tokens(tokens) when is_integer(tokens) do
     if tokens > 0, do: :ok, else: {:error, "max_tokens must be positive"}
   end
+
   defp validate_max_tokens(_), do: {:error, "max_tokens must be an integer"}
 end

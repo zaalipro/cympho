@@ -8,6 +8,7 @@ defmodule Cympho.Skills.Sandbox.Audit do
 
   def log_decision(agent_id, agent_role, capability, result) do
     plugin_id = get_audit_plugin_id()
+
     log_entry = %{
       level: log_level_from_result(result),
       message: format_message(agent_role, capability, result),
@@ -16,12 +17,17 @@ defmodule Cympho.Skills.Sandbox.Audit do
       plugin_id: plugin_id,
       company_id: get_company_id_for_agent(agent_id)
     }
+
     %PluginLog{} |> PluginLog.changeset(log_entry) |> Repo.insert()
     :ok
   end
 
   defp get_audit_plugin_id do
-    query = from p in Plugin, where: p.identifier == "system.sandbox" or p.identifier == "cympho.core", limit: 1
+    query =
+      from p in Plugin,
+        where: p.identifier == "system.sandbox" or p.identifier == "cympho.core",
+        limit: 1
+
     case Repo.one(query) do
       nil -> nil
       plugin -> plugin.id
@@ -29,6 +35,7 @@ defmodule Cympho.Skills.Sandbox.Audit do
   end
 
   defp get_company_id_for_agent(nil), do: nil
+
   defp get_company_id_for_agent(agent_id) do
     case Repo.get(Agent, agent_id) do
       nil -> nil
@@ -66,15 +73,25 @@ defmodule Cympho.Skills.Sandbox.Audit do
 
   def logs_for_agent(agent_id, opts \\ []) do
     limit = Keyword.get(opts, :limit, 100)
-    query = from pl in PluginLog, where: fragment("?->>'agent_id' = ?", pl.metadata, ^agent_id),
-      order_by: [desc: pl.timestamp], limit: ^limit
+
+    query =
+      from pl in PluginLog,
+        where: fragment("?->>'agent_id' = ?", pl.metadata, ^agent_id),
+        order_by: [desc: pl.timestamp],
+        limit: ^limit
+
     Repo.all(query)
   end
 
   def logs_for_capability(capability, opts \\ []) do
     limit = Keyword.get(opts, :limit, 100)
-    query = from pl in PluginLog, where: fragment("?->>'capability' = ?", pl.metadata, ^capability),
-      order_by: [desc: pl.timestamp], limit: ^limit
+
+    query =
+      from pl in PluginLog,
+        where: fragment("?->>'capability' = ?", pl.metadata, ^capability),
+        order_by: [desc: pl.timestamp],
+        limit: ^limit
+
     Repo.all(query)
   end
 
@@ -83,11 +100,21 @@ defmodule Cympho.Skills.Sandbox.Audit do
     agent_id = Keyword.get(opts, :agent_id)
     capability = Keyword.get(opts, :capability)
 
-    query = from pl in PluginLog, where: fragment("?->>'result' LIKE ?", pl.metadata, "denied%"),
-      order_by: [desc: pl.timestamp], limit: ^limit
+    query =
+      from pl in PluginLog,
+        where: fragment("?->>'result' LIKE ?", pl.metadata, "denied%"),
+        order_by: [desc: pl.timestamp],
+        limit: ^limit
 
-    query = if agent_id, do: where(query, [pl], fragment("?->>'agent_id' = ?", pl.metadata, ^agent_id)), else: query
-    query = if capability, do: where(query, [pl], fragment("?->>'capability' = ?", pl.metadata, ^capability)), else: query
+    query =
+      if agent_id,
+        do: where(query, [pl], fragment("?->>'agent_id' = ?", pl.metadata, ^agent_id)),
+        else: query
+
+    query =
+      if capability,
+        do: where(query, [pl], fragment("?->>'capability' = ?", pl.metadata, ^capability)),
+        else: query
 
     Repo.all(query)
   end

@@ -170,7 +170,11 @@ defmodule Cympho.Adapters.CursorAdapter do
         %{status: :unhealthy, message: "Cursor binary not found", checked_at: DateTime.utc_now()}
 
       not File.exists?(cursor_bin) ->
-        %{status: :unhealthy, message: "Cursor binary path does not exist", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "Cursor binary path does not exist",
+          checked_at: DateTime.utc_now()
+        }
 
       true ->
         %{status: :healthy, message: "Cursor adapter ready", checked_at: DateTime.utc_now()}
@@ -180,11 +184,41 @@ defmodule Cympho.Adapters.CursorAdapter do
   @impl true
   def config_schema do
     [
-      %{key: :cursor_path, type: :string, required: false, default: nil, description: "Path to Cursor executable (defaults to system PATH)"},
-      %{key: :workspace_path, type: :string, required: false, default: nil, description: "Cursor workspace path for project context"},
-      %{key: :model, type: :string, required: false, default: nil, description: "Model to use within Cursor"},
-      %{key: :headless, type: :boolean, required: false, default: false, description: "Run Cursor in headless mode"},
-      %{key: :timeout, type: :integer, required: false, default: @default_timeout, description: "CLI process timeout (ms)"}
+      %{
+        key: :cursor_path,
+        type: :string,
+        required: false,
+        default: nil,
+        description: "Path to Cursor executable (defaults to system PATH)"
+      },
+      %{
+        key: :workspace_path,
+        type: :string,
+        required: false,
+        default: nil,
+        description: "Cursor workspace path for project context"
+      },
+      %{
+        key: :model,
+        type: :string,
+        required: false,
+        default: nil,
+        description: "Model to use within Cursor"
+      },
+      %{
+        key: :headless,
+        type: :boolean,
+        required: false,
+        default: false,
+        description: "Run Cursor in headless mode"
+      },
+      %{
+        key: :timeout,
+        type: :integer,
+        required: false,
+        default: @default_timeout,
+        description: "CLI process timeout (ms)"
+      }
     ]
   end
 

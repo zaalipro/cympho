@@ -64,6 +64,7 @@ defmodule CymphoWeb do
 
   defp html_helpers do
     quote do
+      alias Phoenix.LiveView.JS
       import Phoenix.HTML
       import Phoenix.Component
       import CymphoWeb.CoreComponents

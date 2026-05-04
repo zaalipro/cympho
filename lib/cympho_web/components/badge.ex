@@ -36,14 +36,14 @@ defmodule CymphoWeb.Components.Badge do
 
     class =
       case assigns.variant do
-        "status" -> Map.get(@status_colors, value_str, "bg-white/10 text-text-secondary")
-        "priority" -> Map.get(@priority_colors, value_str, "bg-white/10")
-        "agent" -> Map.get(@agent_colors, value_str, "bg-white/10 text-text-secondary")
+        "status" -> Map.get(@status_colors, value_str, "bg-subtle text-text-secondary")
+        "priority" -> Map.get(@priority_colors, value_str, "bg-subtle")
+        "agent" -> Map.get(@agent_colors, value_str, "bg-subtle text-text-secondary")
         "pill" -> "border border-border text-text-secondary"
-        _ -> "bg-white/10 text-text-secondary"
+        _ -> "bg-subtle text-text-secondary"
       end
 
-    dot_class = Map.get(@priority_colors, value_str, "bg-white/10")
+    dot_class = Map.get(@priority_colors, value_str, "bg-subtle")
     label = value_str |> String.replace("_", " ") |> String.capitalize()
 
     assigns =
@@ -54,7 +54,7 @@ defmodule CymphoWeb.Components.Badge do
 
     ~H"""
     <span
-      class={["inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-510", @class]}
+      class={["inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-510", @class]}
       {@rest}
     >
       <%= if @variant == "priority" do %>

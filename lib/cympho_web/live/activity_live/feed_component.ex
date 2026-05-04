@@ -7,7 +7,12 @@ defmodule CymphoWeb.ActivityLive.FeedComponent do
   def update(%{issue_id: issue_id} = assigns, socket) do
     if connected?(socket) do
       CymphoWeb.Endpoint.subscribe("issue:#{issue_id}")
-      company_id = Cympho.Repo.one(from i in Cympho.Issues.Issue, where: i.id == ^issue_id, select: i.company_id)
+
+      company_id =
+        Cympho.Repo.one(
+          from i in Cympho.Issues.Issue, where: i.id == ^issue_id, select: i.company_id
+        )
+
       if company_id, do: Activities.subscribe(company_id)
     end
 
@@ -28,7 +33,6 @@ defmodule CymphoWeb.ActivityLive.FeedComponent do
     {:noreply, socket}
   end
 
-  @impl true
   def handle_info({:activity_created, activity}, socket) do
     activities = [activity | socket.assigns.activities]
     statistics = Activities.get_activity_statistics(socket.assigns.issue_id)
@@ -36,7 +40,6 @@ defmodule CymphoWeb.ActivityLive.FeedComponent do
     {:noreply, assign(socket, activities: activities, statistics: statistics)}
   end
 
-  @impl true
   def handle_info(_, socket) do
     {:noreply, socket}
   end

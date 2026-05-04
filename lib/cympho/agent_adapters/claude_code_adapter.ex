@@ -24,10 +24,18 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
   def health_check(config \\ %{}) do
     cond do
       not claude_in_path?() ->
-        %{status: :unhealthy, message: "Claude CLI not found in PATH", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "Claude CLI not found in PATH",
+          checked_at: DateTime.utc_now()
+        }
 
       not api_key_present?(config) ->
-        %{status: :unhealthy, message: "ANTHROPIC_API_KEY not set", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "ANTHROPIC_API_KEY not set",
+          checked_at: DateTime.utc_now()
+        }
 
       true ->
         case System.cmd("claude", ["--version"], stderr_to_stdout: true) do
@@ -37,7 +45,8 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
           {output, code} ->
             %{
               status: :degraded,
-              message: "claude --version exited with code #{code}: #{String.slice(output, 0, 100)}",
+              message:
+                "claude --version exited with code #{code}: #{String.slice(output, 0, 100)}",
               checked_at: DateTime.utc_now()
             }
         end
@@ -154,14 +163,34 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
   end
 
   defp build_prompt(issue) do
+    lineage_part =
+      case issue.lineage do
+        nil ->
+          ""
+
+        lineage ->
+          parts =
+            [
+              lineage_line("Mission", lineage[:mission_id]),
+              lineage_line("Initiative", lineage[:initiative_id]),
+              lineage_line("Milestone", lineage[:milestone_id])
+            ]
+            |> Enum.reject(&is_nil/1)
+
+          if Enum.empty?(parts), do: "", else: "\nGoal ancestry:\n" <> Enum.join(parts, "\n")
+      end
+
     """
     Issue ID: #{issue.id}
     Title: #{issue.title}
 
-    #{issue.description || "No description provided."}
+    #{issue.description || "No description provided."}#{lineage_part}
     """
     |> String.trim()
   end
+
+  defp lineage_line(_label, nil), do: nil
+  defp lineage_line(label, id), do: "  #{label}: #{id}"
 
   ## Private — Port execution
 

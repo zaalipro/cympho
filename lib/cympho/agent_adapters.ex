@@ -73,11 +73,13 @@ defmodule Cympho.AgentAdapters do
               # Log config errors if we're falling back after previous failures
               if config_errors != [] do
                 require Logger
+
                 Logger.warning("""
                 Adapter #{type} resolved successfully, but previous adapters in fallback chain failed config validation:
                 #{format_config_errors(Enum.reverse(config_errors))}
                 """)
               end
+
               {:ok, module, config}
 
             {:error, reason} ->

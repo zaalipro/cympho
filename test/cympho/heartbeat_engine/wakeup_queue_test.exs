@@ -91,8 +91,12 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
   end
 
   describe "dequeue/1" do
-    test "returns the most recent wake for an agent", %{agent: agent, issue: issue, issue2: issue2} do
-      {:ok, _} =
+    test "returns the oldest pending wake for an agent", %{
+      agent: agent,
+      issue: issue,
+      issue2: issue2
+    } do
+      {:ok, first} =
         WakeupQueue.enqueue(%{
           agent_id: agent.id,
           issue_id: issue.id,
@@ -102,7 +106,7 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
       # Ensure different timestamp
       Process.sleep(1100)
 
-      {:ok, latest} =
+      {:ok, _latest} =
         WakeupQueue.enqueue(%{
           agent_id: agent.id,
           issue_id: issue2.id,
@@ -110,7 +114,7 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
         })
 
       assert {:ok, dequeued} = WakeupQueue.dequeue(agent.id)
-      assert dequeued.id == latest.id
+      assert dequeued.id == first.id
     end
 
     test "returns error when no wakes exist" do
@@ -146,8 +150,27 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
     end
   end
 
+  describe "consume_for/2" do
+    test "marks pending wakes for an agent and issue as consumed", %{agent: agent, issue: issue} do
+      {:ok, _wake} =
+        WakeupQueue.enqueue(%{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: "issue_commented"
+        })
+
+      assert WakeupQueue.pending_count(agent.id) == 1
+      assert :ok = WakeupQueue.consume_for(agent.id, issue.id)
+      assert WakeupQueue.pending_count(agent.id) == 0
+    end
+  end
+
   describe "list_pending/1" do
-    test "returns wakes ordered by most recent first", %{agent: agent, issue: issue, issue2: issue2} do
+    test "returns wakes ordered by most recent first", %{
+      agent: agent,
+      issue: issue,
+      issue2: issue2
+    } do
       {:ok, _first} =
         WakeupQueue.enqueue(%{
           agent_id: agent.id,

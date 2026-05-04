@@ -7,10 +7,12 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
   alias Cympho.Repo
 
   defp company_fixture do
-    {:ok, company} = Cympho.Companies.create_company(%{
-      name: "Test Company",
-      slug: "test-#{System.unique_integer([:positive])}"
-    })
+    {:ok, company} =
+      Cympho.Companies.create_company(%{
+        name: "Test Company",
+        slug: "test-#{System.unique_integer([:positive])}"
+      })
+
     company
   end
 
@@ -213,7 +215,9 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
 
       # Verify total spend doesn't exceed budget
       all_usages = Finances.list_token_usages(company_id)
-      total_cost = Enum.reduce(all_usages, Decimal.new("0"), fn u, acc -> Decimal.add(acc, u.cost_usd) end)
+
+      total_cost =
+        Enum.reduce(all_usages, Decimal.new("0"), fn u, acc -> Decimal.add(acc, u.cost_usd) end)
 
       assert Decimal.compare(total_cost, Decimal.new("20.00")) in [:lt, :eq]
     end
@@ -311,6 +315,7 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
 
       # Different agent should not be affected
       other_agent_id = Ecto.UUID.generate()
+
       {:ok, _tu3} =
         Finances.record_token_usage(%{
           company_id: company_id,

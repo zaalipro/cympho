@@ -4,24 +4,39 @@ defmodule Cympho.GoalsHierarchyTest do
   alias Cympho.Goals.Goal
 
   setup do
-    {:ok, company} = Cympho.Companies.create_company(%{name: "Test Co", slug: "gh-#{System.unique_integer()}"})
+    {:ok, company} =
+      Cympho.Companies.create_company(%{name: "Test Co", slug: "gh-#{System.unique_integer()}"})
+
     prefix = for _ <- 1..4, into: "", do: <<Enum.random(?A..?Z)>>
-    {:ok, project} = Cympho.Projects.create_project(%{name: "Test Project", prefix: prefix, company_id: company.id})
+
+    {:ok, project} =
+      Cympho.Projects.create_project(%{
+        name: "Test Project",
+        prefix: prefix,
+        company_id: company.id
+      })
+
     {:ok, company: company, project: project}
   end
 
   describe "goal hierarchy" do
     test "create a goal with parent", %{project: project} do
       {:ok, parent} = Goals.create_goal(%{title: "Parent Goal", project_id: project.id})
-      {:ok, child} = Goals.create_goal(%{title: "Child Goal", project_id: project.id, parent_id: parent.id})
+
+      {:ok, child} =
+        Goals.create_goal(%{title: "Child Goal", project_id: project.id, parent_id: parent.id})
 
       assert child.parent_id == parent.id
     end
 
     test "get_goal_with_tree! loads nested children", %{project: project} do
       {:ok, parent} = Goals.create_goal(%{title: "Parent", project_id: project.id})
-      {:ok, _child1} = Goals.create_goal(%{title: "Child 1", project_id: project.id, parent_id: parent.id})
-      {:ok, _child2} = Goals.create_goal(%{title: "Child 2", project_id: project.id, parent_id: parent.id})
+
+      {:ok, _child1} =
+        Goals.create_goal(%{title: "Child 1", project_id: project.id, parent_id: parent.id})
+
+      {:ok, _child2} =
+        Goals.create_goal(%{title: "Child 2", project_id: project.id, parent_id: parent.id})
 
       tree = Goals.get_goal_with_tree!(parent.id)
       assert length(tree.children) == 2
@@ -29,7 +44,9 @@ defmodule Cympho.GoalsHierarchyTest do
 
     test "cycle detection prevents circular references", %{project: project} do
       {:ok, parent} = Goals.create_goal(%{title: "Parent", project_id: project.id})
-      {:ok, child} = Goals.create_goal(%{title: "Child", project_id: project.id, parent_id: parent.id})
+
+      {:ok, child} =
+        Goals.create_goal(%{title: "Child", project_id: project.id, parent_id: parent.id})
 
       assert Goals.would_create_cycle?(parent.id, child.id)
     end
@@ -50,9 +67,29 @@ defmodule Cympho.GoalsHierarchyTest do
     test "calculates progress from linked issues", %{project: project} do
       {:ok, goal} = Goals.create_goal(%{title: "Goal", project_id: project.id})
 
-      {:ok, _} = Cympho.Issues.create_issue(%{title: "I1", project_id: project.id, goal_id: goal.id, status: :done})
-      {:ok, _} = Cympho.Issues.create_issue(%{title: "I2", project_id: project.id, goal_id: goal.id, status: :done})
-      {:ok, _} = Cympho.Issues.create_issue(%{title: "I3", project_id: project.id, goal_id: goal.id, status: :in_progress})
+      {:ok, _} =
+        Cympho.Issues.create_issue(%{
+          title: "I1",
+          project_id: project.id,
+          goal_id: goal.id,
+          status: :done
+        })
+
+      {:ok, _} =
+        Cympho.Issues.create_issue(%{
+          title: "I2",
+          project_id: project.id,
+          goal_id: goal.id,
+          status: :done
+        })
+
+      {:ok, _} =
+        Cympho.Issues.create_issue(%{
+          title: "I3",
+          project_id: project.id,
+          goal_id: goal.id,
+          status: :in_progress
+        })
 
       progress = Goals.goal_progress(goal.id)
       assert progress.total == 3
@@ -71,7 +108,10 @@ defmodule Cympho.GoalsHierarchyTest do
   describe "list_root_goals_by_project" do
     test "returns only top-level goals", %{project: project} do
       {:ok, root1} = Goals.create_goal(%{title: "Root 1", project_id: project.id})
-      {:ok, _child} = Goals.create_goal(%{title: "Child", project_id: project.id, parent_id: root1.id})
+
+      {:ok, _child} =
+        Goals.create_goal(%{title: "Child", project_id: project.id, parent_id: root1.id})
+
       {:ok, _root2} = Goals.create_goal(%{title: "Root 2", project_id: project.id})
 
       roots = Goals.list_root_goals_by_project(project.id)
@@ -87,8 +127,12 @@ defmodule Cympho.GoalsHierarchyTest do
 
     test "returns parent chain for nested goals", %{project: project} do
       {:ok, grandparent} = Goals.create_goal(%{title: "GP", project_id: project.id})
-      {:ok, parent} = Goals.create_goal(%{title: "P", project_id: project.id, parent_id: grandparent.id})
-      {:ok, child} = Goals.create_goal(%{title: "C", project_id: project.id, parent_id: parent.id})
+
+      {:ok, parent} =
+        Goals.create_goal(%{title: "P", project_id: project.id, parent_id: grandparent.id})
+
+      {:ok, child} =
+        Goals.create_goal(%{title: "C", project_id: project.id, parent_id: parent.id})
 
       ancestors = Goals.get_ancestors(child.id)
       assert length(ancestors) == 2
@@ -105,9 +149,15 @@ defmodule Cympho.GoalsHierarchyTest do
 
     test "returns all nested children recursively", %{project: project} do
       {:ok, root} = Goals.create_goal(%{title: "Root", project_id: project.id})
-      {:ok, child1} = Goals.create_goal(%{title: "C1", project_id: project.id, parent_id: root.id})
-      {:ok, _child2} = Goals.create_goal(%{title: "C2", project_id: project.id, parent_id: root.id})
-      {:ok, _grandchild} = Goals.create_goal(%{title: "GC1", project_id: project.id, parent_id: child1.id})
+
+      {:ok, child1} =
+        Goals.create_goal(%{title: "C1", project_id: project.id, parent_id: root.id})
+
+      {:ok, _child2} =
+        Goals.create_goal(%{title: "C2", project_id: project.id, parent_id: root.id})
+
+      {:ok, _grandchild} =
+        Goals.create_goal(%{title: "GC1", project_id: project.id, parent_id: child1.id})
 
       descendants = Goals.get_descendants(root.id)
       assert length(descendants) == 3

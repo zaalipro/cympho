@@ -56,9 +56,14 @@ defmodule Cympho.Finances do
     end)
     |> Repo.transaction()
     |> case do
-      {:ok, result} -> {:ok, result.token_usage}
-      {:error, :check_budgets, :budget_blocked, _changes} -> {:error, :budget_blocked}
-      {:error, failed_operation, failed_value, changes} -> {:error, failed_operation, failed_value, changes}
+      {:ok, result} ->
+        {:ok, result.token_usage}
+
+      {:error, :check_budgets, :budget_blocked, _changes} ->
+        {:error, :budget_blocked}
+
+      {:error, failed_operation, failed_value, changes} ->
+        {:error, failed_operation, failed_value, changes}
     end
   end
 
@@ -250,6 +255,7 @@ defmodule Cympho.Finances do
         locked_policy =
           from(p in BudgetPolicy, where: p.id == ^policy.id, lock: "FOR UPDATE")
           |> Repo.one!()
+
         check_policy_threshold(locked_policy, token_usage)
       end)
 

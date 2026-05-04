@@ -6,7 +6,8 @@ defmodule Cympho.Budgets do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Budgets.Budget
-  alias Cympho.{GovernanceAuditLogs, Activities, BoardApprovals, AuditTrail.Instrumenter}
+  alias Cympho.{GovernanceAuditLogs, Activities, BoardApprovals}
+  alias Cympho.AuditTrail.Instrumenter
 
   @doc """
   Returns the list of budgets.
@@ -54,6 +55,13 @@ defmodule Cympho.Budgets do
       nil -> {:error, :not_found}
       budget -> {:ok, budget}
     end
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking budget changes.
+  """
+  def change_budget(%Budget{} = budget, attrs \\ %{}) do
+    Budget.changeset(budget, attrs)
   end
 
   @doc """
@@ -123,7 +131,12 @@ defmodule Cympho.Budgets do
           }
         )
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{budget.company_id}:budgets", {:budget_created, budget})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{budget.company_id}:budgets",
+          {:budget_created, budget}
+        )
+
         {:ok, budget}
 
       error ->
@@ -174,10 +187,36 @@ defmodule Cympho.Budgets do
           }
         )
 
-        # Record budget changes in audit trail for threshold changes
-        maybe_record_budget_change(budget, updated, attrs)
+        # Record audit event if threshold changed
+        if Map.has_key?(attrs, :threshold_alert_percentage) or
+             Map.has_key?(attrs, "threshold_alert_percentage") do
+          old_threshold = budget.threshold_alert_percentage
+          new_threshold = updated.threshold_alert_percentage
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:budgets", {:budget_updated, updated})
+          if old_threshold != new_threshold do
+            {actor_type, actor_id} =
+              case actor do
+                {type, id} -> {to_string(type), id}
+                _ -> {"system", "budget_update"}
+              end
+
+            _ =
+              Instrumenter.record_budget_change(
+                updated,
+                old_threshold,
+                new_threshold,
+                actor_type,
+                actor_id
+              )
+          end
+        end
+
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.company_id}:budgets",
+          {:budget_updated, updated}
+        )
+
         {:ok, updated}
 
       error ->
@@ -217,7 +256,12 @@ defmodule Cympho.Budgets do
           remaining: Budget.available_amount(updated)
         })
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:budgets", {:budget_spent, updated})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.company_id}:budgets",
+          {:budget_spent, updated}
+        )
+
         {:ok, updated}
 
       error ->
@@ -277,7 +321,12 @@ defmodule Cympho.Budgets do
           }
         )
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{deleted.company_id}:budgets", {:budget_deleted, deleted})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{deleted.company_id}:budgets",
+          {:budget_deleted, deleted}
+        )
+
         {:ok, deleted}
 
       error ->
@@ -329,42 +378,6 @@ defmodule Cympho.Budgets do
     end
   end
 
-  defp maybe_record_budget_change(%Budget{} = old_budget, %Budget{} = new_budget, attrs) do
-    # Check if threshold changed
-    if Map.has_key?(attrs, :threshold_alert_percentage) or Map.has_key?(attrs, "threshold_alert_percentage") do
-      old_threshold = old_budget.threshold_alert_percentage
-      new_threshold = new_budget.threshold_alert_percentage
-
-      if old_threshold != new_threshold do
-        Instrumenter.record_budget_change(
-          new_budget.id,
-          "threshold_change",
-          old_threshold,
-          new_threshold,
-          new_budget.company_id
-        )
-      end
-    end
-
-    # Check if limit changed
-    if Map.has_key?(attrs, :limit_amount) or Map.has_key?(attrs, "limit_amount") do
-      old_limit = old_budget.limit_amount
-      new_limit = new_budget.limit_amount
-
-      if old_limit != new_limit do
-        Instrumenter.record_budget_change(
-          new_budget.id,
-          "limit_change",
-          old_limit,
-          new_limit,
-          new_budget.company_id
-        )
-      end
-    end
-
-    :ok
-  end
-
   defp check_hard_stop(%Budget{} = budget, actor) do
     if Budget.exhausted?(budget) and budget.hard_stop do
       GovernanceAuditLogs.log_action(
@@ -379,7 +392,11 @@ defmodule Cympho.Budgets do
         }
       )
 
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{budget.company_id}:budgets", {:budget_hard_stop, budget})
+      Phoenix.PubSub.broadcast(
+        Cympho.PubSub,
+        "company:#{budget.company_id}:budgets",
+        {:budget_hard_stop, budget}
+      )
     end
   end
 
@@ -465,7 +482,8 @@ defmodule Cympho.Budgets do
   defp create_pending_budget_approval(company, attrs, actor) do
     approval_attrs = %{
       title: "Budget creation approval: #{attrs[:name] || attrs["name"] || "Untitled"}",
-      description: "Budget creation requires board approval. Limit: #{attrs[:limit_amount] || attrs["limit_amount"]}",
+      description:
+        "Budget creation requires board approval. Limit: #{attrs[:limit_amount] || attrs["limit_amount"]}",
       category: "budget_increase",
       company_id: company.id,
       proposal_data: %{
@@ -495,7 +513,8 @@ defmodule Cympho.Budgets do
   defp create_pending_budget_update_approval(company, budget, attrs, actor) do
     approval_attrs = %{
       title: "Budget increase approval: #{budget.name}",
-      description: "Budget limit increase from #{budget.limit_amount} to #{attrs[:limit_amount] || attrs["limit_amount"]} requires board approval.",
+      description:
+        "Budget limit increase from #{budget.limit_amount} to #{attrs[:limit_amount] || attrs["limit_amount"]} requires board approval.",
       category: "budget_increase",
       company_id: company.id,
       proposal_data: %{

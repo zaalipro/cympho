@@ -11,12 +11,14 @@ defmodule CymphoWeb.AgentLive.Index do
     current_agent = session["current_agent"]
     full_agent = current_agent && Agents.get_agent(current_agent.id) |> then(fn {:ok, a} -> a end)
 
+    company_id = current_company_id(socket)
+
     socket =
-      assign(socket, :agents, Agents.list_agents())
+      assign(socket, :agents, list_agents(company_id))
       |> assign(:current_agent_id, current_agent && current_agent.id)
       |> assign(:current_agent_role, current_agent && current_agent.role)
       |> assign(:current_agent, full_agent)
-      |> assign(:status_counts, Agents.count_by_status())
+      |> assign(:status_counts, status_counts(company_id))
       |> assign(:session_progress, %{})
 
     if connected?(socket) do
@@ -168,12 +170,68 @@ defmodule CymphoWeb.AgentLive.Index do
   def status_label(:error), do: "Error"
   def status_label(:sleeping), do: "Sleeping"
   def status_label(:offline), do: "Offline"
+  def status_label(:active), do: "Active"
+  def status_label(:paused), do: "Paused"
+  def status_label(:pending_approval), do: "Pending Approval"
+  def status_label(:terminated), do: "Terminated"
 
   def role_label(:engineer), do: "Engineer"
   def role_label(:ceo), do: "CEO"
   def role_label(:cto), do: "CTO"
   def role_label(:product_manager), do: "Product Manager"
   def role_label(:designer), do: "Designer"
+  def role_label(:other), do: "Other"
+
+  def role_label(other),
+    do: other |> to_string() |> String.replace("_", " ") |> String.capitalize()
+
+  def agent_groups(agents) do
+    agents
+    |> Enum.group_by(&group_key/1)
+    |> Enum.sort_by(fn {key, _agents} -> group_rank(key) end)
+  end
+
+  def agent_initials(%{name: name}) when is_binary(name) do
+    name
+    |> String.split(~r/\s+/, trim: true)
+    |> Enum.take(2)
+    |> Enum.map(&String.first/1)
+    |> Enum.join()
+    |> String.upcase()
+  end
+
+  def agent_initials(_), do: "?"
+
+  def adapter_label(nil), do: "No adapter"
+
+  def adapter_label(adapter) do
+    adapter
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.split()
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  def status_pill_class(:running), do: "border-brand/25 bg-brand/10 text-brand"
+  def status_pill_class(:error), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def status_pill_class(:paused), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  def status_pill_class(:sleeping), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  def status_pill_class(:active), do: "border-success/25 bg-success/10 text-success"
+  def status_pill_class(:terminated), do: "border-border bg-surface text-text-quaternary"
+  def status_pill_class(:offline), do: "border-border bg-surface text-text-quaternary"
+  def status_pill_class(_), do: "border-border bg-surface text-text-secondary"
+
+  def health_pill_class(:healthy), do: "border-success/25 bg-success/10 text-success"
+  def health_pill_class(:degraded), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  def health_pill_class(:unavailable), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def health_pill_class(_), do: "border-border bg-surface text-text-secondary"
+
+  def format_heartbeat(%{last_heartbeat_at: nil}), do: "Never"
+
+  def format_heartbeat(%{last_heartbeat_at: datetime}),
+    do: Calendar.strftime(datetime, "%b %d, %H:%M")
+
+  def format_heartbeat(_), do: "Never"
 
   def show_spawn_button?(%Agents.Agent{} = agent) do
     Agents.spawnable_roles(agent) |> length() > 1
@@ -194,4 +252,22 @@ defmodule CymphoWeb.AgentLive.Index do
   end
 
   def format_elapsed(_), do: "0s"
+
+  defp current_company_id(socket) do
+    socket.assigns[:current_company] && socket.assigns.current_company.id
+  end
+
+  defp list_agents(nil), do: Agents.list_agents()
+  defp list_agents(company_id), do: Agents.list_agents_by_company(company_id)
+
+  defp status_counts(nil), do: Agents.count_by_status()
+  defp status_counts(company_id), do: Agents.count_by_status(company_id)
+
+  defp group_key(%{role: role}) when role in [:ceo, :cto, :engineer], do: role
+  defp group_key(_), do: :other
+
+  defp group_rank(:ceo), do: 0
+  defp group_rank(:cto), do: 1
+  defp group_rank(:engineer), do: 2
+  defp group_rank(_), do: 3
 end

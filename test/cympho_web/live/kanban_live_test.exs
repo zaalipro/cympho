@@ -37,6 +37,7 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert html =~ "In Review"
       assert html =~ "Done"
       assert html =~ "Blocked"
+      assert html =~ "Cancelled"
     end
 
     test "renders issues" do
@@ -96,7 +97,7 @@ defmodule CymphoWeb.KanbanLiveTest do
       result =
         render_hook(view, "transition_issue", %{"id" => issue.id, "to_status" => "backlog"})
 
-      assert result =~ "shake_card"
+      assert result =~ "Invalid status transition"
     end
   end
 
@@ -135,7 +136,7 @@ defmodule CymphoWeb.KanbanLiveTest do
 
     test "renders responsive column width classes" do
       {:ok, _view, html} = live(conn(), "/kanban")
-      assert html =~ "w-full lg:w-72"
+      assert html =~ "w-full lg:w-[280px]"
     end
 
     test "renders responsive padding on board container" do
@@ -154,20 +155,23 @@ defmodule CymphoWeb.KanbanLiveTest do
   describe "Empty column states" do
     test "shows contextual empty state message for empty columns" do
       {:ok, _view, html} = live(conn(), "/kanban")
-      assert html =~ "Nothing queued up"
       assert html =~ "Nothing in flight"
       assert html =~ "Nothing to review"
       assert html =~ "No completed work yet"
+      assert html =~ "No blockers"
+      assert html =~ "No cancelled work"
     end
 
-    test "empty backlog column shows no unplanned work message" do
+    test "empty backlog column shows no unplanned work message", %{issue_backlog: issue} do
+      :ok = Issues.delete_issue(issue)
       {:ok, _view, html} = live(conn(), "/kanban")
       assert html =~ "No unplanned work"
     end
 
-    test "empty blocked column shows no blockers message" do
+    test "empty todo column shows nothing queued message", %{issue_todo: issue} do
+      :ok = Issues.delete_issue(issue)
       {:ok, _view, html} = live(conn(), "/kanban")
-      assert html =~ "No blockers"
+      assert html =~ "Nothing queued up"
     end
   end
 

@@ -6,7 +6,8 @@ defmodule Cympho.Decisions do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Decisions.{Decision, DecisionReversal}
-  alias Cympho.{GovernanceAuditLogs, AuditTrail.Instrumenter}
+  alias Cympho.GovernanceAuditLogs
+  alias Cympho.AuditTrail.Instrumenter
 
   @doc """
   Returns the list of decisions.
@@ -61,8 +62,11 @@ defmodule Cympho.Decisions do
 
   def get_decision(id) do
     case Repo.get(Decision, id) do
-      nil -> {:error, :not_found}
-      decision -> {:ok, Repo.preload(decision, [:company, :child_decisions, :reversals, :parent_decision])}
+      nil ->
+        {:error, :not_found}
+
+      decision ->
+        {:ok, Repo.preload(decision, [:company, :child_decisions, :reversals, :parent_decision])}
     end
   end
 
@@ -104,19 +108,34 @@ defmodule Cympho.Decisions do
           "Decision recorded: #{decision.decision_type} - #{decision.outcome}",
           resource: decision,
           reasoning: decision.reasoning,
-          metadata: Map.merge(decision.context, %{
-            decision_key: decision.decision_key,
-            resource: "#{decision.resource_type}:#{decision.resource_id}",
-            reversible: decision.reversible
-          })
+          metadata:
+            Map.merge(decision.context, %{
+              decision_key: decision.decision_key,
+              resource: "#{decision.resource_type}:#{decision.resource_id}",
+              reversible: decision.reversible
+            })
         )
 
-        # Record decision in audit trail with correct API signature
-        actor_id = extract_actor_id(decision, actor)
-        issue = build_issue_from_decision(decision)
-        Instrumenter.record_decision(decision.id, :created, issue, actor_id)
+        # Record audit event for decision creation
+        {actor_type, actor_id} =
+          case actor || extract_actor(decision) do
+            {type, id} -> {to_string(type), id}
+            _ -> {"system", "decision_creation"}
+          end
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{decision.company_id}:decisions", {:decision_created, decision})
+        _ =
+          Instrumenter.record_decision(
+            decision,
+            "created",
+            actor_type,
+            actor_id
+          )
+
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{decision.company_id}:decisions",
+          {:decision_created, decision}
+        )
 
         maybe_mark_parent_superseded(decision)
 
@@ -222,47 +241,67 @@ defmodule Cympho.Decisions do
     original_decision = Repo.get!(Decision, decision_id)
 
     if Decision.can_reverse?(original_decision) do
-      Repo.transaction(fn ->
-        attrs = %{
-          decision_type: original_decision.decision_type,
-          decision_key: "#{original_decision.decision_key}_reversal",
-          outcome: "reversed",
-          reasoning: reasoning,
-          actor_type: elem(actor, 0),
-          actor_id: elem(actor, 1),
-          resource_type: original_decision.resource_type,
-          resource_id: original_decision.resource_id,
-          parent_decision_id: original_decision.id,
-          context: Map.put(original_decision.context, :reversal_reasoning, reasoning),
-          reversible: false,
-          company_id: original_decision.company_id,
-          metadata: Map.put(original_decision.metadata, :reversing_original_decision_id, original_decision.id)
-        }
+      result =
+        Repo.transaction(fn ->
+          attrs = %{
+            decision_type: original_decision.decision_type,
+            decision_key: "#{original_decision.decision_key}_reversal",
+            outcome: "reversed",
+            reasoning: reasoning,
+            actor_type: elem(actor, 0),
+            actor_id: elem(actor, 1),
+            resource_type: original_decision.resource_type,
+            resource_id: original_decision.resource_id,
+            parent_decision_id: original_decision.id,
+            context: Map.put(original_decision.context, :reversal_reasoning, reasoning),
+            reversible: false,
+            company_id: original_decision.company_id,
+            metadata:
+              Map.put(
+                original_decision.metadata,
+                :reversing_original_decision_id,
+                original_decision.id
+              )
+          }
 
-        with {:ok, reversing_decision} <-
-               %Decision{}
-               |> Decision.create_changeset(attrs)
-               |> Repo.insert(),
-             {:ok, _updated_original} <-
-               original_decision
-               |> Decision.reversal_changeset(%{reversed_by_id: reversing_decision.id})
-               |> Repo.update(),
-             {:ok, _reversal_link} <-
-               %DecisionReversal{}
-               |> DecisionReversal.changeset(%{
-                 reasoning: reasoning,
-                 actor_type: safe_actor_type(actor),
-                 actor_id: safe_actor_id(actor),
-                 original_decision_id: original_decision.id,
-                 reversing_decision_id: reversing_decision.id,
-                 company_id: original_decision.company_id
-               })
-               |> Repo.insert() do
-          reversing_decision
-        else
-          {:error, changeset} -> Repo.rollback(changeset)
-        end
-      end)
+          with {:ok, reversing_decision} <-
+                 %Decision{}
+                 |> Decision.create_changeset(attrs)
+                 |> Repo.insert(),
+               {:ok, _updated_original} <-
+                 original_decision
+                 |> Decision.reversal_changeset(%{reversed_by_id: reversing_decision.id})
+                 |> Repo.update(),
+               {:ok, _reversal_link} <-
+                 %DecisionReversal{}
+                 |> DecisionReversal.changeset(%{
+                   reasoning: reasoning,
+                   actor_type: safe_actor_type(actor),
+                   actor_id: safe_actor_id(actor),
+                   original_decision_id: original_decision.id,
+                   reversing_decision_id: reversing_decision.id,
+                   company_id: original_decision.company_id
+                 })
+                 |> Repo.insert() do
+            # Record audit event for decision reversal
+            _ =
+              Instrumenter.record_decision(
+                reversing_decision,
+                "reversed",
+                to_string(elem(actor, 0)),
+                elem(actor, 1)
+              )
+
+            reversing_decision
+          else
+            {:error, changeset} -> Repo.rollback(changeset)
+          end
+        end)
+
+      case result do
+        {:ok, _} = ok -> ok
+        error -> error
+      end
     else
       {:error, :not_reversible}
     end
@@ -308,19 +347,6 @@ defmodule Cympho.Decisions do
   defp safe_actor_id({_, id}), do: id
   defp safe_actor_id(_), do: nil
 
-  defp extract_actor_id(%Decision{actor_id: id}, {_, actor_id}), do: actor_id || id
-  defp extract_actor_id(%Decision{actor_id: id}, _), do: id
-  defp extract_actor_id(_, {_, actor_id}), do: actor_id
-  defp extract_actor_id(_, _), do: nil
-
-  defp build_issue_from_decision(%Decision{} = decision) do
-    %{
-      id: decision.id,
-      title: "#{decision.decision_type}: #{decision.outcome}",
-      resolution_reason: decision.reasoning
-    }
-  end
-
   defp maybe_mark_parent_superseded(%Decision{parent_decision_id: nil}), do: :ok
 
   defp maybe_mark_parent_superseded(%Decision{parent_decision_id: parent_id} = decision) do
@@ -328,7 +354,11 @@ defmodule Cympho.Decisions do
       from(d in Decision, where: d.id == ^parent_id)
       |> Repo.update_all(set: [status: "superseded"])
 
-      Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{decision.company_id}:decisions", {:decision_superseded, parent_id})
+      Phoenix.PubSub.broadcast(
+        Cympho.PubSub,
+        "company:#{decision.company_id}:decisions",
+        {:decision_superseded, parent_id}
+      )
     end
 
     :ok

@@ -46,9 +46,9 @@ defmodule Cympho.ToolCallTraces do
   def get_latest_trace(company_id) do
     query =
       from t in ToolCallTrace,
-      where: t.company_id == ^company_id,
-      order_by: [desc: t.sequence_number],
-      limit: 1
+        where: t.company_id == ^company_id,
+        order_by: [desc: t.sequence_number],
+        limit: 1
 
     case Repo.one(query) do
       nil -> {:error, :not_found}
@@ -63,14 +63,14 @@ defmodule Cympho.ToolCallTraces do
       {:error, :company_id_required}
     else
       case get_next_sequence_number(company_id) do
-        {:error, reason} -> {:error, reason}
         {:ok, sequence_number} ->
           attrs = Map.put(attrs, :sequence_number, sequence_number)
 
-          prev_chain_hash = case get_latest_trace(company_id) do
-            {:ok, latest} -> latest.chain_hash
-            {:error, :not_found} -> nil
-          end
+          prev_chain_hash =
+            case get_latest_trace(company_id) do
+              {:ok, latest} -> latest.chain_hash
+              {:error, :not_found} -> nil
+            end
 
           changeset = ToolCallTrace.creation_changeset(attrs, prev_chain_hash)
 
@@ -90,11 +90,12 @@ defmodule Cympho.ToolCallTraces do
   def update_tool_call_trace_status(%ToolCallTrace{} = trace, status, result \\ nil) do
     attrs = %{status: status}
 
-    attrs = if result do
-      Map.put(attrs, :tool_result, result)
-    else
-      attrs
-    end
+    attrs =
+      if result do
+        Map.put(attrs, :tool_result, result)
+      else
+        attrs
+      end
 
     case trace
          |> ToolCallTrace.changeset(attrs)
@@ -121,9 +122,12 @@ defmodule Cympho.ToolCallTraces do
 
   def verify_chain([_]), do: :ok
   def verify_chain([]), do: :ok
+
   def verify_chain([current | rest]) do
     case Enum.at(rest, 0) do
-      nil -> :ok
+      nil ->
+        :ok
+
       next_trace ->
         if next_trace.prev_hash == current.chain_hash do
           verify_chain(rest)
@@ -134,17 +138,18 @@ defmodule Cympho.ToolCallTraces do
   end
 
   def verify_content_hash(%ToolCallTrace{} = trace) do
-    {expected_hash, _} = ToolCallTrace.calculate_content_hash(%{
-      trace_type: trace.trace_type,
-      tool_name: trace.tool_name,
-      tool_arguments: trace.tool_arguments,
-      tool_result: trace.tool_result,
-      error_message: trace.error_message,
-      status: trace.status,
-      occurred_at: trace.occurred_at,
-      actor_type: trace.actor_type,
-      actor_id: trace.actor_id
-    })
+    {expected_hash, _} =
+      ToolCallTrace.calculate_content_hash(%{
+        trace_type: trace.trace_type,
+        tool_name: trace.tool_name,
+        tool_arguments: trace.tool_arguments,
+        tool_result: trace.tool_result,
+        error_message: trace.error_message,
+        status: trace.status,
+        occurred_at: trace.occurred_at,
+        actor_type: trace.actor_type,
+        actor_id: trace.actor_id
+      })
 
     if expected_hash == trace.content_hash do
       :ok
@@ -158,11 +163,12 @@ defmodule Cympho.ToolCallTraces do
       ToolCallTrace
       |> where([t], t.company_id == ^company_id)
 
-    query = if start_sequence do
-      where(query, [t], t.sequence_number >= ^start_sequence)
-    else
-      query
-    end
+    query =
+      if start_sequence do
+        where(query, [t], t.sequence_number >= ^start_sequence)
+      else
+        query
+      end
 
     query
     |> order_by([t], asc: t.sequence_number)
@@ -170,7 +176,13 @@ defmodule Cympho.ToolCallTraces do
     |> Repo.all()
   end
 
-  def get_statistics(company_id, opts \\ []) do
+  def get_statistics(company_id, opts \\ [])
+
+  def get_statistics(nil, _opts) do
+    %{total_calls: 0, success_calls: 0, error_calls: 0, pending_calls: 0}
+  end
+
+  def get_statistics(company_id, opts) do
     start_date = Keyword.get(opts, :start_date)
     end_date = Keyword.get(opts, :end_date)
 
@@ -178,17 +190,19 @@ defmodule Cympho.ToolCallTraces do
       ToolCallTrace
       |> where([t], t.company_id == ^company_id)
 
-    query = if start_date do
-      where(base_query, [t], t.occurred_at >= ^start_date)
-    else
-      base_query
-    end
+    query =
+      if start_date do
+        where(base_query, [t], t.occurred_at >= ^start_date)
+      else
+        base_query
+      end
 
-    query = if end_date do
-      where(query, [t], t.occurred_at <= ^end_date)
-    else
-      query
-    end
+    query =
+      if end_date do
+        where(query, [t], t.occurred_at <= ^end_date)
+      else
+        query
+      end
 
     total_calls = Repo.aggregate(query, :count, :id)
 
@@ -213,8 +227,8 @@ defmodule Cympho.ToolCallTraces do
   defp get_next_sequence_number(company_id) do
     query =
       from t in ToolCallTrace,
-      where: t.company_id == ^company_id,
-      select: max(t.sequence_number)
+        where: t.company_id == ^company_id,
+        select: max(t.sequence_number)
 
     case Repo.one(query) do
       nil -> {:ok, 1}
@@ -223,36 +237,43 @@ defmodule Cympho.ToolCallTraces do
   end
 
   defp maybe_filter_by_company(query, nil), do: query
+
   defp maybe_filter_by_company(query, company_id) do
     from t in query, where: t.company_id == ^company_id
   end
 
   defp maybe_filter_by_issue(query, nil), do: query
+
   defp maybe_filter_by_issue(query, issue_id) do
     from t in query, where: t.issue_id == ^issue_id
   end
 
   defp maybe_filter_by_agent(query, nil), do: query
+
   defp maybe_filter_by_agent(query, agent_id) do
     from t in query, where: t.agent_id == ^agent_id
   end
 
   defp maybe_filter_by_actor_type(query, nil), do: query
+
   defp maybe_filter_by_actor_type(query, actor_type) do
     from t in query, where: t.actor_type == ^actor_type
   end
 
   defp maybe_filter_by_actor_id(query, nil), do: query
+
   defp maybe_filter_by_actor_id(query, actor_id) do
     from t in query, where: t.actor_id == ^actor_id
   end
 
   defp maybe_filter_by_tool_name(query, nil), do: query
+
   defp maybe_filter_by_tool_name(query, tool_name) do
     from t in query, where: t.tool_name == ^tool_name
   end
 
   defp maybe_filter_by_status(query, nil), do: query
+
   defp maybe_filter_by_status(query, status) do
     from t in query, where: t.status == ^status
   end

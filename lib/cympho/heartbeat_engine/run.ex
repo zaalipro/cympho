@@ -9,11 +9,14 @@ defmodule Cympho.HeartbeatEngine.Run do
   @foreign_key_type :binary_id
 
   schema "heartbeat_runs" do
+    belongs_to :company, Cympho.Companies.Company
     belongs_to :agent, Agent
     belongs_to :issue, Issue
 
     field :status, :string, default: "pending"
     field :adapter, :string, default: "claude_local"
+    field :invocation_source, :string, default: "heartbeat"
+    field :external_run_id, :string
     field :workspace_path, :string
 
     field :budget_allocated, :decimal, default: Decimal.new("0")
@@ -24,6 +27,7 @@ defmodule Cympho.HeartbeatEngine.Run do
     field :cost_usd, :decimal, default: Decimal.new("0")
 
     field :continuation_summary, :string
+    field :log_excerpt, :string
     field :session_state, :map, default: %{}
     field :run_metadata, :map, default: %{}
 
@@ -37,24 +41,29 @@ defmodule Cympho.HeartbeatEngine.Run do
     timestamps(type: :utc_datetime)
   end
 
-  @statuses ~w(pending running completed failed cancelled)
+  @statuses ~w(pending queued running completed succeeded failed cancelled timed_out)
   def statuses, do: @statuses
 
   def create_changeset(run, attrs) do
     run
     |> cast(attrs, [
+      :company_id,
       :agent_id,
       :issue_id,
       :status,
       :adapter,
+      :invocation_source,
+      :external_run_id,
       :workspace_path,
       :budget_allocated,
       :continuation_summary,
+      :log_excerpt,
       :session_state,
       :run_metadata
     ])
     |> validate_required([:agent_id, :issue_id, :adapter])
     |> validate_inclusion(:status, @statuses)
+    |> assoc_constraint(:company)
     |> assoc_constraint(:agent)
     |> assoc_constraint(:issue)
   end
@@ -80,6 +89,7 @@ defmodule Cympho.HeartbeatEngine.Run do
       :output_tokens,
       :cost_usd,
       :continuation_summary,
+      :log_excerpt,
       :session_state,
       :run_metadata
     ])
@@ -92,7 +102,7 @@ defmodule Cympho.HeartbeatEngine.Run do
     now = DateTime.utc_now()
 
     run
-    |> cast(attrs, [:error_reason, :session_state, :run_metadata])
+    |> cast(attrs, [:error_reason, :log_excerpt, :session_state, :run_metadata])
     |> put_change(:status, "failed")
     |> put_change(:completed_at, now)
     |> put_change(:last_heartbeat_at, now)

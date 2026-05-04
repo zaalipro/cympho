@@ -25,7 +25,20 @@ defmodule Cympho.Plugins.Plugin do
 
   def changeset(plugin, attrs) do
     plugin
-    |> cast(attrs, [:identifier, :version, :name, :description, :author, :manifest, :status, :capabilities, :enabled, :settings, :company_id, :project_id])
+    |> cast(attrs, [
+      :identifier,
+      :version,
+      :name,
+      :description,
+      :author,
+      :manifest,
+      :status,
+      :capabilities,
+      :enabled,
+      :settings,
+      :company_id,
+      :project_id
+    ])
     |> validate_required([:identifier, :name, :version, :manifest])
     |> validate_inclusion(:status, ["installed", "active", "disabled", "error"])
     |> unique_constraint([:identifier, :company_id])

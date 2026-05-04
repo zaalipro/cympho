@@ -6,7 +6,9 @@ defmodule Cympho.BoardApprovals do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.BoardApprovals.{BoardApproval, BoardApprovalVote}
-  alias Cympho.{GovernanceAuditLogs, Decisions, AuditTrail.Instrumenter}
+  alias Cympho.GovernanceAuditLogs
+  alias Cympho.Decisions
+  alias Cympho.AuditTrail.Instrumenter
 
   @nil_uuid "00000000-0000-0000-0000-000000000000"
 
@@ -76,7 +78,12 @@ defmodule Cympho.BoardApprovals do
           }
         )
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{approval.company_id}:approvals", {:board_approval_created, approval})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{approval.company_id}:approvals",
+          {:board_approval_created, approval}
+        )
+
         {:ok, approval}
 
       error ->
@@ -114,8 +121,14 @@ defmodule Cympho.BoardApprovals do
           }
         )
 
-        # Record board vote in audit trail with correct API signature
-        Instrumenter.record_board_vote(user_id, vote, board_approval, board_approval_id)
+        # Record audit event for board vote
+        _ =
+          Instrumenter.record_board_vote(
+            board_approval,
+            vote,
+            "user",
+            user_id
+          )
 
         Phoenix.PubSub.broadcast(
           Cympho.PubSub,
@@ -165,7 +178,11 @@ defmodule Cympho.BoardApprovals do
           {:board_approval_resolved, updated}
         )
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "system:board_approvals", {:board_approval_resolved, updated})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "system:board_approvals",
+          {:board_approval_resolved, updated}
+        )
 
         # Execution is handled by BoardApprovalActionExecutor GenServer
         # to prevent race conditions and ensure consistent async processing
@@ -202,7 +219,11 @@ defmodule Cympho.BoardApprovals do
             {:board_approval_cancelled, updated}
           )
 
-          Phoenix.PubSub.broadcast(Cympho.PubSub, "system:board_approvals", {:board_approval_cancelled, updated})
+          Phoenix.PubSub.broadcast(
+            Cympho.PubSub,
+            "system:board_approvals",
+            {:board_approval_cancelled, updated}
+          )
 
           {:ok, updated}
 
@@ -240,10 +261,12 @@ defmodule Cympho.BoardApprovals do
   """
   def governance_required?(%Cympho.Companies.Company{} = company, category) do
     config = Map.get(company, :governance_config) || %{}
+
     required =
       Map.get(config, "categories") ||
-      Map.get(config, "required_approvals") ||
-      Map.get(config, :required_approvals) || []
+        Map.get(config, "required_approvals") ||
+        Map.get(config, :required_approvals) || []
+
     category in required
   end
 
@@ -291,7 +314,8 @@ defmodule Cympho.BoardApprovals do
         create_board_approval(
           %{
             title: "Role Change: #{agent.name} → #{new_role}",
-            description: "Request to change role of agent #{agent.name} from #{agent.role} to #{new_role}.",
+            description:
+              "Request to change role of agent #{agent.name} from #{agent.role} to #{new_role}.",
             category: "agent_promotion",
             company_id: company_id,
             requested_by_agent_id: extract_agent_id(requested_by),
@@ -319,7 +343,8 @@ defmodule Cympho.BoardApprovals do
   pending proposal. Otherwise, applies the change directly.
   """
   def propose_budget_change(company_id, budget_id, new_limit, requested_by \\ nil) do
-    if governance_required?(company_id, "budget_increase") and budget_is_increase?(budget_id, new_limit) do
+    if governance_required?(company_id, "budget_increase") and
+         budget_is_increase?(budget_id, new_limit) do
       create_board_approval(
         %{
           title: "Budget Increase: #{budget_id}",
@@ -394,7 +419,13 @@ defmodule Cympho.BoardApprovals do
   Strategy approvals cover major plan changes, new directions, and
   significant pivots that require board-level visibility and sign-off.
   """
-  def propose_strategic_initiative(company_id, title, description, proposal_data, requested_by \\ nil) do
+  def propose_strategic_initiative(
+        company_id,
+        title,
+        description,
+        proposal_data,
+        requested_by \\ nil
+      ) do
     if governance_required?(company_id, "strategic_initiative") do
       create_board_approval(
         %{
@@ -492,7 +523,7 @@ defmodule Cympho.BoardApprovals do
 
   defp load_threshold_opts(company_id) do
     company = Cympho.Repo.get(Cympho.Companies.Company, company_id)
-    config = company && company.governance_config || %{}
+    config = (company && company.governance_config) || %{}
 
     [
       threshold_type: Map.get(config, "threshold_type", "percentage"),
@@ -536,7 +567,10 @@ defmodule Cympho.BoardApprovals do
 
   defp trigger_agent_hire(board_approval) do
     proposal_data = board_approval.proposal_data || %{}
-    agent_attrs = Map.get(proposal_data, "attrs") || Map.get(proposal_data, "agent_attrs") || Map.get(proposal_data, "agent_params") || %{}
+
+    agent_attrs =
+      Map.get(proposal_data, "attrs") || Map.get(proposal_data, "agent_attrs") ||
+        Map.get(proposal_data, "agent_params") || %{}
 
     case Cympho.Agents.do_create_agent(agent_attrs) do
       {:ok, agent} ->
@@ -612,7 +646,11 @@ defmodule Cympho.BoardApprovals do
                 {"board_approval", board_approval.id},
                 "Agent #{agent.name} promoted to #{new_role}",
                 resource: updated,
-                metadata: %{board_approval_id: board_approval.id, agent_id: agent_id, new_role: new_role}
+                metadata: %{
+                  board_approval_id: board_approval.id,
+                  agent_id: agent_id,
+                  new_role: new_role
+                }
               )
 
               Phoenix.PubSub.broadcast(
@@ -679,7 +717,9 @@ defmodule Cympho.BoardApprovals do
         if budget_id do
           case Cympho.Budgets.get_budget(budget_id) do
             {:ok, budget} ->
-              case Cympho.Budgets.update_budget(budget, update_attrs, actor, skip_governance: true) do
+              case Cympho.Budgets.update_budget(budget, update_attrs, actor,
+                     skip_governance: true
+                   ) do
                 {:ok, updated} ->
                   GovernanceAuditLogs.log_action(
                     "budget_increase_executed",
@@ -692,7 +732,8 @@ defmodule Cympho.BoardApprovals do
                   Phoenix.PubSub.broadcast(
                     Cympho.PubSub,
                     "company:#{board_approval.company_id}:governance",
-                    {:budget_increase_approved, board_approval.id, budget_id, updated.limit_amount}
+                    {:budget_increase_approved, board_approval.id, budget_id,
+                     updated.limit_amount}
                   )
 
                   {:ok, updated}
@@ -703,7 +744,8 @@ defmodule Cympho.BoardApprovals do
                     actor,
                     "Budget update failed after board approval",
                     resource: board_approval,
-                    metadata: Map.merge(meta, %{budget_id: budget_id, errors: traverse_errors(changeset)})
+                    metadata:
+                      Map.merge(meta, %{budget_id: budget_id, errors: traverse_errors(changeset)})
                   )
 
                   {:error, changeset}

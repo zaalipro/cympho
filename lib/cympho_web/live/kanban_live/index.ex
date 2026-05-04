@@ -6,7 +6,7 @@ defmodule CymphoWeb.KanbanLive.Index do
   alias Cympho.AgentHeartbeat
   alias Cympho.Projects
 
-  @status_columns [:backlog, :todo, :in_progress, :in_review, :done, :blocked]
+  @status_columns [:backlog, :todo, :in_progress, :in_review, :blocked, :done, :cancelled]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -14,11 +14,19 @@ defmodule CymphoWeb.KanbanLive.Index do
       Issues.subscribe(socket.assigns.current_company.id)
       Cympho.Agents.subscribe(socket.assigns.current_company.id)
       CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
+      CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
     end
+
     Phoenix.PubSub.subscribe(Cympho.PubSub, "agent_heartbeats")
 
-    projects = Projects.list_projects()
-    issues = Issues.list_issues()
+    company_id = current_company_id(socket)
+
+    projects =
+      if company_id,
+        do: Projects.list_projects_by_company(company_id),
+        else: Projects.list_projects()
+
+    issues = Issues.list_issues(company_filter(company_id))
     agent_heartbeat_states = load_heartbeat_states(issues)
 
     socket =
@@ -26,7 +34,13 @@ defmodule CymphoWeb.KanbanLive.Index do
       |> assign(:issues, issues)
       |> assign(:agent_heartbeat_states, agent_heartbeat_states)
       |> assign(:projects, projects)
-      |> assign(:agents, Cympho.Agents.list_agents())
+      |> assign(
+        :agents,
+        if(company_id,
+          do: Cympho.Agents.list_agents_by_company(company_id),
+          else: Cympho.Agents.list_agents()
+        )
+      )
       |> assign(:collapsed_columns, MapSet.new())
       |> assign(:swimlane_mode, false)
       |> assign(:filter_assignee_id, nil)
@@ -94,11 +108,15 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   defp apply_project_filter(socket, nil) do
-    assign(socket, :issues, Issues.list_issues())
+    assign(socket, :issues, Issues.list_issues(company_filter(current_company_id(socket))))
   end
 
   defp apply_project_filter(socket, project_id) do
-    assign(socket, :issues, Issues.list_issues(%{project_id: project_id}))
+    opts =
+      company_filter(current_company_id(socket))
+      |> Map.put(:project_id, project_id)
+
+    assign(socket, :issues, Issues.list_issues(opts))
   end
 
   @impl true
@@ -140,23 +158,47 @@ defmodule CymphoWeb.KanbanLive.Index do
       if heartbeat_state.status in [:offline, :idle] do
         agent = Enum.find(socket.assigns.agents, &(&1.id == agent_id))
         name = if agent, do: agent.name, else: "Agent"
-        push_event(socket, "toast", %{message: "#{name} went #{heartbeat_state.status}", type: "warning", key: "agent_#{agent_id}_#{heartbeat_state.status}"})
+
+        push_event(socket, "toast", %{
+          message: "#{name} went #{heartbeat_state.status}",
+          type: "warning",
+          key: "agent_#{agent_id}_#{heartbeat_state.status}"
+        })
       else
         socket
       end
-    {:noreply, update(socket, :agent_heartbeat_states, fn states -> Map.put(states, agent_id, heartbeat_state) end)}
+
+    {:noreply,
+     update(socket, :agent_heartbeat_states, fn states ->
+       Map.put(states, agent_id, heartbeat_state)
+     end)}
   end
 
   def handle_info({:run_status_changed, payload}, socket) do
-    socket = case payload do
-      %{new_status: "completed", agent_id: aid, issue_id: iid} ->
-        a = Enum.find(socket.assigns.agents, &(&1.id == aid))
-        push_event(socket, "toast", %{message: "#{if a, do: a.name, else: "Agent"} completed work on #{iid}", type: "success", key: "run_#{iid}_completed"})
-      %{new_status: "failed", agent_id: aid, issue_id: iid} ->
-        a = Enum.find(socket.assigns.agents, &(&1.id == aid))
-        push_event(socket, "toast", %{message: "#{if a, do: a.name, else: "Agent"} failed on #{iid}", type: "error", key: "run_#{iid}_failed"})
-      _ -> socket
-    end
+    socket =
+      case payload do
+        %{new_status: "completed", agent_id: aid, issue_id: iid} ->
+          a = Enum.find(socket.assigns.agents, &(&1.id == aid))
+
+          push_event(socket, "toast", %{
+            message: "#{if a, do: a.name, else: "Agent"} completed work on #{iid}",
+            type: "success",
+            key: "run_#{iid}_completed"
+          })
+
+        %{new_status: "failed", agent_id: aid, issue_id: iid} ->
+          a = Enum.find(socket.assigns.agents, &(&1.id == aid))
+
+          push_event(socket, "toast", %{
+            message: "#{if a, do: a.name, else: "Agent"} failed on #{iid}",
+            type: "error",
+            key: "run_#{iid}_failed"
+          })
+
+        _ ->
+          socket
+      end
+
     {:noreply, socket}
   end
 
@@ -262,12 +304,13 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   def issues_for_status(issues, status), do: Enum.filter(issues, &(&1.status == status))
 
-  def valid_next_statuses(:backlog), do: [:todo, :in_progress, :blocked]
-  def valid_next_statuses(:todo), do: [:in_progress, :blocked]
-  def valid_next_statuses(:in_progress), do: [:in_review, :blocked]
-  def valid_next_statuses(:in_review), do: [:done, :in_progress]
-  def valid_next_statuses(:done), do: [:in_progress, :blocked]
-  def valid_next_statuses(:blocked), do: [:backlog, :todo, :in_progress, :in_review, :done]
+  def valid_next_statuses(:backlog), do: [:todo, :cancelled]
+  def valid_next_statuses(:todo), do: [:in_progress, :blocked, :cancelled]
+  def valid_next_statuses(:in_progress), do: [:in_review, :blocked, :done, :cancelled]
+  def valid_next_statuses(:in_review), do: [:done, :in_progress, :cancelled]
+  def valid_next_statuses(:blocked), do: [:todo, :in_progress, :cancelled]
+  def valid_next_statuses(:done), do: []
+  def valid_next_statuses(:cancelled), do: []
 
   def status_label(:backlog), do: "Backlog"
   def status_label(:todo), do: "To Do"
@@ -275,6 +318,7 @@ defmodule CymphoWeb.KanbanLive.Index do
   def status_label(:in_review), do: "In Review"
   def status_label(:done), do: "Done"
   def status_label(:blocked), do: "Blocked"
+  def status_label(:cancelled), do: "Cancelled"
 
   def status_columns, do: @status_columns
 
@@ -340,7 +384,18 @@ defmodule CymphoWeb.KanbanLive.Index do
     lower_search = String.downcase(search)
 
     Enum.filter(issues, fn issue ->
-      String.contains?(String.downcase(issue.title || ""), lower_search)
+      haystack =
+        [
+          issue.title,
+          issue.identifier,
+          issue.assignee && issue.assignee.name,
+          to_string(issue.priority)
+        ]
+        |> Enum.reject(&is_nil/1)
+        |> Enum.join(" ")
+        |> String.downcase()
+
+      String.contains?(haystack, lower_search)
     end)
   end
 
@@ -350,4 +405,12 @@ defmodule CymphoWeb.KanbanLive.Index do
   def in_review_issues(issues), do: issues_for_status(issues, :in_review)
   def done_issues(issues), do: issues_for_status(issues, :done)
   def blocked_issues(issues), do: issues_for_status(issues, :blocked)
+  def cancelled_issues(issues), do: issues_for_status(issues, :cancelled)
+
+  defp current_company_id(socket) do
+    socket.assigns[:current_company] && socket.assigns.current_company.id
+  end
+
+  defp company_filter(nil), do: %{}
+  defp company_filter(company_id), do: %{company_id: company_id}
 end

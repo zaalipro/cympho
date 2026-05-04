@@ -18,11 +18,16 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
     unique = System.unique_integer([:positive])
 
     %User{}
-    |> User.registration_changeset(Map.merge(%{
-      email: "board-api-#{unique}@example.com",
-      name: "Board API Test #{unique}",
-      password: "password123"
-    }, attrs))
+    |> User.registration_changeset(
+      Map.merge(
+        %{
+          email: "board-api-#{unique}@example.com",
+          name: "Board API Test #{unique}",
+          password: "password123"
+        },
+        attrs
+      )
+    )
     |> Cympho.Repo.insert!()
   end
 
@@ -90,10 +95,15 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
       conn =
         authed_conn(build_conn(), user, company.id)
         |> post("/api/agents", %{
-          "agent" => %{"name" => "Blocked Agent", "role" => "engineer", "company_id" => company.id}
+          "agent" => %{
+            "name" => "Blocked Agent",
+            "role" => "engineer",
+            "company_id" => company.id
+          }
         })
 
-      assert %{"errors" => [%{"detail" => "Board membership required"}]} = json_response(conn, 403)
+      assert %{"errors" => [%{"detail" => "Board membership required"}]} =
+               json_response(conn, 403)
     end
 
     test "returns 403 for any user when no board members are configured" do
@@ -104,7 +114,11 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
       conn =
         authed_conn(build_conn(), user, company.id)
         |> post("/api/agents", %{
-          "agent" => %{"name" => "No Board Agent", "role" => "engineer", "company_id" => company.id}
+          "agent" => %{
+            "name" => "No Board Agent",
+            "role" => "engineer",
+            "company_id" => company.id
+          }
         })
 
       assert %{"errors" => [%{"detail" => "No board members configured for this company"}]} =
@@ -119,11 +133,16 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
       conn =
         authed_conn(build_conn(), user, company.id)
         |> post("/api/agents", %{
-          "agent" => %{"name" => "Governed Agent", "role" => "engineer", "company_id" => company.id}
+          "agent" => %{
+            "name" => "Governed Agent",
+            "role" => "engineer",
+            "company_id" => company.id
+          }
         })
 
       assert %{"data" => %{"status" => "pending_board_approval", "approval_id" => approval_id}} =
                json_response(conn, 202)
+
       assert is_binary(approval_id)
 
       {:ok, approval} = BoardApprovals.get_board_approval(approval_id)
@@ -134,10 +153,11 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
 
   describe "Board member approval flow — agent hire via vote" do
     test "board member votes approve, action is executed" do
-      company = create_company(%{
-        "required_approvals" => ["agent_hire"],
-        "threshold_type" => "any"
-      })
+      company =
+        create_company(%{
+          "required_approvals" => ["agent_hire"],
+          "threshold_type" => "any"
+        })
 
       board_user = create_user()
       create_membership(board_user, company, "member", true)
@@ -148,7 +168,11 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
           category: "agent_hire",
           company_id: company.id,
           proposal_data: %{
-            "attrs" => %{"name" => "Voted Agent", "role" => "engineer", "company_id" => company.id}
+            "attrs" => %{
+              "name" => "Voted Agent",
+              "role" => "engineer",
+              "company_id" => company.id
+            }
           }
         })
 
@@ -163,10 +187,11 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
     end
 
     test "deny vote with 'all' threshold cast first prevents auto-approve" do
-      company = create_company(%{
-        "required_approvals" => ["agent_hire"],
-        "threshold_type" => "all"
-      })
+      company =
+        create_company(%{
+          "required_approvals" => ["agent_hire"],
+          "threshold_type" => "all"
+        })
 
       board_user1 = create_user()
       board_user2 = create_user()
@@ -179,7 +204,11 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
           category: "agent_hire",
           company_id: company.id,
           proposal_data: %{
-            "attrs" => %{"name" => "Denied Agent", "role" => "engineer", "company_id" => company.id}
+            "attrs" => %{
+              "name" => "Denied Agent",
+              "role" => "engineer",
+              "company_id" => company.id
+            }
           }
         })
 
@@ -197,9 +226,14 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
 
       # Manually resolve as denied
       {:ok, denied} =
-        BoardApprovals.resolve_board_approval(approval.id, "denied", %{
-          decision_reasoning: "Denied by vote"
-        }, {"user", board_user1.id})
+        BoardApprovals.resolve_board_approval(
+          approval.id,
+          "denied",
+          %{
+            decision_reasoning: "Denied by vote"
+          },
+          {"user", board_user1.id}
+        )
 
       assert denied.status == "denied"
 
@@ -209,10 +243,11 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
     end
 
     test "no votes means no auto-approve regardless of threshold" do
-      company = create_company(%{
-        "required_approvals" => ["agent_hire"],
-        "threshold_type" => "any"
-      })
+      company =
+        create_company(%{
+          "required_approvals" => ["agent_hire"],
+          "threshold_type" => "any"
+        })
 
       {:ok, approval} =
         BoardApprovals.create_board_approval(%{
@@ -220,7 +255,11 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
           category: "agent_hire",
           company_id: company.id,
           proposal_data: %{
-            "attrs" => %{"name" => "No Vote Agent", "role" => "engineer", "company_id" => company.id}
+            "attrs" => %{
+              "name" => "No Vote Agent",
+              "role" => "engineer",
+              "company_id" => company.id
+            }
           }
         })
 

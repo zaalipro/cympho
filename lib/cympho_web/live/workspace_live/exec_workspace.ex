@@ -8,6 +8,7 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
       {:ok, workspace} ->
         runtime_services = Workspaces.list_runtime_services(id)
         operations = Workspaces.list_operations(id)
+
         {:ok,
          socket
          |> assign(:page_title, "Exec Workspace: #{workspace.name}")
@@ -33,7 +34,10 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
     ~H"""
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="mb-8">
-        <.app_link navigate={~p"/workspaces"} class="text-text-secondary hover:text-text-primary text-sm">
+        <.app_link
+          navigate={~p"/workspaces"}
+          class="text-text-secondary hover:text-text-primary text-sm"
+        >
           &larr; Back to Workspaces
         </.app_link>
       </div>
@@ -41,7 +45,7 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
       <div class="bg-surface border border-border rounded-lg p-6 mb-8">
         <div class="flex items-center justify-between mb-4">
           <h1 class="text-2xl font-510 text-text-primary">{@workspace.name}</h1>
-          <span class="text-xs bg-white/[0.05] text-text-tertiary px-2 py-1 rounded">
+          <span class="text-xs bg-surface text-text-tertiary px-2 py-1 rounded">
             {@workspace.status}
           </span>
         </div>
@@ -79,13 +83,13 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div>
-          <h2 class="text-lg font-510 text-text-primary mb-4">Runtime Services</h2>
+          <h2 class="font-serif text-lg font-510 text-text-primary mb-4">Runtime Services</h2>
 
           <div class="space-y-3">
             <%= for svc <- @runtime_services do %>
               <div class="bg-surface border border-border rounded-lg p-4">
                 <div class="flex items-center justify-between">
-                  <h3 class="text-sm font-510 text-text-primary">{svc.service_name}</h3>
+                  <h3 class="font-serif text-sm font-510 text-text-primary">{svc.service_name}</h3>
                   <span class={"text-xs px-2 py-1 rounded #{service_status_classes(svc.status)}"}>
                     {svc.status}
                   </span>
@@ -109,7 +113,12 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
                       class="inline-flex items-center gap-1 text-xs text-accent-primary hover:text-accent-primary/80 transition-colors"
                     >
                       <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                        />
                       </svg>
                       Open Preview
                     </a>
@@ -125,14 +134,14 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
         </div>
 
         <div>
-          <h2 class="text-lg font-510 text-text-primary mb-4">Operations Log</h2>
+          <h2 class="font-serif text-lg font-510 text-text-primary mb-4">Operations Log</h2>
 
           <div class="space-y-3">
             <%= for op <- @operations do %>
               <div class="bg-surface border border-border rounded-lg p-4">
                 <div class="flex items-center justify-between">
-                  <h3 class="text-sm font-510 text-text-primary">{op.phase}</h3>
-                  <span class="text-xs bg-white/[0.05] text-text-tertiary px-2 py-1 rounded">
+                  <h3 class="font-serif text-sm font-510 text-text-primary">{op.phase}</h3>
+                  <span class="text-xs bg-surface text-text-tertiary px-2 py-1 rounded">
                     {op.status}
                   </span>
                 </div>
@@ -162,5 +171,5 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
   defp service_status_classes("running"), do: "bg-green-500/10 text-green-400"
   defp service_status_classes("stopped"), do: "bg-red-500/10 text-red-400"
   defp service_status_classes("error"), do: "bg-red-500/10 text-red-400"
-  defp service_status_classes(_), do: "bg-white/[0.05] text-text-tertiary"
+  defp service_status_classes(_), do: "bg-surface text-text-tertiary"
 end

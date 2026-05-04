@@ -4,10 +4,15 @@
       <button
         type="button"
         phx-click="refresh_health"
-        class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-md transition-colors inline-flex items-center gap-2"
+        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center gap-2"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+          />
         </svg>
         Refresh Health
       </button>
@@ -16,21 +21,21 @@
 
   <div
     :if={@flash && @flash[:info]}
-    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-md"
+    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-lg"
   >
     {@flash[:info]}
   </div>
 
   <div
     :if={@flash && @flash[:error]}
-    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-md"
+    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
   >
     {@flash[:error]}
   </div>
-
-  <!-- Status Overview -->
-  <div class="mb-6 bg-surface border border-border rounded-card p-4">
-    <h2 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-4">
+  
+<!-- Status Overview -->
+  <div class="mb-6 bg-surface border border-border rounded-xl p-4">
+    <h2 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-4">
       Adapter Status Overview
     </h2>
     <div class="grid grid-cols-3 gap-4">
@@ -54,18 +59,21 @@
       </div>
     </div>
   </div>
-
-  <!-- Adapter Grid -->
+  
+<!-- Adapter Grid -->
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
     <.card :for={adapter <- @adapters} id={"adapter-#{adapter.key}"}>
       <div class="p-5 space-y-3">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span class="text-lg">{adapter_icon(adapter.key)}</span>
-            <h3 class="text-sm font-510 text-text-primary">{adapter.name}</h3>
+            <h3 class="font-serif text-sm font-510 text-text-primary">{adapter.name}</h3>
           </div>
           <%= with health <- Map.get(@health, adapter.key, %{status: :unknown}) do %>
-            <span class={["inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-510", health_status_class(health.status)]}>
+            <span class={[
+              "inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-510",
+              health_status_class(health.status)
+            ]}>
               {health_status_label(health.status)}
             </span>
           <% end %>
@@ -89,7 +97,11 @@
         </div>
 
         <%= with health <- Map.get(@health, adapter.key, %{}), msg <- Map.get(health, :message) do %>
-          <div :if={msg} class="text-xs text-text-tertiary truncate pt-1 border-t border-border" title={msg}>
+          <div
+            :if={msg}
+            class="text-xs text-text-tertiary truncate pt-1 border-t border-border"
+            title={msg}
+          >
             {msg}
           </div>
         <% end %>
@@ -97,7 +109,7 @@
         <div class="flex flex-wrap items-center gap-2 pt-2">
           <.app_link
             navigate={~p"/adapters/#{adapter.key}"}
-            class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors inline-flex items-center justify-center"
+            class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center justify-center"
           >
             Configure
           </.app_link>
@@ -105,7 +117,7 @@
             type="button"
             phx-click="test_adapter"
             phx-value-key={adapter.key}
-            class="bg-brand/10 hover:bg-brand/20 text-brand border border-brand/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-md transition-colors"
+            class="bg-brand/10 hover:bg-brand/20 text-brand border border-brand/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
           >
             Test Health
           </button>
@@ -118,10 +130,25 @@
     :if={Enum.empty?(@adapters)}
     class="flex flex-col items-center justify-center py-20 text-center"
   >
-    <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
-      <svg class="w-6 h-6 text-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
+      <svg
+        class="w-6 h-6 text-text-tertiary"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+        />
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+        />
       </svg>
     </div>
     <p class="text-sm text-text-tertiary">No adapters registered.</p>

@@ -56,7 +56,9 @@ defmodule Cympho.AgentApprovalWorkflowTest do
     merged = Map.merge(%{name: "Test Agent", role: :engineer, company_id: company.id}, attrs)
 
     case Agents.create_agent(merged) do
-      {:ok, agent} -> agent
+      {:ok, agent} ->
+        agent
+
       {:error, :pending_board_approval, _} ->
         %Agent{}
         |> Agent.changeset(merged)
@@ -127,7 +129,12 @@ defmodule Cympho.AgentApprovalWorkflowTest do
     test "stores original attrs in proposal_data for later execution" do
       company = create_company(%{"required_approvals" => ["agent_hire"]})
 
-      attrs = %{name: "Stored Agent", role: :cto, company_id: company.id, config: %{"key" => "val"}}
+      attrs = %{
+        name: "Stored Agent",
+        role: :cto,
+        company_id: company.id,
+        config: %{"key" => "val"}
+      }
 
       assert {:error, :pending_board_approval, approval_id} = Agents.create_agent(attrs)
 
@@ -279,7 +286,9 @@ defmodule Cympho.AgentApprovalWorkflowTest do
         "parent_agent_id" => nil
       }
 
-      assert {:ok, %Agent{} = agent} = Agents.execute_approved_hire(board_approval_id, proposal_data)
+      assert {:ok, %Agent{} = agent} =
+               Agents.execute_approved_hire(board_approval_id, proposal_data)
+
       assert agent.name == "Executed Agent"
       assert agent.role == :engineer
       assert agent.board_approval_id == board_approval_id
@@ -299,10 +308,12 @@ defmodule Cympho.AgentApprovalWorkflowTest do
       }
 
       # First call creates the agent
-      assert {:ok, %Agent{} = agent} = Agents.execute_approved_hire(board_approval_id, proposal_data)
+      assert {:ok, %Agent{} = agent} =
+               Agents.execute_approved_hire(board_approval_id, proposal_data)
 
       # Second call returns :already_executed
-      assert {:error, :already_executed} = Agents.execute_approved_hire(board_approval_id, proposal_data)
+      assert {:error, :already_executed} =
+               Agents.execute_approved_hire(board_approval_id, proposal_data)
     end
   end
 
@@ -411,9 +422,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
       Process.sleep(100)
 
       logs =
-        GovernanceAuditLogs.list_governance_audit_logs(
-          action_type: "agent_hired"
-        )
+        GovernanceAuditLogs.list_governance_audit_logs(action_type: "agent_hired")
 
       assert length(logs) >= 1
     end
@@ -435,9 +444,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
       Process.sleep(100)
 
       logs =
-        GovernanceAuditLogs.list_governance_audit_logs(
-          action_type: "board_decision"
-        )
+        GovernanceAuditLogs.list_governance_audit_logs(action_type: "board_decision")
 
       assert length(logs) >= 1
     end

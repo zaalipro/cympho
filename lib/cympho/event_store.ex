@@ -22,8 +22,12 @@ defmodule Cympho.EventStore do
   end
 
   def fetch_since(topic, last_event_id, limit \\ @default_limit)
-  def fetch_since(topic, nil, limit), do: GenServer.call(__MODULE__, {:fetch_latest, topic, limit})
-  def fetch_since(topic, last_event_id, limit), do: GenServer.call(__MODULE__, {:fetch_since, topic, last_event_id, limit})
+
+  def fetch_since(topic, nil, limit),
+    do: GenServer.call(__MODULE__, {:fetch_latest, topic, limit})
+
+  def fetch_since(topic, last_event_id, limit),
+    do: GenServer.call(__MODULE__, {:fetch_since, topic, last_event_id, limit})
 
   def count(topic), do: length(:ets.match_object(@table, {:_, topic, :_, :_}))
 
@@ -42,11 +46,14 @@ defmodule Cympho.EventStore do
     event_id = :ets.update_counter(@table, :__global_counter__, {2, 1}, {:__global_counter__, 0})
     timestamp = System.system_time(:millisecond)
     :ets.insert(@table, {event_id, topic, payload, timestamp})
-    min_id = case Map.get(state.min_ids, topic) do
-      nil -> event_id
-      existing when event_id < existing -> event_id
-      existing -> existing
-    end
+
+    min_id =
+      case Map.get(state.min_ids, topic) do
+        nil -> event_id
+        existing when event_id < existing -> event_id
+        existing -> existing
+      end
+
     state = %{state | min_ids: Map.put(state.min_ids, topic, min_id)}
     state = trim_if_needed(state, topic)
     {:reply, event_id, state}
@@ -63,40 +70,86 @@ defmodule Cympho.EventStore do
 
   @impl true
   def handle_call({:fetch_latest, topic, limit}, _from, state) do
-    events = :ets.match_object(@table, {:_, topic, :_, :_})
-    |> Enum.sort_by(&elem(&1, 0), :desc) |> Enum.take(limit) |> Enum.reverse() |> Enum.map(&to_map/1)
+    events =
+      :ets.match_object(@table, {:_, topic, :_, :_})
+      |> Enum.sort_by(&elem(&1, 0), :desc)
+      |> Enum.take(limit)
+      |> Enum.reverse()
+      |> Enum.map(&to_map/1)
+
     {:reply, {:ok, events}, state}
   end
 
   @impl true
   def handle_call({:purge_old, ttl_ms}, _from, state) do
-    cutoff = System.system_time(:millisecond) - ttl_ms
-    deleted = :ets.foldl(fn
-      {:__global_counter__, _}, acc -> acc
-      {event_id, _, _, timestamp}, acc ->
-        if timestamp < cutoff, do: (:ets.delete(@table, event_id); acc + 1), else: acc
-    end, 0, @table)
+    {deleted, state} = do_purge_old(ttl_ms, state)
     {:reply, deleted, state}
   end
 
   @impl true
   def handle_info(:purge_tick, state) do
-    purge_old(300_000)
+    {_deleted, state} = do_purge_old(300_000, state)
     Process.send_after(self(), :purge_tick, 60_000)
     {:noreply, state}
   end
 
+  defp do_purge_old(ttl_ms, state) do
+    cutoff = System.system_time(:millisecond) - ttl_ms
+
+    deleted =
+      :ets.foldl(
+        fn
+          {:__global_counter__, _}, acc ->
+            acc
+
+          {event_id, _, _, timestamp}, acc ->
+            if timestamp < cutoff do
+              :ets.delete(@table, event_id)
+              acc + 1
+            else
+              acc
+            end
+        end,
+        0,
+        @table
+      )
+
+    {deleted, %{state | min_ids: recompute_min_ids()}}
+  end
+
+  defp recompute_min_ids do
+    :ets.foldl(
+      fn
+        {:__global_counter__, _}, acc ->
+          acc
+
+        {event_id, topic, _, _}, acc ->
+          Map.update(acc, topic, event_id, &min(&1, event_id))
+      end,
+      %{},
+      @table
+    )
+  end
+
   defp trim_if_needed(state, topic) do
     topic_count = count(topic)
+
     if topic_count > state.max_per_topic do
       trim_count = topic_count - state.max_per_topic
-      to_delete = :ets.match_object(@table, {:_, topic, :_, :_})
-      |> Enum.sort_by(&elem(&1, 0)) |> Enum.take(trim_count)
+
+      to_delete =
+        :ets.match_object(@table, {:_, topic, :_, :_})
+        |> Enum.sort_by(&elem(&1, 0))
+        |> Enum.take(trim_count)
+
       Enum.each(to_delete, fn {id, _, _, _} -> :ets.delete(@table, id) end)
-      new_min = case :ets.match_object(@table, {:_, topic, :_, :_}) |> Enum.sort_by(&elem(&1, 0)) do
-        [{id, _, _, _} | _] -> id
-        [] -> nil
-      end
+
+      new_min =
+        case :ets.match_object(@table, {:_, topic, :_, :_}) |> Enum.sort_by(&elem(&1, 0)) do
+          [{id, _, _, _} | _] -> id
+          [] -> nil
+        end
+
       %{state | min_ids: Map.put(state.min_ids, topic, new_min)}
     else
       state
@@ -106,7 +159,9 @@ defmodule Cympho.EventStore do
   defp do_fetch_since(topic, last_event_id, limit) do
     :ets.match_object(@table, {:_, topic, :_, :_})
     |> Enum.filter(fn {id, _, _, _} -> id > last_event_id end)
-    |> Enum.sort_by(&elem(&1, 0)) |> Enum.take(limit) |> Enum.map(&to_map/1)
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.take(limit)
+    |> Enum.map(&to_map/1)
   end
 
   defp to_map({event_id, topic, payload, timestamp}) do

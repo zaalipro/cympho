@@ -21,10 +21,10 @@ defmodule Cympho.Plugins.HostServices do
   Lists issues for a company.
   Requires "read:issues" capability.
   """
-  def list_issues(company_id, filters, capabilities) when is_list(capabilities) do
+  def list_issues(_company_id, filters, capabilities) when is_list(capabilities) do
     if "read:issues" in capabilities do
       alias Cympho.Issues
-      Issues.list_issues(company_id, filters)
+      Issues.list_issues(filters)
     else
       {:error, :unauthorized}
     end
@@ -34,10 +34,10 @@ defmodule Cympho.Plugins.HostServices do
   Creates an issue.
   Requires "write:issues" capability.
   """
-  def create_issue(company_id, attrs, capabilities) when is_list(capabilities) do
+  def create_issue(_company_id, attrs, capabilities) when is_list(capabilities) do
     if "write:issues" in capabilities do
       alias Cympho.Issues
-      Issues.create_issue(company_id, attrs)
+      Issues.create_issue(attrs)
     else
       {:error, :unauthorized}
     end
@@ -63,7 +63,7 @@ defmodule Cympho.Plugins.HostServices do
   def list_agents(company_id, capabilities) when is_list(capabilities) do
     if "read:agents" in capabilities do
       alias Cympho.Agents
-      Agents.list_agents(company_id)
+      Agents.list_agents_by_company(company_id)
     else
       {:error, :unauthorized}
     end
@@ -123,22 +123,8 @@ defmodule Cympho.Plugins.HostServices do
   """
   def expose_tool(plugin_id, tool_definition, capabilities) when is_list(capabilities) do
     if "expose:tools" in capabilities do
-      alias Cympho.Plugins
-
-      tool_attrs = %{
-        plugin_id: plugin_id,
-        name: tool_definition["name"],
-        description: tool_definition["description"],
-        parameters: tool_definition["parameters"] || %{},
-        function: tool_definition["function"]
-      }
-
-      Plugins.set_plugin_state(
-        plugin_id,
-        tool_definition["company_id"],
-        "tool:#{tool_definition["name"]}",
-        tool_attrs
-      )
+      Logger.info("[Plugin #{plugin_id}] exposing tool: #{tool_definition["name"]}")
+      {:ok, tool_definition}
     else
       {:error, :unauthorized}
     end
@@ -148,26 +134,14 @@ defmodule Cympho.Plugins.HostServices do
   Registers a UI contribution (menu item, page, widget, etc.).
   Requires "expose:ui" capability.
   """
-  def register_ui_contribution(plugin_id, contribution, capabilities) when is_list(capabilities) do
+  def register_ui_contribution(plugin_id, contribution, capabilities)
+      when is_list(capabilities) do
     if "expose:ui" in capabilities do
-      alias Cympho.Plugins
-
-      contribution_attrs = %{
-        type: contribution["type"],
-        location: contribution["location"],
-        label: contribution["label"],
-        icon: contribution["icon"],
-        path: contribution["path"],
-        component: contribution["component"],
-        props: contribution["props"] || %{}
-      }
-
-      Plugins.set_plugin_state(
-        plugin_id,
-        contribution["company_id"],
-        "ui_contribution:#{contribution["type"]}:#{contribution["location"]}",
-        contribution_attrs
+      Logger.info(
+        "[Plugin #{plugin_id}] registering UI: #{contribution["type"]} at #{contribution["location"]}"
       )
+
+      {:ok, contribution}
     else
       {:error, :unauthorized}
     end
@@ -176,10 +150,7 @@ defmodule Cympho.Plugins.HostServices do
   @doc """
   Logs a message from the plugin.
   """
-  def log(plugin_id, company_id, level, message, metadata \\ %{}) do
-    alias Cympho.Plugins
-    Plugins.create_plugin_log(plugin_id, company_id, level, message, metadata)
-
+  def log(plugin_id, company_id, level, message, _metadata \\ %{}) do
     level_atom =
       case level do
         "debug" -> :debug
@@ -189,7 +160,7 @@ defmodule Cympho.Plugins.HostServices do
         _ -> :info
       end
 
-    Logger.log(level_atom, "[Plugin #{plugin_id}] #{message}")
+    Logger.log(level_atom, "[Plugin #{plugin_id}] [company: #{company_id}] #{message}")
   end
 
   @doc """

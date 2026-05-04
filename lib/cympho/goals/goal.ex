@@ -10,6 +10,7 @@ defmodule Cympho.Goals.Goal do
     field :description, :string
     field :status, :string, default: "active"
     field :priority, :string, default: "medium"
+    field :goal_type, Ecto.Enum, values: [:mission, :initiative, :milestone], default: :initiative
 
     belongs_to :project, Cympho.Projects.Project
     belongs_to :company, Cympho.Companies.Company
@@ -25,12 +26,31 @@ defmodule Cympho.Goals.Goal do
 
   def changeset(goal, attrs) do
     goal
-    |> cast(attrs, [:title, :description, :status, :priority, :project_id, :company_id, :parent_id])
+    |> cast(attrs, [
+      :title,
+      :description,
+      :status,
+      :priority,
+      :goal_type,
+      :project_id,
+      :company_id,
+      :parent_id
+    ])
     |> validate_required([:title])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:priority, @priorities)
     |> validate_length(:title, min: 1, max: 255)
     |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:parent_id)
+    |> maybe_set_goal_type()
+  end
+
+  defp maybe_set_goal_type(changeset) do
+    if get_field(changeset, :goal_type) == :initiative and
+         is_nil(get_field(changeset, :parent_id)) do
+      put_change(changeset, :goal_type, :mission)
+    else
+      changeset
+    end
   end
 end

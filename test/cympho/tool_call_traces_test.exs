@@ -149,7 +149,8 @@ defmodule Cympho.ToolCallTracesTest do
         occurred_at: same_time
       }
 
-      assert {:ok, trace2} = ToolCallTraces.create_tool_call_trace(Map.put(attrs2, :company_id, company.id))
+      assert {:ok, trace2} =
+               ToolCallTraces.create_tool_call_trace(Map.put(attrs2, :company_id, company.id))
 
       assert trace1.content_hash != trace2.content_hash
     end
@@ -217,10 +218,12 @@ defmodule Cympho.ToolCallTracesTest do
       assert {:ok, trace2} = ToolCallTraces.create_tool_call_trace(attrs)
 
       from(t in ToolCallTrace, where: t.id == ^trace2.id)
-      |> Repo.update_all(set: [prev_hash: "invalidhash00000000000000000000000000000000000000000000000000000000000"])
+      |> Repo.update_all(
+        set: [prev_hash: "invalidhash00000000000000000000000000000000000000000000000000000000000"]
+      )
 
       assert {:error, :chain_broken, 1, 2} =
-        ToolCallTraces.verify_chain_integrity(company.id)
+               ToolCallTraces.verify_chain_integrity(company.id)
     end
 
     test "returns :ok for empty chain", %{company: company} do
@@ -261,7 +264,7 @@ defmodule Cympho.ToolCallTracesTest do
       |> Repo.update_all(set: [tool_name: "modified_tool"])
 
       assert {:error, :content_hash_mismatch} =
-        ToolCallTraces.verify_content_hash(trace)
+               ToolCallTraces.verify_content_hash(trace)
     end
   end
 
@@ -414,7 +417,7 @@ defmodule Cympho.ToolCallTracesTest do
       assert {:ok, trace} = ToolCallTraces.create_tool_call_trace(attrs)
 
       assert {:ok, updated} =
-        ToolCallTraces.update_tool_call_trace_status(trace, "success", "result data")
+               ToolCallTraces.update_tool_call_trace_status(trace, "success", "result data")
 
       assert updated.status == "success"
       assert updated.tool_result == "result data"
@@ -440,7 +443,9 @@ defmodule Cympho.ToolCallTracesTest do
       traces = ToolCallTraces.get_chain_traces(company.id)
 
       assert length(traces) == 5
-      assert Enum.map(traces, & &1.sequence_number) == Enum.sort(Enum.map(traces, & &1.sequence_number))
+
+      assert Enum.map(traces, & &1.sequence_number) ==
+               Enum.sort(Enum.map(traces, & &1.sequence_number))
     end
 
     test "respects start_sequence parameter", %{company: company} do
@@ -586,7 +591,9 @@ defmodule Cympho.ToolCallTracesTest do
       assert trace.actor_id == user_id
 
       # Query by actor type should return only user traces
-      user_traces = ToolCallTraces.list_tool_call_traces(company_id: company.id, actor_type: "user")
+      user_traces =
+        ToolCallTraces.list_tool_call_traces(company_id: company.id, actor_type: "user")
+
       assert length(user_traces) == 1
       assert hd(user_traces).actor_type == "user"
     end

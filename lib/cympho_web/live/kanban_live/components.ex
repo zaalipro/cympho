@@ -12,15 +12,29 @@ defmodule CymphoWeb.KanbanLive.Components do
   def issue_card(assigns) do
     ~H"""
     <div
-      class="kanban-card-enter bg-white/[0.02] border border-border rounded-md p-3 sm:p-4 space-y-2 hover:bg-white/[0.04] transition-colors cursor-grab active:cursor-grabbing min-h-[60px] sm:min-h-0"
+      class="kanban-card-enter group min-h-[92px] cursor-grab rounded-lg border border-border bg-surface p-3 shadow-ring transition-colors hover:border-border-hover hover:bg-surface-hover active:cursor-grabbing"
       data-issue-id={@issue.id}
     >
-      <div class="text-sm font-510 text-text-primary leading-snug line-clamp-2 sm:line-clamp-1">{@issue.title}</div>
-      <div class="flex items-center gap-2 flex-wrap">
-        <span class={"text-[10px] font-510 px-2 py-1 rounded-full " <> priority_class(@issue.priority)}>
+      <div class="mb-2 flex items-center justify-between gap-2">
+        <span class="font-mono text-[11px] text-text-quaternary">
+          {@issue.identifier || "CYM-" <> String.slice(@issue.id, 0, 4)}
+        </span>
+        <span class={"h-1.5 w-1.5 shrink-0 rounded-full " <> status_pin_class(@issue.status)}></span>
+      </div>
+
+      <.link
+        navigate={"/issues/#{@issue.id}"}
+        class="line-clamp-2 block text-sm font-590 leading-5 text-text-primary hover:text-white"
+        data-no-drag
+      >
+        {@issue.title}
+      </.link>
+
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <span class={"rounded-full px-2 py-0.5 text-[10px] font-510 " <> priority_class(@issue.priority)}>
           {@issue.priority}
         </span>
-        <span class="text-xs text-text-quaternary flex items-center gap-1">
+        <span class="flex items-center gap-1 text-xs text-text-quaternary">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               stroke-linecap="round"
@@ -31,11 +45,16 @@ defmodule CymphoWeb.KanbanLive.Components do
           </svg>
           {length(@issue.comments)}
         </span>
+        <%= if length(@issue.blocked_by || []) > 0 do %>
+          <span class="text-xs text-red-400">
+            {length(@issue.blocked_by)} blockers
+          </span>
+        <% end %>
         <%= if @issue.assignee do %>
           <% hb_state = Index.get_heartbeat_state(@agent_heartbeat_states, @issue.assignee.id) %>
           <span class="flex items-center gap-1">
             <span class={"w-1.5 h-1.5 rounded-full " <> heartbeat_dot_color(hb_state.status)}></span>
-            <span class="text-xs text-text-quaternary truncate max-w-[100px]">
+            <span class="max-w-[110px] truncate text-xs text-text-quaternary">
               {@issue.assignee.name}
             </span>
           </span>
@@ -51,6 +70,29 @@ defmodule CymphoWeb.KanbanLive.Components do
           </a>
         <% end %>
       </div>
+      <% next_statuses = Index.valid_next_statuses(@issue.status) %>
+      <%= if next_statuses != [] do %>
+        <div
+          class="kanban-card-actions mt-3 flex items-center gap-1.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+          data-no-drag
+        >
+          <span class="text-[10px] font-510 text-text-quaternary">Move</span>
+          <%= for next_status <- next_statuses do %>
+            <button
+              type="button"
+              phx-click="transition_issue"
+              phx-value-id={@issue.id}
+              phx-value-to_status={next_status}
+              data-kanban-action
+              class="rounded-md border border-border bg-panel px-1.5 py-0.5 text-[10px] font-510 text-text-tertiary hover:border-border-hover hover:bg-surface-hover hover:text-text-primary transition-colors"
+              style="min-height: 20px;"
+              title={"Move to #{Index.status_label(next_status)}"}
+            >
+              {compact_status_label(next_status)}
+            </button>
+          <% end %>
+        </div>
+      <% end %>
     </div>
     """
   end
@@ -59,8 +101,8 @@ defmodule CymphoWeb.KanbanLive.Components do
 
   def empty_column_state(assigns) do
     ~H"""
-    <div class="flex flex-col items-center justify-center py-8 text-center">
-      <div class="w-8 h-8 rounded-full bg-white/[0.03] flex items-center justify-center mb-2">
+    <div class="flex min-h-[108px] flex-col items-center justify-center rounded-lg border border-dashed border-border bg-canvas/40 px-4 py-6 text-center">
+      <div class="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-subtle">
         {empty_column_icon(@status)}
       </div>
       <p class="text-xs text-text-quaternary">{empty_column_message(@status)}</p>
@@ -104,21 +146,45 @@ defmodule CymphoWeb.KanbanLive.Components do
     )
   end
 
+  defp empty_column_icon(:cancelled) do
+    Phoenix.HTML.raw(
+      ~s|<svg class="w-4 h-4 text-text-quaternary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>|
+    )
+  end
+
   defp empty_column_message(:backlog), do: "No unplanned work"
   defp empty_column_message(:todo), do: "Nothing queued up"
   defp empty_column_message(:in_progress), do: "Nothing in flight"
   defp empty_column_message(:in_review), do: "Nothing to review"
   defp empty_column_message(:done), do: "No completed work yet"
   defp empty_column_message(:blocked), do: "No blockers"
+  defp empty_column_message(:cancelled), do: "No cancelled work"
 
+  def priority_class(:critical), do: "bg-red-500/20 text-red-300"
   def priority_class(:high), do: "bg-red-500/20 text-red-400"
   def priority_class(:medium), do: "bg-yellow-500/20 text-yellow-400"
   def priority_class(:low), do: "bg-emerald-500/20 text-emerald-400"
-  def priority_class(_), do: "bg-white/[0.05] text-text-quaternary"
+  def priority_class(_), do: "bg-surface text-text-quaternary"
 
   defp heartbeat_dot_color(:idle), do: "bg-emerald-400"
+  defp heartbeat_dot_color(:running), do: "bg-yellow-400 animate-pulse"
   defp heartbeat_dot_color(:working), do: "bg-yellow-400 animate-pulse"
   defp heartbeat_dot_color(:error), do: "bg-red-400"
+  defp heartbeat_dot_color(:paused), do: "bg-text-tertiary"
   defp heartbeat_dot_color(:offline), do: "bg-text-quaternary"
   defp heartbeat_dot_color(_), do: "bg-text-quaternary"
+
+  defp status_pin_class(:in_progress), do: "bg-yellow-400 animate-pulse"
+  defp status_pin_class(:blocked), do: "bg-red-400"
+  defp status_pin_class(:done), do: "bg-emerald-400"
+  defp status_pin_class(:cancelled), do: "bg-text-tertiary"
+  defp status_pin_class(_), do: "bg-text-quaternary"
+
+  defp compact_status_label(:backlog), do: "Backlog"
+  defp compact_status_label(:todo), do: "Todo"
+  defp compact_status_label(:in_progress), do: "Doing"
+  defp compact_status_label(:in_review), do: "Review"
+  defp compact_status_label(:blocked), do: "Blocked"
+  defp compact_status_label(:done), do: "Done"
+  defp compact_status_label(:cancelled), do: "Cancel"
 end

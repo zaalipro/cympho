@@ -42,7 +42,7 @@ defmodule CymphoWeb.SearchLive.Index do
   @impl true
   def handle_params(params, _url, socket) do
     query = params["q"] || ""
-    active_tab = params["tab"] || "all"
+    active_tab = parse_tab(params["tab"])
 
     filters = %{
       "status" => params["status"] || "",
@@ -63,9 +63,12 @@ defmodule CymphoWeb.SearchLive.Index do
       socket
       |> assign(:query, query)
       |> assign(:filters, filters)
-      |> assign(:active_tab, String.to_existing_atom(active_tab))
+      |> assign(:active_tab, active_tab)
       |> perform_search()
-      |> assign(:recent_searches, RecentSearches.list_recent_searches(socket.assigns.current_user.id))
+      |> assign(
+        :recent_searches,
+        recent_searches_for_user(socket.assigns.current_user)
+      )
 
     {:noreply, socket}
   end
@@ -89,7 +92,8 @@ defmodule CymphoWeb.SearchLive.Index do
     {:noreply,
      push_patch(socket,
        to:
-         build_url(socket,
+         build_url(
+           socket,
            Map.merge(merged_filters, %{
              "q" => socket.assigns.query,
              "tab" => to_string(socket.assigns.active_tab),
@@ -113,17 +117,21 @@ defmodule CymphoWeb.SearchLive.Index do
 
   def handle_event("clear_filters", _params, socket) do
     {:noreply,
-     push_patch(socket, to: ~p"/search?q=#{socket.assigns.query}&tab=#{socket.assigns.active_tab}")}
+     push_patch(socket,
+       to: ~p"/search?q=#{socket.assigns.query}&tab=#{socket.assigns.active_tab}"
+     )}
   end
 
   def handle_event("recent_search", %{"query" => query}, socket) do
-    {:noreply,
-     push_patch(socket, to: ~p"/search?q=#{query}&tab=#{socket.assigns.active_tab}")}
+    {:noreply, push_patch(socket, to: ~p"/search?q=#{query}&tab=#{socket.assigns.active_tab}")}
   end
 
   def handle_event("clear_recent_searches", _params, socket) do
     current_user = socket.assigns.current_user
-    RecentSearches.clear_recent_searches(current_user.id)
+
+    if current_user do
+      RecentSearches.clear_recent_searches(current_user.id)
+    end
 
     {:noreply,
      socket
@@ -140,6 +148,7 @@ defmodule CymphoWeb.SearchLive.Index do
       |> assign(:total_count, 0)
     else
       results = Search.search_all(query, filters, limit: 20)
+
       total_count =
         length(results.issues) + length(results.agents) + length(results.projects) +
           length(results.goals)
@@ -188,7 +197,10 @@ defmodule CymphoWeb.SearchLive.Index do
     end
   end
 
-  defp active_tab?(socket, tab), do: socket.assigns.active_tab == tab
+  defp parse_tab(tab) when tab in ~w(all issues agents projects goals),
+    do: String.to_existing_atom(tab)
+
+  defp parse_tab(_), do: :all
 
   defp status_label(:backlog), do: "Backlog"
   defp status_label(:todo), do: "To Do"
@@ -207,22 +219,22 @@ defmodule CymphoWeb.SearchLive.Index do
   defp status_label(:offline), do: "Offline"
   defp status_label(other), do: String.capitalize(to_string(other))
 
-  defp status_color(:backlog), do: "bg-gray-100 text-gray-800"
-  defp status_color(:todo), do: "bg-blue-100 text-blue-800"
-  defp status_color(:in_progress), do: "bg-yellow-100 text-yellow-800"
-  defp status_color(:in_review), do: "bg-purple-100 text-purple-800"
-  defp status_color(:done), do: "bg-green-100 text-green-800"
-  defp status_color(:blocked), do: "bg-red-100 text-red-800"
-  defp status_color(:cancelled), do: "bg-gray-100 text-gray-800"
-  defp status_color(:active), do: "bg-green-100 text-green-800"
-  defp status_color(:archived), do: "bg-gray-100 text-gray-800"
-  defp status_color(:completed), do: "bg-green-100 text-green-800"
-  defp status_color(:idle), do: "bg-gray-100 text-gray-800"
-  defp status_color(:running), do: "bg-green-100 text-green-800"
-  defp status_color(:error), do: "bg-red-100 text-red-800"
-  defp status_color(:sleeping), do: "bg-yellow-100 text-yellow-800"
-  defp status_color(:offline), do: "bg-gray-100 text-gray-800"
-  defp status_color(_), do: "bg-gray-100 text-gray-800"
+  defp status_color(:backlog), do: "bg-text-tertiary/20 text-text-tertiary"
+  defp status_color(:todo), do: "bg-accent/20 text-accent"
+  defp status_color(:in_progress), do: "bg-brand/20 text-brand"
+  defp status_color(:in_review), do: "bg-text-secondary/20 text-text-secondary"
+  defp status_color(:done), do: "bg-success/20 text-success"
+  defp status_color(:blocked), do: "bg-red-500/20 text-red-400"
+  defp status_color(:cancelled), do: "bg-text-quaternary/20 text-text-quaternary"
+  defp status_color(:active), do: "bg-success/20 text-success"
+  defp status_color(:archived), do: "bg-text-quaternary/20 text-text-quaternary"
+  defp status_color(:completed), do: "bg-success/20 text-success"
+  defp status_color(:idle), do: "bg-text-quaternary/20 text-text-quaternary"
+  defp status_color(:running), do: "bg-brand/20 text-brand"
+  defp status_color(:error), do: "bg-red-500/20 text-red-400"
+  defp status_color(:sleeping), do: "bg-yellow-500/20 text-yellow-400"
+  defp status_color(:offline), do: "bg-text-quaternary/20 text-text-quaternary"
+  defp status_color(_), do: "bg-text-quaternary/20 text-text-quaternary"
 
   defp priority_label(:low), do: "Low"
   defp priority_label(:medium), do: "Medium"
@@ -230,18 +242,18 @@ defmodule CymphoWeb.SearchLive.Index do
   defp priority_label(:critical), do: "Critical"
   defp priority_label(other), do: String.capitalize(to_string(other))
 
-  defp priority_color(:low), do: "text-gray-600"
-  defp priority_color(:medium), do: "text-blue-600"
-  defp priority_color(:high), do: "text-orange-600"
-  defp priority_color(:critical), do: "text-red-600"
-  defp priority_color(_), do: "text-gray-600"
+  defp priority_color(:low), do: "text-text-tertiary"
+  defp priority_color(:medium), do: "text-accent"
+  defp priority_color(:high), do: "text-orange-400"
+  defp priority_color(:critical), do: "text-red-400"
+  defp priority_color(_), do: "text-text-tertiary"
 
-  defp agent_status_color(:idle), do: "#6B7280"
-  defp agent_status_color(:running), do: "#10B981"
-  defp agent_status_color(:error), do: "#EF4444"
-  defp agent_status_color(:sleeping), do: "#F59E0B"
-  defp agent_status_color(:offline), do: "#374151"
-  defp agent_status_color(_), do: "#6B7280"
+  defp agent_status_color(:idle), do: "bg-text-tertiary"
+  defp agent_status_color(:running), do: "bg-success"
+  defp agent_status_color(:error), do: "bg-error"
+  defp agent_status_color(:sleeping), do: "bg-yellow-500"
+  defp agent_status_color(:offline), do: "bg-text-quaternary"
+  defp agent_status_color(_), do: "bg-text-tertiary"
 
   defp filters_active?(filters) do
     filters["status"] != "" or
@@ -260,7 +272,9 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@issues != []} class="space-y-2">
-      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">{@section_title}</h2>
+      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">
+        {@section_title}
+      </h2>
       <div class="space-y-2">
         <.link
           :for={issue <- @issues}
@@ -278,12 +292,14 @@ defmodule CymphoWeb.SearchLive.Index do
                   {priority_label(issue.priority)} priority
                 </span>
               </div>
-              <h3 class="text-base font-medium text-text-primary mb-1">{issue.title}</h3>
+              <h3 class="font-serif text-base font-medium text-text-primary mb-1">{issue.title}</h3>
               <p class="text-sm text-text-secondary line-clamp-2">{issue.description}</p>
               <div class="flex items-center gap-4 mt-2 text-xs text-text-tertiary">
                 <span :if={issue.assignee}>Assignee: {issue.assignee.name}</span>
                 <span :if={issue.project}>Project: {issue.project.name}</span>
-                <span :if={issue.labels != []}>Labels: {Enum.map_join(issue.labels, ", ", & &1.name)}</span>
+                <span :if={issue.labels != []}>
+                  Labels: {Enum.map_join(issue.labels, ", ", & &1.name)}
+                </span>
               </div>
             </div>
           </div>
@@ -298,7 +314,9 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@agents != []} class="space-y-2">
-      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">{@section_title}</h2>
+      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">
+        {@section_title}
+      </h2>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <.link
           :for={agent <- @agents}
@@ -306,8 +324,12 @@ defmodule CymphoWeb.SearchLive.Index do
           class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
         >
           <div class="flex items-center justify-between mb-2">
-            <h3 class="text-base font-medium text-text-primary">{agent.name}</h3>
-            <span class="w-2 h-2 rounded-full" style={"background-color: " <> agent_status_color(agent.status)}></span>
+            <h3 class="font-serif text-base font-medium text-text-primary">{agent.name}</h3>
+            <span
+              class="w-2 h-2 rounded-full"
+              style={"background-color: " <> agent_status_color(agent.status)}
+            >
+            </span>
           </div>
           <p class="text-sm text-text-secondary mb-2">{agent.title}</p>
           <div class="flex items-center gap-2 text-xs text-text-tertiary">
@@ -326,14 +348,16 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@projects != []} class="space-y-2">
-      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">{@section_title}</h2>
+      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">
+        {@section_title}
+      </h2>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <.link
           :for={project <- @projects}
           navigate={~p"/projects/#{project.id}"}
           class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
         >
-          <h3 class="text-base font-medium text-text-primary mb-1">{project.name}</h3>
+          <h3 class="font-serif text-base font-medium text-text-primary mb-1">{project.name}</h3>
           <p class="text-sm text-text-secondary line-clamp-2 mb-2">{project.description}</p>
           <div class="flex items-center gap-2 text-xs text-text-tertiary">
             <span class="capitalize">{project.status}</span>
@@ -351,7 +375,9 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@goals != []} class="space-y-2">
-      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">{@section_title}</h2>
+      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">
+        {@section_title}
+      </h2>
       <div class="space-y-2">
         <.link
           :for={goal <- @goals}
@@ -361,8 +387,11 @@ defmodule CymphoWeb.SearchLive.Index do
           <div class="flex items-start justify-between">
             <div class="flex-1">
               <div class="flex items-center gap-2 mb-1">
-                <h3 class="text-base font-medium text-text-primary">{goal.title}</h3>
-                <span class={["text-xs font-medium", priority_color(String.to_existing_atom(goal.priority))]}>
+                <h3 class="font-serif text-base font-medium text-text-primary">{goal.title}</h3>
+                <span class={[
+                  "text-xs font-medium",
+                  priority_color(String.to_existing_atom(goal.priority))
+                ]}>
                   {String.capitalize(goal.priority)} priority
                 </span>
               </div>

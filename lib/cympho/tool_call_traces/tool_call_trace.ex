@@ -33,16 +33,34 @@ defmodule Cympho.ToolCallTraces.ToolCallTrace do
   def changeset(tool_call_trace, attrs) do
     tool_call_trace
     |> cast(attrs, [
-      :trace_type, :tool_name, :tool_arguments, :tool_result,
-      :error_message, :status, :content_hash, :prev_hash,
-      :chain_hash, :sequence_number, :occurred_at,
-      :agent_id, :issue_id, :company_id,
-      :actor_type, :actor_id
+      :trace_type,
+      :tool_name,
+      :tool_arguments,
+      :tool_result,
+      :error_message,
+      :status,
+      :content_hash,
+      :prev_hash,
+      :chain_hash,
+      :sequence_number,
+      :occurred_at,
+      :agent_id,
+      :issue_id,
+      :company_id,
+      :actor_type,
+      :actor_id
     ])
     |> validate_required([
-      :trace_type, :tool_name, :tool_arguments, :status,
-      :content_hash, :chain_hash, :sequence_number,
-      :occurred_at, :company_id, :actor_type
+      :trace_type,
+      :tool_name,
+      :tool_arguments,
+      :status,
+      :content_hash,
+      :chain_hash,
+      :sequence_number,
+      :occurred_at,
+      :company_id,
+      :actor_type
     ])
     |> validate_inclusion(:status, ["pending", "success", "error", "timeout"])
     |> validate_inclusion(:actor_type, ["user", "agent", "system"])
@@ -86,30 +104,37 @@ defmodule Cympho.ToolCallTraces.ToolCallTrace do
       actor_id: Map.get(attrs, :actor_id) || Map.get(attrs, "actor_id")
     }
 
-    hash = :crypto.hash(:sha256, :erlang.term_to_binary(content))
-    |> Base.encode16(case: :lower)
+    hash =
+      :crypto.hash(:sha256, :erlang.term_to_binary(content))
+      |> Base.encode16(case: :lower)
 
     {hash, content}
   end
 
   def calculate_chain_hash(content_hash, prev_hash) do
     chain_input = "#{content_hash}#{prev_hash || ""}"
-    hash = :crypto.hash(:sha256, chain_input)
-    |> Base.encode16(case: :lower)
+
+    hash =
+      :crypto.hash(:sha256, chain_input)
+      |> Base.encode16(case: :lower)
 
     hash
   end
 
   defp validate_prev_hash_format(changeset) do
     case get_change(changeset, :prev_hash) do
-      nil -> changeset
+      nil ->
+        changeset
+
       prev_hash when is_binary(prev_hash) ->
         if String.match?(prev_hash, ~r/^[a-f0-9]{64}$/) do
           changeset
         else
           add_error(changeset, :prev_hash, "invalid hash format")
         end
-      _ -> changeset
+
+      _ ->
+        changeset
     end
   end
 end

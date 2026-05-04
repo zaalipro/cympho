@@ -18,12 +18,20 @@
       </.form>
     </:actions>
   </.header>
-
-  <!-- Budget Alerts -->
-  <div :if={not Enum.empty?(@exceeded_budgets)} class="mb-6 bg-red-500/10 border border-red-500/20 rounded-card p-4">
-    <h3 class="text-sm font-510 text-red-400 mb-2">
+  
+<!-- Budget Alerts -->
+  <div
+    :if={not Enum.empty?(@exceeded_budgets)}
+    class="mb-6 bg-red-500/10 border border-red-500/20 rounded-xl p-4"
+  >
+    <h3 class="font-serif text-sm font-510 text-red-400 mb-2">
       <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+        />
       </svg>
       Exceeded Budgets
     </h3>
@@ -37,10 +45,18 @@
     </div>
   </div>
 
-  <div :if={not Enum.empty?(@approaching_budgets)} class="mb-6 bg-amber-500/10 border border-amber-500/20 rounded-card p-4">
-    <h3 class="text-sm font-510 text-amber-400 mb-2">
+  <div
+    :if={not Enum.empty?(@approaching_budgets)}
+    class="mb-6 bg-amber-500/10 border border-amber-500/20 rounded-xl p-4"
+  >
+    <h3 class="font-serif text-sm font-510 text-amber-400 mb-2">
       <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
       </svg>
       Approaching Budget Limits
     </h3>
@@ -53,65 +69,92 @@
       <% end %>
     </div>
   </div>
-
-  <!-- Summary Cards -->
+  
+<!-- Summary Cards -->
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-    <div class="bg-surface border border-border rounded-card p-5">
+    <div class="bg-surface border border-border rounded-xl p-5">
       <div class="flex items-center justify-between mb-2">
         <span class="text-text-secondary text-xs uppercase tracking-wider">Total Cost</span>
         <svg class="w-5 h-5 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
         </svg>
       </div>
       <div class="text-2xl font-510 text-text-primary">{format_cost(@summary.total_cost)}</div>
       <div class="text-xs text-text-quaternary mt-1">Last {@days} days</div>
     </div>
 
-    <div class="bg-surface border border-border rounded-card p-5">
+    <div class="bg-surface border border-border rounded-xl p-5">
       <div class="flex items-center justify-between mb-2">
         <span class="text-text-secondary text-xs uppercase tracking-wider">Total Tokens</span>
         <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+          />
         </svg>
       </div>
-      <div class="text-2xl font-510 text-text-primary">{format_tokens(@summary.total_tokens)}</div>
+      <div class="text-2xl font-510 text-text-primary">
+        {format_tokens(@summary.total_tokens)}
+      </div>
       <div class="text-xs text-text-quaternary mt-1">Last {@days} days</div>
     </div>
 
-    <div class="bg-surface border border-border rounded-card p-5">
+    <div class="bg-surface border border-border rounded-xl p-5">
       <div class="flex items-center justify-between mb-2">
         <span class="text-text-secondary text-xs uppercase tracking-wider">Budget Limit</span>
         <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+          />
         </svg>
       </div>
       <div class="text-2xl font-510 text-text-primary">{format_cost(@summary.budget_limit)}</div>
       <div class="text-xs text-text-quaternary mt-1">Active budgets</div>
     </div>
 
-    <div class="bg-surface border border-border rounded-card p-5">
+    <div class="bg-surface border border-border rounded-xl p-5">
       <div class="flex items-center justify-between mb-2">
         <span class="text-text-secondary text-xs uppercase tracking-wider">Budget Spent</span>
         <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
+          />
         </svg>
       </div>
       <div class="text-2xl font-510 text-text-primary">{format_cost(@summary.budget_spent)}</div>
       <div class="text-xs text-text-quaternary mt-1">
         <%= if Decimal.gt?(@summary.budget_limit, 0) do %>
-          <%= Decimal.to_string(Decimal.mult(Decimal.div(@summary.budget_spent, @summary.budget_limit), 100), :normal) %>%
+          {Decimal.to_string(
+            Decimal.mult(Decimal.div(@summary.budget_spent, @summary.budget_limit), 100),
+            :normal
+          )}%
         <% else %>
           N/A
         <% end %>
       </div>
     </div>
   </div>
-
-  <!-- Daily Cost Chart -->
-  <div class="bg-surface border border-border rounded-card p-6 mb-6">
-    <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">Daily Cost Trend</h2>
+  
+<!-- Daily Cost Chart -->
+  <div class="bg-surface border border-border rounded-xl p-6 mb-6">
+    <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+      Daily Cost Trend
+    </h2>
     <div class="h-40 flex items-end gap-1">
-      <%= max_cost = max_daily_cost(@daily_costs) %>
+      {max_cost = max_daily_cost(@daily_costs)}
       <%= for day <- @daily_costs do %>
         <div class="flex-1 group relative">
           <div
@@ -130,8 +173,8 @@
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
     <!-- Costs by Agent -->
-    <div class="bg-surface border border-border rounded-card p-6">
-      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+    <div class="bg-surface border border-border rounded-xl p-6">
+      <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
         Top Agents by Cost
       </h2>
       <div class="space-y-3">
@@ -166,10 +209,10 @@
         <div class="text-text-tertiary text-sm">No agent cost data for the selected period</div>
       </div>
     </div>
-
-    <!-- Costs by Issue -->
-    <div class="bg-surface border border-border rounded-card p-6">
-      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+    
+<!-- Costs by Issue -->
+    <div class="bg-surface border border-border rounded-xl p-6">
+      <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
         Top Issues by Cost
       </h2>
       <div class="space-y-3">
@@ -208,8 +251,8 @@
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
     <!-- Costs by Model -->
-    <div class="bg-surface border border-border rounded-card p-6">
-      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+    <div class="bg-surface border border-border rounded-xl p-6">
+      <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
         Cost by Model
       </h2>
       <div class="space-y-3">
@@ -243,10 +286,10 @@
         <div class="text-text-tertiary text-sm">No model cost data for the selected period</div>
       </div>
     </div>
-
-    <!-- Costs by Provider -->
-    <div class="bg-surface border border-border rounded-card p-6">
-      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
+    
+<!-- Costs by Provider -->
+    <div class="bg-surface border border-border rounded-xl p-6">
+      <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
         Cost by Provider
       </h2>
       <div class="space-y-3">
@@ -273,15 +316,17 @@
         <% end %>
       </div>
       <div :if={Enum.empty?(@by_provider)} class="text-center py-8">
-        <div class="text-text-tertiary text-sm">No provider cost data for the selected period</div>
+        <div class="text-text-tertiary text-sm">
+          No provider cost data for the selected period
+        </div>
       </div>
     </div>
   </div>
-
-  <!-- Active Budgets -->
-  <div class="bg-surface border border-border rounded-card p-6">
+  
+<!-- Active Budgets -->
+  <div class="bg-surface border border-border rounded-xl p-6">
     <div class="flex items-center justify-between mb-4">
-      <h2 class="text-sm font-510 text-text-secondary uppercase tracking-wider">
+      <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider">
         Active Budgets
       </h2>
       <.app_link

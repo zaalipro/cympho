@@ -64,7 +64,8 @@ defmodule Cympho.AuthenticationUnitTest do
       hash2 = AgentApiKey.hash_api_key(key)
 
       assert hash1 == hash2
-      assert byte_size(hash1) == 64 # SHA256 produces 64 hex characters
+      # SHA256 produces 64 hex characters
+      assert byte_size(hash1) == 64
     end
 
     test "hash_api_key is different for different keys" do
@@ -183,39 +184,46 @@ defmodule Cympho.AuthenticationUnitTest do
   describe "User registration_changeset" do
     test "validates password length" do
       # Short password
-      changeset = User.registration_changeset(%User{}, %{
-        email: "test@example.com",
-        name: "Test",
-        password: "short"
-      })
+      changeset =
+        User.registration_changeset(%User{}, %{
+          email: "test@example.com",
+          name: "Test",
+          password: "short"
+        })
+
       assert !changeset.valid?
       assert Keyword.get(changeset.errors, :password)
 
       # Valid password
-      changeset = User.registration_changeset(%User{}, %{
-        email: "test@example.com",
-        name: "Test",
-        password: "validpassword123"
-      })
+      changeset =
+        User.registration_changeset(%User{}, %{
+          email: "test@example.com",
+          name: "Test",
+          password: "validpassword123"
+        })
+
       assert changeset.valid?
     end
 
     test "validates email format" do
-      changeset = User.registration_changeset(%User{}, %{
-        email: "invalid-email",
-        name: "Test",
-        password: "validpassword123"
-      })
+      changeset =
+        User.registration_changeset(%User{}, %{
+          email: "invalid-email",
+          name: "Test",
+          password: "validpassword123"
+        })
+
       assert !changeset.valid?
       assert Keyword.get(changeset.errors, :email)
     end
 
     test "creates password hash on valid registration" do
-      changeset = User.registration_changeset(%User{}, %{
-        email: "test@example.com",
-        name: "Test",
-        password: "validpassword123"
-      })
+      changeset =
+        User.registration_changeset(%User{}, %{
+          email: "test@example.com",
+          name: "Test",
+          password: "validpassword123"
+        })
 
       assert changeset.valid?
       assert changeset.changes[:password_hash] != nil

@@ -20,7 +20,15 @@ defmodule Cympho.Projects.Project do
 
   def changeset(project, attrs) do
     project
-    |> cast(attrs, [:name, :description, :status, :prefix, :github_webhook_secret, :settings, :company_id])
+    |> cast(attrs, [
+      :name,
+      :description,
+      :status,
+      :prefix,
+      :github_webhook_secret,
+      :settings,
+      :company_id
+    ])
     |> validate_required([:name, :prefix])
     |> validate_length(:name, min: 1, max: 255)
     |> validate_length(:prefix, min: 2, max: 10)

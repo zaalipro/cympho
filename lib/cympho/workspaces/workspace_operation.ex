@@ -26,7 +26,6 @@ defmodule Cympho.Workspaces.WorkspaceOperation do
 
     belongs_to :company, Company
     belongs_to :execution_workspace, ExecutionWorkspace
-    belongs_to :heartbeat_run, Cympho.Wakes.Wake, foreign_key: :heartbeat_run_id
 
     timestamps(type: :utc_datetime)
   end
@@ -51,8 +50,7 @@ defmodule Cympho.Workspaces.WorkspaceOperation do
       :started_at,
       :finished_at,
       :company_id,
-      :execution_workspace_id,
-      :heartbeat_run_id
+      :execution_workspace_id
     ])
     |> validate_required([:phase, :status, :company_id, :execution_workspace_id])
   end

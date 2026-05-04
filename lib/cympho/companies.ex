@@ -5,13 +5,19 @@ defmodule Cympho.Companies do
   alias Cympho.Companies.CompanyMembership
   alias Cympho.Companies.CompanyInvite
   alias Cympho.Companies.JoinRequest
+  alias Cympho.Agents.Agent
   alias Cympho.BoardApprovals
   alias Cympho.GovernanceAuditLogs
+  alias Cympho.Goals.Goal
+  alias Cympho.Issues.Issue
+  alias Cympho.Projects.Project
 
   # ── Company CRUD ──
 
   def list_companies do
-    Repo.all(Company)
+    Company
+    |> order_by([c], asc: c.inserted_at, asc: c.name)
+    |> Repo.all()
   end
 
   def get_company!(id), do: Repo.get!(Company, id)
@@ -42,6 +48,25 @@ defmodule Cympho.Companies do
     do_update_company(company, attrs)
   end
 
+  def pause_company(%Company{} = company, reason \\ "Paused from dashboard") do
+    execute_company_update(company, %{
+      status: "paused",
+      paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
+      paused_reason: reason
+    })
+  end
+
+  def resume_company(%Company{} = company) do
+    execute_company_update(company, %{
+      status: "active",
+      paused_at: nil,
+      paused_reason: nil
+    })
+  end
+
+  def active?(%Company{status: "active"}), do: true
+  def active?(_company), do: false
+
   defp do_update_company(%Company{} = company, attrs) do
     company
     |> Company.changeset(attrs)
@@ -54,6 +79,12 @@ defmodule Cympho.Companies do
           "Company updated: #{updated.name}",
           resource: updated,
           metadata: %{changes: Map.keys(attrs)}
+        )
+
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.id}:company",
+          {:company_updated, updated}
         )
 
         {:ok, updated}
@@ -118,6 +149,233 @@ defmodule Cympho.Companies do
 
   def change_company(%Company{} = company, attrs \\ %{}) do
     Company.changeset(company, attrs)
+  end
+
+  @doc """
+  Creates a Paperclip-style autonomous starter company.
+
+  The template creates a company, one project, one top-level company goal, a CEO,
+  CTO, and engineers reporting through the CTO, then queues the CEO's first
+  strategy issue. It is intentionally local-trusted: no user account is required.
+  """
+  def create_autonomous_company(attrs \\ %{}) do
+    name = attrs[:name] || attrs["name"] || "Autonomous Software Company"
+
+    goal_title =
+      attrs[:goal_title] || attrs["goal_title"] || "Build and run the business autonomously"
+
+    requested_prefix = attrs[:issue_prefix] || attrs["issue_prefix"] || "LLM"
+    issue_prefix = unique_project_prefix(requested_prefix)
+    engineer_count = attrs[:engineer_count] || attrs["engineer_count"] || 2
+    adapter = normalize_adapter(attrs[:adapter] || attrs["adapter"] || :codex)
+
+    Repo.transaction(fn ->
+      company =
+        %Company{}
+        |> Company.changeset(%{
+          name: name,
+          slug: unique_slug(name),
+          description: "An autonomous AI company with a CEO, CTO, and engineering team.",
+          status: "active",
+          issue_prefix: issue_prefix,
+          issue_counter: 1,
+          budget_monthly_cents:
+            attrs[:budget_monthly_cents] || attrs["budget_monthly_cents"] || 0,
+          require_board_approval_for_new_agents: false,
+          governance_config: %{
+            "autonomy_mode" => "autonomous_default",
+            "approval_gates" => ["budget_override", "dangerous_runtime_action"]
+          },
+          brand_color: "#5e6ad2"
+        })
+        |> Repo.insert!()
+
+      project =
+        %Project{}
+        |> Project.changeset(%{
+          company_id: company.id,
+          name: "Company OS",
+          description: "Default operating project for autonomous company work.",
+          prefix: issue_prefix,
+          status: :active,
+          settings: %{"wip_limits" => %{"in_progress" => engineer_count + 2}}
+        })
+        |> Repo.insert!()
+
+      goal =
+        %Goal{}
+        |> Goal.changeset(%{
+          company_id: company.id,
+          project_id: project.id,
+          title: goal_title,
+          description: "Top-level company objective. CEO decomposes this into executable work.",
+          priority: "critical",
+          status: "active"
+        })
+        |> Repo.insert!()
+
+      ceo =
+        create_template_agent!(%{
+          company_id: company.id,
+          project_id: project.id,
+          name: "CEO",
+          title: "Chief Executive Officer",
+          role: :ceo,
+          adapter: adapter,
+          max_concurrent_jobs: 1,
+          capabilities: %{
+            "strategy" => true,
+            "planning" => true,
+            "budgeting" => true,
+            "hiring" => true
+          },
+          instructions:
+            "Own the company goal, break strategy into goals and issues, delegate through the CTO, and keep the company running without waiting for humans unless a configured governance gate is hit."
+        })
+
+      cto =
+        create_template_agent!(%{
+          company_id: company.id,
+          project_id: project.id,
+          parent_id: ceo.id,
+          created_by_agent_id: ceo.id,
+          name: "CTO",
+          title: "Chief Technology Officer",
+          role: :cto,
+          adapter: adapter,
+          max_concurrent_jobs: 2,
+          capabilities: %{
+            "architecture" => true,
+            "review" => true,
+            "triage" => true,
+            "technical_planning" => true
+          },
+          instructions:
+            "Translate CEO strategy into technical plans, review engineering work, unblock engineers, and maintain execution quality."
+        })
+
+      engineers =
+        for index <- 1..engineer_count do
+          create_template_agent!(%{
+            company_id: company.id,
+            project_id: project.id,
+            parent_id: cto.id,
+            created_by_agent_id: cto.id,
+            name: "Engineer #{index}",
+            title: "Software Engineer",
+            role: :engineer,
+            adapter: adapter,
+            max_concurrent_jobs: 1,
+            capabilities: %{
+              "implementation" => true,
+              "testing" => true,
+              "debugging" => true
+            },
+            instructions:
+              "Implement assigned issues end to end, leave comments with results, and surface blockers explicitly."
+          })
+        end
+
+      issue =
+        %Issue{}
+        |> Issue.changeset(%{
+          company_id: company.id,
+          project_id: project.id,
+          goal_id: goal.id,
+          assignee_id: ceo.id,
+          issue_number: 1,
+          identifier: "#{issue_prefix}-1",
+          title: "Create the first autonomous execution plan",
+          description:
+            "Break the company goal into CEO, CTO, and engineering work. Create follow-up issues for the first execution cycle.",
+          status: :todo,
+          priority: :critical,
+          assigned_role: "ceo",
+          origin_type: "onboarding",
+          request_depth: 0
+        })
+        |> Repo.insert!()
+
+      %{
+        company: company,
+        project: project,
+        goal: goal,
+        agents: [ceo, cto | engineers],
+        first_issue: issue
+      }
+    end)
+  end
+
+  defp create_template_agent!(attrs) do
+    %Agent{}
+    |> Agent.changeset(
+      Map.merge(attrs, %{
+        status: :idle,
+        context_mode: "company",
+        runtime_config: %{"autonomous" => true}
+      })
+    )
+    |> Repo.insert!()
+  end
+
+  defp normalize_adapter(adapter) when is_atom(adapter), do: adapter
+
+  defp normalize_adapter(adapter) when is_binary(adapter) do
+    try do
+      String.to_existing_atom(adapter)
+    rescue
+      ArgumentError -> :codex
+    end
+  end
+
+  defp unique_slug(name) do
+    base =
+      name
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9]+/, "-")
+      |> String.trim("-")
+      |> case do
+        "" -> "company"
+        slug -> slug
+      end
+      |> String.slice(0, 42)
+
+    unique_slug(base, 0)
+  end
+
+  defp unique_slug(base, 0) do
+    if get_company_by_slug(base), do: unique_slug(base, 1), else: base
+  end
+
+  defp unique_slug(base, suffix) do
+    candidate = "#{base}-#{suffix}"
+    if get_company_by_slug(candidate), do: unique_slug(base, suffix + 1), else: candidate
+  end
+
+  defp unique_project_prefix(prefix) do
+    base =
+      prefix
+      |> to_string()
+      |> String.upcase()
+      |> String.replace(~r/[^A-Z0-9]+/, "")
+      |> case do
+        "" -> "LLM"
+        value -> String.slice(value, 0, 7)
+      end
+
+    unique_project_prefix(base, 0)
+  end
+
+  defp unique_project_prefix(base, 0) do
+    if Repo.get_by(Project, prefix: base), do: unique_project_prefix(base, 1), else: base
+  end
+
+  defp unique_project_prefix(base, suffix) do
+    candidate = "#{base}#{suffix}"
+
+    if Repo.get_by(Project, prefix: candidate),
+      do: unique_project_prefix(base, suffix + 1),
+      else: candidate
   end
 
   # ── Multi-tenancy scoping ──
@@ -196,8 +454,6 @@ defmodule Cympho.Companies do
     role = get_role(user_id, company_id)
     role in ["owner", "admin"]
   end
-
-
 
   @doc """
   Returns true if the user is a board member of the given company.
@@ -489,16 +745,26 @@ defmodule Cympho.Companies do
           label_id_map
         )
 
-      %{company: company, id_maps: %{projects: project_id_map, agents: agent_id_map, issues: issue_id_map, labels: label_id_map, users: user_id_map}}
+      %{
+        company: company,
+        id_maps: %{
+          projects: project_id_map,
+          agents: agent_id_map,
+          issues: issue_id_map,
+          labels: label_id_map,
+          users: user_id_map
+        }
+      }
     end)
   end
 
   # Creates a company, retrying with a new slug suffix on unique constraint violation
   defp create_company_with_retry(company_data, slug_strategy, attempts \\ 1) do
-    slug = case slug_strategy do
-      :suffix -> "#{company_data.slug}-#{:rand.uniform(9999)}"
-      :fail -> company_data.slug
-    end
+    slug =
+      case slug_strategy do
+        :suffix -> "#{company_data.slug}-#{:rand.uniform(9999)}"
+        :fail -> company_data.slug
+      end
 
     attrs = %{
       name: company_data.name,
@@ -545,7 +811,10 @@ defmodule Cympho.Companies do
             company_id: company_id
           }
 
-          case Repo.insert(%Cympho.Users.User{} |> Cympho.Users.User.registration_changeset(attrs)) do
+          case Repo.insert(
+                 %Cympho.Users.User{}
+                 |> Cympho.Users.User.registration_changeset(attrs)
+               ) do
             {:ok, user} -> {:ok, Map.put(acc, Map.get(user_data, :id), user.id)}
             {:error, changeset} -> {:error, changeset}
           end
@@ -582,7 +851,7 @@ defmodule Cympho.Companies do
   end
 
   defp import_labels(labels, company_id) do
-    errors = []
+    _errors = []
 
     result =
       Enum.reduce(labels, %{}, fn label_data, acc ->
@@ -673,10 +942,11 @@ defmodule Cympho.Companies do
   end
 
   defp create_agent_with_retry(agent_data, company_id, attempts \\ 1) do
-    url_key = case agent_data.url_key do
-      nil -> nil
-      _ -> "#{agent_data.url_key}-#{:rand.uniform(9999)}"
-    end
+    url_key =
+      case agent_data.url_key do
+        nil -> nil
+        _ -> "#{agent_data.url_key}-#{:rand.uniform(9999)}"
+      end
 
     attrs = %{
       name: agent_data.name,
@@ -729,25 +999,34 @@ defmodule Cympho.Companies do
 
             # Import labels
             labels = Map.get(issue_data, :labels, [])
-            label_ids = Enum.map(labels, fn l -> remap_id(label_id_map, Map.get(l, :id)) end)
-                               |> Enum.filter(&(&1 != nil))
+
+            label_ids =
+              Enum.map(labels, fn l -> remap_id(label_id_map, Map.get(l, :id)) end)
+              |> Enum.filter(&(&1 != nil))
 
             if length(label_ids) > 0 do
               label_update =
                 issue
                 |> Repo.preload(:labels)
                 |> Cympho.Issues.Issue.changeset(%{})
-                |> Ecto.Changeset.put_assoc(:labels, Cympho.Repo.all(from l in Cympho.Labels.Label, where: l.id in ^label_ids))
+                |> Ecto.Changeset.put_assoc(
+                  :labels,
+                  Cympho.Repo.all(from l in Cympho.Labels.Label, where: l.id in ^label_ids)
+                )
                 |> Repo.update()
 
               case label_update do
-                {:ok, _} -> :ok
-                {:error, changeset} -> raise "Issue label import failed: #{inspect(changeset.errors)}"
+                {:ok, _} ->
+                  :ok
+
+                {:error, changeset} ->
+                  raise "Issue label import failed: #{inspect(changeset.errors)}"
               end
             end
 
             # Import comments
             comments = Map.get(issue_data, :comments, [])
+
             Enum.each(comments, fn c ->
               {author_type, author_id} =
                 case Map.get(c, :author_type) do
@@ -772,7 +1051,10 @@ defmodule Cympho.Companies do
                 author_id: author_id
               }
 
-              case Repo.insert(%Cympho.Comments.Comment{} |> Cympho.Comments.Comment.changeset(comment_attrs)) do
+              case Repo.insert(
+                     %Cympho.Comments.Comment{}
+                     |> Cympho.Comments.Comment.changeset(comment_attrs)
+                   ) do
                 {:ok, _} -> :ok
                 {:error, changeset} -> raise "Comment import failed: #{inspect(changeset.errors)}"
               end

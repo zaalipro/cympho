@@ -126,7 +126,8 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapterTest do
     end
 
     test "accepts keyword list config" do
-      assert :ok = ClaudeCodeAdapter.validate_config(stall_timeout: 60_000, cwd: System.tmp_dir!())
+      assert :ok =
+               ClaudeCodeAdapter.validate_config(stall_timeout: 60_000, cwd: System.tmp_dir!())
     end
   end
 

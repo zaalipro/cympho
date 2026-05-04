@@ -46,6 +46,7 @@ defmodule CymphoWeb.Router do
       live "/approvals/:id", ApprovalLive.Show
       live "/board-approvals/:id", BoardApprovalLive.Show
       live "/agents", AgentLive.Index
+      live "/agents/new", AgentLive.New
       live "/agents/:id", AgentLive.Show
       live "/adapters", AdapterLive.Index
       live "/adapters/:key", AdapterLive.Show
@@ -71,22 +72,23 @@ defmodule CymphoWeb.Router do
       live "/skills/:id/edit", SkillLive.Edit
       live "/plugins", PluginLive.Index
       live "/plugins/new", PluginLive.New
+      live "/plugins/marketplace", PluginMarketplaceLive.Index
       live "/plugins/:id", PluginLive.Show
       live "/plugins/:id/edit", PluginLive.Edit
       live "/plugins/:id/settings", PluginLive.Show, :settings
-      live "/plugins/marketplace", PluginMarketplaceLive.Index
       live "/search", SearchLive.Index
       live "/workspace/:issue_id", WorkspaceLive.Show
-    live "/workspaces", WorkspaceLive.Index
-    live "/workspaces/:id", WorkspaceLive.ShowWorkspace
-    live "/workspaces/:id/exec/:exec_id", WorkspaceLive.ExecWorkspace
-    live "/tool-call-traces", ToolCallTracesLive.Index
+      live "/workspaces", WorkspaceLive.Index
+      live "/workspaces/:id", WorkspaceLive.ShowWorkspace
+      live "/workspaces/:id/exec/:exec_id", WorkspaceLive.ExecWorkspace
+      live "/tool-call-traces", ToolCallTracesLive.Index
+      live "/audit-trail", AuditTrailLive.Index
       live "/profile/:id", ProfileLive.Show
       live "/profile/:id/edit", ProfileLive.Edit
     end
 
-    live_session :board_governed, on_mount: [{CymphoWeb.UserAuth, :default}, {CymphoWeb.Live.BoardAuth, :default}] do
-      live "/agents/new", AgentLive.New
+    live_session :board_governed,
+      on_mount: [{CymphoWeb.UserAuth, :default}, {CymphoWeb.Live.BoardAuth, :default}] do
       live "/agents/:id/edit", AgentLive.Edit
       live "/budgets", BudgetLive.Index
       live "/budgets/new", BudgetLive.Index, :new
@@ -161,11 +163,17 @@ defmodule CymphoWeb.Router do
     put "/issues/:issue_id/documents/:key", DocumentController, :upsert
     delete "/issues/:issue_id/documents/:key", DocumentController, :delete
     get "/issues/:issue_id/documents/:key/revisions", DocumentController, :revisions
-    get "/issues/:issue_id/documents/:key/revisions/:revision_id", DocumentController, :show_with_revision
+
+    get "/issues/:issue_id/documents/:key/revisions/:revision_id",
+        DocumentController,
+        :show_with_revision
+
     get "/issues/:issue_id/documents/:key/revisions/:revision_id/diff", DocumentController, :diff
     post "/issues/:issue_id/documents/:key/rollback/:revision_id", DocumentController, :rollback
 
-    resources "/issues/:issue_id/work-products", WorkProductController, only: [:index, :create, :show, :update, :delete], name: "issue_work_product"
+    resources "/issues/:issue_id/work-products", WorkProductController,
+      only: [:index, :create, :show, :update, :delete],
+      name: "issue_work_product"
 
     get "/issues/:issue_id/activities", ActivityController, :index
     get "/issues/:issue_id/activities/statistics", ActivityController, :statistics
@@ -187,8 +195,15 @@ defmodule CymphoWeb.Router do
     post "/invites/:token/accept", CompanyController, :accept_invite
     get "/companies/:company_id/join-requests", CompanyController, :list_join_requests
     post "/companies/:company_id/join-requests", CompanyController, :create_join_request
-    post "/companies/:company_id/join-requests/:request_id/approve", CompanyController, :approve_join_request
-    post "/companies/:company_id/join-requests/:request_id/reject", CompanyController, :reject_join_request
+
+    post "/companies/:company_id/join-requests/:request_id/approve",
+         CompanyController,
+         :approve_join_request
+
+    post "/companies/:company_id/join-requests/:request_id/reject",
+         CompanyController,
+         :reject_join_request
+
     get "/companies/:company_id/export", CompanyController, :export
     post "/companies/import", CompanyController, :import_company
 

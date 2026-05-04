@@ -13,14 +13,14 @@ defmodule Cympho.Skills.Manifest do
   """
 
   @type t :: %__MODULE__{
-    name: String.t(),
-    version: String.t(),
-    author: String.t(),
-    capabilities: [String.t()],
-    dependencies: %{String.t() => String.t()},
-    entrypoint: String.t(),
-    permissions: [String.t()]
-  }
+          name: String.t(),
+          version: String.t(),
+          author: String.t(),
+          capabilities: [String.t()],
+          dependencies: %{String.t() => String.t()},
+          entrypoint: String.t(),
+          permissions: [String.t()]
+        }
 
   defstruct [
     :name,
@@ -54,6 +54,7 @@ defmodule Cympho.Skills.Manifest do
         entrypoint: entrypoint,
         permissions: permissions
       }
+
       {:ok, manifest}
     else
       {:error, reason} -> {:error, [reason]}
@@ -87,6 +88,7 @@ defmodule Cympho.Skills.Manifest do
 
   defp validate_semver({:ok, version}), do: validate_semver(version)
   defp validate_semver({:error, _} = error), do: error
+
   defp validate_semver(version) when is_binary(version) do
     case Version.parse(version) do
       {:ok, _} -> {:ok, version}

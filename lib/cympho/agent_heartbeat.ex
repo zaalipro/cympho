@@ -15,6 +15,7 @@ defmodule Cympho.AgentHeartbeat do
   alias Cympho.AgentHeartbeat.Supervisor
   alias Cympho.AgentHeartbeat.Registry, as: HeartbeatRegistry
   alias Cympho.{Orchestrator, Issues, Agents, Activities, Skills}
+  alias Cympho.Orchestrator.Dispatcher
   alias Cympho.Issues.Issue
   alias Cympho.Repo
   import Ecto.Query
@@ -182,12 +183,18 @@ defmodule Cympho.AgentHeartbeat do
   def handle_info(:heartbeat, state) do
     agent_id = state.agent_id
 
-    # Check if agent is at capacity before picking up more work
-    if Agents.is_agent_at_capacity?(agent_id) do
-      timer_ref = schedule_heartbeat(agent_id)
-      {:noreply, %{state | timer_ref: timer_ref}}
-    else
-      do_heartbeat(state)
+    cond do
+      Process.whereis(Dispatcher) ->
+        _ = Dispatcher.poll_now()
+        timer_ref = schedule_heartbeat(agent_id)
+        {:noreply, %{state | timer_ref: timer_ref}}
+
+      Agents.is_agent_at_capacity?(agent_id) ->
+        timer_ref = schedule_heartbeat(agent_id)
+        {:noreply, %{state | timer_ref: timer_ref}}
+
+      true ->
+        do_heartbeat(state)
     end
   end
 

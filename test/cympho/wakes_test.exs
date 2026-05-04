@@ -2,7 +2,6 @@ defmodule Cympho.WakesTest do
   use Cympho.DataCase, async: true
 
   alias Cympho.Wakes
-  alias Cympho.Wakes.AgentWake
   alias Cympho.{Agents, Issues, Comments, Projects}
 
   setup do
@@ -53,7 +52,7 @@ defmodule Cympho.WakesTest do
       assert agent_wake.triggered_by_id == "test-user"
     end
 
-    test "detects mention in comment body", %{agent: agent, issue: issue} do
+    test "detects mention in comment body", %{agent: _agent, issue: issue} do
       {:ok, comment} =
         Comments.create_comment(%{
           body: "@agent please review",
@@ -149,7 +148,7 @@ defmodule Cympho.WakesTest do
           status: :in_progress
         })
 
-      {:ok, child1} =
+      {:ok, _child1} =
         Issues.create_issue(%{
           title: "Child 1",
           project_id: project.id,
@@ -162,12 +161,10 @@ defmodule Cympho.WakesTest do
           title: "Child 2",
           project_id: project.id,
           parent_id: parent.id,
-          status: :todo
+          status: :done
         })
 
-      {:ok, child2_done} = Issues.transition_issue(child2, :done)
-
-      result = Wakes.notify_children_completed(child2_done)
+      result = Wakes.notify_children_completed(child2)
 
       assert {:ok, agent_wake} = result
       assert agent_wake.agent_id == agent.id
@@ -219,12 +216,10 @@ defmodule Cympho.WakesTest do
           title: "Only Child",
           project_id: project.id,
           parent_id: parent.id,
-          status: :todo
+          status: :done
         })
 
-      {:ok, child_done} = Issues.transition_issue(child, :done)
-
-      result = Wakes.notify_children_completed(child_done)
+      result = Wakes.notify_children_completed(child)
 
       assert {:ok, agent_wake} = result
       assert agent_wake.agent_id == agent.id
@@ -267,7 +262,7 @@ defmodule Cympho.WakesTest do
         Issues.create_issue(%{
           title: "Blocker Issue",
           project_id: project.id,
-          status: :todo
+          status: :done
         })
 
       {:ok, blocked} =
@@ -280,9 +275,7 @@ defmodule Cympho.WakesTest do
 
       {:ok, _} = Issues.add_blocker(blocked, blocker)
 
-      {:ok, blocker_done} = Issues.transition_issue(blocker, :done)
-
-      results = Wakes.notify_blockers_resolved(blocker_done)
+      results = Wakes.notify_blockers_resolved(blocker)
 
       assert length(results) == 1
       {:ok, agent_wake} = List.first(results)
@@ -344,6 +337,8 @@ defmodule Cympho.WakesTest do
   describe "list_agent_wakes/1" do
     test "returns wakes for a specific agent", %{agent: agent, issue: issue} do
       {:ok, _} = Wakes.do_wake_agent(agent.id, issue.id, "issue_commented", "user", "1", %{})
+
+      Process.sleep(1100)
 
       {:ok, _} =
         Wakes.do_wake_agent(agent.id, issue.id, "issue_blockers_resolved", "system", nil, %{})

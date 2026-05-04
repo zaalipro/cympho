@@ -1,0 +1,84 @@
+<div class="p-6 lg:p-8 max-w-5xl mx-auto w-full min-w-0">
+  <.header
+    title={@page_title}
+    subtitle={@plugin.description || "Plugin details and configuration."}
+  >
+    <:actions>
+      <.app_link
+        navigate={~p"/plugins"}
+        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+      >
+        Back
+      </.app_link>
+      <.app_link
+        navigate={~p"/plugins/#{@plugin.id}/edit"}
+        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+      >
+        Edit
+      </.app_link>
+      <button
+        type="button"
+        phx-click="toggle_plugin"
+        class="rounded-lg bg-brand px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-accent"
+      >
+        {if @plugin.enabled, do: "Disable", else: "Enable"}
+      </button>
+    </:actions>
+  </.header>
+
+  <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+    <section class="rounded-xl border border-border bg-surface p-5 lg:col-span-2">
+      <h2 class="mb-4 text-sm font-590 text-text-primary">
+        {if @live_action == :settings, do: "Settings", else: "Manifest"}
+      </h2>
+      <pre class="max-h-[520px] overflow-auto rounded-lg border border-border bg-panel p-4 text-xs leading-5 text-text-secondary"><%= Jason.encode!(if(@live_action == :settings, do: @plugin.settings || %{}, else: @plugin.manifest || %{}), pretty: true) %></pre>
+    </section>
+
+    <aside class="space-y-4">
+      <section class="rounded-xl border border-border bg-surface p-5">
+        <h2 class="mb-4 text-sm font-590 text-text-primary">Details</h2>
+        <dl class="space-y-3 text-sm">
+          <div>
+            <dt class="text-xs text-text-quaternary">Identifier</dt>
+            <dd class="mt-1 break-all text-text-secondary">{@plugin.identifier}</dd>
+          </div>
+          <div>
+            <dt class="text-xs text-text-quaternary">Version</dt>
+            <dd class="mt-1 text-text-secondary">v{@plugin.version}</dd>
+          </div>
+          <div>
+            <dt class="text-xs text-text-quaternary">Status</dt>
+            <dd class="mt-1 text-text-secondary">{@plugin.status}</dd>
+          </div>
+          <div>
+            <dt class="text-xs text-text-quaternary">Author</dt>
+            <dd class="mt-1 text-text-secondary">{@plugin.author || "-"}</dd>
+          </div>
+          <div>
+            <dt class="text-xs text-text-quaternary">Scope</dt>
+            <dd class="mt-1 text-text-secondary">
+              {(@plugin.company && @plugin.company.name) || "Global"} / {(@plugin.project &&
+                                                                            @plugin.project.name) ||
+                "All projects"}
+            </dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="rounded-xl border border-border bg-surface p-5">
+        <h2 class="mb-4 text-sm font-590 text-text-primary">Capabilities</h2>
+        <div class="flex flex-wrap gap-2">
+          <span
+            :for={capability <- @plugin.capabilities || []}
+            class="rounded-md border border-border bg-panel px-2 py-1 text-xs text-text-secondary"
+          >
+            {capability}
+          </span>
+          <span :if={Enum.empty?(@plugin.capabilities || [])} class="text-sm text-text-tertiary">
+            No capabilities declared.
+          </span>
+        </div>
+      </section>
+    </aside>
+  </div>
+</div>

@@ -14,18 +14,32 @@ defmodule Cympho.Issues do
   alias Cympho.Approvals
   alias Cympho.Comments
   alias Cympho.Activities
+  alias Cympho.Companies.Company
   alias Cympho.ExecutionPolicies
   alias Cympho.ExecutionPolicies.ExecutionPolicy
   alias Cympho.Wakes
   alias Cympho.Labels.Label
+  alias Cympho.Goals
 
   def list_issues(opts \\ %{}) do
     Issue
+    |> maybe_filter_by_company(opts)
     |> maybe_filter_by_project(opts)
     |> maybe_filter_by_labels(opts)
     |> Repo.all()
     |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
   end
+
+  defp maybe_filter_by_company(query, %{company_id: company_id}) when not is_nil(company_id) do
+    where(query, company_id: ^company_id)
+  end
+
+  defp maybe_filter_by_company(query, %{"company_id" => company_id})
+       when not is_nil(company_id) do
+    where(query, company_id: ^company_id)
+  end
+
+  defp maybe_filter_by_company(query, _opts), do: query
 
   defp maybe_filter_by_project(query, %{project_id: project_id}) do
     where(query, project_id: ^project_id)
@@ -60,17 +74,19 @@ defmodule Cympho.Issues do
     search = Map.get(params, "search")
     assignee_id = Map.get(params, "assignee_id")
     project_id = Map.get(params, "project_id")
+    company_id = Map.get(params, "company_id")
     label_id = Map.get(params, "label_id")
 
     query =
       Issue
+      |> maybe_filter_by_company_id(company_id)
       |> maybe_filter_by_status(status)
       |> maybe_filter_by_priority(priority)
       |> maybe_filter_by_search(search)
       |> maybe_filter_by_assignee(assignee_id)
       |> maybe_filter_by_project_id_filter(project_id)
       |> maybe_filter_by_label_id(label_id)
-      |> order_by([i], [desc: i.updated_at, desc: i.inserted_at, desc: i.id])
+      |> order_by([i], desc: i.updated_at, desc: i.inserted_at, desc: i.id)
 
     total = Repo.aggregate(query, :count)
     total_pages = max(1, ceil(total / per_page))
@@ -96,6 +112,10 @@ defmodule Cympho.Issues do
   defp maybe_filter_by_status(query, nil), do: query
   defp maybe_filter_by_status(query, ""), do: query
   defp maybe_filter_by_status(query, status), do: where(query, status: ^status)
+
+  defp maybe_filter_by_company_id(query, nil), do: query
+  defp maybe_filter_by_company_id(query, ""), do: query
+  defp maybe_filter_by_company_id(query, company_id), do: where(query, company_id: ^company_id)
 
   defp maybe_filter_by_priority(query, nil), do: query
   defp maybe_filter_by_priority(query, ""), do: query
@@ -160,6 +180,19 @@ defmodule Cympho.Issues do
     end
   end
 
+  def get_company_issue(company_id, id) do
+    issue =
+      Repo.one(
+        from i in Issue,
+          where: i.company_id == ^company_id and i.id == ^id
+      )
+
+    case issue do
+      nil -> {:error, :not_found}
+      issue -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee, :labels])}
+    end
+  end
+
   def get_issue_by_pr_url(pr_url) do
     case Repo.one(from i in Issue, where: i.github_pr_url == ^pr_url, preload: [:project]) do
       nil -> {:error, :not_found}
@@ -168,12 +201,22 @@ defmodule Cympho.Issues do
   end
 
   def create_issue(attrs \\ %{}) do
+    attrs = normalize_attrs(attrs)
     attrs = maybe_generate_identifier(attrs)
 
-    case %Issue{}
-         |> Issue.changeset(attrs)
-         |> Repo.insert() do
+    insert_result =
+      if company_id = attrs[:company_id] || attrs["company_id"] do
+        create_company_scoped_issue(company_id, attrs)
+      else
+        %Issue{}
+        |> Issue.changeset(attrs)
+        |> Repo.insert()
+      end
+
+    case insert_result do
       {:ok, issue} ->
+        issue = maybe_backfill_lineage(issue)
+
         Activities.log_activity(%{
           issue_id: issue.id,
           company_id: issue.company_id,
@@ -183,12 +226,85 @@ defmodule Cympho.Issues do
           metadata: %{title: issue.title}
         })
 
-        Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_created, issue})
+        Cympho.RateLimiting.dedup_pubsub(
+          Cympho.PubSub,
+          "company:#{issue.company_id}:issues",
+          {:issue_created, issue}
+        )
+
         CymphoWeb.Events.broadcast_issue_update(issue, :issue_created)
         {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
       {:error, changeset} ->
         {:error, changeset}
+    end
+  end
+
+  defp create_company_scoped_issue(company_id, attrs) do
+    Repo.transaction(fn ->
+      company =
+        Repo.one!(
+          from c in Company,
+            where: c.id == ^company_id,
+            lock: "FOR UPDATE"
+        )
+
+      attrs =
+        if get_param(attrs, :issue_number) do
+          attrs
+        else
+          next_number = company.issue_counter + 1
+          prefix = company.issue_prefix || "CYM"
+
+          company
+          |> Company.changeset(%{issue_counter: next_number})
+          |> Repo.update!()
+
+          attrs
+          |> put_param(:issue_number, next_number)
+          |> put_param_new(:identifier, "#{prefix}-#{next_number}")
+        end
+
+      %Issue{}
+      |> Issue.changeset(attrs)
+      |> Repo.insert()
+      |> case do
+        {:ok, issue} -> issue
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
+    |> case do
+      {:ok, issue} -> {:ok, issue}
+      {:error, %Ecto.Changeset{} = changeset} -> {:error, changeset}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp normalize_attrs(attrs) when is_map(attrs), do: attrs
+
+  defp get_param(attrs, key) when is_atom(key) do
+    Map.get(attrs, key) || Map.get(attrs, Atom.to_string(key))
+  end
+
+  defp put_param(attrs, key, value) when is_atom(key) do
+    Map.put(attrs, preferred_param_key(attrs, key), value)
+  end
+
+  defp put_param_new(attrs, key, value) when is_atom(key) do
+    if get_param(attrs, key) do
+      attrs
+    else
+      put_param(attrs, key, value)
+    end
+  end
+
+  defp preferred_param_key(attrs, key) when is_atom(key) do
+    string_key = Atom.to_string(key)
+
+    cond do
+      Map.has_key?(attrs, string_key) -> string_key
+      Enum.any?(Map.keys(attrs), &is_binary/1) -> string_key
+      true -> key
     end
   end
 
@@ -202,11 +318,29 @@ defmodule Cympho.Issues do
         Repo.one(
           from i in Issue,
             where: i.project_id == ^project_id,
-            select: max(fragment("CAST(SPLIT_PART(i.identifier, '-', 2) AS INTEGER)"))
+            select: max(fragment("CAST(SPLIT_PART(?, '-', 2) AS INTEGER)", i.identifier))
         ) || 0
 
       seq = max_seq + 1
       Map.put(attrs, "identifier", "#{project.prefix}-#{seq}")
+    end
+  end
+
+  defp maybe_generate_identifier(%{project_id: project_id} = attrs) do
+    if Map.has_key?(attrs, :identifier) or Map.has_key?(attrs, "identifier") do
+      attrs
+    else
+      project = Repo.get!(Cympho.Projects.Project, project_id)
+
+      max_seq =
+        Repo.one(
+          from i in Issue,
+            where: i.project_id == ^project_id,
+            select: max(fragment("CAST(SPLIT_PART(?, '-', 2) AS INTEGER)", i.identifier))
+        ) || 0
+
+      seq = max_seq + 1
+      Map.put(attrs, :identifier, "#{project.prefix}-#{seq}")
     end
   end
 
@@ -216,17 +350,39 @@ defmodule Cympho.Issues do
     old_issue = issue
 
     with {:ok, updated} <- do_update_issue(issue, attrs) do
-      updated = Repo.preload(updated, [:comments, :blocked_by, :blocks, :labels])
+      updated =
+        if goal_id_changed?(attrs, issue) do
+          maybe_backfill_lineage(updated)
+        else
+          updated
+        end
+
+      updated =
+        Repo.preload(updated, [:comments, :blocked_by, :blocks, :assignee, :labels], force: true)
+
       Activities.log_issue_changes(old_issue, updated, attrs)
-      Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{updated.company_id}:issues", {:issue_updated, updated})
+
+      Cympho.RateLimiting.dedup_pubsub(
+        Cympho.PubSub,
+        "company:#{updated.company_id}:issues",
+        {:issue_updated, updated}
+      )
 
       event_type = determine_update_event_type(old_issue, updated, attrs)
-      CymphoWeb.Events.broadcast_issue_update(updated, event_type, build_update_metadata(old_issue, updated, attrs))
+
+      CymphoWeb.Events.broadcast_issue_update(
+        updated,
+        event_type,
+        build_update_metadata(old_issue, updated, attrs)
+      )
+
       {:ok, updated}
     end
   end
 
   defp do_update_issue(%Issue{} = issue, %{status: _new_status} = attrs) do
+    attrs = with_status_side_effects(issue, attrs)
+
     issue
     |> Issue.changeset(attrs)
     |> optimistic_lock(:lock_version)
@@ -234,14 +390,67 @@ defmodule Cympho.Issues do
   end
 
   defp do_update_issue(%Issue{} = issue, attrs) do
+    attrs = with_status_side_effects(issue, attrs)
+
     issue
     |> Issue.changeset(attrs)
     |> optimistic_lock(:lock_version)
     |> Repo.update()
   end
 
+  defp with_status_side_effects(%Issue{} = issue, attrs) when is_map(attrs) do
+    case extract_status(attrs) do
+      :in_progress ->
+        attrs
+        |> put_attr_new(:started_at, issue.started_at || DateTime.utc_now())
+
+      :done ->
+        now = DateTime.utc_now()
+
+        attrs
+        |> put_attr_new(:completed_at, issue.completed_at || now)
+
+      :cancelled ->
+        now = DateTime.utc_now()
+
+        attrs
+        |> put_attr_new(:cancelled_at, issue.cancelled_at || now)
+
+      _ ->
+        attrs
+    end
+  end
+
+  defp extract_status(attrs) do
+    case attrs[:status] || attrs["status"] do
+      status when is_atom(status) ->
+        status
+
+      status when is_binary(status) ->
+        try do
+          String.to_existing_atom(status)
+        rescue
+          ArgumentError -> status
+        end
+
+      status ->
+        status
+    end
+  end
+
+  defp put_attr_new(attrs, key, value) do
+    if Map.has_key?(attrs, key) or Map.has_key?(attrs, Atom.to_string(key)) do
+      attrs
+    else
+      Map.put(attrs, key, DateTime.truncate(value, :second))
+    end
+  end
+
   def transition_issue(%Issue{} = issue, new_status, agent_id) when is_binary(agent_id) do
     cond do
+      new_status == :in_review and ExecutionState.active?(issue.execution_state) ->
+        do_transition(issue, new_status)
+
       new_status == :in_review ->
         with {:ok, agent} <- Agents.get_agent(agent_id),
              :ok <- validate_reviewer_role(agent),
@@ -286,14 +495,89 @@ defmodule Cympho.Issues do
   end
 
   defp do_transition(%Issue{} = issue, new_status) do
-    with {:ok, updated} <- update_issue(issue, %{status: new_status}) do
-      if new_status == :done do
+    attrs = %{status: new_status}
+
+    attrs =
+      cond do
+        new_status == :done and ExecutionState.active?(issue.execution_state) ->
+          {:error, :execution_policy_not_complete}
+
+        new_status == :in_review and ExecutionState.active?(issue.execution_state) and
+            issue.execution_state.last_decision_outcome == :changes_requested ->
+          case ExecutionPolicies.get_execution_policy(issue.execution_policy_id) do
+            {:ok, policy} ->
+              stage_config = ExecutionState.current_stage_config(issue.execution_state, policy)
+              reviewer_id = ExecutionState.get_participant_id(stage_config)
+
+              resubmit_state = %{
+                issue.execution_state
+                | last_decision_outcome: :approved,
+                  current_participant: reviewer_id
+              }
+
+              Map.merge(attrs, %{
+                execution_state: resubmit_state,
+                assignee_id: resolve_next_assignee(reviewer_id)
+              })
+
+            {:error, _} ->
+              attrs
+          end
+
+        new_status == :in_review and ExecutionState.active?(issue.execution_state) and
+            issue.execution_state.current_stage_type == :executor ->
+          case ExecutionPolicies.get_execution_policy(issue.execution_policy_id) do
+            {:ok, policy} ->
+              approved_state =
+                ExecutionState.approve(
+                  issue.execution_state,
+                  issue.execution_state.current_participant
+                )
+
+              case ExecutionState.advance(
+                     approved_state,
+                     policy,
+                     issue.execution_state.current_participant
+                   ) do
+                {:ok, next_state} ->
+                  next_assignee = resolve_next_assignee(next_state.current_participant)
+
+                  Map.merge(attrs, %{
+                    execution_state: next_state,
+                    assignee_id: next_assignee
+                  })
+
+                {:done, final_state} ->
+                  Map.merge(attrs, %{
+                    execution_state: final_state,
+                    status: :done,
+                    assignee_id: nil
+                  })
+              end
+
+            {:error, _} ->
+              attrs
+          end
+
+        true ->
+          attrs
+      end
+
+    case attrs do
+      {:error, _} = error -> error
+      attrs -> do_transition_update(issue, attrs)
+    end
+  end
+
+  defp do_transition_update(issue, attrs) do
+    with {:ok, updated} <- update_issue(issue, attrs) do
+      if updated.status == :done do
         unblock_dependents(issue.id)
         _ = Wakes.notify_children_completed(updated)
         maybe_complete_parent(updated)
       end
 
-      if new_status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
+      if updated.status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
       {:ok, updated}
     end
   end
@@ -302,17 +586,30 @@ defmodule Cympho.Issues do
 
   defp maybe_complete_parent(%Issue{parent_id: parent_id}) do
     case Repo.get(Issue, parent_id) do
-      nil -> :ok
+      nil ->
+        :ok
+
       parent ->
         siblings = from(i in Issue, where: i.parent_id == ^parent_id) |> Repo.all()
         all_done? = Enum.all?(siblings, &(&1.status == :done))
+
         if all_done? and parent.status != :done do
           {:ok, _} = do_transition(parent, :done)
           add_system_comment(parent, "Auto-completed: all sub-issues are done")
         end
+
         :ok
     end
   end
+
+  defp resolve_next_assignee(participant_id) when is_binary(participant_id) do
+    case Agents.get_agent(participant_id) do
+      {:ok, _agent} -> participant_id
+      {:error, _} -> nil
+    end
+  end
+
+  defp resolve_next_assignee(_), do: nil
 
   defp cancel_pending_approvals(issue_id) do
     try do
@@ -379,7 +676,7 @@ defmodule Cympho.Issues do
 
   defp all_blockers_done?(%Issue{} = issue) do
     blockers = issue.blocked_by || []
-    Enum.all?(blockers, fn blocker -> blocker.status == :done end)
+    Enum.all?(blockers, fn blocker -> blocker.status in [:done, :cancelled] end)
   end
 
   defp wake_assignee(%Issue{} = issue) do
@@ -442,17 +739,21 @@ defmodule Cympho.Issues do
   end
 
   def checkout_issue(%Issue{} = issue, agent_id, required_role) do
-    # Only reload if issue appears unassigned — avoids N+1 on heartbeat ticks
-    # when the issue was freshly fetched as unassigned.
-    current_issue = if issue.assignee_id == nil, do: Repo.reload(issue), else: issue
     agent = Agents.get_agent!(agent_id)
+    current_issue = Repo.get!(Issue, issue.id)
 
     cond do
+      not same_company?(current_issue, agent) ->
+        {:error, :company_mismatch}
+
       current_issue.assignee_id != nil and current_issue.assignee_id != agent_id ->
         {:error, :already_assigned}
 
       current_issue.assignee_id == agent_id ->
-        {:ok, current_issue}
+        refresh_existing_checkout(current_issue, agent, required_role)
+
+      current_issue.status in [:done, :cancelled] ->
+        {:error, :terminal_issue}
 
       Agents.is_agent_at_capacity?(agent) ->
         {:error, :agent_at_capacity}
@@ -461,26 +762,188 @@ defmodule Cympho.Issues do
         {:error, :chain_of_command_violation}
 
       true ->
-        new_status =
-          if current_issue.status in [:backlog, :todo],
-            do: :in_progress,
-            else: current_issue.status
-
-        attrs = %{assignee_id: agent_id, status: new_status}
-        attrs = if required_role, do: Map.put(attrs, :assigned_role, required_role), else: attrs
-
-        update_issue(current_issue, attrs)
-        |> maybe_adjust_lock_version()
+        atomic_checkout(current_issue, agent_id, required_role)
     end
   end
 
   def release_issue(%Issue{} = issue, target_status \\ :todo) do
-    update_issue(issue, %{assignee_id: nil, status: target_status})
-    |> maybe_adjust_lock_version()
+    atomic_release(issue, target_status, require_owner?: true)
   end
 
-  defp maybe_adjust_lock_version({:ok, issue}), do: {:ok, issue}
-  defp maybe_adjust_lock_version({:error, _} = error), do: error
+  def force_release_issue(%Issue{} = issue, target_status \\ :todo) do
+    atomic_release(issue, target_status, require_owner?: false)
+  end
+
+  defp same_company?(%Issue{company_id: nil}, _agent), do: true
+  defp same_company?(_issue, %Agent{company_id: nil}), do: true
+
+  defp same_company?(%Issue{company_id: issue_company_id}, %Agent{company_id: agent_company_id}),
+    do: issue_company_id == agent_company_id
+
+  defp same_company?(_issue, _agent), do: false
+
+  defp atomic_checkout(%Issue{} = issue, agent_id, required_role) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    set_fields =
+      [
+        assignee_id: agent_id,
+        status: :in_progress,
+        checked_out_at: now,
+        started_at: now,
+        updated_at: now
+      ]
+      |> maybe_put_assigned_role(required_role)
+
+    {count, _} =
+      from(i in Issue,
+        where:
+          i.id == ^issue.id and
+            is_nil(i.assignee_id) and
+            i.status in ^[:backlog, :todo, :in_progress, :in_review, :blocked]
+      )
+      |> Repo.update_all(set: set_fields, inc: [lock_version: 1])
+
+    case count do
+      1 ->
+        with {:ok, checked_out} <- get_issue(issue.id) do
+          Activities.log_activity(%{
+            issue_id: checked_out.id,
+            company_id: checked_out.company_id,
+            actor_type: "agent",
+            actor_id: agent_id,
+            action: "assigned",
+            metadata: %{assignee_id: agent_id, atomic: true}
+          })
+
+          broadcast_issue_update(checked_out, :issue_updated, %{
+            checkout_agent_id: agent_id,
+            status: :in_progress
+          })
+
+          {:ok, checked_out}
+        end
+
+      _ ->
+        case Repo.get(Issue, issue.id) do
+          %Issue{assignee_id: other_id} when not is_nil(other_id) and other_id != agent_id ->
+            {:error, :already_assigned}
+
+          %Issue{status: status} when status in [:done, :cancelled] ->
+            {:error, :terminal_issue}
+
+          %Issue{} ->
+            {:error, :checkout_conflict}
+
+          nil ->
+            {:error, :not_found}
+        end
+    end
+  end
+
+  defp refresh_existing_checkout(%Issue{} = issue, %Agent{} = agent, required_role) do
+    cond do
+      issue.status in [:done, :cancelled] ->
+        {:error, :terminal_issue}
+
+      Agents.is_agent_at_capacity?(agent) and issue.status != :in_progress ->
+        {:error, :agent_at_capacity}
+
+      not Issue.role_authorized?(agent.role, required_role) ->
+        {:error, :chain_of_command_violation}
+
+      issue.status in [:todo, :in_review, :backlog, :blocked] ->
+        now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+        attrs =
+          %{
+            status: :in_progress,
+            checked_out_at: now,
+            started_at: issue.started_at || now,
+            actor_type: "agent",
+            actor_id: agent.id
+          }
+          |> maybe_put_assigned_role_map(required_role)
+
+        update_issue(issue, attrs)
+
+      true ->
+        {:ok, preload_issue(issue)}
+    end
+  end
+
+  defp maybe_put_assigned_role(set_fields, nil), do: set_fields
+
+  defp maybe_put_assigned_role(set_fields, role),
+    do: Keyword.put(set_fields, :assigned_role, to_string(role))
+
+  defp maybe_put_assigned_role_map(attrs, nil), do: attrs
+
+  defp maybe_put_assigned_role_map(attrs, role),
+    do: Map.put(attrs, :assigned_role, to_string(role))
+
+  defp atomic_release(%Issue{} = issue, target_status, opts) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    require_owner? = Keyword.get(opts, :require_owner?, true)
+
+    query =
+      from(i in Issue,
+        where: i.id == ^issue.id
+      )
+
+    query =
+      if require_owner? and issue.assignee_id do
+        where(query, [i], i.assignee_id == ^issue.assignee_id)
+      else
+        query
+      end
+
+    {count, _} =
+      query
+      |> Repo.update_all(
+        set: [
+          assignee_id: nil,
+          checkout_run_id: nil,
+          checked_out_at: nil,
+          status: target_status,
+          updated_at: now
+        ],
+        inc: [lock_version: 1]
+      )
+
+    case count do
+      1 ->
+        with {:ok, released} <- get_issue(issue.id) do
+          Activities.log_activity(%{
+            issue_id: released.id,
+            company_id: released.company_id,
+            actor_type: "system",
+            action: "unassigned",
+            metadata: %{previous_assignee_id: issue.assignee_id, target_status: target_status}
+          })
+
+          broadcast_issue_update(released, :issue_updated, %{status: target_status})
+          {:ok, released}
+        end
+
+      _ ->
+        {:error, :checkout_conflict}
+    end
+  end
+
+  defp preload_issue(%Issue{} = issue) do
+    Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee, :labels])
+  end
+
+  defp broadcast_issue_update(%Issue{} = issue, event_type, metadata) do
+    Cympho.RateLimiting.dedup_pubsub(
+      Cympho.PubSub,
+      "company:#{issue.company_id}:issues",
+      {:issue_updated, issue}
+    )
+
+    CymphoWeb.Events.broadcast_issue_update(issue, event_type, metadata)
+  end
 
   def add_blocker(%Issue{} = blocked_issue, %Issue{} = blocker_issue) do
     cond do
@@ -517,7 +980,12 @@ defmodule Cympho.Issues do
               metadata: %{blocker_id: blocker_issue.id}
             })
 
-            Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_updated, issue})
+            Cympho.RateLimiting.dedup_pubsub(
+              Cympho.PubSub,
+              "company:#{issue.company_id}:issues",
+              {:issue_updated, issue}
+            )
+
             {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
           {:error, reason} ->
@@ -578,7 +1046,12 @@ defmodule Cympho.Issues do
         metadata: %{blocker_id: blocker_issue.id}
       })
 
-      Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_updated, issue})
+      Cympho.RateLimiting.dedup_pubsub(
+        Cympho.PubSub,
+        "company:#{issue.company_id}:issues",
+        {:issue_updated, issue}
+      )
+
       {:ok, issue}
     end
   end
@@ -589,7 +1062,13 @@ defmodule Cympho.Issues do
     case Repo.delete(issue) do
       {:ok, _issue} ->
         Approvals.cancel_pending_for_issue(issue.id)
-        Cympho.RateLimiting.dedup_pubsub(Cympho.PubSub, "company:#{issue.company_id}:issues", {:issue_deleted, issue.id})
+
+        Cympho.RateLimiting.dedup_pubsub(
+          Cympho.PubSub,
+          "company:#{issue.company_id}:issues",
+          {:issue_deleted, issue.id}
+        )
+
         :ok
 
       {:error, changeset} ->
@@ -633,6 +1112,15 @@ defmodule Cympho.Issues do
     end
   end
 
+  defp resolve_next_assignee(participant_id) when is_binary(participant_id) do
+    case Agents.get_agent(participant_id) do
+      {:ok, _agent} -> participant_id
+      {:error, _} -> nil
+    end
+  end
+
+  defp resolve_next_assignee(_), do: nil
+
   @doc """
   Handles a decision (approve/request_changes) for an issue with an execution policy.
   Advances the execution state and assigns the issue to the next participant.
@@ -651,7 +1139,37 @@ defmodule Cympho.Issues do
         {:error, :unauthorized}
 
       true ->
-        do_execution_policy_decision(issue, decision, decided_by)
+        policy = ExecutionPolicies.get_execution_policy!(issue.execution_policy_id)
+
+        with :ok <- check_require_different_actor(issue, policy, decided_by),
+             :ok <- check_require_human(issue, policy, decided_by) do
+          do_execution_policy_decision(issue, decision, decided_by)
+        end
+    end
+  end
+
+  defp check_require_different_actor(issue, policy, decided_by) do
+    if ExecutionState.require_different_actor?(issue.execution_state, policy) do
+      executor_id = ExecutionState.original_executor(issue.execution_state)
+
+      if decided_by == executor_id do
+        {:error, :require_different_actor}
+      else
+        :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp check_require_human(issue, policy, decided_by) do
+    if ExecutionState.require_human?(issue.execution_state, policy) do
+      case Agents.get_agent(decided_by) do
+        {:ok, _agent} -> {:error, :require_human}
+        {:error, _} -> :ok
+      end
+    else
+      :ok
     end
   end
 
@@ -669,9 +1187,10 @@ defmodule Cympho.Issues do
               execution_state: final_state,
               assignee_id: nil
             })
-            |> tap(fn {:ok, _} ->
+            |> tap(fn {:ok, updated} ->
               unblock_dependents(issue.id)
               _ = Wakes.notify_children_completed(issue)
+              maybe_trigger_verification(updated)
             end)
 
           {:ok, next_state} ->
@@ -683,13 +1202,20 @@ defmodule Cympho.Issues do
               status: :in_review
             })
             |> tap(fn {:ok, _} ->
-              wake_next_participant(next_assignee, issue.id)
+              if ExecutionState.require_human?(next_state, policy) do
+                notify_human_approval_needed(issue, next_state)
+              else
+                wake_next_participant(next_assignee, issue.id)
+              end
             end)
         end
 
       :request_changes ->
         changes_state = ExecutionState.request_changes(issue.execution_state, decided_by)
-        executor_id = issue.execution_state.return_assignee || changes_state.current_participant
+
+        executor_id =
+          ExecutionState.original_executor(issue.execution_state) ||
+            changes_state.current_participant
 
         update_issue(issue, %{
           execution_state: changes_state,
@@ -817,5 +1343,94 @@ defmodule Cympho.Issues do
 
   def change_issue(%Issue{} = issue, attrs \\ %{}) do
     Issue.changeset(issue, attrs)
+  end
+
+  defp maybe_backfill_lineage(%Issue{goal_id: nil} = issue), do: issue
+
+  defp maybe_backfill_lineage(%Issue{} = issue) do
+    lineage = Goals.compute_lineage(issue)
+
+    if lineage do
+      issue
+      |> Ecto.Changeset.change(%{lineage: lineage})
+      |> Repo.update()
+      |> case do
+        {:ok, updated} -> updated
+        {:error, _} -> issue
+      end
+    else
+      issue
+    end
+  end
+
+  defp goal_id_changed?(attrs, issue) do
+    new_goal_id = get_param(attrs, :goal_id)
+    new_goal_id != nil and new_goal_id != issue.goal_id
+  end
+
+  defp notify_human_approval_needed(issue, next_state) do
+    company_users =
+      from(u in Cympho.Users.User,
+        join: m in Cympho.Companies.CompanyMembership,
+        on: m.user_id == u.id,
+        where: m.company_id == ^issue.company_id
+      )
+      |> Repo.all()
+
+    Enum.each(company_users, fn user ->
+      Cympho.Notifications.notify_async(
+        "Human approval required",
+        "Issue \"#{issue.title}\" requires human approval at stage #{next_state.current_stage_index + 1}.",
+        user.id,
+        %{
+          issue_id: issue.id,
+          stage_index: next_state.current_stage_index,
+          type: "human_approval_required"
+        }
+      )
+    end)
+  end
+
+  defp maybe_trigger_verification(%Issue{company_id: nil}), do: :ok
+
+  defp maybe_trigger_verification(%Issue{} = issue) do
+    case Repo.get(Company, issue.company_id) do
+      %Company{governance_config: %{"require_verification" => true}} ->
+        create_verification_issue(issue)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp create_verification_issue(%Issue{} = issue) do
+    verifier_role = "engineer"
+
+    attrs = %{
+      title: "Verify: #{issue.title}",
+      description: "Automated verification issue. Verify the work done on parent issue.",
+      priority: :medium,
+      status: :todo,
+      company_id: issue.company_id,
+      project_id: issue.project_id,
+      goal_id: issue.goal_id,
+      parent_id: issue.id,
+      assigned_role: verifier_role,
+      created_by_agent_id: issue.assignee_id,
+      origin_type: "verification",
+      origin_id: issue.id,
+      request_depth: (issue.request_depth || 0) + 1,
+      actor_type: "system",
+      actor_id: "00000000-0000-0000-0000-000000000000"
+    }
+
+    case create_issue(attrs) do
+      {:ok, _verification_issue} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to create verification issue for #{issue.id}: #{inspect(reason)}")
+        :ok
+    end
   end
 end

@@ -17,10 +17,10 @@ defmodule CymphoWeb.CompanyImportLive do
      |> assign(:import_result, nil)
      |> assign(:progress, nil)
      |> allow_upload(:import_file,
-        accept: ~w(.json),
-        max_entries: 1,
-        max_file_size: 50_000_000
-      )}
+       accept: ~w(.json),
+       max_entries: 1,
+       max_file_size: 50_000_000
+     )}
   end
 
   @impl true
@@ -92,10 +92,10 @@ defmodule CymphoWeb.CompanyImportLive do
      |> assign(:import_result, nil)
      |> assign(:progress, nil)
      |> allow_upload(:import_file,
-        accept: ~w(.json),
-        max_entries: 1,
-        max_file_size: 50_000_000
-      )}
+       accept: ~w(.json),
+       max_entries: 1,
+       max_file_size: 50_000_000
+     )}
   end
 
   @impl true
@@ -106,7 +106,7 @@ defmodule CymphoWeb.CompanyImportLive do
     result =
       try do
         case Companies.import_company(import_data, slug_strategy: slug_strategy) do
-          {:ok, %{company: company}} = result ->
+          {:ok, %{company: company}} = _result ->
             # Emit a pubsub notification for real-time updates
             CymphoWeb.Endpoint.broadcast("companies:lobby", "company_imported", %{
               company_id: company.id
@@ -114,7 +114,7 @@ defmodule CymphoWeb.CompanyImportLive do
 
             {:ok, company}
 
-          {:error, reason} = error ->
+          {:error, _reason} = error ->
             error
         end
       rescue
@@ -180,7 +180,7 @@ defmodule CymphoWeb.CompanyImportLive do
         </:actions>
       </.header>
 
-      <%= render_step(assigns) %>
+      {render_step(assigns)}
     </div>
     """
   end
@@ -188,8 +188,8 @@ defmodule CymphoWeb.CompanyImportLive do
   defp render_step(%{step: :upload} = assigns) do
     ~H"""
     <div class="space-y-6">
-      <div class="bg-surface border border-border rounded-card p-6">
-        <h3 class="text-lg font-510 text-text-primary mb-4">Upload Export File</h3>
+      <div class="bg-surface border border-border rounded-xl p-6">
+        <h3 class="font-serif text-lg font-510 text-text-primary mb-4">Upload Export File</h3>
         <p class="text-text-secondary text-sm mb-6">
           Select a JSON export file to import. The file should contain a complete company export including projects, agents, issues, and other data.
         </p>
@@ -199,7 +199,12 @@ defmodule CymphoWeb.CompanyImportLive do
           phx-drop-target={@uploads.import_file.ref}
           class="border-2 border-dashed border-border rounded-lg p-12 text-center hover:border-brand/50 transition-colors"
         >
-          <svg class="mx-auto h-12 w-12 text-text-tertiary mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg
+            class="mx-auto h-12 w-12 text-text-tertiary mb-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
             <path
               stroke-linecap="round"
               stroke-linejoin="round"
@@ -211,7 +216,7 @@ defmodule CymphoWeb.CompanyImportLive do
           <div class="text-text-primary mb-2">Drag and drop your export file here</div>
           <div class="text-text-tertiary text-sm mb-4">or</div>
 
-          <label class="bg-brand hover:bg-accent text-white font-510 text-sm px-6 py-3 rounded-md transition-colors inline-flex items-center gap-2 cursor-pointer">
+          <label class="bg-brand hover:bg-accent text-white font-510 text-sm px-6 py-3 rounded-lg transition-colors inline-flex items-center gap-2 cursor-pointer">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 stroke-linecap="round"
@@ -232,7 +237,7 @@ defmodule CymphoWeb.CompanyImportLive do
         </div>
 
         <div :if={@uploads.import_file.entries != []} class="mt-6">
-          <div class="flex items-center justify-between bg-white/[0.02] border border-border rounded-lg p-4">
+          <div class="flex items-center justify-between bg-subtle border border-border rounded-lg p-4">
             <div class="flex items-center gap-3">
               <svg class="w-5 h-5 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
@@ -247,7 +252,7 @@ defmodule CymphoWeb.CompanyImportLive do
                   {Enum.at(@uploads.import_file.entries, 0).client_name}
                 </div>
                 <div class="text-text-tertiary text-xs">
-                  {Number.Delimit.number_to_human(Enum.at(@uploads.import_file.entries, 0).client_size, precision: 2)}
+                  {format_file_size(Enum.at(@uploads.import_file.entries, 0).client_size)}
                 </div>
               </div>
             </div>
@@ -262,13 +267,16 @@ defmodule CymphoWeb.CompanyImportLive do
 
           <button
             phx-click="proceed_to_preview"
-            class="mt-4 w-full bg-brand hover:bg-accent text-white font-510 text-sm px-6 py-3 rounded-md transition-colors"
+            class="mt-4 w-full bg-brand hover:bg-accent text-white font-510 text-sm px-6 py-3 rounded-lg transition-colors"
           >
             Continue to Preview
           </button>
         </div>
 
-        <div :if={@validation_errors != []} class="mt-6 bg-red-500/10 border border-red-500/20 text-red-400 rounded-card p-4">
+        <div
+          :if={@validation_errors != []}
+          class="mt-6 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl p-4"
+        >
           <h4 class="font-510 mb-2">Validation Errors:</h4>
           <ul class="list-disc list-inside text-sm space-y-1">
             <li :for={error <- @validation_errors}>{error}</li>
@@ -276,20 +284,21 @@ defmodule CymphoWeb.CompanyImportLive do
         </div>
       </div>
 
-      <div class="bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-card p-4 text-sm">
-        <strong>Tip:</strong> The import will create a new company. If a company with the same slug exists, you can choose to either fail the import or automatically generate a unique slug suffix.
+      <div class="bg-blue-500/10 border border-blue-500/20 text-blue-400 rounded-xl p-4 text-sm">
+        <strong>Tip:</strong>
+        The import will create a new company. If a company with the same slug exists, you can choose to either fail the import or automatically generate a unique slug suffix.
       </div>
     </div>
     """
   end
 
-  defp render_step(%{step: :preview, import_data: import_data} = assigns) do
+  defp render_step(%{step: :preview, import_data: _import_data} = assigns) do
     ~H"""
     <div class="space-y-6">
-      <div class="bg-surface border border-border rounded-card p-6">
-        <h3 class="text-lg font-510 text-text-primary mb-4">Preview Import</h3>
+      <div class="bg-surface border border-border rounded-xl p-6">
+        <h3 class="font-serif text-lg font-510 text-text-primary mb-4">Preview Import</h3>
 
-        <div class="bg-white/[0.02] border border-border rounded-lg p-6 mb-6">
+        <div class="bg-subtle border border-border rounded-lg p-6 mb-6">
           <div class="flex items-center gap-4 mb-4">
             <div class="w-16 h-16 bg-brand/10 rounded-lg flex items-center justify-center">
               <svg class="w-8 h-8 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -311,19 +320,27 @@ defmodule CymphoWeb.CompanyImportLive do
 
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div class="text-center">
-              <div class="text-2xl font-510 text-brand">{Enum.count(@import_data["projects"] || [])}</div>
+              <div class="text-2xl font-510 text-brand">
+                {Enum.count(@import_data["projects"] || [])}
+              </div>
               <div class="text-xs text-text-secondary mt-1">Projects</div>
             </div>
             <div class="text-center">
-              <div class="text-2xl font-510 text-brand">{Enum.count(@import_data["agents"] || [])}</div>
+              <div class="text-2xl font-510 text-brand">
+                {Enum.count(@import_data["agents"] || [])}
+              </div>
               <div class="text-xs text-text-secondary mt-1">Agents</div>
             </div>
             <div class="text-center">
-              <div class="text-2xl font-510 text-brand">{Enum.count(@import_data["issues"] || [])}</div>
+              <div class="text-2xl font-510 text-brand">
+                {Enum.count(@import_data["issues"] || [])}
+              </div>
               <div class="text-xs text-text-secondary mt-1">Issues</div>
             </div>
             <div class="text-center">
-              <div class="text-2xl font-510 text-brand">{Enum.count(@import_data["goals"] || [])}</div>
+              <div class="text-2xl font-510 text-brand">
+                {Enum.count(@import_data["goals"] || [])}
+              </div>
               <div class="text-xs text-text-secondary mt-1">Goals</div>
             </div>
           </div>
@@ -362,7 +379,7 @@ defmodule CymphoWeb.CompanyImportLive do
         <div class="flex gap-3">
           <button
             phx-click="start_import"
-            class="bg-brand hover:bg-accent text-white font-510 text-sm px-6 py-3 rounded-md transition-colors inline-flex items-center gap-2"
+            class="bg-brand hover:bg-accent text-white font-510 text-sm px-6 py-3 rounded-lg transition-colors inline-flex items-center gap-2"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -377,15 +394,16 @@ defmodule CymphoWeb.CompanyImportLive do
 
           <button
             phx-click="reset"
-            class="bg-surface hover:bg-white/[0.05] border border-border text-text-primary font-510 text-sm px-6 py-3 rounded-md transition-colors"
+            class="bg-surface hover:bg-surface border border-border text-text-primary font-510 text-sm px-6 py-3 rounded-lg transition-colors"
           >
             Cancel
           </button>
         </div>
       </div>
 
-      <div class="bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 rounded-card p-4 text-sm">
-        <strong>Important:</strong> This will create a new company with all the data from the export file. Make sure you have reviewed the contents before proceeding.
+      <div class="bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 rounded-xl p-4 text-sm">
+        <strong>Important:</strong>
+        This will create a new company with all the data from the export file. Make sure you have reviewed the contents before proceeding.
       </div>
     </div>
     """
@@ -393,19 +411,30 @@ defmodule CymphoWeb.CompanyImportLive do
 
   defp render_step(%{step: :importing} = assigns) do
     ~H"""
-    <div class="bg-surface border border-border rounded-card p-12 text-center">
-      <svg class="animate-spin h-16 w-16 mx-auto text-brand mb-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    <div class="bg-surface border border-border rounded-xl p-12 text-center">
+      <svg
+        class="animate-spin h-16 w-16 mx-auto text-brand mb-6"
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+      >
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+        </circle>
+        <path
+          class="opacity-75"
+          fill="currentColor"
+          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+        >
+        </path>
       </svg>
 
-      <h3 class="text-xl font-510 text-text-primary mb-2">Importing Company Data</h3>
+      <h3 class="font-serif text-xl font-510 text-text-primary mb-2">Importing Company Data</h3>
       <p class="text-text-secondary">{@progress || "Please wait..."}</p>
     </div>
     """
   end
 
-  defp render_step(%{step: :complete, import_result: import_result} = assigns) do
+  defp render_step(%{step: :complete, import_result: _import_result} = assigns) do
     ~H"""
     <div class="space-y-6">
       <div class={result_container_class(@import_result)}>
@@ -425,7 +454,7 @@ defmodule CymphoWeb.CompanyImportLive do
           </svg>
         </div>
 
-        <h3 class="text-2xl font-510 text-text-primary mb-2">
+        <h3 class="font-serif text-2xl font-510 text-text-primary mb-2">
           {result_title(@import_result)}
         </h3>
 
@@ -433,7 +462,10 @@ defmodule CymphoWeb.CompanyImportLive do
           {result_message(@import_result)}
         </p>
 
-        <div :if={import_success?(@import_result)} class="bg-white/[0.02] border border-border rounded-lg p-4 inline-block">
+        <div
+          :if={import_success?(@import_result)}
+          class="bg-subtle border border-border rounded-lg p-4 inline-block"
+        >
           <.app_link
             navigate={~p"/companies/#{import_result_company_id(@import_result)}"}
             class="text-brand hover:text-accent font-510"
@@ -442,7 +474,10 @@ defmodule CymphoWeb.CompanyImportLive do
           </.app_link>
         </div>
 
-        <div :if={import_error?(@import_result)} class="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg p-4 max-w-md mx-auto">
+        <div
+          :if={import_error?(@import_result)}
+          class="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg p-4 max-w-md mx-auto"
+        >
           {import_error_message(@import_result)}
         </div>
       </div>
@@ -450,14 +485,14 @@ defmodule CymphoWeb.CompanyImportLive do
       <div class="flex gap-3 justify-center">
         <button
           phx-click="reset"
-          class="bg-brand hover:bg-accent text-white font-510 text-sm px-6 py-3 rounded-md transition-colors"
+          class="bg-brand hover:bg-accent text-white font-510 text-sm px-6 py-3 rounded-lg transition-colors"
         >
           Import Another
         </button>
 
         <.app_link
           navigate={~p"/companies"}
-          class="bg-surface hover:bg-white/[0.05] border border-border text-text-primary font-510 text-sm px-6 py-3 rounded-md transition-colors"
+          class="bg-surface hover:bg-surface border border-border text-text-primary font-510 text-sm px-6 py-3 rounded-lg transition-colors"
         >
           Back to Companies
         </.app_link>
@@ -472,11 +507,17 @@ defmodule CymphoWeb.CompanyImportLive do
   defp import_error?({:error, _}), do: true
   defp import_error?(_), do: false
 
-  defp result_container_class({:ok, _}), do: "bg-surface border border-border rounded-card p-12 text-center"
-  defp result_container_class({:error, _}), do: "bg-surface border border-red-500/20 rounded-card p-12 text-center"
+  defp result_container_class({:ok, _}),
+    do: "bg-surface border border-border rounded-xl p-12 text-center"
 
-  defp result_icon_class({:ok, _}), do: "w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center bg-success/10"
-  defp result_icon_class({:error, _}), do: "w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center bg-red-500/10"
+  defp result_container_class({:error, _}),
+    do: "bg-surface border border-red-500/20 rounded-xl p-12 text-center"
+
+  defp result_icon_class({:ok, _}),
+    do: "w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center bg-success/10"
+
+  defp result_icon_class({:error, _}),
+    do: "w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center bg-red-500/10"
 
   defp result_svg_class({:ok, _}), do: "w-10 h-10 text-success"
   defp result_svg_class({:error, _}), do: "w-10 h-10 text-red-400"
@@ -495,4 +536,12 @@ defmodule CymphoWeb.CompanyImportLive do
 
   defp import_error_message({:error, msg}), do: msg
   defp import_error_message(_), do: nil
+
+  defp format_file_size(bytes) when is_integer(bytes) do
+    cond do
+      bytes >= 1_000_000 -> "#{Float.round(bytes / 1_000_000, 1)} MB"
+      bytes >= 1_000 -> "#{Float.round(bytes / 1_000, 1)} KB"
+      true -> "#{bytes} B"
+    end
+  end
 end

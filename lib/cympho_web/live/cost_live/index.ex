@@ -68,10 +68,13 @@ defmodule CymphoWeb.CostLive.Index do
 
   defp parse_days(_), do: 30
 
-  def format_cost(cost) when not is_nil(cost) do
-    "$" <> Decimal.to_string(cost, :normal)
+  def format_cost(cost) do
+    "$" <>
+      (cost
+       |> decimal_or_zero()
+       |> Decimal.round(4)
+       |> Decimal.to_string(:normal))
   end
-  def format_cost(_), do: "$0.00"
 
   def format_tokens(tokens) when is_integer(tokens) and tokens > 0 do
     cond do
@@ -80,6 +83,7 @@ defmodule CymphoWeb.CostLive.Index do
       true -> to_string(tokens)
     end
   end
+
   def format_tokens(_), do: "0"
 
   def budget_utilization_pct(budget) do
@@ -114,26 +118,52 @@ defmodule CymphoWeb.CostLive.Index do
     end
   end
 
-  def bar_width(value, total) when is_number(total) and total > 0 do
-    pct = (value / total * 100) |> min(100)
-    "#{pct}%"
+  def bar_width(value, total) do
+    total = decimal_or_zero(total)
+
+    if Decimal.compare(total, Decimal.new("0")) == :gt do
+      pct =
+        value
+        |> decimal_or_zero()
+        |> Decimal.div(total)
+        |> Decimal.mult(100)
+        |> Decimal.to_float()
+        |> min(100)
+
+      "#{pct}%"
+    else
+      "0%"
+    end
   end
-  def bar_width(_, _), do: "0%"
 
   def max_daily_cost(daily_costs) do
     case Enum.map(daily_costs, & &1.total_cost) do
       [] -> Decimal.new("1")
-      costs -> Enum.max(costs, Decimal)
+      costs -> costs |> Enum.map(&decimal_or_zero/1) |> Enum.max(Decimal)
     end
   end
 
-  def daily_bar_height(cost, max) when is_number(max) and max > 0 do
+  def daily_bar_height(cost, max) do
+    max = decimal_or_zero(max)
+
     if Decimal.gt?(max, Decimal.new("0")) do
-      pct = Decimal.div(cost, max) |> Decimal.mult(100) |> Decimal.to_float() |> min(100)
+      pct =
+        cost
+        |> decimal_or_zero()
+        |> Decimal.div(max)
+        |> Decimal.mult(100)
+        |> Decimal.to_float()
+        |> min(100)
+
       "#{max(pct, 4)}%"
     else
       "4%"
     end
   end
-  def daily_bar_height(_, _), do: "4%"
+
+  defp decimal_or_zero(%Decimal{} = value), do: value
+  defp decimal_or_zero(value) when is_integer(value), do: Decimal.new(value)
+  defp decimal_or_zero(value) when is_float(value), do: Decimal.from_float(value)
+  defp decimal_or_zero(value) when is_binary(value), do: Decimal.new(value)
+  defp decimal_or_zero(_), do: Decimal.new("0")
 end

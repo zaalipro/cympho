@@ -61,7 +61,10 @@ defmodule CymphoWeb.PluginLive.Index do
                  if p.id == updated_plugin.id, do: updated_plugin, else: p
                end)
              end)
-             |> put_flash(:info, "Plugin #{if updated_plugin.enabled, do: "enabled", else: "disabled"}")}
+             |> put_flash(
+               :info,
+               "Plugin #{if updated_plugin.enabled, do: "enabled", else: "disabled"}"
+             )}
 
           {:error, _} ->
             {:noreply, put_flash(socket, :error, "Failed to toggle plugin")}
@@ -99,5 +102,39 @@ defmodule CymphoWeb.PluginLive.Index do
     Plugins.list_plugins(company_id: company_id, status: status)
     |> Enum.map(fn p -> Repo.preload(p, [:company, :project]) end)
   end
-end
 
+  def status_class("active"), do: "border-success/20 bg-success/10 text-success"
+  def status_class("installed"), do: "border-brand/20 bg-brand/10 text-brand"
+
+  def status_class("disabled"),
+    do: "border-text-quaternary/20 bg-text-quaternary/10 text-text-tertiary"
+
+  def status_class("error"), do: "border-red-500/20 bg-red-500/10 text-red-400"
+  def status_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  def status_label(nil), do: "Unknown"
+
+  def status_label(status) do
+    status
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
+
+  def enabled_label(true), do: "Enabled"
+  def enabled_label(false), do: "Disabled"
+  def enabled_label(_), do: "Unknown"
+
+  def enabled_class(true), do: "text-success"
+  def enabled_class(false), do: "text-text-quaternary"
+  def enabled_class(_), do: "text-text-tertiary"
+
+  def company_name(%{company: %{name: name}}) when is_binary(name), do: name
+  def company_name(_), do: "Global"
+
+  def project_name(%{project: %{name: name}}) when is_binary(name), do: name
+  def project_name(_), do: "All projects"
+
+  def capability_count(capabilities) when is_list(capabilities), do: length(capabilities)
+  def capability_count(_), do: 0
+end

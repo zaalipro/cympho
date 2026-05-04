@@ -62,11 +62,23 @@ defmodule Cympho.Adapters.HttpAdapterTest do
     test "validates method" do
       config = %{"url" => "https://example.com", "method" => "invalid"}
 
-      assert HttpAdapter.validate_config(config) == {:error, "method must be one of: get, post, put, patch, delete"}
+      assert HttpAdapter.validate_config(config) ==
+               {:error, "method must be one of: get, post, put, patch, delete"}
     end
 
     test "accepts valid methods" do
-      valid_methods = ["get", "post", "put", "patch", "delete", "GET", "POST", "PUT", "PATCH", "DELETE"]
+      valid_methods = [
+        "get",
+        "post",
+        "put",
+        "patch",
+        "delete",
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE"
+      ]
 
       Enum.each(valid_methods, fn method ->
         config = %{"url" => "https://example.com", "method" => method}
@@ -84,8 +96,11 @@ defmodule Cympho.Adapters.HttpAdapterTest do
       config_too_large = %{"url" => "https://example.com", "timeout" => 500_000}
       config_negative = %{"url" => "https://example.com", "timeout" => -100}
 
-      assert HttpAdapter.validate_config(config_too_large) == {:error, "timeout must be between 1 and 300000 milliseconds"}
-      assert HttpAdapter.validate_config(config_negative) == {:error, "timeout must be between 1 and 300000 milliseconds"}
+      assert HttpAdapter.validate_config(config_too_large) ==
+               {:error, "timeout must be between 1 and 300000 milliseconds"}
+
+      assert HttpAdapter.validate_config(config_negative) ==
+               {:error, "timeout must be between 1 and 300000 milliseconds"}
     end
 
     test "validates auth_token" do
@@ -97,7 +112,8 @@ defmodule Cympho.Adapters.HttpAdapterTest do
     test "validates callback_url format" do
       config = %{"url" => "https://example.com", "callback_url" => "not-a-url"}
 
-      assert HttpAdapter.validate_config(config) == {:error, "callback_url must be a valid HTTP/HTTPS URL"}
+      assert HttpAdapter.validate_config(config) ==
+               {:error, "callback_url must be a valid HTTP/HTTPS URL"}
     end
   end
 

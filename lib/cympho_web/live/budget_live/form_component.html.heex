@@ -14,14 +14,14 @@
   </.header>
 
   <.simple_form
-    for={@changeset}
+    for={@form}
     id="budget-form"
     phx-target={@myself}
     phx-change="validate"
     phx-submit="save"
   >
     <.input
-      field={@changeset[:name]}
+      field={@form[:name]}
       type="text"
       label="Budget Name"
       placeholder="Monthly Budget"
@@ -29,7 +29,7 @@
     />
 
     <.input
-      field={@changeset[:scope_type]}
+      field={@form[:scope_type]}
       type="select"
       label="Scope Type"
       options={[
@@ -42,14 +42,14 @@
     />
 
     <.input
-      field={@changeset[:scope_id]}
+      field={@form[:scope_id]}
       type="text"
       label="Scope ID"
       placeholder="company-123"
     />
 
     <.input
-      field={@changeset[:limit_amount]}
+      field={@form[:limit_amount]}
       type="number"
       label="Limit Amount"
       step="0.01"
@@ -57,32 +57,32 @@
     />
 
     <.input
-      field={@changeset[:currency]}
+      field={@form[:currency]}
       type="select"
       label="Currency"
       options={[{"USD", "USD"}, {"EUR", "EUR"}, {"GBP", "GBP"}]}
     />
 
     <.input
-      field={@changeset[:period_start]}
+      field={@form[:period_start]}
       type="datetime-local"
       label="Period Start"
     />
 
     <.input
-      field={@changeset[:period_end]}
+      field={@form[:period_end]}
       type="datetime-local"
       label="Period End"
     />
 
     <.input
-      field={@changeset[:hard_stop]}
+      field={@form[:hard_stop]}
       type="checkbox"
       label="Hard Stop (enforce limit)"
     />
 
     <.input
-      field={@changeset[:threshold_alert_percentage]}
+      field={@form[:threshold_alert_percentage]}
       type="number"
       label="Alert Threshold (%)"
       min="1"

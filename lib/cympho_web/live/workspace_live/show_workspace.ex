@@ -7,6 +7,7 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
     case Workspaces.get_project_workspace(id) do
       {:ok, workspace} ->
         execution_workspaces = Workspaces.list_execution_workspaces(id)
+
         {:ok,
          socket
          |> assign(:page_title, "Workspace: #{workspace.name}")
@@ -31,7 +32,10 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
     ~H"""
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="mb-8">
-        <.app_link navigate={~p"/workspaces"} class="text-text-secondary hover:text-text-primary text-sm">
+        <.app_link
+          navigate={~p"/workspaces"}
+          class="text-text-secondary hover:text-text-primary text-sm"
+        >
           &larr; Back to Workspaces
         </.app_link>
       </div>
@@ -77,15 +81,15 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
       </div>
 
       <div>
-        <h2 class="text-lg font-510 text-text-primary mb-4">Execution Workspaces</h2>
+        <h2 class="font-serif text-lg font-510 text-text-primary mb-4">Execution Workspaces</h2>
 
         <div class="space-y-3">
           <%= for ew <- @execution_workspaces do %>
             <.app_link navigate={~p"/workspaces/#{@workspace.id}/exec/#{ew.id}"}>
               <div class="bg-surface border border-border rounded-lg p-4 hover:border-brand/50 transition-colors">
                 <div class="flex items-center justify-between">
-                  <h3 class="text-sm font-510 text-text-primary">{ew.name}</h3>
-                  <span class="text-xs bg-white/[0.05] text-text-tertiary px-2 py-1 rounded">
+                  <h3 class="font-serif text-sm font-510 text-text-primary">{ew.name}</h3>
+                  <span class="text-xs bg-surface text-text-tertiary px-2 py-1 rounded">
                     {ew.status}
                   </span>
                 </div>

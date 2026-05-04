@@ -27,7 +27,7 @@ defmodule Cympho.Skills do
   def get_skill_by_identifier(identifier, company_id) do
     query =
       from s in Skill,
-      where: s.identifier == ^identifier and s.company_id == ^company_id
+        where: s.identifier == ^identifier and s.company_id == ^company_id
 
     case Repo.one(query) do
       nil -> {:error, :not_found}
@@ -60,11 +60,13 @@ defmodule Cympho.Skills do
   end
 
   defp maybe_filter_by_company(query, nil), do: query
+
   defp maybe_filter_by_company(query, company_id) do
     from s in query, where: s.company_id == ^company_id
   end
 
   defp maybe_filter_by_project(query, nil), do: query
+
   defp maybe_filter_by_project(query, project_id) do
     from s in query, where: s.project_id == ^project_id
   end
@@ -79,10 +81,10 @@ defmodule Cympho.Skills do
   def list_skills_for_agent(agent_id) do
     query =
       from p in Plugin,
-      join: agent_skill in AgentSkill,
-      on: agent_skill.plugin_id == p.id,
-      where: agent_skill.agent_id == ^agent_id and p.enabled == true,
-      order_by: [asc: p.name]
+        join: agent_skill in AgentSkill,
+        on: agent_skill.plugin_id == p.id,
+        where: agent_skill.agent_id == ^agent_id and p.enabled == true,
+        order_by: [asc: p.name]
 
     Repo.all(query)
   end
@@ -111,7 +113,7 @@ defmodule Cympho.Skills do
   def remove_skill_from_agent(agent_id, plugin_id) do
     query =
       from agent_skill in AgentSkill,
-      where: agent_skill.agent_id == ^agent_id and agent_skill.plugin_id == ^plugin_id
+        where: agent_skill.agent_id == ^agent_id and agent_skill.plugin_id == ^plugin_id
 
     case Repo.one(query) do
       nil -> {:error, :not_found}

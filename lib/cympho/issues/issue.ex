@@ -27,13 +27,30 @@ defmodule Cympho.Issues.Issue do
     field :execution_state, :map, default: %{}
     field :assigned_role, :string
     field :billing_code, :string
+    field :issue_number, :integer
+    field :origin_type, :string
+    field :origin_id, :string
+    field :request_depth, :integer, default: 0
+    field :monitor_state, :map, default: %{}
+    field :checked_out_at, :utc_datetime
+    field :started_at, :utc_datetime
+    field :completed_at, :utc_datetime
+    field :cancelled_at, :utc_datetime
+    field :hidden_at, :utc_datetime
+    field :lineage, :map
 
     belongs_to :project, Project
     belongs_to :company, Cympho.Companies.Company
     belongs_to :goal, Cympho.Goals.Goal
     belongs_to :assignee, Agent, foreign_key: :assignee_id
+    belongs_to :assignee_user, Cympho.Users.User, foreign_key: :assignee_user_id
+    belongs_to :checkout_run, Cympho.HeartbeatEngine.Run, foreign_key: :checkout_run_id
+    belongs_to :created_by_agent, Agent, foreign_key: :created_by_agent_id
+    belongs_to :created_by_user, Cympho.Users.User, foreign_key: :created_by_user_id
     belongs_to :parent, __MODULE__, foreign_key: :parent_id
     belongs_to :execution_policy, ExecutionPolicy
+    belongs_to :project_workspace, Cympho.Workspaces.ProjectWorkspace
+    belongs_to :execution_workspace, Cympho.Workspaces.ExecutionWorkspace
 
     has_many :comments, Comment, foreign_key: :issue_id
     has_many :children, __MODULE__, foreign_key: :parent_id
@@ -64,6 +81,8 @@ defmodule Cympho.Issues.Issue do
       :status,
       :priority,
       :assignee_id,
+      :assignee_user_id,
+      :checkout_run_id,
       :project_id,
       :company_id,
       :goal_id,
@@ -72,11 +91,29 @@ defmodule Cympho.Issues.Issue do
       :execution_policy_id,
       :execution_state,
       :assigned_role,
-      :billing_code
+      :billing_code,
+      :issue_number,
+      :origin_type,
+      :origin_id,
+      :request_depth,
+      :created_by_agent_id,
+      :created_by_user_id,
+      :project_workspace_id,
+      :execution_workspace_id,
+      :monitor_state,
+      :lineage,
+      :checked_out_at,
+      :started_at,
+      :completed_at,
+      :cancelled_at,
+      :hidden_at
     ])
     |> validate_required([:title])
     |> validate_length(:title, min: 1, max: 255)
+    |> validate_number(:issue_number, greater_than: 0)
+    |> validate_number(:request_depth, greater_than_or_equal_to: 0)
     |> unique_constraint(:identifier, name: :issues_project_id_identifier_index)
+    |> unique_constraint(:issue_number, name: :issues_company_id_issue_number_index)
   end
 
   def status_options, do: [:backlog, :todo, :in_progress, :in_review, :done, :blocked, :cancelled]
@@ -95,4 +132,5 @@ defmodule Cympho.Issues.Issue do
   def role_rank(:designer), do: 1
   def role_rank(_), do: 0
 end
+
 # TEST MARKER

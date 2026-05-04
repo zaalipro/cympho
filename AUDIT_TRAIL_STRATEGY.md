@@ -1,153 +1,96 @@
-# Audit Trail Strategy
+# Audit Trail Retention and Partitioning Strategy
 
-## Overview
+## Table Structure
 
-The Cympho audit trail system provides comprehensive tracking of all governance decisions, budget changes, and board votes across the platform. This document describes the architecture and implementation strategy for audit trail instrumentation.
+The `audit_events` table is append-only with the following characteristics:
+- **No UPDATE/DELETE**: DB trigger enforces immutability
+- **Write-once**: Records inserted only, never modified
+- **Time-series**: Queries predominantly filter by `company_id` and `created_at`
 
-## Core Components
+## Indexing Strategy
 
-### 1. GovernanceAuditLogs Module
-
-The `Cympho.GovernanceAuditLogs` module provides the base infrastructure for recording audit events:
-
-- **Schema**: `Cympho.GovernanceAuditLogs.GovernanceAuditLog`
-- **Primary Fields**:
-  - `action_type`: The type of action performed (e.g., "decision_created", "budget_threshold_change")
-  - `actor_type` / `actor_id`: Who performed the action
-  - `resource_type` / `resource_id`: What resource was affected
-  - `decision`: Human-readable description of the action
-  - `reasoning`: Detailed reasoning for the decision
-  - `metadata`: Additional context (JSON map)
-  - **`inserted_at`**: Timestamp when the log entry was created (Ecto default)
-
-### 2. AuditTrail.Instrumenter Module
-
-The `Cympho.AuditTrail.Instrumenter` module provides a high-level API for recording specific types of audit events:
-
-#### `record_decision/4`
-
-Records decision lifecycle events (created, updated, reversed, superseded).
-
-**Parameters:**
-- `decision_id`: The UUID of the decision
-- `event`: The event type atom (`:created`, `:updated`, `:reversed`, `:superseded`)
-- `issue`: The issue struct/map associated with the decision
-- `actor_id`: The UUID of the actor who performed the action
-
-**Example:**
-```elixir
-Instrumenter.record_decision(decision.id, :created, issue, actor_id)
+### Primary Index (required at table creation)
+```sql
+CREATE INDEX audit_events_company_created_type_idx 
+ON audit_events (company_id, created_at DESC, event_type);
 ```
 
-#### `record_budget_change/5`
+**Rationale**: This composite index supports the most common query pattern:
+- Filter by company (multi-tenancy)
+- Filter by date range (time-series)
+- Filter by event type (optional)
 
-Records budget configuration changes (threshold changes, limit changes, creation).
+The DESC on `created_at` optimizes for "latest first" display.
 
-**Parameters:**
-- `budget_id`: The UUID of the budget
-- `event`: The event type string (`"threshold_change"`, `"limit_change"`, `"created"`)
-- `old_value`: The previous value
-- `new_value`: The new value
-- `company_id`: The UUID of the company
+### Secondary Indexes (add later if needed)
+- `(actor_type, actor_id, created_at)` — for "what did this actor do?" queries
+- `(resource_type, resource_id, created_at)` — for "history of this resource" queries
 
-**Example:**
-```elixir
-Instrumenter.record_budget_change(updated.id, "threshold_change", old_threshold, new_threshold, company.id)
+## Partitioning Strategy
+
+### Phase 1: Single table (current)
+- Start with unpartitioned table
+- Monitor row growth
+- Partition when table exceeds 10M rows
+
+### Phase 2: Monthly partitioning (trigger at 10M rows)
+Partition by `created_at` month using PostgreSQL declarative partitioning:
+
+```sql
+-- Convert to partitioned table (requires table rebuild)
+CREATE TABLE audit_events_partitioned (
+  -- same schema
+) PARTITION BY RANGE (created_at);
+
+-- Create partitions
+CREATE TABLE audit_events_2026_04 PARTITION OF audit_events_partitioned
+  FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
+
+CREATE TABLE audit_events_2026_05 PARTITION OF audit_events_partitioned
+  FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
 ```
 
-#### `record_board_vote/4`
+**Benefits**:
+- Faster queries (scan only relevant month)
+- Cheaper deletes (drop entire partitions for archival)
+- Better index maintenance (smaller indexes per partition)
 
-Records board member votes on proposals.
+### Phase 3: Automated partition management
+- Create future partitions 1 month in advance
+- Drop partitions older than 90 days after archival
 
-**Parameters:**
-- `user_id`: The UUID of the user casting the vote
-- `vote`: The vote value (`"approve"`, `"deny"`, `"abstain"`)
-- `issue`: The board approval issue/struct
-- `board_approval_id`: The UUID of the board approval
+## Retention Policy
 
-**Example:**
-```elixir
-Instrumenter.record_board_vote(user_id, vote, issue, board_approval.id)
-```
+### Hot storage: 90 days
+- Retain audit events in primary database for 90 days
+- Supports compliance investigation window
+- Aligns with typical business cycle
 
-#### `list_resource_history/3`
+### Cold storage: archive after 90 days
+- Export partitions to compressed JSON or Parquet
+- Upload to S3 (using existing S3 infrastructure)
+- Drop partition from database after successful archival
+- Archive file naming: `audit_events_YYYY_MM.parquet`
 
-Retrieves audit history for a specific resource.
+### Retrieval from cold storage
+- Manual restore process for compliance requests
+- Load archived partition into temporary table for querying
+- Document runbook in ops wiki
 
-**Parameters:**
-- `resource_type`: The type of resource (`"decision"`, `"budget"`, `"board_approval"`)
-- `resource_id`: The UUID of the resource
-- `company_id`: The UUID of the company (for scoping)
+## Volume Estimates
 
-**Returns:**
-- List of `GovernanceAuditLog` entries ordered by `inserted_at` descending (newest first)
+Assumptions:
+- 100 companies, 50 agents each
+- 100 audit events per agent per day
+- **Daily**: 500,000 events
+- **Monthly**: ~15M events
+- **Yearly**: ~180M events
 
-**Example:**
-```elixir
-history = Instrumenter.list_resource_history("decision", decision_id, company_id)
-```
+At these estimates, we reach the 10M partitioning threshold in ~20 days. Plan to implement partitioning within the first month of production deployment.
 
-## Integration Points
+## Implementation Notes
 
-### Decisions Module
-
-The `Cympho.Decisions` module calls `Instrumenter.record_decision/4` when:
-
-- A new decision is created via `create_decision/2`
-- Decision lifecycle events occur (reversal, supersession)
-
-### Budgets Module
-
-The `Cympho.Budgets` module calls `Instrumenter.record_budget_change/5` when:
-
-- Budget threshold values change
-- Budget limit values change
-- Budgets are created
-
-### BoardApprovals Module
-
-The `Cympho.BoardApprovals` module calls `Instrumenter.record_board_vote/4` when:
-
-- Board members cast votes on proposals via `cast_vote/4`
-
-## Timestamps
-
-All audit log entries use Ecto's standard timestamp field `inserted_at` to track when events occurred. This field is automatically set by Ecto and represents the time the log entry was created in the database.
-
-**Note:** The field is `inserted_at`, not `created_at`. This follows Ecto's convention for timestamps.
-
-## PubSub Broadcasting
-
-Audit events are broadcast via Phoenix.PubSub on the `"governance_audit"` topic for real-time monitoring:
-
-```elixir
-{:audit_log_created, %GovernanceAuditLog{}}
-```
-
-## Metadata Structure
-
-Audit log metadata is stored as a JSON map and includes:
-
-- **Decision events**: `decision_id`, `event`, `issue_id`, `issue_title`
-- **Budget events**: `budget_id`, `event`, `old_value`, `new_value`, `company_id`
-- **Board vote events**: `user_id`, `vote`, `board_approval_id`, `issue_id`, `category`
-
-## Testing
-
-The audit trail system is tested in `test/cympho/audit_trail/instrumenter_test.exs` with comprehensive coverage of:
-
-- Event recording for all instrumenter functions
-- Metadata validation
-- Resource history retrieval
-- Company scoping
-- Timestamp ordering
-
-## Future Enhancements
-
-Potential improvements to consider:
-
-1. **Retention policies**: Automatic cleanup of old audit logs
-2. **Archival**: Moving old logs to cold storage
-3. **Export**: CSV/JSON export functionality for compliance
-4. **Search**: Full-text search across audit trail entries
-5. **Aggregation**: Summary statistics and trend analysis
+1. **Migration**: Start with Phase 1 (single table with composite index)
+2. **Monitoring**: Add telemetry for `audit_events` row count and query performance
+3. **Partitioning migration**: Create separate issue for Phase 2 when approaching 10M rows
+4. **Archival automation**: Create cron job to check for partitions older than 90 days

@@ -9,11 +9,9 @@ defmodule CymphoWeb.UserAuth do
   - Assigns :current_user, :user_companies, :current_company to socket
   """
 
-  import Phoenix.LiveView
   import Phoenix.Component, only: [assign: 3]
   import Ecto.Query
   alias Cympho.Users
-  alias Cympho.Companies
 
   def on_mount(:default, _params, session, socket) do
     socket =
@@ -36,7 +34,13 @@ defmodule CymphoWeb.UserAuth do
           {:ok, user} ->
             # Store lightweight map instead of full Ecto struct to avoid
             # Jason.Encoder errors in LiveView test mode
-            user_map = %{id: user.id, email: user.email, name: user.name, company_id: user.company_id}
+            user_map = %{
+              id: user.id,
+              email: user.email,
+              name: user.name,
+              company_id: user.company_id
+            }
+
             assign(socket, :current_user, user_map)
 
           {:error, :not_found} ->
@@ -51,7 +55,8 @@ defmodule CymphoWeb.UserAuth do
 
     companies =
       if is_nil(user) do
-        []
+        Cympho.Companies.list_companies()
+        |> Enum.map(fn c -> %{id: c.id, name: c.name, logo_url: c.logo_url} end)
       else
         # Load all companies the user is a member of
         query =
@@ -74,9 +79,8 @@ defmodule CymphoWeb.UserAuth do
 
     company =
       cond do
-        # Guest users have no company
         is_nil(user) ->
-          nil
+          List.first(companies)
 
         # Try session company_id first
         session["company_id"] ->
@@ -102,7 +106,7 @@ defmodule CymphoWeb.UserAuth do
     assign(socket, :current_company, company)
   end
 
-  defp fallback_company(user, companies) do
+  defp fallback_company(_user, companies) do
     # If the session company or user default company is not in the user's memberships,
     # fall back to the first company in their memberships
     List.first(companies)

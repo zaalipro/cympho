@@ -46,7 +46,7 @@ defmodule Cympho.Adapters.HttpAdapter do
 
       case make_http_request(method, url, headers, payload, timeout) do
         {:ok, response} ->
-          handle_response(response, callback_url, config)
+          handle_response({:ok, response}, callback_url, config)
 
         {:error, reason} ->
           {:error, {:http_error, reason}}
@@ -58,11 +58,12 @@ defmodule Cympho.Adapters.HttpAdapter do
     base_headers = config[:headers] || config["headers"] || %{}
     auth_token = config[:auth_token] || config["auth_token"]
 
-    headers = if auth_token do
-      Map.put(base_headers, "authorization", "Bearer #{auth_token}")
-    else
-      base_headers
-    end
+    headers =
+      if auth_token do
+        Map.put(base_headers, "authorization", "Bearer #{auth_token}")
+      else
+        base_headers
+      end
 
     # Ensure content-type is set
     if not Map.has_key?(headers, "content-type") and not Map.has_key?(headers, "Content-Type") do
@@ -74,57 +75,6 @@ defmodule Cympho.Adapters.HttpAdapter do
 
   defp handle_response({:ok, data}, nil, _config), do: {:ok, data}
   defp handle_response({:ok, data}, _callback_url, _config), do: {:ok, data}
-  defp handle_response({:error, _reason} = error, nil, _config), do: error
-
-  defp handle_response({:error, reason}, callback_url, config) do
-    # If callback URL is configured and initial request failed, poll for result
-    poll_timeout = config[:callback_timeout] || config["callback_timeout"] || 60_000
-    poll_interval = config[:poll_interval] || config["poll_interval"] || 2000
-
-    poll_callback(callback_url, poll_timeout, poll_interval)
-  end
-
-  defp poll_callback(callback_url, timeout, interval) do
-    start_time = System.monotonic_time(:millisecond)
-
-    do_poll_callback(callback_url, start_time, timeout, interval)
-  end
-
-  defp do_poll_callback(callback_url, start_time, timeout, interval) do
-    elapsed = System.monotonic_time(:millisecond) - start_time
-
-    if elapsed >= timeout do
-      {:error, :callback_timeout}
-    else
-      req = Finch.build(:get, callback_url, [{"accept", "application/json"}])
-
-      case Finch.request(req, Cympho.Finch, receive_timeout: div(timeout - elapsed, 2)) do
-        {:ok, %Finch.Response{status: status, body: body}} when status in 200..299 ->
-          case Jason.decode(body) do
-            {:ok, %{"status" => "completed", "result" => result}} ->
-              {:ok, result}
-
-            {:ok, %{"status" => "pending"}} ->
-              Process.sleep(interval)
-              do_poll_callback(callback_url, start_time, timeout, interval)
-
-            {:ok, %{"status" => "error", "error" => error}} ->
-              {:error, {:callback_error, error}}
-
-            {:ok, other} ->
-              {:error, {:invalid_callback_response, other}}
-
-            {:error, _} ->
-              Process.sleep(interval)
-              do_poll_callback(callback_url, start_time, timeout, interval)
-          end
-
-        _ ->
-          Process.sleep(interval)
-          do_poll_callback(callback_url, start_time, timeout, interval)
-      end
-    end
-  end
 
   defp build_payload(issue, agent_id, config) do
     base_payload = %{
@@ -173,21 +123,8 @@ defmodule Cympho.Adapters.HttpAdapter do
     end
   end
 
-  defp parse_response(%{status: status, body: body}) when status in 200..299 do
-    case Jason.decode(body) do
-      {:ok, data} -> {:ok, data}
-      {:error, _} -> {:ok, %{raw_body: body, status: status}}
-    end
-  end
-
-  defp parse_response(%{status: status, body: body}) do
-    case Jason.decode(body) do
-      {:ok, data} -> {:error, {:http_error, status, data}}
-      {:error, _} -> {:error, {:http_error, status, body}}
-    end
-  end
-
   defp normalize_method(method) when is_atom(method), do: method
+
   defp normalize_method(method) when is_binary(method) do
     method |> String.downcase() |> String.to_existing_atom()
   rescue
@@ -195,9 +132,11 @@ defmodule Cympho.Adapters.HttpAdapter do
   end
 
   defp normalize_headers(headers) when is_list(headers), do: headers
+
   defp normalize_headers(headers) when is_map(headers) do
     Enum.map(headers, fn {k, v} -> {to_string(k), to_string(v)} end)
   end
+
   defp normalize_headers(_), do: []
 
   @impl true
@@ -223,20 +162,32 @@ defmodule Cympho.Adapters.HttpAdapter do
 
     case Finch.request(req, Cympho.Finch, receive_timeout: timeout) do
       {:ok, %Finch.Response{status: status}} when status in 200..299 ->
-        %{status: :healthy, message: "Endpoint accessible (HEAD #{status})", checked_at: DateTime.utc_now()}
+        %{
+          status: :healthy,
+          message: "Endpoint accessible (HEAD #{status})",
+          checked_at: DateTime.utc_now()
+        }
 
       {:ok, %Finch.Response{status: status}} when status in 300..399 ->
         # Redirect - try GET
         do_get_health_check(url, headers, timeout)
 
       {:ok, %Finch.Response{status: status}} ->
-        %{status: :unhealthy, message: "Endpoint returned error status (HEAD #{status})", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "Endpoint returned error status (HEAD #{status})",
+          checked_at: DateTime.utc_now()
+        }
 
-      {:error, %Finch.Error{} = error} ->
+      {:error, %Finch.Error{}} ->
         do_get_health_check(url, headers, timeout)
 
       {:error, reason} ->
-        %{status: :unhealthy, message: "Health check failed: #{inspect(reason)}", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "Health check failed: #{inspect(reason)}",
+          checked_at: DateTime.utc_now()
+        }
     end
   end
 
@@ -245,16 +196,32 @@ defmodule Cympho.Adapters.HttpAdapter do
 
     case Finch.request(req, Cympho.Finch, receive_timeout: timeout) do
       {:ok, %Finch.Response{status: status}} when status in 200..299 ->
-        %{status: :healthy, message: "Endpoint accessible (GET #{status})", checked_at: DateTime.utc_now()}
+        %{
+          status: :healthy,
+          message: "Endpoint accessible (GET #{status})",
+          checked_at: DateTime.utc_now()
+        }
 
       {:ok, %Finch.Response{status: status}} ->
-        %{status: :unhealthy, message: "Endpoint returned error status (GET #{status})", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "Endpoint returned error status (GET #{status})",
+          checked_at: DateTime.utc_now()
+        }
 
       {:error, %Finch.Error{} = error} ->
-        %{status: :unhealthy, message: "Request failed: #{Exception.message(error)}", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "Request failed: #{Exception.message(error)}",
+          checked_at: DateTime.utc_now()
+        }
 
       {:error, reason} ->
-        %{status: :unhealthy, message: "Request failed: #{inspect(reason)}", checked_at: DateTime.utc_now()}
+        %{
+          status: :unhealthy,
+          message: "Request failed: #{inspect(reason)}",
+          checked_at: DateTime.utc_now()
+        }
     end
   end
 

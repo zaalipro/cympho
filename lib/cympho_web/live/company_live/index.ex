@@ -22,6 +22,10 @@ defmodule CymphoWeb.CompanyLive.Index do
     |> assign(:company, nil)
   end
 
+  defp apply_action(socket, nil, params) do
+    apply_action(socket, :index, params)
+  end
+
   defp apply_action(socket, :new, _params) do
     socket
     |> assign(:page_title, "New Company")

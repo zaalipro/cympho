@@ -29,7 +29,7 @@ defmodule Cympho.Plugins do
   def get_plugin_by_identifier(identifier, company_id) do
     query =
       from p in Plugin,
-      where: p.identifier == ^identifier and p.company_id == ^company_id
+        where: p.identifier == ^identifier and p.company_id == ^company_id
 
     case Repo.one(query) do
       nil -> {:error, :not_found}
@@ -72,16 +72,19 @@ defmodule Cympho.Plugins do
   end
 
   defp maybe_filter_by_company(query, nil), do: query
+
   defp maybe_filter_by_company(query, company_id) do
     from p in query, where: p.company_id == ^company_id
   end
 
   defp maybe_filter_by_project(query, nil), do: query
+
   defp maybe_filter_by_project(query, project_id) do
     from p in query, where: p.project_id == ^project_id
   end
 
   defp maybe_filter_by_status(query, nil), do: query
+
   defp maybe_filter_by_status(query, status) do
     from p in query, where: p.status == ^status
   end

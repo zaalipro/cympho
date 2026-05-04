@@ -9,9 +9,9 @@ defmodule Cympho.Skills.Adapter do
   def skill_prompt_fragment(:claude_local, skill) do
     name = Map.get(skill, :name, "Unknown")
     version = Map.get(skill, :version, "0.0.0")
-    capabilities = Map.get(skill, :capabilities, [])
+    capabilities = Map.get(skill, :capabilities, []) || []
     identifier = Map.get(skill, :identifier, name)
-    caps = Enum.join(capabilities, ", ")
+    caps = if Enum.empty?(capabilities), do: "none", else: Enum.join(capabilities, ", ")
 
     """
     ### Skill: #{name} (#{version})

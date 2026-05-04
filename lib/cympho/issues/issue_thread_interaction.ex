@@ -9,8 +9,7 @@ defmodule Cympho.Issues.IssueThreadInteraction do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
   schema "issue_thread_interactions" do
-    field :kind, Ecto.Enum,
-      values: [:suggest_tasks, :ask_user_questions, :request_confirmation]
+    field :kind, Ecto.Enum, values: [:suggest_tasks, :ask_user_questions, :request_confirmation]
 
     field :payload, :map, default: %{}
 

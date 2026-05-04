@@ -53,7 +53,12 @@ defmodule Cympho.AgentGovernance do
 
           Decisions.record_governance_decision(updated, "resume", "approved", actor)
 
-          Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:agents", {:agent_resumed, updated})
+          Phoenix.PubSub.broadcast(
+            Cympho.PubSub,
+            "company:#{updated.company_id}:agents",
+            {:agent_resumed, updated}
+          )
+
           {:ok, updated}
 
         error ->
@@ -116,7 +121,12 @@ defmodule Cympho.AgentGovernance do
       },
       requested_by_agent_id: Map.get(actor, :id) || elem(actor, 1),
       company_id: agent.company_id,
-      review_deadline: Keyword.get(opts, :review_deadline, DateTime.add(DateTime.utc_now(), 7 * 24 * 3600, :second))
+      review_deadline:
+        Keyword.get(
+          opts,
+          :review_deadline,
+          DateTime.add(DateTime.utc_now(), 7 * 24 * 3600, :second)
+        )
     }
 
     case BoardApprovals.create_board_approval(board_approval_attrs, actor) do
@@ -187,7 +197,12 @@ defmodule Cympho.AgentGovernance do
 
         Decisions.record_governance_decision(updated, "pause", "approved", actor)
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:agents", {:agent_paused, updated})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.company_id}:agents",
+          {:agent_paused, updated}
+        )
+
         {:ok, updated}
 
       error ->
@@ -214,7 +229,12 @@ defmodule Cympho.AgentGovernance do
 
         Decisions.record_governance_decision(updated, "terminate", "approved", actor)
 
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:agents", {:agent_terminated, updated})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.company_id}:agents",
+          {:agent_terminated, updated}
+        )
+
         {:ok, updated}
 
       error ->
@@ -222,12 +242,14 @@ defmodule Cympho.AgentGovernance do
     end
   end
 
-  defp sensitive_action?(action) when action in [
-    :delete_data,
-    :modify_permissions,
-    :access_sensitive_resources,
-    :bulk_operations
-  ], do: true
+  defp sensitive_action?(action)
+       when action in [
+              :delete_data,
+              :modify_permissions,
+              :access_sensitive_resources,
+              :bulk_operations
+            ],
+       do: true
 
   defp sensitive_action?(_), do: false
 

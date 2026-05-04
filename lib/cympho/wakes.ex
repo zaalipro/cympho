@@ -14,6 +14,7 @@ defmodule Cympho.Wakes do
   alias Cympho.Issues.Issue
   alias Cympho.AgentHeartbeat
   alias Cympho.Comments.Comment
+  alias Cympho.HeartbeatEngine.WakeupQueue
   require Logger
 
   @doc """
@@ -163,19 +164,22 @@ defmodule Cympho.Wakes do
       metadata: metadata
     }
 
-    {:ok, agent_wake} =
-      %AgentWake{}
-      |> AgentWake.changeset(attrs)
-      |> Repo.insert()
+    case WakeupQueue.enqueue(attrs) do
+      {:ok, agent_wake} ->
+        case AgentHeartbeat.trigger_heartbeat(agent_id) do
+          :ok ->
+            _ = Cympho.Orchestrator.Dispatcher.poll_now()
+            Logger.info("Wakes: triggered heartbeat for agent #{agent_id}, reason: #{reason}")
+            {:ok, agent_wake}
 
-    case AgentHeartbeat.trigger_heartbeat(agent_id) do
-      :ok ->
-        Logger.info("Wakes: triggered heartbeat for agent #{agent_id}, reason: #{reason}")
-        {:ok, agent_wake}
+          {:error, :not_found} ->
+            _ = Cympho.Orchestrator.Dispatcher.poll_now()
+            Logger.warning("Wakes: agent heartbeat process not found for #{agent_id}")
+            {:ok, agent_wake}
+        end
 
-      {:error, :not_found} ->
-        Logger.warning("Wakes: agent heartbeat process not found for #{agent_id}")
-        {:ok, agent_wake}
+      {:error, _changeset} = error ->
+        error
     end
   end
 

@@ -147,7 +147,7 @@ defmodule Cympho.Adapters.Registry do
   @impl true
   def init(_) do
     :ets.new(__MODULE__, [:named_table, :set, :protected, read_concurrency: true])
-    {:ok, %{} }
+    {:ok, %{}}
   end
 
   @impl true

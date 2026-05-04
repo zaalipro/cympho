@@ -18,16 +18,17 @@ defmodule CymphoWeb.IssueLive.Show do
       Issues.subscribe(socket.assigns.current_company.id)
       Comments.subscribe(socket.assigns.current_company.id)
       CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
+      Documents.subscribe(socket.assigns.current_company.id)
     end
-    Documents.subscribe()
 
     # Subscribe to read state updates if user is logged in
     current_user = socket.assigns[:current_user]
+
     if current_user do
       IssueReadStates.subscribe(current_user.id)
     end
 
-    case Issues.get_issue(id) do
+    case get_scoped_issue(socket, id) do
       {:ok, issue} ->
         # Auto-mark as read for the current user
         if current_user do
@@ -47,8 +48,8 @@ defmodule CymphoWeb.IssueLive.Show do
            issue: issue,
            comment_changeset: comment_changeset,
            comment_form: to_form(comment_changeset),
-           agents: Agents.list_agents_by_status(:idle),
-           all_agents: Agents.list_agents(),
+           agents: list_idle_agents(socket),
+           all_agents: list_company_agents(socket),
            show_agent_panel: false,
            editing: nil,
            assignee_search: "",
@@ -78,7 +79,7 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   defp apply_action(socket, :show, id) do
-    case Issues.get_issue(id) do
+    case get_scoped_issue(socket, id) do
       {:ok, issue} ->
         socket
         |> assign(:page_title, issue.title)
@@ -129,16 +130,26 @@ defmodule CymphoWeb.IssueLive.Show do
       "in_progress" => :in_progress,
       "in_review" => :in_review,
       "done" => :done,
-      "blocked" => :blocked
+      "blocked" => :blocked,
+      "cancelled" => :cancelled
     }
 
     case Map.fetch(status_atoms, status) do
       {:ok, status_atom} ->
-        case Issues.update_issue(socket.assigns.issue, %{status: status_atom}) do
-          {:ok, _issue} ->
-            {:noreply, socket}
+        case Issues.transition_issue(socket.assigns.issue, status_atom) do
+          {:ok, issue} ->
+            {:noreply,
+             socket
+             |> assign(issue: issue)
+             |> put_flash(:info, "Status updated to #{status}")}
 
-          {:error, _changeset} ->
+          {:error, :invalid_transition} ->
+            {:noreply, put_flash(socket, :error, "Invalid transition")}
+
+          {:error, :blocked_by_active_issues} ->
+            {:noreply, put_flash(socket, :error, "Issue is blocked by active issues")}
+
+          {:error, _reason} ->
             {:noreply, put_flash(socket, :error, "Failed to update status")}
         end
 
@@ -157,8 +168,11 @@ defmodule CymphoWeb.IssueLive.Show do
 
       atom ->
         case Issues.update_issue(socket.assigns.issue, %{priority: atom}) do
-          {:ok, _issue} -> {:noreply, socket}
-          {:error, _changeset} -> {:noreply, put_flash(socket, :error, "Failed to update priority")}
+          {:ok, issue} ->
+            {:noreply, socket |> assign(issue: issue) |> put_flash(:info, "Priority updated")}
+
+          {:error, _changeset} ->
+            {:noreply, put_flash(socket, :error, "Failed to update priority")}
         end
     end
   end
@@ -176,16 +190,35 @@ defmodule CymphoWeb.IssueLive.Show do
   @impl true
   def handle_event("save_title", %{"title" => title}, socket) do
     case Issues.update_issue(socket.assigns.issue, %{title: title}) do
-      {:ok, issue} -> {:noreply, assign(socket, issue: issue, editing: nil)}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update title")}
+      {:ok, issue} ->
+        {:noreply,
+         socket
+         |> assign(issue: issue, editing: nil)
+         |> put_flash(:info, "Title updated")}
+
+      {:error, _} ->
+        message =
+          if String.trim(title) == "" do
+            "Title cannot be empty"
+          else
+            "Failed to update title"
+          end
+
+        {:noreply, put_flash(socket, :error, message)}
     end
   end
 
   @impl true
   def handle_event("save_description", %{"description" => description}, socket) do
     case Issues.update_issue(socket.assigns.issue, %{description: description}) do
-      {:ok, issue} -> {:noreply, assign(socket, issue: issue, editing: nil)}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update description")}
+      {:ok, issue} ->
+        {:noreply,
+         socket
+         |> assign(issue: issue, editing: nil)
+         |> put_flash(:info, "Description updated")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update description")}
     end
   end
 
@@ -210,19 +243,35 @@ defmodule CymphoWeb.IssueLive.Show do
     {:noreply, assign(socket, assignee_search: q)}
   end
 
+  def handle_event("search_assignee", %{"value" => q}, socket) do
+    {:noreply, assign(socket, assignee_search: q)}
+  end
+
   @impl true
   def handle_event("assign_issue", %{"agent_id" => agent_id}, socket) do
     case Issues.update_issue(socket.assigns.issue, %{assignee_id: agent_id}) do
-      {:ok, issue} -> {:noreply, assign(socket, issue: issue, assignee_search: "")}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to assign issue")}
+      {:ok, issue} ->
+        {:noreply,
+         socket
+         |> assign(issue: issue, assignee_search: "")
+         |> put_flash(:info, "Assignee updated")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to assign issue")}
     end
   end
 
   @impl true
   def handle_event("unassign_issue", _params, socket) do
     case Issues.update_issue(socket.assigns.issue, %{assignee_id: nil}) do
-      {:ok, issue} -> {:noreply, assign(socket, issue: issue)}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to unassign issue")}
+      {:ok, issue} ->
+        {:noreply,
+         socket
+         |> assign(issue: issue)
+         |> put_flash(:info, "Assignee removed")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to unassign issue")}
     end
   end
 
@@ -235,19 +284,30 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_event("spawn_agent", %{"agent_id" => agent_id}, socket) do
     issue = socket.assigns.issue
 
-    case Orchestrator.start_and_run(issue, agent_id) do
-      {:ok, _pid} ->
-        {:ok, _updated_agent} =
-          Agents.update_agent(%Agents.Agent{id: agent_id}, %{status: :running})
-
-        {:noreply,
-         socket
-         |> put_flash(:info, "Agent spawned successfully")
-         |> assign(:show_agent_panel, false)
-         |> assign(:agents, Agents.list_agents_by_status(:idle))}
-
+    with {:ok, checked_out} <- Issues.checkout_issue(issue, agent_id),
+         {:ok, _pid} <- Orchestrator.start_and_run(checked_out, agent_id),
+         {:ok, agent} <- Agents.get_agent(agent_id),
+         {:ok, _updated_agent} <- Agents.update_agent(agent, %{status: :running}) do
+      {:noreply,
+       socket
+       |> put_flash(:info, "Agent started successfully")
+       |> assign(:issue, checked_out)
+       |> assign(:show_agent_panel, false)
+       |> assign(:agents, list_idle_agents(socket))}
+    else
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Failed to spawn agent: #{inspect(reason)}")}
+    end
+  end
+
+  @impl true
+  def handle_event("release_issue", _params, socket) do
+    case Issues.release_issue(socket.assigns.issue) do
+      {:ok, issue} ->
+        {:noreply, assign(socket, issue: issue)}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to release issue: #{inspect(reason)}")}
     end
   end
 
@@ -263,7 +323,16 @@ defmodule CymphoWeb.IssueLive.Show do
              "resolved_by_user_id" => user_id
            }) do
       interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, socket.assigns.work_products, socket.assigns.tool_call_traces)
+
+      timeline =
+        build_timeline(
+          socket.assigns.issue,
+          socket.assigns.runs,
+          interactions,
+          socket.assigns.work_products,
+          socket.assigns.tool_call_traces
+        )
+
       {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
     else
       {:error, :invalid_transition} ->
@@ -280,7 +349,7 @@ defmodule CymphoWeb.IssueLive.Show do
   @impl true
   def handle_event(
         "respond_questions",
-        %{"id" => id, "response" => response},
+        %{"_id" => id, "response" => response},
         socket
       ) do
     current_user = socket.assigns[:current_user]
@@ -294,7 +363,16 @@ defmodule CymphoWeb.IssueLive.Show do
              "response" => response
            }) do
       interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, socket.assigns.work_products, socket.assigns.tool_call_traces)
+
+      timeline =
+        build_timeline(
+          socket.assigns.issue,
+          socket.assigns.runs,
+          interactions,
+          socket.assigns.work_products,
+          socket.assigns.tool_call_traces
+        )
+
       {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
     else
       {:error, :invalid_transition} ->
@@ -352,12 +430,19 @@ defmodule CymphoWeb.IssueLive.Show do
 
   @impl true
   def handle_event("show_revision_diff", %{"revision_id" => revision_id}, socket) do
-    case Documents.diff_revision(revision_id) do
-      {:ok, diff_result} ->
-        {:noreply, assign(socket, :selected_revision_diff, diff_result)}
+    revisions = socket.assigns.revisions
 
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Revision not found")}
+    latest_revision =
+      case revisions do
+        [first | _] -> first
+        [] -> nil
+      end
+
+    if latest_revision do
+      diff_result = Documents.get_diff(revision_id, latest_revision.id)
+      {:noreply, assign(socket, :selected_revision_diff, diff_result)}
+    else
+      {:noreply, put_flash(socket, :error, "No revisions to compare")}
     end
   end
 
@@ -373,7 +458,7 @@ defmodule CymphoWeb.IssueLive.Show do
     else
       document = socket.assigns.selected_document
 
-      case Documents.restore_revision(document.id, revision_id) do
+      case Documents.rollback_to_revision(document, revision_id) do
         {:ok, _restored} ->
           # Reload documents and revisions
           documents = Documents.list_documents(socket.assigns.issue.id)
@@ -388,6 +473,9 @@ defmodule CymphoWeb.IssueLive.Show do
              selected_revision_diff: nil
            )}
 
+        {:error, :pending_approvals} ->
+          {:noreply, put_flash(socket, :error, "Cannot restore: issue has pending approvals")}
+
         {:error, _changeset} ->
           {:noreply, put_flash(socket, :error, "Failed to restore revision")}
       end
@@ -398,7 +486,16 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:issue_updated, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
       runs = HeartbeatEngine.list_runs_for_issue(updated_issue.id)
-      socket = assign(socket, issue: updated_issue, runs: runs)
+
+      socket =
+        socket
+        |> assign(issue: updated_issue, runs: runs)
+        |> push_event("toast", %{
+          message: "Issue updated by another user",
+          type: "info",
+          key: "issue_#{updated_issue.id}_updated"
+        })
+
       {:noreply, maybe_rebuild_timeline(socket)}
     else
       {:noreply, socket}
@@ -411,7 +508,15 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:comment_created, updated_issue}, socket) do
     if socket.assigns.issue.id == updated_issue.id do
-      socket = assign(socket, :issue, updated_issue)
+      socket =
+        socket
+        |> assign(:issue, updated_issue)
+        |> push_event("toast", %{
+          message: "New comment added",
+          type: "info",
+          key: "comment_#{updated_issue.id}_created"
+        })
+
       {:noreply, maybe_rebuild_timeline(socket)}
     else
       {:noreply, socket}
@@ -441,6 +546,7 @@ defmodule CymphoWeb.IssueLive.Show do
     case Issues.get_issue(socket.assigns.issue.id) do
       {:ok, issue} ->
         {:noreply, assign(socket, :issue, issue)}
+
       {:error, _} ->
         {:noreply, socket}
     end
@@ -450,6 +556,7 @@ defmodule CymphoWeb.IssueLive.Show do
     case Issues.get_issue(socket.assigns.issue.id) do
       {:ok, issue} ->
         {:noreply, assign(socket, :issue, issue)}
+
       {:error, _} ->
         {:noreply, socket}
     end
@@ -458,7 +565,16 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:interaction_created, interaction}, socket) do
     if socket.assigns.issue.id == interaction.issue_id do
       interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, socket.assigns.work_products, socket.assigns.tool_call_traces)
+
+      timeline =
+        build_timeline(
+          socket.assigns.issue,
+          socket.assigns.runs,
+          interactions,
+          socket.assigns.work_products,
+          socket.assigns.tool_call_traces
+        )
+
       {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
     else
       {:noreply, socket}
@@ -468,7 +584,16 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:interaction_updated, interaction}, socket) do
     if socket.assigns.issue.id == interaction.issue_id do
       interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, socket.assigns.work_products, socket.assigns.tool_call_traces)
+
+      timeline =
+        build_timeline(
+          socket.assigns.issue,
+          socket.assigns.runs,
+          interactions,
+          socket.assigns.work_products,
+          socket.assigns.tool_call_traces
+        )
+
       {:noreply, assign(socket, interactions: interactions, timeline: timeline)}
     else
       {:noreply, socket}
@@ -478,7 +603,16 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:work_product_created, work_product}, socket) do
     if socket.assigns.issue.id == work_product.issue_id do
       work_products = WorkProducts.list_work_products(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, socket.assigns.interactions, work_products, socket.assigns.tool_call_traces)
+
+      timeline =
+        build_timeline(
+          socket.assigns.issue,
+          socket.assigns.runs,
+          socket.assigns.interactions,
+          work_products,
+          socket.assigns.tool_call_traces
+        )
+
       {:noreply, assign(socket, work_products: work_products, timeline: timeline)}
     else
       {:noreply, socket}
@@ -488,7 +622,16 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:work_product_updated, work_product}, socket) do
     if socket.assigns.issue.id == work_product.issue_id do
       work_products = WorkProducts.list_work_products(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, socket.assigns.interactions, work_products, socket.assigns.tool_call_traces)
+
+      timeline =
+        build_timeline(
+          socket.assigns.issue,
+          socket.assigns.runs,
+          socket.assigns.interactions,
+          work_products,
+          socket.assigns.tool_call_traces
+        )
+
       {:noreply, assign(socket, work_products: work_products, timeline: timeline)}
     else
       {:noreply, socket}
@@ -498,7 +641,16 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:work_product_deleted, issue_id}, socket) do
     if socket.assigns.issue.id == issue_id do
       work_products = WorkProducts.list_work_products(socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, socket.assigns.interactions, work_products, socket.assigns.tool_call_traces)
+
+      timeline =
+        build_timeline(
+          socket.assigns.issue,
+          socket.assigns.runs,
+          socket.assigns.interactions,
+          work_products,
+          socket.assigns.tool_call_traces
+        )
+
       {:noreply, assign(socket, work_products: work_products, timeline: timeline)}
     else
       {:noreply, socket}
@@ -508,7 +660,16 @@ defmodule CymphoWeb.IssueLive.Show do
   def handle_info({:tool_call_trace_created, trace}, socket) do
     if socket.assigns.issue.id == trace.issue_id do
       tool_call_traces = ToolCallTraces.list_tool_call_traces(issue_id: socket.assigns.issue.id)
-      timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, socket.assigns.interactions, socket.assigns.work_products, tool_call_traces)
+
+      timeline =
+        build_timeline(
+          socket.assigns.issue,
+          socket.assigns.runs,
+          socket.assigns.interactions,
+          socket.assigns.work_products,
+          tool_call_traces
+        )
+
       {:noreply, assign(socket, tool_call_traces: tool_call_traces, timeline: timeline)}
     else
       {:noreply, socket}
@@ -529,16 +690,28 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:run_status_changed, payload}, socket) do
     issue_id = socket.assigns.issue.id
+
     if payload[:issue_id] == issue_id do
-      {message, type} = case payload do
-        %{new_status: "running"} -> {"Run started", "info"}
-        %{new_status: "completed"} -> {"Run completed successfully", "success"}
-        %{new_status: "failed"} -> {"Run failed", "error"}
-        %{new_status: "cancelled"} -> {"Run cancelled", "warning"}
-        _ -> {"Run status updated", "info"}
-      end
+      {message, type} =
+        case payload do
+          %{new_status: "running"} -> {"Run started", "info"}
+          %{new_status: "completed"} -> {"Run completed successfully", "success"}
+          %{new_status: "failed"} -> {"Run failed", "error"}
+          %{new_status: "cancelled"} -> {"Run cancelled", "warning"}
+          _ -> {"Run status updated", "info"}
+        end
+
       runs = HeartbeatEngine.list_runs_for_issue(issue_id)
-      socket = socket |> assign(:runs, runs) |> push_event("toast", %{message: message, type: type, key: "run_#{issue_id}_#{payload[:new_status]}"})
+
+      socket =
+        socket
+        |> assign(:runs, runs)
+        |> push_event("toast", %{
+          message: message,
+          type: type,
+          key: "run_#{issue_id}_#{payload[:new_status]}"
+        })
+
       {:noreply, maybe_rebuild_timeline(socket)}
     else
       {:noreply, socket}
@@ -546,7 +719,8 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   def handle_info({:document_updated, updated_document}, socket) do
-    if socket.assigns.selected_document && socket.assigns.selected_document.id == updated_document.id do
+    if socket.assigns.selected_document &&
+         socket.assigns.selected_document.id == updated_document.id do
       revisions = Documents.list_revisions(updated_document.id)
       {:noreply, assign(socket, revisions: revisions)}
     else
@@ -556,17 +730,12 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   defp valid_status_options(current_status) do
-    all = [
-      {"Backlog", "backlog"},
-      {"Todo", "todo"},
-      {"In progress", "in_progress"},
-      {"In review", "in_review"},
-      {"Done", "done"},
-      {"Blocked", "blocked"}
-    ]
-
-    current_str = to_string(current_status)
-    Enum.reject(all, fn {_, value} -> value == current_str end)
+    Cympho.Issues.Issue.status_options()
+    |> Enum.reject(&(&1 == current_status))
+    |> Enum.map(fn status ->
+      {status |> to_string() |> String.replace("_", " ") |> String.capitalize(),
+       to_string(status)}
+    end)
   end
 
   defp filtered_agents(all_agents, search) do
@@ -592,10 +761,42 @@ defmodule CymphoWeb.IssueLive.Show do
   def run_status_label("cancelled"), do: "Cancelled"
   def run_status_label(other), do: String.capitalize(to_string(other))
 
-  def format_cost(cost) when not is_nil(cost) do
-    "$" <> (:erlang.float_to_binary(cost / 1, decimals: 4))
+  defp get_scoped_issue(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Issues.get_company_issue(company_id, id)
+      _ -> Issues.get_issue(id)
+    end
   end
-  def format_cost(_), do: "$0.00"
+
+  defp list_idle_agents(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Agents.list_agents_by_status(:idle, company_id)
+      _ -> Agents.list_agents_by_status(:idle)
+    end
+  end
+
+  defp list_company_agents(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Agents.list_agents_by_company(company_id)
+      _ -> Agents.list_agents()
+    end
+  end
+
+  def format_cost(cost) do
+    "$" <>
+      (cost
+       |> decimal_or_zero()
+       |> Decimal.round(4)
+       |> Decimal.to_string(:normal))
+  end
+
+  def positive_cost?(cost), do: Decimal.compare(decimal_or_zero(cost), Decimal.new("0")) == :gt
+
+  defp decimal_or_zero(%Decimal{} = value), do: value
+  defp decimal_or_zero(value) when is_integer(value), do: Decimal.new(value)
+  defp decimal_or_zero(value) when is_float(value), do: Decimal.from_float(value)
+  defp decimal_or_zero(value) when is_binary(value), do: Decimal.new(value)
+  defp decimal_or_zero(_), do: Decimal.new("0")
 
   def format_tokens(tokens) when is_integer(tokens) do
     tokens
@@ -606,6 +807,7 @@ defmodule CymphoWeb.IssueLive.Show do
     |> Enum.join(",")
     |> String.reverse()
   end
+
   def format_tokens(_), do: "0"
 
   def format_run_duration(run) do
@@ -613,9 +815,11 @@ defmodule CymphoWeb.IssueLive.Show do
       run.started_at && run.completed_at ->
         diff = DateTime.diff(run.completed_at, run.started_at, :second)
         format_seconds(diff)
+
       run.started_at ->
         diff = DateTime.diff(DateTime.utc_now(), run.started_at, :second)
         format_seconds(diff)
+
       true ->
         "-"
     end
@@ -684,7 +888,9 @@ defmodule CymphoWeb.IssueLive.Show do
       end)
 
     # Combine and sort by timestamp (newest last for chat view)
-    (comments_timeline ++ runs_timeline ++ interactions_timeline ++ work_products_timeline ++ tool_call_traces_timeline)
+    (comments_timeline ++
+       runs_timeline ++
+       interactions_timeline ++ work_products_timeline ++ tool_call_traces_timeline)
     |> Enum.sort_by(& &1.timestamp, DateTime)
   end
 
@@ -693,7 +899,16 @@ defmodule CymphoWeb.IssueLive.Show do
     interactions = IssueThreadInteractions.list_interactions(socket.assigns.issue.id)
     work_products = WorkProducts.list_work_products(socket.assigns.issue.id)
     tool_call_traces = ToolCallTraces.list_tool_call_traces(issue_id: socket.assigns.issue.id)
-    timeline = build_timeline(socket.assigns.issue, socket.assigns.runs, interactions, work_products, tool_call_traces)
+
+    timeline =
+      build_timeline(
+        socket.assigns.issue,
+        socket.assigns.runs,
+        interactions,
+        work_products,
+        tool_call_traces
+      )
+
     socket
     |> assign(:timeline, timeline)
     |> assign(:interactions, interactions)
@@ -710,10 +925,11 @@ defmodule CymphoWeb.IssueLive.Show do
       diff < 60 -> "just now"
       diff < 3600 -> "#{div(diff, 60)}m ago"
       diff < 86400 -> "#{div(diff, 3600)}h ago"
-      diff < 604800 -> "#{div(diff, 86400)}d ago"
+      diff < 604_800 -> "#{div(diff, 86400)}d ago"
       true -> Calendar.strftime(dt, "%b %d, %Y")
     end
   end
+
   def format_timeline_timestamp(_), do: ""
 
   # Check if there's a plan approval blocker for rollback

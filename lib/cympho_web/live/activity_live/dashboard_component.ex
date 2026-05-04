@@ -6,7 +6,11 @@ defmodule CymphoWeb.ActivityLive.DashboardComponent do
   @impl true
   def update(%{issue_id: issue_id} = assigns, socket) do
     if connected?(socket) do
-      company_id = Cympho.Repo.one(from i in Cympho.Issues.Issue, where: i.id == ^issue_id, select: i.company_id)
+      company_id =
+        Cympho.Repo.one(
+          from i in Cympho.Issues.Issue, where: i.id == ^issue_id, select: i.company_id
+        )
+
       if company_id, do: Activities.subscribe(company_id)
     end
 
@@ -23,16 +27,18 @@ defmodule CymphoWeb.ActivityLive.DashboardComponent do
     {:ok, socket}
   end
 
-  @impl true
   def handle_info({:activity_created, _activity}, socket) do
     activities = Activities.list_activities(socket.assigns.issue_id)
     statistics = Activities.get_activity_statistics(socket.assigns.issue_id)
 
     {:noreply,
-     assign(socket, activities: activities, statistics: statistics, chart_data: prepare_chart_data(activities))}
+     assign(socket,
+       activities: activities,
+       statistics: statistics,
+       chart_data: prepare_chart_data(activities)
+     )}
   end
 
-  @impl true
   def handle_info(_, socket) do
     {:noreply, socket}
   end
@@ -64,35 +70,22 @@ defmodule CymphoWeb.ActivityLive.DashboardComponent do
     }
   end
 
-  defp max_count(chart_data) do
-    chart_data.by_action
-    |> Enum.map(fn {_action, count} -> count end)
-    |> Enum.max(fn -> 0 end)
+  defp max_count(%{by_action: by_action}) do
+    if Enum.empty?(by_action),
+      do: 0,
+      else: Enum.max_by(by_action, fn {_action, count} -> count end) |> elem(1)
   end
 
-  defp action_color(action) do
-    case action do
-      "created" -> "#5e6ad2"
-      "title_changed" -> "#7170ff"
-      "description_changed" -> "#828fff"
-      "status_changed" -> "#27a644"
-      "assigned" -> "#10b981"
-      "unassigned" -> "#f59e0b"
-      "blocker_added" -> "#ef4444"
-      "blocker_removed" -> "#22c55e"
-      "comment_added" -> "#3b82f6"
-      "approval_created" -> "#8b5cf6"
-      "approval_resolved" -> "#a78bfa"
-      "heartbeat_started" -> "#ec4899"
-      "heartbeat_completed" -> "#22c55e"
-      "heartbeat_failed" -> "#ef4444"
-      "cost_incurred" -> "#f59e0b"
-      "budget_threshold_exceeded" -> "#dc2626"
-      _ -> "#6b7280"
-    end
-  end
+  defp action_color("created"), do: "#4ade80"
+  defp action_color("updated"), do: "#60a5fa"
+  defp action_color("deleted"), do: "#f87171"
+  defp action_color("commented"), do: "#fbbf24"
+  defp action_color("assigned"), do: "#c084fc"
+  defp action_color("unassigned"), do: "#a78bfa"
+  defp action_color(_), do: "#7170ff"
 
-  defp actor_color("agent"), do: "#5e6ad2"
-  defp actor_color("user"), do: "#7170ff"
-  defp actor_color("system"), do: "#8a8f98"
+  defp actor_color("user"), do: "#60a5fa"
+  defp actor_color("system"), do: "#fbbf24"
+  defp actor_color("agent"), do: "#4ade80"
+  defp actor_color(_), do: "#7170ff"
 end

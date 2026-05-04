@@ -7,6 +7,7 @@ defmodule Cympho.Comments.Parser do
     |> Enum.map(fn [_, mention] -> mention end)
     |> Enum.uniq()
   end
+
   def extract_mentions(_), do: []
 
   def extract_issue_refs(text) when is_binary(text) do
@@ -16,6 +17,7 @@ defmodule Cympho.Comments.Parser do
     end)
     |> Enum.uniq_by(& &1.ref)
   end
+
   def extract_issue_refs(_), do: []
 
   def resolve_issue_refs(refs) when is_list(refs) do

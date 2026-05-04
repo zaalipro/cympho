@@ -2,6 +2,25 @@ import "phoenix_html"
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 
+// Theme management
+function initTheme() {
+  const stored = localStorage.getItem('cympho-theme');
+  if (stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  } else if (stored === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+}
+
+window.toggleTheme = function() {
+  const currentTheme = document.documentElement.getAttribute('data-theme');
+  const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', newTheme);
+  localStorage.setItem('cympho-theme', newTheme);
+};
+
 // Timeline scroll hook for chat-style auto-scroll
 const TimelineScroll = {
   mounted() {
@@ -106,22 +125,34 @@ const KanbanSortable = {
   },
   _initSortables() {
     const hook = this;
+    if (typeof window.Sortable !== "function") {
+      this.el.dataset.dragUnavailable = "true";
+      return;
+    }
+
+    this.el.dataset.dragUnavailable = "false";
     const columns = this.el.querySelectorAll("[data-kanban-column]");
     columns.forEach(column => {
-      const sortable = new window.Sortable(column, {
-        group: "kanban",
-        ghostClass: "opacity-30",
-        dragClass: "rotate-2",
-        animation: 150,
-        onEnd(evt) {
-          const issueId = evt.item.dataset.issueId;
-          const toStatus = evt.to.dataset.kanbanColumn;
-          const fromStatus = evt.from.dataset.kanbanColumn;
-          if (fromStatus === toStatus) return;
-          hook.pushEvent("transition_issue", {id: issueId, to_status: toStatus});
-        }
-      });
-      this.sortables.push(sortable);
+      try {
+        const sortable = new window.Sortable(column, {
+          group: "kanban",
+          ghostClass: "opacity-30",
+          dragClass: "rotate-2",
+          animation: 150,
+          filter: "a, button, input, textarea, select, [data-no-drag]",
+          preventOnFilter: false,
+          onEnd(evt) {
+            const issueId = evt.item.dataset.issueId;
+            const toStatus = evt.to.dataset.kanbanColumn;
+            const fromStatus = evt.from.dataset.kanbanColumn;
+            if (fromStatus === toStatus) return;
+            hook.pushEvent("transition_issue", {id: issueId, to_status: toStatus});
+          }
+        });
+        this.sortables.push(sortable);
+      } catch (_error) {
+        this.el.dataset.dragUnavailable = "true";
+      }
     });
   }
 };
@@ -135,6 +166,11 @@ function highlightActiveNav() {
     const navPath = el.dataset.navPath;
     const isActive = path === navPath || path.startsWith(navPath + '/');
     el.setAttribute('data-active', isActive ? 'true' : 'false');
+    if (isActive) {
+      el.setAttribute('aria-current', 'page');
+    } else {
+      el.removeAttribute('aria-current');
+    }
   });
 
   // Mobile bottom nav
@@ -310,11 +346,11 @@ function initCompanySwitcher() {
       const isCurrent = company.id === currentCompanyId;
 
       const item = document.createElement('div');
-      item.className = `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm cursor-pointer transition-colors ${isCurrent ? 'bg-white/[0.06] text-text-primary' : 'text-text-secondary hover:bg-white/[0.04] hover:text-text-primary'}`;
+      item.className = `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm cursor-pointer transition-colors ${isCurrent ? 'bg-surface-hover text-text-primary' : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'}`;
       item.dataset.companyId = company.id;
 
       const logoDiv = document.createElement('div');
-      logoDiv.className = 'w-8 h-8 rounded-lg overflow-hidden border-l-2 border-brand flex items-center justify-center shrink-0 bg-brand/10';
+      logoDiv.className = 'w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center shrink-0 bg-brand/10';
 
       if (company.logo_url) {
         const img = document.createElement('img');
@@ -408,11 +444,64 @@ function initCompanySwitcher() {
   window.openCompanySwitcher = openModal;
 }
 
+// Org chart export hook
+const OrgChartExport = {
+  mounted() {
+    this.handleEvent("export_svg", () => {
+      this.exportToSVG();
+    });
+  },
+
+  exportToSVG() {
+    const orgChartContainer = document.querySelector("#org-chart-export-area");
+    if (!orgChartContainer) {
+      console.error("Org chart container not found");
+      return;
+    }
+
+    // Get the computed styles
+    const width = orgChartContainer.offsetWidth;
+    const height = orgChartContainer.offsetHeight;
+
+    // Create SVG element
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("width", width);
+    svg.setAttribute("height", height);
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+    // Create foreignObject to embed HTML
+    const foreignObject = document.createElementNS(svgNS, "foreignObject");
+    foreignObject.setAttribute("width", "100%");
+    foreignObject.setAttribute("height", "100%");
+
+    // Clone the org chart content
+    const clonedContent = orgChartContainer.cloneNode(true);
+    foreignObject.appendChild(clonedContent);
+    svg.appendChild(foreignObject);
+
+    // Serialize to string
+    const serializer = new XMLSerializer();
+    const svgString = serializer.serializeToString(svg);
+
+    // Create download link
+    const blob = new Blob([svgString], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `org-chart-${new Date().toISOString().split("T")[0]}.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+};
+
 // Boot
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
 const liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
-  hooks: {TimelineScroll, KanbanSortable, Toast}
+  hooks: {TimelineScroll, KanbanSortable, Toast, OrgChartExport}
 });
 
 liveSocket.connect();
@@ -420,6 +509,7 @@ window.liveSocket = liveSocket;
 
 // Initialize after DOM ready
 document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
   highlightActiveNav();
   initCommandPalette();
   initCompanySwitcher();
@@ -427,10 +517,18 @@ document.addEventListener('DOMContentLoaded', () => {
   initShortcutsModal();
 
   // Re-highlight on LiveView navigation
-  liveSocket.addEventListener('phx:navigate', highlightActiveNav);
-  liveSocket.addEventListener('phx:page-loading-stop', () => {
-    highlightActiveNav();
-    initCompanySwitcher();
+  window.addEventListener('phx:navigate', () => {
+    window.requestAnimationFrame(() => {
+      initTheme();
+      highlightActiveNav();
+    });
+  });
+  window.addEventListener('phx:page-loading-stop', () => {
+    window.requestAnimationFrame(() => {
+      initTheme();
+      highlightActiveNav();
+      initCompanySwitcher();
+    });
   });
 });
 

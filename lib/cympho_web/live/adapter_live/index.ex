@@ -88,7 +88,7 @@ defmodule CymphoWeb.AdapterLive.Index do
   defp adapter_icon(:process), do: "⚙"
   defp adapter_icon(_), do: "📦"
 
-  defp agent_count(socket, key) do
-    length(Map.get(socket.assigns.agents_by_adapter, key, []))
+  defp agent_count(assigns, key) do
+    length(Map.get(assigns.agents_by_adapter, key, []))
   end
 end

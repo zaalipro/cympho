@@ -11,18 +11,22 @@ defmodule Cympho.RateLimiting.BroadcastDedup do
   end
 
   def should_broadcast?(topic, event, payload) do
-    key = {topic, event, :erlang.phash2(payload)}
+    key = {topic, event, payload_digest(payload)}
     GenServer.call(__MODULE__, {:check_and_mark, key})
   end
 
   def should_broadcast_pubsub?(topic, message) do
-    key = {:pubsub, topic, :erlang.phash2(message)}
+    key = {:pubsub, topic, payload_digest(message)}
     GenServer.call(__MODULE__, {:check_and_mark, key})
   end
 
   @doc false
   def reset do
     GenServer.call(__MODULE__, :reset)
+  end
+
+  defp payload_digest(payload) do
+    :crypto.hash(:sha256, :erlang.term_to_binary(payload))
   end
 
   @impl true

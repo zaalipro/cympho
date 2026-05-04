@@ -1,82 +1,73 @@
-<.header>
-  Edit Routine
-  <:actions>
-    <.link navigate={~p"/routines"} class="phx-btn-secondary">
-      Cancel
-    </.link>
-  </:actions>
-</.header>
-
-<div class="routine-form">
-  <.simple_form for={@form} as={:routine} phx-submit="save">
-    <.input field={@form[:name]} label="Name" />
-    <.input field={@form[:description]} label="Description" type="textarea" />
-
-    <div class="form-group">
-      <label>Priority</label>
-      <select name="routine[priority]">
-        <option
-          value="critical"
-          {if @routine.priority == :critical, do: [selected: true], else: []}
-        >
-          Critical
-        </option>
-        <option value="high" {if @routine.priority == :high, do: [selected: true], else: []}>
-          High
-        </option>
-        <option value="medium" {if @routine.priority == :medium, do: [selected: true], else: []}>
-          Medium
-        </option>
-        <option value="low" {if @routine.priority == :low, do: [selected: true], else: []}>
-          Low
-        </option>
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label>Concurrency Policy</label>
-      <select name="routine[concurrency_policy]">
-        <option
-          value="coalesce_if_active"
-          {if @routine.concurrency_policy == :coalesce_if_active, do: [selected: true], else: []}
-        >
-          Coalesce if active
-        </option>
-        <option
-          value="skip_if_active"
-          {if @routine.concurrency_policy == :skip_if_active, do: [selected: true], else: []}
-        >
-          Skip if active
-        </option>
-        <option
-          value="always_enqueue"
-          {if @routine.concurrency_policy == :always_enqueue, do: [selected: true], else: []}
-        >
-          Always enqueue
-        </option>
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label>Catch-Up Policy</label>
-      <select name="routine[catch_up_policy]">
-        <option
-          value="skip_missed"
-          {if @routine.catch_up_policy == :skip_missed, do: [selected: true], else: []}
-        >
-          Skip missed
-        </option>
-        <option
-          value="enqueue_missed_with_cap"
-          {if @routine.catch_up_policy == :enqueue_missed_with_cap, do: [selected: true], else: []}
-        >
-          Enqueue missed with cap
-        </option>
-      </select>
-    </div>
-
+<div class="p-6 lg:p-8 max-w-3xl mx-auto w-full min-w-0">
+  <.header title="Edit Routine" subtitle={@routine.name}>
     <:actions>
-      <.button type="submit">Update Routine</.button>
+      <.app_link
+        navigate={~p"/routines"}
+        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+      >
+        Cancel
+      </.app_link>
     </:actions>
-  </.simple_form>
+  </.header>
+
+  <.form
+    for={@form}
+    phx-submit="save"
+    class="space-y-5 rounded-xl border border-border bg-surface p-5"
+  >
+    <.input field={@form[:name]} label="Name" required />
+    <.input field={@form[:description]} label="Description" type="textarea" rows={4} />
+
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <.input
+        type="select"
+        field={@form[:priority]}
+        label="Priority"
+        value={@routine.priority}
+        options={[
+          {"Critical", "critical"},
+          {"High", "high"},
+          {"Medium", "medium"},
+          {"Low", "low"}
+        ]}
+      />
+      <.input
+        type="select"
+        field={@form[:concurrency_policy]}
+        label="Concurrency Policy"
+        value={@routine.concurrency_policy}
+        options={[
+          {"Coalesce if active", "coalesce_if_active"},
+          {"Skip if active", "skip_if_active"},
+          {"Always enqueue", "always_enqueue"}
+        ]}
+      />
+      <.input
+        type="select"
+        field={@form[:catch_up_policy]}
+        label="Catch-up Policy"
+        value={@routine.catch_up_policy}
+        options={[
+          {"Skip missed", "skip_missed"},
+          {"Enqueue missed with cap", "enqueue_missed_with_cap"}
+        ]}
+      />
+      <.input type="number" field={@form[:catch_up_cap]} label="Catch-up Cap" min="1" />
+    </div>
+
+    <div class="flex items-center justify-end gap-2 border-t border-border pt-4">
+      <.app_link
+        navigate={~p"/routines/#{@routine.id}"}
+        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+      >
+        Cancel
+      </.app_link>
+      <button
+        type="submit"
+        class="rounded-lg bg-brand px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-accent"
+      >
+        Save Changes
+      </button>
+    </div>
+  </.form>
 </div>

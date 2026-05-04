@@ -188,6 +188,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
             resource: agent,
             metadata: %{board_approval_id: approval.id, agent_id: agent.id}
           )
+
           :ok
 
         {:error, :already_executed} ->
@@ -223,6 +224,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
                 actual_role: to_string(agent.role)
               }
             )
+
             :ok
           else
             # Safe atom conversion - doesn't crash on invalid role
@@ -241,6 +243,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
                         new_role: new_role
                       }
                     )
+
                     :ok
 
                   {:error, :already_executed} ->
@@ -263,6 +266,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
                     role: new_role
                   }
                 )
+
                 {:error, :invalid_role}
             end
           end
@@ -279,6 +283,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
               error: "agent_not_found"
             }
           )
+
           {:error, :agent_not_found}
       end
     else

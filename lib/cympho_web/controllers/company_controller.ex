@@ -18,6 +18,7 @@ defmodule CymphoWeb.CompanyController do
       {:ok, company} ->
         conn
         |> put_status(:created)
+
         json(conn, %{data: company})
 
       {:error, changeset} ->

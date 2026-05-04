@@ -4,7 +4,7 @@ defmodule CymphoWeb.GoalLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, :goals, Goals.list_goals())}
+    {:ok, assign(socket, :goals, list_goals(socket))}
   end
 
   @impl true
@@ -26,6 +26,13 @@ defmodule CymphoWeb.GoalLive.Index do
   def handle_event("delete_goal", %{"id" => id}, socket) do
     goal = Goals.get_goal!(id)
     {:ok, _} = Goals.delete_goal(goal)
-    {:noreply, assign(socket, :goals, Goals.list_goals())}
+    {:noreply, assign(socket, :goals, list_goals(socket))}
+  end
+
+  defp list_goals(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Goals.list_goals_by_company(company_id)
+      _ -> Goals.list_goals()
+    end
   end
 end

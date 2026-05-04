@@ -4,167 +4,78 @@ defmodule Cympho.Issues.StateMachineTest do
   alias Cympho.Issues.StateMachine
 
   describe "valid_transition?/2" do
-    # backlog transitions
-    test "backlog to todo is valid" do
-      assert StateMachine.valid_transition?(:backlog, :todo) == true
+    test "allows Paperclip V1 backlog transitions" do
+      assert StateMachine.valid_transition?(:backlog, :todo)
+      assert StateMachine.valid_transition?(:backlog, :cancelled)
+
+      refute StateMachine.valid_transition?(:backlog, :in_progress)
+      refute StateMachine.valid_transition?(:backlog, :blocked)
+      refute StateMachine.valid_transition?(:backlog, :done)
     end
 
-    test "backlog to in_progress is valid" do
-      assert StateMachine.valid_transition?(:backlog, :in_progress) == true
+    test "allows Paperclip V1 todo transitions" do
+      assert StateMachine.valid_transition?(:todo, :in_progress)
+      assert StateMachine.valid_transition?(:todo, :blocked)
+      assert StateMachine.valid_transition?(:todo, :cancelled)
+
+      refute StateMachine.valid_transition?(:todo, :done)
+      refute StateMachine.valid_transition?(:todo, :backlog)
     end
 
-    test "backlog to blocked is valid" do
-      assert StateMachine.valid_transition?(:backlog, :blocked) == true
+    test "allows autonomous completion from in_progress" do
+      assert StateMachine.valid_transition?(:in_progress, :in_review)
+      assert StateMachine.valid_transition?(:in_progress, :blocked)
+      assert StateMachine.valid_transition?(:in_progress, :done)
+      assert StateMachine.valid_transition?(:in_progress, :cancelled)
+
+      refute StateMachine.valid_transition?(:in_progress, :backlog)
     end
 
-    test "backlog to cancelled is valid" do
-      assert StateMachine.valid_transition?(:backlog, :cancelled) == true
+    test "allows review completion and change requests" do
+      assert StateMachine.valid_transition?(:in_review, :done)
+      assert StateMachine.valid_transition?(:in_review, :in_progress)
+      assert StateMachine.valid_transition?(:in_review, :cancelled)
+
+      refute StateMachine.valid_transition?(:in_review, :blocked)
     end
 
-    test "backlog to done is invalid" do
-      assert StateMachine.valid_transition?(:backlog, :done) == false
+    test "done and cancelled are terminal" do
+      for status <- [:backlog, :todo, :in_progress, :in_review, :blocked, :cancelled] do
+        refute StateMachine.valid_transition?(:done, status)
+      end
+
+      for status <- [:backlog, :todo, :in_progress, :in_review, :blocked, :done] do
+        refute StateMachine.valid_transition?(:cancelled, status)
+      end
     end
 
-    # todo transitions
-    test "todo to in_progress is valid" do
-      assert StateMachine.valid_transition?(:todo, :in_progress) == true
-    end
+    test "blocked can re-enter executable states or cancel" do
+      assert StateMachine.valid_transition?(:blocked, :todo)
+      assert StateMachine.valid_transition?(:blocked, :in_progress)
+      assert StateMachine.valid_transition?(:blocked, :cancelled)
 
-    test "todo to blocked is valid" do
-      assert StateMachine.valid_transition?(:todo, :blocked) == true
-    end
-
-    test "todo to cancelled is valid" do
-      assert StateMachine.valid_transition?(:todo, :cancelled) == true
-    end
-
-    test "todo to done is invalid" do
-      assert StateMachine.valid_transition?(:todo, :done) == false
-    end
-
-    # in_progress transitions
-    test "in_progress to in_review is valid" do
-      assert StateMachine.valid_transition?(:in_progress, :in_review) == true
-    end
-
-    test "in_progress to blocked is valid" do
-      assert StateMachine.valid_transition?(:in_progress, :blocked) == true
-    end
-
-    test "in_progress to cancelled is valid" do
-      assert StateMachine.valid_transition?(:in_progress, :cancelled) == true
-    end
-
-    test "in_progress to done is invalid" do
-      assert StateMachine.valid_transition?(:in_progress, :done) == false
-    end
-
-    # in_review transitions
-    test "in_review to done is valid" do
-      assert StateMachine.valid_transition?(:in_review, :done) == true
-    end
-
-    test "in_review to in_progress is valid" do
-      assert StateMachine.valid_transition?(:in_review, :in_progress) == true
-    end
-
-    test "in_review to cancelled is valid" do
-      assert StateMachine.valid_transition?(:in_review, :cancelled) == true
-    end
-
-    test "in_review to blocked is invalid" do
-      assert StateMachine.valid_transition?(:in_review, :blocked) == false
-    end
-
-    # done transitions
-    test "done to in_progress is valid (reopen)" do
-      assert StateMachine.valid_transition?(:done, :in_progress) == true
-    end
-
-    test "done to blocked is valid" do
-      assert StateMachine.valid_transition?(:done, :blocked) == true
-    end
-
-    test "done to backlog is invalid" do
-      assert StateMachine.valid_transition?(:done, :backlog) == false
-    end
-
-    # cancelled transitions
-    test "cancelled to todo is valid (reopen)" do
-      assert StateMachine.valid_transition?(:cancelled, :todo) == true
-    end
-
-    test "cancelled to in_progress is valid" do
-      assert StateMachine.valid_transition?(:cancelled, :in_progress) == true
-    end
-
-    test "cancelled to done is invalid" do
-      assert StateMachine.valid_transition?(:cancelled, :done) == false
-    end
-
-    test "cancelled to backlog is invalid" do
-      assert StateMachine.valid_transition?(:cancelled, :backlog) == false
-    end
-
-    # blocked transitions
-    test "blocked to backlog is valid" do
-      assert StateMachine.valid_transition?(:blocked, :backlog) == true
-    end
-
-    test "blocked to todo is valid" do
-      assert StateMachine.valid_transition?(:blocked, :todo) == true
-    end
-
-    test "blocked to in_progress is valid" do
-      assert StateMachine.valid_transition?(:blocked, :in_progress) == true
-    end
-
-    test "blocked to in_review is valid" do
-      assert StateMachine.valid_transition?(:blocked, :in_review) == true
-    end
-
-    test "blocked to done is valid" do
-      assert StateMachine.valid_transition?(:blocked, :done) == true
+      refute StateMachine.valid_transition?(:blocked, :backlog)
+      refute StateMachine.valid_transition?(:blocked, :in_review)
+      refute StateMachine.valid_transition?(:blocked, :done)
     end
   end
 
   describe "valid_transitions/1" do
-    test "backlog transitions" do
-      assert StateMachine.valid_transitions(:backlog) == [:todo, :in_progress, :blocked, :cancelled]
-    end
-
-    test "todo transitions" do
+    test "returns Paperclip V1 transitions" do
+      assert StateMachine.valid_transitions(:backlog) == [:todo, :cancelled]
       assert StateMachine.valid_transitions(:todo) == [:in_progress, :blocked, :cancelled]
-    end
 
-    test "in_progress transitions" do
-      assert StateMachine.valid_transitions(:in_progress) == [:in_review, :blocked, :cancelled]
-    end
-
-    test "in_review transitions" do
-      assert StateMachine.valid_transitions(:in_review) == [:done, :in_progress, :cancelled]
-    end
-
-    test "done transitions (reopen or block)" do
-      assert StateMachine.valid_transitions(:done) == [:in_progress, :blocked]
-    end
-
-    test "blocked transitions (can go anywhere)" do
-      assert StateMachine.valid_transitions(:blocked) == [
-               :backlog,
-               :todo,
-               :in_progress,
+      assert StateMachine.valid_transitions(:in_progress) == [
                :in_review,
+               :blocked,
                :done,
                :cancelled
              ]
-    end
 
-    test "cancelled transitions" do
-      assert StateMachine.valid_transitions(:cancelled) == [:todo, :in_progress]
-    end
-
-    test "unknown status returns empty list" do
+      assert StateMachine.valid_transitions(:in_review) == [:done, :in_progress, :cancelled]
+      assert StateMachine.valid_transitions(:blocked) == [:todo, :in_progress, :cancelled]
+      assert StateMachine.valid_transitions(:done) == []
+      assert StateMachine.valid_transitions(:cancelled) == []
       assert StateMachine.valid_transitions(:unknown) == []
     end
   end

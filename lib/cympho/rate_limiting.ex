@@ -18,7 +18,9 @@ defmodule Cympho.RateLimiting do
 
   def check_message_rate(socket) do
     now = System.monotonic_time(:millisecond)
-    bucket = Map.get(socket.assigns, :rate_limit_bucket, %{tokens: @message_rate, last_refill: now})
+
+    bucket =
+      Map.get(socket.assigns, :rate_limit_bucket, %{tokens: @message_rate, last_refill: now})
 
     elapsed = now - bucket.last_refill
     refill = div(elapsed * @message_rate, @message_rate_period_ms)

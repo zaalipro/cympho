@@ -30,11 +30,11 @@ defmodule Cympho.HeartbeatEngineTest do
       insert_agent(agent_id)
 
       {:ok, run} =
-               HeartbeatEngine.create_run(%{
-                 agent_id: agent_id,
-                 issue_id: Ecto.UUID.generate(),
-                 adapter: "claude_local"
-               })
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: Ecto.UUID.generate(),
+          adapter: "claude_local"
+        })
 
       assert {:ok, started} = HeartbeatEngine.start_run(run)
       assert started.status == "running"
@@ -54,11 +54,11 @@ defmodule Cympho.HeartbeatEngineTest do
       insert_agent(agent_id)
 
       {:ok, run} =
-               HeartbeatEngine.create_run(%{
-                 agent_id: agent_id,
-                 issue_id: Ecto.UUID.generate(),
-                 adapter: "claude_local"
-               })
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: Ecto.UUID.generate(),
+          adapter: "claude_local"
+        })
 
       {:ok, started} = HeartbeatEngine.start_run(run)
 
@@ -82,11 +82,11 @@ defmodule Cympho.HeartbeatEngineTest do
       insert_agent(agent_id)
 
       {:ok, run} =
-               HeartbeatEngine.create_run(%{
-                 agent_id: agent_id,
-                 issue_id: Ecto.UUID.generate(),
-                 adapter: "claude_local"
-               })
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: Ecto.UUID.generate(),
+          adapter: "claude_local"
+        })
 
       {:ok, started} = HeartbeatEngine.start_run(run)
 
@@ -103,11 +103,11 @@ defmodule Cympho.HeartbeatEngineTest do
       insert_agent(agent_id)
 
       {:ok, run} =
-               HeartbeatEngine.create_run(%{
-                 agent_id: agent_id,
-                 issue_id: Ecto.UUID.generate(),
-                 adapter: "claude_local"
-               })
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: Ecto.UUID.generate(),
+          adapter: "claude_local"
+        })
 
       assert {:ok, cancelled} = HeartbeatEngine.cancel_run(run)
       assert cancelled.status == "cancelled"
@@ -133,11 +133,11 @@ defmodule Cympho.HeartbeatEngineTest do
       insert_agent(agent_id)
 
       {:ok, run} =
-               HeartbeatEngine.create_run(%{
-                 agent_id: agent_id,
-                 issue_id: issue_id,
-                 adapter: "claude_local"
-               })
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: issue_id,
+          adapter: "claude_local"
+        })
 
       Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:runs")
 
@@ -158,11 +158,11 @@ defmodule Cympho.HeartbeatEngineTest do
       insert_agent(agent_id)
 
       {:ok, run} =
-               HeartbeatEngine.create_run(%{
-                 agent_id: agent_id,
-                 issue_id: Ecto.UUID.generate(),
-                 adapter: "claude_local"
-               })
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: Ecto.UUID.generate(),
+          adapter: "claude_local"
+        })
 
       {:ok, started} = HeartbeatEngine.start_run(run)
       original_hb = started.last_heartbeat_at
@@ -180,11 +180,11 @@ defmodule Cympho.HeartbeatEngineTest do
       insert_agent(agent_id)
 
       {:ok, run} =
-               HeartbeatEngine.create_run(%{
-                 agent_id: agent_id,
-                 issue_id: Ecto.UUID.generate(),
-                 adapter: "claude_local"
-               })
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: Ecto.UUID.generate(),
+          adapter: "claude_local"
+        })
 
       {:ok, _started} = HeartbeatEngine.start_run(run)
 
@@ -203,11 +203,11 @@ defmodule Cympho.HeartbeatEngineTest do
       insert_agent(agent_id)
 
       {:ok, run} =
-               HeartbeatEngine.create_run(%{
-                 agent_id: agent_id,
-                 issue_id: Ecto.UUID.generate(),
-                 adapter: "claude_local"
-               })
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: Ecto.UUID.generate(),
+          adapter: "claude_local"
+        })
 
       {:ok, started} = HeartbeatEngine.start_run(run)
 
@@ -230,11 +230,11 @@ defmodule Cympho.HeartbeatEngineTest do
       insert_agent(agent_id)
 
       {:ok, run} =
-               HeartbeatEngine.create_run(%{
-                 agent_id: agent_id,
-                 issue_id: Ecto.UUID.generate(),
-                 adapter: "claude_local"
-               })
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: Ecto.UUID.generate(),
+          adapter: "claude_local"
+        })
 
       {:ok, started} = HeartbeatEngine.start_run(run)
 

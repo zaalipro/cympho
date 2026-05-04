@@ -1,7 +1,6 @@
 defmodule CymphoWeb.ActivityLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Activities
-  alias Cympho.Companies
 
   @impl true
   def mount(_params, _session, socket) do
@@ -39,7 +38,11 @@ defmodule CymphoWeb.ActivityLive.Index do
   end
 
   @impl true
-  def handle_event("filter", %{"filter_action" => action, "filter_actor_type" => actor_type}, socket) do
+  def handle_event(
+        "filter",
+        %{"filter_action" => action, "filter_actor_type" => actor_type},
+        socket
+      ) do
     socket =
       socket
       |> assign(:filter_action, action)
@@ -87,12 +90,13 @@ defmodule CymphoWeb.ActivityLive.Index do
     limit = 50
     offset = (page - 1) * limit
 
-    {activities, total} = Activities.list_company_activities(company_id,
-      action: filter_action,
-      actor_type: filter_actor_type,
-      limit: limit,
-      offset: offset
-    )
+    {activities, total} =
+      Activities.list_company_activities(company_id,
+        action: filter_action,
+        actor_type: filter_actor_type,
+        limit: limit,
+        offset: offset
+      )
 
     socket
     |> assign(:activities, activities)
@@ -136,10 +140,15 @@ defmodule CymphoWeb.ActivityLive.Index do
   defp format_actor_type(type), do: String.capitalize(type)
 
   defp format_timestamp(nil), do: ""
+
   defp format_timestamp(datetime) do
-    datetime
-    |> DateTime.shift_zone!("America/Los_Angeles")
-    |> Calendar.strftime("%b %d, %Y %I:%M %p")
+    datetime =
+      case DateTime.shift_zone(datetime, "America/Los_Angeles") do
+        {:ok, shifted} -> shifted
+        {:error, _reason} -> datetime
+      end
+
+    Calendar.strftime(datetime, "%b %d, %Y %I:%M %p")
   end
 
   defp activity_icon(action) do
@@ -166,14 +175,6 @@ defmodule CymphoWeb.ActivityLive.Index do
     end
   end
 
-  defp actor_link(%{actor_type: "agent", actor_id: id, metadata: %{agent_name: name}}) do
-    ~p{/agents/#{id}}
-  end
-  defp actor_link(%{actor_type: "user", actor_id: id}) do
-    ~p{/profile/#{id}}
-  end
-  defp actor_link(_), do: "#"
-
   defp actor_name(%{actor_type: "system"}), do: "System"
   defp actor_name(%{actor_type: "agent", metadata: %{agent_name: name}}), do: name
   defp actor_name(%{actor_type: "user", metadata: %{user_name: name}}), do: name
@@ -185,16 +186,17 @@ defmodule CymphoWeb.ActivityLive.Index do
   defp has_prev_pages?(%{page: page}) when page > 1, do: true
   defp has_prev_pages?(_), do: false
 
-
   defp render_metadata(assigns) do
     ~H"""
     <%= case @action do %>
       <% "title_changed" -> %>
-        Changed title from <code class="text-xs bg-white/[0.05] px-1 rounded">{@metadata["from"]}</code> to <code class="text-xs bg-white/[0.05] px-1 rounded">{@metadata["to"]}</code>
+        Changed title from <code class="text-xs bg-surface px-1 rounded">{@metadata["from"]}</code>
+        to <code class="text-xs bg-surface px-1 rounded">{@metadata["to"]}</code>
       <% "description_changed" -> %>
         Updated description
       <% "status_changed" -> %>
-        Changed status from <span class="text-xs">{@metadata["from"]}</span> to <span class="text-xs">{@metadata["to"]}</span>
+        Changed status from <span class="text-xs">{@metadata["from"]}</span>
+        to <span class="text-xs">{@metadata["to"]}</span>
       <% "assigned" -> %>
         Assigned to agent
       <% "unassigned" -> %>

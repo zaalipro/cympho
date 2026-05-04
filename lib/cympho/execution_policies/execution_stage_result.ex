@@ -4,7 +4,6 @@ defmodule Cympho.ExecutionPolicies.ExecutionStageResult do
   """
   use Ecto.Schema
   import Ecto.Changeset
-  import Ecto.Query
 
   alias Cympho.ExecutionPolicies.ExecutionPolicy
   alias Cympho.Companies.Company
@@ -60,7 +59,14 @@ defmodule Cympho.ExecutionPolicies.ExecutionStageResult do
       :resource_id,
       :company_id
     ])
-    |> validate_inclusion(:status, ["pending", "in_progress", "completed", "failed", "skipped", "cancelled"])
+    |> validate_inclusion(:status, [
+      "pending",
+      "in_progress",
+      "completed",
+      "failed",
+      "skipped",
+      "cancelled"
+    ])
     |> validate_inclusion(:outcome, ["approved", "rejected", "deferred", "implemented", "failed"])
     |> validate_stage_index()
     |> validate_completion_ordering()

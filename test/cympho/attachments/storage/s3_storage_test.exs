@@ -66,4 +66,3 @@ defmodule Cympho.Attachments.Storage.S3StorageTest do
     end
   end
 end
-

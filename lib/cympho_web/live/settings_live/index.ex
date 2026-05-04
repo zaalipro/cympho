@@ -251,6 +251,22 @@ defmodule CymphoWeb.SettingsLive.Index do
     Map.get(events, event, true)
   end
 
+  defp channel_toggle_class(true) do
+    "rounded-lg border border-success/20 bg-success/10 px-3 py-1.5 text-xs font-510 text-success transition-colors hover:bg-success/15"
+  end
+
+  defp channel_toggle_class(false) do
+    "rounded-lg border border-border bg-button px-3 py-1.5 text-xs font-510 text-text-tertiary transition-colors hover:bg-button-hover hover:text-text-primary"
+  end
+
+  defp event_toggle_class(true) do
+    "flex w-full items-center justify-between rounded-lg border border-success/20 bg-success/10 px-3 py-2 text-left text-xs font-510 text-success transition-colors hover:bg-success/15"
+  end
+
+  defp event_toggle_class(false) do
+    "flex w-full items-center justify-between rounded-lg border border-border bg-button px-3 py-2 text-left text-xs font-510 text-text-tertiary transition-colors hover:bg-button-hover hover:text-text-primary"
+  end
+
   defp format_event("issue_assigned"), do: "Issue Assigned"
   defp format_event("comment"), do: "Comment"
   defp format_event("status_change"), do: "Status Change"

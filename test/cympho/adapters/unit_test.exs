@@ -224,7 +224,13 @@ defmodule Cympho.Adapters.UnitTest do
     end
 
     test "accepts nil optional fields" do
-      assert :ok = CodexAdapter.validate_config(%{api_key: "test", model: nil, temperature: nil, max_tokens: nil})
+      assert :ok =
+               CodexAdapter.validate_config(%{
+                 api_key: "test",
+                 model: nil,
+                 temperature: nil,
+                 max_tokens: nil
+               })
     end
   end
 
@@ -290,7 +296,10 @@ defmodule Cympho.Adapters.UnitTest do
 
     test "sends session_started message" do
       issue = %{id: "issue-1", title: "Test", description: "Do something"}
-      _ref = CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test", timeout: 500})
+
+      _ref =
+        CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test", timeout: 500})
+
       assert_receive {:session_started, session_id}, 1000
       assert is_reference(session_id)
     end
@@ -300,7 +309,9 @@ defmodule Cympho.Adapters.UnitTest do
 
       unless has_codex do
         issue = %{id: "issue-1", title: "Test", description: "Do something"}
-        _ref = CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test", timeout: 500})
+
+        _ref =
+          CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test", timeout: 500})
 
         assert_receive {:session_started, _session_id}, 1000
         assert_receive {:turn_ended_with_error, _session_id, reason}, 2000
@@ -310,7 +321,10 @@ defmodule Cympho.Adapters.UnitTest do
 
     test "works with string-keyed issue map" do
       issue = %{"id" => "issue-1", "title" => "Test", "description" => "Do something"}
-      ref = CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test", timeout: 500})
+
+      ref =
+        CodexAdapter.run(issue, "agent-1", self(), config: %{api_key: "sk-test", timeout: 500})
+
       assert is_reference(ref)
       assert_receive {:session_started, _session_id}, 1000
     end
@@ -387,7 +401,8 @@ defmodule Cympho.Adapters.UnitTest do
     end
 
     test "validate_config/1 rejects nonexistent cursor_path" do
-      assert {:error, _} = CursorAdapter.validate_config(%{cursor_path: "/nonexistent/path/to/cursor"})
+      assert {:error, _} =
+               CursorAdapter.validate_config(%{cursor_path: "/nonexistent/path/to/cursor"})
     end
 
     test "validate_config/1 rejects non-string workspace_path" do
@@ -607,6 +622,7 @@ defmodule Cympho.Adapters.UnitTest do
     test "run/4 spawns process and sends session_started" do
       issue = %{id: "ISSUE-1", title: "Test Issue", description: "Test"}
       agent_id = "agent-1"
+
       config = %{
         command: "echo",
         args: ["-n", "hello"]
@@ -630,10 +646,12 @@ defmodule Cympho.Adapters.UnitTest do
         status: "open",
         priority: "high"
       }
+
       agent_id = "agent-456"
 
       # Use /bin/echo to test basic process spawning with environment variables
       parent = self()
+
       config = %{
         command: "/bin/echo",
         args: ["test"]
@@ -651,6 +669,7 @@ defmodule Cympho.Adapters.UnitTest do
 
       # Now test with environment variable using a simple shell script
       parent = self()
+
       config = %{
         command: "/bin/sh",
         args: ["-c", "echo ${ISSUE_PAYLOAD}"]
@@ -676,6 +695,7 @@ defmodule Cympho.Adapters.UnitTest do
       json_output = Jason.encode!(%{status: "success", data: "test result"})
 
       parent = self()
+
       config = %{
         command: "echo",
         args: [json_output]
@@ -697,6 +717,7 @@ defmodule Cympho.Adapters.UnitTest do
       agent_id = "agent-1"
 
       parent = self()
+
       config = %{
         command: "echo",
         args: ["plain text output"]
@@ -717,6 +738,7 @@ defmodule Cympho.Adapters.UnitTest do
       agent_id = "agent-1"
 
       parent = self()
+
       config = %{
         command: "ls",
         args: ["/nonexistent_directory_xyz"]
@@ -733,6 +755,7 @@ defmodule Cympho.Adapters.UnitTest do
       agent_id = "agent-1"
 
       parent = self()
+
       config = %{
         command: "sleep",
         args: ["10"],

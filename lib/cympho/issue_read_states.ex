@@ -35,8 +35,16 @@ defmodule Cympho.IssueReadStates do
   """
   def get_read_state_or_default(user_id, issue_id) do
     case get_read_state(user_id, issue_id) do
-      nil -> %IssueReadState{user_id: user_id, issue_id: issue_id, last_read_at: nil, last_read_comment_id: nil}
-      state -> state
+      nil ->
+        %IssueReadState{
+          user_id: user_id,
+          issue_id: issue_id,
+          last_read_at: nil,
+          last_read_comment_id: nil
+        }
+
+      state ->
+        state
     end
   end
 
@@ -53,17 +61,24 @@ defmodule Cympho.IssueReadStates do
 
       state ->
         last_read_comment_id = state.last_read_comment_id
+
         if last_read_comment_id do
           # Find all comments after the last read comment
           all_comments = Cympho.Comments.list_comments(issue_id)
-          new_comments = Enum.drop_while(all_comments, fn c -> c.id != last_read_comment_id end) |> tl()
+
+          new_comments =
+            Enum.drop_while(all_comments, fn c -> c.id != last_read_comment_id end) |> tl()
+
           {state, new_comments}
         else
           # Has read state but no last_read_comment_id - use last_read_at
           all_comments = Cympho.Comments.list_comments(issue_id)
-          new_comments = Enum.filter(all_comments, fn c ->
-            DateTime.compare(c.inserted_at, state.last_read_at) == :gt
-          end)
+
+          new_comments =
+            Enum.filter(all_comments, fn c ->
+              DateTime.compare(c.inserted_at, state.last_read_at) == :gt
+            end)
+
           {state, new_comments}
         end
     end
@@ -145,25 +160,27 @@ defmodule Cympho.IssueReadStates do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     # Get all issues the user has viewed (has read states)
-    existing_states = Repo.all(
-      from rs in IssueReadState,
-        where: rs.user_id == ^user_id,
-        select: rs
-    )
+    existing_states =
+      Repo.all(
+        from rs in IssueReadState,
+          where: rs.user_id == ^user_id,
+          select: rs
+      )
 
     # For each issue, update to mark as read with latest comment
-    results = Enum.map(existing_states, fn state ->
-      comments = Cympho.Comments.list_comments(state.issue_id)
-      last_comment = List.last(comments)
-      last_comment_id = if last_comment, do: last_comment.id, else: nil
+    results =
+      Enum.map(existing_states, fn state ->
+        comments = Cympho.Comments.list_comments(state.issue_id)
+        last_comment = List.last(comments)
+        last_comment_id = if last_comment, do: last_comment.id, else: nil
 
-      state
-      |> IssueReadState.changeset(%{
-        last_read_at: now,
-        last_read_comment_id: last_comment_id
-      })
-      |> Repo.update()
-    end)
+        state
+        |> IssueReadState.changeset(%{
+          last_read_at: now,
+          last_read_comment_id: last_comment_id
+        })
+        |> Repo.update()
+      end)
 
     # Broadcast update for each changed issue
     Enum.each(results, fn
@@ -191,13 +208,14 @@ defmodule Cympho.IssueReadStates do
   """
   def notify_new_comment(issue_id, comment_id) do
     # Get all users who have a read_state for this issue where last_read_comment_id is before the new comment
-    user_ids = Repo.all(
-      from rs in IssueReadState,
-        where: rs.issue_id == ^issue_id,
-        where: rs.last_read_comment_id < ^comment_id,
-        select: rs.user_id
-    )
-    |> Enum.uniq()
+    user_ids =
+      Repo.all(
+        from rs in IssueReadState,
+          where: rs.issue_id == ^issue_id,
+          where: rs.last_read_comment_id < ^comment_id,
+          select: rs.user_id
+      )
+      |> Enum.uniq()
 
     # Broadcast to each user's topic
     Enum.each(user_ids, fn user_id ->

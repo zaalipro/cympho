@@ -60,7 +60,8 @@ defmodule Cympho.AgentAdapters.HealthCheckerTest do
 
     test "multiple subscriptions are handled correctly" do
       assert :ok = HealthChecker.subscribe()
-      assert :ok = HealthChecker.subscribe()  # Subscribe again
+      # Subscribe again
+      assert :ok = HealthChecker.subscribe()
       assert :ok = HealthChecker.unsubscribe()
     end
   end

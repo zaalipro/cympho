@@ -15,22 +15,35 @@ defmodule Cympho.Mcp.Server do
     [
       %{
         name: "list_issues",
-        description: "List issues with optional filtering by status, priority, assignee, or project.",
+        description:
+          "List issues with optional filtering by status, priority, assignee, or project.",
         inputSchema: %{
           type: "object",
           properties: %{
-            status: %{type: "string", description: "Filter by status: backlog, todo, in_progress, in_review, done, blocked"},
-            priority: %{type: "string", description: "Filter by priority: critical, high, medium, low"},
+            status: %{
+              type: "string",
+              description:
+                "Filter by status: backlog, todo, in_progress, in_review, done, blocked"
+            },
+            priority: %{
+              type: "string",
+              description: "Filter by priority: critical, high, medium, low"
+            },
             assignee_id: %{type: "string", description: "Filter by assignee agent ID"},
             project_id: %{type: "string", description: "Filter by project ID"},
             search: %{type: "string", description: "Search in issue titles and descriptions"},
-            limit: %{type: "integer", description: "Max results to return (default 20)", default: 20}
+            limit: %{
+              type: "integer",
+              description: "Max results to return (default 20)",
+              default: 20
+            }
           }
         }
       },
       %{
         name: "get_issue",
-        description: "Get detailed information about a specific issue including comments and activity.",
+        description:
+          "Get detailed information about a specific issue including comments and activity.",
         inputSchema: %{
           type: "object",
           properties: %{
@@ -47,7 +60,11 @@ defmodule Cympho.Mcp.Server do
           properties: %{
             title: %{type: "string", description: "Issue title"},
             description: %{type: "string", description: "Issue description"},
-            priority: %{type: "string", description: "Priority: critical, high, medium, low", default: "medium"},
+            priority: %{
+              type: "string",
+              description: "Priority: critical, high, medium, low",
+              default: "medium"
+            },
             project_id: %{type: "string", description: "Project ID to create the issue in"}
           },
           required: ["title"]
@@ -115,6 +132,7 @@ defmodule Cympho.Mcp.Server do
 
   def call_tool("get_issue", %{"issue_id" => id}) do
     issue = Issues.get_issue!(id)
+
     %{
       id: issue.id,
       title: issue.title,
@@ -122,7 +140,9 @@ defmodule Cympho.Mcp.Server do
       status: issue.status,
       priority: issue.priority,
       assignee: issue.assignee && %{id: issue.assignee.id, name: issue.assignee.name},
-      project: issue.project && %{id: issue.project.id, name: issue.project.name, prefix: issue.project.prefix},
+      project:
+        issue.project &&
+          %{id: issue.project.id, name: issue.project.name, prefix: issue.project.prefix},
       comments_count: length(issue.comments),
       inserted_at: issue.inserted_at,
       updated_at: issue.updated_at
@@ -137,11 +157,12 @@ defmodule Cympho.Mcp.Server do
       status: :todo
     }
 
-    attrs = if project_id = args["project_id"] do
-      Map.put(attrs, :project_id, project_id)
-    else
-      attrs
-    end
+    attrs =
+      if project_id = args["project_id"] do
+        Map.put(attrs, :project_id, project_id)
+      else
+        attrs
+      end
 
     case Issues.create_issue(attrs) do
       {:ok, issue} -> %{success: true, issue: summarize_issue(issue)}
@@ -157,11 +178,12 @@ defmodule Cympho.Mcp.Server do
   def call_tool("list_agents", args) do
     agents = Agents.list_agents()
 
-    agents = if status = args["status"] do
-      Enum.filter(agents, fn a -> to_string(a.status) == status end)
-    else
-      agents
-    end
+    agents =
+      if status = args["status"] do
+        Enum.filter(agents, fn a -> to_string(a.status) == status end)
+      else
+        agents
+      end
 
     Enum.map(agents, fn a ->
       %{id: a.id, name: a.name, status: a.status, role: a.role}
@@ -176,6 +198,7 @@ defmodule Cympho.Mcp.Server do
 
     Enum.map(Issues.Issue.status_options(), fn status ->
       issues = Map.get(by_status, status, [])
+
       %{
         status: status,
         count: length(issues),

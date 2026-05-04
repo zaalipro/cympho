@@ -12,9 +12,9 @@ defmodule Cympho.ActorAttribution do
   @nil_uuid "00000000-0000-0000-0000-000000000000"
 
   @type actor :: %{
-    type: String.t(),
-    id: String.t() | nil
-  }
+          type: String.t(),
+          id: String.t() | nil
+        }
 
   @doc """
   Extracts actor information from various actor representations.

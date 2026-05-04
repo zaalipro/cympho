@@ -62,6 +62,7 @@ defmodule CymphoWeb.WorkProductControllerTest do
 
     test "returns 422 for non-existent issue_id", %{conn: conn} do
       fake_issue_id = Ecto.UUID.generate()
+
       params = %{
         "kind" => "document",
         "title" => "Test"
@@ -79,17 +80,19 @@ defmodule CymphoWeb.WorkProductControllerTest do
     end
 
     test "returns work products newest first", %{conn: conn, issue: issue} do
-      {:ok, wp1} = WorkProducts.create_work_product(%{
-        issue_id: issue.id,
-        kind: "document",
-        title: "First document"
-      })
+      {:ok, wp1} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          kind: "document",
+          title: "First document"
+        })
 
-      {:ok, wp2} = WorkProducts.create_work_product(%{
-        issue_id: issue.id,
-        kind: "code_change",
-        title: "Second document"
-      })
+      {:ok, wp2} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          kind: "code_change",
+          title: "Second document"
+        })
 
       conn = get(conn, "/api/issues/#{issue.id}/work-products")
       assert %{"data" => [first, second]} = json_response(conn, 200)
@@ -100,12 +103,13 @@ defmodule CymphoWeb.WorkProductControllerTest do
 
   describe "GET /api/issues/:issue_id/work-products/:id" do
     test "returns a work product", %{conn: conn, issue: issue} do
-      {:ok, wp} = WorkProducts.create_work_product(%{
-        issue_id: issue.id,
-        kind: "url",
-        title: "Link to PR",
-        url: "https://github.com/example/pr/1"
-      })
+      {:ok, wp} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          kind: "url",
+          title: "Link to PR",
+          url: "https://github.com/example/pr/1"
+        })
 
       conn = get(conn, "/api/issues/#{issue.id}/work-products/#{wp.id}")
       assert %{"data" => data} = json_response(conn, 200)
@@ -123,11 +127,12 @@ defmodule CymphoWeb.WorkProductControllerTest do
 
   describe "PATCH /api/issues/:issue_id/work-products/:id" do
     test "updates a work product", %{conn: conn, issue: issue} do
-      {:ok, wp} = WorkProducts.create_work_product(%{
-        issue_id: issue.id,
-        kind: "document",
-        title: "Original title"
-      })
+      {:ok, wp} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          kind: "document",
+          title: "Original title"
+        })
 
       params = %{"title" => "Updated title", "description" => "New description"}
 
@@ -139,11 +144,12 @@ defmodule CymphoWeb.WorkProductControllerTest do
     end
 
     test "returns 422 when updating with invalid kind", %{conn: conn, issue: issue} do
-      {:ok, wp} = WorkProducts.create_work_product(%{
-        issue_id: issue.id,
-        kind: "document",
-        title: "Test"
-      })
+      {:ok, wp} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          kind: "document",
+          title: "Test"
+        })
 
       params = %{"kind" => "invalid_kind"}
 
@@ -162,11 +168,12 @@ defmodule CymphoWeb.WorkProductControllerTest do
 
   describe "DELETE /api/issues/:issue_id/work-products/:id" do
     test "deletes a work product", %{conn: conn, issue: issue} do
-      {:ok, wp} = WorkProducts.create_work_product(%{
-        issue_id: issue.id,
-        kind: "artifact",
-        title: "To be deleted"
-      })
+      {:ok, wp} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          kind: "artifact",
+          title: "To be deleted"
+        })
 
       conn = delete(conn, "/api/issues/#{issue.id}/work-products/#{wp.id}")
       assert response(conn, 204)

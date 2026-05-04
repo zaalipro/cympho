@@ -13,6 +13,13 @@ defmodule Cympho.Projects do
     Repo.all(Project)
   end
 
+  def list_projects_by_company(company_id) do
+    Project
+    |> where(company_id: ^company_id)
+    |> order_by([p], asc: p.name)
+    |> Repo.all()
+  end
+
   @doc """
   Gets a single project by id.
   """

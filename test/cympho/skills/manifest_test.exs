@@ -127,7 +127,8 @@ defmodule Cympho.Skills.ManifestTest do
         "entrypoint" => "Cympho.Skills.TestSkill"
       }
 
-      assert {:ok, %Manifest{capabilities: [], dependencies: %{}, permissions: []}} = Manifest.validate(manifest)
+      assert {:ok, %Manifest{capabilities: [], dependencies: %{}, permissions: []}} =
+               Manifest.validate(manifest)
     end
   end
 end

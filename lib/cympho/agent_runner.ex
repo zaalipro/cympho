@@ -27,17 +27,18 @@ defmodule Cympho.AgentRunner do
     cwd = opts[:cwd] || Cympho.Workspace.workspace_path(issue.id)
     resume? = opts[:resume] || false
     stall_timeout = opts[:stall_timeout] || @stall_timeout
+    env = opts[:env] || runtime_context_env(opts[:runtime_context])
 
     cmd = build_claude_command(issue, agent_id, resume?, opts)
 
     spawn(fn ->
-      do_run(session_id, cmd, cwd, recipient_pid, stall_timeout)
+      do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, env)
     end)
 
     session_id
   end
 
-  defp build_claude_command(issue, _agent_id, resume?, opts \\ []) do
+  defp build_claude_command(issue, agent_id, resume?, opts) do
     base = [
       "claude",
       "-p",
@@ -47,7 +48,7 @@ defmodule Cympho.AgentRunner do
       "--no-input"
     ]
 
-    prompt = build_prompt(issue, opts)
+    prompt = build_prompt(issue, agent_id, opts)
 
     args =
       if resume? do
@@ -69,48 +70,19 @@ defmodule Cympho.AgentRunner do
     ~s(bash -c '#{claude_cmd}' << 'PROMPT'\n#{prompt}\nPROMPT)
   end
 
-  defp build_prompt(issue, opts \\ []) do
-    skills = Keyword.get(opts, :skills, [])
-
-    base_prompt = """
-    Issue ID: #{issue.id}
-    Title: #{issue.title}
-
-    #{issue.description || "No description provided."}
-    """
-
-    if Enum.empty?(skills) do
-      String.trim(base_prompt)
-    else
-      skills_block = build_skills_prompt_block(skills)
-      """
-      #{String.trim(base_prompt)}
-
-      #{skills_block}
-      """
-      |> String.trim()
-    end
+  def build_prompt(issue, opts) when is_list(opts) do
+    Cympho.AgentPrompt.build(issue, nil, opts)
   end
 
-  defp build_skills_prompt_block(skills) when is_list(skills) do
-    adapter = :claude_local
-
-    skill_fragments =
-      Enum.map(skills, fn skill ->
-        Cympho.Skills.Adapter.skill_prompt_fragment(adapter, skill)
-      end)
-
-    """
-    ## Available Skills
-
-    The following skills are available for use in this session:
-    #{Enum.join(skill_fragments, "\n")}
-    """
-    |> String.trim()
+  def build_prompt(issue, agent_id, opts) when is_list(opts) do
+    Cympho.AgentPrompt.build(issue, agent_id, opts)
   end
 
-  defp do_run(session_id, cmd, cwd, recipient_pid, stall_timeout) do
-    env = [{"ANTHROPIC_API_KEY", api_key()} | env_whitelist()]
+  defp do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, runtime_env) do
+    anthropic_api_key =
+      runtime_env["ANTHROPIC_API_KEY"] || runtime_env[:ANTHROPIC_API_KEY] || api_key()
+
+    env = [{"ANTHROPIC_API_KEY", anthropic_api_key} | runtime_env(runtime_env) ++ env_whitelist()]
 
     port =
       Port.open({:spawn, cmd}, [
@@ -194,6 +166,23 @@ defmodule Cympho.AgentRunner do
     |> Enum.map(fn key -> {key, System.get_env(key)} end)
     |> Enum.reject(fn {_, val} -> is_nil(val) end)
   end
+
+  defp runtime_context_env(%Cympho.RuntimeContext{env: env}) when is_map(env), do: env
+  defp runtime_context_env(_), do: %{}
+
+  defp runtime_env(env) when is_map(env) do
+    Enum.flat_map(env, fn {key, value} ->
+      key = to_string(key)
+
+      if key == "ANTHROPIC_API_KEY" do
+        []
+      else
+        [{key, to_string(value)}]
+      end
+    end)
+  end
+
+  defp runtime_env(_env), do: []
 
   defp extract_and_send_tool_calls(result, session_id, recipient_pid) when is_map(result) do
     content = result["content"] || []

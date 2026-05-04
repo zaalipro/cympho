@@ -3,7 +3,7 @@
     <h1 class="text-2xl font-510 tracking-tight text-text-primary">My Issues</h1>
     <.app_link
       navigate={~p"/issues/new"}
-      class="bg-brand hover:bg-brand/90 text-white font-510 text-sm px-4 py-2 rounded-md transition-colors"
+      class="bg-brand hover:bg-brand/90 text-white font-510 text-sm px-4 py-2 rounded-lg transition-colors"
     >
       New Issue
     </.app_link>
@@ -13,21 +13,21 @@
     <button
       phx-click="switch_tab"
       phx-value-tab="active"
-      class={"flex-1 text-sm font-510 px-3 py-2 rounded-md transition-colors #{tab_active?("active", @current_tab)}"}
+      class={"flex-1 text-sm font-510 px-3 py-2 rounded-lg transition-colors #{tab_active?("active", @current_tab)}"}
     >
       Active
     </button>
     <button
       phx-click="switch_tab"
       phx-value-tab="watching"
-      class={"flex-1 text-sm font-510 px-3 py-2 rounded-md transition-colors #{tab_active?("watching", @current_tab)}"}
+      class={"flex-1 text-sm font-510 px-3 py-2 rounded-lg transition-colors #{tab_active?("watching", @current_tab)}"}
     >
       Watching
     </button>
     <button
       phx-click="switch_tab"
       phx-value-tab="all"
-      class={"flex-1 text-sm font-510 px-3 py-2 rounded-md transition-colors #{tab_active?("all", @current_tab)}"}
+      class={"flex-1 text-sm font-510 px-3 py-2 rounded-lg transition-colors #{tab_active?("all", @current_tab)}"}
     >
       All
     </button>
@@ -40,17 +40,20 @@
   <div :if={!Enum.empty?(@issues)} class="space-y-2">
     <div
       :for={issue <- @issues}
-      class="bg-surface border border-border rounded-lg p-4 hover:bg-white/[0.02] transition-colors"
+      class="bg-surface border border-border rounded-lg p-4 hover:bg-subtle transition-colors"
     >
       <.link navigate={~p"/issues/#{issue.id}"} class="block">
         <div class="flex items-start gap-3">
-          <span class={"mt-1.5 w-2.5 h-2.5 rounded-full flex-shrink-0 #{status_color(issue.status)}"}></span>
+          <span class={"mt-1.5 w-2.5 h-2.5 rounded-full flex-shrink-0 #{status_color(issue.status)}"}>
+          </span>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2">
               <span :if={issue.identifier} class="text-xs text-text-quaternary font-mono">
                 {issue.identifier}
               </span>
-              <h3 class="text-sm font-510 text-text-primary truncate">{issue.title}</h3>
+              <h3 class="font-serif text-sm font-510 text-text-primary truncate">
+                {issue.title}
+              </h3>
             </div>
             <div class="flex items-center gap-3 mt-1.5">
               <span class={"text-xs #{priority_color(issue.priority)}"}>

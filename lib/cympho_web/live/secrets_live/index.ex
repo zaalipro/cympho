@@ -19,19 +19,19 @@ defmodule CymphoWeb.SecretsLive.Index do
     {:ok, socket}
   end
 
-  def mount(_, _session, socket) do
+  def mount(_, session, socket) do
     # Try to get company_id from current company
     company_id = get_current_company_id(socket)
 
     if company_id do
-      mount(%{"company_id" => company_id}, _session, socket)
+      mount(%{"company_id" => company_id}, session, socket)
     else
       {:ok, assign(socket, :page_title, "Secrets Management")}
     end
   end
 
   @impl true
-  def handle_params(params, _url, socket) do
+  def handle_params(_params, _url, socket) do
     {:noreply, socket}
   end
 

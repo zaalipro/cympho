@@ -117,17 +117,19 @@ defmodule Cympho.SkillsIntegrationTest do
   end
 
   defp insert_agent do
-    company =
-      Repo.insert!(%Cympho.Companies.Company{
+    {:ok, company} =
+      Cympho.Companies.create_company(%{
         name: "Test Company #{System.unique_integer()}",
         slug: "test-company-#{System.unique_integer()}"
       })
 
-    Repo.insert!(%Cympho.Agents.Agent{
-      name: "Test Agent #{System.unique_integer()}",
-      role: :engineer,
-      status: :idle,
-      company_id: company.id
-    })
+    {:ok, agent} =
+      Cympho.Agents.create_agent(%{
+        name: "Test Agent #{System.unique_integer()}",
+        role: :engineer,
+        company_id: company.id
+      })
+
+    agent
   end
 end

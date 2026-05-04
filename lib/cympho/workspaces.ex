@@ -22,6 +22,10 @@ defmodule Cympho.Workspaces do
     |> Repo.all()
   end
 
+  def list_project_workspaces_for_company(nil) do
+    Repo.all(ProjectWorkspace)
+  end
+
   def list_project_workspaces_for_company(company_id) do
     from(pw in ProjectWorkspace, where: pw.company_id == ^company_id)
     |> Repo.all()
@@ -380,7 +384,9 @@ defmodule Cympho.Workspaces do
             ew.status == "open" and
             ew.last_used_at < ^threshold
       )
-      |> Repo.update_all(set: [status: "closed", closed_at: now, cleanup_reason: "idle", updated_at: now])
+      |> Repo.update_all(
+        set: [status: "closed", closed_at: now, cleanup_reason: "idle", updated_at: now]
+      )
     end)
   end
 end

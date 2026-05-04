@@ -1,11 +1,20 @@
-<div class="p-6 lg:p-8 max-w-6xl mx-auto">
-  <.header title={@page_title}>
+<.page size="wide">
+  <.header
+    title={@page_title}
+    subtitle="Triage, assign, and track autonomous work across the company."
+  >
     <:actions>
       <.app_link
-        navigate={~p"/issues/new"}
-        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-md transition-colors inline-flex items-center gap-2"
+        navigate={~p"/kanban"}
+        class="inline-flex items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
       >
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        Board
+      </.app_link>
+      <.app_link
+        navigate={~p"/issues/new"}
+        class="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover"
+      >
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
             stroke-linecap="round"
             stroke-linejoin="round"
@@ -18,19 +27,12 @@
     </:actions>
   </.header>
 
-  <div class="space-y-3 mb-4">
-    <div class="flex flex-col sm:flex-row sm:items-center gap-3">
-      <form phx-submit="search" class="flex-1 w-full sm:max-w-md">
+  <div class="linear-panel mb-4 p-3">
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
+      <form phx-submit="search" class="min-w-0 flex-1">
         <div class="relative">
-          <input
-            type="text"
-            name="search"
-            value={@current_search}
-            placeholder="Search issues..."
-            class="w-full bg-white/[0.05] border border-border text-text-primary text-sm rounded-md pl-9 pr-3 py-2 min-h-[44px] placeholder:text-text-quaternary"
-          />
           <svg
-            class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-quaternary"
+            class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-quaternary"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -42,176 +44,195 @@
               d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
             />
           </svg>
+          <input
+            type="text"
+            name="search"
+            value={@current_search}
+            placeholder="Search issues..."
+            class="linear-field h-10 w-full pl-9 pr-3 text-sm placeholder:text-text-quaternary"
+          />
         </div>
       </form>
 
-      <span class="text-xs text-text-quaternary sm:ml-auto">{@total} issue(s)</span>
-    </div>
+      <div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+        <form phx-change="filter_status">
+          <select name="status" class="linear-field h-10 w-full px-3 text-sm sm:w-auto">
+            <option value="">All Statuses</option>
+            <%= for status <- Cympho.Issues.Issue.status_options() do %>
+              <option value={status} selected={@current_status == to_string(status)}>
+                {status_label(status)}
+              </option>
+            <% end %>
+          </select>
+        </form>
 
-    <div class="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
-      <form phx-change="filter_status" class="col-span-1">
-        <select
-          name="status"
-          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
-        >
-          <option value="">All Statuses</option>
-          <%= for status <- Cympho.Issues.Issue.status_options() do %>
-            <option value={status} selected={@current_status == to_string(status)}>
-              {status_label(status)}
-            </option>
-          <% end %>
-        </select>
-      </form>
+        <form phx-change="filter_priority">
+          <select name="priority" class="linear-field h-10 w-full px-3 text-sm sm:w-auto">
+            <option value="">All Priorities</option>
+            <%= for priority <- Cympho.Issues.Issue.priority_options() do %>
+              <option value={priority} selected={@current_priority == to_string(priority)}>
+                {String.capitalize(to_string(priority))}
+              </option>
+            <% end %>
+          </select>
+        </form>
 
-      <form phx-change="filter_priority" class="col-span-1">
-        <select
-          name="priority"
-          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
-        >
-          <option value="">All Priorities</option>
-          <%= for priority <- Cympho.Issues.Issue.priority_options() do %>
-            <option value={priority} selected={@current_priority == to_string(priority)}>
-              {priority}
-            </option>
-          <% end %>
-        </select>
-      </form>
+        <form phx-change="filter_assignee">
+          <select name="assignee_id" class="linear-field h-10 w-full px-3 text-sm sm:w-auto">
+            <option value="">All Assignees</option>
+            <%= for agent <- @agents do %>
+              <option value={agent.id} selected={@current_assignee_id == agent.id}>
+                {agent.name}
+              </option>
+            <% end %>
+          </select>
+        </form>
 
-      <form phx-change="filter_assignee" class="col-span-2 sm:col-span-auto">
-        <select
-          name="assignee_id"
-          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
-        >
-          <option value="">All Assignees</option>
-          <%= for agent <- @agents do %>
-            <option value={agent.id} selected={@current_assignee_id == agent.id}>
-              {agent.name}
-            </option>
-          <% end %>
-        </select>
-      </form>
+        <form phx-change="filter_project">
+          <select name="project_id" class="linear-field h-10 w-full px-3 text-sm sm:w-auto">
+            <option value="">All Projects</option>
+            <%= for project <- @projects do %>
+              <option value={project.id} selected={@current_project_id == project.id}>
+                {project.name}
+              </option>
+            <% end %>
+          </select>
+        </form>
 
-      <form phx-change="filter_project" class="col-span-2 sm:col-span-auto">
-        <select
-          name="project_id"
-          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
-        >
-          <option value="">All Projects</option>
-          <%= for project <- @projects do %>
-            <option value={project.id} selected={@current_project_id == project.id}>
-              {project.name}
-            </option>
-          <% end %>
-        </select>
-      </form>
+        <form phx-change="filter_label">
+          <select name="label_id" class="linear-field h-10 w-full px-3 text-sm sm:w-auto">
+            <option value="">All Labels</option>
+            <%= for label <- @labels do %>
+              <option value={label.id} selected={@current_label_id == label.id}>
+                {label.name}
+              </option>
+            <% end %>
+          </select>
+        </form>
 
-      <form phx-change="filter_label" class="col-span-2 sm:col-span-auto">
-        <select
-          name="label_id"
-          class="w-full bg-white/[0.05] border border-border text-text-secondary text-sm rounded-md px-3 py-2 min-h-[44px]"
-        >
-          <option value="">All Labels</option>
-          <%= for label <- @labels do %>
-            <option value={label.id} selected={@current_label_id == label.id}>
-              {label.name}
-            </option>
-          <% end %>
-        </select>
-      </form>
-
-      <button
-        :if={filters_active?(assigns)}
-        type="button"
-        phx-click="clear_filters"
-        class="col-span-2 sm:col-span-auto text-xs font-510 px-3 py-2 min-h-[44px] rounded-md border border-border text-text-secondary hover:text-text-primary hover:bg-white/[0.08] transition-colors"
-      >
-        Clear all
-      </button>
-    </div>
-  </div>
-
-  <div class="space-y-2">
-    <.app_link
-      :for={issue <- @issues}
-      navigate={~p"/issues/#{issue.id}"}
-      class="group flex items-center gap-4 p-3 rounded-md hover:bg-white/[0.04] transition-colors border border-transparent hover:border-border-subtle"
-    >
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-3">
-          <span :if={@unread_issues[issue.id]} class="w-2 h-2 rounded-full bg-blue-400 shrink-0" title="Unread comments"></span>
-          <span class="text-sm font-510 text-text-primary truncate">{issue.title}</span>
-          <.badge variant="status" value={issue.status} />
-          <span :if={issue.project} class="text-xs text-text-quaternary">
-            {issue.project.prefix}
-          </span>
-        </div>
-        <p class="text-xs text-text-tertiary mt-1 truncate">{issue.description}</p>
-      </div>
-      <div class="flex items-center gap-3 shrink-0">
-        <span :if={issue.assignee} class="text-xs text-text-quaternary">
-          {issue.assignee.name}
-        </span>
-        <.badge variant="priority" value={issue.priority} />
-        <span class="text-xs text-text-quaternary flex items-center gap-1">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
-            />
-          </svg>
-          {length(issue.comments)}
-        </span>
         <button
+          :if={filters_active?(assigns)}
           type="button"
-          class="opacity-0 group-hover:opacity-100 p-1.5 rounded-md text-text-quaternary hover:text-red-400 hover:bg-red-500/10 transition-all"
-          phx-click="delete_issue"
-          phx-value-id={issue.id}
-          data-confirm="Delete this issue?"
+          phx-click="clear_filters"
+          class="h-10 rounded-lg border border-border bg-panel px-3 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
         >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-            />
-          </svg>
+          Clear
         </button>
       </div>
-    </.app_link>
-  </div>
-
-  <div
-    :if={Enum.empty?(@issues)}
-    class="flex flex-col items-center justify-center py-20 text-center"
-  >
-    <div class="w-12 h-12 rounded-full bg-white/[0.05] flex items-center justify-center mb-4">
-      <svg
-        class="w-6 h-6 text-text-tertiary"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-        />
-      </svg>
     </div>
-    <p class="text-sm text-text-tertiary mb-4">No issues found.</p>
   </div>
 
-  <div :if={@total_pages > 1} class="flex items-center justify-center gap-4 mt-6">
+  <div class="mb-2 flex items-center justify-between px-1 text-xs text-text-quaternary">
+    <span>{@total} issue(s)</span>
+    <span :if={@total_pages > 1}>Page {@page} of {@total_pages}</span>
+  </div>
+
+  <.panel class="overflow-visible">
+    <div class="hidden border-b border-border bg-panel/60 px-4 py-2 text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary md:grid md:grid-cols-[minmax(0,1fr)_120px_120px_90px_36px] md:gap-4">
+      <span>Issue</span>
+      <span>Assignee</span>
+      <span>Priority</span>
+      <span class="text-right">Activity</span>
+      <span></span>
+    </div>
+
+    <.empty_state
+      :if={Enum.empty?(@issues)}
+      title="No issues found"
+      message="Create an issue or clear filters to see work."
+    >
+      <:icon_slot>
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+          />
+        </svg>
+      </:icon_slot>
+      <:actions>
+        <.app_link
+          navigate={~p"/issues/new"}
+          class="rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover"
+        >
+          New Issue
+        </.app_link>
+        <button
+          :if={filters_active?(assigns)}
+          type="button"
+          phx-click="clear_filters"
+          class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        >
+          Clear filters
+        </button>
+      </:actions>
+    </.empty_state>
+
+    <div
+      :for={issue <- @issues}
+      class="group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0 hover:bg-surface-hover/70 md:grid-cols-[minmax(0,1fr)_120px_120px_90px_36px] md:gap-4"
+    >
+      <.app_link navigate={~p"/issues/#{issue.id}"} class="min-w-0">
+        <div class="flex min-w-0 items-center gap-2">
+          <span
+            :if={@unread_issues[issue.id]}
+            class="h-1.5 w-1.5 shrink-0 rounded-full bg-brand"
+            title="Unread comments"
+          >
+          </span>
+          <span class="shrink-0 font-mono text-[11px] text-text-quaternary">
+            {issue_identifier(issue)}
+          </span>
+          <span class="truncate text-sm font-510 text-text-primary">{issue.title}</span>
+          <span class={"hidden rounded-full px-2 py-0.5 text-[11px] font-510 sm:inline-flex #{status_badge_class(issue.status)}"}>
+            {to_string(issue.status)}
+          </span>
+        </div>
+        <p class="mt-1 truncate text-xs text-text-tertiary">
+          {issue_description(issue.description)}
+        </p>
+      </.app_link>
+
+      <div class="hidden min-w-0 text-xs text-text-tertiary md:block">
+        <span class="truncate">
+          {if issue.assignee, do: issue.assignee.name, else: "Unassigned"}
+        </span>
+      </div>
+
+      <div class="hidden md:block">
+        <span class={"inline-flex rounded-full px-2 py-0.5 text-[11px] font-510 #{priority_badge_class(issue.priority)}"}>
+          {to_string(issue.priority)}
+        </span>
+      </div>
+
+      <div class="hidden items-center justify-end gap-2 text-xs text-text-quaternary md:flex">
+        <span>{length(issue.comments)} comments</span>
+      </div>
+
+      <div class="flex justify-end">
+        <.overflow_menu label={"Actions for #{issue.title}"}>
+          <.menu_item navigate={~p"/issues/#{issue.id}"}>Open issue</.menu_item>
+          <.menu_item
+            danger
+            phx-click="delete_issue"
+            phx-value-id={issue.id}
+            data-confirm="Delete this issue?"
+          >
+            Delete issue
+          </.menu_item>
+        </.overflow_menu>
+      </div>
+    </div>
+  </.panel>
+
+  <div :if={@total_pages > 1} class="mt-5 flex items-center justify-center gap-3">
     <button
       :if={@page > 1}
       type="button"
       phx-click="change_page"
       phx-value-page={@page - 1}
-      class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary text-sm px-4 py-2 rounded-md transition-colors"
+      class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
     >
       Previous
     </button>
@@ -221,9 +242,9 @@
       type="button"
       phx-click="change_page"
       phx-value-page={@page + 1}
-      class="bg-white/[0.05] hover:bg-white/[0.08] border border-border text-text-secondary text-sm px-4 py-2 rounded-md transition-colors"
+      class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
     >
       Next
     </button>
   </div>
-</div>
+</.page>

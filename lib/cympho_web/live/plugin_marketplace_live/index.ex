@@ -1,8 +1,7 @@
 defmodule CymphoWeb.PluginMarketplaceLive.Index do
   use CymphoWeb, :live_view
 
-  alias Cympho.{Plugins, Repo}
-  alias Cympho.Plugins.Plugin
+  alias Cympho.Plugins
 
   @available_plugins [
     %{
@@ -111,7 +110,7 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
     end
   end
 
-  @impl
+  @impl true
   def handle_event("uninstall", %{"id" => id}, socket) do
     case Plugins.get_plugin(id) do
       {:ok, plugin} ->

@@ -285,7 +285,9 @@ defmodule Cympho.AgentsTest do
 
     test "accepts all valid adapter values" do
       for adapter <- [:claude_code, :codex, :cursor, :http, :process] do
-        changeset = Agents.change_agent(%Agent{}, %{name: "Test", role: :engineer, adapter: adapter})
+        changeset =
+          Agents.change_agent(%Agent{}, %{name: "Test", role: :engineer, adapter: adapter})
+
         assert changeset.valid?, "Expected adapter #{adapter} to be valid"
       end
     end
@@ -302,16 +304,14 @@ defmodule Cympho.AgentsTest do
   describe "spawn_agent/2" do
     setup [:start_heartbeat_supervisor]
 
-    test "creates agent and starts heartbeat process", %{agent: _parent_agent} do
-      parent_agent_id = "parent-#{:rand.uniform(10_000)}"
-
+    test "creates agent and starts heartbeat process", %{agent: parent_agent} do
       attrs = %{
         name: "Spawned Agent",
         role: :engineer,
         config: %{"test" => true}
       }
 
-      assert {:ok, agent} = Agents.spawn_agent(attrs, parent_agent_id)
+      assert {:ok, agent} = Agents.spawn_agent(attrs, parent_agent.id)
       assert agent.name == "Spawned Agent"
       assert agent.role == :engineer
 
@@ -332,12 +332,15 @@ defmodule Cympho.AgentsTest do
     end
 
     test "role pre-fill logic: CEO -> CTO", %{agent: _parent_agent} do
-      # The prefilled_role logic is in the component, not the context
-      # This test verifies the context creates the agent with given role
-      attrs = %{name: "CTO Spawned", role: :cto}
-      parent_agent_id = "ceo-#{:rand.uniform(10_000)}"
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "CEO Parent",
+          role: :ceo
+        })
 
-      assert {:ok, agent} = Agents.spawn_agent(attrs, parent_agent_id)
+      attrs = %{name: "CTO Spawned", role: :cto}
+
+      assert {:ok, agent} = Agents.spawn_agent(attrs, ceo.id)
       assert agent.role == :cto
 
       # Clean up
@@ -345,14 +348,126 @@ defmodule Cympho.AgentsTest do
     end
 
     test "role pre-fill logic: CTO -> Engineer", %{agent: _parent_agent} do
-      attrs = %{name: "Engineer Spawned", role: :engineer}
-      parent_agent_id = "cto-#{:rand.uniform(10_000)}"
+      {:ok, cto} =
+        Agents.create_agent(%{
+          name: "CTO Parent",
+          role: :cto
+        })
 
-      assert {:ok, agent} = Agents.spawn_agent(attrs, parent_agent_id)
+      attrs = %{name: "Engineer Spawned", role: :engineer}
+
+      assert {:ok, agent} = Agents.spawn_agent(attrs, cto.id)
       assert agent.role == :engineer
 
       # Clean up
       Cympho.AgentHeartbeat.stop_for_agent(agent.id)
+    end
+  end
+
+  describe "get_agent_stats/1" do
+    setup [:create_company, :create_agent]
+
+    test "returns nil for non-existent agent" do
+      assert nil == Agents.get_agent_stats("non-existent-id")
+    end
+
+    test "returns stats for agent with no issues", %{agent: agent} do
+      stats = Agents.get_agent_stats(agent.id)
+
+      assert stats.direct_reports == 0
+      assert stats.total_issues == 0
+      assert stats.completed_this_week == 0
+      assert stats.blocked_count == 0
+      assert stats.budget_status == nil
+    end
+
+    test "returns stats for agent with direct reports", %{company: company, agent: parent} do
+      {:ok, _child1} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Child 1",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"},
+          parent_id: parent.id
+        })
+
+      {:ok, _child2} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Child 2",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"},
+          parent_id: parent.id
+        })
+
+      stats = Agents.get_agent_stats(parent.id)
+      assert stats.direct_reports == 2
+    end
+  end
+
+  describe "get_company_agent_stats/1" do
+    setup [:create_company]
+
+    test "returns stats for company with no agents", %{company: company} do
+      stats = Agents.get_company_agent_stats(company.id)
+
+      assert stats.total == 0
+      assert stats.by_role == %{}
+      assert stats.by_status == %{}
+      assert stats.idle_ratio == 0.0
+    end
+
+    test "returns stats for company with multiple agents", %{company: company} do
+      {:ok, _ceo} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, _cto} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "CTO",
+          role: :cto,
+          status: :busy,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, _eng1} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Engineer 1",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, _eng2} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Engineer 2",
+          role: :engineer,
+          status: :busy,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      stats = Agents.get_company_agent_stats(company.id)
+
+      assert stats.total == 4
+      assert stats.by_role == %{ceo: 1, cto: 1, engineer: 2}
+      assert stats.by_status == %{idle: 2, busy: 2}
+      assert stats.idle_ratio == 50.0
     end
   end
 

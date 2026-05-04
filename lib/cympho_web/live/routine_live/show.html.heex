@@ -1,61 +1,99 @@
-<.header>
-  Routine: {@routine.name}
-  <:actions>
-    <.button phx-click="manual_run" phx-disable-with="Starting...">
-      Run Now
-    </.button>
-  </:actions>
-</.header>
+<div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0">
+  <.header
+    title={@routine.name}
+    subtitle={@routine.description || "Routine details and run history."}
+  >
+    <:actions>
+      <.app_link
+        navigate={~p"/routines"}
+        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+      >
+        Back
+      </.app_link>
+      <.app_link
+        navigate={~p"/routines/#{@routine.id}/edit"}
+        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+      >
+        Edit
+      </.app_link>
+      <button
+        type="button"
+        phx-click="manual_run"
+        phx-disable-with="Starting..."
+        class="rounded-lg bg-brand px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-accent"
+      >
+        Run Now
+      </button>
+    </:actions>
+  </.header>
 
-<div class="mt-4">
-  <p class="text-sm text-zinc-500">Status: <span class="font-medium">{@routine.status}</span></p>
-  <%= if @routine.description do %>
-    <p class="mt-2">{@routine.description}</p>
-  <% end %>
-</div>
+  <div class="mb-6 grid grid-cols-1 gap-3 md:grid-cols-4">
+    <div class="rounded-xl border border-border bg-surface p-4">
+      <div class="text-xs text-text-quaternary">Status</div>
+      <div class="mt-2 text-sm font-590 text-text-primary">{routine_label(@routine.status)}</div>
+    </div>
+    <div class="rounded-xl border border-border bg-surface p-4">
+      <div class="text-xs text-text-quaternary">Priority</div>
+      <div class="mt-2 text-sm font-590 text-text-primary">
+        {routine_label(@routine.priority)}
+      </div>
+    </div>
+    <div class="rounded-xl border border-border bg-surface p-4">
+      <div class="text-xs text-text-quaternary">Concurrency</div>
+      <div class="mt-2 text-sm font-590 text-text-primary">
+        {routine_label(@routine.concurrency_policy)}
+      </div>
+    </div>
+    <div class="rounded-xl border border-border bg-surface p-4">
+      <div class="text-xs text-text-quaternary">Catch-up</div>
+      <div class="mt-2 text-sm font-590 text-text-primary">
+        {routine_label(@routine.catch_up_policy)}
+      </div>
+    </div>
+  </div>
 
-<.header class="mt-8">Run History</.header>
+  <section class="rounded-xl border border-border bg-surface">
+    <div class="border-b border-border px-4 py-3">
+      <h2 class="text-sm font-590 text-text-primary">Run History</h2>
+    </div>
 
-<div class="mt-4 overflow-x-auto">
-  <table class="w-full text-sm text-left">
-    <thead>
-      <tr class="border-b border-zinc-200">
-        <th class="pb-2 font-medium">Status</th>
-        <th class="pb-2 font-medium">Trigger Type</th>
-        <th class="pb-2 font-medium">Triggered At</th>
-        <th class="pb-2 font-medium">Completed At</th>
-      </tr>
-    </thead>
-    <tbody>
-      <%= for run <- @runs do %>
-        <tr class="border-b border-zinc-100">
-          <td class="py-2">
-            <span class={
-              "inline-block px-2 py-0.5 text-xs rounded-full " <>
-              case run.status do
-                "pending" -> "bg-yellow-100 text-yellow-800"
-                "running" -> "bg-blue-100 text-blue-800"
-                "completed" -> "bg-green-100 text-green-800"
-                "failed" -> "bg-red-100 text-red-800"
-                _ -> "bg-zinc-100 text-zinc-800"
-              end
-            }>
-              {run.status}
-            </span>
-          </td>
-          <td class="py-2">{run.trigger_type}</td>
-          <td class="py-2">{Calendar.strftime(run.triggered_at, "%Y-%m-%d %H:%M")}</td>
-          <td class="py-2">
-            {if run.completed_at,
-              do: Calendar.strftime(run.completed_at, "%Y-%m-%d %H:%M"),
-              else: raw("&mdash;")}
-          </td>
-        </tr>
-      <% end %>
-    </tbody>
-  </table>
+    <div :if={@runs != []} class="overflow-x-auto">
+      <table class="w-full text-left text-sm">
+        <thead class="bg-subtle text-xs uppercase tracking-wider text-text-quaternary">
+          <tr>
+            <th class="px-4 py-3 font-510">Status</th>
+            <th class="px-4 py-3 font-510">Trigger</th>
+            <th class="px-4 py-3 font-510">Triggered</th>
+            <th class="px-4 py-3 font-510">Completed</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-border">
+          <tr :for={run <- @runs} class="hover:bg-surface-hover">
+            <td class="px-4 py-3">
+              <span class={[
+                "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510",
+                run_status_class(run.status)
+              ]}>
+                {routine_label(run.status)}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-text-secondary">{run.trigger_type}</td>
+            <td class="px-4 py-3 text-text-tertiary">
+              {format_datetime(run.triggered_at)}
+            </td>
+            <td class="px-4 py-3 text-text-tertiary">
+              {format_datetime(run.completed_at)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
-  <%= if @runs == [] do %>
-    <p class="mt-4 text-sm text-zinc-500">No runs yet. Click "Run Now" to start a manual run.</p>
-  <% end %>
+    <div :if={@runs == []} class="px-6 py-16 text-center">
+      <p class="text-sm text-text-primary">No runs yet</p>
+      <p class="mt-1 text-sm text-text-tertiary">
+        Run this routine manually or wait for a trigger.
+      </p>
+    </div>
+  </section>
 </div>

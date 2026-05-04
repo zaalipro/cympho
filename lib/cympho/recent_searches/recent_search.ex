@@ -10,7 +10,7 @@ defmodule Cympho.RecentSearches.RecentSearch do
     field :filters, :map, default: %{}
     field :search_count, :integer, default: 1
 
-    belongs_to :user, Cympho.Accounts.User
+    belongs_to :user, Cympho.Users.User
     belongs_to :company, Cympho.Companies.Company
 
     timestamps(type: :utc_datetime)

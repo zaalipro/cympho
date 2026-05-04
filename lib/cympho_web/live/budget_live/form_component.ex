@@ -10,7 +10,7 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
     {:ok,
      socket
      |> assign(assigns)
-     |> assign(:changeset, changeset)}
+     |> assign_form(changeset)}
   end
 
   @impl true
@@ -20,7 +20,7 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
       |> Budgets.change_budget(budget_params)
       |> Map.put(:action, :validate)
 
-    {:noreply, assign(socket, :changeset, changeset)}
+    {:noreply, assign_form(socket, changeset)}
   end
 
   def handle_event("save", %{"budget" => budget_params}, socket) do
@@ -38,11 +38,14 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
       {:pending_approval, _approval} ->
         {:noreply,
          socket
-         |> put_flash(:warning, "Budget increase requires board approval. A proposal has been submitted.")
+         |> put_flash(
+           :warning,
+           "Budget increase requires board approval. A proposal has been submitted."
+         )
          |> push_navigate(to: ~p"/budgets")}
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign(socket, :changeset, changeset)}
+        {:noreply, assign_form(socket, changeset)}
     end
   end
 
@@ -57,11 +60,18 @@ defmodule CymphoWeb.BudgetLive.FormComponent do
       {:pending_approval, _approval} ->
         {:noreply,
          socket
-         |> put_flash(:warning, "Budget creation requires board approval due to the limit amount. A proposal has been submitted.")
+         |> put_flash(
+           :warning,
+           "Budget creation requires board approval due to the limit amount. A proposal has been submitted."
+         )
          |> push_navigate(to: ~p"/budgets")}
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign(socket, :changeset, changeset)}
+        {:noreply, assign_form(socket, changeset)}
     end
+  end
+
+  defp assign_form(socket, %Ecto.Changeset{} = changeset) do
+    assign(socket, :form, to_form(changeset))
   end
 end

@@ -25,7 +25,6 @@ defmodule Cympho.Workspaces.EnvironmentLease do
     belongs_to :environment, Environment
     belongs_to :execution_workspace, ExecutionWorkspace
     belongs_to :issue, Cympho.Issues.Issue
-    belongs_to :heartbeat_run, Cympho.Wakes.Wake, foreign_key: :heartbeat_run_id
 
     timestamps(type: :utc_datetime)
   end
@@ -48,8 +47,7 @@ defmodule Cympho.Workspaces.EnvironmentLease do
       :company_id,
       :environment_id,
       :execution_workspace_id,
-      :issue_id,
-      :heartbeat_run_id
+      :issue_id
     ])
     |> validate_required([:status, :company_id, :environment_id])
   end

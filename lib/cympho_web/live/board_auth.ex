@@ -26,7 +26,10 @@ defmodule CymphoWeb.Live.BoardAuth do
 
         {:halt,
          socket
-         |> put_flash(:error, "Governance mutations are blocked until board members are configured.")
+         |> put_flash(
+           :error,
+           "Governance mutations are blocked until board members are configured."
+         )
          |> redirect(to: "/")}
 
       Companies.is_board_member?(user.id, company_id) ->

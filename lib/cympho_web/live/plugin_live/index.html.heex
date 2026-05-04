@@ -1,0 +1,145 @@
+<div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0">
+  <.header title={@page_title} subtitle="Install, inspect, and govern runtime extensions.">
+    <:actions>
+      <.app_link
+        navigate={~p"/plugins/marketplace"}
+        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[40px] rounded-lg transition-colors inline-flex items-center gap-2"
+      >
+        Marketplace
+      </.app_link>
+      <.app_link
+        navigate={~p"/plugins/new"}
+        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 min-h-[40px] rounded-lg transition-colors inline-flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M12 4v16m8-8H4"
+          />
+        </svg>
+        New Plugin
+      </.app_link>
+    </:actions>
+  </.header>
+
+  <form
+    phx-change="filter"
+    phx-submit="filter"
+    class="mb-6 grid grid-cols-1 gap-3 rounded-xl border border-border bg-surface p-4 sm:grid-cols-[minmax(0,1fr)_220px]"
+  >
+    <.input
+      type="select"
+      name="company_id"
+      label="Company"
+      value={@selected_company_id || ""}
+      options={[{"All companies", ""} | Enum.map(@companies, &{&1.name, &1.id})]}
+    />
+    <.input
+      type="select"
+      name="status"
+      label="Status"
+      value={@selected_status || ""}
+      options={[
+        {"All statuses", ""},
+        {"Installed", "installed"},
+        {"Active", "active"},
+        {"Disabled", "disabled"},
+        {"Error", "error"}
+      ]}
+    />
+  </form>
+
+  <div class="grid grid-cols-1 gap-3">
+    <div
+      :for={plugin <- @plugins}
+      id={"plugin-#{plugin.id}"}
+      class="group rounded-xl border border-border bg-surface p-4 transition-colors hover:border-border-hover hover:bg-surface-hover"
+    >
+      <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div class="min-w-0 flex-1">
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <.app_link
+              navigate={~p"/plugins/#{plugin.id}"}
+              class="truncate text-sm font-590 text-text-primary hover:text-brand"
+            >
+              {plugin.name}
+            </.app_link>
+            <span class={[
+              "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510",
+              status_class(plugin.status)
+            ]}>
+              {status_label(plugin.status)}
+            </span>
+            <span class={["text-xs font-510", enabled_class(plugin.enabled)]}>
+              {enabled_label(plugin.enabled)}
+            </span>
+          </div>
+          <p class="line-clamp-2 max-w-3xl text-sm leading-5 text-text-tertiary">
+            {plugin.description || "No description provided."}
+          </p>
+          <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
+            <span>{plugin.identifier}</span>
+            <span>v{plugin.version}</span>
+            <span>{company_name(plugin)}</span>
+            <span>{project_name(plugin)}</span>
+            <span>{capability_count(plugin.capabilities)} capabilities</span>
+          </div>
+        </div>
+
+        <div class="flex shrink-0 flex-wrap items-center gap-2">
+          <button
+            type="button"
+            phx-click="toggle_plugin"
+            phx-value-id={plugin.id}
+            class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+          >
+            {if plugin.enabled, do: "Disable", else: "Enable"}
+          </button>
+          <.app_link
+            navigate={~p"/plugins/#{plugin.id}/settings"}
+            class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+          >
+            Settings
+          </.app_link>
+          <.app_link
+            navigate={~p"/plugins/#{plugin.id}/edit"}
+            class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+          >
+            Edit
+          </.app_link>
+          <button
+            type="button"
+            phx-click="delete"
+            phx-value-id={plugin.id}
+            data-confirm="Delete this plugin?"
+            class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-510 text-red-400 transition-colors hover:bg-red-500/15"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div
+    :if={Enum.empty?(@plugins)}
+    class="rounded-xl border border-border bg-surface px-6 py-16 text-center"
+  >
+    <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-subtle text-text-tertiary">
+      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M8 9h8M8 15h8M9 3h6a2 2 0 012 2v1h1a2 2 0 012 2v8a2 2 0 01-2 2h-1v1a2 2 0 01-2 2H9a2 2 0 01-2-2v-1H6a2 2 0 01-2-2V8a2 2 0 012-2h1V5a2 2 0 012-2z"
+        />
+      </svg>
+    </div>
+    <h2 class="text-sm font-590 text-text-primary">No plugins found</h2>
+    <p class="mt-1 text-sm text-text-tertiary">
+      Add a plugin or adjust the filters to inspect installed extensions.
+    </p>
+  </div>
+</div>

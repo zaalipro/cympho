@@ -5,13 +5,16 @@ defmodule CymphoWeb.BudgetLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    Budgets.subscribe(socket.assigns.current_company.id)
+    current_company = socket.assigns.current_company
+    budgets = Budgets.list_budgets(company_id: current_company.id)
+
+    Budgets.subscribe(current_company.id)
 
     {:ok,
      socket
      |> assign(:page_title, "Budgets")
-     |> assign(:budgets, Budgets.list_budgets())
-     |> assign(:summary, calculate_summary(socket.assigns[:budgets] || []))}
+     |> assign(:budgets, budgets)
+     |> assign(:summary, calculate_summary(budgets))}
   end
 
   @impl true
@@ -25,10 +28,14 @@ defmodule CymphoWeb.BudgetLive.Index do
     |> assign(:budget, nil)
   end
 
+  defp apply_action(socket, nil, params) do
+    apply_action(socket, :index, params)
+  end
+
   defp apply_action(socket, :new, _params) do
     socket
     |> assign(:page_title, "New Budget")
-    |> assign(:budget, %Budgets.Budget{})
+    |> assign(:budget, %Budgets.Budget{company_id: socket.assigns.current_company.id})
   end
 
   @impl true
@@ -51,7 +58,7 @@ defmodule CymphoWeb.BudgetLive.Index do
   end
 
   def handle_info({:budget_deleted, _deleted_id}, socket) do
-    budgets = Budgets.list_budgets()
+    budgets = Budgets.list_budgets(company_id: socket.assigns.current_company.id)
 
     {:noreply,
      socket
@@ -64,7 +71,7 @@ defmodule CymphoWeb.BudgetLive.Index do
     budget = Budgets.get_budget!(id)
     {:ok, _} = Budgets.delete_budget(budget)
 
-    budgets = Budgets.list_budgets()
+    budgets = Budgets.list_budgets(company_id: socket.assigns.current_company.id)
 
     {:noreply,
      socket

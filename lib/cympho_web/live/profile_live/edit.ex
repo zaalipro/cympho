@@ -2,7 +2,6 @@ defmodule CymphoWeb.ProfileLive.Edit do
   use CymphoWeb, :live_view
 
   alias Cympho.Users
-  alias Cympho.Users.User
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do

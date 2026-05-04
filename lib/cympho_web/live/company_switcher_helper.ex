@@ -17,10 +17,10 @@ defmodule CymphoWeb.Live.CompanySwitcherHelper do
     company_id = params["id"]
 
     # Update the session with the new company_id
-    # This requires a redirect to set the new session value
+    # This requires a navigate to set the new session value
     {:noreply,
      socket
-     |> push_redirect(to: "/?company_id=#{URI.encode_www_form(company_id)}")}
+     |> push_navigate(to: "/?company_id=#{URI.encode_www_form(company_id)}")}
   end
 
   @doc """

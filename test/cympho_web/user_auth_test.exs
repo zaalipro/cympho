@@ -4,9 +4,8 @@ defmodule CymphoWeb.UserAuthTest do
   import Phoenix.LiveViewTest
   import Phoenix.ConnTest
 
-  alias Cympho.{Users, Companies, Repo}
+  alias Cympho.{Companies, Repo}
   alias Cympho.Users.User
-  alias Cympho.Companies.{Company, CompanyMembership}
 
   setup do
     # Create test companies
@@ -46,68 +45,81 @@ defmodule CymphoWeb.UserAuthTest do
     test "assigns current_user from session", %{user: user} do
       conn =
         build_conn()
+        |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", user.id)
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert view.assigns.current_user.id == user.id
+      assert live_assigns(view).current_user.id == user.id
     end
 
     test "assigns nil current_user for guest (no session)" do
-      conn = build_conn()
+      conn = build_conn() |> Plug.Test.init_test_session(%{})
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert view.assigns.current_user == nil
+      assert live_assigns(view).current_user == nil
     end
 
     test "assigns nil current_user for invalid user_id in session" do
       conn =
         build_conn()
+        |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", "00000000-0000-0000-0000-000000000000")
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert view.assigns.current_user == nil
+      assert live_assigns(view).current_user == nil
     end
 
-    test "loads user_companies for authenticated user", %{user: user, company1: company1, company2: company2} do
+    test "loads user_companies for authenticated user", %{user: user} do
       conn =
         build_conn()
+        |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", user.id)
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert length(view.assigns.user_companies) == 2
+      assert length(live_assigns(view).user_companies) == 2
     end
 
-    test "assigns empty user_companies for guest", %{company1: company1} do
-      conn = build_conn()
+    test "loads companies for guest in local trusted mode", %{
+      company1: company1,
+      company2: company2
+    } do
+      conn = build_conn() |> Plug.Test.init_test_session(%{})
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert view.assigns.user_companies == []
+      company_ids = Enum.map(live_assigns(view).user_companies, & &1.id)
+      assert company1.id in company_ids
+      assert company2.id in company_ids
     end
 
     test "uses session company_id when valid", %{user: user, company2: company2} do
       conn =
         build_conn()
+        |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", user.id)
         |> Plug.Conn.put_session("company_id", company2.id)
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert view.assigns.current_company.id == company2.id
+      assert live_assigns(view).current_company.id == company2.id
     end
 
-    test "falls back to user.company_id when session company_id is missing", %{user: user, company1: company1} do
+    test "falls back to user.company_id when session company_id is missing", %{
+      user: user,
+      company1: company1
+    } do
       conn =
         build_conn()
+        |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", user.id)
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert view.assigns.current_company.id == company1.id
+      assert live_assigns(view).current_company.id == company1.id
     end
 
     test "falls back to first membership when session company_id is invalid", %{
@@ -116,15 +128,19 @@ defmodule CymphoWeb.UserAuthTest do
     } do
       conn =
         build_conn()
+        |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", user.id)
         |> Plug.Conn.put_session("company_id", "00000000-0000-0000-0000-000000000000")
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert view.assigns.current_company.id == company1.id
+      assert live_assigns(view).current_company.id == company1.id
     end
 
-    test "falls back to first membership when user.company_id is not in memberships", %{user: user, company1: company1, company2: company2} do
+    test "falls back to first membership when user.company_id is not in memberships", %{
+      user: user,
+      company1: company1
+    } do
       # Update user to point to a company they're not a member of
       user
       |> User.changeset(%{company_id: nil})
@@ -132,20 +148,21 @@ defmodule CymphoWeb.UserAuthTest do
 
       conn =
         build_conn()
+        |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", user.id)
 
       {:ok, view, _html} = live(conn, "/issues")
 
       # Should fall back to first company in memberships
-      assert view.assigns.current_company.id == company1.id
+      assert live_assigns(view).current_company.id == company1.id
     end
 
-    test "assigns nil current_company for guest", %{company1: company1} do
-      conn = build_conn()
+    test "assigns first company for guest in local trusted mode", %{company1: company1} do
+      conn = build_conn() |> Plug.Test.init_test_session(%{})
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert view.assigns.current_company == nil
+      assert live_assigns(view).current_company.id == company1.id
     end
 
     test "assigns nil current_company for user with no memberships" do
@@ -162,28 +179,29 @@ defmodule CymphoWeb.UserAuthTest do
 
       conn =
         build_conn()
+        |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", lonely_user.id)
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert view.assigns.current_company == nil
+      assert live_assigns(view).current_company == nil
     end
 
     test "prioritizes session company_id over user.company_id", %{
       user: user,
-      company1: company1,
       company2: company2
     } do
       # User's default is company1, but session specifies company2
       conn =
         build_conn()
+        |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", user.id)
         |> Plug.Conn.put_session("company_id", company2.id)
 
       {:ok, view, _html} = live(conn, "/issues")
 
       # Should use company2 from session, not user's default
-      assert view.assigns.current_company.id == company2.id
+      assert live_assigns(view).current_company.id == company2.id
     end
   end
 
@@ -191,11 +209,12 @@ defmodule CymphoWeb.UserAuthTest do
     test "current_user is accessible in LiveView assigns", %{user: user} do
       conn =
         build_conn()
+        |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", user.id)
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert view.assigns.current_user.id == user.id
+      assert live_assigns(view).current_user.id == user.id
     end
 
     test "current_company is accessible in LiveView assigns", %{
@@ -204,21 +223,27 @@ defmodule CymphoWeb.UserAuthTest do
     } do
       conn =
         build_conn()
+        |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", user.id)
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert view.assigns.current_company.id == company1.id
+      assert live_assigns(view).current_company.id == company1.id
     end
 
     test "user_companies is accessible in LiveView assigns", %{user: user} do
       conn =
         build_conn()
+        |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", user.id)
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert length(view.assigns.user_companies) == 2
+      assert length(live_assigns(view).user_companies) == 2
     end
+  end
+
+  defp live_assigns(view) do
+    :sys.get_state(view.pid).socket.assigns
   end
 end

@@ -21,9 +21,9 @@ defmodule CymphoWeb.IssueLive.Index do
     socket =
       socket
       |> assign(:page_title, "All Issues")
-      |> assign(:agents, Agents.list_agents())
-      |> assign(:projects, Projects.list_projects())
-      |> assign(:labels, Labels.list_labels())
+      |> assign(:agents, list_agents(socket))
+      |> assign(:projects, list_projects(socket))
+      |> assign(:labels, list_labels(socket))
       |> assign(:unread_issues, %{})
 
     {:ok, socket}
@@ -31,7 +31,7 @@ defmodule CymphoWeb.IssueLive.Index do
 
   @impl true
   def handle_params(params, _url, socket) do
-    paginated = Issues.list_issues_paginated(params)
+    paginated = Issues.list_issues_paginated(with_company_scope(socket, params))
     current_user = socket.assigns[:current_user]
 
     unread_issues =
@@ -67,7 +67,15 @@ defmodule CymphoWeb.IssueLive.Index do
   def handle_info({:issue_deleted, _id}, socket), do: {:noreply, reload(socket)}
 
   def handle_info({:run_status, payload}, socket) do
-    {type, msg} = Events.run_status_toast(payload)
+    type =
+      case payload[:event_type] do
+        :run_completed -> "success"
+        :run_failed -> "error"
+        :run_cancelled -> "warning"
+        _ -> "info"
+      end
+
+    msg = "Run #{payload[:event_type]} (#{payload[:status]})"
     {:noreply, socket |> push_event("toast", %{message: msg, type: type}) |> reload()}
   end
 
@@ -97,9 +105,14 @@ defmodule CymphoWeb.IssueLive.Index do
 
   @impl true
   def handle_event("delete_issue", %{"id" => id}, socket) do
-    issue = Issues.get_issue!(id)
-    :ok = Issues.delete_issue(issue)
-    {:noreply, reload(socket)}
+    case get_issue(socket, id) do
+      {:ok, issue} ->
+        :ok = Issues.delete_issue(issue)
+        {:noreply, reload(socket)}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Issue not found")}
+    end
   end
 
   def handle_event("filter_status", %{"status" => status}, socket) do
@@ -107,7 +120,8 @@ defmodule CymphoWeb.IssueLive.Index do
   end
 
   def handle_event("filter_priority", %{"priority" => priority}, socket) do
-    {:noreply, push_patch(socket, to: build_url(socket, %{"priority" => priority, "page" => "1"}))}
+    {:noreply,
+     push_patch(socket, to: build_url(socket, %{"priority" => priority, "page" => "1"}))}
   end
 
   def handle_event("search", %{"search" => search}, socket) do
@@ -115,15 +129,18 @@ defmodule CymphoWeb.IssueLive.Index do
   end
 
   def handle_event("filter_assignee", %{"assignee_id" => assignee_id}, socket) do
-    {:noreply, push_patch(socket, to: build_url(socket, %{"assignee_id" => assignee_id, "page" => "1"}))}
+    {:noreply,
+     push_patch(socket, to: build_url(socket, %{"assignee_id" => assignee_id, "page" => "1"}))}
   end
 
   def handle_event("filter_project", %{"project_id" => project_id}, socket) do
-    {:noreply, push_patch(socket, to: build_url(socket, %{"project_id" => project_id, "page" => "1"}))}
+    {:noreply,
+     push_patch(socket, to: build_url(socket, %{"project_id" => project_id, "page" => "1"}))}
   end
 
   def handle_event("filter_label", %{"label_id" => label_id}, socket) do
-    {:noreply, push_patch(socket, to: build_url(socket, %{"label_id" => label_id, "page" => "1"}))}
+    {:noreply,
+     push_patch(socket, to: build_url(socket, %{"label_id" => label_id, "page" => "1"}))}
   end
 
   def handle_event("change_page", %{"page" => page}, socket) do
@@ -145,7 +162,7 @@ defmodule CymphoWeb.IssueLive.Index do
       "page" => to_string(socket.assigns.page)
     }
 
-    paginated = Issues.list_issues_paginated(params)
+    paginated = Issues.list_issues_paginated(with_company_scope(socket, params))
     current_user = socket.assigns[:current_user]
 
     unread_issues =
@@ -189,13 +206,77 @@ defmodule CymphoWeb.IssueLive.Index do
     ~p"/issues?#{query}"
   end
 
+  defp with_company_scope(socket, params) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Map.put(params, "company_id", company_id)
+      _ -> params
+    end
+  end
+
+  defp list_agents(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Agents.list_agents_by_company(company_id)
+      _ -> Agents.list_agents()
+    end
+  end
+
+  defp list_projects(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Projects.list_projects_by_company(company_id)
+      _ -> Projects.list_projects()
+    end
+  end
+
+  defp list_labels(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Labels.list_labels_by_company(company_id)
+      _ -> Labels.list_labels()
+    end
+  end
+
+  defp get_issue(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Issues.get_company_issue(company_id, id)
+      _ -> Issues.get_issue(id)
+    end
+  end
+
   defp status_label(:backlog), do: "Backlog"
   defp status_label(:todo), do: "To Do"
   defp status_label(:in_progress), do: "In Progress"
   defp status_label(:in_review), do: "In Review"
   defp status_label(:done), do: "Done"
   defp status_label(:blocked), do: "Blocked"
+  defp status_label(:cancelled), do: "Cancelled"
   defp status_label(other), do: String.capitalize(to_string(other))
+
+  defp issue_identifier(%{identifier: identifier})
+       when is_binary(identifier) and identifier != "",
+       do: identifier
+
+  defp issue_identifier(%{issue_number: number}) when is_integer(number), do: "CYM-#{number}"
+  defp issue_identifier(%{id: id}) when is_binary(id), do: "CYM-#{String.slice(id, 0, 4)}"
+  defp issue_identifier(_), do: "CYM"
+
+  defp issue_description(description) when is_binary(description) and description != "",
+    do: description
+
+  defp issue_description(_), do: "No description"
+
+  defp status_badge_class(:backlog), do: "bg-text-quaternary/15 text-text-tertiary"
+  defp status_badge_class(:todo), do: "bg-brand/12 text-brand"
+  defp status_badge_class(:in_progress), do: "bg-amber-500/15 text-amber-300"
+  defp status_badge_class(:in_review), do: "bg-sky-500/15 text-sky-300"
+  defp status_badge_class(:done), do: "bg-success/15 text-success"
+  defp status_badge_class(:blocked), do: "bg-red-500/15 text-red-300"
+  defp status_badge_class(:cancelled), do: "bg-text-quaternary/15 text-text-tertiary"
+  defp status_badge_class(_), do: "bg-subtle text-text-secondary"
+
+  defp priority_badge_class(:critical), do: "bg-red-500/15 text-red-300"
+  defp priority_badge_class(:high), do: "bg-orange-500/15 text-orange-300"
+  defp priority_badge_class(:medium), do: "bg-amber-500/15 text-amber-300"
+  defp priority_badge_class(:low), do: "bg-text-quaternary/15 text-text-tertiary"
+  defp priority_badge_class(_), do: "bg-subtle text-text-secondary"
 
   defp filters_active?(assigns) do
     assigns.current_status != "" or assigns.current_priority != "" or

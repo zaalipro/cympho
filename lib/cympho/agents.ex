@@ -23,6 +23,10 @@ defmodule Cympho.Agents do
   def list_agents_by_company(company_id) do
     Agent
     |> where(company_id: ^company_id)
+    |> order_by([a],
+      asc: fragment("CASE ? WHEN 'ceo' THEN 0 WHEN 'cto' THEN 1 ELSE 2 END", a.role),
+      asc: a.inserted_at
+    )
     |> Repo.all()
   end
 
@@ -41,6 +45,12 @@ defmodule Cympho.Agents do
   def list_agents_by_status(status) when is_atom(status) do
     Agent
     |> where(status: ^status)
+    |> Repo.all()
+  end
+
+  def list_agents_by_status(status, company_id) when is_atom(status) do
+    Agent
+    |> where(status: ^status, company_id: ^company_id)
     |> Repo.all()
   end
 
@@ -90,7 +100,12 @@ defmodule Cympho.Agents do
     |> Repo.insert()
     |> case do
       {:ok, agent} ->
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{agent.company_id}:agents", {:agent_created, agent})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{agent.company_id}:agents",
+          {:agent_created, agent}
+        )
+
         {:ok, agent}
 
       {:error, changeset} ->
@@ -115,7 +130,12 @@ defmodule Cympho.Agents do
     |> Repo.update()
     |> case do
       {:ok, updated} ->
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:agents", {:agent_updated, updated})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.company_id}:agents",
+          {:agent_updated, updated}
+        )
+
         {:ok, updated}
 
       {:error, changeset} ->
@@ -140,7 +160,12 @@ defmodule Cympho.Agents do
     Repo.delete(agent)
     |> case do
       {:ok, _} ->
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{agent.company_id}:agents", {:agent_deleted, agent.id})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{agent.company_id}:agents",
+          {:agent_deleted, agent.id}
+        )
+
         {:ok, agent}
 
       {:error, changeset} ->
@@ -180,6 +205,13 @@ defmodule Cympho.Agents do
   def list_eligible_agents(role) when is_atom(role) do
     Agent
     |> where(role: ^role, status: :idle)
+    |> Repo.all()
+    |> Enum.reject(&is_agent_at_capacity?/1)
+  end
+
+  def list_eligible_agents(role, company_id) when is_atom(role) do
+    Agent
+    |> where(role: ^role, status: :idle, company_id: ^company_id)
     |> Repo.all()
     |> Enum.reject(&is_agent_at_capacity?/1)
   end
@@ -440,7 +472,8 @@ defmodule Cympho.Agents do
   defp create_role_change_approval(%Agent{} = agent, new_role) do
     approval_attrs = %{
       title: "Agent Role Change: #{agent.name} (#{agent.role} → #{new_role})",
-      description: "Request to change agent '#{agent.name}' role from '#{agent.role}' to '#{new_role}'.",
+      description:
+        "Request to change agent '#{agent.name}' role from '#{agent.role}' to '#{new_role}'.",
       category: "agent_promotion",
       company_id: agent.company_id,
       requested_by_agent_id: agent.id,
@@ -517,7 +550,12 @@ defmodule Cympho.Agents do
     |> Repo.update()
     |> case do
       {:ok, updated} ->
-        Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:agents", {:agent_updated, updated})
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.company_id}:agents",
+          {:agent_updated, updated}
+        )
+
         {:ok, updated}
 
       {:error, changeset} ->
@@ -541,7 +579,31 @@ defmodule Cympho.Agents do
       select: {a.status, count(a.id)}
     )
     |> Repo.all()
-    |> Enum.into(%{idle: 0, running: 0, error: 0, sleeping: 0, offline: 0})
+    |> Enum.into(default_status_counts())
+  end
+
+  def count_by_status(company_id) do
+    from(a in Agent,
+      where: a.company_id == ^company_id,
+      group_by: a.status,
+      select: {a.status, count(a.id)}
+    )
+    |> Repo.all()
+    |> Enum.into(default_status_counts())
+  end
+
+  defp default_status_counts do
+    %{
+      idle: 0,
+      running: 0,
+      error: 0,
+      sleeping: 0,
+      offline: 0,
+      active: 0,
+      paused: 0,
+      pending_approval: 0,
+      terminated: 0
+    }
   end
 
   @doc """
@@ -670,6 +732,16 @@ defmodule Cympho.Agents do
     build_org_tree(roots)
   end
 
+  def get_org_chart(company_id) do
+    roots =
+      Agent
+      |> where([a], a.company_id == ^company_id and is_nil(a.parent_id))
+      |> preload([:children])
+      |> Repo.all()
+
+    build_org_tree(roots)
+  end
+
   defp build_org_tree(agents) when is_list(agents) do
     Enum.map(agents, &build_org_tree/1)
   end
@@ -726,7 +798,7 @@ defmodule Cympho.Agents do
 
   defp build_ancestors(%Agent{parent: nil}), do: []
 
-  defp build_ancestors(%Agent{parent: parent} = agent) do
+  defp build_ancestors(%Agent{parent: parent} = _agent) do
     [parent | build_ancestors(parent)]
   end
 
@@ -750,10 +822,10 @@ defmodule Cympho.Agents do
   end
 
   @doc """
-  Pauses an agent by setting status to :sleeping.
+  Pauses an agent by setting status to :paused.
   """
   def pause_agent(%Agent{} = agent) do
-    update_agent(agent, %{status: :sleeping})
+    update_agent(agent, %{status: :paused, paused_at: DateTime.utc_now()})
   end
 
   def pause_agent(agent_id) when is_binary(agent_id) do
@@ -764,10 +836,10 @@ defmodule Cympho.Agents do
   end
 
   @doc """
-  Resumes a sleeping agent by setting status to :idle.
+  Resumes a paused agent by setting status to :idle.
   """
   def resume_agent(%Agent{} = agent) do
-    update_agent(agent, %{status: :idle})
+    update_agent(agent, %{status: :idle, paused_at: nil, pause_reason: nil})
   end
 
   def resume_agent(agent_id) when is_binary(agent_id) do
@@ -778,18 +850,18 @@ defmodule Cympho.Agents do
   end
 
   @doc """
-  Terminates an agent by setting status to :offline.
+  Terminates an agent by setting status to :terminated.
   """
   def terminate_agent(%Agent{} = agent) do
     case agent.status do
       :running ->
         case kill_session(agent.id) do
-          :ok -> update_agent(agent, %{status: :offline})
+          :ok -> update_agent(agent, %{status: :terminated, terminated_at: DateTime.utc_now()})
           error -> error
         end
 
       _ ->
-        update_agent(agent, %{status: :offline})
+        update_agent(agent, %{status: :terminated, terminated_at: DateTime.utc_now()})
     end
   end
 
@@ -905,4 +977,115 @@ defmodule Cympho.Agents do
 
   defp compare_maps(map1, map2) when map1 == map2, do: :unchanged
   defp compare_maps(_map1, _map2), do: :changed
+
+  @doc """
+  Returns statistics for a specific agent including:
+  - Direct reports count
+  - Total issues assigned
+  - Issues completed this week
+  - Blocked issues count
+  - Budget status (if applicable)
+  """
+  def get_agent_stats(agent_id) when is_binary(agent_id) do
+    case get_agent(agent_id) do
+      {:ok, agent} ->
+        %{
+          direct_reports: count_direct_reports(agent_id),
+          total_issues: count_assigned_issues(agent_id),
+          completed_this_week: count_completed_this_week(agent_id),
+          blocked_count: count_blocked_issues(agent_id),
+          budget_status: get_agent_budget_status(agent)
+        }
+
+      {:error, _} ->
+        nil
+    end
+  end
+
+  @doc """
+  Returns company-wide agent statistics grouped by role and status.
+  """
+  def get_company_agent_stats(company_id) when is_binary(company_id) do
+    agents = list_agents_by_company(company_id)
+
+    %{
+      total: length(agents),
+      by_role: Enum.group_by(agents, & &1.role) |> Map.new(fn {k, v} -> {k, length(v)} end),
+      by_status: Enum.group_by(agents, & &1.status) |> Map.new(fn {k, v} -> {k, length(v)} end),
+      idle_ratio: calculate_idle_ratio(agents)
+    }
+  end
+
+  defp count_direct_reports(agent_id) do
+    Agent
+    |> where([a], a.parent_id == ^agent_id)
+    |> Repo.aggregate(:count)
+  end
+
+  defp count_assigned_issues(agent_id) do
+    Cympho.Issues.Issue
+    |> where([i], i.assignee_id == ^agent_id)
+    |> Repo.aggregate(:count)
+  end
+
+  defp count_completed_this_week(agent_id) do
+    week_start_date = Date.beginning_of_week(DateTime.utc_now() |> DateTime.to_date())
+    week_start = DateTime.new!(week_start_date, ~T[00:00:00])
+
+    Cympho.Issues.Issue
+    |> where([i], i.assignee_id == ^agent_id)
+    |> where([i], i.status == :done)
+    |> where([i], not is_nil(i.completed_at))
+    |> where([i], i.completed_at >= ^week_start)
+    |> Repo.aggregate(:count)
+  end
+
+  defp count_blocked_issues(agent_id) do
+    Cympho.Issues.Issue
+    |> where([i], i.assignee_id == ^agent_id)
+    |> where([i], i.status == :blocked)
+    |> Repo.aggregate(:count)
+  end
+
+  defp get_agent_budget_status(%Agent{budget: budget}) when budget == %{} or budget == nil,
+    do: nil
+
+  defp get_agent_budget_status(%Agent{budget: budget}) when is_map(budget) do
+    budget_id = Map.get(budget, "budget_id") || Map.get(budget, :budget_id)
+
+    if is_nil(budget_id) do
+      nil
+    else
+      case Cympho.Budgets.get_budget(budget_id) do
+        nil ->
+          nil
+
+        budget ->
+          %{
+            limit: budget.limit_amount,
+            spent: budget.spent_amount,
+            remaining: Decimal.sub(budget.limit_amount, budget.spent_amount),
+            percentage:
+              if Decimal.gt?(budget.limit_amount, 0) do
+                Decimal.mult(Decimal.div(budget.spent_amount, budget.limit_amount), 100)
+              else
+                Decimal.from_integer(0)
+              end
+          }
+      end
+    end
+  end
+
+  defp get_agent_budget_status(_), do: nil
+
+  defp calculate_idle_ratio(agents) when is_list(agents) do
+    total = length(agents)
+    idle = Enum.count(agents, &(&1.status == :idle))
+
+    if total > 0 do
+      Float.round(idle / total * 100, 1)
+    else
+      0.0
+    end
+  end
 end

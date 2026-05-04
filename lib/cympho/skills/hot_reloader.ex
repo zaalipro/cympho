@@ -109,7 +109,8 @@ defmodule Cympho.Skills.HotReloader do
   end
 
   @impl true
-  def handle_info({:file_event, watcher_pid, {path, events}}, state) when watcher_pid == state.watcher_pid do
+  def handle_info({:file_event, watcher_pid, {path, events}}, state)
+      when watcher_pid == state.watcher_pid do
     if :modified in events or :created in events do
       # Debounce: schedule reload after @reload_timeout
       Process.send_after(self(), {:process_file_change, path}, @reload_timeout)
@@ -169,10 +170,11 @@ defmodule Cympho.Skills.HotReloader do
 
         results = Enum.map(manifest_files, &reload_single_manifest/1)
 
-        successful = Enum.count(results, fn
-          {:ok, _} -> true
-          _ -> false
-        end)
+        successful =
+          Enum.count(results, fn
+            {:ok, _} -> true
+            _ -> false
+          end)
 
         {:ok, successful}
 
@@ -187,7 +189,7 @@ defmodule Cympho.Skills.HotReloader do
          {:ok, updated_plugin} <- update_plugin_manifest(plugin, manifest_data) do
       {:ok, updated_plugin}
     else
-      {:error, reason} = error -> error
+      {:error, _reason} = error -> error
     end
   end
 
@@ -212,7 +214,7 @@ defmodule Cympho.Skills.HotReloader do
     end
   end
 
-  defp parse_yaml(content) do
+  defp parse_yaml(_content) do
     # Use a simple YAML parser or add :yamerl dependency
     # For now, return error and expect JSON in dev
     {:error, :yaml_not_supported}
@@ -224,15 +226,22 @@ defmodule Cympho.Skills.HotReloader do
     # slug, we have a data integrity issue and should fail safely
     query =
       from c in Cympho.Companies.Company,
-      where: c.slug == ^company_slug,
-      limit: 2,
-      select: c.id
+        where: c.slug == ^company_slug,
+        limit: 2,
+        select: c.id
 
     case Repo.all(query) do
-      [] -> {:error, :no_company}
-      [company_id] -> Plugins.get_plugin_by_identifier(identifier, company_id)
+      [] ->
+        {:error, :no_company}
+
+      [company_id] ->
+        Plugins.get_plugin_by_identifier(identifier, company_id)
+
       [_first, _second | _] ->
-        Logger.error("Multiple companies found with slug #{company_slug}, possible data integrity issue")
+        Logger.error(
+          "Multiple companies found with slug #{company_slug}, possible data integrity issue"
+        )
+
         {:error, :ambiguous_company}
     end
   end
@@ -243,20 +252,26 @@ defmodule Cympho.Skills.HotReloader do
     # In production with multi-tenant, manifests should include company_slug
     query =
       from p in Plugin,
-      where: p.identifier == ^identifier,
-      limit: 2,
-      select: {p.id, p.company_id}
+        where: p.identifier == ^identifier,
+        limit: 2,
+        select: {p.id, p.company_id}
 
     case Repo.all(query) do
-      [] -> {:error, :plugin_not_found}
-      [{plugin_id, company_id}] ->
+      [] ->
+        {:error, :plugin_not_found}
+
+      [{_plugin_id, company_id}] ->
         case Plugins.get_plugin_by_identifier(identifier, company_id) do
           {:ok, plugin} -> {:ok, plugin}
           error -> error
         end
+
       [_first, _second | _] ->
-        Logger.warning("Multiple plugins found with identifier #{identifier}, using first match. " <>
-                       "Consider adding company_slug to manifest for unambiguous lookup.")
+        Logger.warning(
+          "Multiple plugins found with identifier #{identifier}, using first match. " <>
+            "Consider adding company_slug to manifest for unambiguous lookup."
+        )
+
         # Use the first match
         [{_plugin_id, company_id} | _] = Repo.all(query)
         Plugins.get_plugin_by_identifier(identifier, company_id)

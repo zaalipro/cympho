@@ -33,9 +33,19 @@ defmodule CymphoWeb.WorkProductController do
 
   def update(conn, %{"id" => id} = params) do
     with {:ok, %IssueWorkProduct{} = work_product} <- WorkProducts.get_work_product(id) do
-      attrs = Map.take(params, ["kind", "title", "description", "payload", "url", "metadata", "attachment_id"])
+      attrs =
+        Map.take(params, [
+          "kind",
+          "title",
+          "description",
+          "payload",
+          "url",
+          "metadata",
+          "attachment_id"
+        ])
 
-      with {:ok, %IssueWorkProduct{} = updated} <- WorkProducts.update_work_product(work_product, attrs) do
+      with {:ok, %IssueWorkProduct{} = updated} <-
+             WorkProducts.update_work_product(work_product, attrs) do
         render(conn, :show, work_product: updated)
       end
     end

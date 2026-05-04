@@ -24,7 +24,16 @@ defmodule Cympho.Plugins.PluginWebhook do
 
   def changeset(plugin_webhook, attrs) do
     plugin_webhook
-    |> cast(attrs, [:event_type, :url, :secret, :enabled, :last_triggered_at, :failure_count, :plugin_id, :company_id])
+    |> cast(attrs, [
+      :event_type,
+      :url,
+      :secret,
+      :enabled,
+      :last_triggered_at,
+      :failure_count,
+      :plugin_id,
+      :company_id
+    ])
     |> validate_required([:event_type, :url, :plugin_id, :company_id])
     |> validate_format(:url, ~r/^https?:\/\//)
     |> assoc_constraint(:plugin)

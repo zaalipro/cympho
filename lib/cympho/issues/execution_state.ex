@@ -169,4 +169,59 @@ defmodule Cympho.Issues.ExecutionState do
   def active?(nil), do: false
   def active?(%{current_stage_index: _}), do: true
   def active?(_), do: false
+
+  @doc """
+  Returns the stage config for the current stage from the policy.
+  """
+  @spec current_stage_config(t(), ExecutionPolicy.t()) :: map() | nil
+  def current_stage_config(%{current_stage_index: index}, %ExecutionPolicy{stage_configs: configs}) do
+    Enum.at(configs, index)
+  end
+
+  def current_stage_config(_, _), do: nil
+
+  @doc """
+  Returns true if the current stage requires a different actor than the executor.
+  """
+  @spec require_different_actor?(t(), ExecutionPolicy.t()) :: boolean()
+  def require_different_actor?(state, policy) do
+    case current_stage_config(state, policy) do
+      nil -> false
+      config -> flag_enabled?(config, "require_different_actor")
+    end
+  end
+
+  @doc """
+  Returns true if the current stage requires a human (non-agent) approver.
+  """
+  @spec require_human?(t(), ExecutionPolicy.t()) :: boolean()
+  def require_human?(state, policy) do
+    case current_stage_config(state, policy) do
+      nil -> false
+      config -> flag_enabled?(config, "require_human")
+    end
+  end
+
+  @doc """
+  Returns true if the current stage has been approved.
+  """
+  @spec stage_complete?(t()) :: boolean()
+  def stage_complete?(%{last_decision_outcome: :approved}), do: true
+  def stage_complete?(_), do: false
+
+  @doc """
+  Returns the original executor from history, falling back to current participant.
+  """
+  @spec original_executor(t()) :: binary() | nil
+  def original_executor(%{history: [first | _]}) do
+    first.participant
+  end
+
+  def original_executor(%{current_participant: participant}), do: participant
+  def original_executor(_), do: nil
+
+  defp flag_enabled?(config, key) do
+    value = Map.get(config, key) || Map.get(config, String.to_atom(key))
+    value in [true, "true"]
+  end
 end

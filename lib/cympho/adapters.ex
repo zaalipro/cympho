@@ -89,8 +89,11 @@ defmodule Cympho.Adapters do
   @spec check_health(atom(), map()) :: Cympho.Adapters.Adapter.health_result()
   def check_health(adapter_key, config \\ %{}) when is_atom(adapter_key) do
     case Registry.lookup(adapter_key) do
-      {:ok, module} -> module.health_check(config)
-      :error -> %{status: :unknown, message: "Adapter not registered", checked_at: DateTime.utc_now()}
+      {:ok, module} ->
+        module.health_check(config)
+
+      :error ->
+        %{status: :unknown, message: "Adapter not registered", checked_at: DateTime.utc_now()}
     end
   end
 
@@ -119,7 +122,8 @@ defmodule Cympho.Adapters do
   @doc """
   Returns the config schema for an adapter.
   """
-  @spec config_schema(atom()) :: {:ok, [Cympho.Adapters.Adapter.schema_entry()]} | {:error, :not_found}
+  @spec config_schema(atom()) ::
+          {:ok, [Cympho.Adapters.Adapter.schema_entry()]} | {:error, :not_found}
   def config_schema(adapter_key) when is_atom(adapter_key) do
     case Registry.lookup(adapter_key) do
       {:ok, module} -> {:ok, module.config_schema()}

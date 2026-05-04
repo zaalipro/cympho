@@ -1,46 +1,79 @@
-<.header>
-  New Routine
-  <:actions>
-    <.link navigate={~p"/routines"} class="phx-btn-secondary">
-      Cancel
-    </.link>
-  </:actions>
-</.header>
-
-<div class="routine-form">
-  <.simple_form for={@form} as={:routine} phx-submit="save">
-    <.input field={@form[:name]} label="Name" />
-    <.input field={@form[:description]} label="Description" type="textarea" />
-
-    <div class="form-group">
-      <label>Priority</label>
-      <select name="routine[priority]">
-        <option value="critical">Critical</option>
-        <option value="high">High</option>
-        <option value="medium" selected>Medium</option>
-        <option value="low">Low</option>
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label>Concurrency Policy</label>
-      <select name="routine[concurrency_policy]">
-        <option value="coalesce_if_active" selected>Coalesce if active</option>
-        <option value="skip_if_active">Skip if active</option>
-        <option value="always_enqueue">Always enqueue</option>
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label>Catch-Up Policy</label>
-      <select name="routine[catch_up_policy]">
-        <option value="skip_missed" selected>Skip missed</option>
-        <option value="enqueue_missed_with_cap">Enqueue missed with cap</option>
-      </select>
-    </div>
-
+<div class="p-6 lg:p-8 max-w-3xl mx-auto w-full min-w-0">
+  <.header title="New Routine" subtitle="Schedule recurring autonomous work.">
     <:actions>
-      <.button type="submit">Create Routine</.button>
+      <.app_link
+        navigate={~p"/routines"}
+        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+      >
+        Cancel
+      </.app_link>
     </:actions>
-  </.simple_form>
+  </.header>
+
+  <.form
+    for={@form}
+    phx-submit="save"
+    class="space-y-5 rounded-xl border border-border bg-surface p-5"
+  >
+    <.input field={@form[:name]} label="Name" required />
+    <.input field={@form[:description]} label="Description" type="textarea" rows={4} />
+
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <.input
+        type="select"
+        field={@form[:priority]}
+        label="Priority"
+        value={@form[:priority].value || :medium}
+        options={[
+          {"Critical", "critical"},
+          {"High", "high"},
+          {"Medium", "medium"},
+          {"Low", "low"}
+        ]}
+      />
+      <.input
+        type="select"
+        field={@form[:concurrency_policy]}
+        label="Concurrency Policy"
+        value={@form[:concurrency_policy].value || :coalesce_if_active}
+        options={[
+          {"Coalesce if active", "coalesce_if_active"},
+          {"Skip if active", "skip_if_active"},
+          {"Always enqueue", "always_enqueue"}
+        ]}
+      />
+      <.input
+        type="select"
+        field={@form[:catch_up_policy]}
+        label="Catch-up Policy"
+        value={@form[:catch_up_policy].value || :skip_missed}
+        options={[
+          {"Skip missed", "skip_missed"},
+          {"Enqueue missed with cap", "enqueue_missed_with_cap"}
+        ]}
+      />
+      <.input
+        type="number"
+        field={@form[:catch_up_cap]}
+        label="Catch-up Cap"
+        value={@form[:catch_up_cap].value || 5}
+        min="1"
+      />
+    </div>
+
+    <div class="flex items-center justify-end gap-2 border-t border-border pt-4">
+      <.app_link
+        navigate={~p"/routines"}
+        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+      >
+        Cancel
+      </.app_link>
+      <button
+        type="submit"
+        class="rounded-lg bg-brand px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-accent"
+      >
+        Create Routine
+      </button>
+    </div>
+  </.form>
 </div>

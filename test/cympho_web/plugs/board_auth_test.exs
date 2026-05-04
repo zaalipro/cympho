@@ -9,21 +9,28 @@ defmodule CymphoWeb.Plugs.BoardAuthTest do
     unique = System.unique_integer([:positive])
 
     %User{}
-    |> User.registration_changeset(Map.merge(%{
-      email: "board-test-#{unique}@example.com",
-      name: "Board Test User #{unique}",
-      password: "password123"
-    }, attrs))
+    |> User.registration_changeset(
+      Map.merge(
+        %{
+          email: "board-test-#{unique}@example.com",
+          name: "Board Test User #{unique}",
+          password: "password123"
+        },
+        attrs
+      )
+    )
     |> Cympho.Repo.insert!()
   end
 
   defp create_company do
     unique = System.unique_integer([:positive])
+
     {:ok, company} =
       Companies.create_company(%{
         name: "Board Test Company #{unique}",
         slug: "board-test-company-#{unique}"
       })
+
     company
   end
 
@@ -35,6 +42,7 @@ defmodule CymphoWeb.Plugs.BoardAuthTest do
         role: role,
         is_board_member: is_board_member
       })
+
     membership
   end
 
@@ -138,7 +146,9 @@ defmodule CymphoWeb.Plugs.BoardAuthTest do
 
       assert conn.halted
 
-      [log] = GovernanceAuditLogs.list_governance_audit_logs(action_type: "guard_denied", limit: 1)
+      [log] =
+        GovernanceAuditLogs.list_governance_audit_logs(action_type: "guard_denied", limit: 1)
+
       assert log.actor_id == user.id
       assert log.metadata["company_id"] == company.id
     end

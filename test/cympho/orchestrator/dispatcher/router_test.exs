@@ -3,7 +3,6 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
 
   alias Cympho.Orchestrator.Dispatcher.Router
   alias Cympho.Agents
-  alias Cympho.Agents.Agent
 
   describe "infer_role/1" do
     test "returns :ceo for strategic keywords in title" do
@@ -49,6 +48,16 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
     test "case insensitive matching" do
       issue = %{title: "STRATEGIC VISION", description: "CEOs"}
       assert Router.infer_role(issue) == :ceo
+    end
+
+    test "assigned_role takes precedence over keywords" do
+      issue = %{
+        title: "Strategic architecture planning",
+        description: "CEO and CTO keywords",
+        assigned_role: "engineer"
+      }
+
+      assert Router.infer_role(issue) == :engineer
     end
   end
 
@@ -142,7 +151,7 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
 
   describe "routing integration" do
     setup do
-      {:ok, ceo} =
+      {:ok, _ceo} =
         Agents.create_agent(%{
           name: "CEO",
           role: :cto,
