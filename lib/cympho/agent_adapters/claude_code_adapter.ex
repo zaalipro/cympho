@@ -165,7 +165,9 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
   defp build_prompt(issue) do
     lineage_part =
       case issue.lineage do
-        nil -> ""
+        nil ->
+          ""
+
         lineage ->
           parts =
             [

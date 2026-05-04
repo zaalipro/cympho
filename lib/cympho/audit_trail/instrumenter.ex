@@ -63,7 +63,11 @@ defmodule Cympho.AuditTrail.Instrumenter do
 
   def record_session_event(session, event, metadata \\ %{})
 
-  def record_session_event(%{issue: issue, agent_id: agent_id, run_id: run_id}, "started", _metadata) do
+  def record_session_event(
+        %{issue: issue, agent_id: agent_id, run_id: run_id},
+        "started",
+        _metadata
+      ) do
     log(%{
       event_type: "orchestrator_session_started",
       actor_type: "agent",
@@ -74,7 +78,11 @@ defmodule Cympho.AuditTrail.Instrumenter do
     })
   end
 
-  def record_session_event(%{issue: issue, agent_id: agent_id, run_id: run_id}, "completed", metadata) do
+  def record_session_event(
+        %{issue: issue, agent_id: agent_id, run_id: run_id},
+        "completed",
+        metadata
+      ) do
     log(%{
       event_type: "orchestrator_session_ended",
       actor_type: "agent",
@@ -98,7 +106,12 @@ defmodule Cympho.AuditTrail.Instrumenter do
     })
   end
 
-  def record_tool_call(%{issue: issue, agent_id: agent_id, run_id: run_id}, tool_name, args, result) do
+  def record_tool_call(
+        %{issue: issue, agent_id: agent_id, run_id: run_id},
+        tool_name,
+        args,
+        result
+      ) do
     log(%{
       event_type: "orchestrator_tool_call",
       actor_type: "agent",
@@ -114,7 +127,9 @@ defmodule Cympho.AuditTrail.Instrumenter do
     changeset = AuditEvent.changeset(%AuditEvent{}, attrs)
 
     case Repo.insert(changeset) do
-      {:ok, _event} -> :ok
+      {:ok, _event} ->
+        :ok
+
       {:error, changeset} ->
         Logger.error("Failed to record audit event: #{inspect(changeset.errors)}")
         Logger.error("Audit event attrs: #{inspect(attrs)}")

@@ -82,7 +82,10 @@ defmodule CymphoWeb.WorkspaceLive.Show do
               <span class="capitalize">{@issue.priority}</span>
             </div>
             <h2 class="mt-2 text-lg font-590 leading-6 text-text-primary">{@issue.title}</h2>
-            <p :if={@issue.description not in [nil, ""]} class="mt-2 max-w-3xl text-sm leading-6 text-text-secondary">
+            <p
+              :if={@issue.description not in [nil, ""]}
+              class="mt-2 max-w-3xl text-sm leading-6 text-text-secondary"
+            >
               {@issue.description}
             </p>
           </div>
@@ -91,19 +94,19 @@ defmodule CymphoWeb.WorkspaceLive.Show do
             <div class="bg-panel px-5 py-4">
               <p class="text-xs font-510 uppercase tracking-wide text-text-tertiary">Workspace</p>
               <p class="mt-2 text-sm font-510 text-text-primary">
-                <%= if @workspace_exists, do: "Ready", else: "Not created" %>
+                {if @workspace_exists, do: "Ready", else: "Not created"}
               </p>
             </div>
             <div class="bg-panel px-5 py-4">
               <p class="text-xs font-510 uppercase tracking-wide text-text-tertiary">Project</p>
               <p class="mt-2 truncate text-sm font-510 text-text-primary">
-                <%= if @project, do: @project.name, else: "No project" %>
+                {if @project, do: @project.name, else: "No project"}
               </p>
             </div>
             <div class="bg-panel px-5 py-4">
               <p class="text-xs font-510 uppercase tracking-wide text-text-tertiary">Assignee</p>
               <p class="mt-2 truncate text-sm font-510 text-text-primary">
-                <%= if @issue.assignee, do: @issue.assignee.name, else: "Unassigned" %>
+                {if @issue.assignee, do: @issue.assignee.name, else: "Unassigned"}
               </p>
             </div>
           </div>
@@ -117,7 +120,9 @@ defmodule CymphoWeb.WorkspaceLive.Show do
             </div>
 
             <div>
-              <p class="mb-2 text-xs font-510 uppercase tracking-wide text-text-tertiary">Repository</p>
+              <p class="mb-2 text-xs font-510 uppercase tracking-wide text-text-tertiary">
+                Repository
+              </p>
               <p class="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-secondary">
                 {@repo_url || "No repository configured for this project."}
               </p>
@@ -181,7 +186,7 @@ defmodule CymphoWeb.WorkspaceLive.Show do
               <div class="flex justify-between gap-4">
                 <dt class="text-text-tertiary">Size</dt>
                 <dd class="text-text-secondary">
-                  <%= if @workspace_exists, do: format_workspace_size(@workspace_path), else: "N/A" %>
+                  {if @workspace_exists, do: format_workspace_size(@workspace_path), else: "N/A"}
                 </dd>
               </div>
               <div class="flex justify-between gap-4">

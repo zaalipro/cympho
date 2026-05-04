@@ -184,5 +184,75 @@ defmodule Cympho.AgentActionsTest do
       assert updated.assignee_id == nil
       assert updated.assigned_role == "cto"
     end
+
+    test "handoff generates structured context comment", %{issue: issue, ceo: ceo} do
+      actions = [
+        %{
+          "type" => "handoff",
+          "role" => "cto",
+          "reason" => "Architecture review needed",
+          "summary" => "Implemented dedup check",
+          "remaining" => "Write integration tests",
+          "decisions" => "Used 24h window",
+          "file_paths" => ["lib/cympho/agent_actions.ex", "test/cympho/agent_actions_test.exs"]
+        }
+      ]
+
+      assert {:ok, _} = AgentActions.execute(issue, ceo, actions)
+
+      comments = Comments.list_comments(issue.id)
+
+      context_comment =
+        Enum.find(comments, fn c ->
+          c.author_type == "system" && String.contains?(c.body, "Handoff Context")
+        end)
+
+      assert context_comment != nil
+      assert String.contains?(context_comment.body, "Architecture review needed")
+      assert String.contains?(context_comment.body, "Implemented dedup check")
+      assert String.contains?(context_comment.body, "Write integration tests")
+      assert String.contains?(context_comment.body, "Used 24h window")
+      assert String.contains?(context_comment.body, "lib/cympho/agent_actions.ex")
+    end
+
+    test "create_issue deduplicates within 24h by title and goal", %{
+      issue: issue,
+      cto: cto
+    } do
+      actions = [
+        %{
+          "type" => "create_issue",
+          "title" => "Dedup target issue",
+          "role" => "engineer",
+          "priority" => "medium"
+        }
+      ]
+
+      assert {:ok, %{results: [%{type: "create_issue", issue_id: first_id}]}} =
+               AgentActions.execute(issue, cto, actions)
+
+      assert {:ok, %{results: [%{type: "create_issue", issue_id: ^first_id, duplicate: true}]}} =
+               AgentActions.execute(issue, cto, actions)
+
+      comments = Comments.list_comments(first_id)
+
+      assert Enum.any?(comments, fn c ->
+               c.author_type == "system" && String.contains?(c.body, "Duplicate creation attempt")
+             end)
+    end
+
+    test "create_issue allows different titles", %{issue: issue, cto: cto} do
+      actions_a = [
+        %{"type" => "create_issue", "title" => "Task A", "role" => "engineer"}
+      ]
+
+      actions_b = [
+        %{"type" => "create_issue", "title" => "Task B", "role" => "engineer"}
+      ]
+
+      assert {:ok, %{results: [%{issue_id: id_a}]}} = AgentActions.execute(issue, cto, actions_a)
+      assert {:ok, %{results: [%{issue_id: id_b}]}} = AgentActions.execute(issue, cto, actions_b)
+      assert id_a != id_b
+    end
   end
 end
