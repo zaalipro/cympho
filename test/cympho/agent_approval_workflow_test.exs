@@ -459,10 +459,12 @@ defmodule Cympho.AgentApprovalWorkflowTest do
 
       # Manually change the agent's role before approval is processed
       # (simulating a race condition)
-      {_, _, _} =
+      {:ok, uuid_binary} = Ecto.UUID.dump(agent.id)
+
+      {:ok, _} =
         Cympho.Repo.query(
           "UPDATE agents SET role = 'product_manager' WHERE id = $1",
-          [agent.id]
+          [uuid_binary]
         )
 
       # Approve the original role change

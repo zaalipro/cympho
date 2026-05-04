@@ -375,10 +375,10 @@ defmodule Cympho.Agents do
         child_attrs =
           if parent_agent_id do
             attrs
-            |> Map.put(:created_by_agent_id, parent_agent_id)
-            |> Map.put(:board_approval_id, board_approval_id)
+            |> Map.put("created_by_agent_id", parent_agent_id)
+            |> Map.put("board_approval_id", board_approval_id)
           else
-            Map.put(attrs, :board_approval_id, board_approval_id)
+            Map.put(attrs, "board_approval_id", board_approval_id)
           end
 
         execute_spawn(child_attrs)
