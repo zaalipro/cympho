@@ -7,15 +7,18 @@ function initTheme() {
   const stored = localStorage.getItem('cympho-theme');
   if (stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
     document.documentElement.setAttribute('data-theme', 'dark');
-  } else {
+  } else if (stored === 'light') {
     document.documentElement.setAttribute('data-theme', 'light');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
   }
 }
 
 window.toggleTheme = function() {
-  const isDark = document.documentElement.getAttribute('data-theme') === 'light';
-  document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-  localStorage.setItem('cympho-theme', isDark ? 'dark' : 'light');
+  const currentTheme = document.documentElement.getAttribute('data-theme');
+  const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', newTheme);
+  localStorage.setItem('cympho-theme', newTheme);
 };
 
 // Timeline scroll hook for chat-style auto-scroll

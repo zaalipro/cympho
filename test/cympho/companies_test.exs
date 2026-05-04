@@ -213,7 +213,9 @@ defmodule Cympho.CompaniesTest do
       assert ceo.role == :ceo
       assert cto.role == :cto
 
-      eng_issue = Enum.find(result.seed_issues, &(&1.assigned_role == "cto" and &1.issue_number == 4))
+      eng_issue =
+        Enum.find(result.seed_issues, &(&1.assigned_role == "cto" and &1.issue_number == 4))
+
       assert eng_issue.assignee_id == cto.id
     end
 

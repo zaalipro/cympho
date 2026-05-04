@@ -122,12 +122,13 @@ defmodule Cympho.BoardApprovals do
         )
 
         # Record audit event for board vote
-        _ = Instrumenter.record_board_vote(
-          board_approval,
-          vote,
-          "user",
-          user_id
-        )
+        _ =
+          Instrumenter.record_board_vote(
+            board_approval,
+            vote,
+            "user",
+            user_id
+          )
 
         Phoenix.PubSub.broadcast(
           Cympho.PubSub,

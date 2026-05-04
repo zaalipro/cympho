@@ -46,7 +46,8 @@ defmodule Cympho.Goals.Goal do
   end
 
   defp maybe_set_goal_type(changeset) do
-    if get_field(changeset, :goal_type) == :initiative and is_nil(get_field(changeset, :parent_id)) do
+    if get_field(changeset, :goal_type) == :initiative and
+         is_nil(get_field(changeset, :parent_id)) do
       put_change(changeset, :goal_type, :mission)
     else
       changeset

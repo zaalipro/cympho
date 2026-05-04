@@ -19,51 +19,60 @@ defmodule Cympho.AuditTrail.Instrumenter do
     })
   end
 
-  def record_board_vote(voter_id, vote, issue, approval_id) do
+  def record_board_vote(board_approval, vote, actor_type, actor_id) do
     log(%{
       event_type: "board_approval_vote",
-      actor_type: "agent",
-      actor_id: voter_id,
+      actor_type: actor_type,
+      actor_id: actor_id,
       resource_type: "board_approval",
-      resource_id: approval_id,
-      company_id: issue.company_id,
+      resource_id: board_approval.id,
+      company_id: board_approval.company_id,
       payload: %{vote: vote}
     })
   end
 
-  def record_decision(decision_id, event, issue, actor_id) do
+  def record_decision(decision, event, actor_type, actor_id) do
     event_type =
       case event do
-        :created -> "decision_created"
-        :reversed -> "decision_reversed"
+        "created" -> "decision_created"
+        "reversed" -> "decision_reversed"
         other -> "decision_#{other}"
       end
 
     log(%{
       event_type: event_type,
-      actor_type: "agent",
+      actor_type: actor_type,
       actor_id: actor_id,
       resource_type: "decision",
-      resource_id: decision_id,
-      company_id: issue.company_id
+      resource_id: decision.id,
+      company_id: decision.company_id,
+      payload: %{
+        decision_type: decision.decision_type,
+        outcome: decision.outcome,
+        reasoning: decision.reasoning
+      }
     })
   end
 
-  def record_budget_change(policy_id, action, old_amount, new_amount, company_id) do
+  def record_budget_change(budget, old_value, new_value, actor_type, actor_id) do
     log(%{
       event_type: "budget_threshold_changed",
-      actor_type: "system",
-      actor_id: "00000000-0000-0000-0000-000000000000",
+      actor_type: actor_type,
+      actor_id: actor_id,
       resource_type: "budget",
-      resource_id: policy_id,
-      company_id: company_id,
-      payload: %{action: action, old_amount: old_amount, new_amount: new_amount}
+      resource_id: budget.id,
+      company_id: budget.company_id,
+      payload: %{old_value: old_value, new_value: new_value}
     })
   end
 
   def record_session_event(session, event, metadata \\ %{})
 
-  def record_session_event(%{issue: issue, agent_id: agent_id, run_id: run_id}, "started", _metadata) do
+  def record_session_event(
+        %{issue: issue, agent_id: agent_id, run_id: run_id},
+        "started",
+        _metadata
+      ) do
     log(%{
       event_type: "orchestrator_session_started",
       actor_type: "agent",
@@ -74,7 +83,11 @@ defmodule Cympho.AuditTrail.Instrumenter do
     })
   end
 
-  def record_session_event(%{issue: issue, agent_id: agent_id, run_id: run_id}, "completed", metadata) do
+  def record_session_event(
+        %{issue: issue, agent_id: agent_id, run_id: run_id},
+        "completed",
+        metadata
+      ) do
     log(%{
       event_type: "orchestrator_session_ended",
       actor_type: "agent",
@@ -98,7 +111,12 @@ defmodule Cympho.AuditTrail.Instrumenter do
     })
   end
 
-  def record_tool_call(%{issue: issue, agent_id: agent_id, run_id: run_id}, tool_name, args, result) do
+  def record_tool_call(
+        %{issue: issue, agent_id: agent_id, run_id: run_id},
+        tool_name,
+        args,
+        result
+      ) do
     log(%{
       event_type: "orchestrator_tool_call",
       actor_type: "agent",
@@ -114,14 +132,11 @@ defmodule Cympho.AuditTrail.Instrumenter do
     changeset = AuditEvent.changeset(%AuditEvent{}, attrs)
 
     case Repo.insert(changeset) do
-      {:ok, _event} -> :ok
+      {:ok, _event} ->
+        :ok
+
       {:error, changeset} ->
         Logger.error("Failed to record audit event: #{inspect(changeset.errors)}")
-        Logger.error("Audit event attrs: #{inspect(attrs)}")
-        {:error, :audit_failed}
-
-      {:error, _} ->
-        Logger.error("Failed to record audit event: unknown error")
         Logger.error("Audit event attrs: #{inspect(attrs)}")
         {:error, :audit_failed}
     end

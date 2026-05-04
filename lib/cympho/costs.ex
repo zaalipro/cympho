@@ -130,7 +130,9 @@ defmodule Cympho.Costs do
     |> join(:inner, [goal: g], d in fragment("^goal_descendants"), on: d.ancestor_id == g.id)
     |> where([goal: g], g.company_id == ^company_id)
     |> join(:inner, [goal: g, d: d], tu in TokenUsage,
-      on: tu.goal_id == d.descendant_id and tu.inserted_at >= ^since and tu.company_id == ^company_id
+      on:
+        tu.goal_id == d.descendant_id and tu.inserted_at >= ^since and
+          tu.company_id == ^company_id
     )
     |> group_by([goal: g], [g.id, g.title, g.goal_type])
     |> select([goal: g, d: d, tu: tu], %{
@@ -163,7 +165,9 @@ defmodule Cympho.Costs do
     |> where([mission: m], m.company_id == ^company_id and m.goal_type == ^:mission)
     |> join(:inner, [mission: m], d in fragment("^goal_descendants"), on: d.ancestor_id == m.id)
     |> join(:inner, [mission: m, d: d], tu in TokenUsage,
-      on: tu.goal_id == d.descendant_id and tu.inserted_at >= ^since and tu.company_id == ^company_id
+      on:
+        tu.goal_id == d.descendant_id and tu.inserted_at >= ^since and
+          tu.company_id == ^company_id
     )
     |> group_by([mission: m], [m.id, m.title])
     |> select([mission: m, d: d, tu: tu], %{

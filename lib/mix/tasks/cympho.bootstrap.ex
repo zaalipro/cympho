@@ -54,7 +54,11 @@ defmodule Mix.Tasks.Cympho.Bootstrap do
 
     unless company_name do
       Mix.shell().error("Error: --company-name is required.")
-      Mix.shell().info("\nUsage: mix cympho.bootstrap --company-name \"Name\" [--mission \"Goal\"] [--engineers N] [--yes]")
+
+      Mix.shell().info(
+        "\nUsage: mix cympho.bootstrap --company-name \"Name\" [--mission \"Goal\"] [--engineers N] [--yes]"
+      )
+
       Mix.raise("Missing required option: --company-name")
     end
 
