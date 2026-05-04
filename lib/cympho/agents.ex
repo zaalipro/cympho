@@ -1047,8 +1047,9 @@ defmodule Cympho.Agents do
     |> Repo.aggregate(:count)
   end
 
-  defp get_agent_budget_status(%Agent{budget_monthly_cents: limit}) when is_nil(limit) or limit == 0,
-    do: nil
+  defp get_agent_budget_status(%Agent{budget_monthly_cents: limit})
+       when is_nil(limit) or limit == 0,
+       do: nil
 
   defp get_agent_budget_status(%Agent{budget_monthly_cents: limit, spent_monthly_cents: spent}) do
     limit_decimal = Decimal.new(limit)

@@ -9,18 +9,50 @@ defmodule Cympho.CostsTest do
     setup do
       company = insert_company()
 
-      {:ok, mission} = Goals.create_goal(%{title: "Mission A", company_id: company.id, goal_type: :mission})
-      {:ok, initiative} = Goals.create_goal(%{title: "Initiative B", company_id: company.id, goal_type: :initiative, parent_id: mission.id})
-      {:ok, milestone} = Goals.create_goal(%{title: "Milestone C", company_id: company.id, goal_type: :milestone, parent_id: initiative.id})
+      {:ok, mission} =
+        Goals.create_goal(%{title: "Mission A", company_id: company.id, goal_type: :mission})
 
-      insert_token_usage(%{company_id: company.id, goal_id: mission.id, cost_usd: Decimal.new("10.00")})
-      insert_token_usage(%{company_id: company.id, goal_id: initiative.id, cost_usd: Decimal.new("5.00")})
-      insert_token_usage(%{company_id: company.id, goal_id: milestone.id, cost_usd: Decimal.new("2.00")})
+      {:ok, initiative} =
+        Goals.create_goal(%{
+          title: "Initiative B",
+          company_id: company.id,
+          goal_type: :initiative,
+          parent_id: mission.id
+        })
+
+      {:ok, milestone} =
+        Goals.create_goal(%{
+          title: "Milestone C",
+          company_id: company.id,
+          goal_type: :milestone,
+          parent_id: initiative.id
+        })
+
+      insert_token_usage(%{
+        company_id: company.id,
+        goal_id: mission.id,
+        cost_usd: Decimal.new("10.00")
+      })
+
+      insert_token_usage(%{
+        company_id: company.id,
+        goal_id: initiative.id,
+        cost_usd: Decimal.new("5.00")
+      })
+
+      insert_token_usage(%{
+        company_id: company.id,
+        goal_id: milestone.id,
+        cost_usd: Decimal.new("2.00")
+      })
 
       %{company: company, mission: mission, initiative: initiative, milestone: milestone}
     end
 
-    test "aggregates costs for a goal including descendant costs", %{company: company, mission: mission} do
+    test "aggregates costs for a goal including descendant costs", %{
+      company: company,
+      mission: mission
+    } do
       results = Costs.by_goal(company.id, 30)
 
       mission_row = Enum.find(results, &(&1.goal_id == mission.id))
@@ -28,7 +60,10 @@ defmodule Cympho.CostsTest do
       assert Decimal.eq?(mission_row.total_cost, Decimal.new("17.00"))
     end
 
-    test "aggregates costs for initiative including its children", %{company: company, initiative: initiative} do
+    test "aggregates costs for initiative including its children", %{
+      company: company,
+      initiative: initiative
+    } do
       results = Costs.by_goal(company.id, 30)
 
       init_row = Enum.find(results, &(&1.goal_id == initiative.id))
@@ -54,8 +89,14 @@ defmodule Cympho.CostsTest do
       company = insert_company()
 
       for i <- 1..5 do
-        {:ok, goal} = Goals.create_goal(%{title: "Goal #{i}", company_id: company.id, goal_type: :mission})
-        insert_token_usage(%{company_id: company.id, goal_id: goal.id, cost_usd: Decimal.new("#{i}.00")})
+        {:ok, goal} =
+          Goals.create_goal(%{title: "Goal #{i}", company_id: company.id, goal_type: :mission})
+
+        insert_token_usage(%{
+          company_id: company.id,
+          goal_id: goal.id,
+          cost_usd: Decimal.new("#{i}.00")
+        })
       end
 
       results = Costs.by_goal(company.id, 30, 3)
@@ -67,13 +108,42 @@ defmodule Cympho.CostsTest do
     test "rolls up all costs under a mission" do
       company = insert_company()
 
-      {:ok, mission} = Goals.create_goal(%{title: "Mission X", company_id: company.id, goal_type: :mission})
-      {:ok, initiative} = Goals.create_goal(%{title: "Init Y", company_id: company.id, goal_type: :initiative, parent_id: mission.id})
-      {:ok, milestone} = Goals.create_goal(%{title: "Ms Z", company_id: company.id, goal_type: :milestone, parent_id: initiative.id})
+      {:ok, mission} =
+        Goals.create_goal(%{title: "Mission X", company_id: company.id, goal_type: :mission})
 
-      insert_token_usage(%{company_id: company.id, goal_id: mission.id, cost_usd: Decimal.new("10.00")})
-      insert_token_usage(%{company_id: company.id, goal_id: initiative.id, cost_usd: Decimal.new("5.00")})
-      insert_token_usage(%{company_id: company.id, goal_id: milestone.id, cost_usd: Decimal.new("2.00")})
+      {:ok, initiative} =
+        Goals.create_goal(%{
+          title: "Init Y",
+          company_id: company.id,
+          goal_type: :initiative,
+          parent_id: mission.id
+        })
+
+      {:ok, milestone} =
+        Goals.create_goal(%{
+          title: "Ms Z",
+          company_id: company.id,
+          goal_type: :milestone,
+          parent_id: initiative.id
+        })
+
+      insert_token_usage(%{
+        company_id: company.id,
+        goal_id: mission.id,
+        cost_usd: Decimal.new("10.00")
+      })
+
+      insert_token_usage(%{
+        company_id: company.id,
+        goal_id: initiative.id,
+        cost_usd: Decimal.new("5.00")
+      })
+
+      insert_token_usage(%{
+        company_id: company.id,
+        goal_id: milestone.id,
+        cost_usd: Decimal.new("2.00")
+      })
 
       results = Costs.by_mission(company.id, 30)
 
@@ -87,11 +157,23 @@ defmodule Cympho.CostsTest do
       company_a = insert_company()
       company_b = insert_company()
 
-      {:ok, mission_a} = Goals.create_goal(%{title: "MA", company_id: company_a.id, goal_type: :mission})
-      {:ok, mission_b} = Goals.create_goal(%{title: "MB", company_id: company_b.id, goal_type: :mission})
+      {:ok, mission_a} =
+        Goals.create_goal(%{title: "MA", company_id: company_a.id, goal_type: :mission})
 
-      insert_token_usage(%{company_id: company_a.id, goal_id: mission_a.id, cost_usd: Decimal.new("10.00")})
-      insert_token_usage(%{company_id: company_b.id, goal_id: mission_b.id, cost_usd: Decimal.new("20.00")})
+      {:ok, mission_b} =
+        Goals.create_goal(%{title: "MB", company_id: company_b.id, goal_type: :mission})
+
+      insert_token_usage(%{
+        company_id: company_a.id,
+        goal_id: mission_a.id,
+        cost_usd: Decimal.new("10.00")
+      })
+
+      insert_token_usage(%{
+        company_id: company_b.id,
+        goal_id: mission_b.id,
+        cost_usd: Decimal.new("20.00")
+      })
 
       results = Costs.by_mission(company_a.id, 30)
       assert length(results) == 1
@@ -108,7 +190,10 @@ defmodule Cympho.CostsTest do
 
       results = Costs.sparkline(company.id, 7)
       assert length(results) >= 1
-      assert Enum.all?(results, fn r -> Map.has_key?(r, :date) and Map.has_key?(r, :total_cost) end)
+
+      assert Enum.all?(results, fn r ->
+               Map.has_key?(r, :date) and Map.has_key?(r, :total_cost)
+             end)
     end
 
     test "respects day filter" do
@@ -142,6 +227,7 @@ defmodule Cympho.CostsTest do
     }
 
     attrs = Map.merge(defaults, attrs)
+
     %TokenUsage{}
     |> TokenUsage.changeset(attrs)
     |> Repo.insert!()

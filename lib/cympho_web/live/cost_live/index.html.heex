@@ -18,7 +18,7 @@
       </.form>
     </:actions>
   </.header>
-
+  
 <!-- Budget Alerts -->
   <div
     :if={not Enum.empty?(@exceeded_budgets)}
@@ -69,7 +69,7 @@
       <% end %>
     </div>
   </div>
-
+  
 <!-- Summary Cards -->
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
     <div class="bg-surface border border-border rounded-xl p-5">
@@ -147,7 +147,7 @@
       </div>
     </div>
   </div>
-
+  
 <!-- Daily Cost Chart -->
   <div class="bg-surface border border-border rounded-xl p-6 mb-6">
     <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
@@ -170,7 +170,7 @@
       <div class="text-text-tertiary text-sm">No cost data for the selected period</div>
     </div>
   </div>
-
+  
 <!-- Sparklines -->
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
     <div class="bg-surface border border-border rounded-xl p-6">
@@ -223,7 +223,7 @@
       </div>
     </div>
   </div>
-
+  
 <!-- Cost by Mission / Goal -->
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
     <div class="bg-surface border border-border rounded-xl p-6">
@@ -236,7 +236,9 @@
             <div class="flex-1">
               <div class="flex items-center justify-between mb-1">
                 <span class="text-sm text-text-primary truncate">{item.title}</span>
-                <span class="text-sm text-text-primary font-510 ml-2">{format_cost(item.total_cost)}</span>
+                <span class="text-sm text-text-primary font-510 ml-2">
+                  {format_cost(item.total_cost)}
+                </span>
               </div>
               <div class="w-full bg-black/20 rounded-full h-1.5">
                 <div
@@ -268,10 +270,14 @@
             <div class="flex-1">
               <div class="flex items-center justify-between mb-1">
                 <div class="flex items-center gap-2">
-                  <span class="text-xs px-1.5 py-0.5 rounded bg-brand/10 text-brand">{goal_type_label(item.goal_type)}</span>
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-brand/10 text-brand">
+                    {goal_type_label(item.goal_type)}
+                  </span>
                   <span class="text-sm text-text-primary truncate">{item.title}</span>
                 </div>
-                <span class="text-sm text-text-primary font-510 ml-2">{format_cost(item.total_cost)}</span>
+                <span class="text-sm text-text-primary font-510 ml-2">
+                  {format_cost(item.total_cost)}
+                </span>
               </div>
               <div class="w-full bg-black/20 rounded-full h-1.5">
                 <div
@@ -332,7 +338,7 @@
         <div class="text-text-tertiary text-sm">No agent cost data for the selected period</div>
       </div>
     </div>
-
+    
 <!-- Costs by Issue -->
     <div class="bg-surface border border-border rounded-xl p-6">
       <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
@@ -409,7 +415,7 @@
         <div class="text-text-tertiary text-sm">No model cost data for the selected period</div>
       </div>
     </div>
-
+    
 <!-- Costs by Provider -->
     <div class="bg-surface border border-border rounded-xl p-6">
       <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
@@ -445,7 +451,7 @@
       </div>
     </div>
   </div>
-
+  
 <!-- Active Budgets -->
   <div class="bg-surface border border-border rounded-xl p-6">
     <div class="flex items-center justify-between mb-4">

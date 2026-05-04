@@ -174,11 +174,14 @@ defmodule CymphoWeb.CostLive.Index do
       |> Enum.with_index()
       |> Enum.map(fn {cost, i} ->
         x = if length(costs) > 1, do: i / (length(costs) - 1) * 100, else: 50
-        y = if Decimal.gt?(max_val, Decimal.new("0")) do
-          100 - (Decimal.to_float(Decimal.div(cost, max_val)) * 100)
-        else
-          100.0
-        end
+
+        y =
+          if Decimal.gt?(max_val, Decimal.new("0")) do
+            100 - Decimal.to_float(Decimal.div(cost, max_val)) * 100
+          else
+            100.0
+          end
+
         "#{Float.round(x, 1)},#{Float.round(y, 1)}"
       end)
 
