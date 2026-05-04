@@ -62,49 +62,49 @@ defmodule Cympho.AuditTrail.Instrumenter do
 
   def record_session_event(session, event, metadata \\ %{})
 
-  def record_session_event(session, "started", _metadata) do
+  def record_session_event(%__MODULE__{issue: issue, agent_id: agent_id, run_id: run_id}, "started", _metadata) do
     log(%{
       event_type: "orchestrator_session_started",
       actor_type: "agent",
-      actor_id: session["agent_id"],
+      actor_id: agent_id,
       resource_type: "orchestrator_session",
-      resource_id: session["run_id"],
-      company_id: session["company_id"]
+      resource_id: run_id,
+      company_id: issue.company_id
     })
   end
 
-  def record_session_event(session, "completed", metadata) do
+  def record_session_event(%__MODULE__{issue: issue, agent_id: agent_id, run_id: run_id}, "completed", metadata) do
     log(%{
       event_type: "orchestrator_session_ended",
       actor_type: "agent",
-      actor_id: session["agent_id"],
+      actor_id: agent_id,
       resource_type: "orchestrator_session",
-      resource_id: session["run_id"],
-      company_id: session["company_id"],
+      resource_id: run_id,
+      company_id: issue.company_id,
       payload: metadata
     })
   end
 
-  def record_session_event(session, event, metadata) do
+  def record_session_event(%__MODULE__{issue: issue, agent_id: agent_id, run_id: run_id}, event, metadata) do
     log(%{
       event_type: "orchestrator_session_#{event}",
       actor_type: "agent",
-      actor_id: session["agent_id"],
+      actor_id: agent_id,
       resource_type: "orchestrator_session",
-      resource_id: session["run_id"],
-      company_id: session["company_id"],
+      resource_id: run_id,
+      company_id: issue.company_id,
       payload: metadata
     })
   end
 
-  def record_tool_call(session, tool_name, args, result) do
+  def record_tool_call(%__MODULE__{issue: issue, agent_id: agent_id, run_id: run_id}, tool_name, args, result) do
     log(%{
       event_type: "orchestrator_tool_call",
       actor_type: "agent",
-      actor_id: session["agent_id"],
+      actor_id: agent_id,
       resource_type: "orchestrator_session",
-      resource_id: session["run_id"],
-      company_id: session["company_id"],
+      resource_id: run_id,
+      company_id: issue.company_id,
       payload: %{tool: tool_name, args: args, result: result}
     })
   end
@@ -113,7 +113,7 @@ defmodule Cympho.AuditTrail.Instrumenter do
     changeset = AuditEvent.changeset(%AuditEvent{}, attrs)
 
     case Repo.insert(changeset) do
-      {:ok, event} -> {:ok, event}
+      {:ok, _event} -> :ok
       {:error, _changeset} -> :ok
     end
   rescue
