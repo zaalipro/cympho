@@ -247,7 +247,7 @@ defmodule Cympho.Issues do
         )
 
       attrs =
-        if Map.get(attrs, :issue_number) || Map.get(attrs, "issue_number") do
+        if get_param(attrs, :issue_number) do
           attrs
         else
           next_number = company.issue_counter + 1
@@ -258,8 +258,8 @@ defmodule Cympho.Issues do
           |> Repo.update!()
 
           attrs
-          |> Map.put(:issue_number, next_number)
-          |> Map.put_new(:identifier, "#{prefix}-#{next_number}")
+          |> put_param(:issue_number, next_number)
+          |> put_param_new(:identifier, "#{prefix}-#{next_number}")
         end
 
       %Issue{}
@@ -278,6 +278,32 @@ defmodule Cympho.Issues do
   end
 
   defp normalize_attrs(attrs) when is_map(attrs), do: attrs
+
+  defp get_param(attrs, key) when is_atom(key) do
+    Map.get(attrs, key) || Map.get(attrs, Atom.to_string(key))
+  end
+
+  defp put_param(attrs, key, value) when is_atom(key) do
+    Map.put(attrs, preferred_param_key(attrs, key), value)
+  end
+
+  defp put_param_new(attrs, key, value) when is_atom(key) do
+    if get_param(attrs, key) do
+      attrs
+    else
+      put_param(attrs, key, value)
+    end
+  end
+
+  defp preferred_param_key(attrs, key) when is_atom(key) do
+    string_key = Atom.to_string(key)
+
+    cond do
+      Map.has_key?(attrs, string_key) -> string_key
+      Enum.any?(Map.keys(attrs), &is_binary/1) -> string_key
+      true -> key
+    end
+  end
 
   defp maybe_generate_identifier(%{"project_id" => project_id} = attrs) do
     if Map.has_key?(attrs, "identifier") do

@@ -31,16 +31,20 @@ defmodule CymphoWeb.WorkspaceLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div class="flex items-center justify-between mb-8">
-        <h1 class="text-2xl font-510 text-text-primary">Workspaces</h1>
-      </div>
+    <.page size="wide">
+      <.header
+        title="Workspaces"
+        subtitle="Execution directories and repositories available to autonomous agents."
+      />
 
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div
+        :if={!Enum.empty?(@workspaces)}
+        class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3"
+      >
         <%= for workspace <- @workspaces do %>
-          <div class="bg-surface border border-border rounded-lg p-6 hover:border-brand/50 transition-colors">
+          <.panel class="p-4 transition-colors hover:border-brand/50">
             <.app_link navigate={~p"/workspaces/#{workspace.id}"}>
-              <h3 class="font-serif text-lg font-510 text-text-primary mb-2">
+              <h3 class="mb-2 truncate text-sm font-590 text-text-primary">
                 {workspace.name}
               </h3>
             </.app_link>
@@ -56,26 +60,38 @@ defmodule CymphoWeb.WorkspaceLive.Index do
 
               <div class="flex items-center gap-2 mt-3">
                 <%= if workspace.is_primary do %>
-                  <span class="bg-brand/10 text-brand text-xs px-2 py-1 rounded">Primary</span>
+                  <span class="rounded-md bg-brand/10 px-2 py-1 text-xs text-brand">Primary</span>
                 <% end %>
 
                 <%= if workspace.source_type do %>
-                  <span class="bg-surface text-text-tertiary text-xs px-2 py-1 rounded">
+                  <span class="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-tertiary">
                     {workspace.source_type}
                   </span>
                 <% end %>
               </div>
             </div>
-          </div>
-        <% end %>
-
-        <%= if Enum.empty?(@workspaces) do %>
-          <div class="col-span-3 text-center py-12 text-text-tertiary">
-            <p>No workspaces found.</p>
-          </div>
+          </.panel>
         <% end %>
       </div>
-    </div>
+
+      <.panel :if={Enum.empty?(@workspaces)}>
+        <.empty_state
+          title="No workspaces found"
+          message="Create or attach a project workspace so agents have a controlled execution directory."
+        >
+          <:icon>
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 7a2 2 0 012-2h5l2 2h5a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"
+              />
+            </svg>
+          </:icon>
+        </.empty_state>
+      </.panel>
+    </.page>
     """
   end
 end

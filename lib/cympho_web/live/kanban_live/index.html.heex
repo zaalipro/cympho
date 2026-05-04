@@ -21,7 +21,7 @@
 
 <div
   id="kanban-board"
-  class="p-4 sm:p-6 lg:p-8 h-[calc(100vh-64px)] lg:h-screen flex flex-col overflow-hidden bg-canvas"
+  class="flex h-[calc(100vh-64px)] flex-col overflow-hidden bg-canvas p-4 sm:p-5 lg:h-screen lg:p-6"
   phx-hook="KanbanSortable"
 >
   <.header
@@ -29,10 +29,10 @@
     subtitle="Move autonomous work from strategy to execution."
   >
     <:actions>
-      <div class="flex items-center gap-3">
+      <div class="flex flex-wrap items-center gap-2">
         <.app_link
           navigate={~p"/issues"}
-          class="hidden sm:inline-flex items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
+          class="hidden items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary sm:inline-flex"
         >
           List
         </.app_link>
@@ -61,7 +61,7 @@
 
         <.app_link
           navigate={~p"/issues/new"}
-          class="bg-brand hover:bg-accent-hover text-white font-510 text-sm px-3 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
+          class="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white transition-colors hover:bg-accent-hover"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
@@ -235,8 +235,8 @@
         </div>
       </div>
     <% else %>
-      <div class="flex-1 overflow-y-auto lg:overflow-x-auto lg:overflow-y-hidden rounded-xl border border-border bg-panel/30 p-3">
-        <div class="flex flex-col lg:flex-row gap-3 lg:h-full lg:min-w-max pb-2">
+      <div class="flex-1 overflow-y-auto rounded-lg border border-border bg-panel/30 p-2 lg:overflow-x-auto lg:overflow-y-hidden">
+        <div class="flex flex-col gap-2 pb-2 lg:h-full lg:min-w-max lg:flex-row">
           <%= for status <- status_columns() do %>
             <% issues = issues_for_status(computed, status) %>
             <% limit = wip_limit(@selected_project, status) %>
@@ -247,7 +247,7 @@
             <%= if collapsed do %>
               <%!-- Collapsed column - only visible on desktop --%>
               <div
-                class="hidden lg:flex w-12 flex-col bg-panel border border-border rounded-xl h-full items-center pt-4 cursor-pointer hover:bg-subtle transition-colors"
+                class="hidden h-full w-12 cursor-pointer flex-col items-center rounded-lg border border-border bg-panel pt-4 transition-colors hover:bg-subtle lg:flex"
                 phx-click="toggle_column"
                 phx-value-status={status}
               >
@@ -260,8 +260,8 @@
                 <span class="text-xs text-text-quaternary mt-2">{count}</span>
               </div>
             <% else %>
-              <div class={"w-full lg:w-[280px] xl:w-[304px] flex flex-col bg-panel/90 border rounded-xl min-h-[180px] lg:h-full " <> if(exceeded, do: "border-red-500/50", else: "border-border")}>
-                <div class="sticky top-0 z-10 px-3 py-2.5 border-b border-border flex items-center justify-between bg-panel rounded-t-xl">
+              <div class={"flex min-h-[160px] w-full flex-col rounded-lg border bg-panel/90 lg:h-full lg:w-[260px] xl:w-[276px] " <> if(exceeded, do: "border-red-500/50", else: "border-border")}>
+                <div class="sticky top-0 z-10 flex items-center justify-between rounded-t-lg border-b border-border bg-panel px-3 py-2.5">
                   <div class="flex items-center gap-2">
                     <button
                       type="button"
@@ -291,7 +291,7 @@
                   </span>
                 </div>
                 <div
-                  class="kanban-column-cards flex-1 overflow-y-auto p-2.5 space-y-2.5"
+                  class="kanban-column-cards flex-1 space-y-2 overflow-y-auto p-2"
                   data-kanban-column={status}
                 >
                   <%= if @swimlane_mode do %>

@@ -1,0 +1,48 @@
+<.page size="form">
+  <.header title="New Skill" subtitle="Create a reusable capability for autonomous agents.">
+    <:actions>
+      <.app_link
+        navigate={~p"/skills"}
+        class="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+      >
+        Cancel
+      </.app_link>
+    </:actions>
+  </.header>
+
+  <.panel>
+    <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-5 p-5">
+      <input :if={@current_company} type="hidden" name="skill[company_id]" value={@current_company.id} />
+
+      <div class="grid gap-5 sm:grid-cols-2">
+        <.input field={@form[:name]} label="Name" required placeholder="Repository Auditor" />
+        <.input field={@form[:identifier]} label="Identifier" required placeholder="repo_auditor" />
+      </div>
+
+      <.input
+        field={@form[:description]}
+        label="Description"
+        type="textarea"
+        rows={5}
+        placeholder="Summarize what this skill enables agents to do."
+      />
+
+      <div class="grid gap-5 sm:grid-cols-2">
+        <.input field={@form[:version]} label="Version" placeholder="0.1.0" />
+        <.input field={@form[:author]} label="Author" placeholder="Cympho Labs" />
+      </div>
+
+      <:actions>
+        <div class="flex items-center justify-end gap-2 border-t border-border pt-5">
+          <.app_link
+            navigate={~p"/skills"}
+            class="rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+          >
+            Cancel
+          </.app_link>
+          <.button type="submit" variant="primary">Create Skill</.button>
+        </div>
+      </:actions>
+    </.simple_form>
+  </.panel>
+</.page>

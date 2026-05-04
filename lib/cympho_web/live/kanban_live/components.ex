@@ -12,7 +12,7 @@ defmodule CymphoWeb.KanbanLive.Components do
   def issue_card(assigns) do
     ~H"""
     <div
-      class="kanban-card-enter group rounded-xl border border-border bg-surface p-3.5 shadow-ring transition-colors hover:border-border-hover hover:bg-surface-hover cursor-grab active:cursor-grabbing min-h-[104px]"
+      class="kanban-card-enter group min-h-[92px] cursor-grab rounded-lg border border-border bg-surface p-3 shadow-ring transition-colors hover:border-border-hover hover:bg-surface-hover active:cursor-grabbing"
       data-issue-id={@issue.id}
     >
       <div class="mb-2 flex items-center justify-between gap-2">
@@ -24,13 +24,13 @@ defmodule CymphoWeb.KanbanLive.Components do
 
       <.link
         navigate={"/issues/#{@issue.id}"}
-        class="block text-sm font-590 leading-5 text-text-primary line-clamp-2 hover:text-white"
+        class="line-clamp-2 block text-sm font-590 leading-5 text-text-primary hover:text-white"
         data-no-drag
       >
         {@issue.title}
       </.link>
 
-      <div class="mt-3 flex items-center gap-2 flex-wrap">
+      <div class="mt-3 flex flex-wrap items-center gap-2">
         <span class={"rounded-full px-2 py-0.5 text-[10px] font-510 " <> priority_class(@issue.priority)}>
           {@issue.priority}
         </span>
@@ -101,8 +101,8 @@ defmodule CymphoWeb.KanbanLive.Components do
 
   def empty_column_state(assigns) do
     ~H"""
-    <div class="flex min-h-[180px] flex-col items-center justify-center rounded-lg border border-dashed border-border bg-canvas/40 px-4 py-8 text-center">
-      <div class="w-8 h-8 rounded-lg bg-subtle flex items-center justify-center mb-2">
+    <div class="flex min-h-[108px] flex-col items-center justify-center rounded-lg border border-dashed border-border bg-canvas/40 px-4 py-6 text-center">
+      <div class="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-subtle">
         {empty_column_icon(@status)}
       </div>
       <p class="text-xs text-text-quaternary">{empty_column_message(@status)}</p>

@@ -136,242 +136,223 @@
         
 <!-- Content Column -->
         <div class="flex-1 min-w-0">
-          <%= case entry.type do %>
-            <% :comment -> %>
-              ~H"""
-              <div class={"bg-surface border border-border rounded-lg p-4 #{if entry.data.author_type == "system", do: "bg-subtle border-dashed", else: ""}"}>
-                <div
-                  :if={entry.data.author_type != "system"}
-                  class="flex items-center justify-between mb-2"
-                >
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs font-510 text-text-secondary">
-                      {case entry.data.author_type do
-                        "agent" ->
-                          agent = Enum.find(@all_agents, &(&1.id == entry.data.author_id))
-                          if agent, do: agent.name, else: "Agent"
+          <div
+            :if={entry.type == :comment}
+            class={"rounded-lg border border-border bg-surface p-4 #{if entry.data.author_type == "system", do: "border-dashed bg-subtle", else: ""}"}
+          >
+            <div
+              :if={entry.data.author_type != "system"}
+              class="mb-2 flex items-center justify-between"
+            >
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-510 text-text-secondary">
+                  {case entry.data.author_type do
+                    "agent" ->
+                      agent = Enum.find(@all_agents, &(&1.id == entry.data.author_id))
+                      if agent, do: agent.name, else: "Agent"
 
-                        _ ->
-                          entry.data.author_id || "User"
-                      end}
-                    </span>
-                    <span
-                      :if={entry.data.author_type == "agent"}
-                      class="text-[10px] bg-brand/10 text-brand px-1.5 py-0.5 rounded"
-                    >
-                      Agent
-                    </span>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs text-text-quaternary">
-                      {format_timeline_timestamp(entry.timestamp)}
-                    </span>
-                    <button
-                      type="button"
-                      class="text-text-quaternary hover:text-red-400 transition-colors text-xs opacity-0 group-hover:opacity-100"
-                      phx-click="delete_comment"
-                      phx-value-id={entry.data.id}
-                      data-confirm="Delete this comment?"
-                    >
-                      <.icon name="hero-x-mark" class="w-3 h-3" />
-                    </button>
-                  </div>
+                    _ ->
+                      entry.data.author_id || "User"
+                  end}
+                </span>
+                <span
+                  :if={entry.data.author_type == "agent"}
+                  class="rounded bg-brand/10 px-1.5 py-0.5 text-[10px] text-brand"
+                >
+                  Agent
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-text-quaternary">
+                  {format_timeline_timestamp(entry.timestamp)}
+                </span>
+                <button
+                  type="button"
+                  class="text-xs text-text-quaternary opacity-0 transition-colors hover:text-red-400 group-hover:opacity-100"
+                  phx-click="delete_comment"
+                  phx-value-id={entry.data.id}
+                  data-confirm="Delete this comment?"
+                >
+                  <.icon name="hero-x-mark" class="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+            <p class={
+              if entry.data.author_type == "system",
+                do: "text-xs text-text-quaternary",
+                else: "whitespace-pre-wrap text-sm text-text-secondary"
+            }>
+              {entry.data.body}
+            </p>
+          </div>
+
+          <div
+            :if={entry.type == :run}
+            class="rounded-lg border border-border/50 bg-subtle p-3"
+          >
+            <div class="mb-2 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class={"h-2 w-2 rounded-full #{run_status_color(entry.data.status)}"}>
+                </span>
+                <span class="text-xs font-510 text-text-primary">
+                  {run_status_label(entry.data.status)}
+                </span>
+                <span class="text-xs text-text-quaternary">
+                  {entry.data.adapter || "unknown"}
+                </span>
+              </div>
+              <span class="text-xs text-text-quaternary">
+                {format_timeline_timestamp(entry.timestamp)}
+              </span>
+            </div>
+            <div class="flex items-center gap-3 text-xs text-text-quaternary">
+              <span>{format_run_duration(entry.data)}</span>
+              <span :if={entry.data.input_tokens > 0 or entry.data.output_tokens > 0}>
+                {format_tokens(entry.data.input_tokens + entry.data.output_tokens)} tokens
+              </span>
+              <span :if={positive_cost?(entry.data.cost_usd)}>
+                {format_cost(entry.data.cost_usd)}
+              </span>
+            </div>
+          </div>
+
+          <div
+            :if={entry.type == :interaction}
+            class="space-y-3 rounded-lg border border-accent/30 bg-surface p-4"
+          >
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-510 text-accent">
+                  {case entry.data.kind do
+                    :suggest_tasks -> "Suggested Tasks"
+                    :ask_user_questions -> "Questions"
+                    :request_confirmation -> "Confirmation Request"
+                  end}
+                </span>
+                <.badge variant="status" value={to_string(entry.data.status)} />
+              </div>
+              <span class="text-xs text-text-quaternary">
+                {format_timeline_timestamp(entry.timestamp)}
+              </span>
+            </div>
+
+            <div :if={entry.data.kind == :suggest_tasks} class="space-y-2">
+              <p class="text-sm text-text-secondary">
+                {Map.get(entry.data.payload, "message", "The agent suggests the following tasks:")}
+              </p>
+              <div
+                :for={{task, idx} <- Enum.with_index(Map.get(entry.data.payload, "tasks", []))}
+                class="flex items-start gap-2 rounded-lg bg-subtle p-2"
+              >
+                <span class="mt-0.5 text-xs text-text-quaternary">{idx + 1}.</span>
+                <div class="flex-1">
+                  <p class="text-sm font-510 text-text-primary">
+                    {Map.get(task, "title", "Untitled")}
+                  </p>
+                  <p :if={Map.get(task, "description")} class="mt-0.5 text-xs text-text-tertiary">
+                    {Map.get(task, "description")}
+                  </p>
                 </div>
-                <p class={
-                  if entry.data.author_type == "system",
-                    do: "text-xs text-text-quaternary",
-                    else: "text-sm text-text-secondary whitespace-pre-wrap"
-                }>
-                  {entry.data.body}
+                <div :if={Map.get(task, "accepted")} class="text-xs text-success">Accepted</div>
+              </div>
+              <div :if={entry.data.status == :pending} class="flex items-center gap-2 pt-2">
+                <.button
+                  type="button"
+                  size="sm"
+                  phx-click="resolve_interaction"
+                  phx-value-id={entry.data.id}
+                  phx-value-status="accepted"
+                >
+                  Accept Tasks
+                </.button>
+                <.button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  phx-click="resolve_interaction"
+                  phx-value-id={entry.data.id}
+                  phx-value-status="rejected"
+                >
+                  Reject
+                </.button>
+              </div>
+            </div>
+
+            <div :if={entry.data.kind == :ask_user_questions} class="space-y-3">
+              <p class="text-sm text-text-secondary">
+                {Map.get(entry.data.payload, "message", "The agent has questions:")}
+              </p>
+              <div
+                :for={{q, idx} <- Enum.with_index(Map.get(entry.data.payload, "questions", []))}
+                class="space-y-1"
+              >
+                <p class="text-sm text-text-primary">
+                  <span class="text-text-quaternary">{idx + 1}.</span> {Map.get(
+                    q,
+                    "question",
+                    "N/A"
+                  )}
                 </p>
               </div>
-              """
-            <% :run -> %>
-              ~H"""
-              <div class="bg-subtle border border-border/50 rounded-lg p-3">
-                <div class="flex items-center justify-between mb-2">
-                  <div class="flex items-center gap-2">
-                    <span class={"w-2 h-2 rounded-full #{run_status_color(entry.data.status)}"}>
-                    </span>
-                    <span class="text-xs font-510 text-text-primary">
-                      {run_status_label(entry.data.status)}
-                    </span>
-                    <span class="text-xs text-text-quaternary">
-                      {entry.data.adapter || "unknown"}
-                    </span>
-                  </div>
-                  <span class="text-xs text-text-quaternary">
-                    {format_timeline_timestamp(entry.timestamp)}
-                  </span>
-                </div>
-                <div class="flex items-center gap-3 text-xs text-text-quaternary">
-                  <span>{format_run_duration(entry.data)}</span>
-                  <span :if={entry.data.input_tokens > 0 or entry.data.output_tokens > 0}>
-                    {format_tokens(entry.data.input_tokens + entry.data.output_tokens)} tokens
-                  </span>
-                  <span :if={positive_cost?(entry.data.cost_usd)}>
-                    {format_cost(entry.data.cost_usd)}
-                  </span>
-                </div>
+              <div :if={Map.get(entry.data.payload, "response")} class="rounded-lg bg-subtle p-2">
+                <p class="text-sm text-text-secondary">
+                  {Map.get(entry.data.payload, "response")}
+                </p>
               </div>
-              """
-            <% :interaction -> %>
-              ~H"""
-              <div class="bg-surface border border-accent/30 rounded-lg p-4 space-y-3">
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs font-510 text-accent">
-                      {case entry.data.kind do
-                        :suggest_tasks -> "Suggested Tasks"
-                        :ask_user_questions -> "Questions"
-                        :request_confirmation -> "Confirmation Request"
-                      end}
-                    </span>
-                    <.badge variant="status" value={to_string(entry.data.status)} />
-                  </div>
-                  <span class="text-xs text-text-quaternary">
-                    {format_timeline_timestamp(entry.timestamp)}
-                  </span>
-                </div>
+              <div :if={entry.data.status == :pending} class="pt-2">
+                <form phx-submit="respond_questions" class="space-y-2">
+                  <input type="hidden" name="_id" value={entry.data.id} />
+                  <textarea
+                    name="response"
+                    placeholder="Type your response..."
+                    class="min-h-[60px] w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary transition-colors placeholder:text-text-quaternary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
+                    required
+                  ></textarea>
+                  <.button type="submit" size="sm">Respond</.button>
+                </form>
+              </div>
+            </div>
 
-                <%= case entry.data.kind do %>
-                  <% :suggest_tasks -> %>
-                    <div class="space-y-2">
-                      <p class="text-sm text-text-secondary">
-                        {Map.get(
-                          entry.data.payload,
-                          "message",
-                          "The agent suggests the following tasks:"
-                        )}
-                      </p>
-                      <div
-                        :for={
-                          {task, idx} <- Enum.with_index(Map.get(entry.data.payload, "tasks", []))
-                        }
-                        class="flex items-start gap-2 p-2 bg-subtle rounded-lg"
-                      >
-                        <span class="text-xs text-text-quaternary mt-0.5">{idx + 1}.</span>
-                        <div class="flex-1">
-                          <p class="text-sm text-text-primary font-510">
-                            {Map.get(task, "title", "Untitled")}
-                          </p>
-                          <p
-                            :if={Map.get(task, "description")}
-                            class="text-xs text-text-tertiary mt-0.5"
-                          >
-                            {Map.get(task, "description")}
-                          </p>
-                        </div>
-                        <div :if={Map.get(task, "accepted")} class="text-xs text-success">
-                          Accepted
-                        </div>
-                      </div>
-                    </div>
-                    <div :if={entry.data.status == :pending} class="flex items-center gap-2 pt-2">
-                      <.button
-                        type="button"
-                        size="sm"
-                        phx-click="resolve_interaction"
-                        phx-value-id={entry.data.id}
-                        phx-value-status="accepted"
-                      >
-                        Accept Tasks
-                      </.button>
-                      <.button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        phx-click="resolve_interaction"
-                        phx-value-id={entry.data.id}
-                        phx-value-status="rejected"
-                      >
-                        Reject
-                      </.button>
-                    </div>
-                  <% :ask_user_questions -> %>
-                    <div class="space-y-3">
-                      <p class="text-sm text-text-secondary">
-                        {Map.get(entry.data.payload, "message", "The agent has questions:")}
-                      </p>
-                      <div
-                        :for={
-                          {q, idx} <-
-                            Enum.with_index(Map.get(entry.data.payload, "questions", []))
-                        }
-                        class="space-y-1"
-                      >
-                        <p class="text-sm text-text-primary">
-                          <span class="text-text-quaternary">{idx + 1}.</span> {Map.get(
-                            q,
-                            "question",
-                            "N/A"
-                          )}
-                        </p>
-                      </div>
-                      <div
-                        :if={Map.get(entry.data.payload, "response")}
-                        class="p-2 bg-subtle rounded-lg"
-                      >
-                        <p class="text-sm text-text-secondary">
-                          {Map.get(entry.data.payload, "response")}
-                        </p>
-                      </div>
-                    </div>
-                    <div :if={entry.data.status == :pending} class="pt-2">
-                      <form phx-submit="respond_questions" class="space-y-2">
-                        <input type="hidden" name="_id" value={entry.data.id} />
-                        <textarea
-                          name="response"
-                          placeholder="Type your response..."
-                          class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors min-h-[60px] resize-y"
-                          required
-                        ></textarea>
-                        <.button type="submit" size="sm">Respond</.button>
-                      </form>
-                    </div>
-                  <% :request_confirmation -> %>
-                    <div class="space-y-2">
-                      <p class="text-sm text-text-secondary">
-                        {Map.get(entry.data.payload, "message", "Please confirm:")}
-                      </p>
-                      <div
-                        :if={Map.get(entry.data.payload, "details")}
-                        class="text-xs text-text-tertiary p-2 bg-subtle rounded-lg"
-                      >
-                        {Map.get(entry.data.payload, "details")}
-                      </div>
-                    </div>
-                    <div :if={entry.data.status == :pending} class="flex items-center gap-2 pt-2">
-                      <.button
-                        type="button"
-                        size="sm"
-                        phx-click="resolve_interaction"
-                        phx-value-id={entry.data.id}
-                        phx-value-status="accepted"
-                      >
-                        Confirm
-                      </.button>
-                      <.button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        phx-click="resolve_interaction"
-                        phx-value-id={entry.data.id}
-                        phx-value-status="rejected"
-                      >
-                        Reject
-                      </.button>
-                    </div>
-                <% end %>
+            <div :if={entry.data.kind == :request_confirmation} class="space-y-2">
+              <p class="text-sm text-text-secondary">
+                {Map.get(entry.data.payload, "message", "Please confirm:")}
+              </p>
+              <div
+                :if={Map.get(entry.data.payload, "details")}
+                class="rounded-lg bg-subtle p-2 text-xs text-text-tertiary"
+              >
+                {Map.get(entry.data.payload, "details")}
               </div>
-              """
-            <% _ -> %>
-              ~H"""
-              <div class="text-xs text-text-quaternary">
-                Unknown entry type
+              <div :if={entry.data.status == :pending} class="flex items-center gap-2 pt-2">
+                <.button
+                  type="button"
+                  size="sm"
+                  phx-click="resolve_interaction"
+                  phx-value-id={entry.data.id}
+                  phx-value-status="accepted"
+                >
+                  Confirm
+                </.button>
+                <.button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  phx-click="resolve_interaction"
+                  phx-value-id={entry.data.id}
+                  phx-value-status="rejected"
+                >
+                  Reject
+                </.button>
               </div>
-              """
-          <% end %>
+            </div>
+          </div>
+
+          <div
+            :if={entry.type not in [:comment, :run, :interaction]}
+            class="text-xs text-text-quaternary"
+          >
+            Unknown entry type
+          </div>
         </div>
       </div>
     </div>
@@ -394,6 +375,7 @@
           </div>
           <.button type="submit" class="self-end" aria-label="Send comment">
             <.icon name="hero-paper-airplane" class="w-4 h-4" />
+            <span>Send</span>
           </.button>
         </div>
       </form>
@@ -401,7 +383,7 @@
   </div>
   
 <!-- Sidebar (Metadata Rail) -->
-  <div class="w-full lg:w-80 border-t lg:border-t-0 lg:border-l border-border bg-surface/30 p-4 lg:p-6 space-y-6">
+  <div class="w-full lg:w-96 border-t lg:border-t-0 lg:border-l border-border bg-surface/30 p-4 lg:p-6 space-y-6">
     <!-- Description -->
     <div class="group">
       <div :if={@editing != "description"} class="relative">
@@ -453,14 +435,15 @@
         />
         <div class="flex items-center gap-2">
           <.button type="submit" size="sm">Save</.button>
-          <button
+          <.button
             type="button"
-            class="text-text-quaternary hover:text-text-secondary transition-colors text-xs"
+            variant="ghost"
+            size="sm"
             phx-click="clear_github_pr_url"
             data-confirm="Clear the PR URL?"
           >
             Clear
-          </button>
+          </.button>
         </div>
       </form>
     </div>
@@ -561,7 +544,7 @@
     <div>
       <h3 class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">Agent</h3>
       <div class="flex flex-wrap gap-2">
-        <.button type="button" phx-click="toggle_agent_panel" size="sm" variant="ghost">
+        <.button type="button" phx-click="toggle_agent_panel" size="sm" variant="secondary">
           {(@show_agent_panel && "Hide") || "Start"} Agent
         </.button>
         <.button
@@ -569,7 +552,7 @@
           type="button"
           phx-click="release_issue"
           size="sm"
-          variant="ghost"
+          variant="secondary"
         >
           Release
         </.button>

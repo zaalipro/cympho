@@ -1,0 +1,97 @@
+<.page size="wide">
+  <.header title="Skills" subtitle="Reusable capabilities available to agents and plugins.">
+    <:actions>
+      <.app_link
+        navigate={~p"/skills/new"}
+        class="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-accent"
+      >
+        <.icon name="hero-plus" class="h-4 w-4" /> New Skill
+      </.app_link>
+    </:actions>
+  </.header>
+
+  <.panel class="mb-4 p-4">
+    <form phx-change="filter_company" class="grid gap-4 sm:grid-cols-2">
+      <div>
+        <label class="mb-1.5 block text-xs font-510 text-text-secondary">Company</label>
+        <select
+          name="company_id"
+          class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+        >
+          <option value="">All companies</option>
+          <option
+            :for={company <- @companies}
+            value={company.id}
+            selected={@selected_company_id == company.id}
+          >
+            {company.name}
+          </option>
+        </select>
+      </div>
+    </form>
+  </.panel>
+
+  <.panel class="overflow-hidden">
+    <div :if={Enum.empty?(@skills)} class="p-8">
+      <.empty_state
+        title="No skills found"
+        message="Create a skill to expose repeatable capabilities to autonomous agents."
+      >
+        <:icon>
+          <.icon name="hero-sparkles" class="h-5 w-5" />
+        </:icon>
+      </.empty_state>
+    </div>
+
+    <div :if={!Enum.empty?(@skills)} class="divide-y divide-border">
+      <div class="grid grid-cols-[1fr_140px_120px_48px] gap-4 px-5 py-3 text-xs font-510 uppercase tracking-wide text-text-quaternary">
+        <span>Skill</span>
+        <span>Scope</span>
+        <span>Status</span>
+        <span class="text-right">Actions</span>
+      </div>
+
+      <div
+        :for={skill <- @skills}
+        class="grid grid-cols-[1fr_140px_120px_48px] items-center gap-4 px-5 py-4 transition-colors hover:bg-surface-hover/60"
+      >
+        <.app_link navigate={~p"/skills/#{skill.id}"} class="min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="truncate text-sm font-510 text-text-primary">{skill.name}</span>
+            <span class="rounded border border-border bg-subtle px-1.5 py-0.5 text-[11px] text-text-tertiary">
+              {skill.version || "0.0.0"}
+            </span>
+          </div>
+          <p class="mt-1 truncate text-xs text-text-tertiary">
+            {skill.description || skill.identifier}
+          </p>
+        </.app_link>
+
+        <span class="truncate text-sm text-text-secondary">
+          {(skill.company && skill.company.name) || "Global"}
+        </span>
+
+        <span class={[
+          "w-fit rounded-full border px-2 py-0.5 text-xs font-510",
+          if(skill.enabled,
+            do: "border-green-500/20 bg-green-500/10 text-green-400",
+            else: "border-border bg-subtle text-text-tertiary"
+          )
+        ]}>
+          {if skill.enabled, do: "Enabled", else: "Disabled"}
+        </span>
+
+        <.overflow_menu label={"Actions for #{skill.name}"}>
+          <.menu_item navigate={~p"/skills/#{skill.id}"}>Open</.menu_item>
+          <.menu_item navigate={~p"/skills/#{skill.id}/edit"}>Edit</.menu_item>
+          <.menu_item phx-click="toggle_skill" phx-value-id={skill.id}>
+            {if skill.enabled, do: "Disable", else: "Enable"}
+          </.menu_item>
+          <.menu_item phx-click="delete" phx-value-id={skill.id} data-confirm="Delete this skill?">
+            Delete
+          </.menu_item>
+        </.overflow_menu>
+      </div>
+    </div>
+  </.panel>
+</.page>

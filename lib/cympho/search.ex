@@ -178,19 +178,38 @@ defmodule Cympho.Search do
   end
 
   defp apply_date_range_filter(query, nil, nil), do: query
+  defp apply_date_range_filter(query, "", ""), do: query
+  defp apply_date_range_filter(query, "", nil), do: query
+  defp apply_date_range_filter(query, nil, ""), do: query
 
   defp apply_date_range_filter(query, date_from, nil) do
-    from(q in query, where: q.inserted_at >= ^parse_date(date_from))
+    case parse_date(date_from) do
+      nil -> query
+      parsed -> from(q in query, where: q.inserted_at >= ^parsed)
+    end
   end
 
   defp apply_date_range_filter(query, nil, date_to) do
-    from(q in query, where: q.inserted_at <= ^parse_date(date_to))
+    case parse_date(date_to) do
+      nil -> query
+      parsed -> from(q in query, where: q.inserted_at <= ^parsed)
+    end
   end
 
   defp apply_date_range_filter(query, date_from, date_to) do
-    from(q in query,
-      where: q.inserted_at >= ^parse_date(date_from) and q.inserted_at <= ^parse_date(date_to)
-    )
+    case {parse_date(date_from), parse_date(date_to)} do
+      {nil, nil} ->
+        query
+
+      {parsed_from, nil} ->
+        from(q in query, where: q.inserted_at >= ^parsed_from)
+
+      {nil, parsed_to} ->
+        from(q in query, where: q.inserted_at <= ^parsed_to)
+
+      {parsed_from, parsed_to} ->
+        from(q in query, where: q.inserted_at >= ^parsed_from and q.inserted_at <= ^parsed_to)
+    end
   end
 
   defp apply_agent_status_filter(query, nil), do: query

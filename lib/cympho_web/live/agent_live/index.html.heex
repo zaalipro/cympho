@@ -1,240 +1,192 @@
-<div class="p-6 lg:p-8 max-w-6xl mx-auto">
-  <.header title={@page_title}>
+<.page size="wide">
+  <.header
+    title={@page_title}
+    subtitle="Autonomous operators, runtime health, and execution capacity."
+  >
     <:actions>
       <.app_link
         navigate={~p"/org-chart"}
-        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center gap-2 mr-2"
+        class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
       >
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
             stroke-linecap="round"
             stroke-linejoin="round"
             stroke-width="2"
-            d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+            d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
           />
         </svg>
         Org Chart
       </.app_link>
-      <%= if show_spawn_button?(@current_agent) do %>
-        <.live_component
-          module={CymphoWeb.SpawnAgentComponent}
-          id="spawn-agent"
-          current_agent={@current_agent}
-        />
-      <% else %>
-        <.app_link
-          navigate={~p"/agents/new"}
-          class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center gap-2"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 4v16m8-8H4"
-            />
-          </svg>
-          New Agent
-        </.app_link>
-      <% end %>
+      <.app_link
+        navigate={~p"/agents/new"}
+        class="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover"
+      >
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M12 4v16m8-8H4"
+          />
+        </svg>
+        New Agent
+      </.app_link>
     </:actions>
   </.header>
 
   <div
     :if={@flash && @flash[:info]}
-    class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-lg"
+    class="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"
   >
     {@flash[:info]}
   </div>
 
   <div
     :if={@flash && @flash[:error]}
-    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
+    class="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300"
   >
     {@flash[:error]}
   </div>
-  
-<!-- Status Dashboard -->
-  <div class="mb-6 bg-surface border border-border rounded-xl p-4">
-    <h2 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-4">
-      Agent Status Overview
-    </h2>
-    <div class="grid grid-cols-5 gap-4">
-      <div class="text-center">
-        <div class="text-2xl font-510 text-text-tertiary">{@status_counts[:idle] || 0}</div>
-        <div class="text-xs text-text-quaternary mt-1">Idle</div>
-      </div>
-      <div class="text-center">
-        <div class="text-2xl font-510 text-brand">{@status_counts[:running] || 0}</div>
-        <div class="text-xs text-text-quaternary mt-1">Running</div>
-      </div>
-      <div class="text-center">
-        <div class="text-2xl font-510 text-red-400">{@status_counts[:error] || 0}</div>
-        <div class="text-xs text-text-quaternary mt-1">Error</div>
-      </div>
-      <div class="text-center">
-        <div class="text-2xl font-510 text-amber-400">
-          {(@status_counts[:sleeping] || 0) + (@status_counts[:paused] || 0)}
-        </div>
-        <div class="text-xs text-text-quaternary mt-1">Paused</div>
-      </div>
-      <div class="text-center">
-        <div class="text-2xl font-510 text-text-quaternary">
-          {(@status_counts[:offline] || 0) + (@status_counts[:terminated] || 0)}
-        </div>
-        <div class="text-xs text-text-quaternary mt-1">Stopped</div>
-      </div>
-    </div>
-  </div>
-  
-<!-- Running Agents Session Progress -->
-  <div
-    :if={(@status_counts[:running] || 0) > 0}
-    class="mb-6 bg-brand/5 border border-brand/20 rounded-xl p-4"
-  >
-    <h2 class="font-serif text-xs font-510 text-brand uppercase tracking-wider mb-4">
-      Active Sessions
-    </h2>
-    <div class="space-y-3">
-      <%= for agent <- Enum.filter(@agents, fn a -> a.status == :running end) do %>
-        <% progress = @session_progress[agent.id] %>
-        <div class="flex items-center justify-between bg-subtle border border-border rounded-lg p-3">
-          <div class="flex-1">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-510 text-text-primary">{agent.name}</span>
-              <.badge variant="agent" value={to_string(agent.status)} />
-            </div>
-            <%= if progress && progress.issue do %>
-              <div class="text-xs text-text-secondary mt-1">
-                Working on:
-                <.app_link
-                  navigate={~p"/issues/#{progress.issue.id}"}
-                  class="text-brand hover:text-accent"
-                >
-                  {progress.issue.title}
-                </.app_link>
-              </div>
-              <div class="flex items-center gap-4 text-xs text-text-tertiary mt-2">
-                <span>Turns: {progress.turn_count}</span>
-                <span>Elapsed: {format_elapsed(progress.elapsed_seconds)}</span>
-              </div>
-            <% else %>
-              <div class="text-xs text-text-tertiary mt-1">Loading session info...</div>
-            <% end %>
-          </div>
-          <button
-            type="button"
-            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
-            phx-click="kill_session"
-            phx-value-id={agent.id}
-            data-confirm="Stop this agent's session?"
-          >
-            Stop Session
-          </button>
-        </div>
-      <% end %>
-    </div>
+
+  <div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-5">
+    <.metric label="Idle" value={@status_counts[:idle] || 0} />
+    <.metric label="Running" value={@status_counts[:running] || 0} tone="brand" />
+    <.metric label="Error" value={@status_counts[:error] || 0} tone="danger" />
+    <.metric
+      label="Paused"
+      value={(@status_counts[:sleeping] || 0) + (@status_counts[:paused] || 0)}
+      tone="warning"
+    />
+    <.metric
+      label="Stopped"
+      value={(@status_counts[:offline] || 0) + (@status_counts[:terminated] || 0)}
+    />
   </div>
 
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-    <.card :for={agent <- @agents} id={"agent-#{agent.id}"}>
-      <div class="p-5 space-y-3">
-        <div class="flex items-center justify-between">
-          <h3 class="font-serif text-sm font-510 text-text-primary truncate">{agent.name}</h3>
-          <.badge variant="agent" value={to_string(agent.status)} />
+  <.panel :if={Enum.empty?(@agents)}>
+    <.empty_state
+      title="No agents yet"
+      message="Create the CEO, CTO, and engineering operators that run the company."
+    >
+      <:actions>
+        <.app_link
+          navigate={~p"/agents/new"}
+          class="rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover"
+        >
+          Create agent
+        </.app_link>
+      </:actions>
+    </.empty_state>
+  </.panel>
+
+  <div :if={!Enum.empty?(@agents)} class="space-y-4">
+    <.panel
+      :for={{group, agents} <- agent_groups(@agents)}
+      class="overflow-visible"
+    >
+      <div class="flex items-center justify-between border-b border-border px-4 py-3">
+        <div>
+          <h2 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+            {role_label(group)}
+          </h2>
+          <p class="mt-0.5 text-xs text-text-quaternary">{length(agents)} agent(s)</p>
         </div>
-        <p class="text-xs text-text-tertiary">
-          Role: {role_label(agent.role)}
-        </p>
-        <div class="flex items-center gap-2">
-          <.badge variant="pill" value={Map.get(agent, :adapter) || "No adapter"} />
+      </div>
+
+      <div class="hidden grid-cols-[minmax(220px,1fr)_120px_120px_120px_120px_48px] gap-4 border-b border-border bg-panel/70 px-4 py-2 text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary lg:grid">
+        <span>Agent</span>
+        <span>Status</span>
+        <span>Health</span>
+        <span>Adapter</span>
+        <span>Heartbeat</span>
+        <span class="text-right">Actions</span>
+      </div>
+
+      <div
+        :for={agent <- agents}
+        id={"agent-row-#{agent.id}"}
+        class="group grid gap-3 border-b border-border px-4 py-3 last:border-b-0 hover:bg-surface-hover/60 lg:grid-cols-[minmax(220px,1fr)_120px_120px_120px_120px_48px] lg:items-center lg:gap-4"
+      >
+        <.app_link navigate={~p"/agents/#{agent.id}"} class="min-w-0">
+          <div class="flex min-w-0 items-center gap-3">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-xs font-590 text-brand">
+              {agent_initials(agent)}
+            </div>
+            <div class="min-w-0">
+              <p class="truncate text-sm font-590 text-text-primary">{agent.name}</p>
+              <p class="mt-0.5 truncate text-xs text-text-tertiary">
+                {agent.title || "Role: #{role_label(agent.role)}"}
+              </p>
+            </div>
+          </div>
+        </.app_link>
+
+        <div>
+          <span class={"inline-flex rounded-full border px-2 py-0.5 text-xs font-510 #{status_pill_class(agent.status)}"}>
+            {status_label(agent.status)}
+          </span>
         </div>
-        <div class="flex flex-wrap items-center gap-2 pt-2">
-          <.app_link
-            navigate={~p"/agents/#{agent.id}"}
-            class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center justify-center"
-          >
-            View
-          </.app_link>
-          <%= if agent.status == :running do %>
-            <button
-              type="button"
-              class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
+
+        <div>
+          <span class={"inline-flex rounded-full border px-2 py-0.5 text-xs font-510 #{health_pill_class(agent.health_status)}"}>
+            {agent.health_status |> to_string() |> String.replace("_", " ")}
+          </span>
+        </div>
+
+        <div class="truncate text-xs text-text-tertiary">
+          {adapter_label(Map.get(agent, :adapter))}
+        </div>
+
+        <div class="text-xs text-text-quaternary">
+          {format_heartbeat(agent)}
+        </div>
+
+        <div class="flex justify-end">
+          <.overflow_menu label={"Actions for #{agent.name}"}>
+            <.menu_item navigate={~p"/agents/#{agent.id}"}>View profile</.menu_item>
+            <.menu_item navigate={~p"/agents/#{agent.id}/edit"}>Edit settings</.menu_item>
+            <.menu_item
+              :if={agent.status == :running}
               phx-click="kill_session"
               phx-value-id={agent.id}
               data-confirm="Stop this agent's session?"
             >
-              Stop
-            </button>
-          <% end %>
-          <%= if agent.status == :idle do %>
-            <button
-              type="button"
-              class="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
+              Stop session
+            </.menu_item>
+            <.menu_item
+              :if={agent.status == :idle}
               phx-click="pause_agent"
               phx-value-id={agent.id}
             >
               Pause
-            </button>
-          <% end %>
-          <%= if agent.status in [:sleeping, :paused] do %>
-            <button
-              type="button"
-              class="bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
+            </.menu_item>
+            <.menu_item
+              :if={agent.status in [:sleeping, :paused]}
               phx-click="resume_agent"
               phx-value-id={agent.id}
             >
               Resume
-            </button>
-          <% end %>
-          <button
-            type="button"
-            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
-            phx-click="terminate_agent"
-            phx-value-id={agent.id}
-            data-confirm="Terminate this agent? This will stop any running sessions."
-          >
-            Terminate
-          </button>
-          <button
-            type="button"
-            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors"
-            phx-click="delete_agent"
-            phx-value-id={agent.id}
-            data-confirm="Delete this agent?"
-          >
-            Delete
-          </button>
+            </.menu_item>
+            <.menu_item
+              danger
+              phx-click="terminate_agent"
+              phx-value-id={agent.id}
+              data-confirm="Terminate this agent? This will stop any running sessions."
+            >
+              Terminate
+            </.menu_item>
+            <.menu_item
+              danger
+              phx-click="delete_agent"
+              phx-value-id={agent.id}
+              data-confirm="Delete this agent?"
+            >
+              Delete
+            </.menu_item>
+          </.overflow_menu>
         </div>
       </div>
-    </.card>
+    </.panel>
   </div>
-
-  <div
-    :if={Enum.empty?(@agents)}
-    class="flex flex-col items-center justify-center py-20 text-center"
-  >
-    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
-      <svg
-        class="w-6 h-6 text-text-tertiary"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.131A8 8 0 008 3.239c-4.828 4.596-5.212 11.611-.647 16.656A21.866 21.866 0 0012 21.942a21.866 21.866 0 003.99-.385M19.337 17.81a15.79 15.79 0 01-2.326 1.575"
-        />
-      </svg>
-    </div>
-    <p class="text-sm text-text-tertiary mb-4">No agents yet.</p>
-    <.app_link
-      navigate={~p"/agents/new"}
-      class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
-    >
-      Create your first agent
-    </.app_link>
-  </div>
-</div>
+</.page>

@@ -42,7 +42,7 @@ defmodule CymphoWeb.SearchLive.Index do
   @impl true
   def handle_params(params, _url, socket) do
     query = params["q"] || ""
-    active_tab = params["tab"] || "all"
+    active_tab = parse_tab(params["tab"])
 
     filters = %{
       "status" => params["status"] || "",
@@ -63,11 +63,11 @@ defmodule CymphoWeb.SearchLive.Index do
       socket
       |> assign(:query, query)
       |> assign(:filters, filters)
-      |> assign(:active_tab, String.to_existing_atom(active_tab))
+      |> assign(:active_tab, active_tab)
       |> perform_search()
       |> assign(
         :recent_searches,
-        RecentSearches.list_recent_searches(socket.assigns.current_user.id)
+        recent_searches_for_user(socket.assigns.current_user)
       )
 
     {:noreply, socket}
@@ -128,7 +128,10 @@ defmodule CymphoWeb.SearchLive.Index do
 
   def handle_event("clear_recent_searches", _params, socket) do
     current_user = socket.assigns.current_user
-    RecentSearches.clear_recent_searches(current_user.id)
+
+    if current_user do
+      RecentSearches.clear_recent_searches(current_user.id)
+    end
 
     {:noreply,
      socket
@@ -194,7 +197,10 @@ defmodule CymphoWeb.SearchLive.Index do
     end
   end
 
-  defp active_tab?(socket, tab), do: socket.assigns.active_tab == tab
+  defp parse_tab(tab) when tab in ~w(all issues agents projects goals),
+    do: String.to_existing_atom(tab)
+
+  defp parse_tab(_), do: :all
 
   defp status_label(:backlog), do: "Backlog"
   defp status_label(:todo), do: "To Do"

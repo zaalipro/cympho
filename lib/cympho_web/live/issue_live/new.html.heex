@@ -1,39 +1,63 @@
-<div class="p-6 lg:p-8 max-w-2xl mx-auto">
-  <.header title="Create New Issue">
+<.page size="form">
+  <.header
+    title="New Issue"
+    subtitle="Capture a clear unit of autonomous work and route it into the execution board."
+  >
     <:actions>
       <.app_link
         navigate={~p"/issues"}
-        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
+        class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
       >
         Cancel
       </.app_link>
     </:actions>
   </.header>
 
-  <.simple_form for={@form} phx-submit="save">
-    <.input field={@form[:title]} label="Title" />
-    <.input field={@form[:description]} label="Description" type="textarea" />
-    <.select
-      name="issue[status]"
-      label="Status"
-      options={[
-        Backlog: "backlog",
-        "To Do": "todo",
-        "In Progress": "in_progress",
-        "In Review": "in_review",
-        Blocked: "blocked",
-        Done: "done",
-        Cancelled: "cancelled"
-      ]}
-    />
-    <.select
-      name="issue[priority]"
-      label="Priority"
-      options={[Critical: "critical", High: "high", Medium: "medium", Low: "low"]}
-    />
+  <.panel>
+    <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-5 p-5">
+      <.input
+        field={@form[:title]}
+        label="Title"
+        required
+        placeholder="Describe the outcome in one sentence"
+      />
 
-    <:actions>
-      <.button type="submit">Create Issue</.button>
-    </:actions>
-  </.simple_form>
-</div>
+      <.input
+        field={@form[:description]}
+        label="Description"
+        type="textarea"
+        rows={8}
+        placeholder="Add context, acceptance criteria, constraints, and anything the agent should verify."
+      />
+
+      <div class="grid gap-5 sm:grid-cols-2">
+        <.input
+          field={@form[:status]}
+          type="select"
+          label="Status"
+          required
+          options={status_options()}
+        />
+        <.input
+          field={@form[:priority]}
+          type="select"
+          label="Priority"
+          required
+          options={priority_options()}
+        />
+      </div>
+
+      <:actions>
+        <div class="flex items-center justify-end gap-2 border-t border-border pt-5">
+          <.app_link
+            navigate={~p"/issues"}
+            class="rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+          >
+            Cancel
+          </.app_link>
+          <.button type="submit" variant="primary">Create Issue</.button>
+        </div>
+      </:actions>
+    </.simple_form>
+  </.panel>
+</.page>

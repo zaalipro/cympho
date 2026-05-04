@@ -1,4 +1,4 @@
-<div class="mx-auto max-w-3xl px-6 py-8 lg:px-8">
+<.page size="form">
   <%= if @pending_approval_id do %>
     <div class="mb-5 rounded-lg border border-blue-500/20 bg-blue-500/10 px-4 py-3">
       <p class="text-sm leading-5 text-blue-300">
@@ -27,7 +27,7 @@
     </:actions>
   </.header>
 
-  <section class="rounded-lg border border-border bg-surface/70 shadow-sm">
+  <.panel>
     <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-5 p-5">
       <div class="grid gap-5 sm:grid-cols-2">
         <.input field={@form[:name]} label="Name" required />
@@ -90,5 +90,5 @@
         </div>
       </:actions>
     </.simple_form>
-  </section>
-</div>
+  </.panel>
+</.page>

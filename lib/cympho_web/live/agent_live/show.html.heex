@@ -1,158 +1,156 @@
-<div class="min-h-screen bg-canvas px-4 py-5 sm:px-6 lg:px-8">
-  <div class="mx-auto max-w-6xl">
-    <.header title={@agent.name} subtitle={@agent.title || role_label(@agent.role)}>
-      <:actions>
-        <.app_link
-          navigate={~p"/agents"}
-          class="inline-flex items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        >
-          Back
-        </.app_link>
-        <.app_link
-          navigate={~p"/agents/#{@agent.id}/edit"}
-          class="inline-flex items-center rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover"
-        >
-          Edit
-        </.app_link>
-      </:actions>
-    </.header>
+<.page size="content">
+  <.header title={@agent.name} subtitle={@agent.title || role_label(@agent.role)}>
+    <:actions>
+      <.app_link
+        navigate={~p"/agents"}
+        class="inline-flex items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+      >
+        Back
+      </.app_link>
+      <.app_link
+        navigate={~p"/agents/#{@agent.id}/edit"}
+        class="inline-flex items-center rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover"
+      >
+        Edit
+      </.app_link>
+    </:actions>
+  </.header>
 
-    <div class="linear-panel mb-5 p-5">
-      <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-        <div class="flex min-w-0 items-start gap-4">
-          <div class={"flex h-14 w-14 shrink-0 items-center justify-center rounded-xl text-base font-590 #{role_avatar_class(@agent.role)}"}>
-            {agent_initials(@agent)}
-          </div>
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2">
-              <h2 class="truncate text-xl font-590 tracking-tight text-text-primary">
-                {@agent.name}
-              </h2>
-              <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-510 #{status_pill_class(@agent.status)}"}>
-                {status_label(@agent.status)}
-              </span>
-              <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-510 #{health_pill_class(@agent.health_status)}"}>
-                {health_status_label(@agent.health_status)}
-              </span>
-            </div>
-            <p class="mt-1 text-sm text-text-tertiary">
-              {role_label(@agent.role)} · {adapter_label(Map.get(@agent, :adapter))}
-            </p>
-          </div>
+  <.panel class="mb-5 p-5">
+    <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+      <div class="flex min-w-0 items-start gap-4">
+        <div class={"flex h-14 w-14 shrink-0 items-center justify-center rounded-xl text-base font-590 #{role_avatar_class(@agent.role)}"}>
+          {agent_initials(@agent)}
         </div>
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="truncate text-xl font-590 tracking-tight text-text-primary">
+              {@agent.name}
+            </h2>
+            <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-510 #{status_pill_class(@agent.status)}"}>
+              {status_label(@agent.status)}
+            </span>
+            <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-510 #{health_pill_class(@agent.health_status)}"}>
+              {health_status_label(@agent.health_status)}
+            </span>
+          </div>
+          <p class="mt-1 text-sm text-text-tertiary">
+            {role_label(@agent.role)} · {adapter_label(Map.get(@agent, :adapter))}
+          </p>
+        </div>
+      </div>
 
-        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:min-w-[420px]">
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:min-w-[420px]">
+        <div class="rounded-lg border border-border bg-surface px-3 py-2">
+          <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
+            Max jobs
+          </p>
+          <p class="mt-1 text-lg font-590 text-text-primary">{@agent.max_concurrent_jobs}</p>
+        </div>
+        <div class="rounded-lg border border-border bg-surface px-3 py-2">
+          <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
+            Adapter
+          </p>
+          <p class="mt-1 truncate text-sm font-510 text-text-primary">
+            {adapter_label(Map.get(@agent, :adapter))}
+          </p>
+        </div>
+        <div class="rounded-lg border border-border bg-surface px-3 py-2">
+          <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
+            Reports
+          </p>
+          <p class="mt-1 text-lg font-590 text-text-primary">
+            {reports_count(@agent)}
+          </p>
+        </div>
+      </div>
+    </div>
+  </.panel>
+
+  <div class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+    <div class="space-y-5">
+      <.panel class="p-5">
+        <div class="mb-4 flex items-center justify-between">
+          <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+            Instructions
+          </h3>
+        </div>
+        <p class="whitespace-pre-wrap text-sm leading-6 text-text-secondary">
+          {@agent.instructions || "No instructions configured."}
+        </p>
+      </.panel>
+
+      <.panel :if={@agent.instructions_path} class="p-5">
+        <h3 class="mb-3 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+          Instructions File
+        </h3>
+        <code class="block rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-brand">
+          {@agent.instructions_path}
+        </code>
+      </.panel>
+
+      <.panel class="p-5">
+        <h3 class="mb-3 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+          Configuration
+        </h3>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div class="rounded-lg border border-border bg-surface px-3 py-2">
-            <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
-              Max jobs
+            <p class="text-xs text-text-quaternary">Max concurrent jobs</p>
+            <p class="mt-1 text-sm font-510 text-text-primary">
+              {@agent.max_concurrent_jobs}
             </p>
-            <p class="mt-1 text-lg font-590 text-text-primary">{@agent.max_concurrent_jobs}</p>
           </div>
           <div class="rounded-lg border border-border bg-surface px-3 py-2">
-            <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
-              Adapter
-            </p>
-            <p class="mt-1 truncate text-sm font-510 text-text-primary">
+            <p class="text-xs text-text-quaternary">Runtime adapter</p>
+            <p class="mt-1 text-sm font-510 text-text-primary">
               {adapter_label(Map.get(@agent, :adapter))}
             </p>
           </div>
-          <div class="rounded-lg border border-border bg-surface px-3 py-2">
-            <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
-              Reports
-            </p>
-            <p class="mt-1 text-lg font-590 text-text-primary">
-              {reports_count(@agent)}
-            </p>
+        </div>
+      </.panel>
+    </div>
+
+    <aside class="space-y-5">
+      <.panel class="p-5">
+        <h3 class="mb-3 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+          Wake History
+        </h3>
+        <div
+          :if={Enum.empty?(@wake_history)}
+          class="rounded-lg border border-border bg-surface px-4 py-8 text-center text-sm text-text-tertiary"
+        >
+          No wake history available.
+        </div>
+        <div :if={not Enum.empty?(@wake_history)} class="space-y-2">
+          <div
+            :for={wake <- Enum.take(@wake_history, 10)}
+            class="rounded-lg border border-border bg-surface px-3 py-2"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <span class="truncate text-sm font-510 text-text-secondary">
+                {wake_reason_label(wake.reason)}
+              </span>
+              <span class="shrink-0 text-xs text-text-quaternary">
+                {format_datetime(wake.inserted_at)}
+              </span>
+            </div>
+            <.app_link
+              :if={wake.issue_id}
+              navigate={~p"/issues/#{wake.issue_id}"}
+              class="mt-1 inline-flex text-xs text-brand hover:text-accent-hover"
+            >
+              Open issue
+            </.app_link>
           </div>
         </div>
-      </div>
-    </div>
+      </.panel>
 
-    <div class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <div class="space-y-5">
-        <section class="linear-panel p-5">
-          <div class="mb-4 flex items-center justify-between">
-            <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-              Instructions
-            </h3>
-          </div>
-          <p class="whitespace-pre-wrap text-sm leading-6 text-text-secondary">
-            {@agent.instructions || "No instructions configured."}
-          </p>
-        </section>
-
-        <section :if={@agent.instructions_path} class="linear-panel p-5">
-          <h3 class="mb-3 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-            Instructions File
-          </h3>
-          <code class="block rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-brand">
-            {@agent.instructions_path}
-          </code>
-        </section>
-
-        <section class="linear-panel p-5">
-          <h3 class="mb-3 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-            Configuration
-          </h3>
-          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div class="rounded-lg border border-border bg-surface px-3 py-2">
-              <p class="text-xs text-text-quaternary">Max concurrent jobs</p>
-              <p class="mt-1 text-sm font-510 text-text-primary">
-                {@agent.max_concurrent_jobs}
-              </p>
-            </div>
-            <div class="rounded-lg border border-border bg-surface px-3 py-2">
-              <p class="text-xs text-text-quaternary">Runtime adapter</p>
-              <p class="mt-1 text-sm font-510 text-text-primary">
-                {adapter_label(Map.get(@agent, :adapter))}
-              </p>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <aside class="space-y-5">
-        <section class="linear-panel p-5">
-          <h3 class="mb-3 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-            Wake History
-          </h3>
-          <div
-            :if={Enum.empty?(@wake_history)}
-            class="rounded-lg border border-border bg-surface px-4 py-8 text-center text-sm text-text-tertiary"
-          >
-            No wake history available.
-          </div>
-          <div :if={not Enum.empty?(@wake_history)} class="space-y-2">
-            <div
-              :for={wake <- Enum.take(@wake_history, 10)}
-              class="rounded-lg border border-border bg-surface px-3 py-2"
-            >
-              <div class="flex items-center justify-between gap-3">
-                <span class="truncate text-sm font-510 text-text-secondary">
-                  {wake_reason_label(wake.reason)}
-                </span>
-                <span class="shrink-0 text-xs text-text-quaternary">
-                  {format_datetime(wake.inserted_at)}
-                </span>
-              </div>
-              <.app_link
-                :if={wake.issue_id}
-                navigate={~p"/issues/#{wake.issue_id}"}
-                class="mt-1 inline-flex text-xs text-brand hover:text-accent-hover"
-              >
-                Open issue
-              </.app_link>
-            </div>
-          </div>
-        </section>
-
-        <section class="linear-panel p-5">
-          <h3 class="mb-3 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-            Created
-          </h3>
-          <p class="text-sm text-text-secondary">{format_datetime(@agent.inserted_at)}</p>
-        </section>
-      </aside>
-    </div>
+      <.panel class="p-5">
+        <h3 class="mb-3 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+          Created
+        </h3>
+        <p class="text-sm text-text-secondary">{format_datetime(@agent.inserted_at)}</p>
+      </.panel>
+    </aside>
   </div>
-</div>
+</.page>

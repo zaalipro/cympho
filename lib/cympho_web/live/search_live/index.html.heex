@@ -153,9 +153,9 @@
             phx-value-tab={tab}
             class={[
               "whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors",
-              active_tab?(@socket, tab) &&
+              @active_tab == tab &&
                 "border-brand text-brand",
-              !active_tab?(@socket, tab) &&
+              @active_tab != tab &&
                 "border-transparent text-text-secondary hover:text-text-primary hover:border-border"
             ]}
           >

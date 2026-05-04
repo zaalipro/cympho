@@ -25,6 +25,8 @@ defmodule CymphoWeb.CompanyLive.Show do
     |> assign(:page_title, socket.assigns.company.name)
   end
 
+  defp apply_action(socket, nil, params), do: apply_action(socket, :show, params)
+
   defp apply_action(socket, :edit, _params) do
     socket
     |> assign(:page_title, "Edit Company")

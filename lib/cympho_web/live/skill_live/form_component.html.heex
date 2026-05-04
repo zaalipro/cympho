@@ -1,0 +1,25 @@
+<div>
+  <.simple_form
+    for={@form}
+    id="skill-form"
+    phx-target={@myself}
+    phx-change="validate"
+    phx-submit="save"
+    class="space-y-5"
+  >
+    <div class="grid gap-5 sm:grid-cols-2">
+      <.input field={@form[:name]} label="Name" required />
+      <.input field={@form[:identifier]} label="Identifier" required />
+    </div>
+    <.input field={@form[:description]} label="Description" type="textarea" rows={5} />
+    <div class="grid gap-5 sm:grid-cols-2">
+      <.input field={@form[:version]} label="Version" />
+      <.input field={@form[:author]} label="Author" />
+    </div>
+    <.input field={@form[:enabled]} type="checkbox" label="Enabled" />
+
+    <:actions>
+      <.button type="submit" variant="primary">Save Skill</.button>
+    </:actions>
+  </.simple_form>
+</div>

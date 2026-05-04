@@ -1,113 +1,83 @@
-<div class="p-6 max-w-7xl mx-auto space-y-6 bg-canvas">
-  <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-    <div>
-      <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-tertiary">
-        Autonomous company
-      </p>
-      <h1 class="mt-1 text-2xl font-590 text-text-primary">Command Center</h1>
-    </div>
-    <div class="flex flex-wrap items-center gap-2">
-      <span class={"inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-510 #{autonomy_badge_class(@autonomy_status)}"}>
+<.page size="wide">
+  <.header title="Command Center" subtitle="Company status, agent capacity, and execution flow.">
+    <p class="mt-1 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+      Autonomous company
+    </p>
+    <:actions>
+      <span class={"inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-510 #{autonomy_badge_class(@autonomy_status)}"}>
         {status_label(@autonomy_status)}
       </span>
-      <button
-        :if={@company && @autonomy_status == :active}
-        type="button"
-        phx-click="pause_company"
-        class="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
-      >
-        Pause
-      </button>
-      <button
-        :if={@company && @autonomy_status == :paused}
-        type="button"
-        phx-click="resume_company"
-        class="rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover transition-colors"
-      >
-        Resume
-      </button>
-      <.app_link
-        navigate={~p"/onboarding"}
-        class="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
-      >
-        Start company
-      </.app_link>
+      <.overflow_menu label="Company controls">
+        <.menu_item
+          :if={@company && @autonomy_status == :active}
+          phx-click="pause_company"
+          data-confirm="Pause autonomous execution for this company?"
+        >
+          Pause autonomy
+        </.menu_item>
+        <.menu_item :if={@company && @autonomy_status == :paused} phx-click="resume_company">
+          Resume autonomy
+        </.menu_item>
+        <.menu_item navigate={~p"/onboarding"}>Start company setup</.menu_item>
+      </.overflow_menu>
       <.app_link
         navigate={~p"/kanban"}
-        class="rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover transition-colors"
+        class="rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover"
       >
         Open board
       </.app_link>
-    </div>
+    </:actions>
+  </.header>
+
+  <div class="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+    <.metric
+      label="Queued"
+      value={@queued_work}
+      hint={"Total #{total_issues(@issue_status_counts)} issues"}
+    />
+    <.metric label="Running" value={@running_work} hint="Checked out" tone="brand" />
+    <.metric label="Blocked" value={@blocked_work} hint="Needs action" tone="danger" />
+    <.metric
+      label="Agents"
+      value={"#{@active_agents} / #{@total_agents}"}
+      hint="Active capacity"
+      tone="success"
+    />
+    <.metric
+      label="Closed 7d"
+      value={throughput_total(@throughput.closed)}
+      hint={"Cost #{format_cost(@cost_summary.total_cost)}"}
+    />
   </div>
 
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-    <div class="bg-panel rounded-lg border border-border p-4">
-      <p class="text-sm text-text-secondary">Queued Work</p>
-      <p class="text-3xl font-medium text-text-primary mt-1">
-        {@queued_work}
-      </p>
-      <p class="text-xs text-text-quaternary mt-1">
-        Total Issues {total_issues(@issue_status_counts)}
-      </p>
-    </div>
-    <div class="bg-panel rounded-lg border border-border p-4">
-      <p class="text-sm text-text-secondary">Running</p>
-      <p class="text-3xl font-medium text-text-primary mt-1">
-        {@running_work}
-      </p>
-      <p class="text-xs text-text-quaternary mt-1">
-        Checked out by agents
-      </p>
-    </div>
-    <div class="bg-panel rounded-lg border border-border p-4">
-      <p class="text-sm text-text-secondary">Blocked</p>
-      <p class="text-3xl font-medium text-text-primary mt-1">
-        {@blocked_work}
-      </p>
-      <p class="text-xs text-text-quaternary mt-1">
-        Needs action
-      </p>
-    </div>
-    <div class="bg-panel rounded-lg border border-border p-4">
-      <p class="text-sm text-text-secondary">Active Agents</p>
-      <p class="text-3xl font-medium text-text-primary mt-1">
-        {@active_agents}<span class="text-base text-text-secondary"> / {@total_agents}</span>
-      </p>
-    </div>
-    <div class="bg-panel rounded-lg border border-border p-4">
-      <p class="text-sm text-text-secondary">Closed (7d)</p>
-      <p class="text-3xl font-medium text-text-primary mt-1">
-        {throughput_total(@throughput.closed)}
-      </p>
-      <p class="text-xs text-text-quaternary mt-1">
-        Created (7d) {throughput_total(@throughput.created)} / Total Cost {format_cost(
-          @cost_summary.total_cost
-        )}
-      </p>
-    </div>
-  </div>
-
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <div class="bg-panel rounded-lg border border-border shadow-ring p-5 lg:col-span-1">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="text-base font-medium text-text-primary">Active Agents</h3>
-        <.link
+  <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+    <.panel class="overflow-hidden">
+      <div class="flex items-center justify-between border-b border-border px-4 py-3">
+        <div>
+          <h2 class="text-sm font-590 text-text-primary">Active Agents</h2>
+          <p class="mt-0.5 text-xs text-text-quaternary">Current execution roster</p>
+        </div>
+        <.app_link
           navigate={~p"/org-chart"}
           class="text-xs text-text-tertiary hover:text-text-primary"
         >
           Org chart
-        </.link>
+        </.app_link>
       </div>
-      <div :if={Enum.empty?(@active_agent_list)} class="text-sm text-text-secondary">
-        No agents yet. Start a company to create the CEO, CTO, and engineers.
-      </div>
-      <div :if={!Enum.empty?(@active_agent_list)} class="space-y-2">
+
+      <.empty_state
+        :if={Enum.empty?(@active_agent_list)}
+        title="No active agents"
+        message="Start a company to create the CEO, CTO, and engineers."
+        class="py-10"
+      />
+
+      <div :if={!Enum.empty?(@active_agent_list)} class="divide-y divide-border">
         <div
           :for={agent <- @active_agent_list}
-          class="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2"
+          class="flex items-center gap-3 px-4 py-3 hover:bg-surface-hover/70"
         >
-          <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-brand/15 text-xs font-590 text-brand">
+          <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-xs font-590 text-brand">
             {agent_initials(agent)}
           </div>
           <div class="min-w-0 flex-1">
@@ -119,143 +89,151 @@
           <span class={"h-2 w-2 shrink-0 rounded-full #{agent_status_dot(agent.status)}"}></span>
         </div>
       </div>
-    </div>
+    </.panel>
 
-    <div class="bg-panel rounded-xl border border-border shadow-ring p-5">
-      <h3 class="text-base font-medium text-text-primary mb-4">Issues by Status</h3>
+    <.panel class="p-4">
+      <h2 class="mb-4 text-sm font-590 text-text-primary">Issues by Status</h2>
       <div class="space-y-3">
         <div
           :for={%{status: status, count: count} <- @issue_status_counts}
           class="flex items-center gap-3"
         >
-          <span class={"w-3 h-3 rounded-full flex-shrink-0 #{status_dot_color(status)}"}></span>
-          <span class="text-sm text-text-secondary w-28">{status_label(status)}</span>
-          <div class="flex-1 bg-canvas rounded-full h-2">
+          <span class={"h-2.5 w-2.5 shrink-0 rounded-full #{status_dot_color(status)}"}></span>
+          <span class="w-24 text-xs text-text-tertiary">{status_label(status)}</span>
+          <div class="h-1.5 flex-1 rounded-full bg-canvas">
             <div
-              class={"h-2 rounded-full #{status_bar_color(status)}"}
+              class={"h-1.5 rounded-full #{status_bar_color(status)}"}
               style={"width: #{bar_percent(count, total_issues(@issue_status_counts))}%"}
             >
             </div>
           </div>
-          <span class="text-sm font-510 text-text-primary w-8 text-right">{count}</span>
+          <span class="w-8 text-right text-xs font-590 text-text-secondary">{count}</span>
         </div>
       </div>
-    </div>
+    </.panel>
 
-    <div class="bg-panel rounded-xl border border-border shadow-ring p-5">
-      <h3 class="text-base font-medium text-text-primary mb-4">Agents by Status</h3>
+    <.panel class="p-4">
+      <h2 class="mb-4 text-sm font-590 text-text-primary">Agents by Status</h2>
       <div class="space-y-3">
         <div
           :for={%{status: status, count: count} <- @agent_status_counts}
           class="flex items-center gap-3"
         >
-          <span class={"w-3 h-3 rounded-full flex-shrink-0 #{agent_status_dot(status)}"}></span>
-          <span class="text-sm text-text-secondary w-28">{status_label(status)}</span>
-          <div class="flex-1 bg-canvas rounded-full h-2">
+          <span class={"h-2.5 w-2.5 shrink-0 rounded-full #{agent_status_dot(status)}"}></span>
+          <span class="w-24 text-xs text-text-tertiary">{status_label(status)}</span>
+          <div class="h-1.5 flex-1 rounded-full bg-canvas">
             <div
-              class={"h-2 rounded-full #{agent_status_bar(status)}"}
+              class={"h-1.5 rounded-full #{agent_status_bar(status)}"}
               style={"width: #{bar_percent(count, @total_agents)}%"}
             >
             </div>
           </div>
-          <span class="text-sm font-510 text-text-primary w-8 text-right">{count}</span>
+          <span class="w-8 text-right text-xs font-590 text-text-secondary">{count}</span>
         </div>
       </div>
-    </div>
+    </.panel>
   </div>
 
-  <div class="bg-panel rounded-xl border border-border shadow-ring p-5">
-    <h3 class="text-base font-medium text-text-primary mb-4">Issue Throughput (Last 7 Days)</h3>
-    <div class="flex items-end gap-1 h-40">
-      <div
-        :for={%{date: date, count: count} <- @throughput.created}
-        class="flex-1 flex flex-col items-center gap-1"
-      >
-        <span class="text-xs text-text-secondary">{count}</span>
-        <div
-          class="w-full bg-brand/60 rounded-t"
-          style={"height: #{chart_height(count, @throughput.created)}%"}
-        >
-        </div>
-        <span class="text-xs text-text-secondary truncate w-full text-center">
-          {format_date(date)}
-        </span>
+  <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(320px,1fr)]">
+    <.panel class="p-4">
+      <div class="mb-4 flex items-center justify-between">
+        <h2 class="text-sm font-590 text-text-primary">Issue Throughput</h2>
+        <span class="text-xs text-text-quaternary">Last 7 days</span>
       </div>
-    </div>
-  </div>
-
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <div class="bg-panel rounded-xl border border-border shadow-ring p-5">
-      <h3 class="text-base font-medium text-text-primary mb-4">Recent Activity</h3>
-      <div :if={Enum.empty?(@recent_activities)} class="text-sm text-text-secondary">
-        No recent activity.
-      </div>
-      <div :if={!Enum.empty?(@recent_activities)} class="space-y-3 max-h-80 overflow-y-auto">
+      <div class="flex h-40 items-end gap-2">
         <div
-          :for={activity <- @recent_activities}
-          class="flex items-start gap-3"
+          :for={%{date: date, count: count} <- @throughput.created}
+          class="flex flex-1 flex-col items-center gap-2"
         >
-          <span class={"mt-1 w-2.5 h-2.5 rounded-full flex-shrink-0 #{activity_icon(activity.action)}"}>
+          <span class="text-[11px] text-text-quaternary">{count}</span>
+          <div class="flex w-full items-end rounded-t bg-canvas" style="height: 112px;">
+            <div
+              class="w-full rounded-t bg-brand/70"
+              style={"height: #{chart_height(count, @throughput.created)}%"}
+            >
+            </div>
+          </div>
+          <span class="w-full truncate text-center text-[11px] text-text-quaternary">
+            {format_date(date)}
           </span>
-          <div class="flex-1 min-w-0">
-            <p class="text-sm text-text-primary truncate">
-              {activity_label(activity.action)}
-              <span :if={activity.issue_id} class="text-text-quaternary">
-                — {activity.issue_id |> String.slice(0, 8)}
-              </span>
-            </p>
-            <p class="text-xs text-text-quaternary">
-              {Calendar.strftime(activity.inserted_at, "%b %d, %H:%M")}
-            </p>
+        </div>
+      </div>
+    </.panel>
+
+    <div class="space-y-4">
+      <.panel class="overflow-hidden">
+        <div class="border-b border-border px-4 py-3">
+          <h2 class="text-sm font-590 text-text-primary">Recent Activity</h2>
+        </div>
+
+        <.empty_state
+          :if={Enum.empty?(@recent_activities)}
+          title="No recent activity"
+          message="Agent and issue events will appear here."
+          class="py-10"
+        />
+
+        <div
+          :if={!Enum.empty?(@recent_activities)}
+          class="max-h-72 divide-y divide-border overflow-y-auto"
+        >
+          <div
+            :for={activity <- @recent_activities}
+            class="flex items-start gap-3 px-4 py-3 hover:bg-surface-hover/70"
+          >
+            <span class={"mt-1.5 h-2 w-2 shrink-0 rounded-full #{activity_icon(activity.action)}"}>
+            </span>
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm text-text-primary">
+                {activity_label(activity.action)}
+                <span :if={activity.issue_id} class="text-text-quaternary">
+                  {activity.issue_id |> String.slice(0, 8)}
+                </span>
+              </p>
+              <p class="mt-0.5 text-xs text-text-quaternary">
+                {Calendar.strftime(activity.inserted_at, "%b %d, %H:%M")}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
+      </.panel>
 
-    <div class="space-y-6">
-      <div class="bg-panel rounded-xl border border-border shadow-ring p-5">
-        <h3 class="text-base font-medium text-text-primary mb-4">
-          Bottleneck Alerts
+      <.panel class="p-4">
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="text-sm font-590 text-text-primary">Bottlenecks</h2>
           <span
             :if={Enum.any?(@bottlenecks)}
-            class="ml-2 text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full"
+            class="rounded-full bg-red-500/10 px-2 py-0.5 text-xs text-red-300"
           >
             {length(@bottlenecks)} stuck
           </span>
-        </h3>
-        <div :if={Enum.empty?(@bottlenecks)} class="text-sm text-text-secondary">
-          No bottleneck issues detected.
         </div>
-        <div :if={Enum.any?(@bottlenecks)} class="space-y-2">
-          <div
-            :for={issue <- @bottlenecks}
-            class="flex items-center justify-between p-3 bg-red-500/10 border border-red-500/20 rounded-lg"
-          >
-            <div>
-              <p class="text-sm font-510 text-text-primary">{issue.title}</p>
-              <p class="text-xs text-text-secondary">
-                In review since {Calendar.strftime(issue.updated_at, "%b %d, %H:%M")}
-                <span :if={issue.assignee}>- {issue.assignee}</span>
-                <span :if={issue.project}>- {issue.project}</span>
-              </p>
-            </div>
-            <.link
-              navigate={~p"/issues/#{issue.id}"}
-              class="text-xs text-text-secondary hover:text-text-primary"
-            >
-              View
-            </.link>
-          </div>
-        </div>
-      </div>
 
-      <div class="bg-panel rounded-xl border border-border shadow-ring p-5">
-        <h3 class="text-base font-medium text-text-primary mb-4">Routine Health</h3>
-        <div class="flex items-center gap-3">
-          <span class="w-3 h-3 rounded-full bg-yellow-400 flex-shrink-0"></span>
-          <span class="text-sm text-text-secondary">{@routine_health.message}</span>
+        <p :if={Enum.empty?(@bottlenecks)} class="text-sm text-text-tertiary">
+          No bottleneck issues detected.
+        </p>
+
+        <div :if={Enum.any?(@bottlenecks)} class="space-y-2">
+          <.app_link
+            :for={issue <- @bottlenecks}
+            navigate={~p"/issues/#{issue.id}"}
+            class="block rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 hover:bg-red-500/15"
+          >
+            <p class="truncate text-sm font-510 text-text-primary">{issue.title}</p>
+            <p class="mt-0.5 truncate text-xs text-text-tertiary">
+              In review since {Calendar.strftime(issue.updated_at, "%b %d, %H:%M")}
+            </p>
+          </.app_link>
         </div>
-      </div>
+      </.panel>
+
+      <.panel class="p-4">
+        <h2 class="mb-3 text-sm font-590 text-text-primary">Routine Health</h2>
+        <div class="flex items-center gap-3">
+          <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-300"></span>
+          <span class="text-sm text-text-tertiary">{@routine_health.message}</span>
+        </div>
+      </.panel>
     </div>
   </div>
-</div>
+</.page>

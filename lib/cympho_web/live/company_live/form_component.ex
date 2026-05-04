@@ -10,7 +10,7 @@ defmodule CymphoWeb.CompanyLive.FormComponent do
     {:ok,
      socket
      |> assign(assigns)
-     |> assign(:changeset, changeset)}
+     |> assign_form(changeset)}
   end
 
   @impl true
@@ -20,7 +20,7 @@ defmodule CymphoWeb.CompanyLive.FormComponent do
       |> Companies.change_company(company_params)
       |> Map.put(:action, :validate)
 
-    {:noreply, assign(socket, :changeset, changeset)}
+    {:noreply, assign_form(socket, changeset)}
   end
 
   def handle_event("save", %{"company" => company_params}, socket) do
@@ -45,7 +45,7 @@ defmodule CymphoWeb.CompanyLive.FormComponent do
          |> push_navigate(to: ~p"/companies")}
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign(socket, :changeset, changeset)}
+        {:noreply, assign_form(socket, changeset)}
     end
   end
 
@@ -58,7 +58,11 @@ defmodule CymphoWeb.CompanyLive.FormComponent do
          |> push_navigate(to: ~p"/companies/#{company}")}
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign(socket, :changeset, changeset)}
+        {:noreply, assign_form(socket, changeset)}
     end
+  end
+
+  defp assign_form(socket, %Ecto.Changeset{} = changeset) do
+    assign(socket, :form, to_form(changeset))
   end
 end

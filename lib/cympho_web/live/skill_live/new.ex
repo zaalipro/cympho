@@ -16,7 +16,7 @@ defmodule CymphoWeb.SkillLive.New do
 
   @impl true
   def handle_event("save", %{"skill" => skill_params}, socket) do
-    case Skills.create_skill(skill_params) do
+    case Skills.create_skill(maybe_put_company_id(skill_params, socket.assigns[:current_company])) do
       {:ok, skill} ->
         {:noreply,
          socket
@@ -31,7 +31,7 @@ defmodule CymphoWeb.SkillLive.New do
   def handle_event("validate", %{"skill" => skill_params}, socket) do
     changeset =
       socket.assigns.skill
-      |> Skills.change_skill(skill_params)
+      |> Skills.change_skill(maybe_put_company_id(skill_params, socket.assigns[:current_company]))
       |> Map.put(:action, :validate)
 
     {:noreply, assign_form(socket, changeset)}
@@ -40,4 +40,10 @@ defmodule CymphoWeb.SkillLive.New do
   defp assign_form(socket, %Ecto.Changeset{} = changeset) do
     assign(socket, :form, to_form(changeset))
   end
+
+  defp maybe_put_company_id(params, %{id: company_id}) do
+    Map.put_new(params, "company_id", company_id)
+  end
+
+  defp maybe_put_company_id(params, _), do: params
 end
