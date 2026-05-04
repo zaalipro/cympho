@@ -6,7 +6,7 @@ defmodule Cympho.Budgets do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Budgets.Budget
-  alias Cympho.{GovernanceAuditLogs, Activities, BoardApprovals}
+  alias Cympho.{GovernanceAuditLogs, Activities, BoardApprovals, AuditTrail.Instrumenter}
 
   @doc """
   Returns the list of budgets.
@@ -174,6 +174,9 @@ defmodule Cympho.Budgets do
           }
         )
 
+        # Record budget changes in audit trail for threshold changes
+        maybe_record_budget_change(budget, updated, attrs)
+
         Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{updated.company_id}:budgets", {:budget_updated, updated})
         {:ok, updated}
 
@@ -324,6 +327,42 @@ defmodule Cympho.Budgets do
         {:budget_threshold_reached, budget}
       )
     end
+  end
+
+  defp maybe_record_budget_change(%Budget{} = old_budget, %Budget{} = new_budget, attrs) do
+    # Check if threshold changed
+    if Map.has_key?(attrs, :threshold_alert_percentage) or Map.has_key?(attrs, "threshold_alert_percentage") do
+      old_threshold = old_budget.threshold_alert_percentage
+      new_threshold = new_budget.threshold_alert_percentage
+
+      if old_threshold != new_threshold do
+        Instrumenter.record_budget_change(
+          new_budget.id,
+          "threshold_change",
+          old_threshold,
+          new_threshold,
+          new_budget.company_id
+        )
+      end
+    end
+
+    # Check if limit changed
+    if Map.has_key?(attrs, :limit_amount) or Map.has_key?(attrs, "limit_amount") do
+      old_limit = old_budget.limit_amount
+      new_limit = new_budget.limit_amount
+
+      if old_limit != new_limit do
+        Instrumenter.record_budget_change(
+          new_budget.id,
+          "limit_change",
+          old_limit,
+          new_limit,
+          new_budget.company_id
+        )
+      end
+    end
+
+    :ok
   end
 
   defp check_hard_stop(%Budget{} = budget, actor) do

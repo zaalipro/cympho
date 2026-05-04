@@ -6,8 +6,7 @@ defmodule Cympho.BoardApprovals do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.BoardApprovals.{BoardApproval, BoardApprovalVote}
-  alias Cympho.GovernanceAuditLogs
-  alias Cympho.Decisions
+  alias Cympho.{GovernanceAuditLogs, Decisions, AuditTrail.Instrumenter}
 
   @nil_uuid "00000000-0000-0000-0000-000000000000"
 
@@ -114,6 +113,9 @@ defmodule Cympho.BoardApprovals do
             board_approval_id: board_approval_id
           }
         )
+
+        # Record board vote in audit trail with correct API signature
+        Instrumenter.record_board_vote(user_id, vote, board_approval, board_approval_id)
 
         Phoenix.PubSub.broadcast(
           Cympho.PubSub,

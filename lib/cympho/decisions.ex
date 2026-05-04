@@ -6,7 +6,7 @@ defmodule Cympho.Decisions do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Decisions.{Decision, DecisionReversal}
-  alias Cympho.GovernanceAuditLogs
+  alias Cympho.{GovernanceAuditLogs, AuditTrail.Instrumenter}
 
   @doc """
   Returns the list of decisions.
@@ -110,6 +110,11 @@ defmodule Cympho.Decisions do
             reversible: decision.reversible
           })
         )
+
+        # Record decision in audit trail with correct API signature
+        actor_id = extract_actor_id(decision, actor)
+        issue = build_issue_from_decision(decision)
+        Instrumenter.record_decision(decision.id, :created, issue, actor_id)
 
         Phoenix.PubSub.broadcast(Cympho.PubSub, "company:#{decision.company_id}:decisions", {:decision_created, decision})
 
@@ -302,6 +307,19 @@ defmodule Cympho.Decisions do
   defp safe_actor_id(nil), do: nil
   defp safe_actor_id({_, id}), do: id
   defp safe_actor_id(_), do: nil
+
+  defp extract_actor_id(%Decision{actor_id: id}, {_, actor_id}), do: actor_id || id
+  defp extract_actor_id(%Decision{actor_id: id}, _), do: id
+  defp extract_actor_id(_, {_, actor_id}), do: actor_id
+  defp extract_actor_id(_, _), do: nil
+
+  defp build_issue_from_decision(%Decision{} = decision) do
+    %{
+      id: decision.id,
+      title: "#{decision.decision_type}: #{decision.outcome}",
+      resolution_reason: decision.reasoning
+    }
+  end
 
   defp maybe_mark_parent_superseded(%Decision{parent_decision_id: nil}), do: :ok
 
