@@ -28,14 +28,22 @@ defmodule Cympho.GoalAncestryTest do
 
     test "child of root is initiative", %{project: project} do
       {:ok, parent} = Goals.create_goal(%{title: "Mission", project_id: project.id})
-      {:ok, child} = Goals.create_goal(%{title: "Initiative", project_id: project.id, parent_id: parent.id})
+
+      {:ok, child} =
+        Goals.create_goal(%{title: "Initiative", project_id: project.id, parent_id: parent.id})
+
       assert Goals.compute_goal_type(child) == :initiative
     end
 
     test "grandchild is milestone", %{project: project} do
       {:ok, root} = Goals.create_goal(%{title: "Mission", project_id: project.id})
-      {:ok, mid} = Goals.create_goal(%{title: "Initiative", project_id: project.id, parent_id: root.id})
-      {:ok, leaf} = Goals.create_goal(%{title: "Milestone", project_id: project.id, parent_id: mid.id})
+
+      {:ok, mid} =
+        Goals.create_goal(%{title: "Initiative", project_id: project.id, parent_id: root.id})
+
+      {:ok, leaf} =
+        Goals.create_goal(%{title: "Milestone", project_id: project.id, parent_id: mid.id})
+
       assert Goals.compute_goal_type(leaf) == :milestone
     end
   end
@@ -46,7 +54,12 @@ defmodule Cympho.GoalAncestryTest do
         Goals.create_goal(%{title: "Mission", project_id: project.id, company_id: company.id})
 
       {:ok, _initiative} =
-        Goals.create_goal(%{title: "Initiative", project_id: project.id, company_id: company.id, parent_id: mission.id})
+        Goals.create_goal(%{
+          title: "Initiative",
+          project_id: project.id,
+          company_id: company.id,
+          parent_id: mission.id
+        })
 
       missions = Goals.list_missions(company.id)
       assert length(missions) == 1
@@ -84,8 +97,12 @@ defmodule Cympho.GoalAncestryTest do
 
     test "returns full lineage for issue linked to a milestone", %{project: project} do
       {:ok, mission} = Goals.create_goal(%{title: "Mission", project_id: project.id})
-      {:ok, initiative} = Goals.create_goal(%{title: "Initiative", project_id: project.id, parent_id: mission.id})
-      {:ok, milestone} = Goals.create_goal(%{title: "Milestone", project_id: project.id, parent_id: initiative.id})
+
+      {:ok, initiative} =
+        Goals.create_goal(%{title: "Initiative", project_id: project.id, parent_id: mission.id})
+
+      {:ok, milestone} =
+        Goals.create_goal(%{title: "Milestone", project_id: project.id, parent_id: initiative.id})
 
       {:ok, issue} =
         Issues.create_issue(%{title: "Deep Issue", project_id: project.id, goal_id: milestone.id})
@@ -99,10 +116,16 @@ defmodule Cympho.GoalAncestryTest do
 
     test "returns lineage for initiative-level issue", %{project: project} do
       {:ok, mission} = Goals.create_goal(%{title: "Mission", project_id: project.id})
-      {:ok, initiative} = Goals.create_goal(%{title: "Initiative", project_id: project.id, parent_id: mission.id})
+
+      {:ok, initiative} =
+        Goals.create_goal(%{title: "Initiative", project_id: project.id, parent_id: mission.id})
 
       {:ok, issue} =
-        Issues.create_issue(%{title: "Init Issue", project_id: project.id, goal_id: initiative.id})
+        Issues.create_issue(%{
+          title: "Init Issue",
+          project_id: project.id,
+          goal_id: initiative.id
+        })
 
       lineage = Goals.compute_lineage(issue)
       assert lineage.goal_id == initiative.id

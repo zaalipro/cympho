@@ -188,23 +188,26 @@ defmodule Cympho.Budgets do
         )
 
         # Record audit event if threshold changed
-        if Map.has_key?(attrs, :threshold_alert_percentage) or Map.has_key?(attrs, "threshold_alert_percentage") do
+        if Map.has_key?(attrs, :threshold_alert_percentage) or
+             Map.has_key?(attrs, "threshold_alert_percentage") do
           old_threshold = budget.threshold_alert_percentage
           new_threshold = updated.threshold_alert_percentage
 
           if old_threshold != new_threshold do
-            {actor_type, actor_id} = case actor do
-              {type, id} -> {to_string(type), id}
-              _ -> {"system", "budget_update"}
-            end
+            {actor_type, actor_id} =
+              case actor do
+                {type, id} -> {to_string(type), id}
+                _ -> {"system", "budget_update"}
+              end
 
-            _ = Instrumenter.record_budget_change(
-              updated,
-              old_threshold,
-              new_threshold,
-              actor_type,
-              actor_id
-            )
+            _ =
+              Instrumenter.record_budget_change(
+                updated,
+                old_threshold,
+                new_threshold,
+                actor_type,
+                actor_id
+              )
           end
         end
 
@@ -372,11 +375,6 @@ defmodule Cympho.Budgets do
         "company:#{budget.company_id}:budgets",
         {:budget_threshold_reached, budget}
       )
-
-      notify_company_admins(budget.company_id, "Budget threshold alert: #{budget.name}",
-        "Budget \"#{budget.name}\" has reached #{Budget.utilization_percentage(budget)}% utilization (threshold: #{budget.threshold_alert_percentage}%). Spent #{budget.spent_amount} of #{budget.limit_amount} #{budget.currency}.",
-        %{event_type: "budget_threshold_alert", budget_id: budget.id}
-      )
     end
   end
 
@@ -399,23 +397,7 @@ defmodule Cympho.Budgets do
         "company:#{budget.company_id}:budgets",
         {:budget_hard_stop, budget}
       )
-
-      notify_company_admins(budget.company_id, "Budget exhausted: #{budget.name}",
-        "Budget \"#{budget.name}\" has been exhausted (#{budget.spent_amount} #{budget.currency} of #{budget.limit_amount} #{budget.currency} limit). Action required: review and increase the budget or reallocate spending.",
-        %{event_type: "budget_exhausted", budget_id: budget.id}
-      )
     end
-  end
-
-  defp notify_company_admins(company_id, subject, body, metadata) do
-    from(m in Cympho.Companies.CompanyMembership,
-      where: m.company_id == ^company_id and m.role in ^["owner", "admin"],
-      select: m.user_id
-    )
-    |> Repo.all()
-    |> Enum.each(fn user_id ->
-      Cympho.Notifications.notify_async(subject, body, user_id, metadata)
-    end)
   end
 
   # ── Governance gate helpers ──

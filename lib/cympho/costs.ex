@@ -120,16 +120,22 @@ defmodule Cympho.Costs do
   def by_goal(company_id, days \\ 30, limit \\ 10) do
     since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
 
+    descendants_sql =
+      "SELECT id AS ancestor_id, id AS descendant_id FROM goals " <>
+        "UNION ALL " <>
+        "SELECT d.ancestor_id, g.id AS descendant_id " <>
+        "FROM goal_descendants d JOIN goals g ON g.parent_id = d.descendant_id"
+
     from(g in Cympho.Goals.Goal, as: :goal)
-    |> recursive_ctes(true)
-    |> with_cte("goal_descendants", as: fragment("SELECT id AS ancestor_id, id AS descendant_id FROM goals UNION ALL SELECT d.ancestor_id, g.id AS descendant_id FROM goal_descendants d JOIN goals g ON g.parent_id = d.descendant_id"))
-    |> join(:inner, [goal: g], d in "goal_descendants", as: :desc, on: d.ancestor_id == g.id)
+    |> join(:inner, [goal: g], d in fragment("^goal_descendants"), on: d.ancestor_id == g.id)
     |> where([goal: g], g.company_id == ^company_id)
-    |> join(:inner, [goal: g, desc: d], tu in TokenUsage, as: :tu,
-      on: tu.goal_id == d.descendant_id and tu.inserted_at >= ^since and tu.company_id == ^company_id
+    |> join(:inner, [goal: g, d: d], tu in TokenUsage,
+      on:
+        tu.goal_id == d.descendant_id and tu.inserted_at >= ^since and
+          tu.company_id == ^company_id
     )
     |> group_by([goal: g], [g.id, g.title, g.goal_type])
-    |> select([goal: g, desc: d, tu: tu], %{
+    |> select([goal: g, d: d, tu: tu], %{
       goal_id: g.id,
       title: g.title,
       goal_type: g.goal_type,
@@ -139,6 +145,7 @@ defmodule Cympho.Costs do
     })
     |> order_by([tu: tu], desc: sum(tu.cost_usd))
     |> limit(^limit)
+    |> with_cte("goal_descendants", as: fragment(^descendants_sql))
     |> Repo.all()
   end
 
@@ -148,16 +155,22 @@ defmodule Cympho.Costs do
   def by_mission(company_id, days \\ 30) do
     since = DateTime.utc_now() |> DateTime.add(-days * 86400, :second)
 
+    descendants_sql =
+      "SELECT id AS ancestor_id, id AS descendant_id FROM goals WHERE goal_type = 'mission' " <>
+        "UNION ALL " <>
+        "SELECT d.ancestor_id, g.id AS descendant_id " <>
+        "FROM goal_descendants d JOIN goals g ON g.parent_id = d.descendant_id"
+
     from(m in Cympho.Goals.Goal, as: :mission)
-    |> recursive_ctes(true)
-    |> with_cte("goal_descendants", as: fragment("SELECT id AS ancestor_id, id AS descendant_id FROM goals WHERE goal_type = 'mission' UNION ALL SELECT d.ancestor_id, g.id AS descendant_id FROM goal_descendants d JOIN goals g ON g.parent_id = d.descendant_id"))
     |> where([mission: m], m.company_id == ^company_id and m.goal_type == ^:mission)
-    |> join(:inner, [mission: m], d in "goal_descendants", as: :desc, on: d.ancestor_id == m.id)
-    |> join(:inner, [mission: m, desc: d], tu in TokenUsage, as: :tu,
-      on: tu.goal_id == d.descendant_id and tu.inserted_at >= ^since and tu.company_id == ^company_id
+    |> join(:inner, [mission: m], d in fragment("^goal_descendants"), on: d.ancestor_id == m.id)
+    |> join(:inner, [mission: m, d: d], tu in TokenUsage,
+      on:
+        tu.goal_id == d.descendant_id and tu.inserted_at >= ^since and
+          tu.company_id == ^company_id
     )
     |> group_by([mission: m], [m.id, m.title])
-    |> select([mission: m, desc: d, tu: tu], %{
+    |> select([mission: m, d: d, tu: tu], %{
       mission_id: m.id,
       title: m.title,
       total_cost: sum(tu.cost_usd),
@@ -165,6 +178,7 @@ defmodule Cympho.Costs do
       request_count: count(tu.id)
     })
     |> order_by([tu: tu], desc: sum(tu.cost_usd))
+    |> with_cte("goal_descendants", as: fragment(^descendants_sql))
     |> Repo.all()
   end
 

@@ -272,9 +272,10 @@ defmodule Cympho.AgentApprovalWorkflowTest do
 
   # --- Executor ---
 
-  describe "execute_approved_hire/1" do
+  describe "execute_approved_hire/2" do
     test "creates agent from stored proposal data" do
       company = create_company(%{"required_approvals" => ["agent_hire"]})
+      board_approval_id = "00000000-0000-0000-0000-000000000001"
 
       proposal_data = %{
         "attrs" => %{
@@ -285,9 +286,34 @@ defmodule Cympho.AgentApprovalWorkflowTest do
         "parent_agent_id" => nil
       }
 
-      assert {:ok, %Agent{} = agent} = Agents.execute_approved_hire(proposal_data)
+      assert {:ok, %Agent{} = agent} =
+               Agents.execute_approved_hire(board_approval_id, proposal_data)
+
       assert agent.name == "Executed Agent"
       assert agent.role == :engineer
+      assert agent.board_approval_id == board_approval_id
+    end
+
+    test "returns :already_executed when agent already exists for approval" do
+      company = create_company(%{"required_approvals" => ["agent_hire"]})
+      board_approval_id = "00000000-0000-0000-0000-000000000002"
+
+      proposal_data = %{
+        "attrs" => %{
+          "name" => "Idempotent Agent",
+          "role" => "engineer",
+          "company_id" => company.id
+        },
+        "parent_agent_id" => nil
+      }
+
+      # First call creates the agent
+      assert {:ok, %Agent{} = agent} =
+               Agents.execute_approved_hire(board_approval_id, proposal_data)
+
+      # Second call returns :already_executed
+      assert {:error, :already_executed} =
+               Agents.execute_approved_hire(board_approval_id, proposal_data)
     end
   end
 
@@ -421,6 +447,71 @@ defmodule Cympho.AgentApprovalWorkflowTest do
         GovernanceAuditLogs.list_governance_audit_logs(action_type: "board_decision")
 
       assert length(logs) >= 1
+    end
+
+    test "handles role change when current role has changed since approval" do
+      company = create_company(%{"required_approvals" => ["agent_promotion"]})
+      agent = create_agent_in_company(company, %{role: :engineer})
+      board_member = create_board_member(company)
+
+      {:error, :pending_board_approval, approval_id} =
+        Agents.update_agent(agent, %{role: :cto})
+
+      # Manually change the agent's role before approval is processed
+      # (simulating a race condition)
+      {_, _, _} =
+        Cympho.Repo.query(
+          "UPDATE agents SET role = 'product_manager' WHERE id = $1",
+          [agent.id]
+        )
+
+      # Approve the original role change
+      BoardApprovals.resolve_board_approval(
+        approval_id,
+        "approved",
+        %{decision_reasoning: "Should be skipped"},
+        {"user", board_member.id}
+      )
+
+      Process.sleep(100)
+
+      # Role should NOT be cto since current role at execution time was product_manager
+      {:ok, updated} = Agents.get_agent(agent.id)
+      assert updated.role == :product_manager
+    end
+
+    test "idempotent: duplicate hire events do not create duplicate agents" do
+      company = create_company(%{"required_approvals" => ["agent_hire"]})
+      board_member = create_board_member(company)
+
+      {:error, :pending_board_approval, approval_id} =
+        Agents.create_agent(%{name: "Duplicate Test", role: :engineer, company_id: company.id})
+
+      # Approve
+      BoardApprovals.resolve_board_approval(
+        approval_id,
+        "approved",
+        %{decision_reasoning: "First approval"},
+        {"user", board_member.id}
+      )
+
+      Process.sleep(100)
+
+      agents_before = Agents.list_agents_by_company(company.id)
+      assert length(agents_before) == 1
+
+      # Simulate duplicate event by resolving again (shouldn't happen in practice but tests idempotency)
+      BoardApprovals.resolve_board_approval(
+        approval_id,
+        "approved",
+        %{decision_reasoning: "Duplicate approval"},
+        {"user", board_member.id}
+      )
+
+      Process.sleep(100)
+
+      agents_after = Agents.list_agents_by_company(company.id)
+      assert length(agents_after) == 1
     end
   end
 end
