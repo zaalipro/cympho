@@ -168,20 +168,15 @@ defmodule Cympho.RuntimeTest do
     setup %{company: company, agent: agent, issue: issue} do
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
-          company_id: company.id,
           name: "Test Policy",
-          stages: [
+          stage_configs: [
             %{
-              "name" => "implementation",
-              "participant" => "engineer",
-              "require_human" => false,
-              "auto_proceed" => true
+              "type" => "executor",
+              "require_human" => false
             },
             %{
-              "name" => "review",
-              "participant" => "cto",
-              "require_human" => true,
-              "auto_proceed" => false
+              "type" => "reviewer",
+              "require_human" => true
             }
           ]
         })
@@ -224,9 +219,7 @@ defmodule Cympho.RuntimeTest do
            issue: issue,
            policy: policy
          } do
-      state =
-        ExecutionState.initialize(policy)
-        |> ExecutionState.advance_stage()
+      state = ExecutionState.initialize(policy, agent.id)
 
       {:ok, issue} =
         Issues.update_issue(issue, %{
@@ -242,12 +235,9 @@ defmodule Cympho.RuntimeTest do
       issue: issue,
       policy: policy
     } do
-      # Advance to review stage which requires human
-      state =
-        ExecutionState.initialize(policy)
-        |> ExecutionState.advance_stage()
-        |> ExecutionState.record_human_decision(:approved, "cto", "Looks good")
-        |> ExecutionState.advance_stage()
+      # Advance to reviewer stage which requires human
+      state = ExecutionState.initialize(policy, agent.id)
+      {:ok, state} = ExecutionState.advance(state, policy, agent.id)
 
       {:ok, issue} =
         Issues.update_issue(issue, %{
@@ -276,10 +266,9 @@ defmodule Cympho.RuntimeTest do
           config: %{"command" => "echo"}
         })
 
-      # Initialize state with other_agent as current participant
+      # Initialize state at executor stage, set participant to other_agent
       state =
-        ExecutionState.initialize(policy)
-        |> ExecutionState.advance_stage()
+        ExecutionState.initialize(policy, agent.id)
         |> Map.put(:current_participant, other_agent.id)
 
       {:ok, issue} =
@@ -298,11 +287,10 @@ defmodule Cympho.RuntimeTest do
       issue: issue,
       policy: policy
     } do
-      # Complete a stage by recording approval
+      # Approve the current executor stage
       state =
-        ExecutionState.initialize(policy)
-        |> ExecutionState.advance_stage()
-        |> ExecutionState.record_human_decision(:approved, "cto", "Approved")
+        ExecutionState.initialize(policy, agent.id)
+        |> ExecutionState.approve(agent.id)
 
       {:ok, issue} =
         Issues.update_issue(issue, %{
