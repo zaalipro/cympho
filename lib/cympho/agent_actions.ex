@@ -11,6 +11,7 @@ defmodule Cympho.AgentActions do
   alias Cympho.{Activities, Agents, Comments, Issues, Repo, WorkProducts}
   alias Cympho.Agents.Agent
   alias Cympho.Issues.Issue
+  alias Cympho.AuditTrail.Instrumenter
 
   @max_actions 10
   @supported_types ~w(
@@ -508,6 +509,16 @@ defmodule Cympho.AgentActions do
         result: result
       }
     })
+
+    # Record audit event for agent action
+    _ = Instrumenter.record_agent_action(
+      %{
+        action_type: action["type"],
+        params: Map.drop(action, ["type"])
+      },
+      issue,
+      agent.id
+    )
   end
 
   defp require_string(action, field) do

@@ -1,83 +1,103 @@
 defmodule Cympho.CompanyPauseResumeTest do
   use Cympho.DataCase
+
   alias Cympho.Companies
+  alias Cympho.Agents
+  alias Cympho.Agents.Agent
+
+  defp create_company_with_agents(_context) do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Test Corp " <> Ecto.UUID.generate(),
+        slug: "test-" <> Ecto.UUID.generate()
+      })
+
+    {:ok, _a1} =
+      Agents.create_agent(%{name: "Engineer 1", role: :engineer, company_id: company.id})
+
+    {:ok, _a2} =
+      Agents.create_agent(%{name: "Engineer 2", role: :engineer, company_id: company.id})
+
+    {:ok, company: company}
+  end
 
   describe "pause_company/2" do
-    test "pauses an active company" do
-      {:ok, company} =
-        Companies.create_company(%{
-          name: "Test Company",
-          slug: "test-company"
-        })
+    setup [:create_company_with_agents]
 
-      assert company.status == "active"
-      assert is_nil(company.paused_at)
-      assert is_nil(company.paused_reason)
+    test "sets status to paused, records paused_at and paused_reason", %{company: company} do
+      {:ok, updated} = Companies.pause_company(company, "budget exceeded")
 
-      {:ok, paused_company} =
-        Companies.pause_company(company, "Manual pause for testing")
-
-      assert paused_company.status == "paused"
-      assert paused_company.paused_reason == "Manual pause for testing"
-      assert paused_company.paused_at != nil
+      assert updated.status == "paused"
+      assert updated.paused_at != nil
+      assert updated.paused_reason == "budget exceeded"
     end
 
-    test "uses default reason when none provided" do
-      {:ok, company} =
-        Companies.create_company(%{
-          name: "Test Company",
-          slug: "test-company"
-        })
+    test "pauses all active agents in the company", %{company: company} do
+      {:ok, _} = Companies.pause_company(company, "manual pause")
 
-      {:ok, paused_company} = Companies.pause_company(company)
+      for agent <- Agents.list_agents_by_company(company.id) do
+        reloaded = Repo.get!(Agent, agent.id)
+        assert reloaded.governance_status == "paused"
+      end
+    end
 
-      assert paused_company.status == "paused"
-      assert paused_company.paused_reason == "Paused from dashboard"
+    test "broadcasts company_paused event", %{company: company} do
+      Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company.id}:company")
+      {:ok, _} = Companies.pause_company(company, "test")
+      assert_received {:company_paused, _updated}
+    end
+
+    test "active?/1 returns false for paused company", %{company: company} do
+      {:ok, updated} = Companies.pause_company(company, "test")
+      refute Companies.active?(updated)
     end
   end
 
   describe "resume_company/1" do
-    test "resumes a paused company" do
-      {:ok, company} =
-        Companies.create_company(%{
-          name: "Test Company",
-          slug: "test-company"
-        })
+    setup [:create_company_with_agents]
 
-      {:ok, paused_company} =
-        Companies.pause_company(company, "Test pause")
+    test "sets status to active, clears paused_at and paused_reason", %{company: company} do
+      {:ok, _} = Companies.pause_company(company, "setup pause")
+      {:ok, updated} = Companies.resume_company(Companies.get_company!(company.id))
 
-      assert paused_company.status == "paused"
+      assert updated.status == "active"
+      assert updated.paused_at == nil
+      assert updated.paused_reason == nil
+    end
 
-      {:ok, resumed_company} = Companies.resume_company(paused_company)
+    test "resumes all paused agents", %{company: company} do
+      {:ok, _} = Companies.pause_company(company, "setup pause")
+      {:ok, _} = Companies.resume_company(Companies.get_company!(company.id))
 
-      assert resumed_company.status == "active"
-      assert is_nil(resumed_company.paused_at)
-      assert is_nil(resumed_company.paused_reason)
+      for agent <- Agents.list_agents_by_company(company.id) do
+        reloaded = Repo.get!(Agent, agent.id)
+        assert reloaded.governance_status == "active"
+      end
+    end
+
+    test "broadcasts company_resumed event", %{company: company} do
+      {:ok, _} = Companies.pause_company(company, "setup pause")
+
+      Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company.id}:company")
+      {:ok, _} = Companies.resume_company(Companies.get_company!(company.id))
+      assert_received {:company_resumed, _updated}
+    end
+
+    test "active?/1 returns true for resumed company", %{company: company} do
+      {:ok, _} = Companies.pause_company(company, "setup pause")
+      {:ok, updated} = Companies.resume_company(Companies.get_company!(company.id))
+      assert Companies.active?(updated)
     end
   end
 
-  describe "active?/1" do
-    test "returns true for active companies" do
-      {:ok, company} =
-        Companies.create_company(%{
-          name: "Test Company",
-          slug: "test-company"
-        })
+  describe "dispatcher skips paused companies" do
+    test "active?/1 guards preflight checks" do
+      {:ok, active} = Companies.create_company(%{name: "Active Corp", slug: "active-corp-a"})
+      assert Companies.active?(active)
 
-      assert Companies.active?(company) == true
-    end
-
-    test "returns false for paused companies" do
-      {:ok, company} =
-        Companies.create_company(%{
-          name: "Test Company",
-          slug: "test-company"
-        })
-
-      {:ok, paused_company} = Companies.pause_company(company)
-
-      assert Companies.active?(paused_company) == false
+      {:ok, paused} = Companies.create_company(%{name: "Paused Corp", slug: "paused-corp-a"})
+      {:ok, paused} = Companies.pause_company(paused, "test")
+      refute Companies.active?(paused)
     end
   end
 end

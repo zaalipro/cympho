@@ -7,6 +7,7 @@ defmodule Cympho.Decisions do
   alias Cympho.Repo
   alias Cympho.Decisions.{Decision, DecisionReversal}
   alias Cympho.GovernanceAuditLogs
+  alias Cympho.AuditTrail.Instrumenter
 
   @doc """
   Returns the list of decisions.
@@ -113,6 +114,19 @@ defmodule Cympho.Decisions do
               resource: "#{decision.resource_type}:#{decision.resource_id}",
               reversible: decision.reversible
             })
+        )
+
+        # Record audit event for decision creation
+        {actor_type, actor_id} = case actor || extract_actor(decision) do
+          {type, id} -> {to_string(type), id}
+          _ -> {"system", "decision_creation"}
+        end
+
+        _ = Instrumenter.record_decision(
+          decision,
+          "created",
+          actor_type,
+          actor_id
         )
 
         Phoenix.PubSub.broadcast(
@@ -225,7 +239,7 @@ defmodule Cympho.Decisions do
     original_decision = Repo.get!(Decision, decision_id)
 
     if Decision.can_reverse?(original_decision) do
-      Repo.transaction(fn ->
+      result = Repo.transaction(fn ->
         attrs = %{
           decision_type: original_decision.decision_type,
           decision_key: "#{original_decision.decision_key}_reversal",
@@ -266,11 +280,24 @@ defmodule Cympho.Decisions do
                  company_id: original_decision.company_id
                })
                |> Repo.insert() do
+          # Record audit event for decision reversal
+          _ = Instrumenter.record_decision(
+            reversing_decision,
+            "reversed",
+            to_string(elem(actor, 0)),
+            elem(actor, 1)
+          )
+
           reversing_decision
         else
           {:error, changeset} -> Repo.rollback(changeset)
         end
       end)
+
+      case result do
+        {:ok, _} = ok -> ok
+        error -> error
+      end
     else
       {:error, :not_reversible}
     end
