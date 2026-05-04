@@ -957,4 +957,115 @@ defmodule Cympho.Agents do
 
   defp compare_maps(map1, map2) when map1 == map2, do: :unchanged
   defp compare_maps(_map1, _map2), do: :changed
+
+  @doc """
+  Returns statistics for a specific agent including:
+  - Direct reports count
+  - Total issues assigned
+  - Issues completed this week
+  - Blocked issues count
+  - Budget status (if applicable)
+  """
+  def get_agent_stats(agent_id) when is_binary(agent_id) do
+    case get_agent(agent_id) do
+      {:ok, agent} ->
+        %{
+          direct_reports: count_direct_reports(agent_id),
+          total_issues: count_assigned_issues(agent_id),
+          completed_this_week: count_completed_this_week(agent_id),
+          blocked_count: count_blocked_issues(agent_id),
+          budget_status: get_agent_budget_status(agent)
+        }
+
+      {:error, _} ->
+        nil
+    end
+  end
+
+  @doc """
+  Returns company-wide agent statistics grouped by role and status.
+  """
+  def get_company_agent_stats(company_id) when is_binary(company_id) do
+    agents = list_agents_by_company(company_id)
+
+    %{
+      total: length(agents),
+      by_role: Enum.group_by(agents, & &1.role) |> Map.new(fn {k, v} -> {k, length(v)} end),
+      by_status: Enum.group_by(agents, & &1.status) |> Map.new(fn {k, v} -> {k, length(v)} end),
+      idle_ratio: calculate_idle_ratio(agents)
+    }
+  end
+
+  defp count_direct_reports(agent_id) do
+    Agent
+    |> where([a], a.parent_id == ^agent_id)
+    |> Repo.aggregate(:count)
+  end
+
+  defp count_assigned_issues(agent_id) do
+    Cympho.Issues.Issue
+    |> where([i], i.assignee_id == ^agent_id)
+    |> Repo.aggregate(:count)
+  end
+
+  defp count_completed_this_week(agent_id) do
+    week_start_date = Date.beginning_of_week(DateTime.utc_now() |> DateTime.to_date())
+    week_start = DateTime.new!(week_start_date, ~T[00:00:00])
+
+    Cympho.Issues.Issue
+    |> where([i], i.assignee_id == ^agent_id)
+    |> where([i], i.status == :done)
+    |> where([i], not is_nil(i.completed_at))
+    |> where([i], i.completed_at >= ^week_start)
+    |> Repo.aggregate(:count)
+  end
+
+  defp count_blocked_issues(agent_id) do
+    Cympho.Issues.Issue
+    |> where([i], i.assignee_id == ^agent_id)
+    |> where([i], i.status == :blocked)
+    |> Repo.aggregate(:count)
+  end
+
+  defp get_agent_budget_status(%Agent{budget: budget}) when budget == %{} or budget == nil,
+    do: nil
+
+  defp get_agent_budget_status(%Agent{budget: budget}) when is_map(budget) do
+    budget_id = Map.get(budget, "budget_id") || Map.get(budget, :budget_id)
+
+    if is_nil(budget_id) do
+      nil
+    else
+      case Cympho.Budgets.get_budget(budget_id) do
+        nil ->
+          nil
+
+        budget ->
+          %{
+            limit: budget.limit_amount,
+            spent: budget.spent_amount,
+            remaining: Decimal.sub(budget.limit_amount, budget.spent_amount),
+            percentage:
+              if Decimal.gt?(budget.limit_amount, 0) do
+                Decimal.mult(Decimal.div(budget.spent_amount, budget.limit_amount), 100)
+              else
+                Decimal.from_integer(0)
+              end
+          }
+      end
+    end
+  end
+
+  defp get_agent_budget_status(_), do: nil
+
+  defp calculate_idle_ratio(agents) when is_list(agents) do
+    total = length(agents)
+    idle = Enum.count(agents, &(&1.status == :idle))
+
+    if total > 0 do
+      Float.round(idle / total * 100, 1)
+    else
+      0.0
+    end
+  end
 end

@@ -364,6 +364,113 @@ defmodule Cympho.AgentsTest do
     end
   end
 
+  describe "get_agent_stats/1" do
+    setup [:create_company, :create_agent]
+
+    test "returns nil for non-existent agent" do
+      assert nil == Agents.get_agent_stats("non-existent-id")
+    end
+
+    test "returns stats for agent with no issues", %{agent: agent} do
+      stats = Agents.get_agent_stats(agent.id)
+
+      assert stats.direct_reports == 0
+      assert stats.total_issues == 0
+      assert stats.completed_this_week == 0
+      assert stats.blocked_count == 0
+      assert stats.budget_status == nil
+    end
+
+    test "returns stats for agent with direct reports", %{company: company, agent: parent} do
+      {:ok, _child1} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Child 1",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"},
+          parent_id: parent.id
+        })
+
+      {:ok, _child2} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Child 2",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"},
+          parent_id: parent.id
+        })
+
+      stats = Agents.get_agent_stats(parent.id)
+      assert stats.direct_reports == 2
+    end
+  end
+
+  describe "get_company_agent_stats/1" do
+    setup [:create_company]
+
+    test "returns stats for company with no agents", %{company: company} do
+      stats = Agents.get_company_agent_stats(company.id)
+
+      assert stats.total == 0
+      assert stats.by_role == %{}
+      assert stats.by_status == %{}
+      assert stats.idle_ratio == 0.0
+    end
+
+    test "returns stats for company with multiple agents", %{company: company} do
+      {:ok, _ceo} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, _cto} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "CTO",
+          role: :cto,
+          status: :busy,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, _eng1} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Engineer 1",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, _eng2} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Engineer 2",
+          role: :engineer,
+          status: :busy,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      stats = Agents.get_company_agent_stats(company.id)
+
+      assert stats.total == 4
+      assert stats.by_role == %{ceo: 1, cto: 1, engineer: 2}
+      assert stats.by_status == %{idle: 2, busy: 2}
+      assert stats.idle_ratio == 50.0
+    end
+  end
+
   defp start_heartbeat_supervisor(_context) do
     # Start the heartbeat supervisor and registry for tests
     case start_supervised({Cympho.AgentHeartbeat.Supervisor, []}) do

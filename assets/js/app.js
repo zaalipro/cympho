@@ -444,11 +444,64 @@ function initCompanySwitcher() {
   window.openCompanySwitcher = openModal;
 }
 
+// Org chart export hook
+const OrgChartExport = {
+  mounted() {
+    this.handleEvent("export_svg", () => {
+      this.exportToSVG();
+    });
+  },
+
+  exportToSVG() {
+    const orgChartContainer = document.querySelector("#org-chart-export-area");
+    if (!orgChartContainer) {
+      console.error("Org chart container not found");
+      return;
+    }
+
+    // Get the computed styles
+    const width = orgChartContainer.offsetWidth;
+    const height = orgChartContainer.offsetHeight;
+
+    // Create SVG element
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("width", width);
+    svg.setAttribute("height", height);
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+    // Create foreignObject to embed HTML
+    const foreignObject = document.createElementNS(svgNS, "foreignObject");
+    foreignObject.setAttribute("width", "100%");
+    foreignObject.setAttribute("height", "100%");
+
+    // Clone the org chart content
+    const clonedContent = orgChartContainer.cloneNode(true);
+    foreignObject.appendChild(clonedContent);
+    svg.appendChild(foreignObject);
+
+    // Serialize to string
+    const serializer = new XMLSerializer();
+    const svgString = serializer.serializeToString(svg);
+
+    // Create download link
+    const blob = new Blob([svgString], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `org-chart-${new Date().toISOString().split("T")[0]}.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+};
+
 // Boot
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
 const liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
-  hooks: {TimelineScroll, KanbanSortable, Toast}
+  hooks: {TimelineScroll, KanbanSortable, Toast, OrgChartExport}
 });
 
 liveSocket.connect();
