@@ -3,6 +3,7 @@ defmodule Cympho.AuditTrail.Instrumenter do
   Records structured audit events for agent actions, governance, and budget changes.
   """
 
+  require Logger
   alias Cympho.AuditTrail.AuditEvent
   alias Cympho.Repo
 
@@ -114,9 +115,20 @@ defmodule Cympho.AuditTrail.Instrumenter do
 
     case Repo.insert(changeset) do
       {:ok, _event} -> :ok
-      {:error, _changeset} -> :ok
+      {:error, changeset} ->
+        Logger.error("Failed to record audit event: #{inspect(changeset.errors)}")
+        Logger.error("Audit event attrs: #{inspect(attrs)}")
+        {:error, :audit_failed}
+
+      {:error, _} ->
+        Logger.error("Failed to record audit event: unknown error")
+        Logger.error("Audit event attrs: #{inspect(attrs)}")
+        {:error, :audit_failed}
     end
   rescue
-    _ -> :ok
+    e ->
+      Logger.error("Exception recording audit event: #{inspect(e)}")
+      Logger.error("Audit event attrs: #{inspect(attrs)}")
+      {:error, :audit_exception}
   end
 end
