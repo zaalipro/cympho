@@ -54,6 +54,10 @@ defmodule CymphoWeb.CostLive.Index do
     |> assign(:by_model, Costs.by_model(company_id, days))
     |> assign(:by_provider, Costs.by_provider(company_id, days))
     |> assign(:daily_costs, Costs.daily_costs(company_id, days))
+    |> assign(:by_goal, Costs.by_goal(company_id, days))
+    |> assign(:by_mission, Costs.by_mission(company_id, days))
+    |> assign(:sparkline_7d, Costs.sparkline(company_id, 7))
+    |> assign(:sparkline_30d, Costs.sparkline(company_id, 30))
     |> assign(:active_budgets, Costs.active_budgets(company_id))
     |> assign(:approaching_budgets, Costs.approaching_threshold_budgets(company_id))
     |> assign(:exceeded_budgets, Costs.exceeded_budgets(company_id))
@@ -160,6 +164,31 @@ defmodule CymphoWeb.CostLive.Index do
       "4%"
     end
   end
+
+  def sparkline_points(sparkline_data) do
+    costs = Enum.map(sparkline_data, fn d -> decimal_or_zero(d.total_cost) end)
+    max_val = if costs == [], do: Decimal.new("1"), else: Enum.max(costs, Decimal)
+
+    points =
+      costs
+      |> Enum.with_index()
+      |> Enum.map(fn {cost, i} ->
+        x = if length(costs) > 1, do: i / (length(costs) - 1) * 100, else: 50
+        y = if Decimal.gt?(max_val, Decimal.new("0")) do
+          100 - (Decimal.to_float(Decimal.div(cost, max_val)) * 100)
+        else
+          100.0
+        end
+        "#{Float.round(x, 1)},#{Float.round(y, 1)}"
+      end)
+
+    Enum.join(points, " ")
+  end
+
+  def goal_type_label(:mission), do: "Mission"
+  def goal_type_label(:initiative), do: "Initiative"
+  def goal_type_label(:milestone), do: "Milestone"
+  def goal_type_label(_), do: "Goal"
 
   defp decimal_or_zero(%Decimal{} = value), do: value
   defp decimal_or_zero(value) when is_integer(value), do: Decimal.new(value)
