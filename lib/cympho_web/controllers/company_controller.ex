@@ -3,8 +3,39 @@ defmodule CymphoWeb.CompanyController do
 
   alias Cympho.Companies
 
+  action_fallback CymphoWeb.FallbackController
+
+  plug CymphoWeb.Plugs.CompanyAccess
+       when action in [
+              :show,
+              :update,
+              :delete,
+              :update_governance_config,
+              :list_members,
+              :list_invites,
+              :list_join_requests,
+              :create_join_request,
+              :export
+            ]
+
+  plug CymphoWeb.Plugs.CompanyAccess,
+       [require_admin: true]
+       when action in [
+              :add_member,
+              :remove_member,
+              :create_invite,
+              :revoke_invite,
+              :approve_join_request,
+              :reject_join_request
+            ]
+
   def index(conn, _params) do
-    companies = Companies.list_companies()
+    user = conn.assigns.current_user
+
+    companies =
+      Companies.list_memberships_for_user(user.id)
+      |> Enum.map(& &1.company)
+
     json(conn, %{data: companies})
   end
 
@@ -14,12 +45,18 @@ defmodule CymphoWeb.CompanyController do
   end
 
   def create(conn, %{"company" => company_params}) do
+    user = conn.assigns.current_user
+
     case Companies.create_company(company_params) do
       {:ok, company} ->
-        conn
-        |> put_status(:created)
+        # The creator becomes the first owner.
+        Companies.create_membership(%{
+          user_id: user.id,
+          company_id: company.id,
+          role: "owner"
+        })
 
-        json(conn, %{data: company})
+        conn |> put_status(:created) |> json(%{data: company})
 
       {:error, changeset} ->
         conn
@@ -32,13 +69,8 @@ defmodule CymphoWeb.CompanyController do
     company = Companies.get_company!(id)
 
     case Companies.update_company(company, company_params) do
-      {:ok, company} ->
-        json(conn, %{data: company})
-
-      {:error, changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{errors: translate_errors(changeset)})
+      {:ok, company} -> json(conn, %{data: company})
+      {:error, changeset} -> error_changeset(conn, changeset)
     end
   end
 
@@ -46,13 +78,8 @@ defmodule CymphoWeb.CompanyController do
     company = Companies.get_company!(id)
 
     case Companies.update_company(company, %{governance_config: config_params}) do
-      {:ok, company} ->
-        json(conn, %{data: company})
-
-      {:error, changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{errors: translate_errors(changeset)})
+      {:ok, company} -> json(conn, %{data: company})
+      {:error, changeset} -> error_changeset(conn, changeset)
     end
   end
 
@@ -68,8 +95,7 @@ defmodule CymphoWeb.CompanyController do
   # ── Memberships ──
 
   def list_members(conn, %{"company_id" => company_id}) do
-    memberships = Companies.list_memberships(company_id)
-    json(conn, %{data: memberships})
+    json(conn, %{data: Companies.list_memberships(company_id)})
   end
 
   def add_member(conn, %{"company_id" => company_id, "user_id" => user_id, "role" => role}) do
@@ -78,15 +104,8 @@ defmodule CymphoWeb.CompanyController do
            user_id: user_id,
            role: role
          }) do
-      {:ok, membership} ->
-        conn
-        |> put_status(:created)
-        |> json(%{data: membership})
-
-      {:error, changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{errors: translate_errors(changeset)})
+      {:ok, m} -> conn |> put_status(:created) |> json(%{data: m})
+      {:error, changeset} -> error_changeset(conn, changeset)
     end
   end
 
@@ -98,7 +117,7 @@ defmodule CymphoWeb.CompanyController do
       membership ->
         case Companies.delete_membership(membership) do
           {:ok, _} -> send_resp(conn, :no_content, "")
-          {:error, changeset} -> json(conn, %{errors: translate_errors(changeset)})
+          {:error, changeset} -> error_changeset(conn, changeset)
         end
     end
   end
@@ -106,137 +125,80 @@ defmodule CymphoWeb.CompanyController do
   # ── Invites ──
 
   def list_invites(conn, %{"company_id" => company_id}) do
-    invites = Companies.list_pending_invites(company_id)
-    json(conn, %{data: invites})
+    json(conn, %{data: Companies.list_pending_invites(company_id)})
   end
 
   def create_invite(conn, %{"company_id" => company_id, "invite" => invite_params}) do
     attrs =
       Map.merge(invite_params, %{
         "company_id" => company_id,
-        "inviter_id" => get_current_user_id(conn)
+        "inviter_id" => conn.assigns.current_user.id
       })
 
     case Companies.create_invite(attrs) do
-      {:ok, invite} ->
-        conn
-        |> put_status(:created)
-        |> json(%{data: invite})
-
-      {:error, changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{errors: translate_errors(changeset)})
+      {:ok, invite} -> conn |> put_status(:created) |> json(%{data: invite})
+      {:error, changeset} -> error_changeset(conn, changeset)
     end
   end
 
   def accept_invite(conn, %{"token" => token}) do
-    user_id = get_current_user_id(conn)
-
-    case Companies.accept_invite(token, user_id) do
-      {:ok, _} ->
-        json(conn, %{data: %{accepted: true}})
-
-      {:error, reason} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{error: to_string(reason)})
+    case Companies.accept_invite(token, conn.assigns.current_user.id) do
+      {:ok, _} -> json(conn, %{data: %{accepted: true}})
+      {:error, reason} -> conn |> put_status(:bad_request) |> json(%{error: to_string(reason)})
     end
   end
 
-  def revoke_invite(conn, %{"company_id" => _company_id, "invite_id" => invite_id}) do
+  def revoke_invite(conn, %{"company_id" => company_id, "invite_id" => invite_id}) do
     invite = Cympho.Repo.get(Cympho.Companies.CompanyInvite, invite_id)
 
-    case invite && Companies.revoke_invite(invite) do
-      nil ->
+    cond do
+      is_nil(invite) ->
         conn |> put_status(:not_found) |> json(%{error: "Invite not found"})
 
-      {:ok, _} ->
-        json(conn, %{data: %{revoked: true}})
+      invite.company_id != company_id ->
+        conn |> put_status(:not_found) |> json(%{error: "Invite not found"})
 
-      {:error, changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{errors: translate_errors(changeset)})
+      true ->
+        case Companies.revoke_invite(invite) do
+          {:ok, _} -> json(conn, %{data: %{revoked: true}})
+          {:error, changeset} -> error_changeset(conn, changeset)
+        end
     end
   end
 
   # ── Join Requests ──
 
   def list_join_requests(conn, %{"company_id" => company_id}) do
-    requests = Companies.list_pending_join_requests(company_id)
-    json(conn, %{data: requests})
+    json(conn, %{data: Companies.list_pending_join_requests(company_id)})
   end
 
-  def create_join_request(conn, %{"company_id" => company_id}) do
-    user_id = get_current_user_id(conn)
-
+  def create_join_request(conn, %{"company_id" => company_id} = params) do
     case Companies.create_join_request(%{
            company_id: company_id,
-           user_id: user_id,
-           message: conn.params["message"]
+           user_id: conn.assigns.current_user.id,
+           message: params["message"]
          }) do
-      {:ok, request} ->
-        conn
-        |> put_status(:created)
-        |> json(%{data: request})
-
-      {:error, changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{errors: translate_errors(changeset)})
+      {:ok, request} -> conn |> put_status(:created) |> json(%{data: request})
+      {:error, changeset} -> error_changeset(conn, changeset)
     end
   end
 
-  def approve_join_request(conn, %{"company_id" => _company_id, "request_id" => request_id}) do
-    request = Cympho.Repo.get(Cympho.Companies.JoinRequest, request_id)
-    reviewer_id = get_current_user_id(conn)
-
-    case request && Companies.approve_join_request(request, reviewer_id) do
-      nil ->
-        conn |> put_status(:not_found) |> json(%{error: "Join request not found"})
-
-      {:ok, _} ->
-        json(conn, %{data: %{approved: true}})
-
-      {:error, changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{errors: translate_errors(changeset)})
-    end
+  def approve_join_request(conn, %{"company_id" => company_id, "request_id" => request_id}) do
+    handle_join_request(conn, company_id, request_id, &Companies.approve_join_request/2,
+      key: :approved
+    )
   end
 
-  def reject_join_request(conn, %{"company_id" => _company_id, "request_id" => request_id}) do
-    request = Cympho.Repo.get(Cympho.Companies.JoinRequest, request_id)
-    reviewer_id = get_current_user_id(conn)
-
-    case request && Companies.reject_join_request(request, reviewer_id) do
-      nil ->
-        conn |> put_status(:not_found) |> json(%{error: "Join request not found"})
-
-      {:ok, _} ->
-        json(conn, %{data: %{rejected: true}})
-
-      {:error, changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{errors: translate_errors(changeset)})
-    end
+  def reject_join_request(conn, %{"company_id" => company_id, "request_id" => request_id}) do
+    handle_join_request(conn, company_id, request_id, &Companies.reject_join_request/2,
+      key: :rejected
+    )
   end
 
   # ── Export / Import ──
 
   def export(conn, %{"company_id" => company_id}) do
-    user_id = get_current_user_id(conn)
-
-    if Companies.has_access?(user_id, company_id) do
-      data = Companies.export_company(company_id)
-      json(conn, %{data: data})
-    else
-      conn
-      |> put_status(:forbidden)
-      |> json(%{error: "You do not have access to this company"})
-    end
+    json(conn, %{data: Companies.export_company(company_id)})
   end
 
   def import_company(conn, %{"company" => company_data}) do
@@ -248,27 +210,47 @@ defmodule CymphoWeb.CompanyController do
 
     case Companies.import_company(company_data, slug_strategy: slug_strategy) do
       {:ok, %{company: company}} ->
-        conn
-        |> put_status(:created)
-        |> json(%{data: company})
+        # Creator becomes owner of the imported company.
+        Companies.create_membership(%{
+          user_id: conn.assigns.current_user.id,
+          company_id: company.id,
+          role: "owner"
+        })
+
+        conn |> put_status(:created) |> json(%{data: company})
 
       {:error, changeset} when is_struct(changeset) ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{errors: translate_errors(changeset)})
+        error_changeset(conn, changeset)
 
       {:error, reason} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: to_string(reason)})
+        conn |> put_status(:unprocessable_entity) |> json(%{error: to_string(reason)})
     end
   end
 
   # ── Helpers ──
 
-  defp get_current_user_id(conn) do
-    # TODO: Extract from session/auth once user auth is wired
-    conn.params["user_id"]
+  defp handle_join_request(conn, company_id, request_id, fun, opts) do
+    request = Cympho.Repo.get(Cympho.Companies.JoinRequest, request_id)
+
+    cond do
+      is_nil(request) ->
+        conn |> put_status(:not_found) |> json(%{error: "Join request not found"})
+
+      request.company_id != company_id ->
+        conn |> put_status(:not_found) |> json(%{error: "Join request not found"})
+
+      true ->
+        case fun.(request, conn.assigns.current_user.id) do
+          {:ok, _} -> json(conn, %{data: %{Keyword.fetch!(opts, :key) => true}})
+          {:error, changeset} -> error_changeset(conn, changeset)
+        end
+    end
+  end
+
+  defp error_changeset(conn, changeset) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{errors: translate_errors(changeset)})
   end
 
   defp translate_errors(changeset) do

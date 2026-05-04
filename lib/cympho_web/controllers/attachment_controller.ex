@@ -1,38 +1,42 @@
 defmodule CymphoWeb.AttachmentController do
   use CymphoWeb, :controller
 
-  alias Cympho.Attachments
+  alias Cympho.{Attachments, Issues}
   alias Cympho.Attachments.Attachment
 
   action_fallback CymphoWeb.FallbackController
 
   def index(conn, %{"issue_id" => issue_id}) do
-    attachments = Attachments.list_attachments(issue_id)
-    render(conn, :index, attachments: attachments)
+    with {:ok, issue} <- scoped_issue(conn, issue_id) do
+      attachments = Attachments.list_attachments(issue.id)
+      render(conn, :index, attachments: attachments)
+    end
   end
 
   def create(conn, %{"issue_id" => issue_id, "file" => %Plug.Upload{} = upload}) do
-    if upload_fits?(upload) do
-      with {:ok, relative_path} <- Attachments.store_file(upload, issue_id) do
-        attrs = %{
-          filename: upload.filename,
-          content_type: upload.content_type,
-          file_size: file_size(upload.path),
-          path: relative_path,
-          issue_id: issue_id
-        }
+    with {:ok, issue} <- scoped_issue(conn, issue_id) do
+      if upload_fits?(upload) do
+        with {:ok, relative_path} <- Attachments.store_file(upload, issue.id) do
+          attrs = %{
+            filename: upload.filename,
+            content_type: upload.content_type,
+            file_size: file_size(upload.path),
+            path: relative_path,
+            issue_id: issue.id
+          }
 
-        with {:ok, %Attachment{} = attachment} <- Attachments.create_attachment(attrs) do
-          conn
-          |> put_status(:created)
-          |> render(:show, attachment: attachment)
+          with {:ok, %Attachment{} = attachment} <- Attachments.create_attachment(attrs) do
+            conn
+            |> put_status(:created)
+            |> render(:show, attachment: attachment)
+          end
         end
+      else
+        conn
+        |> put_status(:request_entity_too_large)
+        |> put_view(json: CymphoWeb.ErrorJSON)
+        |> render(:error, message: "File size exceeds limit")
       end
-    else
-      conn
-      |> put_status(:request_entity_too_large)
-      |> put_view(json: CymphoWeb.ErrorJSON)
-      |> render(:error, message: "File size exceeds 10MB limit")
     end
   end
 
@@ -44,13 +48,15 @@ defmodule CymphoWeb.AttachmentController do
   end
 
   def show(conn, %{"id" => id}) do
-    with {:ok, %Attachment{} = attachment} <- Attachments.get_attachment(id) do
+    with {:ok, %Attachment{} = attachment} <- Attachments.get_attachment(id),
+         :ok <- enforce_company(conn, attachment) do
       render(conn, :show, attachment: attachment)
     end
   end
 
   def download(conn, %{"id" => id}) do
-    with {:ok, %Attachment{} = attachment} <- Attachments.get_attachment(id) do
+    with {:ok, %Attachment{} = attachment} <- Attachments.get_attachment(id),
+         :ok <- enforce_company(conn, attachment) do
       case Attachments.read_file(attachment) do
         {:ok, binary} ->
           conn
@@ -71,10 +77,23 @@ defmodule CymphoWeb.AttachmentController do
   end
 
   def delete(conn, %{"id" => id}) do
-    with {:ok, %Attachment{} = attachment} <- Attachments.get_attachment(id) do
-      with {:ok, _} <- Attachments.delete_attachment(attachment) do
-        send_resp(conn, :no_content, "")
-      end
+    with {:ok, %Attachment{} = attachment} <- Attachments.get_attachment(id),
+         :ok <- enforce_company(conn, attachment),
+         {:ok, _} <- Attachments.delete_attachment(attachment) do
+      send_resp(conn, :no_content, "")
+    end
+  end
+
+  # Attachments live under the agent-token pipeline; scope via the agent's
+  # company.
+  defp scoped_issue(conn, issue_id) do
+    Issues.get_company_issue(conn.assigns.current_agent.company_id, issue_id)
+  end
+
+  defp enforce_company(conn, %Attachment{issue_id: issue_id}) do
+    case scoped_issue(conn, issue_id) do
+      {:ok, _} -> :ok
+      {:error, :not_found} -> {:error, :not_found}
     end
   end
 

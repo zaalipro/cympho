@@ -7,7 +7,13 @@ defmodule CymphoWeb.AgentLive.Edit do
   def mount(%{"id" => id}, _session, socket) do
     agent = Agents.get_agent!(id)
     changeset = Agents.change_agent(agent)
-    {:ok, assign(socket, agent: agent, form: to_form(changeset), pending_approval_id: nil)}
+
+    {:ok,
+     socket
+     |> assign(:agent, agent)
+     |> assign(:form, to_form(changeset))
+     |> assign(:pending_approval_id, nil)
+     |> assign(:reports_to_options, reports_to_options(socket.assigns[:current_company], agent.id))}
   end
 
   @impl true
@@ -53,8 +59,30 @@ defmodule CymphoWeb.AgentLive.Edit do
   end
 
   defp normalize_agent_params(params) do
-    Map.update(params, "adapter", "claude_code", &normalize_adapter/1)
+    params
+    |> Map.update("adapter", "claude_code", &normalize_adapter/1)
+    |> normalize_parent_id()
   end
+
+  defp normalize_parent_id(params) do
+    case Map.get(params, "parent_id") do
+      "" -> Map.put(params, "parent_id", nil)
+      _ -> params
+    end
+  end
+
+  defp reports_to_options(%{id: company_id}, exclude_id) do
+    company_id
+    |> Agents.list_agents_by_company()
+    |> Enum.reject(&(&1.id == exclude_id))
+    |> Enum.map(fn agent ->
+      label = if agent.title, do: "#{agent.name} · #{agent.title}", else: agent.name
+      {label, agent.id}
+    end)
+    |> then(&[{"— No manager —", ""} | &1])
+  end
+
+  defp reports_to_options(_, _), do: [{"— No manager —", ""}]
 
   defp normalize_adapter(nil), do: "claude_code"
   defp normalize_adapter(""), do: "claude_code"

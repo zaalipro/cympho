@@ -4,8 +4,16 @@ defmodule Cympho.Activities do
   alias Cympho.Activities.Activity
   alias Cympho.Issues.Issue
 
-  def list_activities(issue_id) do
-    Activity |> where(issue_id: ^issue_id) |> order_by(asc: :inserted_at) |> Repo.all()
+  @default_list_limit 100
+
+  def list_activities(issue_id, opts \\ []) do
+    limit = Keyword.get(opts, :limit, @default_list_limit)
+
+    Activity
+    |> where(issue_id: ^issue_id)
+    |> order_by(asc: :inserted_at)
+    |> limit(^limit)
+    |> Repo.all()
   end
 
   def list_company_activities(company_id, opts \\ []) do
@@ -196,20 +204,36 @@ defmodule Cympho.Activities do
   end
 
   def get_activity_statistics(issue_id) do
-    activities = list_activities(issue_id)
+    total =
+      Repo.one(from a in Activity, where: a.issue_id == ^issue_id, select: count(a.id)) || 0
 
-    %{
-      total: length(activities),
-      by_action:
-        Enum.group_by(activities, & &1.action)
-        |> Enum.map(fn {k, v} -> {k, length(v)} end)
-        |> Map.new(),
-      by_actor_type:
-        Enum.group_by(activities, & &1.actor_type)
-        |> Enum.map(fn {k, v} -> {k, length(v)} end)
-        |> Map.new(),
-      latest: List.last(activities)
-    }
+    by_action =
+      Repo.all(
+        from a in Activity,
+          where: a.issue_id == ^issue_id,
+          group_by: a.action,
+          select: {a.action, count(a.id)}
+      )
+      |> Map.new()
+
+    by_actor_type =
+      Repo.all(
+        from a in Activity,
+          where: a.issue_id == ^issue_id,
+          group_by: a.actor_type,
+          select: {a.actor_type, count(a.id)}
+      )
+      |> Map.new()
+
+    latest =
+      Repo.one(
+        from a in Activity,
+          where: a.issue_id == ^issue_id,
+          order_by: [desc: a.inserted_at],
+          limit: 1
+      )
+
+    %{total: total, by_action: by_action, by_actor_type: by_actor_type, latest: latest}
   end
 
   defp issue_company_id(issue_id),

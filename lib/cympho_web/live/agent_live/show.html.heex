@@ -37,6 +37,15 @@
           <p class="mt-1 text-sm text-text-tertiary">
             {role_label(@agent.role)} · {adapter_label(Map.get(@agent, :adapter))}
           </p>
+          <p :if={@agent.parent} class="mt-1 text-xs text-text-quaternary">
+            Reports to
+            <.app_link
+              navigate={~p"/agents/#{@agent.parent.id}"}
+              class="text-text-secondary hover:text-brand"
+            >
+              {@agent.parent.name}
+            </.app_link>
+          </p>
         </div>
       </div>
 

@@ -1,33 +1,127 @@
-<div class="p-6 lg:p-8 max-w-4xl mx-auto">
-  <.header title={@project.name}>
+<.page size="content">
+  <.header title={@project.name} subtitle={@project.description}>
     <:actions>
       <.app_link
         navigate={~p"/projects"}
-        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
+        class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
       >
         Back
       </.app_link>
       <.app_link
         navigate={~p"/projects/#{@project.id}/edit"}
-        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-lg transition-colors"
+        class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-white hover:bg-primary-hover transition-colors"
       >
-        Edit
+        <.icon name="hero-pencil-square-mini" class="w-3.5 h-3.5" /> Edit
       </.app_link>
     </:actions>
   </.header>
 
-  <div class="space-y-6">
-    <div class="flex items-center gap-3">
-      <.badge variant="status" value={@project.status} />
-      <.badge variant="pill" value={@project.prefix} />
+  <.panel class="mb-5 p-5">
+    <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+      <div class="flex min-w-0 items-center gap-3">
+        <.badge variant="pill" value={@project.prefix} />
+        <.badge variant="status" value={to_string(@project.status)} />
+        <a
+          :if={@project.repo_url not in [nil, ""]}
+          href={@project.repo_url}
+          target="_blank"
+          rel="noopener"
+          class="inline-flex items-center gap-1.5 text-caption text-primary hover:underline truncate"
+        >
+          <.icon name="hero-link-mini" class="w-3.5 h-3.5 shrink-0" />
+          <span class="truncate">{@project.repo_url}</span>
+        </a>
+      </div>
+      <div class="grid grid-cols-3 gap-2 sm:grid-cols-6 lg:min-w-[480px]">
+        <div :for={status <- [:backlog, :todo, :in_progress, :in_review, :done, :blocked]} class="rounded-lg border border-hairline bg-surface-1 px-3 py-2">
+          <div class="text-eyebrow text-ink-tertiary uppercase">{status_label(status)}</div>
+          <div class="mt-1 text-lg font-590 text-ink">{Map.get(@status_counts, status, 0)}</div>
+        </div>
+      </div>
     </div>
+  </.panel>
 
-    <p class="text-sm text-text-secondary leading-relaxed">
-      {@project.description}
-    </p>
+  <div class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <.panel>
+      <div class="p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-card-title text-ink">Recent issues</h2>
+          <.app_link
+            navigate={~p"/issues?project_id=#{@project.id}"}
+            class="text-caption text-ink-muted hover:text-ink transition-colors"
+          >
+            View all →
+          </.app_link>
+        </div>
 
-    <div class="text-xs text-text-quaternary">
-      Created {@project.inserted_at}
-    </div>
+        <div :if={Enum.empty?(@issues)} class="text-caption text-ink-tertiary border border-dashed border-hairline rounded-md px-3 py-6 text-center">
+          No issues in this project yet.
+        </div>
+
+        <ul :if={!Enum.empty?(@issues)} class="border border-hairline rounded-md divide-y divide-hairline overflow-hidden bg-surface-1/40">
+          <li :for={issue <- @issues} class="hover:bg-surface-2 transition-colors duration-100">
+            <.app_link navigate={~p"/issues/#{issue.id}"} class="flex items-center gap-3 px-3 py-2">
+              <.badge variant="status" value={to_string(issue.status)} />
+              <span :if={issue.identifier} class="font-mono text-caption text-ink-tertiary shrink-0">
+                {issue.identifier}
+              </span>
+              <span class="flex-1 truncate text-body text-ink-muted">{issue.title}</span>
+              <.badge variant="priority" value={to_string(issue.priority)} />
+            </.app_link>
+          </li>
+        </ul>
+      </div>
+    </.panel>
+
+    <.panel>
+      <div class="p-5 space-y-4">
+        <div>
+          <span class="text-eyebrow text-ink-tertiary uppercase">Repository</span>
+          <a
+            :if={@project.repo_url not in [nil, ""]}
+            href={@project.repo_url}
+            target="_blank"
+            rel="noopener"
+            class="mt-1 inline-flex items-center gap-1.5 text-caption text-primary hover:underline truncate max-w-full"
+          >
+            <.icon name="hero-arrow-top-right-on-square-mini" class="w-3.5 h-3.5 shrink-0" />
+            <span class="truncate">{@project.repo_url}</span>
+          </a>
+          <p :if={@project.repo_url in [nil, ""]} class="mt-1 text-caption text-ink-tertiary">
+            Not configured.
+            <.app_link
+              navigate={~p"/projects/#{@project.id}/edit"}
+              class="text-primary hover:underline"
+            >
+              Add a repo URL
+            </.app_link>
+          </p>
+        </div>
+
+        <hr class="border-hairline" />
+
+        <div>
+          <div class="flex items-center justify-between">
+            <span class="text-eyebrow text-ink-tertiary uppercase">Env vars</span>
+            <span class="text-caption text-ink-tertiary">{length(@env_keys)}</span>
+          </div>
+          <ul :if={!Enum.empty?(@env_keys)} class="mt-2 space-y-1">
+            <li :for={key <- @env_keys} class="flex items-center gap-2">
+              <span class="hero-key-mini text-ink-tertiary w-3.5 h-3.5 shrink-0" />
+              <span class="font-mono text-caption text-ink-muted truncate">{key}</span>
+            </li>
+          </ul>
+          <p :if={Enum.empty?(@env_keys)} class="mt-1 text-caption text-ink-tertiary">
+            No environment variables.
+          </p>
+        </div>
+
+        <hr class="border-hairline" />
+
+        <div class="text-caption text-ink-tertiary">
+          Created {Calendar.strftime(@project.inserted_at, "%b %-d, %Y")}
+        </div>
+      </div>
+    </.panel>
   </div>
-</div>
+</.page>

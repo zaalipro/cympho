@@ -14,6 +14,18 @@ defmodule CymphoWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :api_authenticated do
+    plug CymphoWeb.Plugs.UserAuth
+  end
+
+  pipeline :api_agent do
+    plug CymphoWeb.Plugs.AgentAuth
+  end
+
+  pipeline :api_mcp_auth do
+    plug CymphoWeb.Plugs.AgentAuth
+  end
+
   pipeline :board do
     plug CymphoWeb.Plugs.BoardAuth
   end
@@ -22,6 +34,8 @@ defmodule CymphoWeb.Router do
     pipe_through :browser
 
     get "/switch-company/:id", CompanySwitcherController, :switch
+
+    post "/issues/quick-create", QuickIssueController, :create
 
     live_session :default, on_mount: [{CymphoWeb.UserAuth, :default}] do
       live "/", DashboardLive.Index, :home
@@ -100,11 +114,29 @@ defmodule CymphoWeb.Router do
     end
   end
 
+  # ── Public API endpoints (no auth) ──
   scope "/api", CymphoWeb do
     pipe_through :api
 
     post "/register", RegistrationController, :create
     post "/login", LoginController, :create
+    post "/telegram/webhook", TelegramController, :webhook
+    post "/invites/:token/accept", CompanyController, :accept_invite
+
+    # Public webhook with per-route HMAC secret check inside controller.
+    post "/routine-triggers/:public_id/fire", RoutineTriggerController, :fire
+  end
+
+  # ── GitHub webhook (HMAC verified inside controller against project secret) ──
+  scope "/api", CymphoWeb do
+    pipe_through :api
+
+    post "/github/webhook", GithubController, :webhook
+  end
+
+  # ── Authenticated API (user JWT) ──
+  scope "/api", CymphoWeb do
+    pipe_through [:api, :api_authenticated]
 
     resources "/users", UserController, only: [:index, :show, :create, :update, :delete]
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
@@ -113,9 +145,6 @@ defmodule CymphoWeb.Router do
     get "/dashboard", DashboardController, :index
 
     resources "/goals", GoalController, only: [:index, :show, :create, :update, :delete]
-
-    post "/telegram/webhook", TelegramController, :webhook
-    post "/github/webhook", GithubController, :webhook
 
     resources "/labels", LabelController, only: [:index, :show, :create, :update, :delete]
     resources "/approvals", ApprovalController, only: [:index, :show, :create, :update]
@@ -133,9 +162,6 @@ defmodule CymphoWeb.Router do
 
     post "/routine-triggers/:id/rotate-secret", RoutineTriggerController, :rotate_secret
 
-    # Public webhook endpoint (no auth, validates via secret header)
-    post "/routine-triggers/:public_id/fire", RoutineTriggerController, :fire
-
     resources "/issues", IssueController, only: [:create, :show]
 
     get "/issues/:issue_id/labels", IssueLabelController, :index
@@ -143,14 +169,11 @@ defmodule CymphoWeb.Router do
     delete "/issues/:issue_id/labels/:label_id", IssueLabelController, :remove
     put "/issues/:issue_id/labels", IssueLabelController, :set
 
-    # Issue read states
     get "/issues/:issue_id/read-state", IssueReadStateController, :get_read_state
     post "/issues/:issue_id/mark-read", IssueReadStateController, :mark_read
 
-    # Inbox
     post "/inbox/mark-all-read", IssueReadStateController, :mark_all_read
 
-    # Issue thread interactions
     get "/issues/:issue_id/interactions", IssueInteractionController, :index
     post "/issues/:issue_id/interactions", IssueInteractionController, :create
     get "/issues/:issue_id/interactions/:id", IssueInteractionController, :show
@@ -180,10 +203,6 @@ defmodule CymphoWeb.Router do
     get "/activities/:id", ActivityController, :show
     get "/companies/:company_id/activities/timeline", ActivityController, :company_timeline
 
-    # MCP server endpoints
-    get "/mcp/tools", McpController, :tools
-    post "/mcp/call", McpController, :call
-
     # Company portability & multi-tenancy
     resources "/companies", CompanyController, only: [:index, :show, :create, :update, :delete]
     get "/companies/:company_id/members", CompanyController, :list_members
@@ -192,7 +211,6 @@ defmodule CymphoWeb.Router do
     get "/companies/:company_id/invites", CompanyController, :list_invites
     post "/companies/:company_id/invites", CompanyController, :create_invite
     delete "/companies/:company_id/invites/:invite_id", CompanyController, :revoke_invite
-    post "/invites/:token/accept", CompanyController, :accept_invite
     get "/companies/:company_id/join-requests", CompanyController, :list_join_requests
     post "/companies/:company_id/join-requests", CompanyController, :create_join_request
 
@@ -233,8 +251,9 @@ defmodule CymphoWeb.Router do
     get "/exec-workspaces/:id/previews", PreviewController, :index
   end
 
+  # ── Agent-token API ──
   scope "/api", CymphoWeb do
-    pipe_through [:api, CymphoWeb.Plugs.AgentAuth]
+    pipe_through [:api, :api_agent]
 
     get "/agents/:id/inbox", AgentController, :inbox
     patch "/agents/:id/status", AgentController, :update_status
@@ -248,9 +267,17 @@ defmodule CymphoWeb.Router do
     delete "/attachments/:id", AttachmentController, :delete
   end
 
-  # Board-governed governance mutations
+  # ── MCP server endpoints (agent API key) ──
   scope "/api", CymphoWeb do
-    pipe_through [:api, :board]
+    pipe_through [:api, :api_mcp_auth]
+
+    get "/mcp/tools", McpController, :tools
+    post "/mcp/call", McpController, :call
+  end
+
+  # ── Board-governed governance mutations ──
+  scope "/api", CymphoWeb do
+    pipe_through [:api, :api_authenticated, :board]
 
     post "/agents", AgentController, :create
     patch "/agents/:id/role", AgentController, :update_role

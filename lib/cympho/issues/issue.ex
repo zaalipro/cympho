@@ -24,6 +24,7 @@ defmodule Cympho.Issues.Issue do
     field :priority, Ecto.Enum, values: [:low, :medium, :high, :critical], default: :medium
     field :lock_version, :integer, default: 0
     field :github_pr_url, :string
+    field :github_pr_number, :integer
     field :execution_state, :map, default: %{}
     field :assigned_role, :string
     field :billing_code, :string
@@ -87,6 +88,7 @@ defmodule Cympho.Issues.Issue do
       :company_id,
       :goal_id,
       :github_pr_url,
+      :github_pr_number,
       :parent_id,
       :execution_policy_id,
       :execution_state,
@@ -118,6 +120,22 @@ defmodule Cympho.Issues.Issue do
 
   def status_options, do: [:backlog, :todo, :in_progress, :in_review, :done, :blocked, :cancelled]
   def priority_options, do: [:low, :medium, :high, :critical]
+
+  @doc """
+  Builds the canonical GitHub PR URL for an issue. Prefers the new
+  `github_pr_number` + project's `repo_url` combination (so the URL
+  follows project repo moves automatically); falls back to the legacy
+  free-form `github_pr_url` field for issues created before the
+  migration.
+  """
+  def pr_url(%__MODULE__{github_pr_number: nil} = issue, _project), do: issue.github_pr_url
+
+  def pr_url(%__MODULE__{github_pr_number: n}, %{repo_url: url})
+      when is_integer(n) and is_binary(url) and url != "" do
+    "#{String.trim_trailing(url, "/")}/pull/#{n}"
+  end
+
+  def pr_url(%__MODULE__{} = issue, _project), do: issue.github_pr_url
 
   def role_authorized?(_agent_role, nil), do: true
 

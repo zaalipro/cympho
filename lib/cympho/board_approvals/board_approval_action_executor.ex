@@ -45,7 +45,12 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
   end
 
   def handle_info({:board_approval_resolved, %{status: "approved"} = approval}, state) do
-    execute_with_retry(approval, 0)
+    case BoardApprovals.claim_for_execution(approval.id) do
+      {:ok, claimed} -> execute_with_retry(claimed, 0)
+      {:error, :already_executed} -> :ok
+      {:error, :not_found} -> :ok
+    end
+
     {:noreply, state}
   end
 
@@ -62,37 +67,24 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  # Replay pending approvals for durability
+  # Replay pending approvals for durability. Uses claim_for_execution/1 so
+  # only one node ever wins for any given approval — the partial index on
+  # (executed_at IS NULL AND status = 'approved') makes this cheap.
   defp replay_pending_approvals do
     import Ecto.Query
 
-    pending_approvals =
+    candidate_ids =
       Repo.all(
         from ba in BoardApproval,
-          where:
-            ba.status == "approved" and
-              ba.category in ["agent_hire", "agent_promotion"] and
-              is_nil(ba.inserted_at) == false
+          where: ba.status == "approved" and is_nil(ba.executed_at),
+          select: ba.id
       )
 
-    Enum.each(pending_approvals, fn approval ->
-      case BoardApprovals.get_board_approval(approval.id) do
-        nil ->
-          # Approval was deleted, skip
-          :ok
-
-        %BoardApprovals.BoardApproval{} = full_approval ->
-          # Check if already executed by looking for the agent
-          already_executed? =
-            case full_approval.category do
-              "agent_hire" -> agent_created_for_approval?(approval.id)
-              "agent_promotion" -> role_change_already_executed?(full_approval)
-              _ -> false
-            end
-
-          unless already_executed? do
-            execute_with_retry(full_approval, 0)
-          end
+    Enum.each(candidate_ids, fn id ->
+      case BoardApprovals.claim_for_execution(id) do
+        {:ok, claimed} -> execute_with_retry(claimed, 0)
+        {:error, :already_executed} -> :ok
+        {:error, :not_found} -> :ok
       end
     end)
   end

@@ -54,67 +54,59 @@
         </div>
       </form>
 
-      <div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-        <form phx-change="filter_status">
-          <select name="status" class="linear-field h-10 w-full px-3 text-sm sm:w-auto">
-            <option value="">All Statuses</option>
-            <%= for status <- Cympho.Issues.Issue.status_options() do %>
-              <option value={status} selected={@current_status == to_string(status)}>
-                {status_label(status)}
-              </option>
-            <% end %>
-          </select>
-        </form>
+      <div class="flex flex-wrap items-center gap-2">
+        <.combobox
+          id="filter-status"
+          label="Status"
+          placeholder="Any status"
+          searchable?={false}
+          options={Enum.map(Cympho.Issues.Issue.status_options(), &%{id: to_string(&1), label: status_label(&1)})}
+          selected={@current_status}
+          on_change="combobox_status"
+        />
 
-        <form phx-change="filter_priority">
-          <select name="priority" class="linear-field h-10 w-full px-3 text-sm sm:w-auto">
-            <option value="">All Priorities</option>
-            <%= for priority <- Cympho.Issues.Issue.priority_options() do %>
-              <option value={priority} selected={@current_priority == to_string(priority)}>
-                {String.capitalize(to_string(priority))}
-              </option>
-            <% end %>
-          </select>
-        </form>
+        <.combobox
+          id="filter-priority"
+          label="Priority"
+          placeholder="Any priority"
+          searchable?={false}
+          options={Enum.map(Cympho.Issues.Issue.priority_options(), &%{id: to_string(&1), label: String.capitalize(to_string(&1))})}
+          selected={@current_priority}
+          on_change="combobox_priority"
+        />
 
-        <form phx-change="filter_assignee">
-          <select name="assignee_id" class="linear-field h-10 w-full px-3 text-sm sm:w-auto">
-            <option value="">All Assignees</option>
-            <%= for agent <- @agents do %>
-              <option value={agent.id} selected={@current_assignee_id == agent.id}>
-                {agent.name}
-              </option>
-            <% end %>
-          </select>
-        </form>
+        <.combobox
+          id="filter-assignee"
+          label="Assignee"
+          placeholder="Anyone"
+          options={Enum.map(@agents, &%{id: &1.id, label: &1.name})}
+          selected={@current_assignee_id}
+          on_change="combobox_assignee"
+        />
 
-        <form phx-change="filter_project">
-          <select name="project_id" class="linear-field h-10 w-full px-3 text-sm sm:w-auto">
-            <option value="">All Projects</option>
-            <%= for project <- @projects do %>
-              <option value={project.id} selected={@current_project_id == project.id}>
-                {project.name}
-              </option>
-            <% end %>
-          </select>
-        </form>
+        <.combobox
+          id="filter-project"
+          label="Project"
+          placeholder="Any project"
+          options={Enum.map(@projects, &%{id: &1.id, label: &1.name})}
+          selected={@current_project_id}
+          on_change="combobox_project"
+        />
 
-        <form phx-change="filter_label">
-          <select name="label_id" class="linear-field h-10 w-full px-3 text-sm sm:w-auto">
-            <option value="">All Labels</option>
-            <%= for label <- @labels do %>
-              <option value={label.id} selected={@current_label_id == label.id}>
-                {label.name}
-              </option>
-            <% end %>
-          </select>
-        </form>
+        <.combobox
+          id="filter-label"
+          label="Label"
+          placeholder="Any label"
+          options={Enum.map(@labels, &%{id: &1.id, label: &1.name})}
+          selected={@current_label_id}
+          on_change="combobox_label"
+        />
 
         <button
           :if={filters_active?(assigns)}
           type="button"
           phx-click="clear_filters"
-          class="h-10 rounded-lg border border-border bg-panel px-3 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+          class="h-7 rounded-md border border-hairline bg-surface-1 px-2.5 text-caption font-510 text-ink-muted hover:bg-surface-2 hover:text-ink transition-colors duration-100"
         >
           Clear
         </button>
@@ -171,7 +163,7 @@
 
     <div
       :for={issue <- @issues}
-      class="group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0 hover:bg-surface-hover/70 md:grid-cols-[minmax(0,1fr)_120px_120px_90px_36px] md:gap-4"
+      class="group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-hairline px-4 py-2.5 last:border-b-0 transition-colors duration-100 hover:bg-surface-2 md:grid-cols-[minmax(0,1fr)_120px_120px_90px_36px] md:gap-4"
     >
       <.app_link navigate={~p"/issues/#{issue.id}"} class="min-w-0">
         <div class="flex min-w-0 items-center gap-2">

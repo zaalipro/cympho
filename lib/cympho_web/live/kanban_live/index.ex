@@ -210,24 +210,51 @@ defmodule CymphoWeb.KanbanLive.Index do
       {:noreply, socket}
     else
       issue = Issues.get_issue!(id)
+      from_status = issue.status
+
+      # Optimistic: update local assigns before the DB write so the server's
+      # render matches the SortableJS-moved DOM. On rollback we push the
+      # original status back to JS and shake the card.
+      socket = update_local_status(socket, id, to_status)
 
       case Issues.transition_issue(issue, to_status) do
         {:ok, _updated_issue} ->
-          {:noreply, socket}
+          {:noreply, push_event(socket, "kanban:confirm", %{issue_id: id})}
 
-        {:error, :invalid_transition} ->
+        {:error, reason} ->
+          message =
+            case reason do
+              :invalid_transition ->
+                "Invalid status transition from #{from_status} to #{to_status}"
+
+              :blocked_by_active_issues ->
+                "Cannot complete — issue is blocked by active issues"
+
+              other ->
+                "Could not move issue: #{inspect(other)}"
+            end
+
           {:noreply,
            socket
-           |> put_flash(:error, "Invalid status transition from #{issue.status} to #{to_status}")
-           |> push_event("shake_card", %{issue_id: id})}
-
-        {:error, :blocked_by_active_issues} ->
-          {:noreply,
-           socket
-           |> put_flash(:error, "Cannot complete - issue is blocked by active issues")
+           |> update_local_status(id, from_status)
+           |> put_flash(:error, message)
+           |> push_event("kanban:rollback", %{
+             issue_id: id,
+             from_status: to_string(to_status),
+             to_status: to_string(from_status)
+           })
            |> push_event("shake_card", %{issue_id: id})}
       end
     end
+  end
+
+  defp update_local_status(socket, issue_id, new_status) do
+    update(socket, :issues, fn issues ->
+      Enum.map(issues, fn
+        %{id: ^issue_id} = issue -> %{issue | status: new_status}
+        issue -> issue
+      end)
+    end)
   end
 
   def handle_event("toggle_column", %{"status" => status_str}, socket) do
@@ -255,9 +282,21 @@ defmodule CymphoWeb.KanbanLive.Index do
     end
   end
 
+  def handle_event("combobox_project", %{"selected" => nil}, socket) do
+    {:noreply, push_patch(socket, to: ~p"/kanban")}
+  end
+
+  def handle_event("combobox_project", %{"selected" => project_id}, socket) when is_binary(project_id) do
+    {:noreply, push_patch(socket, to: ~p"/kanban?project_id=#{project_id}")}
+  end
+
   def handle_event("filter_assignee", %{"assignee_id" => assignee_id}, socket) do
     {:noreply,
      assign(socket, :filter_assignee_id, if(assignee_id == "", do: nil, else: assignee_id))}
+  end
+
+  def handle_event("combobox_assignee", %{"selected" => selected}, socket) do
+    {:noreply, assign(socket, :filter_assignee_id, selected)}
   end
 
   def handle_event("filter_priority", %{"priority" => priority}, socket) do
@@ -267,6 +306,14 @@ defmodule CymphoWeb.KanbanLive.Index do
        :filter_priority,
        if(priority == "", do: nil, else: String.to_existing_atom(priority))
      )}
+  end
+
+  def handle_event("combobox_priority", %{"selected" => nil}, socket) do
+    {:noreply, assign(socket, :filter_priority, nil)}
+  end
+
+  def handle_event("combobox_priority", %{"selected" => priority}, socket) when is_binary(priority) do
+    {:noreply, assign(socket, :filter_priority, String.to_existing_atom(priority))}
   end
 
   def handle_event("filter_search", %{"query" => query}, socket) do

@@ -37,19 +37,14 @@
           List
         </.app_link>
 
-        <form phx-change="filter_project">
-          <select
-            name="project_id"
-            class="linear-field h-10 px-3 text-sm"
-          >
-            <option value="" selected={is_nil(@selected_project_id)}>All Projects</option>
-            <%= for project <- @projects do %>
-              <option value={project.id} selected={@selected_project_id == to_string(project.id)}>
-                {project.name}
-              </option>
-            <% end %>
-          </select>
-        </form>
+        <.combobox
+          id="kanban-filter-project"
+          label="Project"
+          placeholder="All projects"
+          options={Enum.map(@projects, &%{id: to_string(&1.id), label: &1.name})}
+          selected={@selected_project_id}
+          on_change="combobox_project"
+        />
 
         <button
           type="button"
@@ -93,32 +88,29 @@
 
   <%!-- Filter bar --%>
   <div class="linear-panel mb-4 flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
-    <form phx-change="filter_assignee" class="flex-shrink-0 w-full sm:w-auto">
-      <select
-        name="assignee_id"
-        class="linear-field h-10 w-full px-3 text-sm sm:w-auto"
-      >
-        <option value="">Assignee</option>
-        <%= for agent <- @agents do %>
-          <option value={agent.id} selected={@filter_assignee_id == agent.id}>
-            {agent.name}
-          </option>
-        <% end %>
-      </select>
-    </form>
+    <.combobox
+      id="kanban-filter-assignee"
+      label="Assignee"
+      placeholder="Anyone"
+      options={Enum.map(@agents, &%{id: &1.id, label: &1.name})}
+      selected={@filter_assignee_id}
+      on_change="combobox_assignee"
+    />
 
-    <form phx-change="filter_priority" class="flex-shrink-0 w-full sm:w-auto">
-      <select
-        name="priority"
-        class="linear-field h-10 w-full px-3 text-sm sm:w-auto"
-      >
-        <option value="">Priority</option>
-        <option value="critical" selected={@filter_priority == :critical}>Critical</option>
-        <option value="high" selected={@filter_priority == :high}>High</option>
-        <option value="medium" selected={@filter_priority == :medium}>Medium</option>
-        <option value="low" selected={@filter_priority == :low}>Low</option>
-      </select>
-    </form>
+    <.combobox
+      id="kanban-filter-priority"
+      label="Priority"
+      placeholder="Any priority"
+      searchable?={false}
+      options={[
+        %{id: "critical", label: "Critical", color: "bg-red-500"},
+        %{id: "high", label: "High", color: "bg-red-500"},
+        %{id: "medium", label: "Medium", color: "bg-amber-500"},
+        %{id: "low", label: "Low", color: "bg-ink-tertiary"}
+      ]}
+      selected={@filter_priority && to_string(@filter_priority)}
+      on_change="combobox_priority"
+    />
 
     <form phx-change="filter_search" class="flex-1 w-full sm:min-w-[160px] sm:max-w-xs">
       <div class="relative">
@@ -302,7 +294,7 @@
                         </div>
                         <%= for issue <- group_issues do %>
                           <div
-                            class="bg-surface border border-border rounded-lg p-3 space-y-2 hover:bg-surface-hover transition-colors cursor-grab active:cursor-grabbing mb-2 min-h-[72px]"
+                            class="bg-surface-1 border border-hairline rounded-md p-2.5 space-y-1.5 hover:bg-surface-2 transition-colors duration-100 cursor-grab active:cursor-grabbing mb-2 min-h-[64px]"
                             data-issue-id={issue.id}
                           >
                             <div class="text-sm font-510 text-text-primary leading-snug line-clamp-2 sm:line-clamp-1">

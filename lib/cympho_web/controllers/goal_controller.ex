@@ -7,12 +7,15 @@ defmodule CymphoWeb.GoalController do
   action_fallback CymphoWeb.FallbackController
 
   def index(conn, _params) do
-    goals = Goals.list_goals()
-    render(conn, :index, goals: goals)
+    company_id = conn.assigns.current_company.id
+    render(conn, :index, goals: Goals.list_goals_by_company(company_id))
   end
 
   def create(conn, %{"goal" => goal_params}) do
-    with {:ok, %Goal{} = goal} <- Goals.create_goal(goal_params) do
+    company_id = conn.assigns.current_company.id
+    params = Map.put(goal_params, "company_id", company_id)
+
+    with {:ok, %Goal{} = goal} <- Goals.create_goal(params) do
       conn
       |> put_status(:created)
       |> render(:show, goal: goal)
@@ -20,44 +23,28 @@ defmodule CymphoWeb.GoalController do
   end
 
   def show(conn, %{"id" => id}) do
-    case Goals.get_goal(id) do
-      {:ok, goal} ->
-        render(conn, :show, goal: goal)
+    company_id = conn.assigns.current_company.id
 
-      {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> put_view(json: CymphoWeb.ErrorJSON)
-        |> render(:"404")
+    with {:ok, goal} <- Goals.get_company_goal(company_id, id) do
+      render(conn, :show, goal: goal)
     end
   end
 
   def update(conn, %{"id" => id, "goal" => goal_params}) do
-    case Goals.get_goal(id) do
-      {:ok, goal} ->
-        with {:ok, %Goal{} = goal} <- Goals.update_goal(goal, goal_params) do
-          render(conn, :show, goal: goal)
-        end
+    company_id = conn.assigns.current_company.id
 
-      {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> put_view(json: CymphoWeb.ErrorJSON)
-        |> render(:"404")
+    with {:ok, goal} <- Goals.get_company_goal(company_id, id),
+         {:ok, %Goal{} = goal} <- Goals.update_goal(goal, goal_params) do
+      render(conn, :show, goal: goal)
     end
   end
 
   def delete(conn, %{"id" => id}) do
-    case Goals.get_goal(id) do
-      {:ok, goal} ->
-        {:ok, _} = Goals.delete_goal(goal)
-        send_resp(conn, :no_content, "")
+    company_id = conn.assigns.current_company.id
 
-      {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> put_view(json: CymphoWeb.ErrorJSON)
-        |> render(:"404")
+    with {:ok, goal} <- Goals.get_company_goal(company_id, id),
+         {:ok, _} <- Goals.delete_goal(goal) do
+      send_resp(conn, :no_content, "")
     end
   end
 end

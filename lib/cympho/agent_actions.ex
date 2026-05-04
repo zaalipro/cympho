@@ -14,6 +14,7 @@ defmodule Cympho.AgentActions do
   alias Cympho.AuditTrail.Instrumenter
 
   @max_actions 10
+  @max_block_bytes 65_536
   @supported_types ~w(
     create_issue
     submit_review
@@ -29,6 +30,11 @@ defmodule Cympho.AgentActions do
   @priorities ~w(low medium high critical)
   @work_product_kinds ~w(code_change document url artifact other)
 
+  # Actions that change governance state require the agent's role to be in this
+  # set. Lower-privileged agents that emit them are rejected with
+  # `{:error, :unauthorized_action}` rather than executed.
+  @governance_roles [:ceo, :cto]
+
   @type action :: map()
 
   @doc """
@@ -42,6 +48,9 @@ defmodule Cympho.AgentActions do
 
       [_one, _two | _] ->
         {:error, :multiple_action_blocks}
+
+      [[json]] when byte_size(json) > @max_block_bytes ->
+        {:error, {:action_block_too_large, byte_size(json), @max_block_bytes}}
 
       [[json]] ->
         json
@@ -61,28 +70,48 @@ defmodule Cympho.AgentActions do
   @spec execute(Issue.t(), Agent.t() | binary(), [action()]) ::
           {:ok, %{issue: Issue.t(), results: [map()]}} | {:error, term()}
   def execute(%Issue{} = issue, %Agent{} = agent, actions) when is_list(actions) do
-    Repo.transaction(fn ->
-      current_issue = Issues.get_issue!(issue.id)
+    if cross_company?(issue, agent) do
+      {:error, :cross_company}
+    else
+      Repo.transaction(fn ->
+        current_issue = Issues.get_issue!(issue.id)
 
-      results =
-        Enum.map(actions, fn action ->
-          case execute_action(current_issue, agent, action) do
-            {:ok, result} ->
+        results =
+          Enum.map(actions, fn action ->
+            with :ok <- authorize_action(action, agent),
+                 {:ok, result} <- execute_action(current_issue, agent, action) do
               log_action(current_issue, agent, action, result)
               result
+            else
+              {:error, reason} -> Repo.rollback(reason)
+            end
+          end)
 
-            {:error, reason} ->
-              Repo.rollback(reason)
-          end
-        end)
-
-      %{issue: Issues.get_issue!(issue.id), results: results}
-    end)
-    |> case do
-      {:ok, result} -> {:ok, result}
-      {:error, reason} -> {:error, reason}
+        %{issue: Issues.get_issue!(issue.id), results: results}
+      end)
+      |> case do
+        {:ok, result} -> {:ok, result}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
+
+  # Mirror the permissive policy used by `Issues.checkout_issue/3`: only
+  # reject when both sides have a non-nil company_id and they differ. Legacy
+  # fixtures and seed data may have nil company_ids; tightening fully is a
+  # data-migration job, not an authz change.
+  defp cross_company?(%Issue{company_id: nil}, _), do: false
+  defp cross_company?(_, %Agent{company_id: nil}), do: false
+  defp cross_company?(%Issue{company_id: a}, %Agent{company_id: b}), do: a != b
+
+  # Governance actions (approve, request_changes, block) require the agent to
+  # hold a governance role. Lower-privileged agents that emit them are rejected.
+  defp authorize_action(%{"type" => type}, %Agent{role: role})
+       when type in ["approve_issue", "request_changes", "block_issue"] do
+    if role in @governance_roles, do: :ok, else: {:error, :unauthorized_action}
+  end
+
+  defp authorize_action(_action, _agent), do: :ok
 
   def execute(%Issue{} = issue, agent_id, actions) when is_binary(agent_id) do
     with {:ok, agent} <- Agents.get_agent(agent_id) do
@@ -265,7 +294,7 @@ defmodule Cympho.AgentActions do
   defp execute_action(issue, agent, %{"type" => "submit_review"} = action) do
     update_workflow_issue(issue, agent, %{
       status: :in_review,
-      assignee_id: nil,
+      assignee_id: agent.parent_id,
       checkout_run_id: nil,
       checked_out_at: nil,
       assigned_role: action["role"]

@@ -188,8 +188,11 @@ defmodule Cympho.Issues do
       )
 
     case issue do
-      nil -> {:error, :not_found}
-      issue -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee, :labels])}
+      nil ->
+        {:error, :not_found}
+
+      issue ->
+        {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee, :labels, :project])}
     end
   end
 

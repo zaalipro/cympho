@@ -495,6 +495,11 @@ defmodule Cympho.Companies do
     |> Repo.all()
   end
 
+  def list_memberships_for_user(user_id) do
+    from(m in CompanyMembership, where: m.user_id == ^user_id, preload: [:company])
+    |> Repo.all()
+  end
+
   def get_membership(user_id, company_id) do
     Repo.get_by(CompanyMembership, user_id: user_id, company_id: company_id)
   end

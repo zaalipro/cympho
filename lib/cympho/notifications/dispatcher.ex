@@ -101,7 +101,7 @@ defmodule Cympho.Notifications.Dispatcher do
 
     results =
       Enum.map(tasks, fn {type, task} ->
-        case Task.yield(task, 5_000) || Task.shutdown(task) do
+        case Task.yield(task, 5_000) || Task.shutdown(task, 1_000) do
           {:ok, result} -> result
           nil -> {type, {:error, :timeout}}
           {:exit, reason} -> {type, {:error, {:exit, reason}}}

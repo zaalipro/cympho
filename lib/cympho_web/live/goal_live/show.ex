@@ -1,12 +1,18 @@
 defmodule CymphoWeb.GoalLive.Show do
   use CymphoWeb, :live_view
-  alias Cympho.Goals
+  import Ecto.Query
+  alias Cympho.{Goals, Repo}
+  alias Cympho.Issues.Issue
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     case get_scoped_goal(socket, id) do
       {:ok, goal} ->
-        {:ok, assign(socket, goal: goal)}
+        {:ok,
+         socket
+         |> assign(:goal, goal)
+         |> assign(:issues, list_goal_issues(goal))
+         |> assign(:status_counts, status_counts(goal))}
 
       {:error, :not_found} ->
         {:ok, push_navigate(socket, to: ~p"/goals")}
@@ -26,6 +32,8 @@ defmodule CymphoWeb.GoalLive.Show do
         socket
         |> assign(:page_title, goal.title)
         |> assign(:goal, goal)
+        |> assign(:issues, list_goal_issues(goal))
+        |> assign(:status_counts, status_counts(goal))
 
       {:error, :not_found} ->
         socket
@@ -33,6 +41,27 @@ defmodule CymphoWeb.GoalLive.Show do
         |> push_navigate(to: ~p"/goals")
     end
   end
+
+  defp list_goal_issues(%{id: goal_id}) do
+    Issue
+    |> where(goal_id: ^goal_id)
+    |> order_by(desc: :inserted_at)
+    |> limit(10)
+    |> Repo.all()
+  end
+
+  defp status_counts(%{id: goal_id}) do
+    Issue
+    |> where(goal_id: ^goal_id)
+    |> group_by(:status)
+    |> select([i], {i.status, count(i.id)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  def status_label(:in_progress), do: "In progress"
+  def status_label(:in_review), do: "In review"
+  def status_label(s), do: s |> to_string() |> String.capitalize()
 
   defp get_scoped_goal(socket, id) do
     with {:ok, goal} <- Goals.get_goal(id),

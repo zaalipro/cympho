@@ -1,23 +1,38 @@
 defmodule Cympho.Plugins.Registry do
   @moduledoc """
   Registry for managing plugin lifecycle and discovery.
+
+  Reads (`list_plugins/0`, `get_plugin/1`, `plugin_enabled?/1`) bypass the
+  GenServer and read directly from ETS for concurrency. Writes go through
+  the GenServer to serialize update ordering.
   """
   use GenServer
 
-  defstruct [:plugins]
-
   @name __MODULE__
+  @table :cympho_plugins_registry
 
   def start_link(_opts) do
-    GenServer.start_link(__MODULE__, %__MODULE__{}, name: @name)
+    GenServer.start_link(__MODULE__, %{}, name: @name)
   end
 
   def list_plugins do
-    GenServer.call(@name, :list_plugins)
+    case :ets.info(@table) do
+      :undefined -> []
+      _ -> :ets.tab2list(@table) |> Enum.map(fn {_id, plugin} -> plugin end)
+    end
   end
 
   def get_plugin(identifier) do
-    GenServer.call(@name, {:get_plugin, identifier})
+    case :ets.info(@table) do
+      :undefined ->
+        {:error, :not_found}
+
+      _ ->
+        case :ets.lookup(@table, identifier) do
+          [{^identifier, plugin}] -> {:ok, plugin}
+          [] -> {:error, :not_found}
+        end
+    end
   end
 
   def register_plugin(plugin) do
@@ -29,52 +44,47 @@ defmodule Cympho.Plugins.Registry do
   end
 
   def plugin_enabled?(identifier) do
-    GenServer.call(@name, {:plugin_enabled?, identifier})
-  end
-
-  @impl true
-  def init(_args) do
-    state = %__MODULE__{plugins: %{}}
-    {:ok, state}
-  end
-
-  @impl true
-  def handle_call(:list_plugins, _from, state) do
-    plugins = Map.values(state.plugins)
-    {:reply, plugins, state}
-  end
-
-  @impl true
-  def handle_call({:get_plugin, identifier}, _from, state) do
-    case Map.get(state.plugins, identifier) do
-      nil -> {:reply, {:error, :not_found}, state}
-      plugin -> {:reply, {:ok, plugin}, state}
+    case get_plugin(identifier) do
+      {:ok, plugin} -> plugin.enabled
+      {:error, :not_found} -> false
     end
   end
 
   @impl true
+  def init(_args) do
+    case :ets.info(@table) do
+      :undefined ->
+        :ets.new(@table, [:named_table, :set, :protected, read_concurrency: true])
+
+      _ ->
+        :ets.delete(@table)
+        :ets.new(@table, [:named_table, :set, :protected, read_concurrency: true])
+    end
+
+    {:ok, %{}}
+  end
+
+  @impl true
   def handle_call({:register_plugin, plugin}, _from, state) do
-    if Map.has_key?(state.plugins, plugin.identifier) do
-      {:reply, {:error, :already_registered}, state}
-    else
-      {:reply, :ok, %{state | plugins: Map.put(state.plugins, plugin.identifier, plugin)}}
+    case :ets.lookup(@table, plugin.identifier) do
+      [_] ->
+        {:reply, {:error, :already_registered}, state}
+
+      [] ->
+        :ets.insert(@table, {plugin.identifier, plugin})
+        {:reply, :ok, state}
     end
   end
 
   @impl true
   def handle_call({:unregister_plugin, identifier}, _from, state) do
-    if Map.has_key?(state.plugins, identifier) do
-      {:reply, :ok, %{state | plugins: Map.delete(state.plugins, identifier)}}
-    else
-      {:reply, {:error, :not_found}, state}
-    end
-  end
+    case :ets.lookup(@table, identifier) do
+      [_] ->
+        :ets.delete(@table, identifier)
+        {:reply, :ok, state}
 
-  @impl true
-  def handle_call({:plugin_enabled?, identifier}, _from, state) do
-    case Map.get(state.plugins, identifier) do
-      nil -> {:reply, false, state}
-      plugin -> {:reply, plugin.enabled, state}
+      [] ->
+        {:reply, {:error, :not_found}, state}
     end
   end
 end

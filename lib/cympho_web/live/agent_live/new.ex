@@ -19,6 +19,7 @@ defmodule CymphoWeb.AgentLive.New do
      socket
      |> assign(:page_title, "New Agent")
      |> assign(:pending_approval_id, nil)
+     |> assign(:reports_to_options, reports_to_options(company, nil))
      |> assign(:form, to_form(changeset))}
   end
 
@@ -80,8 +81,30 @@ defmodule CymphoWeb.AgentLive.New do
   defp maybe_put_company_id(params, _), do: params
 
   defp normalize_agent_params(params) do
-    Map.update(params, "adapter", "claude_code", &normalize_adapter/1)
+    params
+    |> Map.update("adapter", "claude_code", &normalize_adapter/1)
+    |> normalize_parent_id()
   end
+
+  defp normalize_parent_id(params) do
+    case Map.get(params, "parent_id") do
+      "" -> Map.put(params, "parent_id", nil)
+      _ -> params
+    end
+  end
+
+  defp reports_to_options(%{id: company_id}, exclude_id) do
+    company_id
+    |> Agents.list_agents_by_company()
+    |> Enum.reject(&(&1.id == exclude_id))
+    |> Enum.map(fn agent ->
+      label = if agent.title, do: "#{agent.name} · #{agent.title}", else: agent.name
+      {label, agent.id}
+    end)
+    |> then(&[{"— No manager —", ""} | &1])
+  end
+
+  defp reports_to_options(_, _), do: [{"— No manager —", ""}]
 
   defp normalize_adapter(nil), do: "claude_code"
   defp normalize_adapter(""), do: "claude_code"

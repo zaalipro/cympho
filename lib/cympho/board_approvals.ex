@@ -13,6 +13,43 @@ defmodule Cympho.BoardApprovals do
   @nil_uuid "00000000-0000-0000-0000-000000000000"
 
   @doc """
+  Atomically claims an approved approval for execution by stamping
+  `executed_at` and `executor_node`. Returns `{:ok, approval}` if this caller
+  won the race and `{:error, :already_executed}` if another process or node
+  already claimed it.
+
+  Combined with the partial index on `(executed_at IS NULL AND status =
+  'approved')` this is the single-writer primitive used by the executor.
+  """
+  def claim_for_execution(approval_id) when is_binary(approval_id) do
+    node_name = to_string(node())
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    query =
+      from ba in BoardApproval,
+        where: ba.id == ^approval_id and is_nil(ba.executed_at) and ba.status == "approved"
+
+    case Repo.update_all(query, set: [executed_at: now, executor_node: node_name]) do
+      {1, _} ->
+        case Repo.get(BoardApproval, approval_id) do
+          nil -> {:error, :not_found}
+          approval -> {:ok, Repo.preload(approval, [:requested_by, :votes, :company])}
+        end
+
+      {0, _} ->
+        {:error, :already_executed}
+    end
+  end
+
+  @doc "Reverts a claim — clears `executed_at` so a future retry can proceed."
+  def release_claim(approval_id) when is_binary(approval_id) do
+    query = from ba in BoardApproval, where: ba.id == ^approval_id
+
+    Repo.update_all(query, set: [executed_at: nil, executor_node: nil])
+    :ok
+  end
+
+  @doc """
   Returns the list of board approvals.
   """
   def list_board_approvals(opts \\ %{}) do

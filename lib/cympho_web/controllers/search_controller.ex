@@ -4,7 +4,8 @@ defmodule CymphoWeb.SearchController do
   action_fallback CymphoWeb.FallbackController
 
   def search(conn, %{"q" => q}) when is_binary(q) and byte_size(q) > 0 do
-    results = Search.search(q)
+    company_id = conn.assigns.current_company.id
+    results = Search.search(q, company_id: company_id)
     render(conn, :results, results: results)
   end
 

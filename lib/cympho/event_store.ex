@@ -1,12 +1,23 @@
 defmodule Cympho.EventStore do
   @moduledoc """
-  ETS-based event store that buffers recent scoped-topic events for replay.
+  ETS-backed event store that buffers recent scoped-topic events for replay.
+
+  Maintains an in-memory index `topic => [event_id]` (newest-first) so all
+  per-topic operations are O(per_topic) rather than O(total). The actual
+  event payloads live in an ETS `:set` table keyed by `event_id`.
+
+  Supports:
+    - bounded retention per topic (`@max_per_topic`)
+    - global TTL eviction via periodic `:purge_tick`
+    - replay from a `last_event_id` watermark for WebSocket reconnects
   """
   use GenServer
 
   @table :cympho_event_store
   @max_per_topic 200
   @default_limit 100
+  @ttl_ms 300_000
+  @purge_interval_ms 60_000
 
   def child_spec(opts) do
     %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}, type: :worker}
@@ -29,55 +40,84 @@ defmodule Cympho.EventStore do
   def fetch_since(topic, last_event_id, limit),
     do: GenServer.call(__MODULE__, {:fetch_since, topic, last_event_id, limit})
 
-  def count(topic), do: length(:ets.match_object(@table, {:_, topic, :_, :_}))
+  def count(topic), do: GenServer.call(__MODULE__, {:count, topic})
 
-  def purge_old(ttl_ms \\ 300_000), do: GenServer.call(__MODULE__, {:purge_old, ttl_ms})
+  def purge_old(ttl_ms \\ @ttl_ms), do: GenServer.call(__MODULE__, {:purge_old, ttl_ms})
 
   @impl true
   def init(opts) do
-    table = :ets.new(@table, [:named_table, :ordered_set, :public, read_concurrency: true])
+    table =
+      case :ets.info(@table) do
+        :undefined -> :ets.new(@table, [:named_table, :set, :protected, read_concurrency: true])
+        _ -> @table
+      end
+
     max_per_topic = Keyword.get(opts, :max_events_per_topic, @max_per_topic)
-    Process.send_after(self(), :purge_tick, 60_000)
-    {:ok, %{table: table, min_ids: %{}, max_per_topic: max_per_topic}}
+    Process.send_after(self(), :purge_tick, @purge_interval_ms)
+
+    {:ok,
+     %{
+       table: table,
+       counter: 0,
+       # topic => [event_id] newest-first
+       topic_events: %{},
+       max_per_topic: max_per_topic
+     }}
   end
 
   @impl true
   def handle_call({:append, topic, payload}, _from, state) do
-    event_id = :ets.update_counter(@table, :__global_counter__, {2, 1}, {:__global_counter__, 0})
+    event_id = state.counter + 1
     timestamp = System.system_time(:millisecond)
     :ets.insert(@table, {event_id, topic, payload, timestamp})
 
-    min_id =
-      case Map.get(state.min_ids, topic) do
-        nil -> event_id
-        existing when event_id < existing -> event_id
-        existing -> existing
-      end
+    ids = [event_id | Map.get(state.topic_events, topic, [])]
+    {kept, evicted} = trim_topic(ids, state.max_per_topic)
+    Enum.each(evicted, &:ets.delete(@table, &1))
 
-    state = %{state | min_ids: Map.put(state.min_ids, topic, min_id)}
-    state = trim_if_needed(state, topic)
-    {:reply, event_id, state}
-  end
-
-  @impl true
-  def handle_call({:fetch_since, topic, last_event_id, limit}, _from, state) do
-    case Map.get(state.min_ids, topic) do
-      nil -> {:reply, {:ok, []}, state}
-      min_id when last_event_id < min_id -> {:reply, {:error, :replay_window_expired}, state}
-      _ -> {:reply, {:ok, do_fetch_since(topic, last_event_id, limit)}, state}
-    end
+    {:reply, event_id,
+     %{state | counter: event_id, topic_events: Map.put(state.topic_events, topic, kept)}}
   end
 
   @impl true
   def handle_call({:fetch_latest, topic, limit}, _from, state) do
     events =
-      :ets.match_object(@table, {:_, topic, :_, :_})
-      |> Enum.sort_by(&elem(&1, 0), :desc)
+      state.topic_events
+      |> Map.get(topic, [])
       |> Enum.take(limit)
       |> Enum.reverse()
-      |> Enum.map(&to_map/1)
+      |> lookup_events()
 
     {:reply, {:ok, events}, state}
+  end
+
+  @impl true
+  def handle_call({:fetch_since, topic, last_event_id, limit}, _from, state) do
+    case Map.get(state.topic_events, topic) do
+      nil ->
+        {:reply, {:ok, []}, state}
+
+      ids ->
+        min_id = List.last(ids) || 0
+
+        if last_event_id < min_id do
+          {:reply, {:error, :replay_window_expired}, state}
+        else
+          events =
+            ids
+            |> Enum.reverse()
+            |> Enum.drop_while(&(&1 <= last_event_id))
+            |> Enum.take(limit)
+            |> lookup_events()
+
+          {:reply, {:ok, events}, state}
+        end
+    end
+  end
+
+  @impl true
+  def handle_call({:count, topic}, _from, state) do
+    {:reply, length(Map.get(state.topic_events, topic, [])), state}
   end
 
   @impl true
@@ -88,83 +128,66 @@ defmodule Cympho.EventStore do
 
   @impl true
   def handle_info(:purge_tick, state) do
-    {_deleted, state} = do_purge_old(300_000, state)
-    Process.send_after(self(), :purge_tick, 60_000)
+    {_deleted, state} = do_purge_old(@ttl_ms, state)
+    Process.send_after(self(), :purge_tick, @purge_interval_ms)
     {:noreply, state}
+  end
+
+  defp trim_topic(ids, max) when length(ids) <= max, do: {ids, []}
+
+  defp trim_topic(ids, max) do
+    {kept, evicted} = Enum.split(ids, max)
+    {kept, evicted}
   end
 
   defp do_purge_old(ttl_ms, state) do
     cutoff = System.system_time(:millisecond) - ttl_ms
 
-    deleted =
-      :ets.foldl(
-        fn
-          {:__global_counter__, _}, acc ->
+    {topic_events, deleted} =
+      Enum.reduce(state.topic_events, {%{}, 0}, fn {topic, ids}, {acc, count} ->
+        {kept, evicted} = drop_old_ids(ids, cutoff)
+        Enum.each(evicted, &:ets.delete(@table, &1))
+
+        new_acc =
+          if kept == [] do
             acc
+          else
+            Map.put(acc, topic, kept)
+          end
 
-          {event_id, _, _, timestamp}, acc ->
-            if timestamp < cutoff do
-              :ets.delete(@table, event_id)
-              acc + 1
-            else
-              acc
-            end
-        end,
-        0,
-        @table
-      )
+        {new_acc, count + length(evicted)}
+      end)
 
-    {deleted, %{state | min_ids: recompute_min_ids()}}
+    {deleted, %{state | topic_events: topic_events}}
   end
 
-  defp recompute_min_ids do
-    :ets.foldl(
-      fn
-        {:__global_counter__, _}, acc ->
-          acc
-
-        {event_id, topic, _, _}, acc ->
-          Map.update(acc, topic, event_id, &min(&1, event_id))
-      end,
-      %{},
-      @table
-    )
-  end
-
-  defp trim_if_needed(state, topic) do
-    topic_count = count(topic)
-
-    if topic_count > state.max_per_topic do
-      trim_count = topic_count - state.max_per_topic
-
-      to_delete =
-        :ets.match_object(@table, {:_, topic, :_, :_})
-        |> Enum.sort_by(&elem(&1, 0))
-        |> Enum.take(trim_count)
-
-      Enum.each(to_delete, fn {id, _, _, _} -> :ets.delete(@table, id) end)
-
-      new_min =
-        case :ets.match_object(@table, {:_, topic, :_, :_}) |> Enum.sort_by(&elem(&1, 0)) do
-          [{id, _, _, _} | _] -> id
-          [] -> nil
+  # ids are newest-first; we drop the tail entries (oldest) whose timestamps
+  # are older than the cutoff. Walk from the end.
+  defp drop_old_ids(ids, cutoff) do
+    {kept_rev, evicted} =
+      ids
+      |> Enum.reverse()
+      |> Enum.reduce({[], []}, fn id, {kept, evicted} ->
+        case :ets.lookup(@table, id) do
+          [{^id, _topic, _payload, ts}] when ts >= cutoff -> {[id | kept], evicted}
+          [{^id, _topic, _payload, _ts}] -> {kept, [id | evicted]}
+          [] -> {kept, evicted}
         end
+      end)
 
-      %{state | min_ids: Map.put(state.min_ids, topic, new_min)}
-    else
-      state
-    end
+    {Enum.reverse(kept_rev), evicted}
   end
 
-  defp do_fetch_since(topic, last_event_id, limit) do
-    :ets.match_object(@table, {:_, topic, :_, :_})
-    |> Enum.filter(fn {id, _, _, _} -> id > last_event_id end)
-    |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.take(limit)
-    |> Enum.map(&to_map/1)
-  end
+  defp lookup_events(ids) do
+    Enum.reduce(ids, [], fn id, acc ->
+      case :ets.lookup(@table, id) do
+        [{^id, topic, payload, ts}] ->
+          [%{event_id: id, topic: topic, payload: payload, timestamp: ts} | acc]
 
-  defp to_map({event_id, topic, payload, timestamp}) do
-    %{event_id: event_id, topic: topic, payload: payload, timestamp: timestamp}
+        [] ->
+          acc
+      end
+    end)
+    |> Enum.reverse()
   end
 end

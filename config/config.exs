@@ -45,7 +45,15 @@ config :logger, :console, format: "[$level] $message\n"
 config :phoenix, :json_library, Jason
 
 config :cympho, Cympho.Scheduler,
-  jobs: [],
+  jobs: [
+    # Daily retention sweep at 03:17 UTC. `:overlap, false` ensures concurrent
+    # runs are skipped if a previous sweep is still running.
+    retention: [
+      schedule: "17 3 * * *",
+      task: {Cympho.Retention, :run_all, []},
+      overlap: false
+    ]
+  ],
   timezone: "Etc/UTC"
 
 config :swoosh, :api_client, Swoosh.ApiClient.Finch

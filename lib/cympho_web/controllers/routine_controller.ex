@@ -4,14 +4,20 @@ defmodule CymphoWeb.RoutineController do
 
   alias Cympho.Routines
 
+  action_fallback CymphoWeb.FallbackController
+
   def index(conn, _params) do
-    routines = Routines.list_routines()
+    company_id = conn.assigns.current_company.id
+    routines = Routines.list_routines() |> Enum.filter(&belongs_to_company?(&1, company_id))
     json(conn, %{data: Enum.map(routines, &serialize/1)})
   end
 
   def show(conn, %{"id" => id}) do
-    routine = Routines.get_routine!(id)
-    json(conn, %{data: serialize(routine)})
+    company_id = conn.assigns.current_company.id
+
+    with {:ok, routine} <- Routines.get_company_routine(company_id, id) do
+      json(conn, %{data: serialize(routine)})
+    end
   end
 
   def create(conn, %{"routine" => routine_params}) do
@@ -28,21 +34,21 @@ defmodule CymphoWeb.RoutineController do
     end
   end
 
-  def create(conn, params) do
-    create(conn, %{"routine" => params})
-  end
+  def create(conn, params), do: create(conn, %{"routine" => params})
 
   def update(conn, %{"id" => id, "routine" => routine_params}) do
-    routine = Routines.get_routine!(id)
+    company_id = conn.assigns.current_company.id
 
-    case Routines.update_routine(routine, routine_params) do
-      {:ok, routine} ->
-        json(conn, %{data: serialize(routine)})
+    with {:ok, routine} <- Routines.get_company_routine(company_id, id) do
+      case Routines.update_routine(routine, routine_params) do
+        {:ok, routine} ->
+          json(conn, %{data: serialize(routine)})
 
-      {:error, changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{errors: translate_errors(changeset)})
+        {:error, changeset} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{errors: translate_errors(changeset)})
+      end
     end
   end
 
@@ -51,67 +57,65 @@ defmodule CymphoWeb.RoutineController do
   end
 
   def delete(conn, %{"id" => id}) do
-    routine = Routines.get_routine!(id)
-    {:ok, _} = Routines.delete_routine(routine)
-    send_resp(conn, :no_content, "")
-  end
+    company_id = conn.assigns.current_company.id
 
-  def pause(conn, %{"id" => id}) do
-    routine = Routines.get_routine!(id)
-
-    case Routines.pause_routine(routine) do
-      {:ok, paused} -> json(conn, %{data: serialize(paused)})
-      {:error, reason} -> conn |> put_status(:unprocessable_entity) |> json(%{error: reason})
+    with {:ok, routine} <- Routines.get_company_routine(company_id, id) do
+      {:ok, _} = Routines.delete_routine(routine)
+      send_resp(conn, :no_content, "")
     end
   end
 
-  def resume(conn, %{"id" => id}) do
-    routine = Routines.get_routine!(id)
+  def pause(conn, %{"id" => id}), do: state_change(conn, id, &Routines.pause_routine/1)
+  def resume(conn, %{"id" => id}), do: state_change(conn, id, &Routines.resume_routine/1)
+  def archive(conn, %{"id" => id}), do: state_change(conn, id, &Routines.archive_routine/1)
 
-    case Routines.resume_routine(routine) do
-      {:ok, resumed} -> json(conn, %{data: serialize(resumed)})
-      {:error, reason} -> conn |> put_status(:unprocessable_entity) |> json(%{error: reason})
-    end
-  end
+  defp state_change(conn, id, fun) do
+    company_id = conn.assigns.current_company.id
 
-  def archive(conn, %{"id" => id}) do
-    routine = Routines.get_routine!(id)
-
-    case Routines.archive_routine(routine) do
-      {:ok, archived} -> json(conn, %{data: serialize(archived)})
-      {:error, reason} -> conn |> put_status(:unprocessable_entity) |> json(%{error: reason})
+    with {:ok, routine} <- Routines.get_company_routine(company_id, id) do
+      case fun.(routine) do
+        {:ok, updated} -> json(conn, %{data: serialize(updated)})
+        {:error, reason} -> conn |> put_status(:unprocessable_entity) |> json(%{error: reason})
+      end
     end
   end
 
   def run(conn, %{"id" => id}) do
-    case Cympho.RoutineTriggers.manual_run(id, []) do
-      {:ok, %{run: run, issue: issue}} ->
-        conn
-        |> put_status(:created)
-        |> json(%{data: serialize_run(run), issue_id: issue.id})
+    company_id = conn.assigns.current_company.id
 
-      {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "routine not found"})
+    with {:ok, _routine} <- Routines.get_company_routine(company_id, id) do
+      case Cympho.RoutineTriggers.manual_run(id, []) do
+        {:ok, %{run: run, issue: issue}} ->
+          conn
+          |> put_status(:created)
+          |> json(%{data: serialize_run(run), issue_id: issue.id})
 
-      {:error, :routine_paused} ->
-        conn
-        |> put_status(:conflict)
-        |> json(%{error: "routine is paused"})
+        {:error, :routine_paused} ->
+          conn |> put_status(:conflict) |> json(%{error: "routine is paused"})
 
-      {:error, reason} ->
-        conn
-        |> put_status(:internal_server_error)
-        |> json(%{error: "manual run failed", reason: inspect(reason)})
+        {:error, reason} ->
+          conn
+          |> put_status(:internal_server_error)
+          |> json(%{error: "manual run failed", reason: inspect(reason)})
+      end
     end
   end
 
   def runs(conn, %{"id" => id}) do
-    routine = Routines.get_routine!(id)
-    limit = conn.params["limit"] |> parse_int() |> Kernel.||(50)
-    runs = Cympho.RoutineTriggers.list_runs(routine.id, limit: limit)
-    json(conn, %{data: Enum.map(runs, &serialize_run/1)})
+    company_id = conn.assigns.current_company.id
+
+    with {:ok, routine} <- Routines.get_company_routine(company_id, id) do
+      limit = conn.params["limit"] |> parse_int() |> Kernel.||(50)
+      runs = Cympho.RoutineTriggers.list_runs(routine.id, limit: limit)
+      json(conn, %{data: Enum.map(runs, &serialize_run/1)})
+    end
+  end
+
+  defp belongs_to_company?(routine, company_id) do
+    routine = Cympho.Repo.preload(routine, [:agent, :project])
+
+    (routine.agent && routine.agent.company_id == company_id) ||
+      (routine.project && routine.project.company_id == company_id)
   end
 
   defp parse_int(nil), do: nil

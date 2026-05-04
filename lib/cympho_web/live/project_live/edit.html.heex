@@ -1,27 +1,103 @@
-<div class="p-6 lg:p-8 max-w-2xl mx-auto">
-  <.header title="Edit Project">
+<.page size="form">
+  <.header title={@project.name} subtitle="Project settings, repository link, and agent environment variables.">
     <:actions>
       <.app_link
-        navigate={~p"/projects"}
-        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
+        navigate={~p"/projects/#{@project.id}"}
+        class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
       >
         Cancel
       </.app_link>
     </:actions>
   </.header>
 
-  <.simple_form for={@form} phx-submit="save">
-    <.input field={@form[:name]} label="Name" />
-    <.input field={@form[:description]} label="Description" type="textarea" />
-    <.input field={@form[:prefix]} label="Prefix" placeholder="e.g., PROJ" />
-    <.select
-      name="project[status]"
-      label="Status"
-      options={[Active: "active", Archived: "archived"]}
-    />
+  <.panel class="mb-5">
+    <.simple_form for={@form} phx-submit="save" class="space-y-5 p-5">
+      <.input field={@form[:name]} label="Name" required />
+      <.input
+        field={@form[:description]}
+        label="Description"
+        type="textarea"
+        rows={3}
+      />
+      <div class="grid gap-5 sm:grid-cols-2">
+        <.input field={@form[:prefix]} label="Prefix" required placeholder="PROJ" />
+        <.select
+          name="project[status]"
+          label="Status"
+          options={[Active: "active", Archived: "archived"]}
+        />
+      </div>
+      <.input
+        field={@form[:repo_url]}
+        label="Repository URL"
+        placeholder="https://github.com/owner/repo"
+      />
 
-    <:actions>
-      <.button type="submit">Update Project</.button>
-    </:actions>
-  </.simple_form>
-</div>
+      <:actions>
+        <div class="flex items-center justify-end gap-2 border-t border-hairline pt-5">
+          <.app_link
+            navigate={~p"/projects/#{@project.id}"}
+            class="rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+          >
+            Cancel
+          </.app_link>
+          <.button type="submit" variant="primary">Save changes</.button>
+        </div>
+      </:actions>
+    </.simple_form>
+  </.panel>
+
+  <.panel>
+    <div class="p-5 space-y-4">
+      <div>
+        <h2 class="text-card-title text-ink">Environment variables</h2>
+        <p class="text-caption text-ink-tertiary mt-0.5">
+          Injected into agent runs working on this project's issues. Values are encrypted at rest and never displayed after save — store API tokens and secrets here.
+        </p>
+      </div>
+
+      <div
+        :if={Enum.empty?(@secrets)}
+        class="text-caption text-ink-tertiary border border-dashed border-hairline rounded-md px-3 py-4 text-center"
+      >
+        No environment variables yet.
+      </div>
+
+      <ul
+        :if={!Enum.empty?(@secrets)}
+        class="border border-hairline rounded-md divide-y divide-hairline overflow-hidden"
+      >
+        <li
+          :for={secret <- @secrets}
+          class="flex items-center gap-3 px-3 py-2 hover:bg-surface-2/40 transition-colors duration-100"
+        >
+          <span class="hero-key-mini text-ink-tertiary w-3.5 h-3.5 shrink-0" />
+          <span class="font-mono text-caption text-ink">{secret.key}</span>
+          <span class="font-mono text-caption text-ink-tertiary">••••••••</span>
+          <button
+            type="button"
+            phx-click="delete_env"
+            phx-value-id={secret.id}
+            data-confirm={"Remove #{secret.key}?"}
+            class="ml-auto text-caption text-ink-tertiary hover:text-error transition-colors"
+            aria-label={"Delete #{secret.key}"}
+          >
+            <.icon name="hero-trash-mini" class="w-3.5 h-3.5" />
+          </button>
+        </li>
+      </ul>
+
+      <.simple_form
+        for={@env_form}
+        phx-submit="add_env"
+        class="grid grid-cols-1 sm:grid-cols-[180px_1fr_auto] gap-2 items-end pt-2 border-t border-hairline"
+      >
+        <.input field={@env_form[:key]} label="Key" placeholder="GITHUB_TOKEN" />
+        <.input field={@env_form[:value]} type="password" label="Value" placeholder="ghp_…" />
+        <:actions>
+          <.button type="submit" variant="secondary">Add</.button>
+        </:actions>
+      </.simple_form>
+    </div>
+  </.panel>
+</.page>

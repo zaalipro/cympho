@@ -143,6 +143,21 @@ defmodule CymphoWeb.IssueLive.Index do
      push_patch(socket, to: build_url(socket, %{"label_id" => label_id, "page" => "1"}))}
   end
 
+  def handle_event("combobox_status", %{"selected" => v}, socket),
+    do: handle_event("filter_status", %{"status" => v || ""}, socket)
+
+  def handle_event("combobox_priority", %{"selected" => v}, socket),
+    do: handle_event("filter_priority", %{"priority" => v || ""}, socket)
+
+  def handle_event("combobox_assignee", %{"selected" => v}, socket),
+    do: handle_event("filter_assignee", %{"assignee_id" => v || ""}, socket)
+
+  def handle_event("combobox_project", %{"selected" => v}, socket),
+    do: handle_event("filter_project", %{"project_id" => v || ""}, socket)
+
+  def handle_event("combobox_label", %{"selected" => v}, socket),
+    do: handle_event("filter_label", %{"label_id" => v || ""}, socket)
+
   def handle_event("change_page", %{"page" => page}, socket) do
     {:noreply, push_patch(socket, to: build_url(socket, %{"page" => page}))}
   end

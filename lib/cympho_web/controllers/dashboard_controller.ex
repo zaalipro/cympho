@@ -6,6 +6,7 @@ defmodule CymphoWeb.DashboardController do
   action_fallback CymphoWeb.FallbackController
 
   def index(conn, _params) do
-    json(conn, %{data: Dashboard.summary()})
+    company_id = conn.assigns.current_company.id
+    json(conn, %{data: Dashboard.summary(company_id)})
   end
 end

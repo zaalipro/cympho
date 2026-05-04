@@ -165,23 +165,23 @@ defmodule CymphoWeb.IssueLiveTest do
     end
   end
 
-  describe "Show - Status Dropdown" do
-    test "shows status dropdown with valid transitions", %{issue: issue} do
+  describe "Show - Status Combobox" do
+    test "shows status combobox with valid transitions", %{issue: issue} do
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
-      assert html =~ "update_status"
+      assert html =~ "combobox_status"
       # backlog can transition to todo, in_progress, blocked
-      assert html =~ ~s(value="todo")
-      assert html =~ ~s(value="in_progress")
-      assert html =~ ~s(value="blocked")
+      assert html =~ ~s(data-combobox-id="todo")
+      assert html =~ ~s(data-combobox-id="in_progress")
+      assert html =~ ~s(data-combobox-id="blocked")
     end
 
     test "valid status transition succeeds", %{issue: issue} do
       {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
 
       view
-      |> form("form[phx-change='update_status']", %{"status" => "todo"})
-      |> render_change()
+      |> element("#issue-status-combobox")
+      |> render_hook("combobox_status", %{"selected" => "todo"})
 
       assert render(view) =~ "Status updated to todo"
 
@@ -199,31 +199,30 @@ defmodule CymphoWeb.IssueLiveTest do
 
       {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
 
-      # in_review -> backlog is not valid
       view
-      |> form("form[phx-change='update_status']", %{"status" => "backlog"})
-      |> render_change()
+      |> element("#issue-status-combobox")
+      |> render_hook("combobox_status", %{"selected" => "backlog"})
 
       assert render(view) =~ "Invalid transition"
     end
   end
 
-  describe "Show - Priority Dropdown" do
-    test "shows priority dropdown", %{issue: issue} do
+  describe "Show - Priority Combobox" do
+    test "shows priority combobox", %{issue: issue} do
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
-      assert html =~ "update_priority"
-      assert html =~ ~s(value="low")
-      assert html =~ ~s(value="medium")
-      assert html =~ ~s(value="high")
+      assert html =~ "combobox_priority"
+      assert html =~ ~s(data-combobox-id="low")
+      assert html =~ ~s(data-combobox-id="medium")
+      assert html =~ ~s(data-combobox-id="high")
     end
 
     test "priority change succeeds", %{issue: issue} do
       {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
 
       view
-      |> form("form[phx-change='update_priority']", %{"priority" => "low"})
-      |> render_change()
+      |> element("#issue-priority-combobox")
+      |> render_hook("combobox_priority", %{"selected" => "low"})
 
       assert render(view) =~ "Priority updated"
 
@@ -233,11 +232,11 @@ defmodule CymphoWeb.IssueLiveTest do
   end
 
   describe "Show - Assignee Management" do
-    test "shows search input when no assignee", %{issue: issue} do
+    test "shows assignee combobox when no assignee", %{issue: issue} do
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
-      assert html =~ "Search agents..."
-      assert html =~ "search_assignee"
+      assert html =~ "combobox_assignee"
+      assert html =~ "Pick assignee"
     end
 
     test "assigns an agent to the issue", %{issue: issue} do
@@ -251,15 +250,8 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
 
       view
-      |> element("input[name='q']")
-      |> render_change(%{"q" => "Test"})
-
-      html = render(view)
-      assert html =~ "Test Agent"
-
-      view
-      |> element("button[phx-click='assign_issue'][phx-value-agent_id='#{agent.id}']")
-      |> render_click()
+      |> element("#issue-assignee-combobox")
+      |> render_hook("combobox_assignee", %{"selected" => agent.id})
 
       html = render(view)
       assert html =~ "Test Agent"
@@ -285,8 +277,8 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Remove Me"
 
       view
-      |> element("button[phx-click='unassign_issue']")
-      |> render_click()
+      |> element("#issue-assignee-combobox")
+      |> render_hook("combobox_assignee", %{"selected" => nil})
 
       html = render(view)
       assert html =~ "Assignee removed"

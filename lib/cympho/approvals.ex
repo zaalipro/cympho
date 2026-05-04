@@ -34,6 +34,22 @@ defmodule Cympho.Approvals do
     end
   end
 
+  def get_company_approval(company_id, id) do
+    query =
+      from(a in Approval,
+        join: agent in assoc(a, :requested_by),
+        where: a.id == ^id and agent.company_id == ^company_id
+      )
+
+    case Repo.one(query) do
+      nil ->
+        {:error, :not_found}
+
+      approval ->
+        {:ok, Repo.preload(approval, [:requested_by, :resolved_by, :issues])}
+    end
+  end
+
   def create_approval(attrs) do
     issue_ids = Map.get(attrs, :issue_ids) || Map.get(attrs, "issue_ids") || []
 

@@ -66,4 +66,12 @@ defmodule CymphoWeb.ProjectLive.Index do
     {:ok, _} = Projects.archive_project(project)
     {:noreply, socket}
   end
+
+  def strip_protocol(nil), do: ""
+
+  def strip_protocol(url) do
+    url
+    |> String.replace(~r{^https?://}, "")
+    |> String.trim_trailing("/")
+  end
 end

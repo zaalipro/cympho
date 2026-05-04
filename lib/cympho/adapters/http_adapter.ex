@@ -105,15 +105,49 @@ defmodule Cympho.Adapters.HttpAdapter do
     end)
   end
 
+  # 5 MiB cap on response body. A misbehaving or malicious upstream that
+  # streams an unbounded payload would otherwise OOM the worker; we abort
+  # the streaming accumulation and return :response_too_large.
+  @max_response_bytes 5 * 1024 * 1024
+
   defp make_http_request(method, url, headers, payload, timeout) do
     method_atom = normalize_method(method)
     headers_list = normalize_headers(headers)
 
     req = Finch.build(method_atom, url, headers_list, payload)
+    stream_to_acc(req, timeout)
+  end
 
-    case Finch.request(req, Cympho.Finch, receive_timeout: timeout) do
-      {:ok, %Finch.Response{status: status, headers: resp_headers, body: body}} ->
-        {:ok, %{status: status, headers: resp_headers, body: body}}
+  defp stream_to_acc(req, timeout) do
+    init = %{status: nil, headers: [], body: [], size: 0, overflow: false}
+
+    fun = fn
+      {:status, s}, acc ->
+        %{acc | status: s}
+
+      {:headers, hs}, acc ->
+        %{acc | headers: hs}
+
+      {:data, _chunk}, %{overflow: true} = acc ->
+        acc
+
+      {:data, chunk}, acc ->
+        new_size = acc.size + byte_size(chunk)
+
+        if new_size > @max_response_bytes do
+          %{acc | overflow: true}
+        else
+          %{acc | body: [chunk | acc.body], size: new_size}
+        end
+    end
+
+    case Finch.stream(req, Cympho.Finch, init, fun, receive_timeout: timeout) do
+      {:ok, %{overflow: true}} ->
+        {:error, :response_too_large}
+
+      {:ok, %{status: status, headers: hs, body: chunks}} ->
+        body = chunks |> Enum.reverse() |> IO.iodata_to_binary()
+        {:ok, %{status: status, headers: hs, body: body}}
 
       {:error, %Finch.Error{} = error} ->
         {:error, {:finch_error, Exception.message(error)}}

@@ -41,8 +41,16 @@ defmodule Cympho.Application do
 
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
-        Cympho.Adapters.Registry.register_builtin()
-        Cympho.RoutineTriggers.schedule_all_triggers()
+        # Adapters.Registry now registers builtins from its own init/1, so the
+        # late-binding call here was a redundant double-registration.
+        # Routine triggers are scheduled in a task so a transient failure
+        # doesn't take down boot.
+        Task.Supervisor.start_child(
+          Cympho.TaskSupervisor,
+          fn -> Cympho.RoutineTriggers.schedule_all_triggers() end,
+          restart: :temporary
+        )
+
         {:ok, pid}
 
       error ->

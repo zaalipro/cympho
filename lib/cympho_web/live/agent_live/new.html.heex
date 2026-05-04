@@ -34,13 +34,21 @@
         <.input field={@form[:role]} type="select" label="Role" required options={role_options()} />
       </div>
 
-      <.input
-        field={@form[:adapter]}
-        type="select"
-        label="Adapter"
-        required
-        options={adapter_options()}
-      />
+      <div class="grid gap-5 sm:grid-cols-2">
+        <.input
+          field={@form[:adapter]}
+          type="select"
+          label="Adapter"
+          required
+          options={adapter_options()}
+        />
+        <.input
+          field={@form[:parent_id]}
+          type="select"
+          label="Reports to"
+          options={@reports_to_options}
+        />
+      </div>
 
       <.input
         field={@form[:instructions]}

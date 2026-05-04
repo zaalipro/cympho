@@ -123,6 +123,27 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   @impl true
+  def handle_event("combobox_status", %{"selected" => status}, socket) when is_binary(status) do
+    handle_event("update_status", %{"status" => status}, socket)
+  end
+
+  def handle_event("combobox_status", _, socket), do: {:noreply, socket}
+
+  def handle_event("combobox_priority", %{"selected" => priority}, socket) when is_binary(priority) do
+    handle_event("update_priority", %{"priority" => priority}, socket)
+  end
+
+  def handle_event("combobox_priority", _, socket), do: {:noreply, socket}
+
+  def handle_event("combobox_assignee", %{"selected" => nil}, socket) do
+    handle_event("unassign_issue", %{}, socket)
+  end
+
+  def handle_event("combobox_assignee", %{"selected" => agent_id}, socket) when is_binary(agent_id) do
+    handle_event("assign_issue", %{"agent_id" => agent_id}, socket)
+  end
+
+  @impl true
   def handle_event("update_status", %{"status" => status}, socket) do
     status_atoms = %{
       "backlog" => :backlog,
@@ -223,20 +244,40 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   @impl true
-  def handle_event("update_github_pr_url", %{"github_pr_url" => url}, socket) do
-    case Issues.update_issue(socket.assigns.issue, %{github_pr_url: url}) do
+  def handle_event("update_github_pr_number", %{"github_pr_number" => raw}, socket) do
+    pr_number = parse_pr_number(raw)
+    attrs = %{github_pr_number: pr_number, github_pr_url: nil}
+
+    case Issues.update_issue(socket.assigns.issue, attrs) do
       {:ok, issue} -> {:noreply, assign(socket, issue: issue)}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update PR URL")}
+      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to update PR number")}
     end
   end
 
   @impl true
-  def handle_event("clear_github_pr_url", _params, socket) do
-    case Issues.update_issue(socket.assigns.issue, %{github_pr_url: nil}) do
+  def handle_event("clear_github_pr_number", _params, socket) do
+    case Issues.update_issue(socket.assigns.issue, %{github_pr_number: nil, github_pr_url: nil}) do
       {:ok, issue} -> {:noreply, assign(socket, issue: issue)}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to clear PR URL")}
+      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to clear PR")}
     end
   end
+
+  defp parse_pr_number(nil), do: nil
+  defp parse_pr_number(""), do: nil
+
+  defp parse_pr_number(raw) when is_binary(raw) do
+    raw
+    |> String.trim()
+    |> String.trim_leading("#")
+    |> Integer.parse()
+    |> case do
+      {n, _} when n > 0 -> n
+      _ -> nil
+    end
+  end
+
+  defp parse_pr_number(raw) when is_integer(raw) and raw > 0, do: raw
+  defp parse_pr_number(_), do: nil
 
   @impl true
   def handle_event("search_assignee", %{"q" => q}, socket) do
@@ -735,6 +776,34 @@ defmodule CymphoWeb.IssueLive.Show do
     |> Enum.map(fn status ->
       {status |> to_string() |> String.replace("_", " ") |> String.capitalize(),
        to_string(status)}
+    end)
+  end
+
+  defp status_combobox_options(current_status) do
+    [current_status | Cympho.Issues.Issue.status_options() |> Enum.reject(&(&1 == current_status))]
+    |> Enum.map(fn status ->
+      %{
+        id: to_string(status),
+        label: status |> to_string() |> String.replace("_", " ") |> String.capitalize()
+      }
+    end)
+  end
+
+  defp priority_combobox_options do
+    Enum.map(Cympho.Issues.Issue.priority_options(), fn p ->
+      %{id: to_string(p), label: p |> to_string() |> String.capitalize(), color: priority_dot(p)}
+    end)
+  end
+
+  defp priority_dot(:critical), do: "bg-red-500"
+  defp priority_dot(:high), do: "bg-red-500"
+  defp priority_dot(:medium), do: "bg-amber-500"
+  defp priority_dot(:low), do: "bg-ink-tertiary"
+  defp priority_dot(_), do: "bg-ink-tertiary"
+
+  defp assignee_combobox_options(agents) do
+    Enum.map(agents, fn a ->
+      %{id: a.id, label: a.name}
     end)
   end
 

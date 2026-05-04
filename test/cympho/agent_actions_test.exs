@@ -39,7 +39,7 @@ defmodule Cympho.AgentActionsTest do
          project: project,
          goal: goal,
          agents: [ceo, cto, engineer | _],
-         first_issue: issue
+         seed_issues: seed_issues
        }} =
         Companies.create_autonomous_company(%{
           name: "Action Test Company #{System.unique_integer([:positive])}",
@@ -47,6 +47,7 @@ defmodule Cympho.AgentActionsTest do
           engineer_count: 1
         })
 
+      issue = List.first(seed_issues)
       {:ok, issue} = Issues.checkout_issue(issue, ceo, :ceo)
 
       %{
@@ -103,6 +104,24 @@ defmodule Cympho.AgentActionsTest do
       assert updated.status == :in_review
       assert updated.assignee_id == nil
       assert updated.assigned_role == "cto"
+    end
+
+    test "submit_review routes the issue to the agent's reports_to (parent) when set", %{
+      issue: issue,
+      ceo: ceo,
+      cto: cto,
+      engineer: engineer
+    } do
+      {:ok, issue} = Issues.update_issue(issue, %{assignee_id: engineer.id, status: :in_progress})
+
+      actions = [%{"type" => "submit_review", "role" => "cto"}]
+      assert {:ok, _} = AgentActions.execute(issue, engineer, actions)
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.status == :in_review
+      assert updated.assignee_id == cto.id, "engineer.parent_id (cto) should own the review"
+      assert updated.assigned_role == "cto"
+      _ = ceo
     end
 
     test "approve_issue marks issue done and clears checkout", %{issue: issue, ceo: ceo} do

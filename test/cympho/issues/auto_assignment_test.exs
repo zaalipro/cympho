@@ -8,9 +8,30 @@ defmodule Cympho.Issues.AutoAssignmentTest do
   alias Cympho.Agents.Agent
   alias Cympho.Repo
 
+  defp ensure_test_company do
+    case Repo.get_by(Cympho.Companies.Company, slug: "auto-assignment-test") do
+      nil ->
+        {:ok, c} =
+          Cympho.Companies.create_company(%{
+            name: "AutoAssignment Test Company",
+            slug: "auto-assignment-test"
+          })
+
+        c
+
+      c ->
+        c
+    end
+  end
+
+  defp test_company_id, do: ensure_test_company().id
+
   # Use Repo.insert directly to bypass auto-assignment when testing assign_issue/1
   defp create_issue_direct(attrs) do
-    attrs = Map.merge(%{status: :backlog, priority: :medium}, attrs)
+    attrs =
+      %{status: :backlog, priority: :medium, company_id: test_company_id()}
+      |> Map.merge(attrs)
+
     %Issue{} |> Issue.changeset(attrs) |> Repo.insert!()
   end
 
@@ -21,7 +42,8 @@ defmodule Cympho.Issues.AutoAssignmentTest do
           name: "Test Engineer",
           role: :engineer,
           status: :idle,
-          max_concurrent_jobs: 3
+          max_concurrent_jobs: 3,
+          company_id: test_company_id()
         })
 
       %{agent: agent}
@@ -210,7 +232,7 @@ defmodule Cympho.Issues.AutoAssignmentTest do
         description: "Should also be assigned"
       })
 
-      {:ok, assigned_count, queued_count} = AutoAssignment.reassign_backlog()
+      {:ok, assigned_count, queued_count} = AutoAssignment.reassign_backlog(test_company_id())
       assert assigned_count == 2
       assert queued_count == 0
     end
@@ -222,7 +244,7 @@ defmodule Cympho.Issues.AutoAssignmentTest do
         description: "No agent to assign"
       })
 
-      {:ok, assigned_count, queued_count} = AutoAssignment.reassign_backlog()
+      {:ok, assigned_count, queued_count} = AutoAssignment.reassign_backlog(test_company_id())
       assert assigned_count == 0
       assert queued_count == 1
     end

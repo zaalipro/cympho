@@ -2,10 +2,9 @@ defmodule CymphoWeb.Plugs.AgentAuth do
   @moduledoc """
   Authentication plug for agent requests.
 
-  Supports three authentication methods:
-  1. JWT tokens (Authorization: Bearer <token>) - for heartbeat runs
-  2. API keys (X-API-Key: <key>) - for agent API access
-  3. X-Agent-ID header - legacy method for internal requests
+  Supports two authentication methods:
+  1. JWT tokens (Authorization: Bearer <token>) — for heartbeat runs
+  2. API keys (X-API-Key: <key>) — for agent API access
   """
 
   import Plug.Conn
@@ -17,17 +16,14 @@ defmodule CymphoWeb.Plugs.AgentAuth do
 
   def call(conn, _opts) do
     cond do
-      # Try JWT authentication first
       has_jwt_header?(conn) ->
         authenticate_with_jwt(conn)
 
-      # Try API key authentication
       has_api_key_header?(conn) ->
         authenticate_with_api_key(conn)
 
-      # Fall back to legacy X-Agent-ID header
       true ->
-        authenticate_with_agent_id(conn)
+        unauthorized(conn, "Missing authentication credentials")
     end
   end
 
@@ -65,8 +61,11 @@ defmodule CymphoWeb.Plugs.AgentAuth do
     with [api_key | _] <- get_req_header(conn, "x-api-key"),
          {:ok, agent_api_key} <- get_agent_api_key(api_key),
          {:ok, agent} <- Agents.get_agent(agent_api_key.agent_id) do
-      # Update last_used_at timestamp asynchronously
-      Task.start(fn -> update_last_used(agent_api_key) end)
+      Task.Supervisor.start_child(
+        Cympho.TaskSupervisor,
+        fn -> update_last_used(agent_api_key) end,
+        restart: :temporary
+      )
 
       conn
       |> assign(:current_agent, agent)
@@ -75,23 +74,6 @@ defmodule CymphoWeb.Plugs.AgentAuth do
     else
       _ ->
         unauthorized(conn, "Invalid API key")
-    end
-  end
-
-  defp authenticate_with_agent_id(conn) do
-    case get_req_header(conn, "x-agent-id") do
-      [id | _] when is_binary(id) and byte_size(id) > 0 ->
-        case Agents.get_agent(id) do
-          {:ok, agent} ->
-            assign(conn, :current_agent, agent)
-            |> assign(:auth_method, :agent_id)
-
-          {:error, :not_found} ->
-            unauthorized(conn, "Invalid agent identity")
-        end
-
-      _ ->
-        unauthorized(conn, "Missing authentication credentials")
     end
   end
 

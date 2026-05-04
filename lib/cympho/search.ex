@@ -10,24 +10,41 @@ defmodule Cympho.Search do
 
   def search(query, opts \\ []) do
     limit = Keyword.get(opts, :limit, 20)
+    company_id = Keyword.get(opts, :company_id)
 
-    issues =
+    issues_q =
       from(i in Issue,
         where: fragment("search_vector @@ plainto_tsquery('english', ?)", ^query),
         order_by: fragment("ts_rank(search_vector, plainto_tsquery('english', ?)) DESC", ^query),
         limit: ^limit,
         preload: [:comments, :blocked_by, :blocks, :assignee]
       )
-      |> Repo.all()
 
-    comments =
+    issues_q =
+      if company_id, do: from(i in issues_q, where: i.company_id == ^company_id), else: issues_q
+
+    issues = Repo.all(issues_q)
+
+    comments_q =
       from(c in Comment,
         where: fragment("search_vector @@ plainto_tsquery('english', ?)", ^query),
         order_by: fragment("ts_rank(search_vector, plainto_tsquery('english', ?)) DESC", ^query),
         limit: ^limit,
         preload: [:issue]
       )
-      |> Repo.all()
+
+    comments_q =
+      if company_id do
+        from(c in comments_q,
+          join: i in Issue,
+          on: c.issue_id == i.id,
+          where: i.company_id == ^company_id
+        )
+      else
+        comments_q
+      end
+
+    comments = Repo.all(comments_q)
 
     %{issues: issues, comments: comments}
   end

@@ -64,18 +64,10 @@ defmodule Cympho.RateLimiting.BroadcastDedup do
   def handle_info(:cleanup, state) do
     now = System.monotonic_time(:millisecond)
 
-    :ets.foldl(
-      fn
-        {key, expires_at}, acc when expires_at <= now ->
-          :ets.delete(state.table, key)
-          acc
-
-        _, acc ->
-          acc
-      end,
-      :ok,
-      state.table
-    )
+    # Single kernel-level pass; deletes every row whose `expires_at` has
+    # passed without copying the table or scheduling per-row deletes.
+    match_spec = [{{:_, :"$1"}, [{:"=<", :"$1", now}], [true]}]
+    :ets.select_delete(state.table, match_spec)
 
     schedule_cleanup()
     {:noreply, state}

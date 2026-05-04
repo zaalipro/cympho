@@ -6,6 +6,7 @@ defmodule Cympho.RateLimiting.IpRateLimiter do
   @max_joins_per_second 10
   @window_ms 1_000
   @cleanup_interval_ms 5_000
+  @hard_cap 10_000
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
@@ -30,6 +31,9 @@ defmodule Cympho.RateLimiting.IpRateLimiter do
   def handle_call({:check_join, ip}, _from, %{entries: entries} = state) do
     now = System.monotonic_time(:millisecond)
 
+    entries =
+      if map_size(entries) >= @hard_cap, do: drop_stale(entries, now), else: entries
+
     {result, entries} =
       case Map.get(entries, ip) do
         {count, window_start} when now - window_start < @window_ms ->
@@ -53,15 +57,17 @@ defmodule Cympho.RateLimiting.IpRateLimiter do
 
   @impl true
   def handle_info(:cleanup, %{entries: entries} = state) do
-    threshold = System.monotonic_time(:millisecond) - @window_ms
-
-    cleaned =
-      entries
-      |> Enum.reject(fn {_ip, {_count, window_start}} -> window_start < threshold end)
-      |> Map.new()
-
+    cleaned = drop_stale(entries, System.monotonic_time(:millisecond))
     schedule_cleanup()
     {:noreply, %{state | entries: cleaned}}
+  end
+
+  defp drop_stale(entries, now) do
+    threshold = now - @window_ms
+
+    entries
+    |> Enum.reject(fn {_ip, {_count, window_start}} -> window_start < threshold end)
+    |> Map.new()
   end
 
   defp schedule_cleanup do

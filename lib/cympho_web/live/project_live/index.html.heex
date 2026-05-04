@@ -1,86 +1,76 @@
-<div class="p-6 lg:p-8 max-w-6xl mx-auto">
-  <.header title={@page_title}>
-    <:actions>
-      <.app_link
-        navigate={~p"/projects/new"}
-        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
-      >
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M12 4v16m8-8H4"
-          />
-        </svg>
-        New Project
-      </.app_link>
-    </:actions>
-  </.header>
+<div class="px-4 lg:px-8 py-6 max-w-6xl mx-auto">
+  <div class="flex items-start justify-between gap-4 mb-6">
+    <div>
+      <h1 class="text-headline text-ink">{@page_title}</h1>
+      <p class="text-caption text-ink-tertiary mt-1">
+        Group issues by repo, environment, and team scope.
+      </p>
+    </div>
+    <.app_link
+      navigate={~p"/projects/new"}
+      class="inline-flex items-center gap-1.5 px-3 h-8 rounded-md bg-primary hover:bg-primary-hover text-white text-button font-510 transition-colors duration-100"
+    >
+      <.icon name="hero-plus-mini" class="w-4 h-4" /> New project
+    </.app_link>
+  </div>
 
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-    <.card :for={project <- @projects} id={"project-#{project.id}"}>
-      <div class="p-5 space-y-3">
-        <div class="flex items-center justify-between">
-          <h3 class="font-serif text-sm font-510 text-text-primary truncate">{project.name}</h3>
-          <.badge variant="status" value={project.status} />
-        </div>
-        <p class="text-xs text-text-tertiary line-clamp-2">{project.description}</p>
+  <div :if={!Enum.empty?(@projects)} class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+    <div
+      :for={project <- @projects}
+      id={"project-#{project.id}"}
+      class="group relative bg-surface-1 border border-hairline rounded-md hover:border-hairline-strong hover:bg-surface-2/40 transition-colors duration-100"
+    >
+      <.app_link navigate={~p"/projects/#{project.id}"} class="block p-4 space-y-2">
         <div class="flex items-center gap-2">
           <.badge variant="pill" value={project.prefix} />
+          <.badge variant="status" value={to_string(project.status)} />
         </div>
-        <div class="flex items-center gap-2 pt-2">
-          <.app_link
-            navigate={~p"/projects/#{project.id}"}
-            class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
-          >
-            View
-          </.app_link>
-          <.app_link
-            navigate={~p"/projects/#{project.id}/edit"}
-            class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
-          >
-            Edit
-          </.app_link>
-          <button
-            type="button"
-            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
-            phx-click="delete_project"
-            phx-value-id={project.id}
-            data-confirm="Archive this project?"
-          >
-            Archive
-          </button>
+        <h3 class="text-card-title text-ink truncate">{project.name}</h3>
+        <p :if={project.description not in [nil, ""]} class="text-caption text-ink-muted line-clamp-2">
+          {project.description}
+        </p>
+        <div :if={project.repo_url not in [nil, ""]} class="flex items-center gap-1.5 text-caption text-ink-tertiary truncate">
+          <.icon name="hero-link-mini" class="w-3.5 h-3.5 shrink-0" />
+          <span class="truncate">{strip_protocol(project.repo_url)}</span>
         </div>
+      </.app_link>
+
+      <div class="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-100">
+        <.app_link
+          navigate={~p"/projects/#{project.id}/edit"}
+          class="inline-flex items-center justify-center w-7 h-7 rounded-md bg-surface-2 hover:bg-surface-3 border border-hairline text-ink-muted hover:text-ink transition-colors"
+          title="Edit"
+        >
+          <.icon name="hero-pencil-mini" class="w-3.5 h-3.5" />
+        </.app_link>
+        <button
+          type="button"
+          class="inline-flex items-center justify-center w-7 h-7 rounded-md bg-surface-2 hover:bg-surface-3 border border-hairline text-ink-muted hover:text-error transition-colors"
+          phx-click="delete_project"
+          phx-value-id={project.id}
+          data-confirm="Archive this project?"
+          title="Archive"
+        >
+          <.icon name="hero-archive-box-mini" class="w-3.5 h-3.5" />
+        </button>
       </div>
-    </.card>
+    </div>
   </div>
 
   <div
     :if={Enum.empty?(@projects)}
-    class="flex flex-col items-center justify-center py-20 text-center"
+    class="flex flex-col items-center justify-center py-20 text-center border border-dashed border-hairline rounded-md"
   >
-    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
-      <svg
-        class="w-6 h-6 text-text-tertiary"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-        />
-      </svg>
-    </div>
-    <p class="text-sm text-text-tertiary mb-4">No projects yet.</p>
+    <span class="hero-folder-mini text-ink-tertiary w-8 h-8 mb-3" />
+    <p class="text-body text-ink-muted mb-1">No projects yet</p>
+    <p class="text-caption text-ink-tertiary mb-4">
+      Group issues into projects to track scope and link to a repo.
+    </p>
     <.app_link
       navigate={~p"/projects/new"}
-      class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
+      class="inline-flex items-center gap-1.5 px-3 h-8 rounded-md bg-primary hover:bg-primary-hover text-white text-button font-510 transition-colors"
     >
-      Create your first project
+      <.icon name="hero-plus-mini" class="w-4 h-4" /> Create your first project
     </.app_link>
   </div>
 </div>

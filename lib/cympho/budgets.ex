@@ -57,6 +57,13 @@ defmodule Cympho.Budgets do
     end
   end
 
+  def get_company_budget(company_id, id) do
+    case Repo.one(from b in Budget, where: b.id == ^id and b.company_id == ^company_id) do
+      nil -> {:error, :not_found}
+      budget -> {:ok, budget}
+    end
+  end
+
   @doc """
   Returns an `%Ecto.Changeset{}` for tracking budget changes.
   """

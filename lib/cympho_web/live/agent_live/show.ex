@@ -15,6 +15,7 @@ defmodule CymphoWeb.AgentLive.Show do
 
     case Agents.get_agent(id) do
       {:ok, agent} ->
+        agent = Cympho.Repo.preload(agent, :parent)
         wake_history = Wakes.list_agent_wakes(agent.id)
         {:ok, assign(socket, agent: agent, wake_history: wake_history)}
 
@@ -33,6 +34,7 @@ defmodule CymphoWeb.AgentLive.Show do
   defp apply_action(socket, :show, id) do
     case Agents.get_agent(id) do
       {:ok, agent} ->
+        agent = Cympho.Repo.preload(agent, :parent)
         wake_history = Wakes.list_agent_wakes(agent.id)
 
         socket

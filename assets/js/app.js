@@ -2,24 +2,10 @@ import "phoenix_html"
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 
-// Theme management
-function initTheme() {
-  const stored = localStorage.getItem('cympho-theme');
-  if (stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-    document.documentElement.setAttribute('data-theme', 'dark');
-  } else if (stored === 'light') {
-    document.documentElement.setAttribute('data-theme', 'light');
-  } else {
-    document.documentElement.removeAttribute('data-theme');
-  }
-}
-
-window.toggleTheme = function() {
-  const currentTheme = document.documentElement.getAttribute('data-theme');
-  const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', newTheme);
-  localStorage.setItem('cympho-theme', newTheme);
-};
+// Cympho ships dark-only per DESIGN.md. Theme toggle was removed; this
+// noop preserves the global symbol so any stale inline handlers still in
+// the wild don't throw before they're cleaned up.
+window.toggleTheme = function() {};
 
 // Timeline scroll hook for chat-style auto-scroll
 const TimelineScroll = {
@@ -102,18 +88,44 @@ const Toast = {
   }
 };
 
-// Kanban drag-and-drop hook
+// Kanban drag-and-drop hook with optimistic updates.
+//
+// SortableJS moves the card to the destination column on drop. We then push
+// `transition_issue` to the server. On confirm, we just clear the pending
+// flag — the server's render already matches. On rollback, we move the card
+// back to its source column and animate a shake.
 const KanbanSortable = {
   mounted() {
     this.sortables = [];
     this._initSortables();
+
     this.handleEvent("shake_card", ({issue_id}) => {
-      const card = this.el.querySelector(`[data-issue-id="${issue_id}"]`);
+      const card = this._findCard(issue_id);
       if (card) {
         card.classList.add("phx-error-shake");
         setTimeout(() => card.classList.remove("phx-error-shake"), 600);
       }
     });
+
+    this.handleEvent("kanban:confirm", ({issue_id}) => {
+      const card = this._findCard(issue_id);
+      if (!card) return;
+      card.removeAttribute("data-pending");
+      card.classList.add("kanban-card-confirmed");
+      setTimeout(() => card.classList.remove("kanban-card-confirmed"), 200);
+    });
+
+    this.handleEvent("kanban:rollback", ({issue_id, to_status}) => {
+      const card = this._findCard(issue_id);
+      if (!card) return;
+      const targetColumn = this.el.querySelector(`[data-kanban-column="${to_status}"]`);
+      if (targetColumn) targetColumn.appendChild(card);
+      card.removeAttribute("data-pending");
+    });
+  },
+
+  _findCard(issueId) {
+    return this.el.querySelector(`[data-issue-id="${issueId}"]`);
   },
   updated() {
     this.sortables.forEach(s => s.destroy());
@@ -141,11 +153,18 @@ const KanbanSortable = {
           animation: 150,
           filter: "a, button, input, textarea, select, [data-no-drag]",
           preventOnFilter: false,
+          onStart(evt) {
+            evt.item.classList.add("kanban-card-dragging");
+          },
           onEnd(evt) {
+            evt.item.classList.remove("kanban-card-dragging");
             const issueId = evt.item.dataset.issueId;
             const toStatus = evt.to.dataset.kanbanColumn;
             const fromStatus = evt.from.dataset.kanbanColumn;
             if (fromStatus === toStatus) return;
+            // Mark the card pending so any incoming LiveView render knows
+            // we're awaiting confirmation.
+            evt.item.setAttribute("data-pending", "true");
             hook.pushEvent("transition_issue", {id: issueId, to_status: toStatus});
           }
         });
@@ -230,6 +249,11 @@ function handleKeydown(e) {
   if (e.key === 'Escape') {
     const palette = document.getElementById('command-palette');
     const shortcuts = document.getElementById('shortcuts-modal');
+    const quickCreate = document.getElementById('quick-create-modal');
+    if (quickCreate && !quickCreate.classList.contains('hidden')) {
+      quickCreate.classList.add('hidden');
+      return;
+    }
     if (palette && !palette.classList.contains('hidden')) {
       palette.classList.add('hidden');
       return;
@@ -276,10 +300,11 @@ function handleKeydown(e) {
     return;
   }
 
-  // C opens new issue
-  if (e.key === 'c') {
+  // C opens the quick-create modal — ignore when held with Cmd/Ctrl/Alt
+  // (Cmd+C is copy and must always reach the browser).
+  if (e.key === 'c' && !e.metaKey && !e.ctrlKey && !e.altKey) {
     e.preventDefault();
-    window.location.href = '/issues/new';
+    openQuickCreate();
     return;
   }
 
@@ -497,37 +522,219 @@ const OrgChartExport = {
   }
 };
 
+// Searchable combobox / multi-select. Pairs with
+// CymphoWeb.Components.Combobox. Manages: open/close on trigger click,
+// outside-click close, search filtering, keyboard nav (↑/↓/Enter/Esc),
+// and selection. Pushes the configured event with `%{selected: [ids]}`
+// (multi) or `%{selected: id | nil}` (single) when the user picks.
+const Combobox = {
+  mounted() {
+    this.multi = this.el.dataset.comboboxMulti === "true";
+    this.eventName = this.el.dataset.comboboxOnchange;
+    this.trigger = this.el.querySelector("[data-combobox-trigger]");
+    this.popover = this.el.querySelector("[data-combobox-popover]");
+    this.search = this.el.querySelector("[data-combobox-search]");
+    this.list = this.el.querySelector("[data-combobox-list]");
+    this.empty = this.el.querySelector("[data-combobox-empty]");
+    this.clearBtn = this.el.querySelector("[data-combobox-clear]");
+    this.activeIdx = -1;
+
+    this.trigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this._toggle();
+    });
+
+    this.list.addEventListener("click", (e) => {
+      const opt = e.target.closest("[data-combobox-option]");
+      if (!opt) return;
+      this._toggleSelection(opt.dataset.comboboxId);
+      if (!this.multi) this._close();
+    });
+
+    if (this.search) {
+      this.search.addEventListener("input", () => this._filter(this.search.value));
+      this.search.addEventListener("keydown", (e) => this._onKeydown(e));
+    }
+    this.trigger.addEventListener("keydown", (e) => this._onKeydown(e));
+
+    if (this.clearBtn) {
+      this.clearBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._clear();
+      });
+    }
+
+    this._docClick = (e) => {
+      if (!this.el.contains(e.target)) this._close();
+    };
+    document.addEventListener("click", this._docClick);
+  },
+  destroyed() {
+    document.removeEventListener("click", this._docClick);
+  },
+  _toggle() {
+    if (this.popover.classList.contains("hidden")) this._open();
+    else this._close();
+  },
+  _open() {
+    this.popover.classList.remove("hidden");
+    this.trigger.setAttribute("aria-expanded", "true");
+    this.activeIdx = -1;
+    if (this.search) {
+      this.search.value = "";
+      this._filter("");
+      requestAnimationFrame(() => this.search.focus());
+    }
+  },
+  _close() {
+    this.popover.classList.add("hidden");
+    this.trigger.setAttribute("aria-expanded", "false");
+    this._clearActive();
+  },
+  _filter(query) {
+    const q = query.trim().toLowerCase();
+    let visible = 0;
+    this._visibleOptions().forEach(opt => opt.removeAttribute("data-combobox-hidden"));
+    this.list.querySelectorAll("[data-combobox-option]").forEach((opt) => {
+      const label = (opt.dataset.comboboxLabel || "").toLowerCase();
+      const match = !q || label.includes(q);
+      opt.style.display = match ? "" : "none";
+      if (match) visible++;
+    });
+    if (this.empty) this.empty.classList.toggle("hidden", visible > 0);
+    this.activeIdx = -1;
+    this._clearActive();
+  },
+  _visibleOptions() {
+    return Array.from(this.list.querySelectorAll("[data-combobox-option]"))
+      .filter(opt => opt.style.display !== "none");
+  },
+  _onKeydown(e) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      this._close();
+      this.trigger.focus();
+      return;
+    }
+    if (this.popover.classList.contains("hidden")) {
+      if (e.key === "ArrowDown" || e.key === "Enter") {
+        e.preventDefault();
+        this._open();
+      }
+      return;
+    }
+    const opts = this._visibleOptions();
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      this.activeIdx = Math.min(this.activeIdx + 1, opts.length - 1);
+      this._highlight(opts);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      this.activeIdx = Math.max(this.activeIdx - 1, 0);
+      this._highlight(opts);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (this.activeIdx >= 0 && opts[this.activeIdx]) {
+        this._toggleSelection(opts[this.activeIdx].dataset.comboboxId);
+        if (!this.multi) this._close();
+      }
+    }
+  },
+  _highlight(opts) {
+    this._clearActive();
+    const target = opts[this.activeIdx];
+    if (target) {
+      target.setAttribute("data-combobox-active", "true");
+      target.scrollIntoView({block: "nearest"});
+    }
+  },
+  _clearActive() {
+    this.list.querySelectorAll("[data-combobox-active]").forEach(el => el.removeAttribute("data-combobox-active"));
+  },
+  _currentSelection() {
+    return Array.from(this.list.querySelectorAll('[data-combobox-selected="true"]'))
+      .map(el => el.dataset.comboboxId);
+  },
+  _toggleSelection(id) {
+    let selected = this._currentSelection();
+    if (this.multi) {
+      selected = selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id];
+    } else {
+      selected = selected.includes(id) ? [] : [id];
+    }
+    this._push(selected);
+  },
+  _clear() {
+    this._push([]);
+    this._close();
+  },
+  _push(selectedIds) {
+    const payload = this.multi
+      ? {selected: selectedIds}
+      : {selected: selectedIds[0] || null};
+    this.pushEventTo(this.el, this.eventName, payload);
+  }
+};
+
 // Boot
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
 const liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
-  hooks: {TimelineScroll, KanbanSortable, Toast, OrgChartExport}
+  hooks: {TimelineScroll, KanbanSortable, Toast, OrgChartExport, Combobox}
 });
 
 liveSocket.connect();
 window.liveSocket = liveSocket;
 
+// Quick-create issue modal: opened by `C` keystroke. Cancel button and
+// backdrop close it; submit goes through the standard form POST so we
+// don't need a separate AJAX path.
+function openQuickCreate() {
+  const modal = document.getElementById('quick-create-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  const input = document.getElementById('quick-create-title');
+  if (input) {
+    input.value = '';
+    requestAnimationFrame(() => input.focus());
+  }
+}
+window.openQuickCreate = openQuickCreate;
+
+function initQuickCreate() {
+  const modal = document.getElementById('quick-create-modal');
+  if (!modal || modal.dataset.qcInit) return;
+  modal.dataset.qcInit = '1';
+
+  const cancelBtn = modal.querySelector('[data-quick-create-cancel]');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => modal.classList.add('hidden'));
+  }
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.classList.add('hidden');
+  });
+}
+
 // Initialize after DOM ready
 document.addEventListener('DOMContentLoaded', () => {
-  initTheme();
   highlightActiveNav();
   initCommandPalette();
   initCompanySwitcher();
   initSidebarMobile();
   initShortcutsModal();
+  initQuickCreate();
 
   // Re-highlight on LiveView navigation
   window.addEventListener('phx:navigate', () => {
     window.requestAnimationFrame(() => {
-      initTheme();
       highlightActiveNav();
     });
   });
   window.addEventListener('phx:page-loading-stop', () => {
     window.requestAnimationFrame(() => {
-      initTheme();
       highlightActiveNav();
       initCompanySwitcher();
+      initQuickCreate();
     });
   });
 });

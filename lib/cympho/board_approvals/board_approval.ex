@@ -21,6 +21,9 @@ defmodule Cympho.BoardApprovals.BoardApproval do
     field :decision_reasoning, :string
     field :review_deadline, :utc_datetime
 
+    field :executed_at, :utc_datetime
+    field :executor_node, :string
+
     belongs_to :requested_by, Agent, foreign_key: :requested_by_agent_id
     belongs_to :company, Company
 

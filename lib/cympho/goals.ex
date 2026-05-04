@@ -44,6 +44,13 @@ defmodule Cympho.Goals do
     end
   end
 
+  def get_company_goal(company_id, id) do
+    case Repo.one(from g in Goal, where: g.id == ^id and g.company_id == ^company_id) do
+      nil -> {:error, :not_found}
+      goal -> {:ok, goal}
+    end
+  end
+
   def get_goal_with_tree!(id) do
     goal = Repo.get!(Goal, id) |> Repo.preload([:project, :children])
     %{goal | children: load_tree(goal.children)}

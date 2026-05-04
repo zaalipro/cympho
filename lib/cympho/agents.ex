@@ -76,6 +76,13 @@ defmodule Cympho.Agents do
   @doc """
   Gets a single agent by id, returns {:ok, agent} or {:error, :not_found}.
   """
+  def get_company_agent(company_id, id) do
+    case Repo.one(from a in Agent, where: a.id == ^id and a.company_id == ^company_id) do
+      nil -> {:error, :not_found}
+      agent -> {:ok, agent}
+    end
+  end
+
   def get_agent(id) do
     case Repo.get(Agent, id) do
       nil -> {:error, :not_found}

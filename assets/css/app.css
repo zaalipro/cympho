@@ -5,118 +5,74 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 /* ============================================
-   Linear-inspired Design Tokens from DESIGN.md
+   Cympho Design Tokens — sourced from DESIGN.md (Linear spec)
+
+   The product ships dark-only per the spec; do not add a light theme.
+   Both spec-named tokens (surface-1, ink, hairline, primary…) and the
+   legacy names (panel, surface, text-primary, border, brand…) resolve
+   to the same values so old templates keep working while new code uses
+   the spec names.
    ============================================ */
 
 :root {
-  /* Surface & Background - Light Mode */
-  --color-canvas:        #f7f8f8;
-  --color-panel:         #ffffff;
-  --color-surface:       #f3f4f6;
-  --color-surface-hover: #e5e7eb;
-  --color-subtle:        rgba(0,0,0,0.04);
+  /* Canvas + surface ladder */
+  --color-canvas:        #010102;
+  --color-surface-1:     #0f1011;
+  --color-surface-2:     #141516;
+  --color-surface-3:     #18191a;
+  --color-surface-4:     #191a1b;
 
-  /* Text - Light Mode */
-  --color-text-primary:   #111827;
-  --color-text-secondary: #4b5563;
-  --color-text-tertiary:  #9ca3af;
-  --color-text-quaternary:#d1d5db;
+  /* Legacy aliases */
+  --color-panel:         var(--color-surface-1);
+  --color-surface:       var(--color-surface-2);
+  --color-surface-hover: var(--color-surface-3);
+  --color-subtle:        rgba(255, 255, 255, 0.05);
+
+  /* Ink */
+  --color-ink:           #f7f8f8;
+  --color-ink-muted:     #d0d6e0;
+  --color-ink-subtle:    #8a8f98;
+  --color-ink-tertiary:  #62666d;
+
+  /* Legacy aliases */
+  --color-text-primary:    var(--color-ink);
+  --color-text-secondary:  var(--color-ink-muted);
+  --color-text-tertiary:   var(--color-ink-subtle);
+  --color-text-quaternary: var(--color-ink-tertiary);
 
   /* Brand */
-  --color-brand:        #5e6ad2;
-  --color-accent:       #5e6ad2;
-  --color-accent-hover: #4e5ac2;
+  --color-primary:       #5e6ad2;
+  --color-primary-hover: #828fff;
+  --color-primary-focus: #5e69d1;
 
-  /* Borders - Light Mode */
-  --color-border:       #e5e7eb;
-  --color-border-subtle:#f3f4f6;
-  --color-border-hover: #d1d5db;
+  /* Legacy aliases */
+  --color-brand:        var(--color-primary);
+  --color-accent:       var(--color-primary);
+  --color-accent-hover: var(--color-primary-hover);
+
+  /* Hairlines */
+  --color-hairline:           #23252a;
+  --color-hairline-strong:    #34343a;
+  --color-hairline-tertiary:  #3e3e44;
+
+  /* Legacy aliases */
+  --color-border:        var(--color-hairline);
+  --color-border-subtle: var(--color-surface-3);
+  --color-border-hover:  var(--color-hairline-strong);
 
   /* Semantic */
-  --color-success:      #22c55e;
+  --color-success:      #27a644;
   --color-error:        #ef4444;
+  --color-overlay:      rgba(0, 0, 0, 0.6);
 
-  /* Buttons - Light Mode */
-  --color-button-bg:    #ffffff;
-  --color-button-hover: #f9fafb;
+  /* Buttons */
+  --color-button-bg:    var(--color-surface-2);
+  --color-button-hover: var(--color-surface-3);
 
-  /* Selection */
-  --color-selection:    rgba(94, 106, 210, 0.20);
-
-  /* Scrollbar - Light Mode */
-  --color-scrollbar:    rgba(0, 0, 0, 0.15);
-  --color-scrollbar-hover: rgba(0, 0, 0, 0.25);
-}
-
-html[data-theme="dark"] {
-  --color-canvas:        #010102;
-  --color-panel:         #0f1011;
-  --color-surface:       #141516;
-  --color-surface-hover: #18191a;
-  --color-subtle:        rgba(255,255,255,0.05);
-
-  --color-text-primary:   #f7f8f8;
-  --color-text-secondary: #d0d6e0;
-  --color-text-tertiary:  #8a8f98;
-  --color-text-quaternary:#62666d;
-
-  --color-brand:        #5e6ad2;
-  --color-accent:       #5e6ad2;
-  --color-accent-hover: #828fff;
-
-  --color-border:       #23252a;
-  --color-border-subtle:#18191a;
-  --color-border-hover: #34343a;
-
-  --color-success:      #4ade80;
-  --color-error:        #ef4444;
-
-  --color-button-bg:    #141516;
-  --color-button-hover: #18191a;
-
-  --color-selection:    rgba(94, 106, 210, 0.3);
-
-  --color-scrollbar:    rgba(255, 255, 255, 0.1);
-  --color-scrollbar-hover: rgba(255, 255, 255, 0.15);
-}
-
-/* ============================================
-   System Preference Support
-   ============================================ */
-
-/* Respect OS color scheme preference when user hasn't set explicit choice */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) {
-    --color-canvas:        #010102;
-    --color-panel:         #0f1011;
-    --color-surface:       #141516;
-    --color-surface-hover: #18191a;
-    --color-subtle:        rgba(255,255,255,0.05);
-
-    --color-text-primary:   #f7f8f8;
-    --color-text-secondary: #d0d6e0;
-    --color-text-tertiary:  #8a8f98;
-    --color-text-quaternary:#62666d;
-
-    --color-brand:        #5e6ad2;
-    --color-accent:       #5e6ad2;
-    --color-accent-hover: #828fff;
-
-    --color-border:       #23252a;
-    --color-border-subtle:#18191a;
-    --color-border-hover: #34343a;
-
-    --color-success:      #4ade80;
-    --color-error:        #ef4444;
-
-    --color-button-bg:    #141516;
-    --color-button-hover: #18191a;
-
-    --color-selection:    rgba(94, 106, 210, 0.3);
-
-    --color-scrollbar:    rgba(255, 255, 255, 0.1);
-    --color-scrollbar-hover: rgba(255, 255, 255, 0.15);
-  }
+  /* Selection + scrollbars */
+  --color-selection:        rgba(94, 106, 210, 0.3);
+  --color-scrollbar:        rgba(255, 255, 255, 0.1);
+  --color-scrollbar-hover:  rgba(255, 255, 255, 0.15);
 }
 
 /* Respect reduced motion preference */
@@ -312,28 +268,54 @@ html[data-theme="dark"] {
   box-shadow: 0 0 0 2px rgba(94, 106, 210, 0.22);
 }
 
-.rounded-xl,
-.rounded-2xl,
-.rounded-3xl {
-  border-radius: 8px !important;
-}
-
-.rounded-t-xl,
-.rounded-t-2xl,
-.rounded-t-3xl {
-  border-top-left-radius: 8px !important;
-  border-top-right-radius: 8px !important;
-}
-
-.rounded-b-xl,
-.rounded-b-2xl,
-.rounded-b-3xl {
-  border-bottom-left-radius: 8px !important;
-  border-bottom-right-radius: 8px !important;
-}
-
 #kanban-board[data-drag-unavailable="true"] .kanban-card-actions {
   opacity: 1;
+}
+
+/* Universal focus-visible ring per DESIGN.md: every interactive
+   element gets a 2px primary ring when focused via keyboard. Mouse
+   focus is suppressed (`:focus-visible` only fires for keyboard nav). */
+:where(button, a, [role="button"], [role="option"], [tabindex]:not([tabindex="-1"])) {
+  outline: none;
+}
+:where(button, a, [role="button"], [role="option"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Inputs get an inner ring instead — outlines on bordered fields look
+   broken because the outline overlaps the existing border. */
+:where(input, textarea, select):focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 25%, transparent);
+}
+
+.kanban-card-dragging {
+  opacity: 0.45;
+}
+
+[data-pending="true"] {
+  opacity: 0.7;
+}
+
+.kanban-card-confirmed {
+  outline: 1px solid var(--color-primary);
+  outline-offset: -1px;
+  transition: outline-color 200ms ease-out;
+}
+
+.kanban-card-shake {
+  animation: kanban-shake 0.32s ease-in-out;
+}
+
+@keyframes kanban-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
 }
 
 .linear-menu > summary::-webkit-details-marker {

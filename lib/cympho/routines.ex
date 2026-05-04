@@ -20,6 +20,22 @@ defmodule Cympho.Routines do
     end
   end
 
+  def get_company_routine(company_id, id) do
+    query =
+      from(r in Routine,
+        left_join: agent in assoc(r, :agent),
+        left_join: project in assoc(r, :project),
+        where:
+          r.id == ^id and
+            (agent.company_id == ^company_id or project.company_id == ^company_id)
+      )
+
+    case Repo.one(query) do
+      nil -> {:error, :not_found}
+      routine -> {:ok, routine}
+    end
+  end
+
   def create_routine(attrs \\ %{}) do
     %Routine{}
     |> Routine.changeset(attrs)

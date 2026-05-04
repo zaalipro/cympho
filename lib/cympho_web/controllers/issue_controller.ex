@@ -6,6 +6,14 @@ defmodule CymphoWeb.IssueController do
   action_fallback CymphoWeb.FallbackController
 
   def create(conn, %{"issue" => issue_params}) do
+    company_id = conn.assigns.current_company.id
+
+    issue_params =
+      issue_params
+      |> Map.put("company_id", company_id)
+      |> Map.put("actor_type", "user")
+      |> Map.put("actor_id", conn.assigns.current_user.id)
+
     with {:ok, issue} <- Issues.create_issue(issue_params) do
       conn
       |> put_status(:created)
@@ -14,19 +22,10 @@ defmodule CymphoWeb.IssueController do
   end
 
   def show(conn, %{"id" => id}) do
-    case Issues.get_issue(id) do
-      {:ok, issue} ->
-        json(conn, %{data: CymphoWeb.IssueJSON.issue_data(issue)})
+    company_id = conn.assigns.current_company.id
 
-      {:error, :not_found} ->
-        not_found(conn)
+    with {:ok, issue} <- Issues.get_company_issue(company_id, id) do
+      json(conn, %{data: CymphoWeb.IssueJSON.issue_data(issue)})
     end
-  end
-
-  defp not_found(conn) do
-    conn
-    |> put_status(:not_found)
-    |> put_view(json: CymphoWeb.ErrorJSON)
-    |> render(:"404")
   end
 end

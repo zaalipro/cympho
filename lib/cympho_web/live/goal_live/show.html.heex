@@ -1,33 +1,68 @@
-<div class="p-6 lg:p-8 max-w-4xl mx-auto">
+<.page size="content">
   <.header title={@goal.title}>
     <:actions>
       <.app_link
         navigate={~p"/goals"}
-        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
+        class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
       >
         Back
       </.app_link>
       <.app_link
         navigate={~p"/goals/#{@goal.id}/edit"}
-        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-lg transition-colors"
+        class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-white hover:bg-primary-hover transition-colors"
       >
-        Edit
+        <.icon name="hero-pencil-square-mini" class="w-3.5 h-3.5" /> Edit
       </.app_link>
     </:actions>
   </.header>
 
-  <div class="space-y-6">
-    <div class="flex items-center gap-3">
-      <.badge variant="status" value={@goal.status} />
-      <.badge variant="priority" value={@goal.priority} />
+  <.panel class="mb-5 p-5">
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <.badge variant="status" value={to_string(@goal.status)} />
+      <.badge variant="priority" value={to_string(@goal.priority)} />
     </div>
-
-    <p class="text-sm text-text-secondary leading-relaxed">
+    <p :if={@goal.description not in [nil, ""]} class="text-body text-ink-muted whitespace-pre-wrap leading-relaxed">
       {@goal.description}
     </p>
+    <p :if={@goal.description in [nil, ""]} class="text-caption text-ink-tertiary italic">
+      No description.
+    </p>
+  </.panel>
 
-    <div class="text-xs text-text-quaternary">
-      Created {@goal.inserted_at}
+  <div class="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-5">
+    <div :for={status <- [:backlog, :todo, :in_progress, :in_review, :done, :blocked]} class="bg-surface-1 border border-hairline rounded-md px-3 py-2.5">
+      <div class="text-eyebrow text-ink-tertiary uppercase">{status_label(status)}</div>
+      <div class="text-card-title text-ink mt-0.5">{Map.get(@status_counts, status, 0)}</div>
     </div>
   </div>
-</div>
+
+  <.panel>
+    <div class="p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-card-title text-ink">Issues</h2>
+        <span class="text-caption text-ink-tertiary">{length(@issues)} shown</span>
+      </div>
+
+      <div :if={Enum.empty?(@issues)} class="text-caption text-ink-tertiary border border-dashed border-hairline rounded-md px-3 py-6 text-center">
+        No issues linked to this goal yet.
+      </div>
+
+      <ul :if={!Enum.empty?(@issues)} class="border border-hairline rounded-md divide-y divide-hairline overflow-hidden bg-surface-1/40">
+        <li :for={issue <- @issues} class="hover:bg-surface-2 transition-colors duration-100">
+          <.app_link navigate={~p"/issues/#{issue.id}"} class="flex items-center gap-3 px-3 py-2">
+            <.badge variant="status" value={to_string(issue.status)} />
+            <span :if={issue.identifier} class="font-mono text-caption text-ink-tertiary shrink-0">
+              {issue.identifier}
+            </span>
+            <span class="flex-1 truncate text-body text-ink-muted">{issue.title}</span>
+            <.badge variant="priority" value={to_string(issue.priority)} />
+          </.app_link>
+        </li>
+      </ul>
+    </div>
+  </.panel>
+
+  <p class="mt-5 text-caption text-ink-tertiary">
+    Created {Calendar.strftime(@goal.inserted_at, "%b %-d, %Y")}
+  </p>
+</.page>

@@ -222,21 +222,13 @@ defmodule Cympho.AgentAdapters.HealthChecker do
     consecutive_failures = Map.get(state.consecutive_failures, agent.id, 0)
 
     cond do
-      # Health recovered
       new_health_status == :healthy and current_health_status != :healthy ->
         Logger.info("[HealthChecker] agent #{agent.id} health recovered")
-
-        # Reset consecutive failures
-        _ = put_in(state.consecutive_failures[agent.id], 0)
-        _ = put_in(state.last_health_status[agent.id], :healthy)
-
-        # Broadcast health status change
         broadcast_health_status(agent.id, :healthy, current_health_status)
 
-        # Transition agent back to idle if it was in error state
         if agent.status == :error do
           case Agents.update_agent(agent, %{status: :idle, health_status: :healthy}) do
-            {:ok, _updated_agent} ->
+            {:ok, _} ->
               Logger.info("[HealthChecker] agent #{agent.id} transitioned to :idle")
 
             {:error, changeset} ->
@@ -245,11 +237,13 @@ defmodule Cympho.AgentAdapters.HealthChecker do
               )
           end
         else
-          # Just update health_status
           Agents.update_agent(agent, %{health_status: :healthy})
         end
 
-      # Health degraded or unavailable
+        state
+        |> put_in([:consecutive_failures, agent.id], 0)
+        |> put_in([:last_health_status, agent.id], :healthy)
+
       new_health_status in [:degraded, :unavailable] ->
         new_failures = consecutive_failures + 1
 
@@ -257,19 +251,13 @@ defmodule Cympho.AgentAdapters.HealthChecker do
           "[HealthChecker] agent #{agent.id} unhealthy (#{new_failures}/#{@max_consecutive_failures}): #{health_result.message}"
         )
 
-        # Update state
-        _ = put_in(state.consecutive_failures[agent.id], new_failures)
-        _ = put_in(state.last_health_status[agent.id], new_health_status)
-
-        # Broadcast health status change if it's a new state
         if new_health_status != current_health_status do
           broadcast_health_status(agent.id, new_health_status, current_health_status)
         end
 
-        # Transition to error after max consecutive failures
         if new_failures >= @max_consecutive_failures and agent.status != :error do
           case Agents.update_agent(agent, %{status: :error, health_status: new_health_status}) do
-            {:ok, _updated_agent} ->
+            {:ok, _} ->
               Logger.error(
                 "[HealthChecker] agent #{agent.id} transitioned to :error after #{new_failures} consecutive failures"
               )
@@ -280,23 +268,20 @@ defmodule Cympho.AgentAdapters.HealthChecker do
               )
           end
         else
-          # Just update health_status
           Agents.update_agent(agent, %{health_status: new_health_status})
         end
 
-      # Health remains the same
+        state
+        |> put_in([:consecutive_failures, agent.id], new_failures)
+        |> put_in([:last_health_status, agent.id], new_health_status)
+
       true ->
-        # Reset consecutive failures if healthy
         if new_health_status == :healthy and consecutive_failures > 0 do
-          _ = put_in(state.consecutive_failures[agent.id], 0)
+          put_in(state, [:consecutive_failures, agent.id], 0)
+        else
+          state
         end
     end
-
-    # Return updated state
-    %{
-      state
-      | consecutive_failures: Map.get(state.consecutive_failures, agent.id, consecutive_failures)
-    }
   end
 
   defp broadcast_health_status(agent_id, new_status, old_status) do

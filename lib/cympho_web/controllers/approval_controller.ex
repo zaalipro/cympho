@@ -5,9 +5,13 @@ defmodule CymphoWeb.ApprovalController do
   action_fallback CymphoWeb.FallbackController
 
   def index(conn, params) do
-    status = Map.get(params, "status")
-    parsed_status = parse_status(status)
-    approvals = Approvals.list_approvals(%{status: parsed_status})
+    company_id = conn.assigns.current_company.id
+    parsed_status = parse_status(Map.get(params, "status"))
+
+    approvals =
+      Approvals.list_approvals(%{status: parsed_status})
+      |> Enum.filter(fn a -> a.requested_by && a.requested_by.company_id == company_id end)
+
     json(conn, %{data: approvals})
   end
 
@@ -33,39 +37,39 @@ defmodule CymphoWeb.ApprovalController do
   end
 
   def show(conn, %{"id" => id}) do
-    case Approvals.get_approval(id) do
-      {:ok, approval} ->
-        json(conn, %{data: approval})
+    company_id = conn.assigns.current_company.id
 
-      {:error, :not_found} ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "not found"})
+    with {:ok, approval} <- Approvals.get_company_approval(company_id, id) do
+      json(conn, %{data: approval})
     end
   end
 
   def update(conn, %{"id" => id, "approval" => approval_params}) do
-    status = approval_params["status"]
+    company_id = conn.assigns.current_company.id
 
-    if status in ["approved", "denied"] do
-      opts = %{
-        resolved_by_user_id: approval_params["resolved_by_user_id"],
-        resolution_reason: approval_params["resolution_reason"]
-      }
+    with {:ok, _approval} <- Approvals.get_company_approval(company_id, id) do
+      status = approval_params["status"]
 
-      case Approvals.resolve_approval(id, String.to_atom(status), opts) do
-        {:ok, approval} ->
-          json(conn, %{data: approval})
+      if status in ["approved", "denied"] do
+        opts = %{
+          resolved_by_user_id: conn.assigns.current_user.id,
+          resolution_reason: approval_params["resolution_reason"]
+        }
 
-        {:error, changeset} ->
-          conn
-          |> put_status(:unprocessable_entity)
-          |> json(%{errors: format_errors(changeset)})
+        case Approvals.resolve_approval(id, String.to_atom(status), opts) do
+          {:ok, approval} ->
+            json(conn, %{data: approval})
+
+          {:error, changeset} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{errors: format_errors(changeset)})
+        end
+      else
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: "status must be approved or denied"})
       end
-    else
-      conn
-      |> put_status(:unprocessable_entity)
-      |> json(%{error: "status must be approved or denied"})
     end
   end
 

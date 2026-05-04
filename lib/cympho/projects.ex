@@ -35,6 +35,13 @@ defmodule Cympho.Projects do
     end
   end
 
+  def get_company_project(company_id, id) do
+    case Repo.one(from p in Project, where: p.id == ^id and p.company_id == ^company_id) do
+      nil -> {:error, :not_found}
+      project -> {:ok, project}
+    end
+  end
+
   @doc """
   Gets a single project by prefix.
   """

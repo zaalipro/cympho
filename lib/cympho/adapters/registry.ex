@@ -146,8 +146,38 @@ defmodule Cympho.Adapters.Registry do
 
   @impl true
   def init(_) do
-    :ets.new(__MODULE__, [:named_table, :set, :protected, read_concurrency: true])
+    case :ets.info(__MODULE__) do
+      :undefined ->
+        :ets.new(__MODULE__, [:named_table, :set, :protected, read_concurrency: true])
+
+      _existing ->
+        # Survives a restart by deleting and recreating; previous owner is gone.
+        :ets.delete(__MODULE__)
+        :ets.new(__MODULE__, [:named_table, :set, :protected, read_concurrency: true])
+    end
+
+    register_builtin_direct()
     {:ok, %{}}
+  end
+
+  # Direct ETS insert used during `init/1`. We can't call `register/2` here
+  # because that's a GenServer.call to ourselves and would deadlock waiting
+  # for init to finish.
+  defp register_builtin_direct do
+    builtins = [
+      {:claude_code, Cympho.Adapters.ClaudeCodeAdapter},
+      {:codex, Cympho.Adapters.CodexAdapter},
+      {:cursor, Cympho.Adapters.CursorAdapter},
+      {:http, Cympho.Adapters.HttpAdapter},
+      {:openclaw, Cympho.Adapters.OpenClawAdapter},
+      {:process, Cympho.Adapters.ProcessAdapter}
+    ]
+
+    Enum.each(builtins, fn {key, mod} ->
+      if Code.ensure_loaded?(mod), do: :ets.insert(__MODULE__, {key, mod})
+    end)
+
+    :ok
   end
 
   @impl true

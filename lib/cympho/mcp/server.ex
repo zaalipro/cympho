@@ -2,14 +2,15 @@ defmodule Cympho.Mcp.Server do
   @moduledoc """
   MCP (Model Context Protocol) server implementation for Cympho.
 
-  Exposes project management capabilities as tools that AI models can invoke:
-  - Issue CRUD and search
-  - Project listing
-  - Agent status queries
-  - Kanban board state
+  Every tool requires an authenticated agent (`call_tool/3`) and is scoped to
+  that agent's `company_id`. Cross-tenant access is impossible by construction:
+  the company_id is taken from the authenticated agent, never from request
+  args.
   """
 
-  alias Cympho.{Issues, Projects, Agents}
+  import Ecto.Query, only: [from: 2]
+  alias Cympho.{Issues, Projects, Agents, Repo, Search}
+  alias Cympho.Agents.Agent
 
   def tools do
     [
@@ -73,10 +74,7 @@ defmodule Cympho.Mcp.Server do
       %{
         name: "list_projects",
         description: "List all projects with their issue counts.",
-        inputSchema: %{
-          type: "object",
-          properties: %{}
-        }
+        inputSchema: %{type: "object", properties: %{}}
       },
       %{
         name: "list_agents",
@@ -112,88 +110,116 @@ defmodule Cympho.Mcp.Server do
     ]
   end
 
-  def call_tool("list_issues", args) do
-    params = Map.take(args, ["status", "priority", "assignee_id", "project_id", "search"])
+  def call_tool(name, args, %Agent{} = agent) do
+    do_call(name, args || %{}, agent)
+  rescue
+    e ->
+      %{error: "Internal error", detail: Exception.message(e)}
+  end
 
-    limit = Map.get(args, "limit", 20)
-    params = Map.put(params, "per_page", to_string(limit))
+  defp do_call("list_issues", args, agent) do
+    params =
+      args
+      |> Map.take(["status", "priority", "assignee_id", "project_id", "search"])
+      |> Map.put("company_id", agent.company_id)
+      |> Map.put("per_page", to_string(Map.get(args, "limit", 20)))
 
     result = Issues.list_issues_paginated(params)
-
-    issues = Enum.map(result.issues, &summarize_issue/1)
 
     %{
       total: result.total,
       page: result.page,
       per_page: result.per_page,
-      issues: issues
+      issues: Enum.map(result.issues, &summarize_issue/1)
     }
   end
 
-  def call_tool("get_issue", %{"issue_id" => id}) do
-    issue = Issues.get_issue!(id)
+  defp do_call("get_issue", %{"issue_id" => id}, agent) do
+    case Issues.get_company_issue(agent.company_id, id) do
+      {:ok, issue} ->
+        %{
+          id: issue.id,
+          title: issue.title,
+          description: issue.description,
+          status: issue.status,
+          priority: issue.priority,
+          assignee: issue.assignee && %{id: issue.assignee.id, name: issue.assignee.name},
+          project:
+            issue.project &&
+              %{id: issue.project.id, name: issue.project.name, prefix: issue.project.prefix},
+          comments_count: length(issue.comments),
+          inserted_at: issue.inserted_at,
+          updated_at: issue.updated_at
+        }
 
-    %{
-      id: issue.id,
-      title: issue.title,
-      description: issue.description,
-      status: issue.status,
-      priority: issue.priority,
-      assignee: issue.assignee && %{id: issue.assignee.id, name: issue.assignee.name},
-      project:
-        issue.project &&
-          %{id: issue.project.id, name: issue.project.name, prefix: issue.project.prefix},
-      comments_count: length(issue.comments),
-      inserted_at: issue.inserted_at,
-      updated_at: issue.updated_at
-    }
-  end
-
-  def call_tool("create_issue", args) do
-    attrs = %{
-      title: args["title"],
-      description: Map.get(args, "description", ""),
-      priority: String.to_atom(Map.get(args, "priority", "medium")),
-      status: :todo
-    }
-
-    attrs =
-      if project_id = args["project_id"] do
-        Map.put(attrs, :project_id, project_id)
-      else
-        attrs
-      end
-
-    case Issues.create_issue(attrs) do
-      {:ok, issue} -> %{success: true, issue: summarize_issue(issue)}
-      {:error, changeset} -> %{success: false, errors: format_errors(changeset)}
+      {:error, :not_found} ->
+        %{error: "Issue not found"}
     end
   end
 
-  def call_tool("list_projects", _args) do
-    Projects.list_projects()
+  defp do_call("create_issue", args, agent) do
+    project_id =
+      case args["project_id"] do
+        nil ->
+          nil
+
+        id when is_binary(id) ->
+          if project_belongs_to_company?(id, agent.company_id), do: id, else: :forbidden
+      end
+
+    if project_id == :forbidden do
+      %{success: false, errors: %{project_id: ["does not belong to this company"]}}
+    else
+      attrs =
+        %{
+          title: args["title"],
+          description: Map.get(args, "description", ""),
+          priority: parse_priority(Map.get(args, "priority", "medium")),
+          status: :todo,
+          company_id: agent.company_id,
+          actor_type: "agent",
+          actor_id: agent.id,
+          created_by_agent_id: agent.id
+        }
+        |> maybe_put(:project_id, project_id)
+
+      case Issues.create_issue(attrs) do
+        {:ok, issue} -> %{success: true, issue: summarize_issue(issue)}
+        {:error, changeset} -> %{success: false, errors: format_errors(changeset)}
+      end
+    end
+  end
+
+  defp do_call("list_projects", _args, agent) do
+    Cympho.Companies.list_company_projects(agent.company_id)
     |> Enum.map(fn p -> %{id: p.id, name: p.name, prefix: p.prefix} end)
   end
 
-  def call_tool("list_agents", args) do
-    agents = Agents.list_agents()
-
+  defp do_call("list_agents", args, agent) do
     agents =
-      if status = args["status"] do
-        Enum.filter(agents, fn a -> to_string(a.status) == status end)
-      else
-        agents
-      end
+      Cympho.Companies.list_company_agents(agent.company_id)
+      |> filter_by_status(args["status"])
 
     Enum.map(agents, fn a ->
       %{id: a.id, name: a.name, status: a.status, role: a.role}
     end)
   end
 
-  def call_tool("get_kanban_state", args) do
-    params = if project_id = args["project_id"], do: %{"project_id" => project_id}, else: %{}
-    result = Issues.list_issues_paginated(Map.put(params, "per_page", "1000"))
+  defp do_call("get_kanban_state", args, agent) do
+    params = %{"company_id" => agent.company_id, "per_page" => "1000"}
 
+    params =
+      case args["project_id"] do
+        nil ->
+          params
+
+        id when is_binary(id) ->
+          if project_belongs_to_company?(id, agent.company_id),
+            do: Map.put(params, "project_id", id),
+            else: params
+      end
+
+    result = Issues.list_issues_paginated(params)
     by_status = Enum.group_by(result.issues, & &1.status)
 
     Enum.map(Issues.Issue.status_options(), fn status ->
@@ -207,12 +233,12 @@ defmodule Cympho.Mcp.Server do
     end)
   end
 
-  def call_tool("search", %{"query" => query}) do
-    Cympho.Search.search(query)
+  defp do_call("search", %{"query" => query}, agent) when is_binary(query) do
+    Search.search(query, company_id: agent.company_id)
   end
 
-  def call_tool(_name, _args) do
-    %{error: "Unknown tool"}
+  defp do_call(_name, _args, _agent) do
+    %{error: "Unknown or malformed tool invocation"}
   end
 
   defp summarize_issue(issue) do
@@ -232,5 +258,24 @@ defmodule Cympho.Mcp.Server do
         String.replace(acc, "%{#{key}}", to_string(value))
       end)
     end)
+  end
+
+  defp parse_priority(p) when p in ["critical", "high", "medium", "low"], do: String.to_atom(p)
+  defp parse_priority(_), do: :medium
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp filter_by_status(agents, nil), do: agents
+
+  defp filter_by_status(agents, status) when is_binary(status) do
+    Enum.filter(agents, fn a -> to_string(a.status) == status end)
+  end
+
+  defp project_belongs_to_company?(project_id, company_id) do
+    Repo.exists?(
+      from p in Cympho.Projects.Project,
+        where: p.id == ^project_id and p.company_id == ^company_id
+    )
   end
 end

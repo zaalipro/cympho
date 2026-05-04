@@ -10,6 +10,7 @@ defmodule Cympho.Projects.Project do
     field :description, :string
     field :status, Ecto.Enum, values: [:active, :archived], default: :active
     field :prefix, :string
+    field :repo_url, :string
     field :github_webhook_secret, :string
     field :settings, :map, default: %{}
 
@@ -25,6 +26,7 @@ defmodule Cympho.Projects.Project do
       :description,
       :status,
       :prefix,
+      :repo_url,
       :github_webhook_secret,
       :settings,
       :company_id
@@ -33,7 +35,21 @@ defmodule Cympho.Projects.Project do
     |> validate_length(:name, min: 1, max: 255)
     |> validate_length(:prefix, min: 2, max: 10)
     |> validate_format(:prefix, ~r/^[A-Z]+$/, message: "must be uppercase, 2-10 characters")
+    |> validate_repo_url()
     |> unique_constraint(:prefix)
     |> assoc_constraint(:company)
+  end
+
+  defp validate_repo_url(changeset) do
+    case get_change(changeset, :repo_url) do
+      nil -> changeset
+      "" -> put_change(changeset, :repo_url, nil)
+      url ->
+        if String.match?(url, ~r{^https?://}) do
+          put_change(changeset, :repo_url, String.trim_trailing(url, "/"))
+        else
+          add_error(changeset, :repo_url, "must start with http:// or https://")
+        end
+    end
   end
 end
