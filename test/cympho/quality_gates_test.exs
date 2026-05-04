@@ -43,11 +43,11 @@ defmodule Cympho.QualityGatesTest do
     test "stage_complete? returns false for nil" do
       assert ExecutionState.stage_complete?(%{last_decision_outcome: nil}) == false
     end
-    test "original_executor returns return_assignee when present" do
-      assert ExecutionState.original_executor(%{return_assignee: "exec1", current_participant: "rev1"}) == "exec1"
+    test "original_executor returns first history participant" do
+      assert ExecutionState.original_executor(%{history: [%{participant: "exec1"}], current_participant: "rev1", return_assignee: "exec1"}) == "exec1"
     end
-    test "original_executor falls back to current_participant" do
-      assert ExecutionState.original_executor(%{return_assignee: nil, current_participant: "rev1"}) == "rev1"
+    test "original_executor falls back to current_participant when no history" do
+      assert ExecutionState.original_executor(%{history: [], current_participant: "rev1"}) == "rev1"
     end
   end
 

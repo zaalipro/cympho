@@ -498,36 +498,70 @@ defmodule Cympho.Issues do
     attrs = %{status: new_status}
 
     attrs =
-      if new_status == :in_review and ExecutionState.active?(issue.execution_state) and
-           issue.execution_state.current_stage_type == :executor do
-        case ExecutionPolicies.get_execution_policy(issue.execution_policy_id) do
-          {:ok, policy} ->
-            approved_state = ExecutionState.approve(issue.execution_state, issue.execution_state.current_participant)
+      cond do
+        new_status == :done and ExecutionState.active?(issue.execution_state) ->
+          {:error, :execution_policy_not_complete}
 
-            case ExecutionState.advance(approved_state, policy, issue.execution_state.current_participant) do
-              {:ok, next_state} ->
-                next_assignee = resolve_next_assignee(next_state.current_participant)
+        new_status == :in_review and ExecutionState.active?(issue.execution_state) and
+            issue.execution_state.last_decision_outcome == :changes_requested ->
+          case ExecutionPolicies.get_execution_policy(issue.execution_policy_id) do
+            {:ok, policy} ->
+              stage_config = ExecutionState.current_stage_config(issue.execution_state, policy)
+              reviewer_id = ExecutionState.get_participant_id(stage_config)
 
-                Map.merge(attrs, %{
-                  execution_state: next_state,
-                  assignee_id: next_assignee
-                })
+              resubmit_state = %{
+                issue.execution_state
+                | last_decision_outcome: :approved,
+                  current_participant: reviewer_id
+              }
 
-              {:done, final_state} ->
-                Map.merge(attrs, %{
-                  execution_state: final_state,
-                  status: :done,
-                  assignee_id: nil
-                })
-            end
+              Map.merge(attrs, %{
+                execution_state: resubmit_state,
+                assignee_id: resolve_next_assignee(reviewer_id)
+              })
 
-          {:error, _} ->
-            attrs
-        end
-      else
-        attrs
+            {:error, _} ->
+              attrs
+          end
+
+        new_status == :in_review and ExecutionState.active?(issue.execution_state) and
+            issue.execution_state.current_stage_type == :executor ->
+          case ExecutionPolicies.get_execution_policy(issue.execution_policy_id) do
+            {:ok, policy} ->
+              approved_state = ExecutionState.approve(issue.execution_state, issue.execution_state.current_participant)
+
+              case ExecutionState.advance(approved_state, policy, issue.execution_state.current_participant) do
+                {:ok, next_state} ->
+                  next_assignee = resolve_next_assignee(next_state.current_participant)
+
+                  Map.merge(attrs, %{
+                    execution_state: next_state,
+                    assignee_id: next_assignee
+                  })
+
+                {:done, final_state} ->
+                  Map.merge(attrs, %{
+                    execution_state: final_state,
+                    status: :done,
+                    assignee_id: nil
+                  })
+              end
+
+            {:error, _} ->
+              attrs
+          end
+
+        true ->
+          attrs
       end
 
+    case attrs do
+      {:error, _} = error -> error
+      attrs -> do_transition_update(issue, attrs)
+    end
+  end
+
+  defp do_transition_update(issue, attrs) do
     with {:ok, updated} <- update_issue(issue, attrs) do
       if updated.status == :done do
         unblock_dependents(issue.id)
@@ -1161,7 +1195,7 @@ defmodule Cympho.Issues do
 
       :request_changes ->
         changes_state = ExecutionState.request_changes(issue.execution_state, decided_by)
-        executor_id = issue.execution_state.return_assignee || changes_state.current_participant
+        executor_id = ExecutionState.original_executor(issue.execution_state) || changes_state.current_participant
 
         update_issue(issue, %{
           execution_state: changes_state,
