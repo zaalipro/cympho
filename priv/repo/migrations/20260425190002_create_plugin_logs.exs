@@ -10,6 +10,8 @@ defmodule Cympho.Repo.Migrations.CreatePluginLogs do
       add :metadata, :map, default: %{}
       add :company_id, references(:companies, type: :binary_id, on_delete: :delete_all)
       add :timestamp, :utc_datetime, null: false
+
+      timestamps(type: :utc_datetime)
     end
 
     create index(:plugin_logs, [:plugin_id])

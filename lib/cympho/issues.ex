@@ -19,6 +19,7 @@ defmodule Cympho.Issues do
   alias Cympho.ExecutionPolicies.ExecutionPolicy
   alias Cympho.Wakes
   alias Cympho.Labels.Label
+  alias Cympho.Goals
 
   def list_issues(opts \\ %{}) do
     Issue
@@ -214,6 +215,8 @@ defmodule Cympho.Issues do
 
     case insert_result do
       {:ok, issue} ->
+        issue = maybe_backfill_lineage(issue)
+
         Activities.log_activity(%{
           issue_id: issue.id,
           company_id: issue.company_id,
@@ -347,6 +350,13 @@ defmodule Cympho.Issues do
     old_issue = issue
 
     with {:ok, updated} <- do_update_issue(issue, attrs) do
+      updated =
+        if goal_id_changed?(attrs, issue) do
+          maybe_backfill_lineage(updated)
+        else
+          updated
+        end
+
       updated =
         Repo.preload(updated, [:comments, :blocked_by, :blocks, :assignee, :labels], force: true)
 
@@ -1199,5 +1209,28 @@ defmodule Cympho.Issues do
 
   def change_issue(%Issue{} = issue, attrs \\ %{}) do
     Issue.changeset(issue, attrs)
+  end
+
+  defp maybe_backfill_lineage(%Issue{goal_id: nil} = issue), do: issue
+
+  defp maybe_backfill_lineage(%Issue{} = issue) do
+    lineage = Goals.compute_lineage(issue)
+
+    if lineage do
+      issue
+      |> Ecto.Changeset.change(%{lineage: lineage})
+      |> Repo.update()
+      |> case do
+        {:ok, updated} -> updated
+        {:error, _} -> issue
+      end
+    else
+      issue
+    end
+  end
+
+  defp goal_id_changed?(attrs, issue) do
+    new_goal_id = get_param(attrs, :goal_id)
+    new_goal_id != nil and new_goal_id != issue.goal_id
   end
 end
