@@ -1009,7 +1009,8 @@ defmodule Cympho.Agents do
   end
 
   defp count_completed_this_week(agent_id) do
-    week_start = Date.beginning_of_week(DateTime.utc_now() |> DateTime.to_date())
+    week_start_date = Date.beginning_of_week(DateTime.utc_now() |> DateTime.to_date())
+    week_start = DateTime.new!(week_start_date, ~T[00:00:00])
 
     Cympho.Issues.Issue
     |> where([i], i.assignee_id == ^agent_id)

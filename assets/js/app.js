@@ -6,14 +6,15 @@ import {LiveSocket} from "phoenix_live_view"
 function initTheme() {
   const stored = localStorage.getItem('cympho-theme');
   if (stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-    document.documentElement.classList.add('dark');
+    document.documentElement.setAttribute('data-theme', 'dark');
   } else {
-    document.documentElement.classList.remove('dark');
+    document.documentElement.setAttribute('data-theme', 'light');
   }
 }
 
 window.toggleTheme = function() {
-  const isDark = document.documentElement.classList.toggle('dark');
+  const isDark = document.documentElement.getAttribute('data-theme') === 'light';
+  document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
   localStorage.setItem('cympho-theme', isDark ? 'dark' : 'light');
 };
 

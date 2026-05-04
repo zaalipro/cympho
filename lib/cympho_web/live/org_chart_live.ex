@@ -33,8 +33,17 @@ defmodule CymphoWeb.OrgChartLive do
 
   @impl true
   def handle_event("select_agent", %{"agent_id" => agent_id}, socket) do
-    stats = Agents.get_agent_stats(agent_id)
-    {:noreply, assign(socket, selected_agent_id: agent_id, selected_agent_stats: stats)}
+    current_company_id = socket.assigns[:current_company].id
+
+    case Agents.get_agent(agent_id) do
+      {:ok, agent} when agent.company_id == current_company_id ->
+        stats = Agents.get_agent_stats(agent_id)
+        {:noreply, assign(socket, selected_agent_id: agent_id, selected_agent_stats: stats)}
+
+      _ ->
+        # Agent not found or belongs to different company - do nothing
+        {:noreply, socket}
+    end
   end
 
   @impl true
@@ -237,6 +246,12 @@ defmodule CymphoWeb.OrgChartLive do
                   </p>
                 </div>
               </div>
+            </div>
+
+            <div class="flex justify-center pt-2">
+              <.link navigate={"/agents/#{@selected_agent_id}"} class="text-sm text-brand hover:text-brand-hover font-510">
+                View Full Profile →
+              </.link>
             </div>
           </div>
         </.modal>
