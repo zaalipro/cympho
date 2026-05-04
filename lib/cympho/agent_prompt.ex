@@ -69,7 +69,8 @@ defmodule Cympho.AgentPrompt do
         context_line("Company", loaded_name(issue, :company, Cympho.Companies.Company)),
         context_line("Project", loaded_name(issue, :project, Cympho.Projects.Project)),
         context_line("Goal", loaded_name(issue, :goal, Cympho.Goals.Goal)),
-        context_line("Parent issue", field(issue, :parent_id))
+        context_line("Parent issue", field(issue, :parent_id)),
+        lineage_block(field(issue, :lineage))
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -78,6 +79,31 @@ defmodule Cympho.AgentPrompt do
     else
       Enum.join(["Context" | context], "\n")
     end
+  end
+
+  defp lineage_block(nil), do: nil
+
+  defp lineage_block(lineage) when is_map(lineage) do
+    parts =
+      [
+        lineage_entry("Mission", lineage[:mission_id], Cympho.Goals.Goal),
+        lineage_entry("Initiative", lineage[:initiative_id], Cympho.Goals.Goal),
+        lineage_entry("Milestone", lineage[:milestone_id], Cympho.Goals.Goal)
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    if Enum.empty?(parts), do: nil, else: Enum.join(["Goal ancestry" | parts], "\n")
+  end
+
+  defp lineage_entry(_label, nil, _module), do: nil
+
+  defp lineage_entry(label, id, module) do
+    case Repo.get(module, id) do
+      nil -> nil
+      goal -> "#{label}: #{goal.title} (#{id})"
+    end
+  rescue
+    _ -> nil
   end
 
   defp context_line(_label, nil), do: nil

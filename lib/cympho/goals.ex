@@ -28,6 +28,13 @@ defmodule Cympho.Goals do
     |> Repo.all()
   end
 
+  def list_missions(company_id) do
+    Goal
+    |> where([g], g.company_id == ^company_id and g.goal_type == ^:mission)
+    |> order_by([g], asc: g.inserted_at)
+    |> Repo.all()
+  end
+
   def get_goal!(id), do: Repo.get!(Goal, id)
 
   def get_goal(id) do
@@ -136,5 +143,64 @@ defmodule Cympho.Goals do
         %{parent_id: pid} -> ancestor_reaches?(pid, target_id, visited)
       end
     end
+  end
+
+  @doc """
+  Computes the goal_type for a goal based on its depth in the parent chain.
+  - No parent → :mission
+  - Parent is a mission → :initiative
+  - Parent is an initiative or deeper → :milestone
+  """
+  def compute_goal_type(%Goal{parent_id: nil}), do: :mission
+
+  def compute_goal_type(%Goal{parent_id: parent_id}) do
+    case Repo.get(Goal, parent_id) do
+      nil -> :initiative
+      %{parent_id: nil} -> :initiative
+      _ -> :milestone
+    end
+  end
+
+  @doc """
+  Builds the lineage map for an issue by walking its goal's parent chain.
+  Returns %{goal_id:, project_id:, mission_id:, initiative_id:, milestone_id:}
+  or nil if the issue has no goal.
+  """
+  def compute_lineage(%Issue{goal_id: nil}), do: nil
+
+  def compute_lineage(%Issue{goal_id: goal_id}) do
+    case Repo.get(Goal, goal_id) do
+      nil -> nil
+      goal -> build_lineage(goal)
+    end
+  end
+
+  defp build_lineage(goal) do
+    ancestors = get_ancestors(goal.id)
+    full_chain = ancestors ++ [goal]
+
+    mission = Enum.find(full_chain, &(&1.parent_id == nil))
+
+    initiative =
+      if mission do
+        Enum.find(full_chain, fn g ->
+          g.parent_id == mission.id
+        end)
+      end
+
+    milestone =
+      if initiative != nil and goal.id != initiative.id do
+        goal.id
+      else
+        nil
+      end
+
+    %{
+      goal_id: goal.id,
+      project_id: goal.project_id,
+      mission_id: if(mission, do: mission.id),
+      initiative_id: if(initiative, do: initiative.id),
+      milestone_id: milestone
+    }
   end
 end

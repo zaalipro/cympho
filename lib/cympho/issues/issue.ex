@@ -37,6 +37,7 @@ defmodule Cympho.Issues.Issue do
     field :completed_at, :utc_datetime
     field :cancelled_at, :utc_datetime
     field :hidden_at, :utc_datetime
+    field :lineage, :map
 
     belongs_to :project, Project
     belongs_to :company, Cympho.Companies.Company
@@ -100,6 +101,7 @@ defmodule Cympho.Issues.Issue do
       :project_workspace_id,
       :execution_workspace_id,
       :monitor_state,
+      :lineage,
       :checked_out_at,
       :started_at,
       :completed_at,
