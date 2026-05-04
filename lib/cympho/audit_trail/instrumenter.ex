@@ -62,7 +62,7 @@ defmodule Cympho.AuditTrail.Instrumenter do
 
   def record_session_event(session, event, metadata \\ %{})
 
-  def record_session_event(%__MODULE__{issue: issue, agent_id: agent_id, run_id: run_id}, "started", _metadata) do
+  def record_session_event(%{issue: issue, agent_id: agent_id, run_id: run_id}, "started", _metadata) do
     log(%{
       event_type: "orchestrator_session_started",
       actor_type: "agent",
@@ -73,7 +73,7 @@ defmodule Cympho.AuditTrail.Instrumenter do
     })
   end
 
-  def record_session_event(%__MODULE__{issue: issue, agent_id: agent_id, run_id: run_id}, "completed", metadata) do
+  def record_session_event(%{issue: issue, agent_id: agent_id, run_id: run_id}, "completed", metadata) do
     log(%{
       event_type: "orchestrator_session_ended",
       actor_type: "agent",
@@ -85,7 +85,7 @@ defmodule Cympho.AuditTrail.Instrumenter do
     })
   end
 
-  def record_session_event(%__MODULE__{issue: issue, agent_id: agent_id, run_id: run_id}, event, metadata) do
+  def record_session_event(%{issue: issue, agent_id: agent_id, run_id: run_id}, event, metadata) do
     log(%{
       event_type: "orchestrator_session_#{event}",
       actor_type: "agent",
@@ -97,7 +97,7 @@ defmodule Cympho.AuditTrail.Instrumenter do
     })
   end
 
-  def record_tool_call(%__MODULE__{issue: issue, agent_id: agent_id, run_id: run_id}, tool_name, args, result) do
+  def record_tool_call(%{issue: issue, agent_id: agent_id, run_id: run_id}, tool_name, args, result) do
     log(%{
       event_type: "orchestrator_tool_call",
       actor_type: "agent",
