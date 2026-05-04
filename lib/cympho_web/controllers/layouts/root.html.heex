@@ -6,7 +6,7 @@
     <meta name="csrf-token" content={Plug.CSRFProtection.get_csrf_token()} />
     <title>{Map.get(assigns, :page_title, "Cympho")}</title>
     <script>
-      (function(){var t=localStorage.getItem('cympho-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark')})();
+      (function(){var t=localStorage.getItem('cympho-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.setAttribute('data-theme','dark')})();
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

@@ -1,7 +1,7 @@
 const plugin = require("tailwindcss/plugin")
 
 module.exports = {
-  darkMode: 'class',
+  darkMode: ['selector', '[data-theme="dark"]'],
   content: [
     "./js/**/*.js",
     "../lib/cympho_web.ex",
