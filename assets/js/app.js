@@ -6,15 +6,19 @@ import {LiveSocket} from "phoenix_live_view"
 function initTheme() {
   const stored = localStorage.getItem('cympho-theme');
   if (stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-    document.documentElement.classList.add('dark');
+    document.documentElement.setAttribute('data-theme', 'dark');
+  } else if (stored === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
   } else {
-    document.documentElement.classList.remove('dark');
+    document.documentElement.removeAttribute('data-theme');
   }
 }
 
 window.toggleTheme = function() {
-  const isDark = document.documentElement.classList.toggle('dark');
-  localStorage.setItem('cympho-theme', isDark ? 'dark' : 'light');
+  const currentTheme = document.documentElement.getAttribute('data-theme');
+  const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', newTheme);
+  localStorage.setItem('cympho-theme', newTheme);
 };
 
 // Timeline scroll hook for chat-style auto-scroll
