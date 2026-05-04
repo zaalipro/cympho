@@ -1027,26 +1027,23 @@ defmodule Cympho.Agents do
     |> Repo.aggregate(:count)
   end
 
-  defp get_agent_budget_status(%Agent{budget_id: nil}), do: nil
+  defp get_agent_budget_status(%Agent{budget_monthly_cents: 0}), do: nil
 
-  defp get_agent_budget_status(%Agent{budget_id: budget_id}) do
-    case Cympho.Budgets.get_budget(budget_id) do
-      nil ->
-        nil
+  defp get_agent_budget_status(%Agent{budget_monthly_cents: limit, spent_monthly_cents: spent}) do
+    limit_dec = Decimal.new(limit)
+    spent_dec = Decimal.new(spent)
 
-      budget ->
-        %{
-          limit: budget.limit_amount,
-          spent: budget.spent_amount,
-          remaining: Decimal.sub(budget.limit_amount, budget.spent_amount),
-          percentage:
-            if Decimal.gt?(budget.limit_amount, 0) do
-              Decimal.mult(Decimal.div(budget.spent_amount, budget.limit_amount), 100)
-            else
-              Decimal.from_integer(0)
-            end
-        }
-    end
+    %{
+      limit: limit_dec,
+      spent: spent_dec,
+      remaining: Decimal.sub(limit_dec, spent_dec),
+      percentage:
+        if Decimal.gt?(limit_dec, 0) do
+          Decimal.mult(Decimal.div(spent_dec, limit_dec), 100)
+        else
+          Decimal.new(0)
+        end
+    }
   end
 
   defp get_agent_budget_status(_), do: nil

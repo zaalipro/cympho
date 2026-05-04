@@ -71,7 +71,7 @@ defmodule CymphoWeb.OrgChartLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="min-h-screen bg-canvas px-4 py-5 sm:px-6 lg:px-8" phx-hook="OrgChartExport">
+    <div id="org-chart-page" class="min-h-screen bg-canvas px-4 py-5 sm:px-6 lg:px-8" phx-hook="OrgChartExport">
       <div class="mx-auto max-w-7xl">
         <.header
           title="Org"
@@ -181,6 +181,7 @@ defmodule CymphoWeb.OrgChartLive do
         <!-- Agent Stats Panel -->
         <.modal
           :if={@selected_agent_id}
+          id="agent-stats-modal"
           on_cancel={JS.push("close_agent_panel")}
           show={true}
         >
@@ -259,6 +260,7 @@ defmodule CymphoWeb.OrgChartLive do
         <!-- Company Stats Panel -->
         <.modal
           :if={@show_company_stats}
+          id="company-stats-modal"
           on_cancel={JS.push("toggle_company_stats")}
           show={true}
         >

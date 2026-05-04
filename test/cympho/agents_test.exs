@@ -195,18 +195,18 @@ defmodule Cympho.AgentsTest do
   end
 
   describe "count_running_jobs/1" do
-    test "returns 0 when agent has no running jobs" do
-      assert Agents.count_running_jobs(@agent.id) == 0
+    test "returns 0 when agent has no running jobs", %{agent: agent} do
+      assert Agents.count_running_jobs(agent.id) == 0
     end
   end
 
   describe "is_agent_at_capacity?/1" do
-    test "returns false when agent has no running jobs and default capacity" do
-      refute Agents.is_agent_at_capacity?(@agent.id)
+    test "returns false when agent has no running jobs and default capacity", %{agent: agent} do
+      refute Agents.is_agent_at_capacity?(agent.id)
     end
 
     test "returns true when agent does not exist" do
-      assert Agents.is_agent_at_capacity?("non-existent-id")
+      assert Agents.is_agent_at_capacity?("00000000-0000-0000-0000-000000000000")
     end
   end
 
@@ -266,6 +266,7 @@ defmodule Cympho.AgentsTest do
       assert :codex in options
       assert :cursor in options
       assert :http in options
+      assert :openclaw in options
       assert :process in options
     end
   end
@@ -273,7 +274,7 @@ defmodule Cympho.AgentsTest do
   describe "Agent.adapter_options/0" do
     test "returns valid adapter types from schema" do
       options = Agent.adapter_options()
-      assert options == [:claude_code, :codex, :cursor, :http, :process]
+      assert options == [:claude_code, :codex, :cursor, :http, :openclaw, :process]
     end
   end
 
@@ -365,10 +366,8 @@ defmodule Cympho.AgentsTest do
   end
 
   describe "get_agent_stats/1" do
-    setup [:create_company, :create_agent]
-
     test "returns nil for non-existent agent" do
-      assert nil == Agents.get_agent_stats("non-existent-id")
+      assert nil == Agents.get_agent_stats("00000000-0000-0000-0000-000000000000")
     end
 
     test "returns stats for agent with no issues", %{agent: agent} do
@@ -381,10 +380,9 @@ defmodule Cympho.AgentsTest do
       assert stats.budget_status == nil
     end
 
-    test "returns stats for agent with direct reports", %{company: company, agent: parent} do
+    test "returns stats for agent with direct reports", %{agent: parent} do
       {:ok, _child1} =
         Agents.create_agent(%{
-          company_id: company.id,
           name: "Child 1",
           role: :engineer,
           status: :idle,
@@ -395,7 +393,6 @@ defmodule Cympho.AgentsTest do
 
       {:ok, _child2} =
         Agents.create_agent(%{
-          company_id: company.id,
           name: "Child 2",
           role: :engineer,
           status: :idle,
@@ -410,9 +407,13 @@ defmodule Cympho.AgentsTest do
   end
 
   describe "get_company_agent_stats/1" do
-    setup [:create_company]
+    test "returns stats for company with no agents" do
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Test Co",
+          slug: "test-co-#{System.unique_integer([:positive])}"
+        })
 
-    test "returns stats for company with no agents", %{company: company} do
       stats = Agents.get_company_agent_stats(company.id)
 
       assert stats.total == 0
@@ -421,7 +422,13 @@ defmodule Cympho.AgentsTest do
       assert stats.idle_ratio == 0.0
     end
 
-    test "returns stats for company with multiple agents", %{company: company} do
+    test "returns stats for company with multiple agents" do
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Test Co",
+          slug: "test-co-#{System.unique_integer([:positive])}"
+        })
+
       {:ok, _ceo} =
         Agents.create_agent(%{
           company_id: company.id,
