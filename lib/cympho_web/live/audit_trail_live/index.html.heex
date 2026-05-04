@@ -1,11 +1,11 @@
 <div class="p-6 lg:p-8 max-w-7xl mx-auto">
   <.header title={@page_title}>
     <:actions>
-      <span class="text-xs text-text-quaternary"><%= @pagination.total %> event(s)</span>
+      <span class="text-xs text-text-quaternary">{@pagination.total} event(s)</span>
     </:actions>
   </.header>
-
-  <!-- Filters -->
+  
+<!-- Filters -->
   <div class="space-y-3 mb-4">
     <div class="flex items-center gap-3 flex-wrap">
       <form phx-change="filter" phx-submit="prevent">
@@ -16,7 +16,7 @@
           <option value="">All Event Types</option>
           <%= for event_type <- @event_types do %>
             <option value={event_type} selected={@filter_event_type == event_type}>
-              <%= format_event_type(event_type) %>
+              {format_event_type(event_type)}
             </option>
           <% end %>
         </select>
@@ -52,9 +52,13 @@
           <option value="">All Resource Types</option>
           <option value="issue" selected={@filter_resource_type == "issue"}>Issue</option>
           <option value="agent" selected={@filter_resource_type == "agent"}>Agent</option>
-          <option value="board_approval" selected={@filter_resource_type == "board_approval"}>Board Approval</option>
+          <option value="board_approval" selected={@filter_resource_type == "board_approval"}>
+            Board Approval
+          </option>
           <option value="budget" selected={@filter_resource_type == "budget"}>Budget</option>
-          <option value="decision" selected={@filter_resource_type == "decision"}>Decision</option>
+          <option value="decision" selected={@filter_resource_type == "decision"}>
+            Decision
+          </option>
         </select>
       </form>
 
@@ -102,8 +106,8 @@
       </button>
     </div>
   </div>
-
-  <!-- Events List -->
+  
+<!-- Events List -->
   <div :if={@events == []} class="flex flex-col items-center justify-center py-20 text-center">
     <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
       <svg
@@ -130,20 +134,24 @@
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
               <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-brand-foreground text-brand">
-                <%= format_event_type(event.event_type) %>
+                {format_event_type(event.event_type)}
               </span>
               <span class="text-xs text-text-quaternary">
-                <%= format_actor_type(event.actor_type) %>
+                {format_actor_type(event.actor_type)}
                 <%= if event.actor_id do %>
-                  <span class="font-mono text-text-tertiary"><%= String.slice(event.actor_id, 0..7) %></span>
+                  <span class="font-mono text-text-tertiary">
+                    {String.slice(event.actor_id, 0..7)}
+                  </span>
                 <% end %>
               </span>
             </div>
 
             <div class="text-sm text-text-secondary mb-1">
-              <span class="font-medium text-text-primary"><%= event.resource_type %></span>
+              <span class="font-medium text-text-primary">{event.resource_type}</span>
               <%= if event.resource_id do %>
-                <span class="font-mono text-xs text-text-tertiary"><%= String.slice(event.resource_id, 0..7) %></span>
+                <span class="font-mono text-xs text-text-tertiary">
+                  {String.slice(event.resource_id, 0..7)}
+                </span>
               <% end %>
             </div>
 
@@ -159,20 +167,23 @@
 
           <div class="text-right">
             <div class="text-xs text-text-quaternary">
-              <%= format_timestamp(event.inserted_at) %>
+              {format_timestamp(event.inserted_at)}
             </div>
           </div>
         </div>
       </div>
     <% end %>
   </div>
-
-  <!-- Pagination -->
-  <div :if={@pagination.total_pages > 1} class="flex items-center justify-between mt-6 pt-6 border-t border-border">
+  
+<!-- Pagination -->
+  <div
+    :if={@pagination.total_pages > 1}
+    class="flex items-center justify-between mt-6 pt-6 border-t border-border"
+  >
     <div class="text-sm text-text-quaternary">
-      Page <%= @pagination.page %> of <%= @pagination.total_pages %>
+      Page {@pagination.page} of {@pagination.total_pages}
       <span class="mx-2">•</span>
-      <%= @pagination.total %> total events
+      {@pagination.total} total events
     </div>
 
     <div class="flex items-center gap-2">

@@ -71,7 +71,11 @@ defmodule CymphoWeb.OrgChartLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div id="org-chart-page" class="min-h-screen bg-canvas px-4 py-5 sm:px-6 lg:px-8" phx-hook="OrgChartExport">
+    <div
+      id="org-chart-page"
+      class="min-h-screen bg-canvas px-4 py-5 sm:px-6 lg:px-8"
+      phx-hook="OrgChartExport"
+    >
       <div class="mx-auto max-w-7xl">
         <.header
           title="Org"
@@ -177,11 +181,10 @@ defmodule CymphoWeb.OrgChartLive do
         >
           <.render_tree nodes={@org_chart} level={0} />
         </div>
-
-        <!-- Agent Stats Panel -->
+        
+    <!-- Agent Stats Panel -->
         <.modal
           :if={@selected_agent_id}
-          id="agent-stats-modal"
           on_cancel={JS.push("close_agent_panel")}
           show={true}
         >
@@ -228,7 +231,10 @@ defmodule CymphoWeb.OrgChartLive do
               </div>
             </div>
 
-            <div :if={@selected_agent_stats && @selected_agent_stats.budget_status} class="linear-panel px-4 py-3">
+            <div
+              :if={@selected_agent_stats && @selected_agent_stats.budget_status}
+              class="linear-panel px-4 py-3"
+            >
               <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary mb-2">
                 Budget Status
               </p>
@@ -250,17 +256,19 @@ defmodule CymphoWeb.OrgChartLive do
             </div>
 
             <div class="flex justify-center pt-2">
-              <.link navigate={"/agents/#{@selected_agent_id}"} class="text-sm text-brand hover:text-brand-hover font-510">
+              <.link
+                navigate={"/agents/#{@selected_agent_id}"}
+                class="text-sm text-brand hover:text-brand-hover font-510"
+              >
                 View Full Profile →
               </.link>
             </div>
           </div>
         </.modal>
-
-        <!-- Company Stats Panel -->
+        
+    <!-- Company Stats Panel -->
         <.modal
           :if={@show_company_stats}
-          id="company-stats-modal"
           on_cancel={JS.push("toggle_company_stats")}
           show={true}
         >
@@ -288,9 +296,18 @@ defmodule CymphoWeb.OrgChartLive do
               <div class="space-y-2">
                 <.stat_row label="CEO" count={@company_stats && @company_stats.by_role[:ceo]} />
                 <.stat_row label="CTO" count={@company_stats && @company_stats.by_role[:cto]} />
-                <.stat_row label="Engineer" count={@company_stats && @company_stats.by_role[:engineer]} />
-                <.stat_row label="Product Manager" count={@company_stats && @company_stats.by_role[:product_manager]} />
-                <.stat_row label="Designer" count={@company_stats && @company_stats.by_role[:designer]} />
+                <.stat_row
+                  label="Engineer"
+                  count={@company_stats && @company_stats.by_role[:engineer]}
+                />
+                <.stat_row
+                  label="Product Manager"
+                  count={@company_stats && @company_stats.by_role[:product_manager]}
+                />
+                <.stat_row
+                  label="Designer"
+                  count={@company_stats && @company_stats.by_role[:designer]}
+                />
               </div>
             </div>
 
@@ -300,7 +317,10 @@ defmodule CymphoWeb.OrgChartLive do
               </p>
               <div class="space-y-2">
                 <.stat_row label="Idle" count={@company_stats && @company_stats.by_status[:idle]} />
-                <.stat_row label="Running" count={@company_stats && @company_stats.by_status[:running]} />
+                <.stat_row
+                  label="Running"
+                  count={@company_stats && @company_stats.by_status[:running]}
+                />
                 <.stat_row label="Error" count={@company_stats && @company_stats.by_status[:error]} />
                 <.stat_row label="Paused" count={@company_stats && @company_stats.by_status[:paused]} />
               </div>

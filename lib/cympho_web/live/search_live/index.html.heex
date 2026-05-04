@@ -1,4 +1,4 @@
-<div class="container mx-auto px-4 py-8">
+<.page>
   <.header title="Search" subtitle="Search across issues, agents, projects, and goals"></.header>
   
 <!-- Search Input -->
@@ -27,7 +27,7 @@
   <%= if @recent_searches != [] do %>
     <div class="mb-6 p-4 bg-surface border border-border rounded-lg">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="font-serif text-sm font-medium text-text-primary">Recent Searches</h3>
+        <h3 class=" text-sm font-medium text-text-primary">Recent Searches</h3>
         <button
           type="button"
           phx-click="clear_recent_searches"
@@ -55,7 +55,7 @@
 <!-- Filters -->
   <div class="mb-6 p-4 bg-surface border border-border rounded-lg">
     <div class="flex items-center justify-between mb-4">
-      <h3 class="font-serif text-sm font-medium text-text-primary">Filters</h3>
+      <h3 class=" text-sm font-medium text-text-primary">Filters</h3>
       <%= if filters_active?(@filters) do %>
         <button
           type="button"
@@ -214,14 +214,14 @@
       <% end %>
     <% end %>
   </div>
-</div>
+</.page>
 
 <!-- All Tab -->
 <%= if @active_tab == :all do %>
   <div class="space-y-6">
     <%= if @results.issues != [] do %>
       <div>
-        <h2 class="font-serif text-lg font-medium text-text-primary mb-3">Issues</h2>
+        <h2 class=" text-lg font-medium text-text-primary mb-3">Issues</h2>
         <div class="space-y-2">
           <%= for issue <- @results.issues do %>
             <.link
@@ -239,7 +239,7 @@
                       {priority_label(issue.priority)} priority
                     </span>
                   </div>
-                  <h3 class="font-serif text-base font-medium text-text-primary mb-1">
+                  <h3 class=" text-base font-medium text-text-primary mb-1">
                     {issue.title}
                   </h3>
                   <p class="text-sm text-text-secondary line-clamp-2">{issue.description}</p>
@@ -266,7 +266,7 @@
 
     <%= if @results.agents != [] do %>
       <div>
-        <h2 class="font-serif text-lg font-medium text-text-primary mb-3">Agents</h2>
+        <h2 class=" text-lg font-medium text-text-primary mb-3">Agents</h2>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <%= for agent <- @results.agents do %>
             <.link
@@ -274,10 +274,10 @@
               class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
             >
               <div class="flex items-center justify-between mb-2">
-                <h3 class="font-serif text-base font-medium text-text-primary">{agent.name}</h3>
+                <h3 class=" text-base font-medium text-text-primary">{agent.name}</h3>
                 <span
                   class="w-2 h-2 rounded-full"
-                  style={"background-color: #{agent_status_color(agent.status)}"}
+                  class={["w-2 h-2 rounded-full", agent_status_color(agent.status)]}
                 >
                 </span>
               </div>
@@ -295,14 +295,14 @@
 
     <%= if @results.projects != [] do %>
       <div>
-        <h2 class="font-serif text-lg font-medium text-text-primary mb-3">Projects</h2>
+        <h2 class=" text-lg font-medium text-text-primary mb-3">Projects</h2>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <%= for project <- @results.projects do %>
             <.link
               navigate={~p"/projects/#{project.id}"}
               class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
             >
-              <h3 class="font-serif text-base font-medium text-text-primary mb-1">
+              <h3 class=" text-base font-medium text-text-primary mb-1">
                 {project.name}
               </h3>
               <p class="text-sm text-text-secondary line-clamp-2 mb-2">{project.description}</p>
@@ -319,7 +319,7 @@
 
     <%= if @results.goals != [] do %>
       <div>
-        <h2 class="font-serif text-lg font-medium text-text-primary mb-3">Goals</h2>
+        <h2 class=" text-lg font-medium text-text-primary mb-3">Goals</h2>
         <div class="space-y-2">
           <%= for goal <- @results.goals do %>
             <.link
@@ -329,7 +329,7 @@
               <div class="flex items-start justify-between">
                 <div class="flex-1">
                   <div class="flex items-center gap-2 mb-1">
-                    <h3 class="font-serif text-base font-medium text-text-primary">
+                    <h3 class=" text-base font-medium text-text-primary">
                       {goal.title}
                     </h3>
                     <span class={"text-xs font-medium #{priority_color(String.to_existing_atom(goal.priority))}"}>
@@ -373,7 +373,7 @@
                   {priority_label(issue.priority)} priority
                 </span>
               </div>
-              <h3 class="font-serif text-base font-medium text-text-primary mb-1">
+              <h3 class=" text-base font-medium text-text-primary mb-1">
                 {issue.title}
               </h3>
               <p class="text-sm text-text-secondary line-clamp-2">{issue.description}</p>
@@ -412,10 +412,10 @@
           class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
         >
           <div class="flex items-center justify-between mb-2">
-            <h3 class="font-serif text-base font-medium text-text-primary">{agent.name}</h3>
+            <h3 class=" text-base font-medium text-text-primary">{agent.name}</h3>
             <span
               class="w-2 h-2 rounded-full"
-              style={"background-color: #{agent_status_color(agent.status)}"}
+              class={["w-2 h-2 rounded-full", agent_status_color(agent.status)]}
             >
             </span>
           </div>
@@ -444,7 +444,7 @@
           navigate={~p"/projects/#{project.id}"}
           class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
         >
-          <h3 class="font-serif text-base font-medium text-text-primary mb-1">{project.name}</h3>
+          <h3 class=" text-base font-medium text-text-primary mb-1">{project.name}</h3>
           <p class="text-sm text-text-secondary line-clamp-2 mb-2">{project.description}</p>
           <div class="flex items-center gap-2 text-xs text-text-tertiary">
             <span class="capitalize">{project.status}</span>
@@ -473,7 +473,7 @@
           <div class="flex items-start justify-between">
             <div class="flex-1">
               <div class="flex items-center gap-2 mb-1">
-                <h3 class="font-serif text-base font-medium text-text-primary">{goal.title}</h3>
+                <h3 class=" text-base font-medium text-text-primary">{goal.title}</h3>
                 <span class={"text-xs font-medium #{priority_color(String.to_existing_atom(goal.priority))}"}>
                   {String.capitalize(goal.priority)} priority
                 </span>

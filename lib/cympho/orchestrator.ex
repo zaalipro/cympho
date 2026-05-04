@@ -170,12 +170,13 @@ defmodule Cympho.Orchestrator do
       capture_tool_call(tool_call, issue, agent_id, session.tool_traces)
 
     # Record tool call
-    _ = Instrumenter.record_tool_call(
-      session,
-      tool_call["name"],
-      tool_call["input"] || %{},
-      "[in_progress]"
-    )
+    _ =
+      Instrumenter.record_tool_call(
+        session,
+        tool_call["name"],
+        tool_call["input"] || %{},
+        "[in_progress]"
+      )
 
     {:noreply, %{session | turn_count: session.turn_count + 1, tool_traces: updated_tool_traces}}
   end
@@ -191,9 +192,10 @@ defmodule Cympho.Orchestrator do
     complete_engine_run(%{session | tool_traces: updated_tool_traces}, result)
 
     # Record session completion
-    _ = Instrumenter.record_session_event(session, "completed", %{
-      "turn_count" => session.turn_count + 1
-    })
+    _ =
+      Instrumenter.record_session_event(session, "completed", %{
+        "turn_count" => session.turn_count + 1
+      })
 
     body = extract_result_content(result)
 

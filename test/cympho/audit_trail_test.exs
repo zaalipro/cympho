@@ -137,7 +137,9 @@ defmodule Cympho.AuditTrailTest do
     end
 
     test "filters by event_type", %{company: company} do
-      {events, total} = AuditTrail.list_company_events(company.id, event_type: "issue_state_transition")
+      {events, total} =
+        AuditTrail.list_company_events(company.id, event_type: "issue_state_transition")
+
       assert total == 2
       assert length(events) == 2
       assert Enum.all?(events, &(&1.event_type == "issue_state_transition"))
@@ -364,9 +366,7 @@ defmodule Cympho.AuditTrailTest do
         })
 
       assert_raise Postgrex.Error, ~r/Audit events are immutable/, fn ->
-        Cympho.Repo.update(
-          Ecto.Changeset.change(event, %{ip_address: "1.2.3.4"})
-        )
+        Cympho.Repo.update(Ecto.Changeset.change(event, %{ip_address: "1.2.3.4"}))
       end
     end
 
