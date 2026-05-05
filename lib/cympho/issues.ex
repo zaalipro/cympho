@@ -30,6 +30,21 @@ defmodule Cympho.Issues do
     |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
   end
 
+  @doc """
+  Recent issues touched by an agent (assigned, created, or currently checked
+  out by them). Used by the agent show page.
+  """
+  def list_recent_for_agent(agent_id, limit \\ 10) do
+    Issue
+    |> where(
+      [i],
+      i.assignee_id == ^agent_id or i.created_by_agent_id == ^agent_id
+    )
+    |> order_by([i], desc: i.updated_at)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
   defp maybe_filter_by_company(query, %{company_id: company_id}) when not is_nil(company_id) do
     where(query, company_id: ^company_id)
   end
@@ -192,7 +207,8 @@ defmodule Cympho.Issues do
         {:error, :not_found}
 
       issue ->
-        {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee, :labels, :project])}
+        {:ok,
+         Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee, :labels, :project])}
     end
   end
 

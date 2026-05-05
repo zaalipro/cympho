@@ -1,165 +1,791 @@
 <.page size="content">
-  <.header title={@agent.name} subtitle={@agent.title || role_label(@agent.role)}>
-    <:actions>
-      <.app_link
-        navigate={~p"/agents"}
-        class="inline-flex items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-      >
-        Back
-      </.app_link>
-      <.app_link
-        navigate={~p"/agents/#{@agent.id}/edit"}
-        class="inline-flex items-center rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover"
-      >
-        Edit
-      </.app_link>
-    </:actions>
-  </.header>
+  <%!-- ── Breadcrumbs ────────────────────────────────────────────── --%>
+  <div class="mb-3 flex items-center gap-2 text-xs text-text-quaternary">
+    <.app_link navigate={~p"/agents"} class="hover:text-text-secondary">Agents</.app_link>
+    <span>›</span>
+    <span class="text-text-secondary">{@agent.name}</span>
+    <span :if={@current_tab != "dashboard"}>›</span>
+    <span :if={@current_tab != "dashboard"} class="capitalize text-text-secondary">
+      {@current_tab}
+    </span>
+  </div>
 
-  <.panel class="mb-5 p-5">
-    <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-      <div class="flex min-w-0 items-start gap-4">
-        <div class={"flex h-14 w-14 shrink-0 items-center justify-center rounded-xl text-base font-590 #{role_avatar_class(@agent.role)}"}>
-          {agent_initials(@agent)}
-        </div>
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <h2 class="truncate text-xl font-590 tracking-tight text-text-primary">
-              {@agent.name}
-            </h2>
-            <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-510 #{status_pill_class(@agent.status)}"}>
-              {status_label(@agent.status)}
-            </span>
-            <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-510 #{health_pill_class(@agent.health_status)}"}>
-              {health_status_label(@agent.health_status)}
-            </span>
-          </div>
-          <p class="mt-1 text-sm text-text-tertiary">
-            {role_label(@agent.role)} · {adapter_label(Map.get(@agent, :adapter))}
-          </p>
-          <p :if={@agent.parent} class="mt-1 text-xs text-text-quaternary">
-            Reports to
-            <.app_link
-              navigate={~p"/agents/#{@agent.parent.id}"}
-              class="text-text-secondary hover:text-brand"
-            >
-              {@agent.parent.name}
-            </.app_link>
-          </p>
-        </div>
+  <%!-- ── Top action bar ────────────────────────────────────────── --%>
+  <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div class="flex items-center gap-3">
+      <div class={"flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-base font-590 #{role_avatar_class(@agent.role)}"}>
+        {agent_initials(@agent)}
       </div>
-
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:min-w-[420px]">
-        <div class="rounded-lg border border-border bg-surface px-3 py-2">
-          <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
-            Max jobs
-          </p>
-          <p class="mt-1 text-lg font-590 text-text-primary">{@agent.max_concurrent_jobs}</p>
-        </div>
-        <div class="rounded-lg border border-border bg-surface px-3 py-2">
-          <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
-            Adapter
-          </p>
-          <p class="mt-1 truncate text-sm font-510 text-text-primary">
-            {adapter_label(Map.get(@agent, :adapter))}
-          </p>
-        </div>
-        <div class="rounded-lg border border-border bg-surface px-3 py-2">
-          <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
-            Reports
-          </p>
-          <p class="mt-1 text-lg font-590 text-text-primary">
-            {reports_count(@agent)}
-          </p>
-        </div>
-      </div>
-    </div>
-  </.panel>
-
-  <div class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-    <div class="space-y-5">
-      <.panel class="p-5">
-        <div class="mb-4 flex items-center justify-between">
-          <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-            Instructions
-          </h3>
-        </div>
-        <p class="whitespace-pre-wrap text-sm leading-6 text-text-secondary">
-          {@agent.instructions || "No instructions configured."}
+      <div class="min-w-0">
+        <h1 class="truncate text-2xl font-590 tracking-tight text-text-primary">{@agent.name}</h1>
+        <p class="truncate text-sm text-text-tertiary">
+          {role_label(@agent.role)}<span :if={@agent.title}> · {@agent.title}</span>
         </p>
-      </.panel>
-
-      <.panel :if={@agent.instructions_path} class="p-5">
-        <h3 class="mb-3 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-          Instructions File
-        </h3>
-        <code class="block rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-brand">
-          {@agent.instructions_path}
-        </code>
-      </.panel>
-
-      <.panel class="p-5">
-        <h3 class="mb-3 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-          Configuration
-        </h3>
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div class="rounded-lg border border-border bg-surface px-3 py-2">
-            <p class="text-xs text-text-quaternary">Max concurrent jobs</p>
-            <p class="mt-1 text-sm font-510 text-text-primary">
-              {@agent.max_concurrent_jobs}
-            </p>
-          </div>
-          <div class="rounded-lg border border-border bg-surface px-3 py-2">
-            <p class="text-xs text-text-quaternary">Runtime adapter</p>
-            <p class="mt-1 text-sm font-510 text-text-primary">
-              {adapter_label(Map.get(@agent, :adapter))}
-            </p>
-          </div>
-        </div>
-      </.panel>
+      </div>
     </div>
 
-    <aside class="space-y-5">
-      <.panel class="p-5">
-        <h3 class="mb-3 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-          Wake History
-        </h3>
-        <div
-          :if={Enum.empty?(@wake_history)}
-          class="rounded-lg border border-border bg-surface px-4 py-8 text-center text-sm text-text-tertiary"
+    <div class="flex flex-wrap items-center gap-2">
+      <.app_link
+        navigate={~p"/issues/new?assignee_id=#{@agent.id}"}
+        class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+      >
+        <span class="text-base leading-none">+</span> Assign Task
+      </.app_link>
+
+      <button
+        type="button"
+        phx-click="resume_agent"
+        disabled
+        title="Heartbeat trigger — coming soon"
+        class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary opacity-60"
+      >
+        ▶ Run Heartbeat
+      </button>
+
+      <%= if is_paused?(@agent) do %>
+        <button
+          type="button"
+          phx-click="resume_agent"
+          class="inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-510 text-emerald-300 hover:bg-emerald-500/15"
         >
-          No wake history available.
-        </div>
-        <div :if={not Enum.empty?(@wake_history)} class="space-y-2">
-          <div
-            :for={wake <- Enum.take(@wake_history, 10)}
-            class="rounded-lg border border-border bg-surface px-3 py-2"
+          ▶ Resume
+        </button>
+      <% else %>
+        <button
+          type="button"
+          phx-click="pause_agent"
+          class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        >
+          ⏸ Pause
+        </button>
+      <% end %>
+
+      <span class={"inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-510 #{status_pill_class(@agent.status)}"}>
+        {status_label(@agent.status)}
+      </span>
+    </div>
+  </div>
+
+  <%!-- ── Tabs ──────────────────────────────────────────────────── --%>
+  <div class="mb-5 flex items-center gap-1 border-b border-border">
+    <button
+      :for={
+        {key, label} <- [
+          {"dashboard", "Dashboard"},
+          {"instructions", "Instructions"},
+          {"skills", "Skills"},
+          {"configuration", "Configuration"},
+          {"runs", "Runs"}
+        ]
+      }
+      type="button"
+      phx-click="set_tab"
+      phx-value-tab={key}
+      class={[
+        "border-b-2 px-3 py-2 text-sm transition-colors -mb-px",
+        if(@current_tab == key,
+          do: "border-brand text-text-primary font-510",
+          else: "border-transparent text-text-tertiary hover:text-text-secondary"
+        )
+      ]}
+    >
+      {label}
+    </button>
+  </div>
+
+  <%!-- ── Dashboard tab ─────────────────────────────────────────── --%>
+  <div :if={@current_tab == "dashboard"} class="space-y-5">
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div class="rounded-lg border border-border bg-panel px-4 py-3">
+        <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
+          Max jobs
+        </p>
+        <p class="mt-1 text-xl font-590 text-text-primary">{@agent.max_concurrent_jobs}</p>
+      </div>
+      <div class="rounded-lg border border-border bg-panel px-4 py-3">
+        <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
+          Adapter
+        </p>
+        <p class="mt-1 truncate text-sm font-590 text-text-primary">
+          {adapter_label(@agent.adapter)}
+        </p>
+      </div>
+      <div class="rounded-lg border border-border bg-panel px-4 py-3">
+        <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
+          Reports
+        </p>
+        <p class="mt-1 text-xl font-590 text-text-primary">{reports_count(@agent)}</p>
+      </div>
+      <div class="rounded-lg border border-border bg-panel px-4 py-3">
+        <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
+          Created
+        </p>
+        <p class="mt-1 truncate text-sm font-590 text-text-primary">
+          {format_relative(@agent.inserted_at)}
+        </p>
+      </div>
+    </div>
+
+    <.panel class="overflow-hidden">
+      <div class="flex items-center justify-between border-b border-border px-4 py-3">
+        <h3 class="text-sm font-590 text-text-primary">Latest Run</h3>
+        <span :if={@latest_run} class="text-xs text-text-quaternary">
+          {format_relative(@latest_run.inserted_at)}
+        </span>
+      </div>
+
+      <div :if={!@latest_run} class="px-4 py-8 text-center text-sm text-text-tertiary">
+        No runs recorded yet.
+      </div>
+
+      <div :if={@latest_run} class="px-4 py-3">
+        <div class="flex flex-wrap items-center gap-2 text-sm">
+          <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-510 #{run_status_class(@latest_run.status)}"}>
+            {@latest_run.status}
+          </span>
+          <span class="font-mono text-xs text-text-quaternary">
+            {String.slice(@latest_run.id, 0, 8)}
+          </span>
+          <button
+            type="button"
+            phx-click="set_tab"
+            phx-value-tab="runs"
+            class="text-xs text-text-secondary hover:text-brand"
           >
-            <div class="flex items-center justify-between gap-3">
-              <span class="truncate text-sm font-510 text-text-secondary">
-                {wake_reason_label(wake.reason)}
-              </span>
-              <span class="shrink-0 text-xs text-text-quaternary">
-                {format_datetime(wake.inserted_at)}
-              </span>
-            </div>
+            View runs →
+          </button>
+        </div>
+        <div class="mt-2 grid grid-cols-2 gap-3 text-xs text-text-quaternary sm:grid-cols-4">
+          <div>
+            <p class="uppercase tracking-[0.08em]">Input tokens</p>
+            <p class="mt-1 text-sm font-510 text-text-secondary">
+              {@latest_run.input_tokens || 0}
+            </p>
+          </div>
+          <div>
+            <p class="uppercase tracking-[0.08em]">Output tokens</p>
+            <p class="mt-1 text-sm font-510 text-text-secondary">
+              {@latest_run.output_tokens || 0}
+            </p>
+          </div>
+          <div>
+            <p class="uppercase tracking-[0.08em]">Cost</p>
+            <p class="mt-1 text-sm font-510 text-text-secondary">
+              ${@latest_run.cost_usd || "0.00"}
+            </p>
+          </div>
+          <div>
+            <p class="uppercase tracking-[0.08em]">Started</p>
+            <p class="mt-1 text-sm font-510 text-text-secondary">
+              {format_datetime(@latest_run.inserted_at)}
+            </p>
+          </div>
+        </div>
+      </div>
+    </.panel>
+
+    <.panel class="overflow-hidden">
+      <div class="flex items-center justify-between border-b border-border px-4 py-3">
+        <h3 class="text-sm font-590 text-text-primary">Recent Issues</h3>
+        <.app_link
+          navigate={~p"/issues"}
+          class="text-xs text-text-tertiary hover:text-text-primary"
+        >
+          See all
+        </.app_link>
+      </div>
+
+      <div
+        :if={Enum.empty?(@recent_issues)}
+        class="px-4 py-8 text-center text-sm text-text-tertiary"
+      >
+        No issues yet for this agent.
+      </div>
+
+      <div :if={!Enum.empty?(@recent_issues)} class="divide-y divide-border">
+        <.app_link
+          :for={issue <- @recent_issues}
+          navigate={~p"/issues/#{issue.id}"}
+          class="block px-4 py-3 hover:bg-surface-hover/70"
+        >
+          <div class="flex items-center gap-3">
+            <span class="w-16 shrink-0 font-mono text-xs text-text-quaternary">
+              {issue.identifier}
+            </span>
+            <p class="min-w-0 flex-1 truncate text-sm text-text-primary">{issue.title}</p>
+            <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-510 #{issue_status_class(issue.status)}"}>
+              {issue_status_label(issue.status)}
+            </span>
+            <span class="hidden text-xs text-text-quaternary sm:inline-block">
+              {format_relative(issue.updated_at)}
+            </span>
+          </div>
+        </.app_link>
+      </div>
+    </.panel>
+
+    <.panel :if={!Enum.empty?(@wake_history)} class="overflow-hidden">
+      <div class="border-b border-border px-4 py-3">
+        <h3 class="text-sm font-590 text-text-primary">Wake History</h3>
+      </div>
+      <div class="divide-y divide-border">
+        <div
+          :for={wake <- Enum.take(@wake_history, 8)}
+          class="flex items-center justify-between gap-3 px-4 py-3"
+        >
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-510 text-text-secondary">
+              {wake_reason_label(wake.reason)}
+            </p>
             <.app_link
               :if={wake.issue_id}
               navigate={~p"/issues/#{wake.issue_id}"}
-              class="mt-1 inline-flex text-xs text-brand hover:text-accent-hover"
+              class="mt-0.5 inline-flex text-xs text-brand hover:text-accent-hover"
             >
               Open issue
             </.app_link>
           </div>
+          <span class="shrink-0 text-xs text-text-quaternary">
+            {format_datetime(wake.inserted_at)}
+          </span>
+        </div>
+      </div>
+    </.panel>
+  </div>
+
+  <%!-- ── Instructions tab ──────────────────────────────────────── --%>
+  <div
+    :if={@current_tab == "instructions"}
+    class="grid grid-cols-1 gap-5 lg:grid-cols-[260px_minmax(0,1fr)]"
+  >
+    <.panel class="overflow-hidden">
+      <div class="flex items-center justify-between border-b border-border px-4 py-3">
+        <h3 class="text-sm font-590 text-text-primary">Files</h3>
+        <form phx-submit="new_file" class="flex items-center gap-1">
+          <input
+            type="text"
+            name="name"
+            placeholder="extra.md"
+            class="hidden rounded border border-border bg-surface px-2 py-1 text-xs text-text-primary placeholder-text-quaternary focus:border-brand focus:outline-none sm:block sm:w-24"
+          />
+          <button
+            type="submit"
+            title="Add new file"
+            class="rounded p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+          </button>
+        </form>
+      </div>
+      <ul class="divide-y divide-border">
+        <li :for={file <- @files} class="group flex items-center gap-2 px-4 py-2">
+          <button
+            type="button"
+            phx-click="select_file"
+            phx-value-file={file}
+            class={[
+              "flex min-w-0 flex-1 items-center gap-2 truncate text-left text-sm",
+              if(@selected_file == file,
+                do: "text-text-primary",
+                else: "text-text-secondary hover:text-text-primary"
+              )
+            ]}
+          >
+            <svg
+              class="h-3.5 w-3.5 shrink-0 text-text-quaternary"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+              />
+            </svg>
+            <span class="truncate">{file}</span>
+            <span
+              :if={file == "AGENTS.md"}
+              class="ml-auto rounded bg-surface px-1.5 py-0.5 text-[10px] text-text-quaternary"
+            >
+              ENTRY
+            </span>
+          </button>
+          <button
+            :if={file != "AGENTS.md"}
+            type="button"
+            phx-click="delete_file"
+            phx-value-file={file}
+            data-confirm={"Delete #{file}?"}
+            title="Delete"
+            class="hidden rounded p-1 text-text-quaternary hover:text-red-300 group-hover:block"
+          >
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        </li>
+      </ul>
+    </.panel>
+
+    <.panel class="overflow-hidden">
+      <form phx-submit="save_file">
+        <div class="flex items-center justify-between border-b border-border px-5 py-3">
+          <div>
+            <h3 class="text-sm font-590 text-text-primary">{@selected_file}</h3>
+            <p class="mt-0.5 text-xs text-text-quaternary">markdown file</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1 rounded-lg border border-border bg-surface p-1 text-xs">
+              <button
+                type="button"
+                phx-click="toggle_instructions_preview"
+                class={[
+                  "rounded px-2 py-1 transition-colors",
+                  if(!@instructions_preview?,
+                    do: "bg-panel text-text-primary",
+                    else: "text-text-tertiary hover:text-text-secondary"
+                  )
+                ]}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                phx-click="toggle_instructions_preview"
+                class={[
+                  "rounded px-2 py-1 transition-colors",
+                  if(@instructions_preview?,
+                    do: "bg-panel text-text-primary",
+                    else: "text-text-tertiary hover:text-text-secondary"
+                  )
+                ]}
+              >
+                Preview
+              </button>
+            </div>
+            <button
+              type="submit"
+              class="rounded-lg bg-brand px-3 py-1.5 text-xs font-510 text-white hover:bg-accent-hover"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+
+        <div class="p-5">
+          <%= if @instructions_preview? do %>
+            <div class="prose-cympho min-h-[400px] rounded-lg border border-border bg-surface px-4 py-3 text-sm leading-6 text-text-secondary">
+              <%= if String.trim(@selected_file_content || "") != "" do %>
+                {render_markdown(@selected_file_content)}
+              <% else %>
+                <p class="text-text-tertiary">Nothing to preview yet.</p>
+              <% end %>
+            </div>
+          <% else %>
+            <textarea
+              name="content"
+              rows="22"
+              spellcheck="false"
+              class="w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs leading-6 text-text-primary placeholder-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              placeholder="# Markdown supported"
+            ><%= @selected_file_content %></textarea>
+          <% end %>
+        </div>
+      </form>
+    </.panel>
+  </div>
+
+  <%!-- ── Skills tab ────────────────────────────────────────────── --%>
+  <div :if={@current_tab == "skills"} class="space-y-5">
+    <.panel class="overflow-hidden">
+      <div class="border-b border-border px-5 py-3">
+        <h3 class="text-sm font-590 text-text-primary">Company skills library</h3>
+        <p class="mt-0.5 text-xs text-text-quaternary">
+          Toggle skills available to this agent at runtime.
+        </p>
+      </div>
+
+      <div :if={Enum.empty?(@plugins)} class="px-5 py-8 text-center text-sm text-text-tertiary">
+        No skills available. Install skills from the company library first.
+      </div>
+
+      <ul :if={!Enum.empty?(@plugins)} class="divide-y divide-border">
+        <li
+          :for={plugin <- @plugins}
+          class="flex items-start justify-between gap-4 px-5 py-3 hover:bg-surface-hover/40"
+        >
+          <button
+            type="button"
+            phx-click="toggle_skill"
+            phx-value-plugin_id={plugin.id}
+            class="flex min-w-0 flex-1 items-start gap-3 text-left"
+          >
+            <input
+              type="checkbox"
+              checked={MapSet.member?(@assigned_skill_ids, plugin.id)}
+              readonly
+              class="mt-0.5 h-4 w-4 rounded border-border bg-surface accent-brand"
+            />
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-510 text-text-primary">{plugin.name}</p>
+              <p :if={plugin.description} class="mt-0.5 line-clamp-2 text-xs text-text-quaternary">
+                {plugin.description}
+              </p>
+              <p
+                :if={MapSet.member?(@assigned_skill_ids, plugin.id)}
+                class="mt-1 text-[11px] text-text-quaternary"
+              >
+                Active for this agent.
+              </p>
+            </div>
+          </button>
+          <span class="shrink-0 text-xs text-text-quaternary">v{plugin.version}</span>
+        </li>
+      </ul>
+    </.panel>
+  </div>
+
+  <%!-- ── Configuration tab ─────────────────────────────────────── --%>
+  <div :if={@current_tab == "configuration"}>
+    <.simple_form
+      for={@form}
+      phx-change="config_validate"
+      phx-submit="config_save"
+      class="space-y-6"
+    >
+      <%!-- Identity --%>
+      <.panel class="p-5">
+        <h3 class="mb-4 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+          Identity
+        </h3>
+        <div class="grid gap-5 sm:grid-cols-2">
+          <.input field={@form[:name]} label="Name" required />
+          <.input field={@form[:title]} label="Title" placeholder="e.g. Software Engineer" />
+          <.input
+            field={@form[:role]}
+            type="select"
+            label="Role"
+            required
+            options={role_options()}
+          />
+          <.input
+            field={@form[:parent_id]}
+            type="select"
+            label="Reports to"
+            options={@reports_to_options}
+          />
         </div>
       </.panel>
 
+      <%!-- Adapter --%>
       <.panel class="p-5">
-        <h3 class="mb-3 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-          Created
+        <h3 class="mb-4 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+          Adapter
         </h3>
-        <p class="text-sm text-text-secondary">{format_datetime(@agent.inserted_at)}</p>
+        <div class="grid gap-5 sm:grid-cols-2">
+          <.input
+            field={@form[:adapter]}
+            type="select"
+            label="Adapter type"
+            required
+            options={adapter_options()}
+          />
+          <div class="space-y-1.5">
+            <label class="block text-xs font-510 text-text-secondary">Max concurrent jobs</label>
+            <div class="flex h-10 items-center gap-3 rounded-lg border border-border bg-surface px-3">
+              <input
+                type="range"
+                name="agent[max_concurrent_jobs]"
+                min="1"
+                max="10"
+                value={@form[:max_concurrent_jobs].value || 3}
+                class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-surface-hover accent-brand"
+              />
+              <span class="w-8 text-center text-sm font-590 text-brand">
+                {@form[:max_concurrent_jobs].value || 3}
+              </span>
+            </div>
+          </div>
+        </div>
       </.panel>
-    </aside>
+
+      <%!-- Environment Variables --%>
+      <.panel class="overflow-hidden">
+        <div class="flex items-center justify-between border-b border-border px-5 py-3">
+          <div>
+            <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+              Environment Variables
+            </h3>
+            <p class="mt-0.5 text-xs text-text-quaternary">
+              Forwarded to the adapter subprocess. Secrets override these on conflict.
+            </p>
+          </div>
+          <button
+            type="button"
+            phx-click="add_env_row"
+            class="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+          >
+            + Add
+          </button>
+        </div>
+
+        <div class="space-y-2 p-5">
+          <div :for={{row, idx} <- Enum.with_index(@env_rows)} class="flex items-center gap-2">
+            <input
+              type="text"
+              name={"env_keys[#{idx}]"}
+              value={row.key}
+              placeholder="KEY"
+              spellcheck="false"
+              class="w-1/3 rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-text-primary placeholder-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+            <input
+              type="text"
+              name={"env_values[#{idx}]"}
+              value={row.value}
+              placeholder="value"
+              spellcheck="false"
+              class="flex-1 rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-text-primary placeholder-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+            <button
+              type="button"
+              phx-click="remove_env_row"
+              phx-value-index={idx}
+              class="shrink-0 rounded-lg border border-border bg-surface p-2 text-text-quaternary hover:bg-red-500/10 hover:text-red-300"
+              title="Remove"
+            >
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </.panel>
+
+      <%!-- Permissions --%>
+      <.panel class="overflow-hidden">
+        <div class="border-b border-border px-5 py-3">
+          <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+            Permissions
+          </h3>
+        </div>
+
+        <div class="divide-y divide-border">
+          <.permission_row
+            label="Can create new agents"
+            help="Lets this agent hire or spawn other agents."
+            name="permissions[can_create_agents]"
+            checked={!!@permissions["can_create_agents"]}
+          />
+          <.permission_row
+            label="Can assign tasks"
+            help="Allows assigning issues to other agents."
+            name="permissions[can_assign_tasks]"
+            checked={!!@permissions["can_assign_tasks"]}
+          />
+          <.permission_row
+            label="Can approve work"
+            help="Required for approve_issue and request_changes governance actions."
+            name="permissions[can_approve]"
+            checked={!!@permissions["can_approve"]}
+          />
+        </div>
+      </.panel>
+
+      <:actions>
+        <div class="flex items-center justify-end gap-2 border-t border-border pt-5">
+          <.button type="submit" variant="primary">Save changes</.button>
+        </div>
+      </:actions>
+    </.simple_form>
+  </div>
+
+  <%!-- ── Runs tab ──────────────────────────────────────────────── --%>
+  <div
+    :if={@current_tab == "runs"}
+    class="grid grid-cols-1 gap-5 lg:grid-cols-[320px_minmax(0,1fr)]"
+  >
+    <.panel class="overflow-hidden">
+      <div class="border-b border-border px-4 py-3">
+        <h3 class="text-sm font-590 text-text-primary">Runs</h3>
+        <p class="mt-0.5 text-xs text-text-quaternary">{length(@recent_runs)} most recent</p>
+      </div>
+
+      <div
+        :if={Enum.empty?(@recent_runs)}
+        class="px-4 py-8 text-center text-sm text-text-tertiary"
+      >
+        No runs yet.
+      </div>
+
+      <ul
+        :if={!Enum.empty?(@recent_runs)}
+        class="max-h-[70vh] divide-y divide-border overflow-y-auto"
+      >
+        <li :for={run <- @recent_runs}>
+          <button
+            type="button"
+            phx-click="select_run"
+            phx-value-run_id={run.id}
+            class={[
+              "flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors",
+              if(@selected_run && @selected_run.id == run.id,
+                do: "bg-surface-hover",
+                else: "hover:bg-surface-hover/60"
+              )
+            ]}
+          >
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class={"h-2 w-2 shrink-0 rounded-full " <> run_dot_class(run.status)}>
+                </span>
+                <span class="font-mono text-xs text-text-primary">
+                  {String.slice(run.id, 0, 8)}
+                </span>
+                <span
+                  :if={run.invocation_source}
+                  class="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-quaternary"
+                >
+                  {run.invocation_source}
+                </span>
+              </div>
+              <span class="shrink-0 text-[11px] text-text-quaternary">
+                {format_relative(run.inserted_at)}
+              </span>
+            </div>
+            <p :if={run.continuation_summary} class="line-clamp-2 text-xs text-text-tertiary">
+              {String.slice(run.continuation_summary, 0, 140)}
+            </p>
+            <span class="text-[11px] text-text-quaternary">
+              {(run.input_tokens || 0) + (run.output_tokens || 0)} tok
+            </span>
+          </button>
+        </li>
+      </ul>
+    </.panel>
+
+    <.panel :if={@selected_run} class="overflow-hidden">
+      <div class="border-b border-border px-5 py-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class={"inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-510 #{run_status_class(@selected_run.status)}"}>
+            {@selected_run.status}
+          </span>
+          <span class="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[11px] uppercase text-text-quaternary">
+            {String.upcase(@selected_run.adapter || "—")}
+          </span>
+          <span class="font-mono text-xs text-text-secondary">
+            {String.slice(@selected_run.id, 0, 12)}
+          </span>
+        </div>
+
+        <div class="mt-3 grid grid-cols-2 gap-4 text-xs sm:grid-cols-4">
+          <div>
+            <p class="uppercase tracking-[0.08em] text-text-quaternary">Input</p>
+            <p class="mt-0.5 text-sm font-510 text-text-primary">
+              {@selected_run.input_tokens || 0}
+            </p>
+          </div>
+          <div>
+            <p class="uppercase tracking-[0.08em] text-text-quaternary">Output</p>
+            <p class="mt-0.5 text-sm font-510 text-text-primary">
+              {@selected_run.output_tokens || 0}
+            </p>
+          </div>
+          <div>
+            <p class="uppercase tracking-[0.08em] text-text-quaternary">Cost</p>
+            <p class="mt-0.5 text-sm font-510 text-text-primary">
+              ${@selected_run.cost_usd || "0.00"}
+            </p>
+          </div>
+          <div>
+            <p class="uppercase tracking-[0.08em] text-text-quaternary">Started</p>
+            <p class="mt-0.5 text-sm font-510 text-text-primary">
+              {format_datetime(@selected_run.started_at || @selected_run.inserted_at)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div :if={@selected_run.issue_id} class="border-b border-border px-5 py-3">
+        <p class="text-xs uppercase tracking-[0.08em] text-text-quaternary">Issue Touched</p>
+        <.app_link
+          navigate={~p"/issues/#{@selected_run.issue_id}"}
+          class="mt-1 inline-flex items-center gap-2 text-sm text-text-secondary hover:text-brand"
+        >
+          <span class="font-mono text-xs text-text-quaternary">
+            {String.slice(@selected_run.issue_id, 0, 8)}
+          </span>
+          Open issue →
+        </.app_link>
+      </div>
+
+      <div :if={@selected_run.workspace_path} class="border-b border-border px-5 py-3">
+        <p class="text-xs uppercase tracking-[0.08em] text-text-quaternary">Working dir</p>
+        <code class="mt-1 block rounded border border-border bg-surface px-2 py-1 font-mono text-xs text-text-secondary">
+          {@selected_run.workspace_path}
+        </code>
+      </div>
+
+      <div class="px-5 py-4">
+        <p class="text-xs uppercase tracking-[0.08em] text-text-quaternary mb-2">
+          Transcript / Summary
+        </p>
+        <div
+          :if={@selected_run.continuation_summary && @selected_run.continuation_summary != ""}
+          class="prose-cympho rounded-lg border border-border bg-surface p-4 text-sm leading-6 text-text-secondary"
+        >
+          {render_markdown(@selected_run.continuation_summary)}
+        </div>
+
+        <div :if={@selected_run.log_excerpt && @selected_run.log_excerpt != ""} class="mt-4">
+          <p class="text-xs uppercase tracking-[0.08em] text-text-quaternary mb-1">
+            Adapter log excerpt
+          </p>
+          <pre class="max-h-96 overflow-auto rounded-lg border border-border bg-surface px-3 py-2 font-mono text-[11px] leading-5 text-text-secondary"><%= @selected_run.log_excerpt %></pre>
+        </div>
+
+        <div :if={@selected_run.error_reason} class="mt-4">
+          <p class="text-xs uppercase tracking-[0.08em] text-text-quaternary mb-1">Error</p>
+          <pre class="overflow-auto rounded-lg border border-red-500/25 bg-red-500/5 px-3 py-2 font-mono text-[11px] leading-5 text-red-300"><%= @selected_run.error_reason %></pre>
+        </div>
+
+        <div
+          :if={
+            @selected_run.continuation_summary in [nil, ""] and
+              @selected_run.log_excerpt in [nil, ""] and
+              is_nil(@selected_run.error_reason)
+          }
+          class="rounded-lg border border-border bg-surface px-4 py-8 text-center text-sm text-text-tertiary"
+        >
+          No transcript or log captured for this run.
+        </div>
+      </div>
+    </.panel>
+
+    <div
+      :if={!@selected_run}
+      class="rounded-lg border border-border bg-panel px-4 py-8 text-center text-sm text-text-tertiary"
+    >
+      Select a run on the left to see its details.
+    </div>
   </div>
 </.page>

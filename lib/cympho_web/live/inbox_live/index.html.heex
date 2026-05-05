@@ -12,7 +12,7 @@
           name="agent_id"
           class="bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-1.5"
         >
-          <option value="">Select Agent</option>
+          <option value="all" selected={@selected_agent_id == "all"}>All agents</option>
           <%= for agent <- @agents do %>
             <option value={agent.id} selected={@selected_agent_id == agent.id}>
               {agent.name}
@@ -46,28 +46,6 @@
     </div>
   </div>
 
-  <div
-    :if={@selected_agent_id == "" || is_nil(@selected_agent_id)}
-    class="flex flex-col items-center justify-center py-20 text-center"
-  >
-    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
-      <svg
-        class="w-6 h-6 text-text-tertiary"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
-        />
-      </svg>
-    </div>
-    <p class="text-sm text-text-tertiary">Select an agent to view their inbox.</p>
-  </div>
-
   <div :if={@selected_agent_id != "" && @selected_agent_id != nil} class="space-y-2">
     <div
       :for={item <- @inbox_items}
@@ -97,6 +75,9 @@
           </span>
         </div>
         <p class="text-xs text-text-quaternary mt-1">
+          <span :if={@selected_agent_id == "all" and item.agent}>
+            {item.agent.name} ·
+          </span>
           {format_timestamp(item.inserted_at)}
         </p>
       </div>
@@ -107,6 +88,7 @@
           type="button"
           phx-click="mark_read"
           phx-value-issue_id={item.issue_id}
+          phx-value-agent_id={item.agent_id}
           class="p-1.5 rounded-lg text-text-quaternary hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
           title="Mark as read"
         >
@@ -124,6 +106,7 @@
           type="button"
           phx-click="dismiss"
           phx-value-issue_id={item.issue_id}
+          phx-value-agent_id={item.agent_id}
           class="p-1.5 rounded-lg text-text-quaternary hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
           title="Dismiss"
         >
@@ -141,6 +124,7 @@
           type="button"
           phx-click="archive"
           phx-value-issue_id={item.issue_id}
+          phx-value-agent_id={item.agent_id}
           class="p-1.5 rounded-lg text-text-quaternary hover:text-red-400 hover:bg-red-500/10 transition-colors"
           title="Archive"
         >
@@ -158,6 +142,7 @@
           type="button"
           phx-click="restore"
           phx-value-issue_id={item.issue_id}
+          phx-value-agent_id={item.agent_id}
           class="p-1.5 rounded-lg text-text-quaternary hover:text-green-400 hover:bg-green-500/10 transition-colors"
           title="Restore to unread"
         >

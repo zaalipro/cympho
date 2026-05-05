@@ -34,7 +34,13 @@ defmodule CymphoWeb.InboxLive.Index do
   def handle_params(params, _url, socket) do
     status = params["status"] || nil
     agent_id_param = params["agent_id"]
-    agent_id = if agent_id_param && agent_id_param != "", do: agent_id_param, else: nil
+
+    agent_id =
+      cond do
+        agent_id_param == "all" -> "all"
+        agent_id_param && agent_id_param != "" -> agent_id_param
+        true -> "all"
+      end
 
     socket =
       socket
@@ -88,72 +94,34 @@ defmodule CymphoWeb.InboxLive.Index do
   end
 
   @impl true
-  def handle_event("mark_read", %{"issue_id" => issue_id}, socket) do
-    agent_id = socket.assigns.selected_agent_id
-
-    with {:ok, _agent} <- authorize_agent_access(agent_id, socket),
-         {:ok, _} <- Inbox.mark_read(issue_id, agent_id) do
-      {:noreply, load_inbox(socket)}
-    else
-      {:error, :unauthorized} ->
-        {:noreply,
-         put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
-
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Inbox entry not found")}
-    end
+  def handle_event("mark_read", params, socket) do
+    inbox_action(socket, params, &Inbox.mark_read/2)
   end
 
-  def handle_event("dismiss", %{"issue_id" => issue_id}, socket) do
-    agent_id = socket.assigns.selected_agent_id
-
-    with {:ok, _agent} <- authorize_agent_access(agent_id, socket),
-         {:ok, _} <- Inbox.dismiss(issue_id, agent_id) do
-      {:noreply, load_inbox(socket)}
-    else
-      {:error, :unauthorized} ->
-        {:noreply,
-         put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
-
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Inbox entry not found")}
-    end
+  def handle_event("dismiss", params, socket) do
+    inbox_action(socket, params, &Inbox.dismiss/2)
   end
 
-  def handle_event("archive", %{"issue_id" => issue_id}, socket) do
-    agent_id = socket.assigns.selected_agent_id
-
-    with {:ok, _agent} <- authorize_agent_access(agent_id, socket),
-         {:ok, _} <- Inbox.archive(issue_id, agent_id) do
-      {:noreply, load_inbox(socket)}
-    else
-      {:error, :unauthorized} ->
-        {:noreply,
-         put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
-
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Inbox entry not found")}
-    end
+  def handle_event("archive", params, socket) do
+    inbox_action(socket, params, &Inbox.archive/2)
   end
 
-  def handle_event("restore", %{"issue_id" => issue_id}, socket) do
-    agent_id = socket.assigns.selected_agent_id
-
-    with {:ok, _agent} <- authorize_agent_access(agent_id, socket),
-         {:ok, _} <- Inbox.restore(issue_id, agent_id) do
-      {:noreply, load_inbox(socket)}
-    else
-      {:error, :unauthorized} ->
-        {:noreply,
-         put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
-
-      {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Inbox entry not found")}
-    end
+  def handle_event("restore", params, socket) do
+    inbox_action(socket, params, &Inbox.restore/2)
   end
 
   def handle_event("filter_status", %{"status" => status}, socket) do
     {:noreply, push_patch(socket, to: build_url(socket, %{"status" => status}))}
+  end
+
+  def handle_event("select_agent", %{"agent_id" => "all"}, socket) do
+    socket =
+      socket
+      |> assign(:selected_agent_id, "all")
+      |> maybe_subscribe_to_agent()
+      |> load_inbox()
+
+    {:noreply, push_patch(socket, to: build_url(socket, %{"agent_id" => "all"}))}
   end
 
   def handle_event("select_agent", %{"agent_id" => agent_id}, socket) do
@@ -173,17 +141,39 @@ defmodule CymphoWeb.InboxLive.Index do
     end
   end
 
+  defp inbox_action(socket, %{"issue_id" => issue_id} = params, fun) do
+    agent_id = Map.get(params, "agent_id") || socket.assigns.selected_agent_id
+
+    with {:ok, _agent} <- authorize_agent_access(agent_id, socket),
+         {:ok, _} <- fun.(issue_id, agent_id) do
+      {:noreply, load_inbox(socket)}
+    else
+      {:error, :unauthorized} ->
+        {:noreply,
+         put_flash(socket, :error, "You don't have permission to access this agent's inbox")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Inbox entry not found")}
+    end
+  end
+
   defp load_inbox(socket) do
     agent_id = socket.assigns[:selected_agent_id]
     status = socket.assigns[:current_status]
-
-    opts = if status, do: [status: status], else: []
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
     items =
-      if agent_id do
-        Inbox.list_inbox_for_agent(agent_id, opts)
-      else
-        []
+      cond do
+        agent_id == "all" and company_id ->
+          opts = [limit: 100] ++ if(status, do: [status: status], else: [])
+          Inbox.list_recent_for_company(company_id, opts)
+
+        agent_id in [nil, "", "all"] ->
+          []
+
+        true ->
+          opts = if status, do: [status: status], else: []
+          Inbox.list_inbox_for_agent(agent_id, opts)
       end
 
     assign(socket, :inbox_items, items)
@@ -229,8 +219,8 @@ defmodule CymphoWeb.InboxLive.Index do
     agent_id = socket.assigns[:selected_agent_id]
     subscribed_id = socket.assigns[:subscribed_agent_id]
 
-    if connected?(socket) && agent_id && agent_id != subscribed_id do
-      if subscribed_id do
+    if connected?(socket) && agent_id && agent_id != "all" && agent_id != subscribed_id do
+      if subscribed_id && subscribed_id != "all" do
         Inbox.unsubscribe(subscribed_id)
       end
 
