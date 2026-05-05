@@ -37,6 +37,30 @@ defmodule Cympho.Inbox do
     |> Kernel.||(0)
   end
 
+  @doc """
+  Recent inbox items across all agents in the given company. Used by the
+  dashboard preview — kept small (10 by default) and preloaded with `:issue`.
+  """
+  def list_recent_for_company(company_id, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 10)
+    status = Keyword.get(opts, :status)
+
+    query =
+      from(s in InboxState,
+        join: a in Cympho.Agents.Agent,
+        on: a.id == s.agent_id,
+        where: a.company_id == ^company_id,
+        order_by: [desc: s.inserted_at],
+        limit: ^limit
+      )
+
+    query = if status, do: where(query, [s], s.status == ^status), else: query
+
+    query
+    |> Repo.all()
+    |> Repo.preload([:issue, :agent])
+  end
+
   def list_inbox_for_agent(agent_id, opts \\ []) do
     status = Keyword.get(opts, :status)
     limit = Keyword.get(opts, :limit, 100)

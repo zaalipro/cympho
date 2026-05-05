@@ -58,6 +58,22 @@
         placeholder="Describe the agent's responsibilities, constraints, and working style."
       />
 
+      <div class="space-y-1.5">
+        <label class="block text-xs font-510 text-text-secondary">
+          Environment Variables
+        </label>
+        <textarea
+          name="agent[env_text]"
+          rows="4"
+          placeholder={~s(ANTHROPIC_BASE_URL=https://api.anthropic.com\nANTHROPIC_AUTH_TOKEN=...)}
+          class="w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-text-primary placeholder-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+        ><%= @env_text %></textarea>
+        <p class="text-xs text-text-quaternary">
+          One <code>KEY=VALUE</code> per line. Forwarded to the adapter subprocess.
+          Sensitive values (e.g. API keys) should go in Secrets — secrets override these on conflict.
+        </p>
+      </div>
+
       <:actions>
         <div class="flex items-center justify-end gap-2 border-t border-border pt-5">
           <.app_link

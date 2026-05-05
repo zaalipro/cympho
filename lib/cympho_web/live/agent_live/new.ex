@@ -2,11 +2,16 @@ defmodule CymphoWeb.AgentLive.New do
   use CymphoWeb, :live_view
   alias Cympho.Agents
   alias Cympho.Agents.Agent
+  alias Cympho.Agents.RolePlaybook
+  alias Cympho.Agents.RuntimeEnv
+
+  @default_role "engineer"
 
   @default_attrs %{
-    "role" => "engineer",
+    "role" => @default_role,
     "adapter" => "claude_code",
-    "max_concurrent_jobs" => "3"
+    "max_concurrent_jobs" => "3",
+    "instructions" => RolePlaybook.default_overrides_template(:engineer)
   }
 
   @impl true
@@ -19,6 +24,7 @@ defmodule CymphoWeb.AgentLive.New do
      socket
      |> assign(:page_title, "New Agent")
      |> assign(:pending_approval_id, nil)
+     |> assign(:env_text, "")
      |> assign(:reports_to_options, reports_to_options(company, nil))
      |> assign(:form, to_form(changeset))}
   end
@@ -26,6 +32,9 @@ defmodule CymphoWeb.AgentLive.New do
   @impl true
   def handle_event("validate", %{"agent" => agent_params}, socket) do
     company = socket.assigns[:current_company]
+
+    agent_params = maybe_refresh_instructions_for_role(agent_params)
+    env_text = Map.get(agent_params, "env_text", "")
 
     changeset =
       %Agent{}
@@ -36,7 +45,10 @@ defmodule CymphoWeb.AgentLive.New do
       )
       |> Map.put(:action, :validate)
 
-    {:noreply, assign(socket, form: to_form(changeset))}
+    {:noreply,
+     socket
+     |> assign(:env_text, env_text)
+     |> assign(:form, to_form(changeset))}
   end
 
   def handle_event("save", %{"agent" => agent_params}, socket) do
@@ -84,6 +96,20 @@ defmodule CymphoWeb.AgentLive.New do
     params
     |> Map.update("adapter", "claude_code", &normalize_adapter/1)
     |> normalize_parent_id()
+    |> normalize_runtime_env()
+  end
+
+  defp normalize_runtime_env(params) do
+    case Map.pop(params, "env_text") do
+      {nil, params} ->
+        params
+
+      {text, params} ->
+        env_map = RuntimeEnv.parse_text(text)
+        existing = Map.get(params, "runtime_config") || %{}
+        runtime_config = Map.put(existing, "env", env_map)
+        Map.put(params, "runtime_config", runtime_config)
+    end
   end
 
   defp normalize_parent_id(params) do
@@ -92,6 +118,45 @@ defmodule CymphoWeb.AgentLive.New do
       _ -> params
     end
   end
+
+  # When the user changes role, refresh the instructions field if it's still
+  # one of the role-template defaults (i.e. they haven't customised it yet).
+  # Custom text is left alone so we never overwrite the user's writing.
+  defp maybe_refresh_instructions_for_role(%{"role" => role} = params) do
+    role_atom = parse_role(role)
+    current = Map.get(params, "instructions", "") || ""
+
+    if role_atom != nil and looks_like_default_template?(current) do
+      Map.put(params, "instructions", RolePlaybook.default_overrides_template(role_atom))
+    else
+      params
+    end
+  end
+
+  defp maybe_refresh_instructions_for_role(params), do: params
+
+  defp parse_role(role) when is_binary(role) do
+    case role do
+      "ceo" -> :ceo
+      "cto" -> :cto
+      "engineer" -> :engineer
+      "product_manager" -> :product_manager
+      "designer" -> :designer
+      _ -> nil
+    end
+  end
+
+  defp parse_role(_), do: nil
+
+  defp looks_like_default_template?(""), do: true
+
+  defp looks_like_default_template?(text) when is_binary(text) do
+    Enum.any?([:ceo, :cto, :engineer, :product_manager, :designer], fn role ->
+      RolePlaybook.default_overrides_template(role) == text
+    end)
+  end
+
+  defp looks_like_default_template?(_), do: false
 
   defp reports_to_options(%{id: company_id}, exclude_id) do
     company_id

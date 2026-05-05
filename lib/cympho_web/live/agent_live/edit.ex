@@ -2,6 +2,7 @@ defmodule CymphoWeb.AgentLive.Edit do
   use CymphoWeb, :live_view
   alias Cympho.Agents
   alias Cympho.Agents.Agent
+  alias Cympho.Agents.RuntimeEnv
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -12,18 +13,27 @@ defmodule CymphoWeb.AgentLive.Edit do
      socket
      |> assign(:agent, agent)
      |> assign(:form, to_form(changeset))
+     |> assign(:env_text, RuntimeEnv.to_text(RuntimeEnv.from_agent(agent)))
      |> assign(:pending_approval_id, nil)
-     |> assign(:reports_to_options, reports_to_options(socket.assigns[:current_company], agent.id))}
+     |> assign(
+       :reports_to_options,
+       reports_to_options(socket.assigns[:current_company], agent.id)
+     )}
   end
 
   @impl true
   def handle_event("validate", %{"agent" => agent_params}, socket) do
+    env_text = Map.get(agent_params, "env_text", socket.assigns.env_text)
+
     changeset =
       socket.assigns.agent
       |> Agents.change_agent(normalize_agent_params(agent_params))
       |> Map.put(:action, :validate)
 
-    {:noreply, assign(socket, form: to_form(changeset))}
+    {:noreply,
+     socket
+     |> assign(:env_text, env_text)
+     |> assign(:form, to_form(changeset))}
   end
 
   def handle_event("save", %{"agent" => agent_params}, socket) do
@@ -62,6 +72,20 @@ defmodule CymphoWeb.AgentLive.Edit do
     params
     |> Map.update("adapter", "claude_code", &normalize_adapter/1)
     |> normalize_parent_id()
+    |> normalize_runtime_env()
+  end
+
+  defp normalize_runtime_env(params) do
+    case Map.pop(params, "env_text") do
+      {nil, params} ->
+        params
+
+      {text, params} ->
+        env_map = RuntimeEnv.parse_text(text)
+        existing = Map.get(params, "runtime_config") || %{}
+        runtime_config = Map.put(existing, "env", env_map)
+        Map.put(params, "runtime_config", runtime_config)
+    end
   end
 
   defp normalize_parent_id(params) do

@@ -90,8 +90,16 @@ defmodule Cympho.AgentActions do
         %{issue: Issues.get_issue!(issue.id), results: results}
       end)
       |> case do
-        {:ok, result} -> {:ok, result}
-        {:error, reason} -> {:error, reason}
+        {:ok, result} ->
+          {:ok, result}
+
+        {:error, reason} ->
+          # The transaction rolled back, which means any system_comment
+          # written inside an execute_action clause was discarded too.
+          # Re-emit the rejection comment outside the transaction so the
+          # LLM sees it on its next turn and self-corrects.
+          maybe_emit_rejection_comment(issue, reason)
+          {:error, reason}
       end
     end
   end
@@ -103,6 +111,35 @@ defmodule Cympho.AgentActions do
   end
 
   def execute(_issue, _agent, _actions), do: {:error, :invalid_execution_context}
+
+  defp maybe_emit_rejection_comment(%Issue{} = issue, :no_supervisor_to_review) do
+    system_comment(
+      issue,
+      "submit_review rejected: you are the CEO and have no supervisor to route this to. " <>
+        "Use approve_issue when sub-issues are complete, or create_issue to delegate further."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(%Issue{} = issue, {:children_not_done, child_ids}) do
+    labels =
+      from(i in Issue,
+        where: i.id in ^child_ids,
+        select: i.identifier
+      )
+      |> Repo.all()
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join(", ")
+
+    label_part = if labels == "", do: "", else: " (#{labels})"
+
+    system_comment(
+      issue,
+      "approve_issue rejected: #{length(child_ids)} sub-issue(s) still open#{label_part}. " <>
+        "Wait for them to reach :done, or request_changes / block_issue if they're stuck."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(_issue, _reason), do: :ok
 
   # Mirror the permissive policy used by `Issues.checkout_issue/3`: only
   # reject when both sides have a non-nil company_id and they differ. Legacy
@@ -291,6 +328,14 @@ defmodule Cympho.AgentActions do
     end
   end
 
+  # CEO has no supervisor — submit_review would set assignee_id to nil and
+  # the dispatcher would re-route the issue right back to the CEO. Reject
+  # explicitly. The rejection system-comment is emitted post-transaction in
+  # execute/3 (since the rollback would otherwise discard it).
+  defp execute_action(_issue, %Agent{role: :ceo, parent_id: nil}, %{"type" => "submit_review"}) do
+    {:error, :no_supervisor_to_review}
+  end
+
   defp execute_action(issue, agent, %{"type" => "submit_review"} = action) do
     update_workflow_issue(issue, agent, %{
       status: :in_review,
@@ -304,10 +349,17 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "approve_issue"} = action) do
-    with {:ok, transitioned} <- Issues.transition_issue(issue, :done),
-         {:ok, released} <- Issues.force_release_issue(transitioned, :done),
-         {:ok, _} <- maybe_agent_comment(issue, agent, action["notes"]) do
-      {:ok, %{type: "approve_issue", issue_id: released.id}}
+    case open_children(issue.id) do
+      [] ->
+        with {:ok, transitioned} <- Issues.transition_issue(issue, :done),
+             {:ok, released} <- Issues.force_release_issue(transitioned, :done),
+             {:ok, _} <- maybe_agent_comment(issue, agent, action["notes"]) do
+          {:ok, %{type: "approve_issue", issue_id: released.id}}
+        end
+
+      open ->
+        # Rejection comment is emitted post-transaction in execute/3.
+        {:error, {:children_not_done, Enum.map(open, & &1.id)}}
     end
   end
 
@@ -481,6 +533,16 @@ defmodule Cympho.AgentActions do
       end
 
     Enum.join(lines, "\n")
+  end
+
+  # Returns sub-issues of `parent_id` that are not yet :done or :cancelled.
+  # Used by approve_issue to refuse premature parent completion.
+  defp open_children(parent_id) do
+    from(i in Issue,
+      where: i.parent_id == ^parent_id and i.status not in [:done, :cancelled],
+      select: %{id: i.id, identifier: i.identifier}
+    )
+    |> Repo.all()
   end
 
   defp update_workflow_issue(issue, agent, attrs) do

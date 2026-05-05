@@ -202,7 +202,9 @@ defmodule Cympho.Companies do
           description: "An autonomous AI company with a CEO, CTO, and engineering team.",
           status: "active",
           issue_prefix: issue_prefix,
-          issue_counter: 1,
+          # Pre-aligned with the 5 seed issues created below; otherwise the
+          # next Issues.create_issue/1 call would collide on issue_number.
+          issue_counter: 5,
           budget_monthly_cents:
             attrs[:budget_monthly_cents] || attrs["budget_monthly_cents"] || 0,
           require_board_approval_for_new_agents: false,

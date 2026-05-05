@@ -50,8 +50,8 @@
     />
   </div>
 
-  <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-    <.panel class="overflow-hidden">
+  <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-stretch">
+    <.panel class="flex flex-col overflow-hidden">
       <div class="flex items-center justify-between border-b border-border px-4 py-3">
         <div>
           <h2 class="text-sm font-590 text-text-primary">Active Agents</h2>
@@ -91,45 +91,87 @@
       </div>
     </.panel>
 
-    <.panel class="p-4">
-      <h2 class="mb-4 text-sm font-590 text-text-primary">Issues by Status</h2>
-      <div class="space-y-3">
-        <div
-          :for={%{status: status, count: count} <- @issue_status_counts}
-          class="flex items-center gap-3"
-        >
-          <span class={"h-2.5 w-2.5 shrink-0 rounded-full #{status_dot_color(status)}"}></span>
-          <span class="w-24 text-xs text-text-tertiary">{status_label(status)}</span>
-          <div class="h-1.5 flex-1 rounded-full bg-canvas">
-            <div
-              class={"h-1.5 rounded-full #{status_bar_color(status)}"}
-              style={"width: #{bar_percent(count, total_issues(@issue_status_counts))}%"}
-            >
+    <div class="flex flex-col gap-4">
+      <.panel class="flex-1 p-4">
+        <h2 class="mb-4 text-sm font-590 text-text-primary">Issues by Status</h2>
+        <div class="space-y-3">
+          <div
+            :for={%{status: status, count: count} <- @issue_status_counts}
+            class="flex items-center gap-3"
+          >
+            <span class={"h-2.5 w-2.5 shrink-0 rounded-full #{status_dot_color(status)}"}></span>
+            <span class="w-24 text-xs text-text-tertiary">{status_label(status)}</span>
+            <div class="h-1.5 flex-1 rounded-full bg-canvas">
+              <div
+                class={"h-1.5 rounded-full #{status_bar_color(status)}"}
+                style={"width: #{bar_percent(count, total_issues(@issue_status_counts))}%"}
+              >
+              </div>
             </div>
+            <span class="w-8 text-right text-xs font-590 text-text-secondary">{count}</span>
           </div>
-          <span class="w-8 text-right text-xs font-590 text-text-secondary">{count}</span>
         </div>
-      </div>
-    </.panel>
+      </.panel>
 
-    <.panel class="p-4">
-      <h2 class="mb-4 text-sm font-590 text-text-primary">Agents by Status</h2>
-      <div class="space-y-3">
-        <div
-          :for={%{status: status, count: count} <- @agent_status_counts}
-          class="flex items-center gap-3"
-        >
-          <span class={"h-2.5 w-2.5 shrink-0 rounded-full #{agent_status_dot(status)}"}></span>
-          <span class="w-24 text-xs text-text-tertiary">{status_label(status)}</span>
-          <div class="h-1.5 flex-1 rounded-full bg-canvas">
-            <div
-              class={"h-1.5 rounded-full #{agent_status_bar(status)}"}
-              style={"width: #{bar_percent(count, @total_agents)}%"}
-            >
+      <.panel class="flex-1 p-4">
+        <h2 class="mb-4 text-sm font-590 text-text-primary">Agents by Status</h2>
+        <div class="space-y-3">
+          <div
+            :for={%{status: status, count: count} <- @agent_status_counts}
+            class="flex items-center gap-3"
+          >
+            <span class={"h-2.5 w-2.5 shrink-0 rounded-full #{agent_status_dot(status)}"}></span>
+            <span class="w-24 text-xs text-text-tertiary">{status_label(status)}</span>
+            <div class="h-1.5 flex-1 rounded-full bg-canvas">
+              <div
+                class={"h-1.5 rounded-full #{agent_status_bar(status)}"}
+                style={"width: #{bar_percent(count, @total_agents)}%"}
+              >
+              </div>
             </div>
+            <span class="w-8 text-right text-xs font-590 text-text-secondary">{count}</span>
           </div>
-          <span class="w-8 text-right text-xs font-590 text-text-secondary">{count}</span>
         </div>
+      </.panel>
+    </div>
+
+    <.panel class="flex flex-col overflow-hidden">
+      <div class="flex items-center justify-between border-b border-border px-4 py-3">
+        <div>
+          <h2 class="text-sm font-590 text-text-primary">Inbox</h2>
+          <p class="mt-0.5 text-xs text-text-quaternary">Latest agent inbox items</p>
+        </div>
+        <.app_link
+          navigate={~p"/inbox"}
+          class="text-xs text-text-tertiary hover:text-text-primary"
+        >
+          Open inbox
+        </.app_link>
+      </div>
+
+      <.empty_state
+        :if={Enum.empty?(@recent_inbox)}
+        title="Inbox empty"
+        message="Agent activity will surface here as it arrives."
+        class="py-10"
+      />
+
+      <div :if={!Enum.empty?(@recent_inbox)} class="divide-y divide-border">
+        <.app_link
+          :for={item <- @recent_inbox}
+          navigate={inbox_item_link(item)}
+          class="block px-4 py-3 hover:bg-surface-hover/70"
+        >
+          <div class="flex items-center gap-2">
+            <span class={"h-2 w-2 shrink-0 rounded-full #{inbox_dot(item.status)}"}></span>
+            <p class="min-w-0 flex-1 truncate text-sm font-510 text-text-primary">
+              {inbox_item_title(item)}
+            </p>
+          </div>
+          <p class="mt-1 truncate text-xs text-text-quaternary">
+            {inbox_item_meta(item)}
+          </p>
+        </.app_link>
       </div>
     </.panel>
   </div>

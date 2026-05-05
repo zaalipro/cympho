@@ -99,6 +99,10 @@ defmodule CymphoWeb.Router do
       live "/audit-trail", AuditTrailLive.Index
       live "/profile/:id", ProfileLive.Show
       live "/profile/:id/edit", ProfileLive.Edit
+
+      if Mix.env() == :dev do
+        live "/dev/prompt-inspector", PromptInspectorLive
+      end
     end
 
     live_session :board_governed,

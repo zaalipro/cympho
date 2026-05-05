@@ -108,6 +108,7 @@ defmodule CymphoWeb.DashboardLive.Index do
     |> assign(:bottlenecks, summary.bottlenecks)
     |> assign(:routine_health, summary.routine_health)
     |> assign(:recent_activities, summary.recent_activities)
+    |> assign(:recent_inbox, summary.recent_inbox)
     |> assign(:cost_summary, summary.cost_summary)
   end
 
@@ -242,6 +243,29 @@ defmodule CymphoWeb.DashboardLive.Index do
   def activity_icon("heartbeat"), do: "bg-gray-400"
   def activity_icon("agent_action"), do: "bg-brand"
   def activity_icon(_), do: "bg-gray-400"
+
+  def inbox_dot("unread"), do: "bg-blue-400"
+  def inbox_dot("read"), do: "bg-gray-500"
+  def inbox_dot("dismissed"), do: "bg-yellow-500"
+  def inbox_dot("archived"), do: "bg-red-500"
+  def inbox_dot(_), do: "bg-gray-400"
+
+  def inbox_item_link(%{issue: %{id: id}}) when is_binary(id), do: ~p"/issues/#{id}"
+  def inbox_item_link(_), do: ~p"/inbox"
+
+  def inbox_item_title(%{issue: %{identifier: ident, title: title}})
+      when is_binary(ident) and is_binary(title),
+      do: "#{ident} — #{title}"
+
+  def inbox_item_title(%{issue: %{title: title}}) when is_binary(title), do: title
+  def inbox_item_title(_), do: "Issue removed"
+
+  def inbox_item_meta(item) do
+    agent_name = (item.agent && item.agent.name) || "—"
+    timestamp = Calendar.strftime(item.inserted_at, "%b %d, %H:%M")
+    status = String.capitalize(item.status || "")
+    "#{agent_name} · #{status} · #{timestamp}"
+  end
 
   def activity_label("created"), do: "Created"
   def activity_label("status_changed"), do: "Status Changed"

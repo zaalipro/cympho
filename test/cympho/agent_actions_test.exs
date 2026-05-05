@@ -95,15 +95,27 @@ defmodule Cympho.AgentActionsTest do
       assert created.status == :todo
     end
 
-    test "submit_review releases current issue to reviewer role", %{issue: issue, ceo: ceo} do
+    test "submit_review from a CEO with no parent is rejected (would ping-pong)", %{
+      issue: issue,
+      ceo: ceo
+    } do
       actions = [%{"type" => "submit_review", "role" => "cto", "notes" => "Ready"}]
 
-      assert {:ok, _} = AgentActions.execute(issue, ceo, actions)
+      assert {:error, :no_supervisor_to_review} = AgentActions.execute(issue, ceo, actions)
 
-      updated = Issues.get_issue!(issue.id)
-      assert updated.status == :in_review
-      assert updated.assignee_id == nil
-      assert updated.assigned_role == "cto"
+      # Issue is unchanged — still :in_progress, still owned by the CEO
+      unchanged = Issues.get_issue!(issue.id)
+      assert unchanged.status == :in_progress
+      assert unchanged.assignee_id == ceo.id
+
+      # A system comment surfaces the rejection so the LLM self-corrects
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn c ->
+               c.author_type == "system" and
+                 String.contains?(c.body, "submit_review rejected") and
+                 String.contains?(c.body, "approve_issue")
+             end)
     end
 
     test "submit_review routes the issue to the agent's reports_to (parent) when set", %{
@@ -272,6 +284,59 @@ defmodule Cympho.AgentActionsTest do
       assert {:ok, %{results: [%{issue_id: id_a}]}} = AgentActions.execute(issue, cto, actions_a)
       assert {:ok, %{results: [%{issue_id: id_b}]}} = AgentActions.execute(issue, cto, actions_b)
       assert id_a != id_b
+    end
+
+    test "approve_issue is rejected when sub-issues are still open", %{
+      issue: issue,
+      ceo: ceo,
+      cto: cto
+    } do
+      # CTO creates a sub-issue under the CEO's parent issue. The child stays
+      # in :todo (unfinished). The CEO then tries to approve the parent.
+      child_action = [
+        %{"type" => "create_issue", "title" => "Open child task", "role" => "engineer"}
+      ]
+
+      assert {:ok, %{results: [%{issue_id: child_id}]}} =
+               AgentActions.execute(issue, cto, child_action)
+
+      child = Issues.get_issue!(child_id)
+      assert child.status == :todo
+      refute child.status in [:done, :cancelled]
+
+      assert {:error, {:children_not_done, [^child_id]}} =
+               AgentActions.execute(issue, ceo, [%{"type" => "approve_issue"}])
+
+      # Parent did NOT transition to :done
+      unchanged = Issues.get_issue!(issue.id)
+      refute unchanged.status == :done
+
+      # System comment surfaces the rejection with the child identifier
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn c ->
+               c.author_type == "system" and
+                 String.contains?(c.body, "approve_issue rejected") and
+                 String.contains?(c.body, child.identifier)
+             end)
+    end
+
+    test "approve_issue succeeds once all sub-issues are :done", %{
+      issue: issue,
+      ceo: ceo,
+      cto: cto
+    } do
+      assert {:ok, %{results: [%{issue_id: child_id}]}} =
+               AgentActions.execute(issue, cto, [
+                 %{"type" => "create_issue", "title" => "Closable child", "role" => "engineer"}
+               ])
+
+      {:ok, _} = Issues.update_issue(Issues.get_issue!(child_id), %{status: :done})
+
+      assert {:ok, _} =
+               AgentActions.execute(issue, ceo, [%{"type" => "approve_issue", "notes" => "ok"}])
+
+      assert Issues.get_issue!(issue.id).status == :done
     end
   end
 end

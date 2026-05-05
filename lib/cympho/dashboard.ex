@@ -113,8 +113,17 @@ defmodule Cympho.Dashboard do
       bottlenecks: Enum.map(bottleneck_issues(7, company_id), &bottle_neck_to_map/1),
       routine_health: routine_health(),
       recent_activities: recent_activities(10, company_id),
+      recent_inbox: recent_inbox(company_id, 6),
       cost_summary: cost_summary(company_id)
     }
+  end
+
+  def recent_inbox(nil, _limit), do: []
+
+  def recent_inbox(company_id, limit) do
+    Cympho.Inbox.list_recent_for_company(company_id, limit: limit)
+  rescue
+    _ -> []
   end
 
   def recent_activities(limit \\ 20, company_id \\ nil) do

@@ -175,9 +175,15 @@ defmodule Cympho.Runtime do
   end
 
   defp resolve_env(%Agent{} = agent) do
-    {:ok, Secrets.resolve_env_for_agent(agent.id)}
+    config_env = Cympho.Agents.RuntimeEnv.from_agent(agent)
+    secrets_env = safe_resolve_secrets_env(agent.id)
+    {:ok, Map.merge(config_env, secrets_env)}
+  end
+
+  defp safe_resolve_secrets_env(agent_id) do
+    Secrets.resolve_env_for_agent(agent_id)
   rescue
-    _ -> {:ok, %{}}
+    _ -> %{}
   end
 
   defp resolve_adapter(%Agent{} = agent, env, opts) do
