@@ -183,7 +183,7 @@ defmodule Cympho.Skills do
       end)
     rescue
       e ->
-        :logger.error("[Skills] Failed to load skills for agent #{agent_id}: #{inspect(e)}")
+        :logger.debug("[Skills] Failed to load skills for agent #{agent_id}: #{inspect(e)}")
         []
     end
   end

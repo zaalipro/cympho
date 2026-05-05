@@ -743,7 +743,7 @@ defmodule Cympho.Issues do
             :ok
 
           {:error, reason} ->
-            Logger.warning("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
+            Logger.debug("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
               error: inspect(reason)
             )
 
@@ -752,7 +752,7 @@ defmodule Cympho.Issues do
       rescue
         e ->
           _ =
-            Logger.warning("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
+            Logger.debug("wake_assignee: failed to trigger heartbeat for #{issue.assignee_id}",
               error: inspect(e)
             )
 

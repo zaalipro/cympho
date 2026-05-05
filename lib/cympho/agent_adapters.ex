@@ -74,7 +74,7 @@ defmodule Cympho.AgentAdapters do
               if config_errors != [] do
                 require Logger
 
-                Logger.warning("""
+                Logger.debug("""
                 Adapter #{type} resolved successfully, but previous adapters in fallback chain failed config validation:
                 #{format_config_errors(Enum.reverse(config_errors))}
                 """)

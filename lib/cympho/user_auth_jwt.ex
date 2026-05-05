@@ -65,7 +65,7 @@ defmodule Cympho.UserAuthJWT do
       {:ok, claims}
     else
       {:error, reason} = error ->
-        Logger.warning("Failed to verify user JWT: #{inspect(reason)}")
+        Logger.debug("Failed to verify user JWT: #{inspect(reason)}")
         error
     end
   end

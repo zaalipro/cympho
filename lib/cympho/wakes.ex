@@ -174,7 +174,7 @@ defmodule Cympho.Wakes do
 
           {:error, :not_found} ->
             _ = Cympho.Orchestrator.Dispatcher.poll_now()
-            Logger.warning("Wakes: agent heartbeat process not found for #{agent_id}")
+            Logger.info("Wakes: agent heartbeat process not found for #{agent_id}")
             {:ok, agent_wake}
         end
 

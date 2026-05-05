@@ -9,7 +9,7 @@ defmodule CymphoWeb.TelegramController do
   def webhook(conn, _params) do
     case Application.get_env(:cympho, :telegram_webhook_secret) do
       nil ->
-        Logger.error("Telegram webhook secret not configured; refusing webhook")
+        Logger.debug("Telegram webhook secret not configured; refusing webhook")
 
         conn
         |> put_status(:service_unavailable)

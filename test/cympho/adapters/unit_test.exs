@@ -761,8 +761,8 @@ defmodule Cympho.Adapters.UnitTest do
       parent = self()
 
       config = %{
-        command: "ls",
-        args: ["/nonexistent_directory_xyz"]
+        command: "sh",
+        args: ["-c", "exit 2"]
       }
 
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)

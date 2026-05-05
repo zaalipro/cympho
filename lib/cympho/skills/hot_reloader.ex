@@ -90,7 +90,7 @@ defmodule Cympho.Skills.HotReloader do
         {:reply, {:ok, count}, state}
 
       {:error, reason} = error ->
-        Logger.error("Failed to reload manifests: #{inspect(reason)}")
+        Logger.info("Failed to reload manifests: #{inspect(reason)}")
         {:reply, error, state}
     end
   end
@@ -103,7 +103,7 @@ defmodule Cympho.Skills.HotReloader do
         {:reply, {:ok, plugin}, state}
 
       {:error, reason} = error ->
-        Logger.error("Failed to reload manifest #{file_path}: #{inspect(reason)}")
+        Logger.info("Failed to reload manifest #{file_path}: #{inspect(reason)}")
         {:reply, error, state}
     end
   end
