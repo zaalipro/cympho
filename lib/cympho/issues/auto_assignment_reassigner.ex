@@ -19,14 +19,14 @@ defmodule Cympho.Issues.AutoAssignmentReassigner do
 
   @impl true
   def init(_opts) do
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "agent_heartbeats")
+    Phoenix.PubSub.subscribe(Cympho.PubSub, "system:agent_heartbeats")
     {:ok, %{tasks: %{}}}
   end
 
   @impl true
   def handle_info({:agent_heartbeat_updated, agent_id, hb_state}, state) do
     if hb_state.status == :idle do
-      task = spawn_reassign_task(agent_id)
+      task = spawn_reassign_task(agent_id, hb_state[:company_id])
       tasks = Map.put(state.tasks, task.ref, agent_id)
       {:noreply, %{state | tasks: tasks}}
     else
@@ -65,7 +65,13 @@ defmodule Cympho.Issues.AutoAssignmentReassigner do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  defp spawn_reassign_task(agent_id) do
+  defp spawn_reassign_task(_agent_id, company_id) when is_binary(company_id) do
+    Task.Supervisor.async_nolink(Cympho.TaskSupervisor, fn ->
+      AutoAssignment.reassign_backlog(company_id)
+    end)
+  end
+
+  defp spawn_reassign_task(agent_id, _missing_company_id) do
     Task.Supervisor.async_nolink(Cympho.TaskSupervisor, fn ->
       case Agents.get_agent(agent_id) do
         {:ok, %{company_id: company_id}} when is_binary(company_id) ->

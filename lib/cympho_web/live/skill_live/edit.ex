@@ -6,7 +6,7 @@ defmodule CymphoWeb.SkillLive.Edit do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case Skills.get_skill(id) do
+    case fetch_company_skill(socket, id) do
       {:ok, skill} ->
         skill = Repo.preload(skill, [:company, :project])
         changeset = Skills.change_skill(skill)
@@ -22,6 +22,13 @@ defmodule CymphoWeb.SkillLive.Edit do
          socket
          |> put_flash(:error, "Skill not found")
          |> push_navigate(to: ~p"/skills")}
+    end
+  end
+
+  defp fetch_company_skill(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Skills.get_company_skill(company_id, id)
+      _ -> {:error, :not_found}
     end
   end
 

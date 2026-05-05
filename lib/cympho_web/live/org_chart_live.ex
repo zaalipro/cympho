@@ -454,12 +454,7 @@ defmodule CymphoWeb.OrgChartLive do
 
   defp initials(_), do: "?"
 
-  defp role_avatar_class(:ceo), do: "bg-brand/15 text-brand"
-  defp role_avatar_class(:cto), do: "bg-sky-500/15 text-sky-300"
-  defp role_avatar_class(:engineer), do: "bg-emerald-500/15 text-emerald-300"
-  defp role_avatar_class(:product_manager), do: "bg-amber-500/15 text-amber-300"
-  defp role_avatar_class(:designer), do: "bg-fuchsia-500/15 text-fuchsia-300"
-  defp role_avatar_class(_), do: "bg-subtle text-text-secondary"
+  defp role_avatar_class(role), do: CymphoWeb.Format.role_avatar_class(role)
 
   def role_color(:ceo), do: "#8B5CF6"
   def role_color(:cto), do: "#3B82F6"

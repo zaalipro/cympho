@@ -314,7 +314,33 @@ defmodule Cympho.AgentHeartbeat do
       end
     end
 
+    broadcast_idle_transition(state.agent_id)
+
     {:reply, :ok, %{state | status: :idle, current_issue_id: nil, started_at: nil}}
+  end
+
+  defp broadcast_idle_transition(agent_id) do
+    case Agents.get_agent(agent_id) do
+      {:ok, %{company_id: company_id}} when is_binary(company_id) ->
+        payload = {:agent_heartbeat_updated, agent_id, %{status: :idle, company_id: company_id}}
+
+        # Per-company topic for LiveView consumers (kanban, dashboards).
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "agent_heartbeats:#{company_id}",
+          payload
+        )
+
+        # System topic for app-wide consumers (AutoAssignmentReassigner).
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "system:agent_heartbeats",
+          payload
+        )
+
+      _ ->
+        :ok
+    end
   end
 
   @impl true

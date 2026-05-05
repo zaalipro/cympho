@@ -6,7 +6,7 @@ defmodule CymphoWeb.PluginLive.Edit do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case Plugins.get_plugin(id) do
+    case fetch_company_plugin(socket, id) do
       {:ok, plugin} ->
         plugin = Repo.preload(plugin, [:company, :project])
         changeset = Plugins.change_plugin(plugin)
@@ -22,6 +22,13 @@ defmodule CymphoWeb.PluginLive.Edit do
          socket
          |> put_flash(:error, "Plugin not found")
          |> push_navigate(to: ~p"/plugins")}
+    end
+  end
+
+  defp fetch_company_plugin(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Plugins.get_company_plugin(company_id, id)
+      _ -> {:error, :not_found}
     end
   end
 

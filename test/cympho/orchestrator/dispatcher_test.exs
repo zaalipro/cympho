@@ -48,6 +48,27 @@ defmodule Cympho.Orchestrator.DispatcherTest do
     end
   end
 
+  describe "backoff_ms_for_attempt/1" do
+    test "monotonically increases for the first few attempts" do
+      assert Dispatcher.backoff_ms_for_attempt(0) <= Dispatcher.backoff_ms_for_attempt(1)
+      assert Dispatcher.backoff_ms_for_attempt(1) <= Dispatcher.backoff_ms_for_attempt(2)
+      assert Dispatcher.backoff_ms_for_attempt(2) <= Dispatcher.backoff_ms_for_attempt(3)
+    end
+
+    test "is capped — large attempt counts don't push retries into hours" do
+      # Attempt 100 would naively be base * 2^100 ms (vastly more than years).
+      # Confirm we top out at the same value as a much-smaller attempt count.
+      capped = Dispatcher.backoff_ms_for_attempt(50)
+      really_capped = Dispatcher.backoff_ms_for_attempt(500)
+      assert capped == really_capped
+
+      # Cap should be at most an hour — the configured @max_backoff_ms is 10
+      # minutes by default. Use a generous bound to avoid coupling the test
+      # to the exact constant.
+      assert capped <= 3_600_000
+    end
+  end
+
   # Helpers
 
   defp ensure_dispatcher_running do

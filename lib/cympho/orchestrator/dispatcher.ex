@@ -37,6 +37,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
                    ])
   @max_retries Application.compile_env(:cympho, [:orchestrator, :max_retries], 5)
   @base_backoff_ms Application.compile_env(:cympho, [:orchestrator, :base_backoff_ms], 30_000)
+  @max_backoff_ms Application.compile_env(:cympho, [:orchestrator, :max_backoff_ms], 600_000)
   @enabled_default Application.compile_env(:cympho, [:orchestrator, :enabled], true)
 
   # Client
@@ -325,6 +326,12 @@ defmodule Cympho.Orchestrator.Dispatcher do
     end
   end
 
+  @doc false
+  # Public for testing — bounded exponential backoff for the retry scheduler.
+  def backoff_ms_for_attempt(attempts) when attempts >= 0 do
+    min(round(@base_backoff_ms * :math.pow(2, attempts)), @max_backoff_ms)
+  end
+
   defp record_dispatch_failure(%Cympho.Issues.Issue{} = issue, %State{} = state, reason) do
     current_entry = state.retry_attempts[issue.id]
     attempts = if current_entry, do: current_entry.attempts, else: 0
@@ -337,7 +344,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
       state
     else
       next_attempts = attempts + 1
-      backoff_ms = (@base_backoff_ms * :math.pow(2, attempts)) |> round()
+      # Cap exponential backoff so a long-running flake doesn't push retries
+      # hours into the future.
+      backoff_ms = backoff_ms_for_attempt(attempts)
       next_retry_at = :os.system_time(:millisecond) + backoff_ms
 
       new_retry_entry = %{attempts: next_attempts, next_retry_at: next_retry_at}
@@ -425,7 +434,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   defp same_company?(_issue, _agent), do: false
 
-  defp broadcast_state(%State{} = state) do
-    Phoenix.PubSub.broadcast(Cympho.PubSub, "orchestrator:dispatcher", {:dispatcher_state, state})
-  end
+  # Dispatcher state intentionally not broadcast: it would mix running_issue_ids
+  # across all tenants on a global topic. If observability is needed later, add a
+  # per-company topic with a payload filtered to that company's running issues.
+  defp broadcast_state(%State{}), do: :ok
 end

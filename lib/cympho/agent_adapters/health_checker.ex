@@ -195,24 +195,47 @@ defmodule Cympho.AgentAdapters.HealthChecker do
     end
   end
 
+  # Bound each adapter's health_check call so a hung adapter (e.g. one whose
+  # network call doesn't return) cannot stall the loop and starve other agents.
+  @health_check_timeout_ms 5_000
+
   defp check_adapter_health(%Agent{} = agent) do
     case AgentAdapters.resolve(%{adapter: agent.adapter, config: agent.config}) do
       {:ok, adapter_module, _config} ->
-        try do
-          adapter_module.health_check(agent.config)
-        rescue
-          e ->
-            Logger.error("[HealthChecker] health_check crashed for #{agent.id}: #{inspect(e)}")
-
-            %{
-              status: :unavailable,
-              message: "Health check failed",
-              checked_at: DateTime.utc_now()
-            }
-        end
+        run_with_timeout(adapter_module, agent)
 
       {:error, :no_adapter} ->
         %{status: :unavailable, message: "Adapter not found", checked_at: DateTime.utc_now()}
+    end
+  end
+
+  defp run_with_timeout(adapter_module, %Agent{} = agent) do
+    task =
+      Task.Supervisor.async_nolink(Cympho.TaskSupervisor, fn ->
+        adapter_module.health_check(agent.config)
+      end)
+
+    case Task.yield(task, @health_check_timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} ->
+        result
+
+      {:exit, reason} ->
+        Logger.error("[HealthChecker] health_check crashed for #{agent.id}: #{inspect(reason)}")
+
+        %{
+          status: :unavailable,
+          message: "Health check failed",
+          checked_at: DateTime.utc_now()
+        }
+
+      nil ->
+        Logger.warning("[HealthChecker] health_check timed out for #{agent.id}")
+
+        %{
+          status: :unavailable,
+          message: "Health check timed out after #{@health_check_timeout_ms}ms",
+          checked_at: DateTime.utc_now()
+        }
     end
   end
 

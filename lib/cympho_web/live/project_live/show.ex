@@ -10,7 +10,7 @@ defmodule CymphoWeb.ProjectLive.Show do
       Projects.subscribe(socket.assigns.current_company.id)
     end
 
-    case Projects.get_project(id) do
+    case scoped_get_project(id, socket) do
       {:ok, project} ->
         {:ok,
          socket
@@ -32,7 +32,7 @@ defmodule CymphoWeb.ProjectLive.Show do
   defp apply_action(socket, nil, id), do: apply_action(socket, :show, id)
 
   defp apply_action(socket, :show, id) do
-    case Projects.get_project(id) do
+    case scoped_get_project(id, socket) do
       {:ok, project} ->
         socket
         |> assign(:page_title, project.name)
@@ -45,6 +45,13 @@ defmodule CymphoWeb.ProjectLive.Show do
         socket
         |> put_flash(:error, "Project not found")
         |> push_navigate(to: ~p"/projects")
+    end
+  end
+
+  defp scoped_get_project(id, socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Projects.get_company_project(company_id, id)
+      _ -> {:error, :not_found}
     end
   end
 

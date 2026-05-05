@@ -50,7 +50,7 @@ defmodule CymphoWeb.PluginLive.Index do
 
   @impl true
   def handle_event("toggle_plugin", %{"id" => id}, socket) do
-    case Plugins.get_plugin(id) do
+    case fetch_company_plugin(socket, id) do
       {:ok, plugin} ->
         case Plugins.toggle_plugin(plugin) do
           {:ok, updated_plugin} ->
@@ -77,7 +77,7 @@ defmodule CymphoWeb.PluginLive.Index do
 
   @impl true
   def handle_event("delete", %{"id" => id}, socket) do
-    case Plugins.get_plugin(id) do
+    case fetch_company_plugin(socket, id) do
       {:ok, plugin} ->
         case Plugins.delete_plugin(plugin) do
           {:ok, _} ->
@@ -101,6 +101,13 @@ defmodule CymphoWeb.PluginLive.Index do
 
     Plugins.list_plugins(company_id: company_id, status: status)
     |> Enum.map(fn p -> Repo.preload(p, [:company, :project]) end)
+  end
+
+  defp fetch_company_plugin(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Plugins.get_company_plugin(company_id, id)
+      _ -> {:error, :not_found}
+    end
   end
 
   def status_class("active"), do: "border-success/20 bg-success/10 text-success"

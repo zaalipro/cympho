@@ -35,6 +35,8 @@ defmodule Cympho.Orchestrator do
 
   use GenServer
 
+  import Ecto.Query, only: [from: 2]
+
   alias Cympho.{
     Issues,
     Comments,
@@ -63,18 +65,23 @@ defmodule Cympho.Orchestrator do
   def start_and_run(%{id: issue_id} = issue, agent_id, opts \\ []) when is_binary(agent_id) do
     ensure_adapter_failure_table()
 
-    case Registry.lookup(@registry, issue_id) do
-      [{_pid, _}] ->
-        {:error, :already_started}
+    # `GenServer.start_link/3` with a `:name` is itself the atomic gate via the
+    # Registry — a redundant `Registry.lookup` before it creates a TOCTOU window
+    # where a concurrent caller can win and we incorrectly report a permanent
+    # `:already_started` (which the dispatcher then treats as a dispatch failure
+    # and retries with backoff).
+    name = via_tuple(issue_id)
 
-      [] ->
-        name = via_tuple(issue_id)
+    case GenServer.start_link(__MODULE__, {issue, agent_id, opts}, name: name) do
+      {:ok, pid} ->
+        {:ok, pid}
 
-        case GenServer.start_link(__MODULE__, {issue, agent_id, opts}, name: name) do
-          {:ok, pid} -> {:ok, pid}
-          {:error, {:already_started, _pid}} -> {:error, :already_started}
-          {:error, reason} -> {:error, reason}
-        end
+      {:error, {:already_started, pid}} ->
+        # Existing orchestrator is fine — caller can attach to it.
+        {:ok, pid}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -497,43 +504,40 @@ defmodule Cympho.Orchestrator do
 
   defp format_preflight_error(reason), do: inspect(reason)
 
+  # Adapter failure counter is persisted on the agent row so the cap survives
+  # process / node restarts. Race-safe via atomic SQL increment.
+
   defp reset_adapter_failure(agent_id) do
-    if adapter_failure_table_exists?() do
-      :ets.delete(:cympho_adapter_failures, agent_id)
-    end
+    from(a in Cympho.Agents.Agent, where: a.id == ^agent_id)
+    |> Cympho.Repo.update_all(set: [adapter_failure_count: 0])
 
     :ok
   end
 
   defp record_adapter_failure(agent_id) do
-    table = ensure_adapter_failure_table()
+    from(a in Cympho.Agents.Agent, where: a.id == ^agent_id)
+    |> Cympho.Repo.update_all(inc: [adapter_failure_count: 1])
 
     new_count =
-      case :ets.lookup(table, agent_id) do
-        [{^agent_id, count}] -> count + 1
-        [] -> 1
-      end
+      Cympho.Repo.one(
+        from(a in Cympho.Agents.Agent,
+          where: a.id == ^agent_id,
+          select: a.adapter_failure_count
+        )
+      ) || 0
 
     if new_count >= 3 do
       set_agent_error(agent_id)
-      :ets.delete(table, agent_id)
-    else
-      :ets.insert(table, {agent_id, new_count})
+      reset_adapter_failure(agent_id)
     end
 
     new_count
   end
 
-  defp ensure_adapter_failure_table do
-    case :ets.whereis(:cympho_adapter_failures) do
-      :undefined -> :ets.new(:cympho_adapter_failures, [:named_table, :set, :public])
-      _ -> :cympho_adapter_failures
-    end
-  end
-
-  defp adapter_failure_table_exists? do
-    :ets.whereis(:cympho_adapter_failures) != :undefined
-  end
+  # Kept as a no-op for callers that previously needed the ETS table — the
+  # counter now lives on the agent row directly. New callers should not need
+  # to call this.
+  defp ensure_adapter_failure_table, do: :ok
 
   defp start_engine_run(%__MODULE__{run_id: nil}), do: :ok
 

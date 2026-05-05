@@ -5,12 +5,26 @@ defmodule CymphoWeb.BudgetLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    budget = Budgets.get_budget!(id)
+    case fetch_budget(socket, id) do
+      {:ok, budget} ->
+        {:ok,
+         socket
+         |> assign(:page_title, budget.name)
+         |> assign(:budget, budget)}
 
-    {:ok,
-     socket
-     |> assign(:page_title, budget.name)
-     |> assign(:budget, budget)}
+      {:error, :not_found} ->
+        {:ok,
+         socket
+         |> put_flash(:error, "Budget not found")
+         |> push_navigate(to: ~p"/budgets")}
+    end
+  end
+
+  defp fetch_budget(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Budgets.get_company_budget(company_id, id)
+      _ -> {:error, :not_found}
+    end
   end
 
   @impl true

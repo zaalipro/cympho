@@ -1118,4 +1118,104 @@ defmodule Cympho.IssuesTest do
 
     issue
   end
+
+  describe "auto-complete parent" do
+    setup do
+      project =
+        Cympho.Repo.insert!(%Cympho.Projects.Project{
+          name: "Parent Test Project #{System.unique_integer()}",
+          prefix: "PCT"
+        })
+
+      {:ok, parent} =
+        Issues.create_issue(%{
+          title: "Parent",
+          status: :in_progress,
+          project_id: project.id
+        })
+
+      %{parent: parent, project: project}
+    end
+
+    test "transitions parent to :done when its only child becomes :done", %{parent: parent} do
+      {:ok, child} =
+        Issues.create_issue(%{
+          title: "Only child",
+          status: :in_progress,
+          parent_id: parent.id,
+          project_id: parent.project_id
+        })
+
+      {:ok, _} = Issues.transition_issue(child, :done)
+
+      assert Issues.get_issue!(parent.id).status == :done
+    end
+
+    test "does NOT transition parent when an open sibling remains", %{parent: parent} do
+      {:ok, child_a} =
+        Issues.create_issue(%{
+          title: "A",
+          status: :in_progress,
+          parent_id: parent.id,
+          project_id: parent.project_id
+        })
+
+      {:ok, _child_b} =
+        Issues.create_issue(%{
+          title: "B (still open)",
+          status: :in_progress,
+          parent_id: parent.id,
+          project_id: parent.project_id
+        })
+
+      {:ok, _} = Issues.transition_issue(child_a, :done)
+
+      # Parent still :in_progress because child_b is open
+      refute Issues.get_issue!(parent.id).status == :done
+    end
+
+    test "treats :cancelled children as terminal (does not block parent completion)", %{
+      parent: parent
+    } do
+      {:ok, child_a} =
+        Issues.create_issue(%{
+          title: "A",
+          status: :in_progress,
+          parent_id: parent.id,
+          project_id: parent.project_id
+        })
+
+      {:ok, child_b} =
+        Issues.create_issue(%{
+          title: "B",
+          status: :in_progress,
+          parent_id: parent.id,
+          project_id: parent.project_id
+        })
+
+      {:ok, _} = Issues.transition_issue(child_b, :cancelled)
+      {:ok, _} = Issues.transition_issue(child_a, :done)
+
+      assert Issues.get_issue!(parent.id).status == :done
+    end
+
+    test "does not retransition an already-:done parent", %{parent: parent} do
+      {:ok, child} =
+        Issues.create_issue(%{
+          title: "Child",
+          status: :in_progress,
+          parent_id: parent.id,
+          project_id: parent.project_id
+        })
+
+      {:ok, _} = Issues.transition_issue(parent, :done)
+      done_at = Issues.get_issue!(parent.id).updated_at
+
+      :timer.sleep(1100)
+      {:ok, _} = Issues.transition_issue(child, :done)
+
+      # If maybe_complete_parent had retransitioned, updated_at would differ
+      assert Issues.get_issue!(parent.id).updated_at == done_at
+    end
+  end
 end

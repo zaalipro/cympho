@@ -24,6 +24,15 @@ defmodule Cympho.Skills do
     end
   end
 
+  def get_company_skill(company_id, id) do
+    query = from s in Skill, where: s.id == ^id and s.company_id == ^company_id
+
+    case Repo.one(query) do
+      nil -> {:error, :not_found}
+      skill -> {:ok, Repo.preload(skill, [:company, :project])}
+    end
+  end
+
   def get_skill_by_identifier(identifier, company_id) do
     query =
       from s in Skill,

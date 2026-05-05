@@ -3,6 +3,7 @@ defmodule CymphoWeb.AgentLive.Show do
 
   alias Cympho.Agents
   alias Cympho.Agents.Agent
+  alias Cympho.Agents.InstructionFiles
   alias Cympho.Agents.RuntimeEnv
   alias Cympho.HeartbeatEngine
   alias Cympho.Issues
@@ -10,6 +11,9 @@ defmodule CymphoWeb.AgentLive.Show do
   alias Cympho.Skills
   alias Cympho.Wakes
   alias CymphoWeb.Markdown
+
+  import CymphoWeb.Format,
+    only: [format_datetime: 1, role_avatar_class: 1, status_pill_class: 1]
 
   @valid_tabs ~w(dashboard instructions skills configuration runs)
   @entry_file "AGENTS.md"
@@ -156,6 +160,7 @@ defmodule CymphoWeb.AgentLive.Show do
 
   def handle_event("new_file", %{"name" => name}, socket) do
     name = String.trim(name)
+    agent = socket.assigns.agent
 
     cond do
       name == "" ->
@@ -164,17 +169,14 @@ defmodule CymphoWeb.AgentLive.Show do
       name == @entry_file ->
         {:noreply, put_flash(socket, :error, "AGENTS.md is the entry file and already exists.")}
 
-      Map.has_key?(instructions_files(socket.assigns.agent), name) ->
+      InstructionFiles.exists?(agent, name) ->
         {:noreply, put_flash(socket, :error, "A file named #{name} already exists.")}
 
       true ->
-        files = Map.put(instructions_files(socket.assigns.agent), name, "")
+        case InstructionFiles.create(agent, name, "") do
+          {:ok, _file} ->
+            {:ok, agent} = Agents.get_agent(agent.id)
 
-        runtime_config =
-          Map.put(socket.assigns.agent.runtime_config || %{}, "instructions_files", files)
-
-        case Agents.update_agent(socket.assigns.agent, %{"runtime_config" => runtime_config}) do
-          {:ok, agent} ->
             socket =
               socket
               |> assign_agent(agent)
@@ -183,20 +185,17 @@ defmodule CymphoWeb.AgentLive.Show do
             {:noreply,
              push_patch(socket, to: ~p"/agents/#{agent.id}?tab=instructions&file=#{name}")}
 
-          _ ->
+          {:error, _changeset} ->
             {:noreply, put_flash(socket, :error, "Could not create file.")}
         end
     end
   end
 
   def handle_event("delete_file", %{"file" => file}, socket) when file != @entry_file do
-    files = Map.delete(instructions_files(socket.assigns.agent), file)
+    case InstructionFiles.delete(socket.assigns.agent, file) do
+      {:ok, _} ->
+        {:ok, agent} = Agents.get_agent(socket.assigns.agent.id)
 
-    runtime_config =
-      Map.put(socket.assigns.agent.runtime_config || %{}, "instructions_files", files)
-
-    case Agents.update_agent(socket.assigns.agent, %{"runtime_config" => runtime_config}) do
-      {:ok, agent} ->
         {:noreply,
          socket
          |> put_flash(:info, "Deleted #{file}.")
@@ -213,35 +212,18 @@ defmodule CymphoWeb.AgentLive.Show do
   def handle_event("save_file", %{"content" => content}, socket) do
     file = socket.assigns.selected_file
 
-    if file == @entry_file do
-      case Agents.update_agent(socket.assigns.agent, %{"instructions" => content}) do
-        {:ok, agent} ->
-          {:noreply,
-           socket
-           |> put_flash(:info, "Saved #{file}.")
-           |> assign_agent(agent)
-           |> maybe_select_file(file)}
+    case InstructionFiles.upsert_content(socket.assigns.agent, file, content) do
+      {:ok, _} ->
+        {:ok, agent} = Agents.get_agent(socket.assigns.agent.id)
 
-        _ ->
-          {:noreply, put_flash(socket, :error, "Save failed.")}
-      end
-    else
-      files = Map.put(instructions_files(socket.assigns.agent), file, content)
+        {:noreply,
+         socket
+         |> put_flash(:info, "Saved #{file}.")
+         |> assign_agent(agent)
+         |> maybe_select_file(file)}
 
-      runtime_config =
-        Map.put(socket.assigns.agent.runtime_config || %{}, "instructions_files", files)
-
-      case Agents.update_agent(socket.assigns.agent, %{"runtime_config" => runtime_config}) do
-        {:ok, agent} ->
-          {:noreply,
-           socket
-           |> put_flash(:info, "Saved #{file}.")
-           |> assign_agent(agent)
-           |> maybe_select_file(file)}
-
-        _ ->
-          {:noreply, put_flash(socket, :error, "Save failed.")}
-      end
+      _ ->
+        {:noreply, put_flash(socket, :error, "Save failed.")}
     end
   end
 
@@ -380,31 +362,13 @@ defmodule CymphoWeb.AgentLive.Show do
   defp parse_tab(tab) when tab in @valid_tabs, do: tab
   defp parse_tab(_), do: "dashboard"
 
-  defp instructions_files(%Agent{runtime_config: rc}) when is_map(rc) do
-    case Map.get(rc, "instructions_files") do
-      %{} = m -> Map.new(m, fn {k, v} -> {to_string(k), to_string(v || "")} end)
-      _ -> %{}
-    end
+  defp file_list(%Agent{} = agent) do
+    InstructionFiles.list_for_agent(agent)
+    |> Enum.map(fn {filename, _content} -> filename end)
   end
 
-  defp instructions_files(_), do: %{}
-
-  defp file_list(agent) do
-    extras =
-      agent
-      |> instructions_files()
-      |> Map.keys()
-      |> Enum.sort()
-
-    [@entry_file | extras]
-  end
-
-  defp file_content(%Agent{instructions: instructions} = agent, file) do
-    if file == @entry_file do
-      instructions || ""
-    else
-      Map.get(instructions_files(agent), file, "")
-    end
+  defp file_content(%Agent{} = agent, file) do
+    InstructionFiles.get_content(agent, file) || ""
   end
 
   # ── Configuration form helpers ────────────────────────────────────────
@@ -537,9 +501,6 @@ defmodule CymphoWeb.AgentLive.Show do
   def wake_reason_label("issue_children_completed"), do: "Children completed"
   def wake_reason_label(_), do: "Unknown"
 
-  def format_datetime(%DateTime{} = dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M:%S")
-  def format_datetime(_), do: "—"
-
   def format_relative(nil), do: "—"
 
   def format_relative(%DateTime{} = dt) do
@@ -620,21 +581,6 @@ defmodule CymphoWeb.AgentLive.Show do
     |> Enum.join()
     |> String.upcase()
   end
-
-  def role_avatar_class(:ceo), do: "bg-brand/15 text-brand"
-  def role_avatar_class(:cto), do: "bg-sky-500/15 text-sky-300"
-  def role_avatar_class(:engineer), do: "bg-emerald-500/15 text-emerald-300"
-  def role_avatar_class(:product_manager), do: "bg-amber-500/15 text-amber-300"
-  def role_avatar_class(:designer), do: "bg-fuchsia-500/15 text-fuchsia-300"
-  def role_avatar_class(_), do: "bg-subtle text-text-secondary"
-
-  def status_pill_class(:running), do: "border-brand/30 bg-brand/10 text-brand"
-  def status_pill_class(:idle), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  def status_pill_class(:sleeping), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  def status_pill_class(:paused), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  def status_pill_class(:error), do: "border-red-500/25 bg-red-500/10 text-red-300"
-  def status_pill_class(:offline), do: "border-border bg-surface text-text-quaternary"
-  def status_pill_class(_), do: "border-border bg-surface text-text-secondary"
 
   def health_pill_class(:healthy), do: "border-success/25 bg-success/10 text-success"
   def health_pill_class(:degraded), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"

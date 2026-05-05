@@ -8,12 +8,19 @@ defmodule CymphoWeb.BoardApprovalLive.Show do
       BoardApprovals.subscribe(socket.assigns.current_company.id)
     end
 
-    case BoardApprovals.get_board_approval(id) do
+    case fetch_company_board_approval(socket, id) do
       {:ok, approval} ->
         {:ok, assign(socket, approval: approval, page_title: approval.title)}
 
       {:error, :not_found} ->
         {:ok, push_navigate(socket, to: ~p"/")}
+    end
+  end
+
+  defp fetch_company_board_approval(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> BoardApprovals.get_company_board_approval(company_id, id)
+      _ -> {:error, :not_found}
     end
   end
 

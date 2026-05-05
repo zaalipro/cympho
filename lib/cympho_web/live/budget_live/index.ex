@@ -68,16 +68,21 @@ defmodule CymphoWeb.BudgetLive.Index do
 
   @impl true
   def handle_event("delete_budget", %{"id" => id}, socket) do
-    budget = Budgets.get_budget!(id)
-    {:ok, _} = Budgets.delete_budget(budget)
+    case Budgets.get_company_budget(socket.assigns.current_company.id, id) do
+      {:ok, budget} ->
+        {:ok, _} = Budgets.delete_budget(budget)
 
-    budgets = Budgets.list_budgets(company_id: socket.assigns.current_company.id)
+        budgets = Budgets.list_budgets(company_id: socket.assigns.current_company.id)
 
-    {:noreply,
-     socket
-     |> assign(:budgets, budgets)
-     |> assign(:summary, calculate_summary(budgets))
-     |> put_flash(:info, "Budget deleted successfully")}
+        {:noreply,
+         socket
+         |> assign(:budgets, budgets)
+         |> assign(:summary, calculate_summary(budgets))
+         |> put_flash(:info, "Budget deleted successfully")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Budget not found")}
+    end
   end
 
   defp calculate_summary(budgets) do

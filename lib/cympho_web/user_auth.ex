@@ -72,10 +72,8 @@ defmodule CymphoWeb.UserAuth do
 
     companies =
       if is_nil(user) do
-        Cympho.Companies.list_companies()
-        |> Enum.map(fn c -> %{id: c.id, name: c.name, logo_url: c.logo_url} end)
+        []
       else
-        # Load all companies the user is a member of
         query =
           from(m in Cympho.Companies.CompanyMembership,
             where: m.user_id == ^user.id,

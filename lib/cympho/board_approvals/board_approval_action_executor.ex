@@ -20,6 +20,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
   alias Cympho.Repo
 
   @max_retries 5
+  @replay_batch_size 50
   @base_retry_delay_ms 1000
   @max_retry_delay_ms 30000
 
@@ -39,8 +40,16 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
   @impl true
   def handle_info(:recover_pending_approvals, state) do
-    # Replay any approved but not-yet-executed actions
-    replay_pending_approvals()
+    # Replay any approved but not-yet-executed actions in capped batches so a
+    # large backlog after downtime can't monopolize this GenServer for minutes.
+    case replay_pending_approvals(@replay_batch_size) do
+      :done ->
+        :ok
+
+      :more ->
+        send(self(), :recover_pending_approvals)
+    end
+
     {:noreply, state}
   end
 
@@ -75,14 +84,16 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
   # Replay pending approvals for durability. Uses claim_for_execution/1 so
   # only one node ever wins for any given approval — the partial index on
   # (executed_at IS NULL AND status = 'approved') makes this cheap.
-  defp replay_pending_approvals do
+  # Returns :done if no more candidates remain, :more if there could be.
+  defp replay_pending_approvals(batch_size) do
     import Ecto.Query
 
     candidate_ids =
       Repo.all(
         from ba in BoardApproval,
           where: ba.status == "approved" and is_nil(ba.executed_at),
-          select: ba.id
+          select: ba.id,
+          limit: ^batch_size
       )
 
     Enum.each(candidate_ids, fn id ->
@@ -92,6 +103,8 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
         {:error, :not_found} -> :ok
       end
     end)
+
+    if length(candidate_ids) < batch_size, do: :done, else: :more
   end
 
   # Check if an agent was already created for this approval (idempotency)

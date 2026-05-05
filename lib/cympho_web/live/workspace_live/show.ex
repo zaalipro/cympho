@@ -5,7 +5,9 @@ defmodule CymphoWeb.WorkspaceLive.Show do
 
   @impl true
   def mount(%{"issue_id" => issue_id}, _session, socket) do
-    case Issues.get_issue(issue_id) do
+    company = socket.assigns[:current_company]
+
+    case fetch_company_issue(company, issue_id) do
       {:ok, issue} ->
         issue = Repo.preload(issue, [:project, :assignee])
 
@@ -19,7 +21,7 @@ defmodule CymphoWeb.WorkspaceLive.Show do
           end
 
         project =
-          case Projects.get_project(issue.project_id) do
+          case Projects.get_company_project(company.id, issue.project_id) do
             {:ok, p} -> p
             {:error, _} -> nil
           end
@@ -40,6 +42,11 @@ defmodule CymphoWeb.WorkspaceLive.Show do
          |> push_navigate(to: ~p"/issues")}
     end
   end
+
+  defp fetch_company_issue(%{id: company_id}, issue_id),
+    do: Issues.get_company_issue(company_id, issue_id)
+
+  defp fetch_company_issue(_, _), do: {:error, :not_found}
 
   @impl true
   def handle_params(params, _url, socket) do

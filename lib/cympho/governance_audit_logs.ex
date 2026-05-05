@@ -114,6 +114,13 @@ defmodule Cympho.GovernanceAuditLogs do
     {String.downcase(type), actor_id}
   end
 
+  # Plain-map current_user (UserAuth on_mount stores a stripped map to avoid
+  # JSON encoder errors in LiveView test mode). Treat as a user.
+  defp extract_actor_info(%{id: id} = actor)
+       when is_binary(id) and not is_map_key(actor, :__struct__) do
+    {"user", id}
+  end
+
   defp extract_actor_info(nil), do: {"system", @nil_uuid}
 
   defp valid_uuid?(s) when is_binary(s) do

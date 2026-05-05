@@ -4,12 +4,19 @@ defmodule CymphoWeb.ApprovalLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case Approvals.get_approval(id) do
+    case fetch_company_approval(socket, id) do
       {:ok, approval} ->
         {:ok, assign(socket, approval: approval, page_title: "Approval #{approval.id}")}
 
       {:error, :not_found} ->
         {:ok, push_navigate(socket, to: ~p"/approvals")}
+    end
+  end
+
+  defp fetch_company_approval(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Approvals.get_company_approval(company_id, id)
+      _ -> {:error, :not_found}
     end
   end
 

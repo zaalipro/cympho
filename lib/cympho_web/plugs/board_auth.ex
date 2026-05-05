@@ -14,7 +14,12 @@ defmodule CymphoWeb.Plugs.BoardAuth do
 
   def call(conn, _opts) do
     user = conn.assigns[:current_user]
-    company_id = conn.assigns[:current_company_id]
+
+    company_id =
+      case conn.assigns[:current_company] do
+        %{id: id} -> id
+        _ -> conn.assigns[:current_company_id]
+      end
 
     cond do
       is_nil(user) ->

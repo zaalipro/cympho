@@ -18,6 +18,9 @@ defmodule Cympho.EventStore do
   @default_limit 100
   @ttl_ms 300_000
   @purge_interval_ms 60_000
+  # Cap per purge tick so a topic-heavy install can't block the GenServer.
+  # Topics not touched this tick get processed next tick (60s later).
+  @max_topics_per_purge_tick 200
 
   def child_spec(opts) do
     %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}, type: :worker}
@@ -61,7 +64,9 @@ defmodule Cympho.EventStore do
        counter: 0,
        # topic => [event_id] newest-first
        topic_events: %{},
-       max_per_topic: max_per_topic
+       max_per_topic: max_per_topic,
+       # cursor for incremental purge — last topic name visited last tick.
+       purge_cursor: nil
      }}
   end
 
@@ -143,22 +148,51 @@ defmodule Cympho.EventStore do
   defp do_purge_old(ttl_ms, state) do
     cutoff = System.system_time(:millisecond) - ttl_ms
 
-    {topic_events, deleted} =
-      Enum.reduce(state.topic_events, {%{}, 0}, fn {topic, ids}, {acc, count} ->
+    # Sort topics deterministically and skip ahead to the cursor so we resume
+    # from where we left off last tick. Process at most
+    # @max_topics_per_purge_tick topics; the rest wait for the next tick.
+    sorted_topics = state.topic_events |> Map.keys() |> Enum.sort()
+
+    {topics_to_visit, next_cursor} =
+      pick_topic_window(sorted_topics, state.purge_cursor, @max_topics_per_purge_tick)
+
+    {processed_events, deleted} =
+      Enum.reduce(topics_to_visit, {%{}, 0}, fn topic, {acc, count} ->
+        ids = Map.get(state.topic_events, topic, [])
         {kept, evicted} = drop_old_ids(ids, cutoff)
         Enum.each(evicted, &:ets.delete(@table, &1))
 
-        new_acc =
-          if kept == [] do
-            acc
-          else
-            Map.put(acc, topic, kept)
-          end
-
+        new_acc = if kept == [], do: acc, else: Map.put(acc, topic, kept)
         {new_acc, count + length(evicted)}
       end)
 
-    {deleted, %{state | topic_events: topic_events}}
+    # Topics not visited this tick: keep their existing ids unchanged. Visited
+    # topics: replace with the trimmed list (or drop if empty).
+    untouched =
+      state.topic_events
+      |> Map.drop(topics_to_visit)
+
+    new_topic_events = Map.merge(untouched, processed_events)
+
+    {deleted, %{state | topic_events: new_topic_events, purge_cursor: next_cursor}}
+  end
+
+  # Returns {topics_to_visit, next_cursor}.
+  # If cursor is nil or not present, start from the head; otherwise pick up
+  # after it. Wrap to the head when we hit the end.
+  defp pick_topic_window([], _cursor, _max), do: {[], nil}
+
+  defp pick_topic_window(topics, cursor, max) do
+    rest =
+      case cursor do
+        nil -> topics
+        c -> Enum.drop_while(topics, &(&1 <= c))
+      end
+
+    rest = if rest == [], do: topics, else: rest
+    window = Enum.take(rest, max)
+    next = if window == [], do: nil, else: List.last(window)
+    {window, next}
   end
 
   # ids are newest-first; we drop the tail entries (oldest) whose timestamps

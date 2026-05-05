@@ -73,11 +73,12 @@ defmodule Cympho.Agents do
   end
 
   @doc """
-  Returns agents with the specified adapter type.
+  Returns agents with the specified adapter type, scoped to a company.
   """
-  def list_agents_by_adapter(adapter) when is_atom(adapter) do
+  def list_agents_by_adapter(adapter, company_id)
+      when is_atom(adapter) and is_binary(company_id) do
     Agent
-    |> where(adapter: ^adapter)
+    |> where(adapter: ^adapter, company_id: ^company_id)
     |> Repo.all()
   end
 

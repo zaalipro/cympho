@@ -14,10 +14,12 @@ defmodule CymphoWeb.KanbanLive.Index do
       Issues.subscribe(socket.assigns.current_company.id)
       Cympho.Agents.subscribe(socket.assigns.current_company.id)
       CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
-      CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
-    end
 
-    Phoenix.PubSub.subscribe(Cympho.PubSub, "agent_heartbeats")
+      Phoenix.PubSub.subscribe(
+        Cympho.PubSub,
+        "agent_heartbeats:#{socket.assigns.current_company.id}"
+      )
+    end
 
     company_id = current_company_id(socket)
 
@@ -86,15 +88,18 @@ defmodule CymphoWeb.KanbanLive.Index do
     project_id = params["project_id"]
 
     selected_project =
-      case project_id do
-        nil ->
+      case {project_id, socket.assigns[:current_company]} do
+        {nil, _} ->
           nil
 
-        id ->
-          case Projects.get_project(id) do
+        {id, %{id: company_id}} ->
+          case Projects.get_company_project(company_id, id) do
             {:ok, project} -> project
             {:error, _} -> nil
           end
+
+        _ ->
+          nil
       end
 
     socket =
@@ -277,7 +282,8 @@ defmodule CymphoWeb.KanbanLive.Index do
     {:noreply, push_patch(socket, to: ~p"/kanban")}
   end
 
-  def handle_event("combobox_project", %{"selected" => project_id}, socket) when is_binary(project_id) do
+  def handle_event("combobox_project", %{"selected" => project_id}, socket)
+      when is_binary(project_id) do
     {:noreply, push_patch(socket, to: ~p"/kanban?project_id=#{project_id}")}
   end
 
@@ -303,7 +309,8 @@ defmodule CymphoWeb.KanbanLive.Index do
     {:noreply, assign(socket, :filter_priority, nil)}
   end
 
-  def handle_event("combobox_priority", %{"selected" => priority}, socket) when is_binary(priority) do
+  def handle_event("combobox_priority", %{"selected" => priority}, socket)
+      when is_binary(priority) do
     {:noreply, assign(socket, :filter_priority, String.to_existing_atom(priority))}
   end
 

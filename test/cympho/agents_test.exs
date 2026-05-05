@@ -256,31 +256,44 @@ defmodule Cympho.AgentsTest do
     end
   end
 
-  describe "list_agents_by_adapter/1" do
-    test "returns agents with specified adapter" do
+  describe "list_agents_by_adapter/2" do
+    setup [:create_company]
+
+    test "returns agents with specified adapter scoped to company", %{company: company} do
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Other Co",
+          slug: "other-co-#{System.unique_integer([:positive])}"
+        })
+
       {:ok, _claude} =
         Agents.create_agent(%{
+          company_id: company.id,
           name: "Claude Agent",
+          role: :engineer,
+          adapter: :claude_code
+        })
+
+      {:ok, _other_claude} =
+        Agents.create_agent(%{
+          company_id: other_company.id,
+          name: "Other-co Claude",
           role: :engineer,
           adapter: :claude_code
         })
 
       {:ok, _codex} =
         Agents.create_agent(%{
+          company_id: company.id,
           name: "Codex Agent",
           role: :engineer,
           adapter: :codex
         })
 
-      {:ok, _no_adapter} =
-        Agents.create_agent(%{
-          name: "Plain Agent",
-          role: :engineer
-        })
-
-      claude_agents = Agents.list_agents_by_adapter(:claude_code)
-      assert length(claude_agents) >= 1
+      claude_agents = Agents.list_agents_by_adapter(:claude_code, company.id)
+      assert length(claude_agents) == 1
       assert Enum.all?(claude_agents, fn a -> a.adapter == :claude_code end)
+      assert Enum.all?(claude_agents, fn a -> a.company_id == company.id end)
     end
   end
 

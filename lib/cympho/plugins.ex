@@ -26,6 +26,15 @@ defmodule Cympho.Plugins do
     end
   end
 
+  def get_company_plugin(company_id, id) do
+    query = from p in Plugin, where: p.id == ^id and p.company_id == ^company_id
+
+    case Repo.one(query) do
+      nil -> {:error, :not_found}
+      plugin -> {:ok, Repo.preload(plugin, [:company, :project])}
+    end
+  end
+
   def get_plugin_by_identifier(identifier, company_id) do
     query =
       from p in Plugin,

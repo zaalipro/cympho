@@ -604,21 +604,40 @@ defmodule Cympho.Issues do
   defp maybe_complete_parent(%Issue{parent_id: nil}), do: :ok
 
   defp maybe_complete_parent(%Issue{parent_id: parent_id}) do
-    case Repo.get(Issue, parent_id) do
-      nil ->
-        :ok
+    # Race-free auto-complete: lock the parent row, then check that no children
+    # are open with an EXISTS query. Without the row lock, two siblings finishing
+    # concurrently could both observe `all_done?` and double-transition; without
+    # the EXISTS subquery, a new child created between read and act would slip
+    # through.
+    Repo.transaction(fn ->
+      parent =
+        from(i in Issue, where: i.id == ^parent_id, lock: "FOR UPDATE")
+        |> Repo.one()
 
-      parent ->
-        siblings = from(i in Issue, where: i.parent_id == ^parent_id) |> Repo.all()
-        all_done? = Enum.all?(siblings, &(&1.status == :done))
+      with %Issue{} = parent <- parent,
+           false <- parent.status in [:done, :cancelled],
+           false <- parent_has_open_child?(parent_id) do
+        case do_transition(parent, :done) do
+          {:ok, _} ->
+            add_system_comment(parent, "Auto-completed: all sub-issues are done")
+            :ok
 
-        if all_done? and parent.status != :done do
-          {:ok, _} = do_transition(parent, :done)
-          add_system_comment(parent, "Auto-completed: all sub-issues are done")
+          {:error, reason} ->
+            Repo.rollback(reason)
         end
+      else
+        _ -> :ok
+      end
+    end)
 
-        :ok
-    end
+    :ok
+  end
+
+  defp parent_has_open_child?(parent_id) do
+    from(c in Issue,
+      where: c.parent_id == ^parent_id and c.status not in [:done, :cancelled]
+    )
+    |> Repo.exists?()
   end
 
   defp resolve_next_assignee(participant_id) when is_binary(participant_id) do

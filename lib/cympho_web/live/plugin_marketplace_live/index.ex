@@ -112,7 +112,7 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
 
   @impl true
   def handle_event("uninstall", %{"id" => id}, socket) do
-    case Plugins.get_plugin(id) do
+    case fetch_company_plugin(socket, id) do
       {:ok, plugin} ->
         case Plugins.delete_plugin(plugin) do
           {:ok, _} ->
@@ -183,5 +183,12 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
     |> Enum.map(fn p ->
       Map.put(p, :is_installed, p.identifier in installed)
     end)
+  end
+
+  defp fetch_company_plugin(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Plugins.get_company_plugin(company_id, id)
+      _ -> {:error, :not_found}
+    end
   end
 end

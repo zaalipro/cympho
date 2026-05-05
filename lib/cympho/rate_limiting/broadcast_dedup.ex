@@ -5,6 +5,10 @@ defmodule Cympho.RateLimiting.BroadcastDedup do
 
   @dedup_window_ms 500
   @cleanup_interval_ms 5_000
+  # Hard cap on dedup-table rows; under sustained broadcast flood we'd
+  # otherwise grow unbounded between cleanup ticks. When we hit this we run
+  # an inline cleanup (cheap kernel-level select_delete) before inserting.
+  @max_table_size 50_000
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
@@ -41,6 +45,10 @@ defmodule Cympho.RateLimiting.BroadcastDedup do
     now = System.monotonic_time(:millisecond)
     expires_at = now + @dedup_window_ms
 
+    if :ets.info(state.table, :size) >= @max_table_size do
+      sweep_expired(state.table, now)
+    end
+
     result =
       case :ets.lookup(state.table, key) do
         [{^key, existing_expires}] when existing_expires > now ->
@@ -62,15 +70,16 @@ defmodule Cympho.RateLimiting.BroadcastDedup do
 
   @impl true
   def handle_info(:cleanup, state) do
-    now = System.monotonic_time(:millisecond)
-
-    # Single kernel-level pass; deletes every row whose `expires_at` has
-    # passed without copying the table or scheduling per-row deletes.
-    match_spec = [{{:_, :"$1"}, [{:"=<", :"$1", now}], [true]}]
-    :ets.select_delete(state.table, match_spec)
-
+    sweep_expired(state.table, System.monotonic_time(:millisecond))
     schedule_cleanup()
     {:noreply, state}
+  end
+
+  # Single kernel-level pass; deletes every row whose `expires_at` has
+  # passed without copying the table or scheduling per-row deletes.
+  defp sweep_expired(table, now) do
+    match_spec = [{{:_, :"$1"}, [{:"=<", :"$1", now}], [true]}]
+    :ets.select_delete(table, match_spec)
   end
 
   defp schedule_cleanup do

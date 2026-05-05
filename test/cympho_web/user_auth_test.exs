@@ -83,17 +83,15 @@ defmodule CymphoWeb.UserAuthTest do
       assert length(live_assigns(view).user_companies) == 2
     end
 
-    test "loads companies for guest in local trusted mode", %{
-      company1: company1,
-      company2: company2
+    test "guest user gets empty company list (no cross-tenant enumeration)", %{
+      company1: _company1,
+      company2: _company2
     } do
       conn = build_conn() |> Plug.Test.init_test_session(%{})
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      company_ids = Enum.map(live_assigns(view).user_companies, & &1.id)
-      assert company1.id in company_ids
-      assert company2.id in company_ids
+      assert live_assigns(view).user_companies == []
     end
 
     test "uses session company_id when valid", %{user: user, company2: company2} do
@@ -157,12 +155,12 @@ defmodule CymphoWeb.UserAuthTest do
       assert live_assigns(view).current_company.id == company1.id
     end
 
-    test "assigns first company for guest in local trusted mode", %{company1: company1} do
+    test "guest user gets nil current_company (no cross-tenant access)", %{company1: _company1} do
       conn = build_conn() |> Plug.Test.init_test_session(%{})
 
       {:ok, view, _html} = live(conn, "/issues")
 
-      assert live_assigns(view).current_company.id == company1.id
+      assert live_assigns(view).current_company == nil
     end
 
     test "assigns nil current_company for user with no memberships" do

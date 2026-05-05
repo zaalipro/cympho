@@ -49,7 +49,7 @@ defmodule CymphoWeb.SkillLive.Index do
 
   @impl true
   def handle_event("toggle_skill", %{"id" => id}, socket) do
-    case Skills.get_skill(id) do
+    case fetch_company_skill(socket, id) do
       {:ok, skill} ->
         case Skills.toggle_skill(skill) do
           {:ok, updated_skill} ->
@@ -76,7 +76,7 @@ defmodule CymphoWeb.SkillLive.Index do
 
   @impl true
   def handle_event("delete", %{"id" => id}, socket) do
-    case Skills.get_skill(id) do
+    case fetch_company_skill(socket, id) do
       {:ok, skill} ->
         case Skills.delete_skill(skill) do
           {:ok, _} ->
@@ -99,5 +99,12 @@ defmodule CymphoWeb.SkillLive.Index do
 
     Skills.list_skills(company_id: company_id, project_id: project_id)
     |> Enum.map(fn s -> Repo.preload(s, [:company, :project]) end)
+  end
+
+  defp fetch_company_skill(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Skills.get_company_skill(company_id, id)
+      _ -> {:error, :not_found}
+    end
   end
 end

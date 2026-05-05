@@ -11,7 +11,12 @@ defmodule CymphoWeb.AdapterLive.Show do
     case Adapters.get_adapter(key) do
       {:ok, adapter} ->
         health = Adapters.check_health(key, %{})
-        agents = Agents.list_agents_by_adapter(key)
+
+        agents =
+          case socket.assigns[:current_company] do
+            %{id: company_id} -> Agents.list_agents_by_adapter(key, company_id)
+            _ -> []
+          end
 
         config =
           agents
@@ -153,7 +158,7 @@ defmodule CymphoWeb.AdapterLive.Show do
   defp schema_type_label(_), do: "Text"
 
   defp format_datetime(nil), do: "Never"
-  defp format_datetime(dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M:%S UTC")
+  defp format_datetime(dt), do: CymphoWeb.Format.format_datetime(dt)
 
   defp input_type(:integer), do: "number"
   defp input_type(:boolean), do: "checkbox"

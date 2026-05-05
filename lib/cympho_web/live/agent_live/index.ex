@@ -2,6 +2,8 @@ defmodule CymphoWeb.AgentLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Agents
 
+  import CymphoWeb.Format, only: [status_pill_class: 1]
+
   @impl true
   def mount(_params, session, socket) do
     if connected?(socket) && socket.assigns[:current_company] do
@@ -211,15 +213,6 @@ defmodule CymphoWeb.AgentLive.Index do
     |> String.split()
     |> Enum.map_join(" ", &String.capitalize/1)
   end
-
-  def status_pill_class(:running), do: "border-brand/25 bg-brand/10 text-brand"
-  def status_pill_class(:error), do: "border-red-500/25 bg-red-500/10 text-red-300"
-  def status_pill_class(:paused), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  def status_pill_class(:sleeping), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  def status_pill_class(:active), do: "border-success/25 bg-success/10 text-success"
-  def status_pill_class(:terminated), do: "border-border bg-surface text-text-quaternary"
-  def status_pill_class(:offline), do: "border-border bg-surface text-text-quaternary"
-  def status_pill_class(_), do: "border-border bg-surface text-text-secondary"
 
   def health_pill_class(:healthy), do: "border-success/25 bg-success/10 text-success"
   def health_pill_class(:degraded), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"

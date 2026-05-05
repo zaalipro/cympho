@@ -233,13 +233,20 @@ defmodule Cympho.HeartbeatEngine do
   @doc """
   Finds runs that have not had a heartbeat within the threshold.
   """
+  @stale_run_batch_size 200
+
   @spec find_stale_runs(pos_integer()) :: [Run.t()]
   def find_stale_runs(threshold_minutes \\ @stale_threshold_minutes) do
     threshold = DateTime.add(DateTime.utc_now(), -threshold_minutes * 60, :second)
 
+    # Bound the batch so a backlog (e.g. after extended downtime) doesn't
+    # block the watchdog tick. Anything we miss this tick gets caught on
+    # the next 5-minute tick.
     Run
     |> where([r], r.status == "running")
     |> where([r], r.last_heartbeat_at < ^threshold)
+    |> order_by([r], asc: r.last_heartbeat_at)
+    |> limit(^@stale_run_batch_size)
     |> Repo.all()
   end
 
@@ -271,6 +278,8 @@ defmodule Cympho.HeartbeatEngine do
   def find_orphaned_runs do
     Run
     |> where([r], r.status == "running")
+    |> order_by([r], asc: r.started_at)
+    |> limit(^@stale_run_batch_size)
     |> Repo.all()
     |> Enum.reject(fn run ->
       case Cympho.Orchestrator.whereis(run.issue_id) do

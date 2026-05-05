@@ -74,20 +74,34 @@ defmodule Cympho.AgentActions do
       {:error, :cross_company}
     else
       Repo.transaction(fn ->
-        current_issue = Issues.get_issue!(issue.id)
+        # Thread a fresh issue through the action loop. Earlier actions can
+        # mutate status (e.g. submit_review → :in_review, approve_issue → :done)
+        # and later actions in the same batch must see the new state — using a
+        # single `current_issue` snapshot causes silent corruption when actions
+        # are chained.
+        initial_issue = Issues.get_issue!(issue.id)
 
-        results =
-          Enum.map(actions, fn action ->
+        {final_issue, results} =
+          Enum.reduce(actions, {initial_issue, []}, fn action, {current_issue, acc} ->
             with :ok <- authorize_action(action, agent),
                  {:ok, result} <- execute_action(current_issue, agent, action) do
               log_action(current_issue, agent, action, result)
-              result
+
+              # Refetch only when the action could have mutated the issue;
+              # cheap actions like `comment` or `attach_work_product` don't
+              # change status / assignee.
+              next_issue =
+                if mutates_issue?(action),
+                  do: Issues.get_issue!(issue.id),
+                  else: current_issue
+
+              {next_issue, [result | acc]}
             else
               {:error, reason} -> Repo.rollback(reason)
             end
           end)
 
-        %{issue: Issues.get_issue!(issue.id), results: results}
+        %{issue: final_issue, results: Enum.reverse(results)}
       end)
       |> case do
         {:ok, result} ->
@@ -139,7 +153,25 @@ defmodule Cympho.AgentActions do
     )
   end
 
+  defp maybe_emit_rejection_comment(%Issue{} = issue, :unauthorized_action) do
+    system_comment(
+      issue,
+      "Action rejected: only CEO/CTO agents may emit approve_issue, request_changes, or block_issue. " <>
+        "Use submit_review to escalate, or comment to explain."
+    )
+  end
+
   defp maybe_emit_rejection_comment(_issue, _reason), do: :ok
+
+  # Actions that change the issue's persistent state. After running one of
+  # these we must refetch before the next action sees the issue, otherwise
+  # later actions read stale status / assignee / execution_state.
+  @mutating_action_types ~w(
+    create_issue submit_review approve_issue request_changes
+    block_issue handoff set_pr_url
+  )
+  defp mutates_issue?(%{"type" => type}) when type in @mutating_action_types, do: true
+  defp mutates_issue?(_), do: false
 
   # Mirror the permissive policy used by `Issues.checkout_issue/3`: only
   # reject when both sides have a non-nil company_id and they differ. Legacy

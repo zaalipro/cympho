@@ -6,7 +6,7 @@ defmodule CymphoWeb.SkillLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case Skills.get_skill(id) do
+    case fetch_company_skill(socket, id) do
       {:ok, skill} ->
         skill = Repo.preload(skill, [:company, :project])
 
@@ -26,6 +26,13 @@ defmodule CymphoWeb.SkillLive.Show do
   @impl true
   def handle_params(params, _url, socket) do
     {:noreply, apply_action(socket, socket.assigns.live_action, params)}
+  end
+
+  defp fetch_company_skill(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Skills.get_company_skill(company_id, id)
+      _ -> {:error, :not_found}
+    end
   end
 
   defp apply_action(socket, :show, _params) do

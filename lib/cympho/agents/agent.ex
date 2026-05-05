@@ -54,6 +54,7 @@ defmodule Cympho.Agents.Agent do
     field :terminated_at, :utc_datetime
     field :board_approval_id, :binary_id
     field :requires_board_approval, :boolean, default: false
+    field :adapter_failure_count, :integer, default: 0
 
     belongs_to :company, Cympho.Companies.Company
     belongs_to :project, Cympho.Projects.Project
@@ -107,7 +108,8 @@ defmodule Cympho.Agents.Agent do
       :paused_by_user_id,
       :terminated_at,
       :board_approval_id,
-      :requires_board_approval
+      :requires_board_approval,
+      :adapter_failure_count
     ])
     |> validate_required([:name, :role])
     |> validate_inclusion(:role, [:engineer, :product_manager, :designer, :ceo, :cto])

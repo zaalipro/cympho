@@ -92,6 +92,19 @@ defmodule Cympho.BoardApprovals do
     end
   end
 
+  def get_company_board_approval(company_id, id) do
+    query =
+      from a in BoardApproval, where: a.id == ^id and a.company_id == ^company_id
+
+    case Repo.one(query) do
+      nil ->
+        {:error, :not_found}
+
+      approval ->
+        {:ok, Repo.preload(approval, [:requested_by, :company, {:votes, [:user]}])}
+    end
+  end
+
   @doc """
   Creates a board approval proposal.
   """

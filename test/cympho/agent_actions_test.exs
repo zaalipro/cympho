@@ -338,5 +338,31 @@ defmodule Cympho.AgentActionsTest do
 
       assert Issues.get_issue!(issue.id).status == :done
     end
+
+    test "engineer attempting approve_issue is rejected with a system comment", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      # Engineers are non-governance — they cannot approve, request_changes,
+      # or block. The server rejects with :unauthorized_action and surfaces a
+      # system comment so the LLM gets actionable feedback on its next turn.
+      assert {:error, :unauthorized_action} =
+               AgentActions.execute(issue, engineer, [
+                 %{"type" => "approve_issue", "notes" => "trying my luck"}
+               ])
+
+      # Issue unchanged
+      unchanged = Issues.get_issue!(issue.id)
+      refute unchanged.status == :done
+
+      # System comment surfaces the rejection
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn c ->
+               c.author_type == "system" and
+                 String.contains?(c.body, "Action rejected") and
+                 String.contains?(c.body, "CEO/CTO")
+             end)
+    end
   end
 end

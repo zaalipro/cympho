@@ -10,10 +10,16 @@ defmodule CymphoWeb.AdapterLive.Index do
     health = Adapters.check_all_health()
 
     agents_by_adapter =
-      Agents.adapter_options()
-      |> Enum.into(%{}, fn key ->
-        {key, Agents.list_agents_by_adapter(key)}
-      end)
+      case socket.assigns[:current_company] do
+        %{id: company_id} ->
+          Agents.adapter_options()
+          |> Enum.into(%{}, fn key ->
+            {key, Agents.list_agents_by_adapter(key, company_id)}
+          end)
+
+        _ ->
+          %{}
+      end
 
     socket =
       socket
