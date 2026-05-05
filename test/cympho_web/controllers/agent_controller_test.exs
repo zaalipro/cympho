@@ -261,7 +261,11 @@ defmodule CymphoWeb.AgentControllerTest do
       assert %{"errors" => _} = json_response(conn, 422)
     end
 
-    test "returns 400 when status field is missing", %{conn: conn, agent: agent, agent_token: token} do
+    test "returns 400 when status field is missing", %{
+      conn: conn,
+      agent: agent,
+      agent_token: token
+    } do
       conn =
         conn
         |> put_api_key(token)
@@ -270,7 +274,10 @@ defmodule CymphoWeb.AgentControllerTest do
       assert %{"errors" => _} = json_response(conn, 400)
     end
 
-    test "returns 403 for non-existent agent (unauthorized to update different agent)", %{conn: conn, agent_token: token} do
+    test "returns 403 for non-existent agent (unauthorized to update different agent)", %{
+      conn: conn,
+      agent_token: token
+    } do
       conn =
         conn
         |> put_api_key(token)

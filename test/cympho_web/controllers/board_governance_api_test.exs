@@ -58,6 +58,7 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
 
   defp authed_conn(conn, user, company_id) do
     {:ok, token} = Cympho.UserAuthJWT.generate_token(user, company_id)
+
     conn
     |> Plug.Conn.put_req_header("authorization", "Bearer " <> token)
   end
@@ -83,7 +84,8 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
         |> Plug.Conn.put_req_header("authorization", "Bearer " <> token)
         |> post("/api/agents", %{"agent" => %{"name" => "Agent", "role" => "engineer"}})
 
-      assert %{"errors" => [%{"detail" => "User has no company memberships"}]} = json_response(conn, 401)
+      assert %{"errors" => [%{"detail" => "User has no company memberships"}]} =
+               json_response(conn, 401)
     end
 
     test "returns 403 for non-board user when board members exist" do

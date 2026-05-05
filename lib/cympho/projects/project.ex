@@ -62,8 +62,12 @@ defmodule Cympho.Projects.Project do
 
   defp validate_repo_url(changeset) do
     case get_change(changeset, :repo_url) do
-      nil -> changeset
-      "" -> put_change(changeset, :repo_url, nil)
+      nil ->
+        changeset
+
+      "" ->
+        put_change(changeset, :repo_url, nil)
+
       url ->
         if String.match?(url, ~r{^https?://}) do
           put_change(changeset, :repo_url, String.trim_trailing(url, "/"))

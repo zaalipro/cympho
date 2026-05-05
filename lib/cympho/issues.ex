@@ -21,11 +21,20 @@ defmodule Cympho.Issues do
   alias Cympho.Labels.Label
   alias Cympho.Goals
 
+  # Hard upper bound for unbounded issue listings. The kanban/search callers
+  # pass a company filter but otherwise have no `LIMIT`; without a safety cap
+  # a 100k-issue company would load the entire table into memory on each
+  # mount. Override with `%{limit: n}` if a caller genuinely needs more.
+  @list_issues_safety_cap 5_000
+
   def list_issues(opts \\ %{}) do
+    cap = Map.get(opts, :limit, @list_issues_safety_cap)
+
     Issue
     |> maybe_filter_by_company(opts)
     |> maybe_filter_by_project(opts)
     |> maybe_filter_by_labels(opts)
+    |> limit(^cap)
     |> Repo.all()
     |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
   end
@@ -1117,6 +1126,11 @@ defmodule Cympho.Issues do
 
     case Repo.delete(issue) do
       {:ok, _issue} ->
+        # Stop the per-issue Orchestrator GenServer so it doesn't outlive the
+        # row. Without this it survives until the dispatcher reconciliation
+        # loop (~30s) and races against issue re-creation.
+        :ok = Cympho.Orchestrator.stop(issue.id)
+
         Approvals.cancel_pending_for_issue(issue.id)
 
         Cympho.RateLimiting.dedup_pubsub(

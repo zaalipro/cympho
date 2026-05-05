@@ -7,8 +7,7 @@
         navigate={~p"/issues"}
         class="inline-flex items-center gap-1.5 text-caption text-ink-tertiary hover:text-ink-muted transition-colors"
       >
-        <.icon name="hero-arrow-left-mini" class="w-3.5 h-3.5" />
-        Issues
+        <.icon name="hero-arrow-left-mini" class="w-3.5 h-3.5" /> Issues
       </.app_link>
       <span class="text-ink-tertiary">·</span>
       <span :if={@issue.identifier} class="font-mono text-caption text-ink-tertiary">
@@ -18,8 +17,8 @@
         #{@issue.issue_number}
       </span>
     </div>
-
-    <!-- Title + meta hero -->
+    
+<!-- Title + meta hero -->
     <div class="group px-4 lg:px-6 pt-5 pb-4">
       <div :if={@editing != "title"} class="flex items-start gap-3">
         <h1 class="flex-1 text-headline text-ink leading-tight">
@@ -55,7 +54,10 @@
       <div class="mt-3 flex flex-wrap items-center gap-2">
         <.badge variant="status" value={to_string(@issue.status)} />
         <.badge variant="priority" value={to_string(@issue.priority)} />
-        <span :if={@issue.assignee} class="inline-flex items-center gap-1.5 text-caption text-ink-muted">
+        <span
+          :if={@issue.assignee}
+          class="inline-flex items-center gap-1.5 text-caption text-ink-muted"
+        >
           <span class="w-4 h-4 rounded-full bg-brand/20 flex items-center justify-center text-[10px] font-510 text-brand">
             {String.first(@issue.assignee.name) || "?"}
           </span>
@@ -138,7 +140,7 @@
         </div>
       </form>
     </div>
-
+    
 <!-- Activity timeline -->
     <div class="px-4 lg:px-6 pb-3">
       <h2 class="text-eyebrow text-ink-tertiary uppercase">Activity</h2>
@@ -511,8 +513,8 @@
       </div>
 
       <hr class="border-hairline" />
-
-      <!-- Agent controls — only the live actions, no labels-as-headers -->
+      
+<!-- Agent controls — only the live actions, no labels-as-headers -->
       <div class="space-y-2">
         <div class="flex items-center gap-2">
           <.button type="button" phx-click="toggle_agent_panel" size="sm" variant="secondary">
@@ -550,15 +552,18 @@
       </div>
 
       <hr class="border-hairline" />
-
-      <!-- GitHub PR — number-only field; URL composed from project.repo_url -->
+      
+<!-- GitHub PR — number-only field; URL composed from project.repo_url -->
       <details
         class="group"
         open={@issue.github_pr_number not in [nil, 0] or @issue.github_pr_url not in [nil, ""]}
       >
         <summary class="flex items-center justify-between gap-2 cursor-pointer text-eyebrow text-ink-tertiary uppercase list-none">
           <span>GitHub PR</span>
-          <.icon name="hero-chevron-down-mini" class="w-3.5 h-3.5 text-ink-tertiary transition-transform group-open:rotate-180" />
+          <.icon
+            name="hero-chevron-down-mini"
+            class="w-3.5 h-3.5 text-ink-tertiary transition-transform group-open:rotate-180"
+          />
         </summary>
         <form phx-submit="update_github_pr_number" class="mt-2 space-y-2">
           <div class="flex items-center gap-1.5">
@@ -574,7 +579,7 @@
             <.button type="submit" size="sm">Save</.button>
           </div>
           <p
-            :if={@issue.project && (@issue.project.repo_url in [nil, ""])}
+            :if={@issue.project && @issue.project.repo_url in [nil, ""]}
             class="text-caption text-ink-tertiary"
           >
             Set a repo URL on
@@ -609,8 +614,8 @@
       </details>
 
       <hr :if={!Enum.empty?(@documents)} class="border-hairline" />
-
-      <!-- Documents — only render if there are any -->
+      
+<!-- Documents — only render if there are any -->
       <div :if={!Enum.empty?(@documents)} class="space-y-2">
         <span class="text-eyebrow text-ink-tertiary uppercase">Documents</span>
         <ul class="space-y-1">
@@ -621,8 +626,8 @@
       </div>
 
       <hr class="border-hairline" />
-
-      <!-- Footer meta — single line, not a debug dump -->
+      
+<!-- Footer meta — single line, not a debug dump -->
       <div class="text-caption text-ink-tertiary">
         Created {Calendar.strftime(@issue.inserted_at, "%b %-d, %Y")}
       </div>

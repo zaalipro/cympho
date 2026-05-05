@@ -14,6 +14,7 @@ defmodule CymphoWeb.Components.NavRail do
     user menu at the bottom of the sidebar — see `UserMenu`.
   """
   use Phoenix.Component
+
   use Phoenix.VerifiedRoutes,
     endpoint: CymphoWeb.Endpoint,
     router: CymphoWeb.Router
@@ -28,7 +29,9 @@ defmodule CymphoWeb.Components.NavRail do
   attr :rest, :global
 
   def nav_rail(assigns) do
-    {visible_projects, hidden_projects_count} = take_with_overflow(assigns.projects, @projects_visible)
+    {visible_projects, hidden_projects_count} =
+      take_with_overflow(assigns.projects, @projects_visible)
+
     {visible_agents, hidden_agents_count} = take_with_overflow(assigns.agents, @agents_visible)
 
     assigns =
@@ -44,8 +47,18 @@ defmodule CymphoWeb.Components.NavRail do
 
       <div class="h-1.5"></div>
 
-      <.nav_link to={~p"/dashboard"} label="Dashboard" icon="hero-squares-2x2-mini" current_path={@current_path} />
-      <.nav_link to={~p"/kanban"} label="Board" icon="hero-view-columns-mini" current_path={@current_path} />
+      <.nav_link
+        to={~p"/dashboard"}
+        label="Dashboard"
+        icon="hero-squares-2x2-mini"
+        current_path={@current_path}
+      />
+      <.nav_link
+        to={~p"/kanban"}
+        label="Board"
+        icon="hero-view-columns-mini"
+        current_path={@current_path}
+      />
       <.nav_link
         to={~p"/inbox"}
         label="Inbox"
@@ -55,9 +68,19 @@ defmodule CymphoWeb.Components.NavRail do
       />
 
       <.section_header label="Work" />
-      <.nav_link to={~p"/issues"} label="Issues" icon="hero-clipboard-document-list-mini" current_path={@current_path} />
+      <.nav_link
+        to={~p"/issues"}
+        label="Issues"
+        icon="hero-clipboard-document-list-mini"
+        current_path={@current_path}
+      />
       <.nav_link to={~p"/goals"} label="Goals" icon="hero-flag-mini" current_path={@current_path} />
-      <.nav_link to={~p"/routines"} label="Routines" icon="hero-arrow-path-rounded-square-mini" current_path={@current_path} />
+      <.nav_link
+        to={~p"/routines"}
+        label="Routines"
+        icon="hero-arrow-path-rounded-square-mini"
+        current_path={@current_path}
+      />
 
       <.section_header label="Projects" action_to={~p"/projects/new"} action_label="New project" />
       <p
@@ -211,7 +234,8 @@ defmodule CymphoWeb.Components.NavRail do
         class="h-2.5 w-2.5 rounded-full shrink-0 border border-white/10"
         style={"background-color: #{@project.color || "#6b7280"}"}
         aria-hidden="true"
-      ></span>
+      >
+      </span>
       <span class="flex-1 truncate">{@project.name}</span>
       <span
         :if={(@project[:open_count] || 0) > 0}
@@ -251,7 +275,8 @@ defmodule CymphoWeb.Components.NavRail do
         class="h-1.5 w-1.5 rounded-full shrink-0"
         title={status_label(@agent.status)}
         style={"background-color: #{status_color(@agent.status)}"}
-      ></span>
+      >
+      </span>
     </.link>
     """
   end

@@ -8,7 +8,10 @@ defmodule CymphoWeb.DashboardLive.Index do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) && socket.assigns[:current_company] do
-      :timer.send_interval(:timer.seconds(30), self(), :refresh)
+      # Use Process.send_after (re-scheduled in handle_info) instead of
+      # :timer.send_interval — the latter survives socket disconnect and
+      # leaks messages into a dead mailbox forever.
+      Process.send_after(self(), :refresh, :timer.seconds(30))
       Events.subscribe_to_runs(socket.assigns.current_company.id)
 
       Phoenix.PubSub.subscribe(
@@ -32,6 +35,7 @@ defmodule CymphoWeb.DashboardLive.Index do
 
   @impl true
   def handle_info(:refresh, socket) do
+    Process.send_after(self(), :refresh, :timer.seconds(30))
     {:noreply, assign_metrics(socket)}
   end
 

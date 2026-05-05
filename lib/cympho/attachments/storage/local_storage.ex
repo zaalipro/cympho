@@ -35,6 +35,7 @@ defmodule Cympho.Attachments.Storage.LocalStorage do
   @impl true
   def delete_file(relative_path) do
     full_path = Path.join(upload_dir(), relative_path)
+
     case File.rm(full_path) do
       :ok -> :ok
       {:error, :enoent} -> :ok

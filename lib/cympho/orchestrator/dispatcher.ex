@@ -13,7 +13,10 @@ defmodule Cympho.Orchestrator.Dispatcher do
   session.
   """
 
-  use GenServer, restart: :permanent
+  # `shutdown: 10_000` gives terminate/2 enough time to release in-flight
+  # issues back to :todo before the supervisor brutally kills the process.
+  # Default 5s was too tight under load.
+  use GenServer, restart: :permanent, shutdown: 10_000
   import Ecto.Query
   alias Cympho.Orchestrator.Dispatcher.State
   alias Cympho.Orchestrator.Dispatcher.Router
@@ -110,8 +113,64 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   @impl true
   def init(_opts) do
-    if enabled?(), do: schedule_poll()
-    {:ok, State.new()}
+    Process.flag(:trap_exit, true)
+
+    if enabled?() do
+      schedule_poll()
+      # Hand recovery off to handle_continue so init/1 returns fast even if
+      # the recovery scan hits a slow DB. Without this, a stuck Repo blocks
+      # the whole supervisor boot.
+      {:ok, State.new(), {:continue, :recover_orphans}}
+    else
+      {:ok, State.new()}
+    end
+  end
+
+  @impl true
+  def handle_continue(:recover_orphans, %State{} = state) do
+    recover_orphaned_in_progress()
+    {:noreply, state}
+  end
+
+  # Find any issue in :in_progress with no live Orchestrator process and
+  # release it back to :todo so the dispatcher (or another node) can pick
+  # it up. This handles three cases:
+  #   1. The orchestrator GenServer crashed mid-run.
+  #   2. The whole node died and restarted.
+  #   3. A bug stranded an issue (defensive).
+  defp recover_orphaned_in_progress do
+    in_progress_query =
+      from i in Cympho.Issues.Issue,
+        where: i.status == :in_progress,
+        select: %{id: i.id, assignee_id: i.assignee_id}
+
+    Cympho.Repo.all(in_progress_query)
+    |> Enum.each(fn %{id: issue_id, assignee_id: assignee_id} ->
+      if Orchestrator.whereis(issue_id) == nil do
+        case Cympho.Issues.get_issue(issue_id) do
+          {:ok, issue} ->
+            case Cympho.Issues.force_release_issue(issue, :todo) do
+              {:ok, _} ->
+                :logger.warning(
+                  "[Dispatcher] recovered orphaned issue #{issue_id} (assignee=#{assignee_id || "none"}) → :todo"
+                )
+
+              {:error, reason} ->
+                :logger.error(
+                  "[Dispatcher] failed to release orphaned issue #{issue_id}: #{inspect(reason)}"
+                )
+            end
+
+          {:error, _} ->
+            :ok
+        end
+      end
+    end)
+  rescue
+    # Recovery is best-effort; never let a transient DB issue block boot.
+    error ->
+      :logger.error("[Dispatcher] orphan recovery failed: #{inspect(error)}")
+      :ok
   end
 
   @impl true
@@ -153,6 +212,36 @@ defmodule Cympho.Orchestrator.Dispatcher do
     new_state = %{state | running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id)}
     broadcast_state(new_state)
     {:noreply, new_state}
+  end
+
+  # Graceful shutdown: on SIGTERM (or supervisor stop) the BEAM is about to
+  # die and any in-flight orchestrators will be killed. Release the issues
+  # they were running back to :todo so a different node — or this node on
+  # next boot — can pick them up cleanly. The boot-time orphan recovery
+  # would catch these eventually, but releasing here means no observable
+  # window where an issue is "owned" by a dead process.
+  @impl true
+  def terminate(reason, %State{running_issue_ids: running}) do
+    :logger.info(
+      "[Dispatcher] terminating (reason=#{inspect(reason)}); releasing #{MapSet.size(running)} in-flight issues"
+    )
+
+    Enum.each(MapSet.to_list(running), fn issue_id ->
+      try do
+        case Cympho.Issues.get_issue(issue_id) do
+          {:ok, %{status: :in_progress} = issue} ->
+            _ = Cympho.Issues.force_release_issue(issue, :todo)
+
+          _ ->
+            :ok
+        end
+      rescue
+        # Best-effort: never raise from terminate or we delay supervisor shutdown.
+        _ -> :ok
+      end
+    end)
+
+    :ok
   end
 
   # Internal
@@ -260,10 +349,16 @@ defmodule Cympho.Orchestrator.Dispatcher do
     |> Enum.reject(&Issues.is_blocked?/1)
   end
 
+  # Anything older than this with an `assigned_role` is a stalled wakeup —
+  # the wakeup queue should have caused us to pick it up far sooner.
+  @stalled_wakeup_threshold_ms 60_000
+
   defp dispatch_issue(%Cympho.Issues.Issue{} = issue, %State{} = state) do
     if MapSet.member?(state.running_issue_ids, issue.id) do
       state
     else
+      maybe_emit_stalled_wakeup(issue)
+
       case agent_for_issue(issue) do
         {:ok, agent} ->
           required_role = Router.infer_role(issue)
@@ -325,6 +420,38 @@ defmodule Cympho.Orchestrator.Dispatcher do
         record_dispatch_failure(issue, state, :checkout_failed)
     end
   end
+
+  # If an issue carries `assigned_role` it was placed there by a handoff or
+  # submit_review and should have been woken via the WakeupQueue. By the time
+  # the dispatcher poll picks it up, more than `@stalled_wakeup_threshold_ms`
+  # since `updated_at` means the wake never fired (or fired and was lost).
+  # Emit a telemetry event so operators can alert on it.
+  defp maybe_emit_stalled_wakeup(%Cympho.Issues.Issue{
+         assigned_role: role,
+         status: :todo,
+         updated_at: updated_at,
+         id: issue_id,
+         company_id: company_id
+       })
+       when not is_nil(role) and not is_nil(updated_at) do
+    age_ms = DateTime.diff(DateTime.utc_now(), updated_at, :millisecond)
+
+    if age_ms >= @stalled_wakeup_threshold_ms do
+      :telemetry.execute(
+        [:cympho, :dispatcher, :stalled_wakeup],
+        %{age_ms: age_ms},
+        %{issue_id: issue_id, company_id: company_id, role: role}
+      )
+
+      :logger.warning(
+        "[Dispatcher] stalled wakeup: issue=#{issue_id} role=#{inspect(role)} age_ms=#{age_ms}"
+      )
+    end
+
+    :ok
+  end
+
+  defp maybe_emit_stalled_wakeup(_issue), do: :ok
 
   @doc false
   # Public for testing — bounded exponential backoff for the retry scheduler.

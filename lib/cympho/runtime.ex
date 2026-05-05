@@ -27,6 +27,8 @@ defmodule Cympho.Runtime do
   alias Cympho.Issues.Issue
   alias Cympho.Workspaces.ProjectWorkspace
 
+  require Logger
+
   @allowed_idle_statuses [:idle]
   @allowed_owned_statuses [:idle, :running]
 
@@ -183,7 +185,15 @@ defmodule Cympho.Runtime do
   defp safe_resolve_secrets_env(agent_id) do
     Secrets.resolve_env_for_agent(agent_id)
   rescue
-    _ -> %{}
+    error ->
+      # Log the failure so silent secret-resolution errors are visible. We
+      # only log the exception message — never the raised value itself, in
+      # case it carries secret material in its struct fields.
+      Logger.error(
+        "[Runtime] secret resolution failed for agent #{agent_id}: #{Exception.message(error)}"
+      )
+
+      %{}
   end
 
   defp resolve_adapter(%Agent{} = agent, env, opts) do

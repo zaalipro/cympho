@@ -10,11 +10,20 @@ defmodule Cympho.Agents do
   alias Cympho.BoardApprovals
   alias Cympho.Issues.Issue
 
+  # Hard upper bound for unscoped agent listings. Real installs have far
+  # fewer agents than this; the cap exists to prevent an unbounded `Repo.all`
+  # from OOMing the node if data ever grows past expectations.
+  @list_agents_safety_cap 5_000
+
   @doc """
-  Returns the list of all agents.
+  Returns the list of all agents, capped at #{@list_agents_safety_cap} rows.
+
+  Prefer `list_agents_by_company/1` whenever a company context is available.
   """
   def list_agents do
-    Repo.all(Agent)
+    Agent
+    |> limit(@list_agents_safety_cap)
+    |> Repo.all()
   end
 
   @doc """
@@ -183,9 +192,12 @@ defmodule Cympho.Agents do
   Deletes an agent.
   """
   def delete_agent(%Agent{} = agent) do
-    Repo.delete(agent)
-    |> case do
+    case Repo.delete(agent) do
       {:ok, _} ->
+        # Terminate the per-agent heartbeat GenServer so it doesn't run with
+        # stale state pointing at a now-missing DB row.
+        _ = Cympho.AgentHeartbeat.stop_for_agent(agent.id)
+
         Phoenix.PubSub.broadcast(
           Cympho.PubSub,
           "company:#{agent.company_id}:agents",

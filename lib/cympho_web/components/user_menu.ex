@@ -9,6 +9,7 @@ defmodule CymphoWeb.Components.UserMenu do
   dismissal and escape handling.
   """
   use Phoenix.Component
+
   use Phoenix.VerifiedRoutes,
     endpoint: CymphoWeb.Endpoint,
     router: CymphoWeb.Router
@@ -58,15 +59,60 @@ defmodule CymphoWeb.Components.UserMenu do
           <p class="px-3 pt-1.5 pb-0.5 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
             More
           </p>
-          <.menu_link to={~p"/org-chart"} icon="hero-share-mini" current={@current_path} label="Org chart" />
-          <.menu_link to={~p"/approvals"} icon="hero-check-circle-mini" current={@current_path} label="Approvals" />
-          <.menu_link to={~p"/costs"} icon="hero-currency-dollar-mini" current={@current_path} label="Costs" />
-          <.menu_link to={~p"/activity"} icon="hero-bolt-mini" current={@current_path} label="Activity" />
-          <.menu_link to={~p"/workspaces"} icon="hero-rectangle-stack-mini" current={@current_path} label="Workspaces" />
-          <.menu_link to={~p"/plugins"} icon="hero-puzzle-piece-mini" current={@current_path} label="Plugins" />
-          <.menu_link to={~p"/skills"} icon="hero-academic-cap-mini" current={@current_path} label="Skills" />
-          <.menu_link to={~p"/adapters"} icon="hero-cog-6-tooth-mini" current={@current_path} label="Adapters" />
-          <.menu_link to={~p"/tool-call-traces"} icon="hero-magnifying-glass-mini" current={@current_path} label="Tool traces" />
+          <.menu_link
+            to={~p"/org-chart"}
+            icon="hero-share-mini"
+            current={@current_path}
+            label="Org chart"
+          />
+          <.menu_link
+            to={~p"/approvals"}
+            icon="hero-check-circle-mini"
+            current={@current_path}
+            label="Approvals"
+          />
+          <.menu_link
+            to={~p"/costs"}
+            icon="hero-currency-dollar-mini"
+            current={@current_path}
+            label="Costs"
+          />
+          <.menu_link
+            to={~p"/activity"}
+            icon="hero-bolt-mini"
+            current={@current_path}
+            label="Activity"
+          />
+          <.menu_link
+            to={~p"/workspaces"}
+            icon="hero-rectangle-stack-mini"
+            current={@current_path}
+            label="Workspaces"
+          />
+          <.menu_link
+            to={~p"/plugins"}
+            icon="hero-puzzle-piece-mini"
+            current={@current_path}
+            label="Plugins"
+          />
+          <.menu_link
+            to={~p"/skills"}
+            icon="hero-academic-cap-mini"
+            current={@current_path}
+            label="Skills"
+          />
+          <.menu_link
+            to={~p"/adapters"}
+            icon="hero-cog-6-tooth-mini"
+            current={@current_path}
+            label="Adapters"
+          />
+          <.menu_link
+            to={~p"/tool-call-traces"}
+            icon="hero-magnifying-glass-mini"
+            current={@current_path}
+            label="Tool traces"
+          />
         </div>
 
         <div class="py-1 border-t border-hairline">
@@ -76,7 +122,8 @@ defmodule CymphoWeb.Components.UserMenu do
             class={menu_row_class(false)}
             role="menuitem"
           >
-            <span class="hero-magnifying-glass-mini w-4 h-4 text-text-tertiary group-hover:text-text-primary"></span>
+            <span class="hero-magnifying-glass-mini w-4 h-4 text-text-tertiary group-hover:text-text-primary">
+            </span>
             <span class="flex-1 text-left">Search</span>
             <kbd class="kbd">⌘K</kbd>
           </button>
@@ -86,11 +133,17 @@ defmodule CymphoWeb.Components.UserMenu do
             class={menu_row_class(false)}
             role="menuitem"
           >
-            <span class="hero-command-line-mini w-4 h-4 text-text-tertiary group-hover:text-text-primary"></span>
+            <span class="hero-command-line-mini w-4 h-4 text-text-tertiary group-hover:text-text-primary">
+            </span>
             <span class="flex-1 text-left">Keyboard shortcuts</span>
             <kbd class="kbd">?</kbd>
           </button>
-          <.menu_link to={~p"/settings"} icon="hero-cog-6-tooth-mini" current={@current_path} label="Settings" />
+          <.menu_link
+            to={~p"/settings"}
+            icon="hero-cog-6-tooth-mini"
+            current={@current_path}
+            label="Settings"
+          />
         </div>
       </div>
     </div>

@@ -13,8 +13,16 @@ defmodule Cympho.AgentActions do
   alias Cympho.Issues.Issue
   alias Cympho.AuditTrail.Instrumenter
 
+  require Logger
+
   @max_actions 10
   @max_block_bytes 65_536
+
+  # Hard cap on agent-action chain depth. `create_issue` from an agent action
+  # increments the child's `request_depth`; once we exceed the cap, further
+  # chained creation is rejected so a buggy CEO→CTO→engineer→engineer→...
+  # storm cannot run away.
+  @max_request_depth Application.compile_env(:cympho, [:agent_actions, :max_request_depth], 5)
   @supported_types ~w(
     create_issue
     submit_review
@@ -70,9 +78,31 @@ defmodule Cympho.AgentActions do
   @spec execute(Issue.t(), Agent.t() | binary(), [action()]) ::
           {:ok, %{issue: Issue.t(), results: [map()]}} | {:error, term()}
   def execute(%Issue{} = issue, %Agent{} = agent, actions) when is_list(actions) do
-    if cross_company?(issue, agent) do
-      {:error, :cross_company}
-    else
+    cond do
+      cross_company?(issue, agent) ->
+        {:error, :cross_company}
+
+      Cympho.RateLimiting.AgentActionLimiter.check(agent.id) == {:error, :rate_limited} ->
+        # The rejection comment is emitted post-check so the LLM sees it on
+        # its next turn. Don't open a transaction we'll just roll back.
+        maybe_emit_rejection_comment(issue, :rate_limited)
+        {:error, :rate_limited}
+
+      true ->
+        do_execute(issue, agent, actions)
+    end
+  end
+
+  def execute(%Issue{} = issue, agent_id, actions) when is_binary(agent_id) do
+    with {:ok, agent} <- Agents.get_agent(agent_id) do
+      execute(issue, agent, actions)
+    end
+  end
+
+  def execute(_issue, _agent, _actions), do: {:error, :invalid_execution_context}
+
+  defp do_execute(%Issue{} = issue, %Agent{} = agent, actions) do
+    result =
       Repo.transaction(fn ->
         # Thread a fresh issue through the action loop. Earlier actions can
         # mutate status (e.g. submit_review → :in_review, approve_issue → :done)
@@ -84,8 +114,8 @@ defmodule Cympho.AgentActions do
         {final_issue, results} =
           Enum.reduce(actions, {initial_issue, []}, fn action, {current_issue, acc} ->
             with :ok <- authorize_action(action, agent),
-                 {:ok, result} <- execute_action(current_issue, agent, action) do
-              log_action(current_issue, agent, action, result)
+                 {:ok, action_result} <- execute_action(current_issue, agent, action) do
+              log_action(current_issue, agent, action, action_result)
 
               # Refetch only when the action could have mutated the issue;
               # cheap actions like `comment` or `attach_work_product` don't
@@ -95,7 +125,7 @@ defmodule Cympho.AgentActions do
                   do: Issues.get_issue!(issue.id),
                   else: current_issue
 
-              {next_issue, [result | acc]}
+              {next_issue, [action_result | acc]}
             else
               {:error, reason} -> Repo.rollback(reason)
             end
@@ -103,28 +133,20 @@ defmodule Cympho.AgentActions do
 
         %{issue: final_issue, results: Enum.reverse(results)}
       end)
-      |> case do
-        {:ok, result} ->
-          {:ok, result}
 
-        {:error, reason} ->
-          # The transaction rolled back, which means any system_comment
-          # written inside an execute_action clause was discarded too.
-          # Re-emit the rejection comment outside the transaction so the
-          # LLM sees it on its next turn and self-corrects.
-          maybe_emit_rejection_comment(issue, reason)
-          {:error, reason}
-      end
+    case result do
+      {:ok, ok_result} ->
+        {:ok, ok_result}
+
+      {:error, reason} ->
+        # The transaction rolled back, which means any system_comment
+        # written inside an execute_action clause was discarded too.
+        # Re-emit the rejection comment outside the transaction so the
+        # LLM sees it on its next turn and self-corrects.
+        maybe_emit_rejection_comment(issue, reason)
+        {:error, reason}
     end
   end
-
-  def execute(%Issue{} = issue, agent_id, actions) when is_binary(agent_id) do
-    with {:ok, agent} <- Agents.get_agent(agent_id) do
-      execute(issue, agent, actions)
-    end
-  end
-
-  def execute(_issue, _agent, _actions), do: {:error, :invalid_execution_context}
 
   defp maybe_emit_rejection_comment(%Issue{} = issue, :no_supervisor_to_review) do
     system_comment(
@@ -158,6 +180,26 @@ defmodule Cympho.AgentActions do
       issue,
       "Action rejected: only CEO/CTO agents may emit approve_issue, request_changes, or block_issue. " <>
         "Use submit_review to escalate, or comment to explain."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(%Issue{} = issue, :rate_limited) do
+    system_comment(
+      issue,
+      "Action batch rejected: this agent exceeded the per-minute action limit. " <>
+        "Slow down and re-emit the actions on a later turn."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:request_depth_exceeded, current, max}
+       ) do
+    system_comment(
+      issue,
+      "create_issue rejected: request depth #{current} would exceed the maximum allowed " <>
+        "depth of #{max}. Stop delegating further; either do the work yourself, " <>
+        "block_issue with a reason, or escalate via submit_review."
     )
   end
 
@@ -317,46 +359,12 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "create_issue"} = action) do
-    case find_recent_duplicate(issue.company_id, action["title"], issue.goal_id) do
-      %Issue{} = existing ->
-        comment_body =
-          "Duplicate creation attempt by #{agent.name || agent.id}. " <>
-            "An issue with this title already exists.\n\n" <>
-            (action["description"] || "")
+    current_depth = issue.request_depth || 0
 
-        with {:ok, _comment} <-
-               Comments.create_comment(%{
-                 body: comment_body,
-                 author_type: "system",
-                 author_id: "00000000-0000-0000-0000-000000000000",
-                 issue_id: existing.id
-               }) do
-          {:ok, %{type: "create_issue", issue_id: existing.id, duplicate: true}}
-        end
-
-      nil ->
-        attrs = %{
-          title: action["title"],
-          description: action["description"] || "",
-          priority: action["priority"] || "medium",
-          status: :todo,
-          company_id: issue.company_id,
-          project_id: issue.project_id,
-          goal_id: issue.goal_id,
-          parent_id: issue.id,
-          assigned_role: action["role"],
-          created_by_agent_id: agent.id,
-          origin_type: "agent_action",
-          origin_id: issue.id,
-          request_depth: (issue.request_depth || 0) + 1,
-          actor_type: "agent",
-          actor_id: agent.id
-        }
-
-        case Issues.create_issue(attrs) do
-          {:ok, created} -> {:ok, %{type: "create_issue", issue_id: created.id}}
-          error -> error
-        end
+    if current_depth >= @max_request_depth do
+      {:error, {:request_depth_exceeded, current_depth, @max_request_depth}}
+    else
+      do_create_issue(issue, agent, action)
     end
   end
 
@@ -369,9 +377,11 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "submit_review"} = action) do
+    assignee_id = resolve_review_assignee(agent, action["role"])
+
     update_workflow_issue(issue, agent, %{
       status: :in_review,
-      assignee_id: agent.parent_id,
+      assignee_id: assignee_id,
       checkout_run_id: nil,
       checked_out_at: nil,
       assigned_role: action["role"]
@@ -473,15 +483,131 @@ defmodule Cympho.AgentActions do
            }),
          {:ok, _comment} <- maybe_agent_comment(issue, agent, handoff_reason),
          {:ok, _context_comment} <- system_comment(issue, context_body) do
-      _ =
-        Cympho.Orchestrator.Dispatcher.enqueue_wake(updated.id, "agent_handoff", %{
-          "from_agent_id" => agent.id,
-          "role" => action["role"]
-        })
-
+      handle_handoff_wakeup(updated, agent, action)
       {:ok, %{type: "handoff", issue_id: updated.id, role: action["role"]}}
     end
   end
+
+  # The autonomous reporting chain (engineer → CTO → CEO) depends on the
+  # wakeup queue to nudge the next agent immediately. If the queue is down
+  # or returns an error we fall back to dispatcher polling (~30s latency),
+  # but we must surface the failure: a silent miss leaves the issue in :todo
+  # with `assigned_role` set and no human-visible signal.
+  defp handle_handoff_wakeup(issue, agent, action) do
+    role = action["role"]
+
+    payload = %{
+      "from_agent_id" => agent.id,
+      "role" => role
+    }
+
+    case Cympho.Orchestrator.Dispatcher.enqueue_wake(issue.id, "agent_handoff", payload) do
+      :ok ->
+        :ok
+
+      {:ok, _} ->
+        :ok
+
+      other ->
+        Logger.error(
+          "[AgentActions] handoff wakeup enqueue failed: issue_id=#{issue.id} role=#{inspect(role)} from_agent=#{agent.id} result=#{inspect(other)}"
+        )
+
+        # Best-effort fallback so the failure is visible on the issue itself.
+        _ =
+          system_comment(
+            issue,
+            "Auto-wakeup failed for handoff to #{role}; awaiting dispatcher poll."
+          )
+
+        :ok
+    end
+  end
+
+  defp do_create_issue(issue, agent, action) do
+    case find_recent_duplicate(issue.company_id, action["title"], issue.goal_id) do
+      %Issue{} = existing ->
+        comment_body =
+          "Duplicate creation attempt by #{agent.name || agent.id}. " <>
+            "An issue with this title already exists.\n\n" <>
+            (action["description"] || "")
+
+        with {:ok, _comment} <-
+               Comments.create_comment(%{
+                 body: comment_body,
+                 author_type: "system",
+                 author_id: "00000000-0000-0000-0000-000000000000",
+                 issue_id: existing.id
+               }) do
+          {:ok, %{type: "create_issue", issue_id: existing.id, duplicate: true}}
+        end
+
+      nil ->
+        attrs = %{
+          title: action["title"],
+          description: action["description"] || "",
+          priority: action["priority"] || "medium",
+          status: :todo,
+          company_id: issue.company_id,
+          project_id: issue.project_id,
+          goal_id: issue.goal_id,
+          parent_id: issue.id,
+          assigned_role: action["role"],
+          created_by_agent_id: agent.id,
+          origin_type: "agent_action",
+          origin_id: issue.id,
+          request_depth: (issue.request_depth || 0) + 1,
+          actor_type: "agent",
+          actor_id: agent.id
+        }
+
+        case Issues.create_issue(attrs) do
+          {:ok, created} -> {:ok, %{type: "create_issue", issue_id: created.id}}
+          error -> error
+        end
+    end
+  end
+
+  # Pick the agent that should receive a `submit_review`.
+  #
+  # The agent's `parent_id` is the org-chart hop, but it isn't guaranteed to
+  # match the role the review is being submitted to (parent could be a peer,
+  # the wrong role, or missing). When that happens we drop the direct
+  # assignment and let the dispatcher route by `assigned_role` instead — same
+  # path `handoff` uses. This unifies the two routing systems behind one
+  # safe behavior and keeps the autonomous engineer→CTO→CEO chain working
+  # even when org-chart parents are messy.
+  defp resolve_review_assignee(_agent, nil), do: nil
+  defp resolve_review_assignee(%Agent{parent_id: nil}, _role), do: nil
+
+  defp resolve_review_assignee(%Agent{parent_id: parent_id} = agent, requested_role) do
+    case Agents.get_agent(parent_id) do
+      {:ok, %Agent{role: parent_role}} ->
+        if role_matches?(parent_role, requested_role) do
+          parent_id
+        else
+          Logger.warning(
+            "[AgentActions] submit_review parent role mismatch: agent=#{agent.id} parent=#{parent_id} parent_role=#{inspect(parent_role)} requested_role=#{inspect(requested_role)} — falling back to dispatcher routing"
+          )
+
+          nil
+        end
+
+      {:error, _} ->
+        Logger.warning(
+          "[AgentActions] submit_review parent not found: agent=#{agent.id} parent=#{parent_id} — falling back to dispatcher routing"
+        )
+
+        nil
+    end
+  end
+
+  defp role_matches?(parent_role, requested_role) when is_atom(parent_role) do
+    parent_role == requested_role || Atom.to_string(parent_role) == to_string(requested_role)
+  end
+
+  defp role_matches?(parent_role, requested_role),
+    do: to_string(parent_role) == to_string(requested_role)
 
   defp find_recent_duplicate(company_id, title, goal_id) do
     since = DateTime.utc_now() |> DateTime.add(-24, :hour)

@@ -51,7 +51,8 @@ defmodule Cympho.AgentHeartbeatTest do
     end
 
     test "returns error when agent is not running" do
-      assert {:error, :not_found} = AgentHeartbeat.stop_for_agent("00000000-0000-0000-0000-000000000000")
+      assert {:error, :not_found} =
+               AgentHeartbeat.stop_for_agent("00000000-0000-0000-0000-000000000000")
     end
   end
 

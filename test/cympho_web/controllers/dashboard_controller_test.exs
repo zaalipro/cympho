@@ -30,7 +30,8 @@ defmodule CymphoWeb.DashboardControllerTest do
           company_id: company.id
         })
 
-      {:ok, _} = Issues.create_issue(%{title: "Dash Issue", description: "desc", company_id: company.id})
+      {:ok, _} =
+        Issues.create_issue(%{title: "Dash Issue", description: "desc", company_id: company.id})
 
       conn = get(conn, ~p"/api/dashboard")
       %{"data" => data} = json_response(conn, 200)

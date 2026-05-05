@@ -14,7 +14,8 @@ defmodule Cympho.Telemetry do
       [:cympho, :command_palette, :opened],
       [:cympho, :onboarding, :completed],
       [:cympho, :web, :request, :stop],
-      [:cympho, :tool, :call]
+      [:cympho, :tool, :call],
+      [:cympho, :dispatcher, :stalled_wakeup]
     ]
 
     :telemetry.attach_many("cympho-metrics", events, &handle_event/4, nil)

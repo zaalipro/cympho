@@ -31,7 +31,8 @@ defmodule CymphoWeb.ChannelCase do
         Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{},
           connect_info: %{
             session: %{"user_id" => user_id, "company_id" => company_id}
-          })
+          }
+        )
       end
     end
   end

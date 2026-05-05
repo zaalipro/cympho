@@ -198,7 +198,9 @@ defmodule Cympho.Issues.ExecutionState do
 
   defp normalize_history(history) when is_list(history) do
     Enum.map(history, fn
-      %{stage_index: _} = entry -> entry
+      %{stage_index: _} = entry ->
+        entry
+
       entry when is_map(entry) ->
         Map.new(entry, fn
           {k, v} when is_binary(k) -> {String.to_existing_atom(k), v}

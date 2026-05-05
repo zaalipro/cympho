@@ -12,7 +12,8 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
 
   describe "POST /api/issues/:issue_id/execution-policy/assign" do
     test "assigns execution policy to issue", %{conn: conn, company: company} do
-      {:ok, executor} = Agents.create_agent(%{name: "Executor", role: :engineer, company_id: company.id})
+      {:ok, executor} =
+        Agents.create_agent(%{name: "Executor", role: :engineer, company_id: company.id})
 
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
@@ -23,7 +24,12 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
           ]
         })
 
-      {:ok, issue} = Issues.create_issue(%{title: "API Assign Test", description: "Test", company_id: company.id})
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "API Assign Test",
+          description: "Test",
+          company_id: company.id
+        })
 
       conn =
         post(conn, "/api/issues/#{issue.id}/execution-policy/assign", %{
@@ -50,8 +56,11 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
 
   describe "POST /api/issues/:issue_id/execution-policy/decide" do
     test "approves at current stage", %{conn: conn, company: company} do
-      {:ok, executor} = Agents.create_agent(%{name: "Exec", role: :engineer, company_id: company.id})
-      {:ok, approver} = Agents.create_agent(%{name: "Approver", role: :ceo, company_id: company.id})
+      {:ok, executor} =
+        Agents.create_agent(%{name: "Exec", role: :engineer, company_id: company.id})
+
+      {:ok, approver} =
+        Agents.create_agent(%{name: "Approver", role: :ceo, company_id: company.id})
 
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
@@ -62,7 +71,13 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
           ]
         })
 
-      {:ok, issue} = Issues.create_issue(%{title: "API Decide Test", description: "Test", company_id: company.id})
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "API Decide Test",
+          description: "Test",
+          company_id: company.id
+        })
+
       {:ok, assigned} = Issues.assign_execution_policy(issue, policy.id, executor.id)
       {:ok, _at_approver} = Issues.transition_issue(assigned, :in_review, executor.id)
 
@@ -78,7 +93,9 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
     end
 
     test "requests changes at current stage", %{conn: conn, company: company} do
-      {:ok, executor} = Agents.create_agent(%{name: "Exec", role: :engineer, company_id: company.id})
+      {:ok, executor} =
+        Agents.create_agent(%{name: "Exec", role: :engineer, company_id: company.id})
+
       {:ok, reviewer} = Agents.create_agent(%{name: "Rev", role: :cto, company_id: company.id})
 
       {:ok, policy} =
@@ -90,7 +107,13 @@ defmodule CymphoWeb.IssueExecutionPolicyControllerTest do
           ]
         })
 
-      {:ok, issue} = Issues.create_issue(%{title: "API Changes Test", description: "Test", company_id: company.id})
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "API Changes Test",
+          description: "Test",
+          company_id: company.id
+        })
+
       {:ok, assigned} = Issues.assign_execution_policy(issue, policy.id, executor.id)
       {:ok, _at_reviewer} = Issues.transition_issue(assigned, :in_review, executor.id)
 

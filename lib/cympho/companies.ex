@@ -176,7 +176,17 @@ defmodule Cympho.Companies do
   end
 
   def delete_company(%Company{} = company) do
-    Repo.delete(company)
+    case Repo.delete(company) do
+      {:ok, deleted} ->
+        # Drop any EventStore topics scoped to this company so a long-running
+        # node doesn't accumulate stale topic entries (e.g. from companies
+        # created and deleted during testing or churn).
+        _ = Cympho.EventStore.purge_topics_with_prefix("company:#{company.id}:")
+        {:ok, deleted}
+
+      {:error, changeset} ->
+        {:error, changeset}
+    end
   end
 
   def change_company(%Company{} = company, attrs \\ %{}) do

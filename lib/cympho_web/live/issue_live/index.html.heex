@@ -60,7 +60,12 @@
           label="Status"
           placeholder="Any status"
           searchable?={false}
-          options={Enum.map(Cympho.Issues.Issue.status_options(), &%{id: to_string(&1), label: status_label(&1)})}
+          options={
+            Enum.map(
+              Cympho.Issues.Issue.status_options(),
+              &%{id: to_string(&1), label: status_label(&1)}
+            )
+          }
           selected={@current_status}
           on_change="combobox_status"
         />
@@ -70,7 +75,12 @@
           label="Priority"
           placeholder="Any priority"
           searchable?={false}
-          options={Enum.map(Cympho.Issues.Issue.priority_options(), &%{id: to_string(&1), label: String.capitalize(to_string(&1))})}
+          options={
+            Enum.map(
+              Cympho.Issues.Issue.priority_options(),
+              &%{id: to_string(&1), label: String.capitalize(to_string(&1))}
+            )
+          }
           selected={@current_priority}
           on_change="combobox_priority"
         />

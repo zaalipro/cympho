@@ -42,7 +42,11 @@ defmodule CymphoWeb.RoutineLiveTest do
       {:ok, routine} = Routines.create_routine(%{name: "To Pause"})
 
       {:ok, view, _html} = live(conn, "/routines")
-      view |> element("#routine-#{routine.id} button[phx-click='pause_routine']") |> render_click()
+
+      view
+      |> element("#routine-#{routine.id} button[phx-click='pause_routine']")
+      |> render_click()
+
       html = render(view)
       assert html =~ "Paused"
     end
@@ -52,7 +56,11 @@ defmodule CymphoWeb.RoutineLiveTest do
       {:ok, _} = Routines.pause_routine(routine)
 
       {:ok, view, _html} = live(conn, "/routines")
-      view |> element("#routine-#{routine.id} button[phx-click='resume_routine']") |> render_click()
+
+      view
+      |> element("#routine-#{routine.id} button[phx-click='resume_routine']")
+      |> render_click()
+
       html = render(view)
       assert html =~ "Active"
     end
@@ -61,7 +69,11 @@ defmodule CymphoWeb.RoutineLiveTest do
       {:ok, routine} = Routines.create_routine(%{name: "To Archive"})
 
       {:ok, view, _html} = live(conn, "/routines")
-      view |> element("#routine-#{routine.id} button[phx-click='delete_routine']") |> render_click()
+
+      view
+      |> element("#routine-#{routine.id} button[phx-click='delete_routine']")
+      |> render_click()
+
       html = render(view)
       assert html =~ "Archived"
     end

@@ -38,7 +38,8 @@ defmodule CymphoWeb.ProjectLive.Edit do
         {:noreply, put_flash(socket, :error, "Key and value are required")}
 
       not String.match?(key, ~r/^[A-Z][A-Z0-9_]*$/) ->
-        {:noreply, put_flash(socket, :error, "Key must be uppercase letters, digits, underscores")}
+        {:noreply,
+         put_flash(socket, :error, "Key must be uppercase letters, digits, underscores")}
 
       project.company_id == nil ->
         {:noreply, put_flash(socket, :error, "Project missing company — cannot store secrets")}

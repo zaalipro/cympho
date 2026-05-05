@@ -17,9 +17,13 @@ endpoint_config =
 config :cympho, CymphoWeb.Endpoint, endpoint_config
 
 if (database_url = System.get_env("DATABASE_URL")) && config_env() != :test do
+  # Default sized for: 3 concurrent orchestrators (each can hold a tx during
+  # streaming/external HTTP) + dispatcher poll + heartbeat watchdog + health
+  # checker stream + LiveView pubsub fan-out + headroom for spikes. Bump
+  # POOL_SIZE explicitly when running more concurrent agents.
   config :cympho, Cympho.Repo,
     url: database_url,
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "25")
 
   if config_env() == :prod do
     config :cympho, Cympho.Repo,

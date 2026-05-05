@@ -73,4 +73,27 @@ defmodule Cympho.EventStoreTest do
       assert is_integer(event.timestamp)
     end
   end
+
+  describe "purge_topics_with_prefix/1" do
+    test "drops every topic that starts with the given prefix and leaves others alone" do
+      Cympho.EventStore.append("company:abc:issues", %{n: 1})
+      Cympho.EventStore.append("company:abc:agents", %{n: 2})
+      Cympho.EventStore.append("company:xyz:issues", %{n: 3})
+      Cympho.EventStore.append("system:other", %{n: 4})
+
+      deleted = Cympho.EventStore.purge_topics_with_prefix("company:abc:")
+
+      assert deleted == 2
+      assert Cympho.EventStore.count("company:abc:issues") == 0
+      assert Cympho.EventStore.count("company:abc:agents") == 0
+      assert Cympho.EventStore.count("company:xyz:issues") == 1
+      assert Cympho.EventStore.count("system:other") == 1
+    end
+
+    test "returns zero when no topics match" do
+      Cympho.EventStore.append("company:def:issues", %{n: 1})
+      assert Cympho.EventStore.purge_topics_with_prefix("nothing-matches:") == 0
+      assert Cympho.EventStore.count("company:def:issues") == 1
+    end
+  end
 end

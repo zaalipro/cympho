@@ -14,7 +14,9 @@ defmodule CymphoWeb.SocketAuthTest do
 
     test "rejects an invalid JWT token" do
       assert {:error, :unauthorized} ==
-               Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{"token" => "garbage"}, connect_info: %{})
+               Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{"token" => "garbage"},
+                 connect_info: %{}
+               )
     end
 
     test "rejects an expired JWT token" do
@@ -33,7 +35,9 @@ defmodule CymphoWeb.SocketAuthTest do
       {:ok, token} = sign_jwt(claims, secret)
 
       assert {:error, :unauthorized} ==
-               Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{"token" => token}, connect_info: %{})
+               Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{"token" => token},
+                 connect_info: %{}
+               )
     end
   end
 

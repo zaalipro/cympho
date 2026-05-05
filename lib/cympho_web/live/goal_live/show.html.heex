@@ -21,7 +21,10 @@
       <.badge variant="status" value={to_string(@goal.status)} />
       <.badge variant="priority" value={to_string(@goal.priority)} />
     </div>
-    <p :if={@goal.description not in [nil, ""]} class="text-body text-ink-muted whitespace-pre-wrap leading-relaxed">
+    <p
+      :if={@goal.description not in [nil, ""]}
+      class="text-body text-ink-muted whitespace-pre-wrap leading-relaxed"
+    >
       {@goal.description}
     </p>
     <p :if={@goal.description in [nil, ""]} class="text-caption text-ink-tertiary italic">
@@ -30,7 +33,10 @@
   </.panel>
 
   <div class="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-5">
-    <div :for={status <- [:backlog, :todo, :in_progress, :in_review, :done, :blocked]} class="bg-surface-1 border border-hairline rounded-md px-3 py-2.5">
+    <div
+      :for={status <- [:backlog, :todo, :in_progress, :in_review, :done, :blocked]}
+      class="bg-surface-1 border border-hairline rounded-md px-3 py-2.5"
+    >
       <div class="text-eyebrow text-ink-tertiary uppercase">{status_label(status)}</div>
       <div class="text-card-title text-ink mt-0.5">{Map.get(@status_counts, status, 0)}</div>
     </div>
@@ -43,11 +49,17 @@
         <span class="text-caption text-ink-tertiary">{length(@issues)} shown</span>
       </div>
 
-      <div :if={Enum.empty?(@issues)} class="text-caption text-ink-tertiary border border-dashed border-hairline rounded-md px-3 py-6 text-center">
+      <div
+        :if={Enum.empty?(@issues)}
+        class="text-caption text-ink-tertiary border border-dashed border-hairline rounded-md px-3 py-6 text-center"
+      >
         No issues linked to this goal yet.
       </div>
 
-      <ul :if={!Enum.empty?(@issues)} class="border border-hairline rounded-md divide-y divide-hairline overflow-hidden bg-surface-1/40">
+      <ul
+        :if={!Enum.empty?(@issues)}
+        class="border border-hairline rounded-md divide-y divide-hairline overflow-hidden bg-surface-1/40"
+      >
         <li :for={issue <- @issues} class="hover:bg-surface-2 transition-colors duration-100">
           <.app_link navigate={~p"/issues/#{issue.id}"} class="flex items-center gap-3 px-3 py-2">
             <.badge variant="status" value={to_string(issue.status)} />

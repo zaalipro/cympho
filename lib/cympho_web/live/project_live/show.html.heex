@@ -33,7 +33,10 @@
         </a>
       </div>
       <div class="grid grid-cols-3 gap-2 sm:grid-cols-6 lg:min-w-[480px]">
-        <div :for={status <- [:backlog, :todo, :in_progress, :in_review, :done, :blocked]} class="rounded-lg border border-hairline bg-surface-1 px-3 py-2">
+        <div
+          :for={status <- [:backlog, :todo, :in_progress, :in_review, :done, :blocked]}
+          class="rounded-lg border border-hairline bg-surface-1 px-3 py-2"
+        >
           <div class="text-eyebrow text-ink-tertiary uppercase">{status_label(status)}</div>
           <div class="mt-1 text-lg font-590 text-ink">{Map.get(@status_counts, status, 0)}</div>
         </div>
@@ -54,15 +57,27 @@
           </.app_link>
         </div>
 
-        <div :if={Enum.empty?(@issues)} class="text-caption text-ink-tertiary border border-dashed border-hairline rounded-md px-3 py-6 text-center">
+        <div
+          :if={Enum.empty?(@issues)}
+          class="text-caption text-ink-tertiary border border-dashed border-hairline rounded-md px-3 py-6 text-center"
+        >
           No issues in this project yet.
         </div>
 
-        <ul :if={!Enum.empty?(@issues)} class="border border-hairline rounded-md divide-y divide-hairline overflow-hidden bg-surface-1/40">
+        <ul
+          :if={!Enum.empty?(@issues)}
+          class="border border-hairline rounded-md divide-y divide-hairline overflow-hidden bg-surface-1/40"
+        >
           <li :for={issue <- @issues} class="hover:bg-surface-2 transition-colors duration-100">
-            <.app_link navigate={~p"/issues/#{issue.id}"} class="flex items-center gap-3 px-3 py-2">
+            <.app_link
+              navigate={~p"/issues/#{issue.id}"}
+              class="flex items-center gap-3 px-3 py-2"
+            >
               <.badge variant="status" value={to_string(issue.status)} />
-              <span :if={issue.identifier} class="font-mono text-caption text-ink-tertiary shrink-0">
+              <span
+                :if={issue.identifier}
+                class="font-mono text-caption text-ink-tertiary shrink-0"
+              >
                 {issue.identifier}
               </span>
               <span class="flex-1 truncate text-body text-ink-muted">{issue.title}</span>

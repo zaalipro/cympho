@@ -1,5 +1,8 @@
 defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
-  use Cympho.DataCase, async: true
+  # async: false because the depth-cap describe mutates Application env
+  # (`:wakeup_queue, :max_pending_per_agent`), which is process-global
+  # and would race with concurrent tests that enqueue >3 wakes per agent.
+  use Cympho.DataCase, async: false
 
   alias Cympho.HeartbeatEngine.WakeupQueue
 
@@ -217,6 +220,82 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
 
       wakes = WakeupQueue.list_pending(agent.id, limit: 2)
       assert length(wakes) == 2
+    end
+  end
+
+  describe "enqueue/1 depth cap" do
+    setup do
+      original = Application.get_env(:cympho, :wakeup_queue, [])
+      Application.put_env(:cympho, :wakeup_queue, max_pending_per_agent: 3)
+      on_exit(fn -> Application.put_env(:cympho, :wakeup_queue, original) end)
+      :ok
+    end
+
+    test "rejects new wakes once the per-agent cap is exceeded", %{
+      agent: agent,
+      issue: issue,
+      issue2: issue2
+    } do
+      assert {:ok, _} =
+               WakeupQueue.enqueue(%{
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 reason: "issue_commented"
+               })
+
+      assert {:ok, _} =
+               WakeupQueue.enqueue(%{
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 reason: "issue_blockers_resolved"
+               })
+
+      assert {:ok, _} =
+               WakeupQueue.enqueue(%{
+                 agent_id: agent.id,
+                 issue_id: issue2.id,
+                 reason: "issue_commented"
+               })
+
+      assert {:error, :wakeup_queue_full} =
+               WakeupQueue.enqueue(%{
+                 agent_id: agent.id,
+                 issue_id: issue2.id,
+                 reason: "issue_blockers_resolved"
+               })
+    end
+
+    test "coalescing into an existing wake bypasses the cap", %{agent: agent, issue: issue} do
+      {:ok, _} =
+        WakeupQueue.enqueue(%{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: "issue_commented"
+        })
+
+      {:ok, _} =
+        WakeupQueue.enqueue(%{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: "issue_blockers_resolved"
+        })
+
+      {:ok, _} =
+        WakeupQueue.enqueue(%{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: "issue_children_completed"
+        })
+
+      # Coalescing same (agent, issue, reason) into the existing wake is
+      # always allowed — we update the existing row rather than insert.
+      assert {:ok, _} =
+               WakeupQueue.enqueue(%{
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 reason: "issue_commented",
+                 metadata: %{"again" => true}
+               })
     end
   end
 end

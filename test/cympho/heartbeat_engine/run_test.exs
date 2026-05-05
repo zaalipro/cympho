@@ -13,7 +13,12 @@ defmodule Cympho.HeartbeatEngine.RunTest do
     end
 
     test "validates adapter is required when no default" do
-      changeset = Run.create_changeset(%Run{adapter: nil}, %{agent_id: Ecto.UUID.generate(), issue_id: Ecto.UUID.generate()})
+      changeset =
+        Run.create_changeset(%Run{adapter: nil}, %{
+          agent_id: Ecto.UUID.generate(),
+          issue_id: Ecto.UUID.generate()
+        })
+
       errors = errors_on(changeset)
       assert :adapter in Map.keys(errors)
     end

@@ -13,12 +13,28 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
   alias Cympho.Wakes.AgentWake
   require Logger
 
+  # Default cap on pending wakes per agent. Without this a runaway agent
+  # (or a noisy upstream) can insert wakes faster than the agent consumes
+  # them and grow the `agent_wakes` table without bound. Reads/writes scale
+  # O(pending) within the dequeue path, so the cap is also a latency floor.
+  # Read at runtime so tests can adjust it via Application.put_env.
+  @default_max_pending_wakes_per_agent 100
+
+  defp max_pending_wakes_per_agent do
+    Application.get_env(:cympho, :wakeup_queue, [])
+    |> Keyword.get(:max_pending_per_agent, @default_max_pending_wakes_per_agent)
+  end
+
   @doc """
   Enqueues a wake event, coalescing if a pending wake already exists for this agent/issue pair.
 
-  Returns `{:ok, agent_wake}` with either the new or updated record.
+  Returns `{:ok, agent_wake}` with either the new or updated record. When the
+  per-agent pending cap is exceeded and there's no existing wake to coalesce
+  with, returns `{:error, :wakeup_queue_full}`.
   """
-  @spec enqueue(map()) :: {:ok, AgentWake.t()} | {:error, Ecto.Changeset.t()}
+  @spec enqueue(map()) ::
+          {:ok, AgentWake.t()}
+          | {:error, Ecto.Changeset.t() | :wakeup_queue_full}
   def enqueue(%{agent_id: agent_id, issue_id: issue_id, reason: reason} = attrs) do
     triggered_by_type = Map.get(attrs, :triggered_by_type, "system")
     triggered_by_id = Map.get(attrs, :triggered_by_id)
@@ -34,17 +50,27 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
 
     case existing do
       nil ->
-        %AgentWake{}
-        |> AgentWake.changeset(%{
-          agent_id: agent_id,
-          issue_id: issue_id,
-          reason: reason,
-          status: "pending",
-          triggered_by_type: triggered_by_type,
-          triggered_by_id: triggered_by_id,
-          metadata: metadata
-        })
-        |> Repo.insert()
+        cap = max_pending_wakes_per_agent()
+
+        if pending_count(agent_id) >= cap do
+          Logger.warning(
+            "WakeupQueue: rejecting wake for agent #{agent_id}, queue full (cap=#{cap})"
+          )
+
+          {:error, :wakeup_queue_full}
+        else
+          %AgentWake{}
+          |> AgentWake.changeset(%{
+            agent_id: agent_id,
+            issue_id: issue_id,
+            reason: reason,
+            status: "pending",
+            triggered_by_type: triggered_by_type,
+            triggered_by_id: triggered_by_id,
+            metadata: metadata
+          })
+          |> Repo.insert()
+        end
 
       wake ->
         Logger.debug("WakeupQueue: coalescing wake for agent #{agent_id}, issue #{issue_id}")

@@ -129,7 +129,8 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_event("combobox_status", _, socket), do: {:noreply, socket}
 
-  def handle_event("combobox_priority", %{"selected" => priority}, socket) when is_binary(priority) do
+  def handle_event("combobox_priority", %{"selected" => priority}, socket)
+      when is_binary(priority) do
     handle_event("update_priority", %{"priority" => priority}, socket)
   end
 
@@ -139,7 +140,8 @@ defmodule CymphoWeb.IssueLive.Show do
     handle_event("unassign_issue", %{}, socket)
   end
 
-  def handle_event("combobox_assignee", %{"selected" => agent_id}, socket) when is_binary(agent_id) do
+  def handle_event("combobox_assignee", %{"selected" => agent_id}, socket)
+      when is_binary(agent_id) do
     handle_event("assign_issue", %{"agent_id" => agent_id}, socket)
   end
 
@@ -771,7 +773,10 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   defp status_combobox_options(current_status) do
-    [current_status | Cympho.Issues.Issue.status_options() |> Enum.reject(&(&1 == current_status))]
+    [
+      current_status
+      | Cympho.Issues.Issue.status_options() |> Enum.reject(&(&1 == current_status))
+    ]
     |> Enum.map(fn status ->
       %{
         id: to_string(status),

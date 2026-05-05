@@ -332,7 +332,8 @@ defmodule Cympho.RoutineTriggers do
     _ -> :ok
   end
 
-  defp quantum_job_name(%RoutineTrigger{id: id}), do: String.to_atom("routine_trigger_" <> id)
+  defp quantum_job_name(%RoutineTrigger{id: id}), do: quantum_job_name_from_id(id)
+  defp quantum_job_name_from_id(id), do: String.to_atom("routine_trigger_" <> id)
 
   def execute_scheduled_trigger(trigger_id) do
     case get_trigger(trigger_id) do
@@ -341,7 +342,7 @@ defmodule Cympho.RoutineTriggers do
 
       {:error, :not_found} ->
         Logger.warning("Scheduled trigger #{trigger_id} not found, removing from Quantum")
-        Cympho.Scheduler.delete_job({:routine_trigger, trigger_id})
+        Cympho.Scheduler.delete_job(quantum_job_name_from_id(trigger_id))
     end
   end
 

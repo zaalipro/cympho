@@ -12,6 +12,8 @@ defmodule CymphoWeb.Events do
   Integrates with existing PubSub broadcasts to WebSocket clients.
   """
 
+  import Ecto.Query, only: [from: 2]
+
   alias Cympho.Repo
   alias Cympho.Issues.Issue
   alias Cympho.Comments.Comment
@@ -48,11 +50,14 @@ defmodule CymphoWeb.Events do
   Broadcast a comment notification to WebSocket clients.
   """
   def broadcast_comment(%Comment{issue_id: issue_id} = comment, event_type \\ :comment_created) do
-    case Repo.get(Issue, issue_id) do
+    # Select only the columns we need rather than loading the whole Issue row.
+    # This is on the hot path (every comment) and the full row carries large
+    # text columns we don't use here.
+    case Repo.one(from i in Issue, where: i.id == ^issue_id, select: {i.company_id, i.project_id}) do
       nil ->
         :ok
 
-      %Issue{company_id: company_id, project_id: project_id} ->
+      {company_id, project_id} ->
         topic = "company:#{company_id}:project:#{project_id}:comments"
         payload = build_comment_payload(comment, event_type)
         Cympho.RateLimiting.dedup_broadcast(topic, "comment", payload)
@@ -63,11 +68,11 @@ defmodule CymphoWeb.Events do
   Broadcast a run status change to WebSocket clients.
   """
   def broadcast_run_status(%Run{id: _run_id, issue_id: issue_id} = run, event_type) do
-    case Repo.get(Issue, issue_id) do
+    case Repo.one(from i in Issue, where: i.id == ^issue_id, select: i.company_id) do
       nil ->
         :ok
 
-      %Issue{company_id: company_id} ->
+      company_id ->
         topic = "company:#{company_id}:runs"
         payload = build_run_payload(run, event_type)
         Cympho.RateLimiting.dedup_broadcast(topic, "run_status", payload)

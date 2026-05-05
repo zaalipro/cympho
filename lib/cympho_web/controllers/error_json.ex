@@ -17,6 +17,7 @@ defmodule CymphoWeb.ErrorJSON do
 
   defp translate_error({msg, opts}) do
     opts = Enum.map(opts, fn {k, v} -> {k, inspect_value(v)} end)
+
     Enum.reduce(opts, msg, fn {key, value}, acc ->
       String.replace(acc, "%{#{key}}", value)
     end)

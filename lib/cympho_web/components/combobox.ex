@@ -128,9 +128,15 @@ defmodule CymphoWeb.Components.Combobox do
               <span :if={opt.id in @selected_ids} class="hero-check-mini text-white w-3 h-3" />
             </span>
             <span :if={Map.get(opt, :color)} class={["w-2 h-2 rounded-pill", Map.get(opt, :color)]} />
-            <span :if={Map.get(opt, :icon)} class={[Map.get(opt, :icon), "w-3.5 h-3.5 text-ink-muted"]} />
+            <span
+              :if={Map.get(opt, :icon)}
+              class={[Map.get(opt, :icon), "w-3.5 h-3.5 text-ink-muted"]}
+            />
             <span class="flex-1 truncate">{opt.label}</span>
-            <span :if={!@multi? and opt.id in @selected_ids} class="hero-check-mini text-primary w-4 h-4" />
+            <span
+              :if={!@multi? and opt.id in @selected_ids}
+              class="hero-check-mini text-primary w-4 h-4"
+            />
           </li>
           <li data-combobox-empty class="hidden px-3 py-3 text-caption text-ink-tertiary text-center">
             No results

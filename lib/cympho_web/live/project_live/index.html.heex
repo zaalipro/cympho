@@ -26,10 +26,16 @@
           <.badge variant="status" value={to_string(project.status)} />
         </div>
         <h3 class="text-card-title text-ink truncate">{project.name}</h3>
-        <p :if={project.description not in [nil, ""]} class="text-caption text-ink-muted line-clamp-2">
+        <p
+          :if={project.description not in [nil, ""]}
+          class="text-caption text-ink-muted line-clamp-2"
+        >
           {project.description}
         </p>
-        <div :if={project.repo_url not in [nil, ""]} class="flex items-center gap-1.5 text-caption text-ink-tertiary truncate">
+        <div
+          :if={project.repo_url not in [nil, ""]}
+          class="flex items-center gap-1.5 text-caption text-ink-tertiary truncate"
+        >
           <.icon name="hero-link-mini" class="w-3.5 h-3.5 shrink-0" />
           <span class="truncate">{strip_protocol(project.repo_url)}</span>
         </div>

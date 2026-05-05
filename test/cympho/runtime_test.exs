@@ -196,7 +196,9 @@ defmodule Cympho.RuntimeTest do
       issue: issue,
       policy: policy
     } do
-      {:ok, issue} = Issues.update_issue(issue, %{execution_policy_id: policy.id, execution_state: %{}})
+      {:ok, issue} =
+        Issues.update_issue(issue, %{execution_policy_id: policy.id, execution_state: %{}})
+
       assert {:ok, _context} = Runtime.preflight(issue, agent)
     end
 

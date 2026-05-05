@@ -1,5 +1,8 @@
 <.page size="form">
-  <.header title={@project.name} subtitle="Project settings, repository link, and agent environment variables.">
+  <.header
+    title={@project.name}
+    subtitle="Project settings, repository link, and agent environment variables."
+  >
     <:actions>
       <.app_link
         navigate={~p"/projects/#{@project.id}"}

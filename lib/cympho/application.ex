@@ -33,6 +33,8 @@ defmodule Cympho.Application do
       # Rate limiting
       Cympho.RateLimiting.BroadcastDedup,
       Cympho.RateLimiting.IpRateLimiter,
+      Cympho.RateLimiting.AgentActionLimiter,
+      Cympho.WebhookDedup,
       Cympho.EventStore,
       CymphoWeb.Endpoint
     ]

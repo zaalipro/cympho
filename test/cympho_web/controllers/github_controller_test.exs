@@ -135,6 +135,40 @@ defmodule CymphoWeb.GithubControllerTest do
       assert length(updated_issue.comments) > 0
     end
 
+    test "duplicate delivery (same X-GitHub-Delivery) is short-circuited and runs side effects only once",
+         %{conn: conn, issue: issue, project: project} do
+      payload =
+        build_pr_payload("synchronize", issue.github_pr_url, %{
+          "head" => %{"ref" => "feature-branch"}
+        })
+
+      delivery_id = "delivery-" <> Integer.to_string(System.unique_integer([:positive]))
+
+      conn1 =
+        post_signed_webhook_with_delivery(
+          conn,
+          payload,
+          project.github_webhook_secret,
+          delivery_id
+        )
+
+      assert response(conn1, :ok) == ""
+      first_count = length(Issues.get_issue!(issue.id).comments)
+
+      # Re-deliver the exact same payload + delivery id; the controller must
+      # ack with 200 but skip the side effect.
+      conn2 =
+        post_signed_webhook_with_delivery(
+          build_conn(),
+          payload,
+          project.github_webhook_secret,
+          delivery_id
+        )
+
+      assert response(conn2, :ok) == ""
+      assert length(Issues.get_issue!(issue.id).comments) == first_count
+    end
+
     test "PR merged (closed with merged=true) transitions issue to done", %{
       conn: conn,
       issue: issue,
@@ -223,6 +257,17 @@ defmodule CymphoWeb.GithubControllerTest do
     conn
     |> put_req_header("content-type", "application/json")
     |> put_req_header("x-hub-signature-256", signature)
+    |> post("/api/github/webhook", payload_json)
+  end
+
+  defp post_signed_webhook_with_delivery(conn, payload, secret, delivery_id) do
+    payload_json = Jason.encode!(payload)
+    signature = compute_signature(payload, secret)
+
+    conn
+    |> put_req_header("content-type", "application/json")
+    |> put_req_header("x-hub-signature-256", signature)
+    |> put_req_header("x-github-delivery", delivery_id)
     |> post("/api/github/webhook", payload_json)
   end
 end

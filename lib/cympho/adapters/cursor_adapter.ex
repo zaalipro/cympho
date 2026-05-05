@@ -39,7 +39,10 @@ defmodule Cympho.Adapters.CursorAdapter do
   defp build_prompt(issue, agent_id) do
     id = (is_map(issue) && Map.get(issue, :id)) || Map.get(issue, "id") || issue.id
     title = (is_map(issue) && Map.get(issue, :title)) || Map.get(issue, "title") || issue.title
-    description = (is_map(issue) && Map.get(issue, :description)) || Map.get(issue, "description") || issue.description
+
+    description =
+      (is_map(issue) && Map.get(issue, :description)) || Map.get(issue, "description") ||
+        issue.description
 
     """
     You are agent #{agent_id} working on the following issue:

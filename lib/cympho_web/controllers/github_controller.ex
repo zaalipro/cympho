@@ -14,13 +14,21 @@ defmodule CymphoWeb.GithubController do
   """
   def webhook(conn, %{"action" => action, "pull_request" => pr} = _params) do
     pr_url = pr["html_url"]
+    delivery_id = get_req_header(conn, "x-github-delivery") |> List.first()
 
     with {:ok, issue, project} <- find_issue_and_project(pr_url),
-         :ok <- verify_signature(conn, project) do
+         :ok <- verify_signature(conn, project),
+         :fresh <- Cympho.WebhookDedup.check_and_mark(delivery_id) do
       Logger.info("GitHub webhook received: action=#{action}, pr_url=#{pr_url}")
       handle_pr_action(issue, action, pr)
       send_resp(conn, :ok, "")
     else
+      :duplicate ->
+        # GitHub re-delivered an event we already processed. Ack with 200 so
+        # GitHub stops retrying, but skip side effects.
+        Logger.info("GitHub webhook duplicate delivery: id=#{delivery_id}, pr_url=#{pr_url}")
+        send_resp(conn, :ok, "")
+
       {:error, :not_found} ->
         Logger.info("No issue found linked to PR: #{pr_url}")
         send_resp(conn, :ok, "")

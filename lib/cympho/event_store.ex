@@ -47,6 +47,17 @@ defmodule Cympho.EventStore do
 
   def purge_old(ttl_ms \\ @ttl_ms), do: GenServer.call(__MODULE__, {:purge_old, ttl_ms})
 
+  @doc """
+  Drops every topic whose name starts with `prefix` and deletes the backing
+  ETS rows. Called on company deletion so stale `company:{id}:*` topics don't
+  linger in `topic_events` forever (they're bounded per-topic but the topic
+  set itself is unbounded).
+  """
+  @spec purge_topics_with_prefix(String.t()) :: non_neg_integer()
+  def purge_topics_with_prefix(prefix) when is_binary(prefix) do
+    GenServer.call(__MODULE__, {:purge_prefix, prefix})
+  end
+
   @impl true
   def init(opts) do
     table =
@@ -129,6 +140,23 @@ defmodule Cympho.EventStore do
   def handle_call({:purge_old, ttl_ms}, _from, state) do
     {deleted, state} = do_purge_old(ttl_ms, state)
     {:reply, deleted, state}
+  end
+
+  @impl true
+  def handle_call({:purge_prefix, prefix}, _from, state) do
+    {matching, remaining} =
+      Enum.split_with(state.topic_events, fn {topic, _ids} ->
+        is_binary(topic) and String.starts_with?(topic, prefix)
+      end)
+
+    deleted =
+      Enum.reduce(matching, 0, fn {_topic, ids}, count ->
+        Enum.each(ids, &:ets.delete(@table, &1))
+        count + length(ids)
+      end)
+
+    new_state = %{state | topic_events: Map.new(remaining)}
+    {:reply, deleted, new_state}
   end
 
   @impl true
