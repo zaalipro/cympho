@@ -34,8 +34,9 @@ defmodule CymphoWeb.UserAuthTest do
       })
       |> Repo.insert()
 
-    # Add user to both companies
+    # Add user to both companies (with a small delay so inserted_at ordering is deterministic)
     Companies.create_membership!(%{user_id: user.id, company_id: company1.id, role: "member"})
+    Process.sleep(1100)
     Companies.create_membership!(%{user_id: user.id, company_id: company2.id, role: "admin"})
 
     %{user: user, company1: company1, company2: company2}

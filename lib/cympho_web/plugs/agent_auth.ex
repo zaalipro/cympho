@@ -61,11 +61,14 @@ defmodule CymphoWeb.Plugs.AgentAuth do
     with [api_key | _] <- get_req_header(conn, "x-api-key"),
          {:ok, agent_api_key} <- get_agent_api_key(api_key),
          {:ok, agent} <- Agents.get_agent(agent_api_key.agent_id) do
-      Task.Supervisor.start_child(
-        Cympho.TaskSupervisor,
-        fn -> update_last_used(agent_api_key) end,
-        restart: :temporary
-      )
+      # Fire-and-forget update; skip in test to avoid sandbox disconnect noise
+      unless Application.get_env(:cympho, :env) == :test do
+        Task.Supervisor.start_child(
+          Cympho.TaskSupervisor,
+          fn -> update_last_used(agent_api_key) end,
+          restart: :temporary
+        )
+      end
 
       conn
       |> assign(:current_agent, agent)
