@@ -9,7 +9,7 @@ defmodule Cympho.Mcp.Server do
   """
 
   import Ecto.Query, only: [from: 2]
-  alias Cympho.{Issues, Projects, Agents, Repo, Search}
+  alias Cympho.{Issues, Repo, Search}
   alias Cympho.Agents.Agent
 
   def tools do

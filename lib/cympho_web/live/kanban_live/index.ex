@@ -248,15 +248,6 @@ defmodule CymphoWeb.KanbanLive.Index do
     end
   end
 
-  defp update_local_status(socket, issue_id, new_status) do
-    update(socket, :issues, fn issues ->
-      Enum.map(issues, fn
-        %{id: ^issue_id} = issue -> %{issue | status: new_status}
-        issue -> issue
-      end)
-    end)
-  end
-
   def handle_event("toggle_column", %{"status" => status_str}, socket) do
     status = String.to_existing_atom(status_str)
 
@@ -337,6 +328,15 @@ defmodule CymphoWeb.KanbanLive.Index do
       {:ok, _} -> {:noreply, assign(socket, :editing_card_id, nil)}
       {:error, _} -> {:noreply, socket}
     end
+  end
+
+  defp update_local_status(socket, issue_id, new_status) do
+    update(socket, :issues, fn issues ->
+      Enum.map(issues, fn
+        %{id: ^issue_id} = issue -> %{issue | status: new_status}
+        issue -> issue
+      end)
+    end)
   end
 
   defp try_string_to_status(string) do

@@ -297,9 +297,8 @@ defmodule CymphoWeb.Components do
 
   def input(assigns) do
     assigns = assign(assigns, :errors, input_errors(assigns.field))
-
-    error_id = input_error_id(assigns.field, assigns.name, assigns.id)
-    has_errors = assigns.errors != []
+    assigns = assign(assigns, :error_id, input_error_id(assigns.field, assigns.name, assigns.id))
+    assigns = assign(assigns, :has_errors, assigns.errors != [])
 
     ~H"""
     <div class="space-y-1.5">
@@ -315,8 +314,8 @@ defmodule CymphoWeb.Components do
         id={input_id(@field, @id)}
         name={input_name(@field, @name)}
         rows={@rows}
-        aria-describedby={has_errors && error_id}
-        aria-invalid={has_errors}
+        aria-describedby={@has_errors && @error_id}
+        aria-invalid={@has_errors}
         class={[
           "w-full bg-surface border rounded-lg px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors",
           input_border_class(@errors)
@@ -329,8 +328,8 @@ defmodule CymphoWeb.Components do
         name={input_name(@field, @name)}
         required={@required}
         disabled={@disabled}
-        aria-describedby={has_errors && error_id}
-        aria-invalid={has_errors}
+        aria-describedby={@has_errors && @error_id}
+        aria-invalid={@has_errors}
         class={[
           "w-full bg-surface border rounded-lg px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors",
           input_border_class(@errors)
@@ -353,15 +352,15 @@ defmodule CymphoWeb.Components do
         value={input_value(@field, @value)}
         required={@required}
         disabled={@disabled}
-        aria-describedby={has_errors && error_id}
-        aria-invalid={has_errors}
+        aria-describedby={@has_errors && @error_id}
+        aria-invalid={@has_errors}
         class={[
           "w-full bg-surface border rounded-lg px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors",
           input_border_class(@errors)
         ]}
         {@rest}
       />
-      <p :if={has_errors} id={error_id} class="text-xs text-error" aria-live="polite">
+      <p :if={@has_errors} id={@error_id} class="text-xs text-error" aria-live="polite">
         {Enum.at(@errors, 0)}
       </p>
     </div>
@@ -485,7 +484,7 @@ defmodule CymphoWeb.Components do
   defp input_border_class([]), do: "border-border"
   defp input_border_class(_), do: "border-error/60"
 
-  defp input_error_id(field, name, id) when is_binary(id), do: "#{id}-error"
+  defp input_error_id(_field, _name, id) when is_binary(id), do: "#{id}-error"
   defp input_error_id(field, name, _id), do: "input-error-#{input_name(field, name) || "unknown"}"
 
   defp input_id(%{id: id}, _name), do: id

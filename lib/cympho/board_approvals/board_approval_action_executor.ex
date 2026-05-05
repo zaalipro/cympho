@@ -65,6 +65,11 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     {:noreply, state}
   end
 
+  def handle_info({:retry_approval, approval, attempt}, state) do
+    execute_with_retry(approval, attempt)
+    {:noreply, state}
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
 
   # Replay pending approvals for durability. Uses claim_for_execution/1 so
@@ -99,22 +104,6 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
     )
   end
 
-  # Check if role change was already executed
-  defp role_change_already_executed?(approval) do
-    proposal_data = approval.proposal_data || %{}
-    agent_id = proposal_data["agent_id"]
-    new_role = proposal_data["new_role"]
-
-    case Agents.get_agent(agent_id) do
-      {:ok, agent} ->
-        # Already executed if the agent's role matches the target role
-        to_string(agent.role) == new_role
-
-      _ ->
-        false
-    end
-  end
-
   # Execute with retry logic
   defp execute_with_retry(approval, attempt) when attempt >= @max_retries do
     GovernanceAuditLogs.log_action(
@@ -135,7 +124,7 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
       :ok ->
         :ok
 
-      {:error, _reason} = error ->
+      {:error, _reason} ->
         delay = calculate_retry_delay(attempt)
 
         GovernanceAuditLogs.log_action(
@@ -153,11 +142,6 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
         Process.send_after(self(), {:retry_approval, approval, attempt + 1}, delay)
     end
-  end
-
-  def handle_info({:retry_approval, approval, attempt}, state) do
-    execute_with_retry(approval, attempt)
-    {:noreply, state}
   end
 
   defp calculate_retry_delay(attempt) do

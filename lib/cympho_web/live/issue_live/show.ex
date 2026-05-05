@@ -262,23 +262,6 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
-  defp parse_pr_number(nil), do: nil
-  defp parse_pr_number(""), do: nil
-
-  defp parse_pr_number(raw) when is_binary(raw) do
-    raw
-    |> String.trim()
-    |> String.trim_leading("#")
-    |> Integer.parse()
-    |> case do
-      {n, _} when n > 0 -> n
-      _ -> nil
-    end
-  end
-
-  defp parse_pr_number(raw) when is_integer(raw) and raw > 0, do: raw
-  defp parse_pr_number(_), do: nil
-
   @impl true
   def handle_event("search_assignee", %{"q" => q}, socket) do
     {:noreply, assign(socket, assignee_search: q)}
@@ -522,6 +505,23 @@ defmodule CymphoWeb.IssueLive.Show do
       end
     end
   end
+
+  defp parse_pr_number(nil), do: nil
+  defp parse_pr_number(""), do: nil
+
+  defp parse_pr_number(raw) when is_binary(raw) do
+    raw
+    |> String.trim()
+    |> String.trim_leading("#")
+    |> Integer.parse()
+    |> case do
+      {n, _} when n > 0 -> n
+      _ -> nil
+    end
+  end
+
+  defp parse_pr_number(raw) when is_integer(raw) and raw > 0, do: raw
+  defp parse_pr_number(_), do: nil
 
   @impl true
   def handle_info({:issue_updated, updated_issue}, socket) do
@@ -770,15 +770,6 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
-  defp valid_status_options(current_status) do
-    Cympho.Issues.Issue.status_options()
-    |> Enum.reject(&(&1 == current_status))
-    |> Enum.map(fn status ->
-      {status |> to_string() |> String.replace("_", " ") |> String.capitalize(),
-       to_string(status)}
-    end)
-  end
-
   defp status_combobox_options(current_status) do
     [current_status | Cympho.Issues.Issue.status_options() |> Enum.reject(&(&1 == current_status))]
     |> Enum.map(fn status ->
@@ -804,15 +795,6 @@ defmodule CymphoWeb.IssueLive.Show do
   defp assignee_combobox_options(agents) do
     Enum.map(agents, fn a ->
       %{id: a.id, label: a.name}
-    end)
-  end
-
-  defp filtered_agents(all_agents, search) do
-    search = String.downcase(search)
-
-    Enum.filter(all_agents, fn agent ->
-      String.contains?(String.downcase(agent.name), search) or
-        String.contains?(String.downcase(to_string(agent.role)), search)
     end)
   end
 

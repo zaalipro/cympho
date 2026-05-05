@@ -96,6 +96,14 @@ defmodule Cympho.AgentActions do
     end
   end
 
+  def execute(%Issue{} = issue, agent_id, actions) when is_binary(agent_id) do
+    with {:ok, agent} <- Agents.get_agent(agent_id) do
+      execute(issue, agent, actions)
+    end
+  end
+
+  def execute(_issue, _agent, _actions), do: {:error, :invalid_execution_context}
+
   # Mirror the permissive policy used by `Issues.checkout_issue/3`: only
   # reject when both sides have a non-nil company_id and they differ. Legacy
   # fixtures and seed data may have nil company_ids; tightening fully is a
@@ -112,14 +120,6 @@ defmodule Cympho.AgentActions do
   end
 
   defp authorize_action(_action, _agent), do: :ok
-
-  def execute(%Issue{} = issue, agent_id, actions) when is_binary(agent_id) do
-    with {:ok, agent} <- Agents.get_agent(agent_id) do
-      execute(issue, agent, actions)
-    end
-  end
-
-  def execute(_issue, _agent, _actions), do: {:error, :invalid_execution_context}
 
   def unresolved_current_issue?(%Issue{} = issue, %Agent{} = agent) do
     case Repo.get(Issue, issue.id) do

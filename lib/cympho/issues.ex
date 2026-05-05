@@ -1115,15 +1115,6 @@ defmodule Cympho.Issues do
     end
   end
 
-  defp resolve_next_assignee(participant_id) when is_binary(participant_id) do
-    case Agents.get_agent(participant_id) do
-      {:ok, _agent} -> participant_id
-      {:error, _} -> nil
-    end
-  end
-
-  defp resolve_next_assignee(_), do: nil
-
   @doc """
   Handles a decision (approve/request_changes) for an issue with an execution policy.
   Advances the execution state and assigns the issue to the next participant.

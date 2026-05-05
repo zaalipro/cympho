@@ -185,6 +185,7 @@ defmodule CymphoWeb.OrgChartLive do
         
     <!-- Agent Stats Panel -->
         <.modal
+          id="agent-stats-modal"
           :if={@selected_agent_id}
           on_cancel={JS.push("close_agent_panel")}
           show={true}
@@ -269,6 +270,7 @@ defmodule CymphoWeb.OrgChartLive do
         
     <!-- Company Stats Panel -->
         <.modal
+          id="company-stats-modal"
           :if={@show_company_stats}
           on_cancel={JS.push("toggle_company_stats")}
           show={true}
