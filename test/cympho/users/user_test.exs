@@ -2,7 +2,6 @@ defmodule Cympho.Users.UserTest do
   use ExUnit.Case, async: true
 
   alias Cympho.Users.User
-  alias Cympho.DataCase
 
   describe "changeset/2" do
     test "valid changeset with required fields" do

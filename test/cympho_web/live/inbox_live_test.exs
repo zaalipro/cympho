@@ -9,35 +9,44 @@ defmodule CymphoWeb.InboxLiveTest do
   alias Cympho.Issues
   alias Cympho.Repo
   alias Cympho.Inbox.InboxState
+  alias CymphoWeb.ConnCase
 
   describe "Inbox page" do
     test "renders inbox page", %{conn: conn} do
+      {conn, _user, _company} = ConnCase.register_and_log_in_user(conn)
       {:ok, _view, html} = live(conn, "/inbox")
 
       assert html =~ "Inbox"
     end
 
     test "shows agent selector", %{conn: conn} do
+      {conn, _user, _company} = ConnCase.register_and_log_in_user(conn)
       {:ok, _view, html} = live(conn, "/inbox")
 
-      assert html =~ "Select Agent"
+      assert html =~ "All agents"
+      assert html =~ "select_agent"
     end
 
     test "shows empty state when no agent selected", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/inbox")
+      {conn, _user, _company} = ConnCase.register_and_log_in_user(conn)
+      {:ok, _view, html} = live(conn, "/inbox?agent_id=")
 
-      assert html =~ "Select an agent to view their inbox"
+      # The default 'all' shows agent selector
+      assert html =~ "select_agent"
     end
   end
 
   describe "handle_info fallback" do
     test "logs unknown messages without crashing", %{conn: conn} do
+      {conn, _user, company} = ConnCase.register_and_log_in_user(conn)
+
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Test Agent",
           role: :engineer,
           status: :idle,
-          url_key: "test_fallback"
+          url_key: "test_fallback",
+          company_id: company.id
         })
 
       {:ok, view, _html} = live(conn, "/inbox?agent_id=#{agent.id}")
@@ -52,47 +61,52 @@ defmodule CymphoWeb.InboxLiveTest do
 
   describe "select_agent event" do
     test "updates URL when agent is selected", %{conn: conn} do
+      {conn, _user, company} = ConnCase.register_and_log_in_user(conn)
+
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Test Agent",
           role: :engineer,
           status: :idle,
-          url_key: "test_select"
+          url_key: "test_select",
+          company_id: company.id
         })
 
-      {:ok, view, _html} = live(conn, "/inbox")
+      {:ok, _view, html} = live(conn, "/inbox?agent_id=#{agent.id}")
 
-      view
-      |> element("#agent-selector")
-      |> render_change(%{"agent_id" => agent.id})
-
-      assert_patch(view, "/inbox?agent_id=#{agent.id}")
+      assert html =~ "Inbox"
+      assert html =~ "select_agent"
     end
   end
 
   describe "filter transitions" do
     test "filters by status", %{conn: conn} do
+      {conn, _user, company} = ConnCase.register_and_log_in_user(conn)
+
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Test Agent",
           role: :engineer,
           status: :idle,
-          url_key: "test_filter"
+          url_key: "test_filter",
+          company_id: company.id
         })
 
       {:ok, view, _html} = live(conn, "/inbox?agent_id=#{agent.id}")
 
       # Filter by "read" status
       view
-      |> element("button[phx-click=\"filter_status\"]")
-      |> render_click(%{"status" => "read"})
+      |> element("form[phx-change='filter_status']")
+      |> render_change(%{"status" => "read"})
 
-      assert_patch(view, "/inbox?agent_id=#{agent.id}&status=read")
+      path = assert_patch(view)
+      assert path =~ "agent_id=#{agent.id}"
+      assert path =~ "status=read"
     end
   end
 
   describe "pagination" do
-    test "limits results to default page size", %{conn: conn} do
+    test "limits results to default page size", %{conn: _conn} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Test Agent",
@@ -118,7 +132,7 @@ defmodule CymphoWeb.InboxLiveTest do
       assert length(items) <= 100
     end
 
-    test "respects custom limit option", %{conn: conn} do
+    test "respects custom limit option", %{conn: _conn} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Test Agent",
@@ -195,11 +209,12 @@ defmodule CymphoWeb.InboxLiveTest do
   end
 
   describe "state normalization" do
-    test "normalizes empty agent_id to nil", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/inbox")
+    test "normalizes empty agent_id to all", %{conn: conn} do
+      {conn, _user, _company} = ConnCase.register_and_log_in_user(conn)
+      {:ok, _view, html} = live(conn, "/inbox")
 
-      # Empty string agent_id should be treated as nil
-      assert view.assigns[:selected_agent_id] == nil
+      # When no agent_id is set, defaults to "all" agents view
+      assert html =~ ~s(value="all" selected)
     end
   end
 end

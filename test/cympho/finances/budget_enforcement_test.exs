@@ -2,7 +2,6 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
   use Cympho.DataCase
 
   alias Cympho.Finances
-  alias Cympho.Finances.BudgetPolicy
   alias Cympho.Finances.BudgetIncident
   alias Cympho.Repo
 
@@ -329,17 +328,5 @@ defmodule Cympho.Finances.BudgetEnforcementTest do
       usages = Finances.list_token_usages(company_id)
       assert length(usages) == 2
     end
-  end
-
-  defp company_fixture do
-    unique = System.unique_integer([:positive])
-
-    {:ok, company} =
-      Cympho.Companies.create_company(%{
-        name: "Budget Test Co #{unique}",
-        slug: "budget-test-co-#{unique}"
-      })
-
-    company
   end
 end

@@ -255,7 +255,7 @@ defmodule Cympho.HeartbeatEngine do
   """
   @spec recover_stale_run(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t()}
   def recover_stale_run(%Run{} = run) do
-    now = DateTime.utc_now()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     run
     |> change(%{

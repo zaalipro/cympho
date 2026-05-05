@@ -49,47 +49,55 @@ defmodule Cympho.Companies do
   end
 
   def pause_company(%Company{} = company, reason \\ "Paused from dashboard") do
-    case execute_company_update(company, %{
-           status: "paused",
-           paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
-           paused_reason: reason
-         }) do
-      {:ok, updated} = result ->
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{updated.id}:company",
-          {:company_paused, updated}
-        )
+    with {:ok, updated} <-
+           execute_company_update(company, %{
+             status: "paused",
+             paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
+             paused_reason: reason
+           }) do
+      pause_company_agents(company.id)
 
-        result
+      Phoenix.PubSub.broadcast(
+        Cympho.PubSub,
+        "company:#{updated.id}:company",
+        {:company_paused, updated}
+      )
 
-      error ->
-        error
+      {:ok, updated}
     end
   end
 
   def resume_company(%Company{} = company) do
-    case execute_company_update(company, %{
-           status: "active",
-           paused_at: nil,
-           paused_reason: nil
-         }) do
-      {:ok, updated} = result ->
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "company:#{updated.id}:company",
-          {:company_resumed, updated}
-        )
+    with {:ok, updated} <-
+           execute_company_update(company, %{
+             status: "active",
+             paused_at: nil,
+             paused_reason: nil
+           }) do
+      resume_company_agents(company.id)
 
-        result
+      Phoenix.PubSub.broadcast(
+        Cympho.PubSub,
+        "company:#{updated.id}:company",
+        {:company_resumed, updated}
+      )
 
-      error ->
-        error
+      {:ok, updated}
     end
   end
 
   def active?(%Company{status: "active"}), do: true
   def active?(_company), do: false
+
+  defp pause_company_agents(company_id) do
+    from(a in Agent, where: a.company_id == ^company_id)
+    |> Repo.update_all(set: [governance_status: "paused"])
+  end
+
+  defp resume_company_agents(company_id) do
+    from(a in Agent, where: a.company_id == ^company_id)
+    |> Repo.update_all(set: [governance_status: "active"])
+  end
 
   defp do_update_company(%Company{} = company, attrs) do
     company

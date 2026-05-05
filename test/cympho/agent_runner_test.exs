@@ -54,7 +54,7 @@ defmodule Cympho.AgentRunnerTest do
       session_id = Mock.run(issue, "agent-1", recipient, mock_delay: 5, include_tool_calls: false)
 
       assert_receive {:session_started, ^session_id}
-      assert_receive {:turn_completed, ^session_id, result}
+      assert_receive {:turn_completed, ^session_id, _result}
 
       # Should not receive any tool_call_detected messages
       refute_receive {:tool_call_detected, _, _}

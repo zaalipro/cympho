@@ -37,13 +37,17 @@ defmodule Cympho.Adapters.CursorAdapter do
   end
 
   defp build_prompt(issue, agent_id) do
+    id = (is_map(issue) && Map.get(issue, :id)) || Map.get(issue, "id") || issue.id
+    title = (is_map(issue) && Map.get(issue, :title)) || Map.get(issue, "title") || issue.title
+    description = (is_map(issue) && Map.get(issue, :description)) || Map.get(issue, "description") || issue.description
+
     """
     You are agent #{agent_id} working on the following issue:
 
-    Issue ID: #{issue[:id] || issue.id}
-    Title: #{issue[:title] || issue.title}
+    Issue ID: #{id}
+    Title: #{title}
 
-    #{issue[:description] || issue.description || "No description provided."}
+    #{description || "No description provided."}
 
     Please analyze this issue and provide your response.
     """
@@ -51,14 +55,14 @@ defmodule Cympho.Adapters.CursorAdapter do
   end
 
   defp run_cursor(prompt, config) do
-    cursor_bin = find_cursor_binary(config)
-    timeout = config[:timeout] || config["timeout"] || @default_timeout
-
-    args = build_cursor_args(config)
-
-    env = build_env(config)
-
     try do
+      cursor_bin = find_cursor_binary(config)
+      timeout = config[:timeout] || config["timeout"] || @default_timeout
+
+      args = build_cursor_args(config)
+
+      env = build_env(config)
+
       port_opts =
         [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}] ++
           cursor_cwd_opt(config)
@@ -231,7 +235,7 @@ defmodule Cympho.Adapters.CursorAdapter do
   @impl true
   def available?(config) do
     cursor_bin = resolve_cursor_path(config)
-    not is_nil(cursor_bin)
+    not is_nil(cursor_bin) and File.exists?(cursor_bin)
   end
 
   @impl true

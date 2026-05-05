@@ -93,7 +93,8 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
       |> form("form[phx-submit='search']", %{"search" => "Pagination"})
       |> render_submit()
 
-      assert_patched(view, ~r/search=Pagination/)
+      path = assert_patch(view)
+      assert path =~ "search=Pagination"
     end
   end
 
@@ -101,16 +102,16 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
     test "renders status filter dropdown", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/issues")
 
-      assert html =~ "All Statuses"
-      assert html =~ ~s(phx-change="filter_status")
+      assert html =~ "Any status"
+      assert html =~ ~s(combobox_status)
     end
 
     test "filtering by status shows only matching issues", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/issues")
 
       view
-      |> element("form[phx-change='filter_status']")
-      |> render_change(%{"status" => "in_progress"})
+      |> element("#filter-status")
+      |> render_hook("combobox_status", %{"selected" => "in_progress"})
 
       html = render(view)
       assert html =~ "Pagination test issue two"
@@ -122,10 +123,11 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
       {:ok, view, _html} = live(conn, "/issues")
 
       view
-      |> element("form[phx-change='filter_status']")
-      |> render_change(%{"status" => "backlog"})
+      |> element("#filter-status")
+      |> render_hook("combobox_status", %{"selected" => "backlog"})
 
-      assert_patched(view, ~r/status=backlog/)
+      path = assert_patch(view)
+      assert path =~ "status=backlog"
     end
   end
 
@@ -133,16 +135,15 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
     test "renders priority filter dropdown", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/issues")
 
-      assert html =~ "All Priorities"
-      assert html =~ ~s(phx-change="filter_priority")
+      assert html =~ "combobox_priority"
     end
 
     test "filtering by priority shows only matching issues", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/issues")
 
       view
-      |> element("form[phx-change='filter_priority']")
-      |> render_change(%{"priority" => "low"})
+      |> element("#filter-priority")
+      |> render_hook("combobox_priority", %{"selected" => "low"})
 
       html = render(view)
       assert html =~ "Pagination test issue two"
@@ -154,17 +155,16 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
     test "renders assignee filter dropdown", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/issues")
 
-      assert html =~ "All Assignees"
       assert html =~ "Filter Agent"
-      assert html =~ ~s(phx-change="filter_assignee")
+      assert html =~ "combobox_assignee"
     end
 
     test "filtering by assignee shows only their issues", %{conn: conn, agent: agent} do
       {:ok, view, _html} = live(conn, "/issues")
 
       view
-      |> element("form[phx-change='filter_assignee']")
-      |> render_change(%{"assignee_id" => agent.id})
+      |> element("#filter-assignee")
+      |> render_hook("combobox_assignee", %{"selected" => agent.id})
 
       html = render(view)
       assert html =~ "Pagination test issue one"
@@ -177,17 +177,16 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
     test "renders project filter dropdown", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/issues")
 
-      assert html =~ "All Projects"
       assert html =~ "Test Project"
-      assert html =~ ~s(phx-change="filter_project")
+      assert html =~ "combobox_project"
     end
 
     test "filtering by project shows only its issues", %{conn: conn, project: project} do
       {:ok, view, _html} = live(conn, "/issues")
 
       view
-      |> element("form[phx-change='filter_project']")
-      |> render_change(%{"project_id" => project.id})
+      |> element("#filter-project")
+      |> render_hook("combobox_project", %{"selected" => project.id})
 
       html = render(view)
       assert html =~ "Pagination test issue one"
@@ -199,17 +198,16 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
     test "renders label filter dropdown", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/issues")
 
-      assert html =~ "All Labels"
       assert html =~ "bug"
-      assert html =~ ~s(phx-change="filter_label")
+      assert html =~ "combobox_label"
     end
 
     test "filtering by label shows only matching issues", %{conn: conn, label: label} do
       {:ok, view, _html} = live(conn, "/issues")
 
       view
-      |> element("form[phx-change='filter_label']")
-      |> render_change(%{"label_id" => label.id})
+      |> element("#filter-label")
+      |> render_hook("combobox_label", %{"selected" => label.id})
 
       html = render(view)
       assert html =~ "Pagination test issue one"
@@ -222,7 +220,7 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
       {:ok, view, _html} = live(conn, "/issues?status=backlog&priority=high")
 
       html = render(view)
-      assert html =~ "Clear all"
+      assert html =~ ~s(phx-click="clear_filters")
 
       view
       |> element("button[phx-click='clear_filters']")
@@ -234,7 +232,7 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
     test "clear filters not shown when no filters active", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/issues")
 
-      refute html =~ "Clear all"
+      refute html =~ ~s(phx-click="clear_filters")
     end
   end
 
@@ -257,7 +255,8 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
       |> element("button[phx-click='change_page'][phx-value-page='2']")
       |> render_click()
 
-      assert_patched(view, ~r/page=2/)
+      path = assert_patch(view)
+      assert path =~ "page=2"
     end
 
     test "pagination resets to page 1 when filter changes", %{conn: conn} do
@@ -271,10 +270,11 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
       {:ok, view, _html} = live(conn, "/issues?per_page=5&page=2")
 
       view
-      |> element("form[phx-change='filter_status']")
-      |> render_change(%{"status" => "backlog"})
+      |> element("#filter-status")
+      |> render_hook("combobox_status", %{"selected" => "backlog"})
 
-      assert_patched(view, ~r/page=1/)
+      path = assert_patch(view)
+      assert path =~ "page=1"
     end
   end
 

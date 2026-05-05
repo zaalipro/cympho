@@ -76,7 +76,15 @@ defmodule Cympho.AgentHeartbeat do
   def stop_for_agent(agent_id) do
     case HeartbeatRegistry.lookup(agent_id) do
       {:ok, pid} ->
-        GenServer.stop(pid, :normal)
+        if Process.alive?(pid) do
+          try do
+            GenServer.stop(pid, :normal, :infinity)
+          catch
+            :exit, _ -> {:error, :not_found}
+          end
+        else
+          {:error, :not_found}
+        end
 
       :error ->
         {:error, :not_found}

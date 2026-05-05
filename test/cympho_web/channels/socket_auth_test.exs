@@ -14,7 +14,7 @@ defmodule CymphoWeb.SocketAuthTest do
 
     test "rejects an invalid JWT token" do
       assert {:error, :unauthorized} ==
-               Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{"token" => "garbage"}, %{})
+               Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{"token" => "garbage"}, connect_info: %{})
     end
 
     test "rejects an expired JWT token" do
@@ -33,7 +33,7 @@ defmodule CymphoWeb.SocketAuthTest do
       {:ok, token} = sign_jwt(claims, secret)
 
       assert {:error, :unauthorized} ==
-               Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{"token" => token}, %{})
+               Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{"token" => token}, connect_info: %{})
     end
   end
 
@@ -50,7 +50,7 @@ defmodule CymphoWeb.SocketAuthTest do
 
     test "rejects when session is missing" do
       assert {:error, :unauthorized} ==
-               Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{}, %{})
+               Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{}, connect_info: %{})
     end
 
     test "rejects when session has no company_id" do
@@ -58,7 +58,7 @@ defmodule CymphoWeb.SocketAuthTest do
                Phoenix.ChannelTest.connect(
                  CymphoWeb.Socket,
                  %{},
-                 %{session: %{"user_id" => Ecto.UUID.generate()}}
+                 connect_info: %{session: %{"user_id" => Ecto.UUID.generate()}}
                )
     end
 
@@ -67,7 +67,7 @@ defmodule CymphoWeb.SocketAuthTest do
                Phoenix.ChannelTest.connect(
                  CymphoWeb.Socket,
                  %{},
-                 %{session: %{"company_id" => Ecto.UUID.generate()}}
+                 connect_info: %{session: %{"company_id" => Ecto.UUID.generate()}}
                )
     end
   end
@@ -75,7 +75,7 @@ defmodule CymphoWeb.SocketAuthTest do
   describe "connect/3 rejects anonymous" do
     test "rejects connections with no credentials" do
       assert {:error, :unauthorized} ==
-               Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{}, %{})
+               Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{}, connect_info: %{})
     end
   end
 

@@ -8,12 +8,17 @@ defmodule Cympho.HeartbeatEngine.RunTest do
       changeset = Run.create_changeset(%Run{}, %{})
 
       errors = errors_on(changeset)
-      assert :agent_id in Keyword.keys(errors)
-      assert :issue_id in Keyword.keys(errors)
-      assert :adapter in Keyword.keys(errors)
+      assert :agent_id in Map.keys(errors)
+      assert :issue_id in Map.keys(errors)
     end
 
-    test "sets status to pending" do
+    test "validates adapter is required when no default" do
+      changeset = Run.create_changeset(%Run{adapter: nil}, %{agent_id: Ecto.UUID.generate(), issue_id: Ecto.UUID.generate()})
+      errors = errors_on(changeset)
+      assert :adapter in Map.keys(errors)
+    end
+
+    test "sets status to pending by default" do
       changeset =
         Run.create_changeset(%Run{}, %{
           agent_id: Ecto.UUID.generate(),
@@ -21,7 +26,9 @@ defmodule Cympho.HeartbeatEngine.RunTest do
           adapter: "claude_local"
         })
 
-      assert changeset.changes.status == "pending"
+      # Status uses schema default "pending"; it's only in changes when explicitly set
+      assert %Run{} = changeset.data
+      assert changeset.data.status == "pending"
     end
   end
 

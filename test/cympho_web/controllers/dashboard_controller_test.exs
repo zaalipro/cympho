@@ -4,6 +4,11 @@ defmodule CymphoWeb.DashboardControllerTest do
   alias Cympho.Agents
   alias Cympho.Issues
 
+  setup %{conn: conn} do
+    {conn, _user, company} = register_and_log_in_user(conn)
+    %{conn: conn, company: company}
+  end
+
   describe "GET /api/dashboard" do
     test "returns dashboard summary JSON", %{conn: conn} do
       conn = get(conn, ~p"/api/dashboard")
@@ -15,16 +20,17 @@ defmodule CymphoWeb.DashboardControllerTest do
       assert Map.has_key?(data, "routine_health")
     end
 
-    test "reflects created agents and issues", %{conn: conn} do
+    test "reflects created agents and issues", %{conn: conn, company: company} do
       {:ok, _} =
         Agents.create_agent(%{
           name: "Dash Agent",
           role: :engineer,
           status: :idle,
-          url_key: "dash1"
+          url_key: "dash1",
+          company_id: company.id
         })
 
-      {:ok, _} = Issues.create_issue(%{title: "Dash Issue", description: "desc"})
+      {:ok, _} = Issues.create_issue(%{title: "Dash Issue", description: "desc", company_id: company.id})
 
       conn = get(conn, ~p"/api/dashboard")
       %{"data" => data} = json_response(conn, 200)

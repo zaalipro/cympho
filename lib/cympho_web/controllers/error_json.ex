@@ -16,8 +16,14 @@ defmodule CymphoWeb.ErrorJSON do
   end
 
   defp translate_error({msg, opts}) do
+    opts = Enum.map(opts, fn {k, v} -> {k, inspect_value(v)} end)
     Enum.reduce(opts, msg, fn {key, value}, acc ->
-      String.replace(acc, "%{#{key}}", to_string(value))
+      String.replace(acc, "%{#{key}}", value)
     end)
   end
+
+  defp inspect_value(value) when is_binary(value), do: value
+  defp inspect_value(value) when is_atom(value), do: to_string(value)
+  defp inspect_value(value) when is_number(value), do: to_string(value)
+  defp inspect_value(value), do: inspect(value)
 end

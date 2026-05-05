@@ -3,7 +3,6 @@ defmodule Cympho.DocumentsTest do
 
   alias Cympho.Documents
   alias Cympho.Documents.IssueDocument
-  alias Cympho.Documents.IssueDocumentRevision
   alias Cympho.Issues
 
   setup do

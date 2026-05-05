@@ -7,14 +7,16 @@ defmodule Cympho.Attachments.Storage.LocalStorage do
 
   @behaviour Cympho.Attachments.Storage
 
-  @upload_dir Application.compile_env(:cympho, :uploads_dir, "priv/static/uploads")
+  @default_upload_dir "priv/static/uploads"
+
+  defp upload_dir, do: Application.get_env(:cympho, :uploads_dir, @default_upload_dir)
 
   @impl true
   def store_file(%Plug.Upload{filename: filename, path: tmp_path}, issue_id) do
     with {:ok, safe_id} <- validate_uuid(issue_id) do
       ext = Path.extname(filename)
       unique_name = "#{Ecto.UUID.generate()}#{ext}"
-      dest_dir = Path.join(@upload_dir, safe_id)
+      dest_dir = Path.join(upload_dir(), safe_id)
       dest_path = Path.join(dest_dir, unique_name)
 
       with :ok <- File.mkdir_p(dest_dir),
@@ -26,14 +28,18 @@ defmodule Cympho.Attachments.Storage.LocalStorage do
 
   @impl true
   def read_file(relative_path) do
-    full_path = Path.join(@upload_dir, relative_path)
+    full_path = Path.join(upload_dir(), relative_path)
     File.read(full_path)
   end
 
   @impl true
   def delete_file(relative_path) do
-    full_path = Path.join(@upload_dir, relative_path)
-    File.rm(full_path)
+    full_path = Path.join(upload_dir(), relative_path)
+    case File.rm(full_path) do
+      :ok -> :ok
+      {:error, :enoent} -> :ok
+      error -> error
+    end
   end
 
   @impl true

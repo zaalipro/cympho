@@ -7,7 +7,7 @@ defmodule Cympho.HeartbeatEngineTest do
   describe "create_run/1" do
     test "creates a pending run" do
       agent_id = Ecto.UUID.generate()
-      issue_id = Ecto.UUID.generate()
+      issue_id = insert_issue()
 
       insert_agent(agent_id)
 
@@ -32,7 +32,7 @@ defmodule Cympho.HeartbeatEngineTest do
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
+          issue_id: insert_issue(),
           adapter: "claude_local"
         })
 
@@ -56,7 +56,7 @@ defmodule Cympho.HeartbeatEngineTest do
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
+          issue_id: insert_issue(),
           adapter: "claude_local"
         })
 
@@ -84,7 +84,7 @@ defmodule Cympho.HeartbeatEngineTest do
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
+          issue_id: insert_issue(),
           adapter: "claude_local"
         })
 
@@ -105,7 +105,7 @@ defmodule Cympho.HeartbeatEngineTest do
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
+          issue_id: insert_issue(),
           adapter: "claude_local"
         })
 
@@ -143,12 +143,10 @@ defmodule Cympho.HeartbeatEngineTest do
 
       assert {:ok, _cancelled} = HeartbeatEngine.cancel_run(run)
 
-      assert_received {:run_status_changed,
-                       %{
-                         event_type: :run_cancelled,
-                         new_status: "cancelled",
-                         old_status: "pending"
-                       }}
+      assert_received %Phoenix.Socket.Broadcast{
+        event: "run_status",
+        payload: %{event_type: :run_cancelled, status: "cancelled"}
+      }
     end
   end
 
@@ -160,7 +158,7 @@ defmodule Cympho.HeartbeatEngineTest do
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
+          issue_id: insert_issue(),
           adapter: "claude_local"
         })
 
@@ -182,7 +180,7 @@ defmodule Cympho.HeartbeatEngineTest do
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
+          issue_id: insert_issue(),
           adapter: "claude_local"
         })
 
@@ -205,14 +203,17 @@ defmodule Cympho.HeartbeatEngineTest do
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
+          issue_id: insert_issue(),
           adapter: "claude_local"
         })
 
       {:ok, started} = HeartbeatEngine.start_run(run)
 
       # Manually age the heartbeat
-      stale_time = DateTime.add(DateTime.utc_now(), -30 * 60, :second)
+      stale_time =
+        DateTime.utc_now()
+        |> DateTime.add(-30 * 60, :second)
+        |> DateTime.truncate(:second)
 
       started
       |> Ecto.Changeset.change(%{last_heartbeat_at: stale_time})
@@ -232,7 +233,7 @@ defmodule Cympho.HeartbeatEngineTest do
       {:ok, run} =
         HeartbeatEngine.create_run(%{
           agent_id: agent_id,
-          issue_id: Ecto.UUID.generate(),
+          issue_id: insert_issue(),
           adapter: "claude_local"
         })
 
@@ -251,5 +252,23 @@ defmodule Cympho.HeartbeatEngineTest do
       role: :engineer,
       status: :idle
     })
+  end
+
+  defp insert_issue do
+    company_id = Ecto.UUID.generate()
+
+    Cympho.Repo.insert!(%Cympho.Companies.Company{
+      id: company_id,
+      name: "HB Co #{:rand.uniform(100_000)}",
+      slug: "hb-co-#{:rand.uniform(1_000_000)}"
+    })
+
+    issue =
+      Cympho.Repo.insert!(%Cympho.Issues.Issue{
+        title: "test issue #{:rand.uniform(100_000)}",
+        company_id: company_id
+      })
+
+    issue.id
   end
 end

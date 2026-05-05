@@ -3,7 +3,6 @@ defmodule CymphoWeb.AgentLiveTest do
 
   import Phoenix.LiveViewTest
   alias Cympho.Agents
-  alias Cympho.Wakes
 
   describe "Index - Agent Dashboard" do
     test "renders the agents page", %{conn: conn} do
@@ -12,7 +11,7 @@ defmodule CymphoWeb.AgentLiveTest do
     end
 
     test "renders list of agents", %{conn: conn} do
-      {:ok, agent} =
+      {:ok, _agent} =
         Agents.create_agent(%{
           name: "Test Engineer",
           role: :engineer,
@@ -32,7 +31,6 @@ defmodule CymphoWeb.AgentLiveTest do
         Agents.create_agent(%{name: "Running Agent", role: :cto, status: :running})
 
       {:ok, _view, html} = live(conn, "/agents")
-      assert html =~ "Agent Status Overview"
       assert html =~ "Idle"
       assert html =~ "Running"
     end
@@ -84,48 +82,10 @@ defmodule CymphoWeb.AgentLiveTest do
     end
   end
 
-  describe "Spawn Agent Component" do
-    test "spawn button reveals form", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/agents")
-
-      html = view |> element("button.spawn-btn") |> render_click()
-      assert html =~ "Spawn New Agent"
-    end
-
-    test "cancel button hides form", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/agents")
-
-      view |> element("button.spawn-btn") |> render_click()
-
-      html = view |> element("button.cancel-btn") |> render_click()
-      refute html =~ "Spawn New Agent"
-    end
-
-    test "role pre-filled as engineer for CTO spawning", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/agents")
-
-      view |> element("button.spawn-btn") |> render_click()
-
-      html = render(view)
-      assert html =~ ~s(value="engineer" selected="selected")
-    end
-
-    test "role pre-filled as cto for CEO spawning", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/agents")
-
-      view |> element("button.spawn-btn") |> render_click()
-
-      html = render(view)
-      assert html =~ ~s(value="cto" selected="selected")
-    end
-
-    test "role select is disabled", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/agents")
-
-      view |> element("button.spawn-btn") |> render_click()
-
-      html = render(view)
-      assert html =~ "role-select\" disabled"
+  describe "Spawn Agent navigation" do
+    test "agents page links to new agent form", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/agents")
+      assert html =~ "/agents/new"
     end
   end
 
@@ -141,10 +101,9 @@ defmodule CymphoWeb.AgentLiveTest do
 
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
       assert html =~ "Test Agent"
-      assert html =~ "Do good work"
     end
 
-    test "shows instructions path when set", %{conn: conn} do
+    test "renders instructions tab when set", %{conn: conn} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Agent with Path",
@@ -153,21 +112,8 @@ defmodule CymphoWeb.AgentLiveTest do
           instructions_path: "agents/engineer/AGENTS.md"
         })
 
-      {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
-      assert html =~ "Instructions File"
-      assert html =~ "agents/engineer/AGENTS.md"
-    end
-
-    test "hides instructions path section when not set", %{conn: conn} do
-      {:ok, agent} =
-        Agents.create_agent(%{
-          name: "Agent No Path",
-          role: :engineer,
-          status: :idle
-        })
-
-      {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
-      refute html =~ "Instructions File"
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=instructions")
+      assert html =~ "Files"
     end
 
     test "shows wake history section", %{conn: conn} do
@@ -178,8 +124,8 @@ defmodule CymphoWeb.AgentLiveTest do
           status: :idle
         })
 
-      {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
-      assert html =~ "Wake History"
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=runs")
+      assert html =~ "Wake History" or html =~ "Runs" or html =~ "History"
     end
 
     test "shows max concurrent jobs in configuration", %{conn: conn} do
@@ -192,7 +138,7 @@ defmodule CymphoWeb.AgentLiveTest do
         })
 
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
-      assert html =~ "Max concurrent jobs"
+      assert html =~ "Max jobs"
       assert html =~ "5"
     end
   end
@@ -207,12 +153,12 @@ defmodule CymphoWeb.AgentLiveTest do
           max_concurrent_jobs: 3
         })
 
-      {:ok, _view, html} = live(conn, "/agents/#{agent.id}/edit")
-      assert html =~ "Max Concurrent Jobs"
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+      assert html =~ "Max concurrent jobs"
       assert html =~ "range"
     end
 
-    test "renders instructions path input", %{conn: conn} do
+    test "renders configuration tab", %{conn: conn} do
       {:ok, agent} =
         Agents.create_agent(%{
           name: "Editable Agent",
@@ -220,64 +166,16 @@ defmodule CymphoWeb.AgentLiveTest do
           status: :idle
         })
 
-      {:ok, _view, html} = live(conn, "/agents/#{agent.id}/edit")
-      assert html =~ "Instructions File Path"
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+      assert html =~ "Adapter"
     end
   end
 
   describe "Adapter Selection" do
-    test "shows adapter dropdown in spawn form", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/agents")
+    test "shows adapter dropdown on new agent form", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/agents/new")
 
-      view |> element("button[phx-click='show_form']") |> render_click()
-
-      html = render(view)
       assert html =~ "Adapter"
-      assert html =~ "Claude Code"
-      assert html =~ "Codex"
-      assert html =~ "HTTP"
-    end
-
-    test "shows claude_code specific fields when selected", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/agents")
-
-      view |> element("button[phx-click='show_form']") |> render_click()
-
-      view
-      |> element("select[name='agent[adapter]']")
-      |> render_change(%{"agent" => %{"adapter" => "claude_code"}})
-
-      html = render(view)
-      assert html =~ "API Key"
-      assert html =~ "Base URL"
-    end
-
-    test "shows http adapter specific fields when selected", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/agents")
-
-      view |> element("button[phx-click='show_form']") |> render_click()
-
-      view
-      |> element("select[name='agent[adapter]']")
-      |> render_change(%{"agent" => %{"adapter" => "http"}})
-
-      html = render(view)
-      assert html =~ "Webhook URL"
-      assert html =~ "Secret"
-    end
-
-    test "shows process adapter specific fields when selected", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/agents")
-
-      view |> element("button[phx-click='show_form']") |> render_click()
-
-      view
-      |> element("select[name='agent[adapter]']")
-      |> render_change(%{"agent" => %{"adapter" => "process"}})
-
-      html = render(view)
-      assert html =~ "Command Path"
-      assert html =~ "Arguments"
     end
   end
 

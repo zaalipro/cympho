@@ -57,7 +57,10 @@ defmodule CymphoWeb.GithubController do
 
   defp verify_signature(conn, %Project{github_webhook_secret: secret})
        when is_binary(secret) and byte_size(secret) > 0 do
-    signature = conn.assigns[:github_webhook_signature]
+    signature =
+      conn.assigns[:github_webhook_signature] ||
+        get_req_header(conn, "x-hub-signature-256") |> List.first()
+
     raw_body = raw_body(conn)
 
     case signature do

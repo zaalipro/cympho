@@ -75,7 +75,7 @@ defmodule Cympho.ToolCallTraces.ToolCallTrace do
   end
 
   def creation_changeset(attrs, prev_chain_hash \\ nil) do
-    attrs = Map.put(attrs, :occurred_at, attrs[:occurred_at] || DateTime.utc_now())
+    attrs = Map.put(attrs, :occurred_at, attrs[:occurred_at] || DateTime.utc_now() |> DateTime.truncate(:second))
 
     {content_hash, _} = calculate_content_hash(attrs)
 

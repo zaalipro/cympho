@@ -28,6 +28,13 @@ defmodule Cympho.Skills.Sandbox.AuditTest do
 
     {:ok, agent} = Agents.create_agent(%{name: "Agent", role: :designer, company_id: company.id})
 
+    Plugins.create_plugin(%{
+      identifier: "system.sandbox",
+      name: "Sandbox",
+      version: "1.0.0",
+      company_id: company.id
+    })
+
     :ok =
       Audit.log_decision(
         agent.id,
@@ -45,6 +52,13 @@ defmodule Cympho.Skills.Sandbox.AuditTest do
       Companies.create_company(%{name: "Test Company", slug: "test-#{System.unique_integer()}"})
 
     {:ok, agent} = Agents.create_agent(%{name: "Agent", role: :designer, company_id: company.id})
+
+    Plugins.create_plugin(%{
+      identifier: "system.sandbox",
+      name: "Sandbox",
+      version: "1.0.0",
+      company_id: company.id
+    })
 
     Audit.log_decision(
       agent.id,

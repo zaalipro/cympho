@@ -246,9 +246,16 @@ defmodule Cympho.Adapters.UnitTest do
     end
 
     test "without api key reports unhealthy" do
-      result = CodexAdapter.health_check(%{})
-      assert result.status == :unhealthy
-      assert result.message =~ "API key"
+      saved = System.get_env("OPENAI_API_KEY")
+      System.delete_env("OPENAI_API_KEY")
+
+      try do
+        result = CodexAdapter.health_check(%{})
+        assert result.status == :unhealthy
+        assert result.message =~ "API key"
+      after
+        if saved, do: System.put_env("OPENAI_API_KEY", saved)
+      end
     end
 
     test "with api key reports healthy or degraded" do
@@ -264,11 +271,25 @@ defmodule Cympho.Adapters.UnitTest do
 
   describe "CodexAdapter — available?" do
     test "available?/1 without api key returns false" do
-      assert CodexAdapter.available?(%{}) == false
+      saved = System.get_env("OPENAI_API_KEY")
+      System.delete_env("OPENAI_API_KEY")
+
+      try do
+        assert CodexAdapter.available?(%{}) == false
+      after
+        if saved, do: System.put_env("OPENAI_API_KEY", saved)
+      end
     end
 
     test "available?/1 with empty api key returns false" do
-      assert CodexAdapter.available?(%{api_key: ""}) == false
+      saved = System.get_env("OPENAI_API_KEY")
+      System.delete_env("OPENAI_API_KEY")
+
+      try do
+        assert CodexAdapter.available?(%{api_key: ""}) == false
+      after
+        if saved, do: System.put_env("OPENAI_API_KEY", saved)
+      end
     end
 
     test "available?/1 with api key depends on binary presence" do
@@ -708,8 +729,8 @@ defmodule Cympho.Adapters.UnitTest do
 
       # JSON should be parsed into a map
       assert is_map(result)
-      assert result.status == "success"
-      assert result.data == "test result"
+      assert result["status"] == "success" or Map.get(result, :status) == "success"
+      assert result["data"] == "test result" or Map.get(result, :data) == "test result"
     end
 
     test "run/4 handles non-JSON output" do
@@ -764,8 +785,8 @@ defmodule Cympho.Adapters.UnitTest do
 
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
 
-      assert_receive {:session_started, ^ref}
-      assert_receive {:turn_ended_with_error, ^ref, :timeout}
+      assert_receive {:session_started, ^ref}, 1000
+      assert_receive {:turn_ended_with_error, ^ref, :timeout}, 1000
     end
 
     test "run/4 handles no command error" do

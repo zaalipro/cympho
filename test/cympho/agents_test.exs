@@ -220,18 +220,18 @@ defmodule Cympho.AgentsTest do
   end
 
   describe "count_running_jobs/1" do
-    test "returns 0 when agent has no running jobs" do
-      assert Agents.count_running_jobs(@agent.id) == 0
+    test "returns 0 when agent has no running jobs", %{agent: agent} do
+      assert Agents.count_running_jobs(agent.id) == 0
     end
   end
 
   describe "is_agent_at_capacity?/1" do
-    test "returns false when agent has no running jobs and default capacity" do
-      refute Agents.is_agent_at_capacity?(@agent.id)
+    test "returns false when agent has no running jobs and default capacity", %{agent: agent} do
+      refute Agents.is_agent_at_capacity?(agent.id)
     end
 
     test "returns true when agent does not exist" do
-      assert Agents.is_agent_at_capacity?("non-existent-id")
+      assert Agents.is_agent_at_capacity?("00000000-0000-0000-0000-000000000000")
     end
   end
 
@@ -311,7 +311,7 @@ defmodule Cympho.AgentsTest do
   describe "Agent.adapter_options/0" do
     test "returns valid adapter types from schema" do
       options = Agent.adapter_options()
-      assert options == [:claude_code, :codex, :cursor, :http, :process]
+      assert options == [:claude_code, :codex, :cursor, :http, :openclaw, :process]
     end
   end
 
@@ -363,7 +363,7 @@ defmodule Cympho.AgentsTest do
     test "returns error and does not create agent when heartbeat start fails" do
       # Use an invalid parent_agent_id format that won't matter
       # The heartbeat will fail to start due to invalid agent_id format
-      attrs = %{name: "Bad Agent", role: :engineer}
+      _attrs = %{name: "Bad Agent", role: :engineer}
 
       # This test documents the expected behavior when heartbeat fails
       # Actual failure mode depends on AgentHeartbeat implementation
@@ -406,7 +406,7 @@ defmodule Cympho.AgentsTest do
     setup [:create_company, :create_agent]
 
     test "returns nil for non-existent agent" do
-      assert nil == Agents.get_agent_stats("non-existent-id")
+      assert nil == Agents.get_agent_stats("00000000-0000-0000-0000-000000000000")
     end
 
     test "returns stats for agent with no issues", %{agent: agent} do

@@ -9,6 +9,14 @@ defmodule CymphoWeb.LabelController do
     render(conn, :index, labels: Labels.list_labels_by_company(company_id))
   end
 
+  def show(conn, %{"id" => id}) do
+    company_id = conn.assigns.current_company.id
+
+    with {:ok, %Label{} = label} <- Labels.get_company_label(company_id, id) do
+      render(conn, :show, label: label)
+    end
+  end
+
   def create(conn, %{"label" => label_params}) do
     company_id = conn.assigns.current_company.id
     params = Map.put(label_params, "company_id", company_id)
@@ -32,8 +40,8 @@ defmodule CymphoWeb.LabelController do
   def delete(conn, %{"id" => id}) do
     company_id = conn.assigns.current_company.id
 
-    with {:ok, %Label{} = label} <- Labels.get_company_label(company_id, id) do
-      {:ok, ^label} = Labels.delete_label(label)
+    with {:ok, %Label{} = label} <- Labels.get_company_label(company_id, id),
+         {:ok, _} <- Labels.delete_label(label) do
       send_resp(conn, :no_content, "")
     end
   end

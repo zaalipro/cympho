@@ -7,7 +7,7 @@ defmodule Cympho.WorkProducts do
   def list_work_products(issue_id) do
     IssueWorkProduct
     |> where(issue_id: ^issue_id)
-    |> order_by(desc: :inserted_at)
+    |> order_by(desc: :inserted_at, desc: :id)
     |> preload([:created_by_agent, :attachment])
     |> Repo.all()
   end

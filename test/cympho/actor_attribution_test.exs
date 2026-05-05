@@ -9,16 +9,14 @@ defmodule Cympho.ActorAttributionTest do
     {:ok, company} =
       Companies.create_company(%{
         name: "Test Company",
-        prefix: "test-co",
-        default_role: "member"
+        slug: "test-co-#{System.unique_integer([:positive])}"
       })
 
     {:ok, agent} =
-      Agents.create_agent(company, %{
+      Agents.create_agent(%{
         name: "Test Agent",
-        role: "engineer",
-        model: "claude-sonnet-4-6",
-        status: :idle
+        role: :engineer,
+        company_id: company.id
       })
 
     %{company: company, agent: agent}
@@ -153,7 +151,10 @@ defmodule Cympho.ActorAttributionTest do
 
     test "returns false for invalid UUIDs" do
       refute ActorAttribution.valid_uuid?("not-a-uuid")
-      refute ActorAttribution.valid_uuid?("12345678-1234-1234-1234-123456789abc")
+      # too short
+      refute ActorAttribution.valid_uuid?("12345678-1234-1234-1234-123456789ab")
+      # non-hex character
+      refute ActorAttribution.valid_uuid?("12345678-1234-1234-1234-12345678zabc")
     end
 
     test "returns false for non-strings" do

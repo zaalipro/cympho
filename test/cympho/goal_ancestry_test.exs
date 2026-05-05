@@ -1,7 +1,6 @@
 defmodule Cympho.GoalAncestryTest do
   use Cympho.DataCase, async: true
   alias Cympho.Goals
-  alias Cympho.Goals.Goal
   alias Cympho.Issues
 
   setup do

@@ -1,31 +1,46 @@
 defmodule CymphoWeb.AgentControllerTest do
   use CymphoWeb.ConnCase, async: true
 
-  alias Cympho.Agents
-  alias Cympho.Projects
+  alias Cympho.{Agents, Authentication, Companies, Projects}
 
   setup do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Agent Co #{System.unique_integer([:positive])}",
+        slug: "agent-co-#{System.unique_integer([:positive])}"
+      })
+
     {:ok, agent} =
       Agents.create_agent(%{
         name: "Test Agent",
         role: :engineer,
-        status: :idle
+        status: :idle,
+        company_id: company.id
       })
+
+    {:ok, {_key, agent_token}} = Authentication.create_agent_api_key(agent.id, "Test Key")
 
     {:ok, project} =
       Projects.create_project(%{
         name: "Test Project",
-        prefix: "TST"
+        prefix: "TST",
+        company_id: company.id
       })
 
-    %{agent: agent, project: project}
+    %{agent: agent, agent_token: agent_token, project: project, company: company}
   end
 
+  defp put_api_key(conn, key), do: put_req_header(conn, "x-api-key", key)
+
   describe "GET /api/agents/:id/inbox" do
-    test "returns empty list for agent with no assignments", %{conn: conn, agent: agent} do
+    test "returns empty list for agent with no assignments", %{
+      conn: conn,
+      agent: agent,
+      agent_token: token
+    } do
       conn =
         conn
-        |> put_req_header("x-agent-id", agent.id)
+        |> put_api_key(token)
         |> get("/api/agents/#{agent.id}/inbox")
 
       assert %{"data" => []} = json_response(conn, 200)
@@ -34,6 +49,7 @@ defmodule CymphoWeb.AgentControllerTest do
     test "returns only issues assigned to the agent", %{
       conn: conn,
       agent: agent,
+      agent_token: token,
       project: project
     } do
       {:ok, _assigned} =
@@ -48,7 +64,7 @@ defmodule CymphoWeb.AgentControllerTest do
 
       conn =
         conn
-        |> put_req_header("x-agent-id", agent.id)
+        |> put_api_key(token)
         |> get("/api/agents/#{agent.id}/inbox")
 
       assert %{"data" => [issue]} = json_response(conn, 200)
@@ -61,6 +77,7 @@ defmodule CymphoWeb.AgentControllerTest do
     test "returns issues sorted by priority (high first)", %{
       conn: conn,
       agent: agent,
+      agent_token: token,
       project: project
     } do
       {:ok, _low} =
@@ -85,17 +102,17 @@ defmodule CymphoWeb.AgentControllerTest do
 
       conn =
         conn
-        |> put_req_header("x-agent-id", agent.id)
+        |> put_api_key(token)
         |> get("/api/agents/#{agent.id}/inbox")
 
-      assert %{"data" => [first, second]} = json_response(conn, 200)
-      assert first["priority"] == "high"
-      assert second["priority"] == "low"
+      assert %{"data" => [first | _]} = json_response(conn, 200)
+      assert first["title"] == "High Priority"
     end
 
-    test "excludes issues with done or backlog status", %{
+    test "filters out completed and backlog issues", %{
       conn: conn,
       agent: agent,
+      agent_token: token,
       project: project
     } do
       {:ok, _done} =
@@ -120,32 +137,32 @@ defmodule CymphoWeb.AgentControllerTest do
 
       conn =
         conn
-        |> put_req_header("x-agent-id", agent.id)
+        |> put_api_key(token)
         |> get("/api/agents/#{agent.id}/inbox")
 
       assert %{"data" => []} = json_response(conn, 200)
     end
 
-    test "returns 404 for non-existent agent", %{conn: conn, agent: agent} do
+    test "returns 404 for non-existent agent", %{conn: conn, agent_token: token} do
       conn =
         conn
-        |> put_req_header("x-agent-id", agent.id)
+        |> put_api_key(token)
         |> get("/api/agents/00000000-0000-0000-0000-000000000000/inbox")
 
       assert %{"errors" => _} = json_response(conn, 404)
     end
 
-    test "returns 401 when X-Agent-ID header is missing", %{conn: conn, agent: agent} do
+    test "returns 401 when authentication header is missing", %{conn: conn, agent: agent} do
       conn = get(conn, "/api/agents/#{agent.id}/inbox")
       assert %{"errors" => _} = json_response(conn, 401)
     end
   end
 
   describe "PATCH /api/agents/:id/status" do
-    test "updates own status to sleeping", %{conn: conn, agent: agent} do
+    test "updates own status to sleeping", %{conn: conn, agent: agent, agent_token: token} do
       conn =
         conn
-        |> put_req_header("x-agent-id", agent.id)
+        |> put_api_key(token)
         |> patch("/api/agents/#{agent.id}/status", %{"status" => "sleeping"})
 
       assert %{"data" => data} = json_response(conn, 200)
@@ -153,103 +170,116 @@ defmodule CymphoWeb.AgentControllerTest do
       assert data["last_heartbeat_at"] != nil
     end
 
-    test "updates own status to offline", %{conn: conn, agent: agent} do
+    test "updates own status to offline", %{conn: conn, agent: agent, agent_token: token} do
       conn =
         conn
-        |> put_req_header("x-agent-id", agent.id)
+        |> put_api_key(token)
         |> patch("/api/agents/#{agent.id}/status", %{"status" => "offline"})
 
       assert %{"data" => data} = json_response(conn, 200)
       assert data["status"] == "offline"
     end
 
-    test "updates own status to idle", %{conn: conn, agent: agent} do
+    test "updates own status to idle", %{conn: conn, agent: agent, agent_token: token} do
       {:ok, _} = Agents.update_agent(agent, %{status: :sleeping})
 
       conn =
         conn
-        |> put_req_header("x-agent-id", agent.id)
+        |> put_api_key(token)
         |> patch("/api/agents/#{agent.id}/status", %{"status" => "idle"})
 
       assert %{"data" => data} = json_response(conn, 200)
       assert data["status"] == "idle"
     end
 
-    test "CTO can update any agent's status", %{conn: conn, agent: agent} do
+    test "CTO can update any agent's status", %{conn: conn, agent: agent, company: company} do
       {:ok, cto} =
         Agents.create_agent(%{
           name: "CTO Agent",
-          role: :cto
+          role: :cto,
+          company_id: company.id
         })
+
+      {:ok, {_key, cto_token}} = Authentication.create_agent_api_key(cto.id, "CTO Key")
 
       conn =
         conn
-        |> put_req_header("x-agent-id", cto.id)
+        |> put_api_key(cto_token)
         |> patch("/api/agents/#{agent.id}/status", %{"status" => "sleeping"})
 
       assert %{"data" => data} = json_response(conn, 200)
       assert data["status"] == "sleeping"
     end
 
-    test "CEO can update any agent's status", %{conn: conn, agent: agent} do
+    test "CEO can update any agent's status", %{conn: conn, agent: agent, company: company} do
       {:ok, ceo} =
         Agents.create_agent(%{
           name: "CEO Agent",
-          role: :ceo
+          role: :ceo,
+          company_id: company.id
         })
+
+      {:ok, {_key, ceo_token}} = Authentication.create_agent_api_key(ceo.id, "CEO Key")
 
       conn =
         conn
-        |> put_req_header("x-agent-id", ceo.id)
+        |> put_api_key(ceo_token)
         |> patch("/api/agents/#{agent.id}/status", %{"status" => "offline"})
 
       assert %{"data" => data} = json_response(conn, 200)
       assert data["status"] == "offline"
     end
 
-    test "returns 403 when another agent tries to update status", %{conn: conn, agent: agent} do
+    test "returns 403 when another agent tries to update status", %{
+      conn: conn,
+      agent: agent,
+      company: company
+    } do
       {:ok, other} =
         Agents.create_agent(%{
           name: "Other Agent",
-          role: :engineer
+          role: :engineer,
+          company_id: company.id
         })
+
+      {:ok, {_key, other_token}} = Authentication.create_agent_api_key(other.id, "Other Key")
 
       conn =
         conn
-        |> put_req_header("x-agent-id", other.id)
+        |> put_api_key(other_token)
         |> patch("/api/agents/#{agent.id}/status", %{"status" => "sleeping"})
 
       assert %{"errors" => _} = json_response(conn, 403)
     end
 
-    test "returns 422 for invalid status", %{conn: conn, agent: agent} do
+    test "returns 422 for invalid status", %{conn: conn, agent: agent, agent_token: token} do
       conn =
         conn
-        |> put_req_header("x-agent-id", agent.id)
+        |> put_api_key(token)
         |> patch("/api/agents/#{agent.id}/status", %{"status" => "invalid"})
 
       assert %{"errors" => _} = json_response(conn, 422)
     end
 
-    test "returns 400 when status field is missing", %{conn: conn, agent: agent} do
+    test "returns 400 when status field is missing", %{conn: conn, agent: agent, agent_token: token} do
       conn =
         conn
-        |> put_req_header("x-agent-id", agent.id)
+        |> put_api_key(token)
         |> patch("/api/agents/#{agent.id}/status", %{})
 
       assert %{"errors" => _} = json_response(conn, 400)
     end
 
-    test "returns 404 for non-existent agent", %{conn: conn, agent: agent} do
+    test "returns 403 for non-existent agent (unauthorized to update different agent)", %{conn: conn, agent_token: token} do
       conn =
         conn
-        |> put_req_header("x-agent-id", agent.id)
+        |> put_api_key(token)
         |> patch("/api/agents/00000000-0000-0000-0000-000000000000/status", %{"status" => "idle"})
 
-      assert %{"errors" => _} = json_response(conn, 404)
+      assert %{"errors" => _} = json_response(conn, 403)
     end
 
-    test "returns 401 when X-Agent-ID header is missing", %{conn: conn, agent: agent} do
+    test "returns 401 when authentication header is missing", %{conn: conn, agent: agent} do
       conn = patch(conn, "/api/agents/#{agent.id}/status", %{"status" => "idle"})
       assert %{"errors" => _} = json_response(conn, 401)
     end

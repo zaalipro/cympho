@@ -62,7 +62,7 @@ defmodule Cympho.Finances.TokenUsage do
   end
 
   defp compute_total_tokens(changeset) do
-    case get_field(changeset, :total_tokens) do
+    case get_change(changeset, :total_tokens) do
       nil ->
         input = get_field(changeset, :input_tokens) || 0
         output = get_field(changeset, :output_tokens) || 0

@@ -13,8 +13,8 @@ defmodule Cympho.Secrets.RedactionTest do
     end
 
     test "returns input unchanged when no secrets match" do
-      input = "No secrets here"
-      assert Redaction.redact(input, ["secret"]) == "No secrets here"
+      input = "Nothing to redact here"
+      assert Redaction.redact(input, ["sk-unknown"]) == "Nothing to redact here"
     end
 
     test "handles non-string input" do

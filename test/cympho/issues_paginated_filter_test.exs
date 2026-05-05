@@ -108,7 +108,7 @@ defmodule Cympho.IssuesPaginatedFilterTest do
   end
 
   describe "list_issues_paginated/1 - combined filters" do
-    test "status + priority filter together", %{agent: agent} do
+    test "status + priority filter together", %{} do
       result =
         Issues.list_issues_paginated(%{
           "status" => "backlog",

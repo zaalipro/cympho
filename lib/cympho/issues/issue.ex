@@ -68,7 +68,7 @@ defmodule Cympho.Issues.Issue do
       join_keys: [blocking_issue_id: :id, blocked_issue_id: :id],
       unique: true
 
-    many_to_many :labels, Label, join_through: "issue_labels", unique: true
+    many_to_many :labels, Label, join_through: "issue_labels", unique: true, on_replace: :delete
 
     timestamps(type: :utc_datetime)
   end

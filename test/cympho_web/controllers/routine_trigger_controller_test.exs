@@ -4,17 +4,28 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
   alias Cympho.Routines
   alias Cympho.RoutineTriggers
 
-  describe "fire webhook (POST /api/routine-triggers/:public_id/fire)" do
-    setup do
-      {:ok, agent} =
-        Cympho.Agents.create_agent(%{
-          name: "Webhook Fire Agent",
-          role: :engineer,
-          url_key: "wf-agent-#{:rand.uniform(100_000)}"
-        })
+  setup %{conn: conn} do
+    {conn, user, company} = register_and_log_in_user(conn)
+    {:ok, conn: conn, user: user, company: company}
+  end
 
-      {:ok, routine} =
-        Routines.create_routine(%{name: "Webhook Fire Test", agent_id: agent.id})
+  defp company_routine(company, attrs) do
+    {:ok, agent} =
+      Cympho.Agents.create_agent(%{
+        name: "Routine Agent #{System.unique_integer([:positive])}",
+        role: "engineer",
+        company_id: company.id,
+        url_key: "ra-#{System.unique_integer([:positive])}"
+      })
+
+    Routines.create_routine(
+      Map.merge(%{name: "R#{System.unique_integer([:positive])}", agent_id: agent.id}, attrs)
+    )
+  end
+
+  describe "fire webhook (POST /api/routine-triggers/:public_id/fire)" do
+    setup %{company: company} do
+      {:ok, routine} = company_routine(company, %{name: "Webhook Fire Test"})
 
       {:ok, trigger, secret} =
         RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
@@ -72,8 +83,8 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
   end
 
   describe "rotate_secret (POST /api/routine-triggers/:id/rotate-secret)" do
-    setup do
-      {:ok, routine} = Routines.create_routine(%{name: "Rotate Test"})
+    setup %{company: company} do
+      {:ok, routine} = company_routine(company, %{name: "Rotate Test"})
 
       {:ok, trigger, _secret} =
         RoutineTriggers.create_webhook_trigger(%{"routine_id" => routine.id})
@@ -92,13 +103,13 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
       conn =
         post(conn, ~p"/api/routine-triggers/00000000-0000-0000-0000-000000000000/rotate-secret")
 
-      assert %{"error" => "trigger not found"} = json_response(conn, 404)
+      assert json_response(conn, 404)
     end
   end
 
   describe "index (GET /api/routines/:routine_id/triggers)" do
-    setup do
-      {:ok, routine} = Routines.create_routine(%{name: "Index Test"})
+    setup %{company: company} do
+      {:ok, routine} = company_routine(company, %{name: "Index Test"})
       %{routine: routine}
     end
 
@@ -117,8 +128,8 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
   end
 
   describe "show (GET /api/routines/:routine_id/triggers/:id)" do
-    setup do
-      {:ok, routine} = Routines.create_routine(%{name: "Show Test"})
+    setup %{company: company} do
+      {:ok, routine} = company_routine(company, %{name: "Show Test"})
 
       {:ok, trigger} =
         RoutineTriggers.create_schedule_trigger(%{
@@ -140,13 +151,13 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
       conn =
         get(conn, ~p"/api/routines/#{routine.id}/triggers/00000000-0000-0000-0000-000000000000")
 
-      assert %{"error" => "trigger not found"} = json_response(conn, 404)
+      assert json_response(conn, 404)
     end
   end
 
   describe "create schedule trigger" do
-    setup do
-      {:ok, routine} = Routines.create_routine(%{name: "Create Schedule Test"})
+    setup %{company: company} do
+      {:ok, routine} = company_routine(company, %{name: "Create Schedule Test"})
       %{routine: routine}
     end
 
@@ -168,8 +179,8 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
   end
 
   describe "create webhook trigger" do
-    setup do
-      {:ok, routine} = Routines.create_routine(%{name: "Create Webhook Test"})
+    setup %{company: company} do
+      {:ok, routine} = company_routine(company, %{name: "Create Webhook Test"})
       %{routine: routine}
     end
 
@@ -185,8 +196,8 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
   end
 
   describe "update trigger" do
-    setup do
-      {:ok, routine} = Routines.create_routine(%{name: "Update Test"})
+    setup %{company: company} do
+      {:ok, routine} = company_routine(company, %{name: "Update Test"})
 
       {:ok, trigger} =
         RoutineTriggers.create_schedule_trigger(%{
@@ -197,25 +208,29 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
       %{routine: routine, trigger: trigger}
     end
 
-    test "updates a trigger", %{conn: conn, trigger: trigger} do
-      conn = patch(conn, ~p"/api/routine-triggers/#{trigger.id}", %{"enabled" => false})
+    test "updates a trigger", %{conn: conn, routine: routine, trigger: trigger} do
+      conn =
+        patch(conn, ~p"/api/routines/#{routine.id}/triggers/#{trigger.id}", %{"enabled" => false})
+
       assert %{"data" => data} = json_response(conn, 200)
       refute data["enabled"]
     end
 
-    test "returns 404 for non-existent trigger", %{conn: conn} do
+    test "returns 404 for non-existent trigger", %{conn: conn, routine: routine} do
       conn =
-        patch(conn, ~p"/api/routine-triggers/00000000-0000-0000-0000-000000000000", %{
-          "enabled" => false
-        })
+        patch(
+          conn,
+          ~p"/api/routines/#{routine.id}/triggers/00000000-0000-0000-0000-000000000000",
+          %{"enabled" => false}
+        )
 
-      assert %{"error" => "trigger not found"} = json_response(conn, 404)
+      assert json_response(conn, 404)
     end
   end
 
   describe "delete trigger" do
-    setup do
-      {:ok, routine} = Routines.create_routine(%{name: "Delete Test"})
+    setup %{company: company} do
+      {:ok, routine} = company_routine(company, %{name: "Delete Test"})
 
       {:ok, trigger} =
         RoutineTriggers.create_schedule_trigger(%{
@@ -226,16 +241,19 @@ defmodule CymphoWeb.RoutineTriggerControllerTest do
       %{routine: routine, trigger: trigger}
     end
 
-    test "deletes a trigger", %{conn: conn, trigger: trigger} do
-      conn = delete(conn, ~p"/api/routine-triggers/#{trigger.id}")
+    test "deletes a trigger", %{conn: conn, routine: routine, trigger: trigger} do
+      conn = delete(conn, ~p"/api/routines/#{routine.id}/triggers/#{trigger.id}")
       assert %{"message" => "trigger deleted"} = json_response(conn, 200)
     end
 
-    test "returns 404 for non-existent trigger", %{conn: conn} do
+    test "returns 404 for non-existent trigger", %{conn: conn, routine: routine} do
       conn =
-        delete(conn, ~p"/api/routine-triggers/00000000-0000-0000-0000-000000000000")
+        delete(
+          conn,
+          ~p"/api/routines/#{routine.id}/triggers/00000000-0000-0000-0000-000000000000"
+        )
 
-      assert %{"error" => "trigger not found"} = json_response(conn, 404)
+      assert json_response(conn, 404)
     end
   end
 end

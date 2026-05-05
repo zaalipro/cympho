@@ -120,17 +120,35 @@ defmodule Cympho.Adapters.ProcessAdapter do
     send(recipient_pid, {:session_started, session_id})
 
     # Use spawn_executable with explicit args to avoid shell injection
-    # Convert command to charlist for Port.open
-    command_charlist = String.to_charlist(command)
+    # Resolve command to full path (Port.open requires absolute path)
+    resolved_command = resolve_command_path(command)
 
-    # Add args to port opts
-    opts_with_args = opts ++ [{:args, args}]
+    case resolved_command do
+      nil ->
+        send(
+          recipient_pid,
+          {:turn_ended_with_error, session_id, "command not found: #{command}"}
+        )
 
-    port = Port.open({:spawn_executable, command_charlist}, opts_with_args)
+      command_path ->
+        try do
+          command_charlist = String.to_charlist(command_path)
+          opts_with_args = opts ++ [{:args, args}]
+          port = Port.open({:spawn_executable, command_charlist}, opts_with_args)
+          timeout = config[:timeout] || config["timeout"] || 300_000
+          wait_for_process(port, session_id, recipient_pid, timeout, <<>>)
+        rescue
+          e ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, inspect(e)})
+        end
+    end
+  end
 
-    timeout = config[:timeout] || config["timeout"] || 300_000
-
-    wait_for_process(port, session_id, recipient_pid, timeout, <<>>)
+  defp resolve_command_path(command) do
+    cond do
+      String.starts_with?(command, "/") and File.exists?(command) -> command
+      true -> System.find_executable(command)
+    end
   end
 
   defp wait_for_process(port, session_id, recipient_pid, timeout, acc) do

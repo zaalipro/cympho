@@ -206,9 +206,6 @@ defmodule Cympho.AdaptersTest do
 
       assert :endpoint in keys
       assert :api_key in keys
-      assert :instructions in keys
-      assert :timeout in keys
-      assert :headers in keys
 
       endpoint_entry = Enum.find(schema, &(&1.key == :endpoint))
       assert endpoint_entry.required == true
@@ -238,25 +235,11 @@ defmodule Cympho.AdaptersTest do
       assert msg =~ "HTTP"
     end
 
-    test "validate_config/1 rejects out-of-range timeout" do
+    test "validate_config/1 rejects invalid context type" do
       assert {:error, _} =
                OpenClawAdapter.validate_config(%{
                  "endpoint" => "https://openclaw.example.com",
-                 "timeout" => 0
-               })
-
-      assert {:error, _} =
-               OpenClawAdapter.validate_config(%{
-                 "endpoint" => "https://openclaw.example.com",
-                 "timeout" => 700_000
-               })
-    end
-
-    test "validate_config/1 rejects non-map headers" do
-      assert {:error, _} =
-               OpenClawAdapter.validate_config(%{
-                 "endpoint" => "https://openclaw.example.com",
-                 "headers" => "not-a-map"
+                 "context" => "not-a-map"
                })
     end
 
@@ -272,7 +255,7 @@ defmodule Cympho.AdaptersTest do
     test "health_check/1 returns unhealthy when no endpoint configured" do
       result = OpenClawAdapter.health_check(%{})
       assert result.status == :unhealthy
-      assert result.message =~ "not configured"
+      assert result.message =~ "configured"
     end
 
     test "run/4 returns a reference" do

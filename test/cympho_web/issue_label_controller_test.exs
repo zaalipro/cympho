@@ -4,14 +4,22 @@ defmodule CymphoWeb.IssueLabelControllerTest do
   alias Cympho.Labels
   alias Cympho.Projects
 
-  setup do
-    {:ok, project} = Projects.create_project(%{name: "Test", prefix: "TST"})
+  setup %{conn: conn} do
+    {conn, _user, company} = register_and_log_in_user(conn)
+
+    {:ok, project} =
+      Projects.create_project(%{name: "Test", prefix: "TST", company_id: company.id})
 
     {:ok, issue} =
-      Issues.create_issue(%{title: "Test", description: "Desc", project_id: project.id})
+      Issues.create_issue(%{
+        title: "Test",
+        description: "Desc",
+        project_id: project.id,
+        company_id: company.id
+      })
 
-    {:ok, label} = Labels.create_label(%{name: "Bug", color: "#FF0000"})
-    %{issue: issue, label: label}
+    {:ok, label} = Labels.create_label(%{name: "Bug", color: "#FF0000", company_id: company.id})
+    %{conn: conn, issue: issue, label: label}
   end
 
   test "index returns empty", %{conn: conn, issue: issue} do

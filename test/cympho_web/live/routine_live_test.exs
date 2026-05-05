@@ -20,14 +20,14 @@ defmodule CymphoWeb.RoutineLiveTest do
 
       {:ok, _view, html} = live(conn, "/routines")
       assert html =~ "Test Routine Alpha"
-      assert html =~ "active"
+      assert html =~ "Active"
     end
 
     test "shows pause button for active routines", %{conn: conn} do
       {:ok, routine} = Routines.create_routine(%{name: "Active One"})
 
       {:ok, view, _html} = live(conn, "/routines")
-      assert has_element?(view, "#routine-#{routine.id} button.pause-btn")
+      assert has_element?(view, "#routine-#{routine.id} button[phx-click='pause_routine']")
     end
 
     test "shows resume button for paused routines", %{conn: conn} do
@@ -35,16 +35,16 @@ defmodule CymphoWeb.RoutineLiveTest do
       {:ok, _} = Routines.pause_routine(routine)
 
       {:ok, view, _html} = live(conn, "/routines")
-      assert has_element?(view, "#routine-#{routine.id} button.resume-btn")
+      assert has_element?(view, "#routine-#{routine.id} button[phx-click='resume_routine']")
     end
 
     test "pauses an active routine", %{conn: conn} do
       {:ok, routine} = Routines.create_routine(%{name: "To Pause"})
 
       {:ok, view, _html} = live(conn, "/routines")
-      view |> element("#routine-#{routine.id} button.pause-btn") |> render_click()
+      view |> element("#routine-#{routine.id} button[phx-click='pause_routine']") |> render_click()
       html = render(view)
-      assert html =~ "paused"
+      assert html =~ "Paused"
     end
 
     test "resumes a paused routine", %{conn: conn} do
@@ -52,18 +52,18 @@ defmodule CymphoWeb.RoutineLiveTest do
       {:ok, _} = Routines.pause_routine(routine)
 
       {:ok, view, _html} = live(conn, "/routines")
-      view |> element("#routine-#{routine.id} button.resume-btn") |> render_click()
+      view |> element("#routine-#{routine.id} button[phx-click='resume_routine']") |> render_click()
       html = render(view)
-      assert html =~ "active"
+      assert html =~ "Active"
     end
 
     test "archives a routine", %{conn: conn} do
       {:ok, routine} = Routines.create_routine(%{name: "To Archive"})
 
       {:ok, view, _html} = live(conn, "/routines")
-      view |> element("#routine-#{routine.id} button.delete-btn") |> render_click()
+      view |> element("#routine-#{routine.id} button[phx-click='delete_routine']") |> render_click()
       html = render(view)
-      refute html =~ "To Archive"
+      assert html =~ "Archived"
     end
 
     test "links to new routine page", %{conn: conn} do
@@ -86,7 +86,7 @@ defmodule CymphoWeb.RoutineLiveTest do
       {:ok, _view, html} = live(conn, "/routines/#{routine.id}")
       assert html =~ "Show Routine"
       assert html =~ "A desc"
-      assert html =~ "active"
+      assert html =~ "Active"
     end
 
     test "shows run history section", %{conn: conn} do
@@ -119,12 +119,17 @@ defmodule CymphoWeb.RoutineLiveTest do
     test "creates a routine and redirects to show", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/routines/new")
 
-      html =
+      result =
         view
         |> form("form[phx-submit=save]", routine: %{name: "Brand New Routine"})
         |> render_submit()
 
-      assert html =~ "Brand New Routine"
+      assert {:error, {:live_redirect, %{to: "/routines/" <> _}}} = result
+
+      assert Enum.any?(
+               Cympho.Routines.list_routines(),
+               &(&1.name == "Brand New Routine")
+             )
     end
 
     test "shows error for empty name", %{conn: conn} do
@@ -145,7 +150,7 @@ defmodule CymphoWeb.RoutineLiveTest do
 
       {:ok, _view, html} = live(conn, "/routines/#{routine.id}/edit")
       assert html =~ "Edit Routine"
-      assert html =~ "Update Routine"
+      assert html =~ "Save Changes"
     end
 
     test "updates routine and redirects to show", %{conn: conn} do
@@ -153,12 +158,16 @@ defmodule CymphoWeb.RoutineLiveTest do
 
       {:ok, view, _html} = live(conn, "/routines/#{routine.id}/edit")
 
-      html =
+      result =
         view
         |> form("form[phx-submit=save]", routine: %{name: "After Edit"})
         |> render_submit()
 
-      assert html =~ "After Edit"
+      # On submit redirects to show page
+      assert {:error, {:live_redirect, %{to: "/routines/" <> _}}} = result
+
+      updated = Cympho.Routines.get_routine!(routine.id)
+      assert updated.name == "After Edit"
     end
   end
 end

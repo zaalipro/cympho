@@ -137,6 +137,9 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
       :ok ->
         :ok
 
+      {:ok, _result} ->
+        :ok
+
       {:error, _reason} ->
         delay = calculate_retry_delay(attempt)
 

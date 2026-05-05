@@ -31,7 +31,7 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
     |> Cympho.Repo.insert!()
   end
 
-  defp create_company(governance_config \\ %{}) do
+  defp create_company(governance_config) do
     unique = System.unique_integer([:positive])
 
     {:ok, company} =
@@ -44,7 +44,7 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
     company
   end
 
-  defp create_membership(user, company, role \\ "member", is_board_member \\ false) do
+  defp create_membership(user, company, role, is_board_member) do
     {:ok, membership} =
       Companies.create_membership(%{
         user_id: user.id,
@@ -57,32 +57,33 @@ defmodule CymphoWeb.BoardGovernanceApiTest do
   end
 
   defp authed_conn(conn, user, company_id) do
+    {:ok, token} = Cympho.UserAuthJWT.generate_token(user, company_id)
     conn
-    |> Plug.Conn.assign(:current_user, user)
-    |> Plug.Conn.assign(:current_company_id, company_id)
+    |> Plug.Conn.put_req_header("authorization", "Bearer " <> token)
   end
 
   describe "POST /api/agents — board governance gate" do
-    test "returns 403 when no user is present" do
-      company = create_company(%{"required_approvals" => ["agent_hire"]})
+    test "returns 401 when no user is present" do
+      _company = create_company(%{"required_approvals" => ["agent_hire"]})
 
       conn =
         build_conn()
-        |> Plug.Conn.assign(:current_company_id, company.id)
         |> post("/api/agents", %{"agent" => %{"name" => "Agent", "role" => "engineer"}})
 
-      assert %{"errors" => [%{"detail" => "Authentication required"}]} = json_response(conn, 403)
+      assert %{"errors" => [%{"detail" => "Authentication required"}]} = json_response(conn, 401)
     end
 
-    test "returns 403 when no company context is present" do
+    test "returns 403 when user has no company memberships" do
       user = create_user()
+
+      {:ok, token} = Cympho.UserAuthJWT.generate_token(user)
 
       conn =
         build_conn()
-        |> Plug.Conn.assign(:current_user, user)
+        |> Plug.Conn.put_req_header("authorization", "Bearer " <> token)
         |> post("/api/agents", %{"agent" => %{"name" => "Agent", "role" => "engineer"}})
 
-      assert %{"errors" => [%{"detail" => "Company context required"}]} = json_response(conn, 403)
+      assert %{"errors" => [%{"detail" => "User has no company memberships"}]} = json_response(conn, 401)
     end
 
     test "returns 403 for non-board user when board members exist" do

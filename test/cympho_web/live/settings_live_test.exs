@@ -23,6 +23,7 @@ defmodule CymphoWeb.SettingsLiveTest do
 
   defp conn_with_session(user_id) do
     Phoenix.ConnTest.build_conn()
+    |> Plug.Test.init_test_session(%{})
     |> Plug.Conn.put_session("settings_user_id", user_id)
   end
 
@@ -38,15 +39,15 @@ defmodule CymphoWeb.SettingsLiveTest do
       Users.create_user(%{email: "other@example.com", name: "Other"})
 
       conn = conn_with_session(user.id)
-      {:ok, view, html} = live(conn, "/settings?user_id=fake-id")
+      {:ok, _view, html} = live(conn, "/settings?user_id=fake-id")
 
       # Should still show the session-bound user, not the param
       assert html =~ "Notification Settings"
-      assert html =~ "Settings User"
+      assert html =~ user.email
     end
 
     test "select_user event stores user in session", %{user: user} do
-      {:ok, view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
+      {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       assert html =~ "Notification Settings"
       # The select_user event should persist the session binding
@@ -79,7 +80,7 @@ defmodule CymphoWeb.SettingsLiveTest do
       Users.ensure_default_prefs(user.id)
       {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
-      assert html =~ "Enabled"
+      assert html =~ "On"
     end
 
     test "shows event notification section", %{user: user} do
@@ -106,7 +107,7 @@ defmodule CymphoWeb.SettingsLiveTest do
       {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       view
-      |> element("#channel-email .toggle-btn")
+      |> element("#channel-email button[phx-click='toggle_channel']")
       |> render_click()
 
       # Verify the dispatcher's data store was updated
@@ -119,7 +120,7 @@ defmodule CymphoWeb.SettingsLiveTest do
       {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       view
-      |> element("#channel-telegram .toggle-btn")
+      |> element("#channel-telegram button[phx-click='toggle_channel']")
       |> render_click()
 
       telegram_pref =
@@ -133,7 +134,7 @@ defmodule CymphoWeb.SettingsLiveTest do
       {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
       view
-      |> element("#channel-webhook .toggle-btn")
+      |> element("#channel-webhook button[phx-click='toggle_channel']")
       |> render_click()
 
       webhook_pref =
@@ -152,7 +153,7 @@ defmodule CymphoWeb.SettingsLiveTest do
 
       # Toggle email off via the UI
       {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
-      view |> element("#channel-email .toggle-btn") |> render_click()
+      view |> element("#channel-email button[phx-click='toggle_channel']") |> render_click()
 
       # Cache should be invalidated - next lookup should reflect the change
       email_pref = Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "email")
@@ -161,7 +162,7 @@ defmodule CymphoWeb.SettingsLiveTest do
   end
 
   describe "Webhook URL configuration" do
-    test "save webhook URL writes to notification_preferences", %{user: user} do
+    test "save webhook URL writes to user record", %{user: user} do
       Users.ensure_default_prefs(user.id)
       {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
@@ -169,15 +170,13 @@ defmodule CymphoWeb.SettingsLiveTest do
       |> element("form[phx-submit='update_webhook_url']")
       |> render_submit(%{"webhook_url" => "https://example.com/hook"})
 
-      webhook_pref =
-        Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "webhook")
-
-      assert webhook_pref.config["url"] == "https://example.com/hook"
+      reloaded = Repo.get!(Cympho.Users.User, user.id)
+      assert reloaded.webhook_url == "https://example.com/hook"
     end
 
     test "shows test ping button after URL is saved", %{user: user} do
       Users.ensure_default_prefs(user.id)
-      Users.upsert_notification_pref(user.id, "webhook", %{"url" => "https://example.com/hook"})
+      Users.update_notification_prefs(user, %{webhook_url: "https://example.com/hook"})
 
       {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
@@ -186,7 +185,7 @@ defmodule CymphoWeb.SettingsLiveTest do
 
     test "test ping shows result", %{user: user} do
       Users.ensure_default_prefs(user.id)
-      Users.upsert_notification_pref(user.id, "webhook", %{"url" => "https://example.com/hook"})
+      Users.update_notification_prefs(user, %{webhook_url: "https://example.com/hook"})
 
       {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
@@ -204,10 +203,10 @@ defmodule CymphoWeb.SettingsLiveTest do
       Users.ensure_default_prefs(user.id)
       {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
-      assert html =~ "Enter Telegram Chat ID"
+      assert html =~ "Telegram chat ID"
     end
 
-    test "link telegram chat ID writes to notification_preferences", %{user: user} do
+    test "link telegram chat ID writes to user record", %{user: user} do
       Users.ensure_default_prefs(user.id)
       {:ok, view, _html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
@@ -215,24 +214,22 @@ defmodule CymphoWeb.SettingsLiveTest do
       |> element("form[phx-submit='link_telegram']")
       |> render_submit(%{"telegram_chat_id" => "123456789"})
 
-      telegram_pref =
-        Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "telegram")
-
-      assert telegram_pref.config["telegram_chat_id"] == "123456789"
-      assert telegram_pref.enabled
+      reloaded = Repo.get!(Cympho.Users.User, user.id)
+      assert reloaded.telegram_chat_id == "123456789"
+      assert reloaded.telegram_enabled
     end
 
     test "shows verify button after linking", %{user: user} do
       Users.ensure_default_prefs(user.id)
 
-      Users.upsert_notification_pref(user.id, "telegram", %{
-        "telegram_chat_id" => "123456789",
-        "enabled" => true
+      Users.update_notification_prefs(user, %{
+        telegram_chat_id: "123456789",
+        telegram_enabled: true
       })
 
       {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")
 
-      assert html =~ "Verify Connection"
+      assert html =~ "Verify"
       assert html =~ "123456789"
     end
   end
@@ -255,10 +252,10 @@ defmodule CymphoWeb.SettingsLiveTest do
 
       result =
         view
-        |> element("#events-email .event-toggle-btn", poison: "")
+        |> element("#events-email button[phx-click='toggle_event']", "Issue Assigned")
         |> render_click()
 
-      assert result =~ "ON" or result =~ "OFF" or result =~ "event"
+      assert result =~ "On" or result =~ "Off" or result =~ "event"
     end
 
     test "toggle pref channel enabled", %{user: user} do
@@ -268,10 +265,10 @@ defmodule CymphoWeb.SettingsLiveTest do
 
       result =
         view
-        |> element("#events-email .toggle-btn")
+        |> element("#events-email button[phx-click='toggle_pref_enabled']")
         |> render_click()
 
-      assert result =~ "OFF" or result =~ "ON"
+      assert result =~ "Off" or result =~ "On"
     end
   end
 
@@ -279,14 +276,11 @@ defmodule CymphoWeb.SettingsLiveTest do
     test "settings persist on reload", %{user: user} do
       Users.ensure_default_prefs(user.id)
 
-      Users.upsert_notification_pref(user.id, "telegram", %{
-        "telegram_chat_id" => "999888",
-        "enabled" => true
-      })
-
-      Users.upsert_notification_pref(user.id, "webhook", %{
-        "url" => "https://persist.example.com",
-        "enabled" => true
+      Users.update_notification_prefs(user, %{
+        telegram_chat_id: "999888",
+        telegram_enabled: true,
+        webhook_url: "https://persist.example.com",
+        webhook_enabled: true
       })
 
       {:ok, _view, html} = live(build_conn_(), "/settings?user_id=#{user.id}")

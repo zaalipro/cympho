@@ -165,7 +165,7 @@ defmodule Cympho.RuntimeTest do
     alias Cympho.ExecutionPolicies
     alias Cympho.Issues.ExecutionState
 
-    setup %{company: company, agent: agent, issue: issue} do
+    setup %{company: _company, agent: _agent, issue: _issue} do
       {:ok, policy} =
         ExecutionPolicies.create_execution_policy(%{
           name: "Test Policy",
@@ -193,9 +193,10 @@ defmodule Cympho.RuntimeTest do
 
     test "preflight allows execution when execution state is empty", %{
       agent: agent,
-      issue: issue
+      issue: issue,
+      policy: policy
     } do
-      {:ok, issue} = Issues.update_issue(issue, %{execution_policy_id: "some-policy-id"})
+      {:ok, issue} = Issues.update_issue(issue, %{execution_policy_id: policy.id, execution_state: %{}})
       assert {:ok, _context} = Runtime.preflight(issue, agent)
     end
 

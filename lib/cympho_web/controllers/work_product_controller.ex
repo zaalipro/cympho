@@ -68,7 +68,7 @@ defmodule CymphoWeb.WorkProductController do
   def delete(conn, %{"id" => id}) do
     with {:ok, %IssueWorkProduct{} = work_product} <- WorkProducts.get_work_product(id),
          :ok <- enforce_company(conn, work_product),
-         {:ok, _} <- WorkProducts.delete_work_product(work_product) do
+         :ok <- WorkProducts.delete_work_product(work_product) do
       send_resp(conn, :no_content, "")
     end
   end

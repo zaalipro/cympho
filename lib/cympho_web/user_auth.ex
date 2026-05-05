@@ -77,6 +77,7 @@ defmodule CymphoWeb.UserAuth do
         query =
           from(m in Cympho.Companies.CompanyMembership,
             where: m.user_id == ^user.id,
+            order_by: [asc: m.inserted_at],
             preload: :company
           )
 

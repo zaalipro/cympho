@@ -28,4 +28,39 @@ defmodule CymphoWeb.ConnCase do
     Cympho.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
+
+  @doc """
+  Creates a user, company, and membership, and authenticates the conn with a
+  Bearer JWT issued for that user/company. Returns `{conn, user, company}`.
+  """
+  def register_and_log_in_user(conn, attrs \\ %{}) do
+    unique = System.unique_integer([:positive])
+
+    {:ok, company} =
+      Cympho.Companies.create_company(%{
+        name: Map.get(attrs, :company_name, "Test Co #{unique}"),
+        slug: Map.get(attrs, :company_slug, "test-co-#{unique}")
+      })
+
+    {:ok, user} =
+      Cympho.Users.create_user(%{
+        email: "user-#{unique}@example.com",
+        name: "Test User #{unique}",
+        password: "password1234"
+      })
+
+    {:ok, _membership} =
+      Cympho.Companies.create_membership(%{
+        user_id: user.id,
+        company_id: company.id,
+        role: Map.get(attrs, :role, "member"),
+        is_board_member: Map.get(attrs, :is_board_member, false)
+      })
+
+    {:ok, token} = Cympho.UserAuthJWT.generate_token(user, company.id)
+
+    conn = Plug.Conn.put_req_header(conn, "authorization", "Bearer " <> token)
+
+    {conn, user, company}
+  end
 end

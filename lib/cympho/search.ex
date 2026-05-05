@@ -26,22 +26,26 @@ defmodule Cympho.Search do
     issues = Repo.all(issues_q)
 
     comments_q =
-      from(c in Comment,
-        where: fragment("search_vector @@ plainto_tsquery('english', ?)", ^query),
-        order_by: fragment("ts_rank(search_vector, plainto_tsquery('english', ?)) DESC", ^query),
-        limit: ^limit,
-        preload: [:issue]
-      )
-
-    comments_q =
       if company_id do
-        from(c in comments_q,
+        from(c in Comment,
           join: i in Issue,
           on: c.issue_id == i.id,
-          where: i.company_id == ^company_id
+          where:
+            fragment("c0.search_vector @@ plainto_tsquery('english', ?)", ^query) and
+              i.company_id == ^company_id,
+          order_by:
+            fragment("ts_rank(c0.search_vector, plainto_tsquery('english', ?)) DESC", ^query),
+          limit: ^limit,
+          preload: [:issue]
         )
       else
-        comments_q
+        from(c in Comment,
+          where: fragment("search_vector @@ plainto_tsquery('english', ?)", ^query),
+          order_by:
+            fragment("ts_rank(search_vector, plainto_tsquery('english', ?)) DESC", ^query),
+          limit: ^limit,
+          preload: [:issue]
+        )
       end
 
     comments = Repo.all(comments_q)

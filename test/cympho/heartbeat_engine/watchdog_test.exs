@@ -1,13 +1,18 @@
 defmodule Cympho.HeartbeatEngine.WatchdogTest do
-  use ExUnit.Case, async: false
+  # async: false so we can grant the global watchdog process access to our
+  # sandbox connection without contention with other tests.
+  use Cympho.DataCase, async: false
 
   alias Cympho.HeartbeatEngine.Watchdog
 
   setup do
-    unless Process.whereis(Cympho.HeartbeatEngine.Watchdog) do
-      start_supervised!(Cympho.HeartbeatEngine.Watchdog)
-    end
+    pid =
+      case start_supervised(Cympho.HeartbeatEngine.Watchdog) do
+        {:ok, pid} -> pid
+        {:error, {:already_started, pid}} -> pid
+      end
 
+    Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), pid)
     :ok
   end
 

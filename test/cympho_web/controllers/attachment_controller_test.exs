@@ -1,19 +1,37 @@
 defmodule CymphoWeb.AttachmentControllerTest do
   use CymphoWeb.ConnCase, async: true
 
-  alias Cympho.Issues
-  alias Cympho.Attachments
+  alias Cympho.{Agents, Authentication, Companies, Issues, Attachments}
 
-  setup do
+  setup %{conn: conn} do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Att Co #{System.unique_integer([:positive])}",
+        slug: "att-co-#{System.unique_integer([:positive])}"
+      })
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Test Agent",
+        role: :engineer,
+        status: :idle,
+        company_id: company.id
+      })
+
+    {:ok, {_key, agent_token}} = Authentication.create_agent_api_key(agent.id, "Test Key")
+
+    conn = put_req_header(conn, "x-api-key", agent_token)
+
     {:ok, issue} =
       Issues.create_issue(%{
         title: "Test Issue",
         description: "Test description",
         status: :backlog,
-        priority: :medium
+        priority: :medium,
+        company_id: company.id
       })
 
-    %{issue: issue}
+    %{conn: conn, issue: issue, company: company, agent: agent}
   end
 
   describe "index/2" do

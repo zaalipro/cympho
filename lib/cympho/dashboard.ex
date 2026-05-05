@@ -103,7 +103,7 @@ defmodule Cympho.Dashboard do
     %{
       active_agents: active_agents_count(company_id),
       total_agents: total_agents_count(company_id),
-      active_agent_list: active_agents(company_id),
+      active_agent_list: Enum.map(active_agents(company_id), &agent_to_map/1),
       agent_status_counts: agent_status_counts(company_id),
       issue_status_counts: issue_status_counts(company_id),
       throughput: %{
@@ -112,8 +112,8 @@ defmodule Cympho.Dashboard do
       },
       bottlenecks: Enum.map(bottleneck_issues(7, company_id), &bottle_neck_to_map/1),
       routine_health: routine_health(),
-      recent_activities: recent_activities(10, company_id),
-      recent_inbox: recent_inbox(company_id, 6),
+      recent_activities: Enum.map(recent_activities(10, company_id), &activity_to_map/1),
+      recent_inbox: Enum.map(recent_inbox(company_id, 6), &inbox_to_map/1),
       cost_summary: cost_summary(company_id)
     }
   end
@@ -198,6 +198,44 @@ defmodule Cympho.Dashboard do
       updated_at: issue.updated_at,
       assignee: issue.assignee && issue.assignee.name,
       project: issue.project && issue.project.name
+    }
+  end
+
+  defp agent_to_map(agent) do
+    %{
+      id: agent.id,
+      name: agent.name,
+      title: agent.title,
+      role: agent.role,
+      status: agent.status,
+      adapter: agent.adapter,
+      url_key: agent.url_key
+    }
+  end
+
+  defp inbox_to_map(item) do
+    %{
+      id: item.id,
+      agent_id: item.agent_id,
+      issue_id: item.issue_id,
+      status: item.status,
+      unread_count: item.unread_count,
+      agent: item.agent && agent_to_map(item.agent),
+      issue: item.issue && bottle_neck_to_map(item.issue),
+      inserted_at: item.inserted_at,
+      updated_at: item.updated_at
+    }
+  end
+
+  defp activity_to_map(activity) do
+    %{
+      id: activity.id,
+      actor_type: activity.actor_type,
+      actor_id: activity.actor_id,
+      action: activity.action,
+      issue_id: activity.issue_id,
+      metadata: activity.metadata,
+      inserted_at: activity.inserted_at
     }
   end
 end

@@ -124,24 +124,26 @@ defmodule Cympho.ToolCallTracesTest do
 
   describe "hash chain calculation" do
     test "content_hash is deterministic", %{company: company} do
-      attrs = %{
+      actor_id = Ecto.UUID.generate()
+
+      attrs1 = %{
         trace_type: "llm_tool_call",
         tool_name: "web_search",
-        tool_arguments: %{"query" => "test"},
+        tool_arguments: %{"query" => "first"},
         status: "pending",
         company_id: company.id,
         actor_type: "agent",
-        actor_id: Ecto.UUID.generate()
+        actor_id: actor_id
       }
 
-      assert {:ok, trace1} = ToolCallTraces.create_tool_call_trace(attrs)
+      assert {:ok, trace1} = ToolCallTraces.create_tool_call_trace(attrs1)
 
       same_time = trace1.occurred_at
 
       attrs2 = %{
         trace_type: "llm_tool_call",
         tool_name: "web_search",
-        tool_arguments: %{"query" => "test"},
+        tool_arguments: %{"query" => "second"},
         status: "pending",
         company_id: company.id,
         actor_type: "agent",
@@ -186,36 +188,48 @@ defmodule Cympho.ToolCallTracesTest do
 
   describe "verify_chain_integrity/1" do
     test "returns :ok for valid chain", %{company: company} do
-      attrs = %{
-        trace_type: "llm_tool_call",
-        tool_name: "web_search",
-        tool_arguments: %{},
-        status: "pending",
-        company_id: company.id,
-        actor_type: "agent",
-        actor_id: Ecto.UUID.generate()
-      }
+      actor_id = Ecto.UUID.generate()
 
-      for _ <- 1..5 do
-        ToolCallTraces.create_tool_call_trace(attrs)
+      for i <- 1..5 do
+        ToolCallTraces.create_tool_call_trace(%{
+          trace_type: "llm_tool_call",
+          tool_name: "web_search",
+          tool_arguments: %{"step" => i},
+          status: "pending",
+          company_id: company.id,
+          actor_type: "agent",
+          actor_id: actor_id
+        })
       end
 
       assert :ok = ToolCallTraces.verify_chain_integrity(company.id)
     end
 
     test "detects broken chain links", %{company: company} do
-      attrs = %{
+      actor_id = Ecto.UUID.generate()
+
+      attrs1 = %{
         trace_type: "llm_tool_call",
         tool_name: "web_search",
-        tool_arguments: %{},
+        tool_arguments: %{"step" => 1},
         status: "pending",
         company_id: company.id,
         actor_type: "agent",
-        actor_id: Ecto.UUID.generate()
+        actor_id: actor_id
       }
 
-      assert {:ok, trace1} = ToolCallTraces.create_tool_call_trace(attrs)
-      assert {:ok, trace2} = ToolCallTraces.create_tool_call_trace(attrs)
+      attrs2 = %{
+        trace_type: "llm_tool_call",
+        tool_name: "web_search",
+        tool_arguments: %{"step" => 2},
+        status: "pending",
+        company_id: company.id,
+        actor_type: "agent",
+        actor_id: actor_id
+      }
+
+      assert {:ok, _trace1} = ToolCallTraces.create_tool_call_trace(attrs1)
+      assert {:ok, trace2} = ToolCallTraces.create_tool_call_trace(attrs2)
 
       from(t in ToolCallTrace, where: t.id == ^trace2.id)
       |> Repo.update_all(
@@ -263,6 +277,8 @@ defmodule Cympho.ToolCallTracesTest do
       from(t in ToolCallTrace, where: t.id == ^trace.id)
       |> Repo.update_all(set: [tool_name: "modified_tool"])
 
+      trace = Repo.get!(ToolCallTrace, trace.id)
+
       assert {:error, :content_hash_mismatch} =
                ToolCallTraces.verify_content_hash(trace)
     end
@@ -270,18 +286,16 @@ defmodule Cympho.ToolCallTracesTest do
 
   describe "list_tool_call_traces/1" do
     test "returns all traces for company", %{company: company} do
-      attrs = %{
-        trace_type: "llm_tool_call",
-        tool_name: "web_search",
-        tool_arguments: %{},
-        status: "pending",
-        company_id: company.id,
-        actor_type: "agent",
-        actor_id: Ecto.UUID.generate()
-      }
-
-      for _ <- 1..3 do
-        ToolCallTraces.create_tool_call_trace(attrs)
+      for i <- 1..3 do
+        ToolCallTraces.create_tool_call_trace(%{
+          trace_type: "llm_tool_call",
+          tool_name: "web_search",
+          tool_arguments: %{"query" => "query_#{i}"},
+          status: "pending",
+          company_id: company.id,
+          actor_type: "agent",
+          actor_id: Ecto.UUID.generate()
+        })
       end
 
       traces = ToolCallTraces.list_tool_call_traces(company_id: company.id)
@@ -426,18 +440,16 @@ defmodule Cympho.ToolCallTracesTest do
 
   describe "get_chain_traces/3" do
     test "returns traces in sequence order", %{company: company} do
-      attrs = %{
-        trace_type: "llm_tool_call",
-        tool_name: "web_search",
-        tool_arguments: %{},
-        status: "pending",
-        company_id: company.id,
-        actor_type: "agent",
-        actor_id: Ecto.UUID.generate()
-      }
-
-      for _ <- 1..5 do
-        ToolCallTraces.create_tool_call_trace(attrs)
+      for i <- 1..5 do
+        ToolCallTraces.create_tool_call_trace(%{
+          trace_type: "llm_tool_call",
+          tool_name: "web_search",
+          tool_arguments: %{"step" => i},
+          status: "pending",
+          company_id: company.id,
+          actor_type: "agent",
+          actor_id: Ecto.UUID.generate()
+        })
       end
 
       traces = ToolCallTraces.get_chain_traces(company.id)
@@ -449,18 +461,16 @@ defmodule Cympho.ToolCallTracesTest do
     end
 
     test "respects start_sequence parameter", %{company: company} do
-      attrs = %{
-        trace_type: "llm_tool_call",
-        tool_name: "web_search",
-        tool_arguments: %{},
-        status: "pending",
-        company_id: company.id,
-        actor_type: "agent",
-        actor_id: Ecto.UUID.generate()
-      }
-
-      for _ <- 1..5 do
-        ToolCallTraces.create_tool_call_trace(attrs)
+      for i <- 1..5 do
+        ToolCallTraces.create_tool_call_trace(%{
+          trace_type: "llm_tool_call",
+          tool_name: "web_search",
+          tool_arguments: %{"step" => i},
+          status: "pending",
+          company_id: company.id,
+          actor_type: "agent",
+          actor_id: Ecto.UUID.generate()
+        })
       end
 
       traces = ToolCallTraces.get_chain_traces(company.id, 3)
@@ -470,18 +480,16 @@ defmodule Cympho.ToolCallTracesTest do
     end
 
     test "respects limit parameter", %{company: company} do
-      attrs = %{
-        trace_type: "llm_tool_call",
-        tool_name: "web_search",
-        tool_arguments: %{},
-        status: "pending",
-        company_id: company.id,
-        actor_type: "agent",
-        actor_id: Ecto.UUID.generate()
-      }
-
-      for _ <- 1..10 do
-        ToolCallTraces.create_tool_call_trace(attrs)
+      for i <- 1..10 do
+        ToolCallTraces.create_tool_call_trace(%{
+          trace_type: "llm_tool_call",
+          tool_name: "web_search",
+          tool_arguments: %{"step" => i},
+          status: "pending",
+          company_id: company.id,
+          actor_type: "agent",
+          actor_id: Ecto.UUID.generate()
+        })
       end
 
       traces = ToolCallTraces.get_chain_traces(company.id, nil, 5)
@@ -509,6 +517,8 @@ defmodule Cympho.ToolCallTracesTest do
       |> Ecto.Changeset.change(%{tool_name: "modified_tool"})
       |> Cympho.Repo.update()
 
+      trace = Repo.get!(ToolCallTrace, trace.id)
+
       # Verify should detect the tampering
       assert {:error, :content_hash_mismatch} = ToolCallTraces.verify_content_hash(trace)
     end
@@ -534,7 +544,7 @@ defmodule Cympho.ToolCallTracesTest do
         actor_id: Ecto.UUID.generate()
       }
 
-      {:ok, trace1} = ToolCallTraces.create_tool_call_trace(attrs1)
+      {:ok, _trace1} = ToolCallTraces.create_tool_call_trace(attrs1)
       {:ok, trace2} = ToolCallTraces.create_tool_call_trace(attrs2)
 
       # Tamper with the chain by modifying prev_hash

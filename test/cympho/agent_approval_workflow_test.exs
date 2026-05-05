@@ -3,7 +3,6 @@ defmodule Cympho.AgentApprovalWorkflowTest do
 
   alias Cympho.{Agents, BoardApprovals, Companies, GovernanceAuditLogs}
   alias Cympho.Agents.Agent
-  alias Cympho.BoardApprovals.BoardApproval
   alias Cympho.Users.User
 
   # --- Helpers ---
@@ -52,7 +51,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
     user
   end
 
-  defp create_agent_in_company(company, attrs \\ %{}) do
+  defp create_agent_in_company(company, attrs) do
     merged = Map.merge(%{name: "Test Agent", role: :engineer, company_id: company.id}, attrs)
 
     case Agents.create_agent(merged) do
@@ -308,7 +307,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
       }
 
       # First call creates the agent
-      assert {:ok, %Agent{} = agent} =
+      assert {:ok, %Agent{} = _agent} =
                Agents.execute_approved_hire(board_approval_id, proposal_data)
 
       # Second call returns :already_executed
@@ -459,10 +458,12 @@ defmodule Cympho.AgentApprovalWorkflowTest do
 
       # Manually change the agent's role before approval is processed
       # (simulating a race condition)
-      {_, _, _} =
+      {:ok, agent_uuid} = Ecto.UUID.dump(agent.id)
+
+      {:ok, _} =
         Cympho.Repo.query(
           "UPDATE agents SET role = 'product_manager' WHERE id = $1",
-          [agent.id]
+          [agent_uuid]
         )
 
       # Approve the original role change

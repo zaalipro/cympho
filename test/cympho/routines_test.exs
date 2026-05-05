@@ -7,6 +7,7 @@ defmodule Cympho.RoutinesTest do
   describe "list_routines/0" do
     test "returns all routines ordered by inserted_at desc" do
       {:ok, r1} = Routines.create_routine(%{name: "First Routine"})
+      Process.sleep(1100)
       {:ok, r2} = Routines.create_routine(%{name: "Second Routine"})
 
       routines = Routines.list_routines()

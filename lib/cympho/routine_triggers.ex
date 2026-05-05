@@ -183,7 +183,7 @@ defmodule Cympho.RoutineTriggers do
         end)
 
       case Repo.transaction(multi) do
-        {:ok, %{issue: issue, run: run}} ->
+        {:ok, %{issue: issue, update_run: run}} ->
           wake_routine_agent(routine)
           {:ok, %{issue: issue, run: run}}
 
@@ -404,7 +404,7 @@ defmodule Cympho.RoutineTriggers do
         end)
 
       case Repo.transaction(multi) do
-        {:ok, %{issue: issue, run: run}} ->
+        {:ok, %{issue: issue, update_run: run}} ->
           wake_routine_agent(routine)
           {:ok, %{issue: issue, run: run}}
 

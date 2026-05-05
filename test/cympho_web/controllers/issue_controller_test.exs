@@ -3,14 +3,17 @@ defmodule CymphoWeb.IssueControllerTest do
 
   alias Cympho.Projects
 
-  setup do
+  setup %{conn: conn} do
+    {conn, _user, company} = register_and_log_in_user(conn)
+
     {:ok, project} =
       Projects.create_project(%{
         name: "Test Project",
-        prefix: "TST"
+        prefix: "TST",
+        company_id: company.id
       })
 
-    %{project: project}
+    %{conn: conn, project: project, company: company}
   end
 
   describe "POST /api/issues" do
@@ -29,12 +32,13 @@ defmodule CymphoWeb.IssueControllerTest do
       assert data["parent_id"] == nil
     end
 
-    test "creates a child issue with parentId", %{conn: conn, project: project} do
+    test "creates a child issue with parentId", %{conn: conn, project: project, company: company} do
       {:ok, parent} =
         Cympho.Issues.create_issue(%{
           "title" => "Parent Issue",
           "description" => "The parent",
-          "project_id" => project.id
+          "project_id" => project.id,
+          "company_id" => company.id
         })
 
       params = %{
@@ -66,12 +70,13 @@ defmodule CymphoWeb.IssueControllerTest do
   end
 
   describe "GET /api/issues/:id" do
-    test "returns an issue with parent_id", %{conn: conn, project: project} do
+    test "returns an issue with parent_id", %{conn: conn, project: project, company: company} do
       {:ok, parent} =
         Cympho.Issues.create_issue(%{
           "title" => "Parent Issue",
           "description" => "The parent",
-          "project_id" => project.id
+          "project_id" => project.id,
+          "company_id" => company.id
         })
 
       {:ok, child} =
@@ -79,7 +84,8 @@ defmodule CymphoWeb.IssueControllerTest do
           "title" => "Child Issue",
           "description" => "The child",
           "project_id" => project.id,
-          "parent_id" => parent.id
+          "parent_id" => parent.id,
+          "company_id" => company.id
         })
 
       conn = get(conn, "/api/issues/#{child.id}")

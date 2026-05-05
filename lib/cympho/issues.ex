@@ -65,14 +65,14 @@ defmodule Cympho.Issues do
   defp maybe_filter_by_labels(query, %{label_id: label_id}) do
     query
     |> join(:inner, [i], l in "issue_labels", on: i.id == l.issue_id)
-    |> where([_, l], l.label_id == ^label_id)
+    |> where([_, l], l.label_id == type(^label_id, :binary_id))
   end
 
   defp maybe_filter_by_labels(query, %{label_ids: label_ids})
        when is_list(label_ids) and length(label_ids) > 0 do
     query
     |> join(:inner, [i], l in "issue_labels", on: i.id == l.issue_id)
-    |> where([_, l], l.label_id in ^label_ids)
+    |> where([_, l], l.label_id in type(^label_ids, {:array, :binary_id}))
     |> group_by([i], i.id)
     |> having([_, l], count(l.label_id) == ^length(label_ids))
   end
@@ -186,12 +186,17 @@ defmodule Cympho.Issues do
 
   def get_issue!(id),
     do:
-      Repo.get!(Issue, id) |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
+      Repo.get!(Issue, id)
+      |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels, :project])
 
   def get_issue(id) do
     case Repo.get(Issue, id) do
-      nil -> {:error, :not_found}
-      issue -> {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee, :labels])}
+      nil ->
+        {:error, :not_found}
+
+      issue ->
+        {:ok,
+         Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee, :labels, :project])}
     end
   end
 
@@ -466,9 +471,15 @@ defmodule Cympho.Issues do
   end
 
   def transition_issue(%Issue{} = issue, new_status, agent_id) when is_binary(agent_id) do
+    issue = %{issue | execution_state: ExecutionState.normalize(issue.execution_state)}
+
     cond do
       new_status == :in_review and ExecutionState.active?(issue.execution_state) ->
-        do_transition(issue, new_status)
+        if issue.execution_state.current_participant == agent_id do
+          do_transition(issue, new_status)
+        else
+          {:error, :unauthorized}
+        end
 
       new_status == :in_review ->
         with {:ok, agent} <- Agents.get_agent(agent_id),
@@ -489,6 +500,8 @@ defmodule Cympho.Issues do
   end
 
   def transition_issue(%Issue{} = issue, new_status, nil) do
+    issue = %{issue | execution_state: ExecutionState.normalize(issue.execution_state)}
+
     cond do
       new_status == :done and is_blocked?(issue) ->
         {:error, :blocked_by_active_issues}
@@ -667,7 +680,12 @@ defmodule Cympho.Issues do
   end
 
   def is_blocked?(%Issue{} = issue) do
-    blocked_by = issue.blocked_by || []
+    blocked_by =
+      case issue.blocked_by do
+        %Ecto.Association.NotLoaded{} -> []
+        nil -> []
+        list when is_list(list) -> list
+      end
 
     Enum.any?(blocked_by, fn blocker ->
       blocker.status != :done and blocker.status != :cancelled
@@ -1160,11 +1178,14 @@ defmodule Cympho.Issues do
   @spec execution_policy_decision(Issue.t(), :approve | :request_changes, binary()) ::
           {:ok, Issue.t()} | {:error, atom() | Ecto.Changeset.t()}
   def execution_policy_decision(%Issue{} = issue, decision, decided_by) do
+    state = ExecutionState.normalize(issue.execution_state)
+    issue = %{issue | execution_state: state}
+
     cond do
-      not ExecutionState.active?(issue.execution_state) ->
+      not ExecutionState.active?(state) ->
         {:error, :execution_policy_not_active}
 
-      decided_by != issue.execution_state.current_participant ->
+      decided_by != state.current_participant ->
         {:error, :unauthorized}
 
       true ->

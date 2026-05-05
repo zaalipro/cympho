@@ -69,7 +69,7 @@ defmodule Cympho.HeartbeatEngine.Run do
   end
 
   def start_changeset(run, attrs) do
-    now = DateTime.utc_now()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     run
     |> cast(attrs, [:workspace_path, :budget_allocated, :run_metadata])
@@ -80,7 +80,7 @@ defmodule Cympho.HeartbeatEngine.Run do
   end
 
   def complete_changeset(run, attrs) do
-    now = DateTime.utc_now()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     run
     |> cast(attrs, [
@@ -99,7 +99,7 @@ defmodule Cympho.HeartbeatEngine.Run do
   end
 
   def fail_changeset(run, attrs) do
-    now = DateTime.utc_now()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     run
     |> cast(attrs, [:error_reason, :log_excerpt, :session_state, :run_metadata])
@@ -109,7 +109,7 @@ defmodule Cympho.HeartbeatEngine.Run do
   end
 
   def heartbeat_changeset(run) do
-    now = DateTime.utc_now()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     run
     |> change(%{last_heartbeat_at: now})

@@ -168,10 +168,10 @@ defmodule Cympho.IssuesLifecycleTest do
       assert released.assignee_id == nil
       assert released.status == :in_review
 
-      # Same agent can checkout again
+      # Same agent can checkout again (checkout always sets status to in_progress)
       assert {:ok, rechecked} = Issues.checkout_issue(agent, issue)
       assert rechecked.assignee_id == agent.id
-      assert rechecked.status == :in_review
+      assert rechecked.status == :in_progress
     end
   end
 

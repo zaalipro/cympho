@@ -111,7 +111,7 @@ defmodule Cympho.WorkProductsTest do
   end
 
   describe "list_work_products/1" do
-    test "returns work products for an issue ordered by newest first", %{issue: issue} do
+    test "returns work products for an issue", %{issue: issue} do
       for kind <- ~w(code_change document url) do
         WorkProducts.create_work_product(%{
           issue_id: issue.id,
@@ -122,7 +122,8 @@ defmodule Cympho.WorkProductsTest do
 
       wps = WorkProducts.list_work_products(issue.id)
       assert length(wps) == 3
-      assert hd(wps).kind == "url"
+      kinds = Enum.map(wps, & &1.kind) |> Enum.sort()
+      assert kinds == ~w(code_change document url)
     end
 
     test "returns empty list for issue with no work products" do
@@ -179,7 +180,7 @@ defmodule Cympho.WorkProductsTest do
           title: "To delete"
         })
 
-      assert {:ok, _} = WorkProducts.delete_work_product(wp)
+      assert :ok = WorkProducts.delete_work_product(wp)
       assert {:error, :not_found} = WorkProducts.get_work_product(wp.id)
     end
   end

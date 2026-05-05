@@ -33,7 +33,7 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
     end
   end
 
-  defp create_test_company(attrs \\ %{}) do
+  defp create_test_company(attrs) do
     unique = System.unique_integer([:positive])
 
     defaults = %{
@@ -618,6 +618,9 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
 
       updated_approval = BoardApprovals.get_board_approval!(approval.id)
       assert updated_approval.status == "approved"
+
+      # Drain the async executor so the policy change is applied
+      :sys.get_state(Cympho.BoardApprovals.BoardApprovalActionExecutor)
 
       # Verify the config was applied through the context
       updated_company = Companies.get_company!(company.id)

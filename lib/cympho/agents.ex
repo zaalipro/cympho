@@ -398,13 +398,15 @@ defmodule Cympho.Agents do
         attrs = proposal_data["attrs"] || %{}
         parent_agent_id = proposal_data["parent_agent_id"]
 
+        # Proposal data comes from JSON so keys are strings; keep them strings
+        # to avoid Ecto.CastError on a mixed-key map.
         child_attrs =
           if parent_agent_id do
             attrs
-            |> Map.put(:created_by_agent_id, parent_agent_id)
-            |> Map.put(:board_approval_id, board_approval_id)
+            |> Map.put("created_by_agent_id", parent_agent_id)
+            |> Map.put("board_approval_id", board_approval_id)
           else
-            Map.put(attrs, :board_approval_id, board_approval_id)
+            Map.put(attrs, "board_approval_id", board_approval_id)
           end
 
         execute_spawn(child_attrs)

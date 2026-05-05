@@ -3,7 +3,6 @@ defmodule Cympho.RoutineManualRunTest do
 
   alias Cympho.Routines
   alias Cympho.RoutineTriggers
-  alias Cympho.RoutineTriggers.RoutineRun
 
   describe "manual_run/2" do
     setup do
@@ -37,13 +36,13 @@ defmodule Cympho.RoutineManualRunTest do
     end
 
     test "returns error for paused routine", %{routine: routine} do
-      {:ok, _} = Routines.pause_routine(routine)
-      assert {:error, :routine_paused} = RoutineTriggers.manual_run(routine)
+      {:ok, paused} = Routines.pause_routine(routine)
+      assert {:error, :routine_paused} = RoutineTriggers.manual_run(paused)
     end
 
     test "returns error for archived routine", %{routine: routine} do
-      {:ok, _} = Routines.archive_routine(routine)
-      assert {:error, :routine_paused} = RoutineTriggers.manual_run(routine)
+      {:ok, archived} = Routines.archive_routine(routine)
+      assert {:error, :routine_paused} = RoutineTriggers.manual_run(archived)
     end
 
     test "works with routine struct or routine id", %{routine: routine} do

@@ -4,16 +4,19 @@ defmodule CymphoWeb.WorkProductControllerTest do
   alias Cympho.Issues
   alias Cympho.WorkProducts
 
-  setup do
+  setup %{conn: conn} do
+    {conn, _user, company} = register_and_log_in_user(conn)
+
     {:ok, issue} =
       Issues.create_issue(%{
         title: "Test Issue",
         description: "Test description",
         status: :backlog,
-        priority: :medium
+        priority: :medium,
+        company_id: company.id
       })
 
-    %{issue: issue}
+    %{conn: conn, issue: issue, company: company}
   end
 
   describe "POST /api/issues/:issue_id/work-products" do
@@ -60,7 +63,7 @@ defmodule CymphoWeb.WorkProductControllerTest do
       assert %{"errors" => _} = json_response(conn, 422)
     end
 
-    test "returns 422 for non-existent issue_id", %{conn: conn} do
+    test "returns 404 for non-existent issue_id", %{conn: conn} do
       fake_issue_id = Ecto.UUID.generate()
 
       params = %{
@@ -69,7 +72,7 @@ defmodule CymphoWeb.WorkProductControllerTest do
       }
 
       conn = post(conn, "/api/issues/#{fake_issue_id}/work-products", params)
-      assert json_response(conn, 422)
+      assert json_response(conn, 404)
     end
   end
 
@@ -87,6 +90,8 @@ defmodule CymphoWeb.WorkProductControllerTest do
           title: "First document"
         })
 
+      Process.sleep(1100)
+
       {:ok, wp2} =
         WorkProducts.create_work_product(%{
           issue_id: issue.id,
@@ -98,6 +103,8 @@ defmodule CymphoWeb.WorkProductControllerTest do
       assert %{"data" => [first, second]} = json_response(conn, 200)
       assert first["id"] == wp2.id
       assert second["id"] == wp1.id
+      assert first["title"] == "Second document"
+      assert second["title"] == "First document"
     end
   end
 

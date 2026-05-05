@@ -3,9 +3,6 @@ defmodule CymphoWeb.MyIssuesLiveTest do
 
   import Phoenix.LiveViewTest
 
-  alias Cympho.Agents
-  alias Cympho.Issues
-
   describe "My Issues page" do
     test "renders my issues page", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/my-issues")
@@ -30,14 +27,11 @@ defmodule CymphoWeb.MyIssuesLiveTest do
     test "switches tabs via patch", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/my-issues")
 
-      {:ok, _view, html} =
-        view
-        |> element("button", "Watching")
-        |> render_click()
-        |> follow_redirect(conn, "/my-issues?tab=watching")
-        |> then(fn {:ok, view} -> {:ok, view, render(view)} end)
+      view
+      |> element("button", "Watching")
+      |> render_click()
 
-      assert html =~ "My Issues"
+      assert_patch(view, "/my-issues?tab=watching")
     end
   end
 end

@@ -743,8 +743,9 @@ defmodule Cympho.IssuesTest do
       assert updated.status == :todo
     end
 
-    test "backlog -> in_progress is invalid; work must be queued first", %{issue: issue} do
-      assert {:error, :invalid_transition} = Issues.transition_issue(issue, :in_progress)
+    test "backlog -> in_progress is now valid (Linear-style direct drop)", %{issue: issue} do
+      assert {:ok, updated} = Issues.transition_issue(issue, :in_progress)
+      assert updated.status == :in_progress
     end
 
     test "backlog -> done is invalid", %{issue: issue} do
@@ -780,12 +781,13 @@ defmodule Cympho.IssuesTest do
       assert updated.status == :in_progress
     end
 
-    test "done is terminal", %{issue: issue} do
+    test "done can be reopened back into the open workflow", %{issue: issue} do
       {:ok, done_issue} = Issues.transition_issue(issue, :todo)
       {:ok, done_issue} = Issues.transition_issue(done_issue, :in_progress)
       {:ok, done_issue} = Issues.transition_issue(done_issue, :in_review)
       {:ok, done_issue} = Issues.transition_issue(done_issue, :done)
-      assert {:error, :invalid_transition} = Issues.transition_issue(done_issue, :in_progress)
+      assert {:ok, reopened} = Issues.transition_issue(done_issue, :in_progress)
+      assert reopened.status == :in_progress
     end
   end
 
@@ -894,32 +896,34 @@ defmodule Cympho.IssuesTest do
 
   describe "StateMachine.valid_transitions/1" do
     test "backlog transitions" do
-      assert StateMachine.valid_transitions(:backlog) == [:todo, :cancelled]
+      assert StateMachine.valid_transitions(:backlog) ==
+               [:todo, :in_progress, :in_review, :blocked, :cancelled]
     end
 
     test "todo transitions" do
-      assert StateMachine.valid_transitions(:todo) == [:in_progress, :blocked, :cancelled]
+      assert StateMachine.valid_transitions(:todo) ==
+               [:backlog, :in_progress, :in_review, :blocked, :cancelled]
     end
 
     test "in_progress transitions" do
-      assert StateMachine.valid_transitions(:in_progress) == [
-               :in_review,
-               :blocked,
-               :done,
-               :cancelled
-             ]
+      assert StateMachine.valid_transitions(:in_progress) ==
+               [:backlog, :todo, :in_review, :blocked, :done, :cancelled]
     end
 
     test "in_review transitions" do
-      assert StateMachine.valid_transitions(:in_review) == [:done, :in_progress, :cancelled]
+      assert StateMachine.valid_transitions(:in_review) ==
+               [:backlog, :todo, :in_progress, :blocked, :done, :cancelled]
     end
 
     test "done transitions" do
-      assert StateMachine.valid_transitions(:done) == []
+      # Terminal states can be reopened back into the open workflow.
+      assert StateMachine.valid_transitions(:done) ==
+               [:backlog, :todo, :in_progress, :in_review, :blocked]
     end
 
     test "blocked transitions" do
-      assert StateMachine.valid_transitions(:blocked) == [:todo, :in_progress, :cancelled]
+      assert StateMachine.valid_transitions(:blocked) ==
+               [:backlog, :todo, :in_progress, :in_review, :cancelled]
     end
   end
 

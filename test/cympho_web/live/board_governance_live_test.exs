@@ -30,7 +30,7 @@ defmodule CymphoWeb.Live.BoardGovernanceLiveTest do
     |> Cympho.Repo.insert!()
   end
 
-  defp create_company(governance_config \\ %{}) do
+  defp create_company(governance_config) do
     unique = System.unique_integer([:positive])
 
     {:ok, company} =
@@ -43,7 +43,7 @@ defmodule CymphoWeb.Live.BoardGovernanceLiveTest do
     company
   end
 
-  defp create_membership(user, company, role \\ "member", is_board_member \\ false) do
+  defp create_membership(user, company, role, is_board_member) do
     {:ok, _} =
       Companies.create_membership(%{
         user_id: user.id,

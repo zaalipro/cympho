@@ -3,17 +3,16 @@ defmodule CymphoWeb.TelegramControllerTest do
 
   describe "webhook" do
     test "returns 403 when secret token is incorrect" do
-      # Set a webhook secret
       Application.put_env(:cympho, :telegram_webhook_secret, "my-secret-token")
 
-      conn = build_conn(:post, "/api/telegram/webhook", %{"secret_token" => "wrong-token"})
+      conn =
+        build_conn(:post, "/api/telegram/webhook", %{})
+        |> Plug.Conn.put_req_header("x-telegram-bot-api-secret-token", "wrong-token")
 
       conn = CymphoWeb.TelegramController.webhook(conn, %{})
 
       assert conn.status == 403
-      assert %{"error" => "invalid token"} = json_response(conn, 403)
 
-      # Cleanup
       Application.delete_env(:cympho, :telegram_webhook_secret)
     end
 
@@ -22,19 +21,18 @@ defmodule CymphoWeb.TelegramControllerTest do
 
       conn =
         build_conn(:post, "/api/telegram/webhook", %{
-          "secret_token" => "my-secret-token",
           "message" => %{"chat" => %{"id" => 123}, "text" => "/help"}
         })
+        |> Plug.Conn.put_req_header("x-telegram-bot-api-secret-token", "my-secret-token")
 
       conn = CymphoWeb.TelegramController.webhook(conn, %{})
 
       assert conn.status == 200
 
-      # Cleanup
       Application.delete_env(:cympho, :telegram_webhook_secret)
     end
 
-    test "returns 200 when no secret token is configured (webhook not protected)" do
+    test "returns 503 when no secret token is configured" do
       Application.delete_env(:cympho, :telegram_webhook_secret)
 
       conn =
@@ -42,7 +40,7 @@ defmodule CymphoWeb.TelegramControllerTest do
 
       conn = CymphoWeb.TelegramController.webhook(conn, %{})
 
-      assert conn.status == 200
+      assert conn.status == 503
     end
   end
 end

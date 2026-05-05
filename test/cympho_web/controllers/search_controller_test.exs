@@ -4,13 +4,16 @@ defmodule CymphoWeb.SearchControllerTest do
   alias Cympho.Issues
   alias Cympho.Comments
 
-  setup do
+  setup %{conn: conn} do
+    {conn, _user, company} = register_and_log_in_user(conn)
+
     {:ok, issue} =
       Issues.create_issue(%{
         title: "Searchable test issue",
         description: "This issue is searchable via API endpoint",
         status: :todo,
-        priority: :high
+        priority: :high,
+        company_id: company.id
       })
 
     {:ok, _comment} =
@@ -21,7 +24,7 @@ defmodule CymphoWeb.SearchControllerTest do
         issue_id: issue.id
       })
 
-    %{issue: issue}
+    %{conn: conn, issue: issue, company: company}
   end
 
   describe "GET /api/search" do

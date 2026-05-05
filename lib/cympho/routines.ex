@@ -4,11 +4,11 @@ defmodule Cympho.Routines do
   alias Cympho.Routines.Routine
 
   def list_routines do
-    Repo.all(from r in Routine, order_by: [desc: r.inserted_at])
+    Repo.all(from r in Routine, order_by: [desc: r.inserted_at, desc: r.id])
   end
 
   def list_routines_by_status(status) when is_atom(status) do
-    Repo.all(from r in Routine, where: r.status == ^status, order_by: [desc: r.inserted_at])
+    Repo.all(from r in Routine, where: r.status == ^status, order_by: [desc: r.inserted_at, desc: r.id])
   end
 
   def get_routine!(id), do: Repo.get!(Routine, id)

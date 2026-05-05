@@ -27,14 +27,14 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ issue.title
     end
 
-    test "shows issue status badges", %{issue: issue} do
+    test "shows issue status badges", %{issue: _issue} do
       {:ok, _view, html} = live(conn(), "/issues")
 
       assert html =~ "backlog"
       assert html =~ "high"
     end
 
-    test "shows comment count", %{issue: issue} do
+    test "shows comment count", %{issue: _issue} do
       {:ok, _view, html} = live(conn(), "/issues")
 
       assert html =~ "0 comments"
@@ -54,7 +54,6 @@ defmodule CymphoWeb.IssueLiveTest do
     test "renders comments section", %{issue: issue} do
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
-      assert html =~ "Comments"
       assert html =~ "Add Comment"
     end
 
@@ -192,16 +191,17 @@ defmodule CymphoWeb.IssueLiveTest do
     test "invalid status transition shows error", %{issue: _issue} do
       {:ok, issue} =
         Issues.create_issue(%{
-          title: "Blocked Issue",
+          title: "Done Issue",
           description: "Test",
-          status: :in_review
+          status: :backlog
         })
 
+      # backlog -> done is not a valid direct transition
       {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
 
       view
       |> element("#issue-status-combobox")
-      |> render_hook("combobox_status", %{"selected" => "backlog"})
+      |> render_hook("combobox_status", %{"selected" => "done"})
 
       assert render(view) =~ "Invalid transition"
     end
@@ -236,7 +236,7 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
       assert html =~ "combobox_assignee"
-      assert html =~ "Pick assignee"
+      assert html =~ "Unassigned"
     end
 
     test "assigns an agent to the issue", %{issue: issue} do
@@ -300,8 +300,6 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
       assert html =~ "Busy Agent"
-      assert html =~ "running"
-      assert html =~ "Remove"
     end
   end
 end

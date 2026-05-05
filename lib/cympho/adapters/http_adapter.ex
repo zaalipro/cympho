@@ -114,7 +114,8 @@ defmodule Cympho.Adapters.HttpAdapter do
     method_atom = normalize_method(method)
     headers_list = normalize_headers(headers)
 
-    req = Finch.build(method_atom, url, headers_list, payload)
+    encoded_payload = Jason.encode!(payload)
+    req = Finch.build(method_atom, url, headers_list, encoded_payload)
     stream_to_acc(req, timeout)
   end
 

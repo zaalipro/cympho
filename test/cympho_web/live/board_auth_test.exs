@@ -33,7 +33,7 @@ defmodule CymphoWeb.Live.BoardAuthTest do
     company
   end
 
-  defp create_membership(user, company, role \\ "member", is_board_member \\ false) do
+  defp create_membership(user, company, role, is_board_member) do
     {:ok, membership} =
       Companies.create_membership(%{
         user_id: user.id,

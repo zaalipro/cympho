@@ -1,8 +1,6 @@
 defmodule CymphoWeb.BoardGovernanceE2ETest do
   use CymphoWeb.ConnCase, async: false
 
-  import Phoenix.LiveViewTest
-
   alias Cympho.{Agents, BoardApprovals, Companies}
   alias Cympho.Users.User
 
@@ -34,7 +32,7 @@ defmodule CymphoWeb.BoardGovernanceE2ETest do
     company
   end
 
-  defp create_membership(user, company, role \\ "member", is_board_member \\ false) do
+  defp create_membership(user, company, role, is_board_member) do
     {:ok, membership} =
       Companies.create_membership(%{
         user_id: user.id,
@@ -68,39 +66,33 @@ defmodule CymphoWeb.BoardGovernanceE2ETest do
       create_membership(user, company, "member", false)
       create_membership(board_user, company, "member", true)
 
+      {:ok, token} = Cympho.UserAuthJWT.generate_token(user, company.id)
+
       conn =
         build_conn()
-        |> Plug.Conn.assign(:current_user, user)
-        |> Plug.Conn.assign(:current_company_id, company.id)
+        |> Plug.Conn.put_req_header("authorization", "Bearer " <> token)
         |> Plug.Conn.put_req_header("accept", "application/json")
         |> post("/api/agents", %{"agent" => %{"name" => "Blocked", "role" => "engineer"}})
 
       assert json_response(conn, 403)
     end
 
-    test "returns 403 for agent-authenticated request (no current_user)" do
-      user = create_user()
-      company = create_company()
-      create_membership(user, company, "member", true)
-
+    test "returns 401 for agent-authenticated request (no user JWT)" do
       conn =
         build_conn()
-        |> Plug.Conn.assign(:current_agent, %{id: "agent-456"})
-        |> Plug.Conn.assign(:current_company_id, company.id)
         |> Plug.Conn.put_req_header("accept", "application/json")
         |> post("/api/agents", %{"agent" => %{"name" => "Agent Auth", "role" => "engineer"}})
 
-      assert json_response(conn, 403)
+      assert json_response(conn, 401)
     end
 
-    test "returns 403 when no user is present" do
+    test "returns 401 when no user is present" do
       conn =
         build_conn()
-        |> Plug.Conn.assign(:current_company_id, "some-id")
         |> Plug.Conn.put_req_header("accept", "application/json")
         |> post("/api/agents", %{"agent" => %{"name" => "No Auth", "role" => "engineer"}})
 
-      assert json_response(conn, 403)
+      assert json_response(conn, 401)
     end
 
     test "board member passes board auth plug" do

@@ -106,7 +106,7 @@ defmodule Cympho.ApprovalsTest do
 
       {:ok, approved} = Approvals.resolve_approval(approval.id, :approved, %{})
 
-      assert {:error, changeset} = Approvals.resolve_approval(approved.id, :denied, %{})
+      assert {:error, _changeset} = Approvals.resolve_approval(approved.id, :denied, %{})
     end
 
     test "broadcasts approval_resolved event" do

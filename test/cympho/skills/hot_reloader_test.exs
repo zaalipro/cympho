@@ -2,8 +2,7 @@ defmodule Cympho.Skills.HotReloaderTest do
   use Cympho.DataCase
   use ExUnit.Case, async: false
 
-  alias Cympho.{Companies, Plugins, Repo, Skills.HotReloader}
-  alias Cympho.Skills.Plugin
+  alias Cympho.{Companies, Plugins, Skills.HotReloader}
 
   @manifest_dir "test/support/skill_manifests"
   @test_manifest Path.join(@manifest_dir, "test_skill.json")
@@ -143,7 +142,7 @@ defmodule Cympho.Skills.HotReloaderTest do
       unknown_manifest = Path.join(@manifest_dir, "unknown.json")
       File.write!(unknown_manifest, Jason.encode!(%{"identifier" => "unknown_skill"}))
 
-      assert {:error, {:missing_company_context, "unknown_skill"}} =
+      assert {:error, :plugin_not_found} =
                HotReloader.reload_manifest(unknown_manifest)
     end
 

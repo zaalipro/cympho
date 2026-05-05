@@ -164,11 +164,48 @@ defmodule Cympho.Issues.ExecutionState do
 
   @doc """
   Checks if execution state is active (issue has a policy and is mid-flow).
+  Handles both atom and string keys (string keys come from JSONB roundtrip).
   """
   @spec active?(map() | nil) :: boolean()
   def active?(nil), do: false
   def active?(%{current_stage_index: _}), do: true
+  def active?(%{"current_stage_index" => _}), do: true
   def active?(_), do: false
+
+  @doc """
+  Normalizes execution state keys from strings to atoms (for JSONB roundtrip).
+  """
+  @spec normalize(map() | nil) :: map() | nil
+  def normalize(nil), do: nil
+
+  def normalize(%{current_stage_index: _} = state) do
+    %{state | history: normalize_history(state[:history])}
+  end
+
+  def normalize(%{"current_stage_index" => _} = state) do
+    normalized =
+      Map.new(state, fn
+        {k, v} when is_binary(k) -> {String.to_existing_atom(k), v}
+        {k, v} -> {k, v}
+      end)
+
+    %{normalized | history: normalize_history(normalized[:history])}
+  end
+
+  def normalize(state) when is_map(state), do: state
+
+  defp normalize_history(nil), do: []
+
+  defp normalize_history(history) when is_list(history) do
+    Enum.map(history, fn
+      %{stage_index: _} = entry -> entry
+      entry when is_map(entry) ->
+        Map.new(entry, fn
+          {k, v} when is_binary(k) -> {String.to_existing_atom(k), v}
+          {k, v} -> {k, v}
+        end)
+    end)
+  end
 
   @doc """
   Returns the stage config for the current stage from the policy.
@@ -214,10 +251,11 @@ defmodule Cympho.Issues.ExecutionState do
   """
   @spec original_executor(t()) :: binary() | nil
   def original_executor(%{history: [first | _]}) do
-    first.participant
+    Map.get(first, :participant) || Map.get(first, "participant")
   end
 
   def original_executor(%{current_participant: participant}), do: participant
+  def original_executor(%{"current_participant" => participant}), do: participant
   def original_executor(_), do: nil
 
   defp flag_enabled?(config, key) do

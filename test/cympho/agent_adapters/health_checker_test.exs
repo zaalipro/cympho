@@ -1,24 +1,17 @@
 defmodule Cympho.AgentAdapters.HealthCheckerTest do
-  use ExUnit.Case, async: false
+  use Cympho.DataCase, async: false
 
   alias Cympho.AgentAdapters.HealthChecker
 
   setup do
-    # Start PubSub if not already started
-    case Process.whereis(Cympho.PubSub) do
-      nil ->
-        {:ok, _} = start_supervised({Phoenix.PubSub, name: Cympho.PubSub})
-
-      _ ->
-        :ok
-    end
-
     # Start HealthChecker
     case start_supervised({HealthChecker, [interval: 100]}) do
       {:ok, pid} ->
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), pid)
         %{health_checker_pid: pid}
 
       {:error, {:already_started, pid}} ->
+        Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), pid)
         %{health_checker_pid: pid}
     end
   end

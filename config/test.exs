@@ -24,6 +24,15 @@ config :cympho, :skill_manifest_dir, "test/support/skill_manifests"
 
 config :cympho, :orchestrator, enabled: false
 
+# Tests that exercise the BoardApprovalActionExecutor / HeartbeatEngine.Watchdog
+# start them explicitly via `start_supervised` so they can grant Ecto sandbox
+# access. Starting them from the application supervisor would let global PubSub
+# events / timer ticks crash them with DBConnection.OwnershipError and
+# eventually take down the whole tree (including the Repo).
+config :cympho, :start_board_approval_executor?, false
+config :cympho, :start_heartbeat_watchdog?, false
+config :cympho, :start_health_checker?, false
+
 config :phoenix, :plug_init_mode, :runtime
 
 config :swoosh, :api_client, Swoosh.ApiClient.Test

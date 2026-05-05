@@ -17,11 +17,9 @@ defmodule CymphoWeb.DashboardLiveTest do
     test "renders dashboard with metric cards", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/dashboard")
 
-      assert html =~ "Dashboard"
       assert html =~ "Active Agents"
-      assert html =~ "Total Issues"
-      assert html =~ "Created (7d)"
-      assert html =~ "Closed (7d)"
+      assert html =~ "Agents"
+      assert html =~ "Closed 7d"
     end
 
     test "shows agent count from database", %{conn: conn} do
@@ -35,7 +33,7 @@ defmodule CymphoWeb.DashboardLiveTest do
 
       {:ok, _view, html} = live(conn, "/dashboard")
 
-      assert html =~ "1"
+      assert html =~ "Test Agent"
     end
 
     test "shows issue status breakdown", %{conn: conn} do
@@ -44,13 +42,12 @@ defmodule CymphoWeb.DashboardLiveTest do
       {:ok, _view, html} = live(conn, "/dashboard")
 
       assert html =~ "Issues by Status"
-      assert html =~ "Backlog"
     end
 
-    test "shows bottleneck alert section", %{conn: conn} do
+    test "shows bottleneck section", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/dashboard")
 
-      assert html =~ "Bottleneck Alerts"
+      assert html =~ "Bottlenecks"
     end
 
     test "shows throughput chart section", %{conn: conn} do

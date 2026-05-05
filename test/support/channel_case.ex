@@ -21,16 +21,17 @@ defmodule CymphoWeb.ChannelCase do
         {:ok, token} =
           Cympho.AgentAuthJWT.generate_token(agent_id, "run-#{:rand.uniform(1000)}", company_id)
 
-        Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{"token" => token})
+        Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{"token" => token}, connect_info: %{})
       end
 
       @doc """
       Connects a socket with session auth (browser-style).
       """
       def connect_session(company_id, user_id) do
-        Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{}, %{
-          session: %{"user_id" => user_id, "company_id" => company_id}
-        })
+        Phoenix.ChannelTest.connect(CymphoWeb.Socket, %{},
+          connect_info: %{
+            session: %{"user_id" => user_id, "company_id" => company_id}
+          })
       end
     end
   end

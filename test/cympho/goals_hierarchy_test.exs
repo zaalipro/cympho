@@ -1,7 +1,6 @@
 defmodule Cympho.GoalsHierarchyTest do
   use Cympho.DataCase, async: true
   alias Cympho.Goals
-  alias Cympho.Goals.Goal
 
   setup do
     {:ok, company} =

@@ -88,7 +88,7 @@ defmodule Cympho.CompaniesTest do
     end
 
     test "accept_invite/2 with expired token returns error", %{company: company, user: user} do
-      expired = DateTime.add(DateTime.utc_now(), -1, :second)
+      expired = DateTime.utc_now() |> DateTime.add(-1, :second) |> DateTime.truncate(:second)
 
       invite = %CompanyInvite{
         company_id: company.id,
@@ -99,7 +99,7 @@ defmodule Cympho.CompaniesTest do
         expires_at: expired
       }
 
-      {:ok, invite} = Repo.insert(invite)
+      {:ok, _invite} = Repo.insert(invite)
 
       assert {:error, :expired} = Companies.accept_invite("expired-token", user.id)
     end
@@ -164,8 +164,10 @@ defmodule Cympho.CompaniesTest do
 
     test "import_company/1 handles slug collision with suffix strategy" do
       {:ok, _existing} = Companies.create_company(%{name: "Existing", slug: "collide-corp"})
-      {:ok, company} = Companies.create_company(%{name: "Source", slug: "collide-corp"})
+      {:ok, company} = Companies.create_company(%{name: "Source", slug: "source-corp"})
       data = Companies.export_company(company.id)
+      # Simulate slug collision by overwriting the exported slug
+      data = put_in(data, [:company, :slug], "collide-corp")
 
       assert {:ok, result} = Companies.import_company(data, slug_strategy: :suffix)
       assert result.company.slug != "collide-corp"

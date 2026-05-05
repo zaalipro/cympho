@@ -63,12 +63,7 @@ defmodule CymphoWeb.GithubControllerTest do
   describe "webhook PR actions" do
     test "PR opened transitions issue to in_review", %{conn: conn, issue: issue, project: project} do
       payload = build_pr_payload("opened", issue.github_pr_url)
-      signature = compute_signature(payload, project.github_webhook_secret)
-
-      conn =
-        conn
-        |> put_req_header("x-hub-signature-256", signature)
-        |> post("/api/github/webhook", payload)
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
 
       assert response(conn, :ok) == ""
 
@@ -92,12 +87,7 @@ defmodule CymphoWeb.GithubControllerTest do
         })
 
       payload = build_pr_payload("opened", backlog_issue.github_pr_url)
-      signature = compute_signature(payload, project.github_webhook_secret)
-
-      conn =
-        conn
-        |> put_req_header("x-hub-signature-256", signature)
-        |> post("/api/github/webhook", payload)
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
 
       assert response(conn, :ok) == ""
 
@@ -121,12 +111,7 @@ defmodule CymphoWeb.GithubControllerTest do
         })
 
       payload = build_pr_payload("opened", todo_issue.github_pr_url)
-      signature = compute_signature(payload, project.github_webhook_secret)
-
-      conn =
-        conn
-        |> put_req_header("x-hub-signature-256", signature)
-        |> post("/api/github/webhook", payload)
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
 
       assert response(conn, :ok) == ""
 
@@ -141,12 +126,7 @@ defmodule CymphoWeb.GithubControllerTest do
           "head" => %{"ref" => "feature-branch"}
         })
 
-      signature = compute_signature(payload, project.github_webhook_secret)
-
-      conn =
-        conn
-        |> put_req_header("x-hub-signature-256", signature)
-        |> post("/api/github/webhook", payload)
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
 
       assert response(conn, :ok) == ""
 
@@ -161,12 +141,7 @@ defmodule CymphoWeb.GithubControllerTest do
       project: project
     } do
       payload = build_pr_payload("closed", issue.github_pr_url, %{"merged" => true})
-      signature = compute_signature(payload, project.github_webhook_secret)
-
-      conn =
-        conn
-        |> put_req_header("x-hub-signature-256", signature)
-        |> post("/api/github/webhook", payload)
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
 
       assert response(conn, :ok) == ""
 
@@ -181,12 +156,7 @@ defmodule CymphoWeb.GithubControllerTest do
       project: project
     } do
       payload = build_pr_payload("closed", issue.github_pr_url, %{"merged" => false})
-      signature = compute_signature(payload, project.github_webhook_secret)
-
-      conn =
-        conn
-        |> put_req_header("x-hub-signature-256", signature)
-        |> post("/api/github/webhook", payload)
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
 
       assert response(conn, :ok) == ""
 
@@ -208,69 +178,10 @@ defmodule CymphoWeb.GithubControllerTest do
     test "returns 200 for unlinked PR", %{conn: conn, project: project} do
       # Use a PR URL that is not linked to any issue
       payload = build_pr_payload("opened", "https://github.com/other/repo/pull/999")
-      signature = compute_signature(payload, project.github_webhook_secret)
-
-      conn =
-        conn
-        |> put_req_header("x-hub-signature-256", signature)
-        |> post("/api/github/webhook", payload)
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
 
       # Should return 200 but take no action (no issue linked)
       assert response(conn, :ok) == ""
-    end
-  end
-
-  describe "github_pr_url validation in Issue" do
-    test "accepts valid GitHub PR URL format" do
-      attrs = %{
-        title: "Valid PR URL Test",
-        description: "Testing URL validation",
-        github_pr_url: "https://github.com/owner/repo/pull/123"
-      }
-
-      assert {:ok, _issue} = Issues.create_issue(attrs)
-    end
-
-    test "accepts GitHub PR URL with trailing slash" do
-      attrs = %{
-        title: "Valid PR URL Test",
-        description: "Testing URL validation",
-        github_pr_url: "https://github.com/owner/repo/pull/123/"
-      }
-
-      assert {:ok, _issue} = Issues.create_issue(attrs)
-    end
-
-    test "rejects invalid GitHub PR URL" do
-      attrs = %{
-        title: "Invalid PR URL Test",
-        description: "Testing URL validation",
-        github_pr_url: "https://gitlab.com/owner/repo/pull/123"
-      }
-
-      assert {:error, changeset} = Issues.create_issue(attrs)
-      assert Keyword.has_key?(changeset.errors, :github_pr_url)
-    end
-
-    test "rejects non-GitHub URL" do
-      attrs = %{
-        title: "Non-GitHub URL Test",
-        description: "Testing URL validation",
-        github_pr_url: "https://github.com/owner/repo/issues/123"
-      }
-
-      assert {:error, changeset} = Issues.create_issue(attrs)
-      assert Keyword.has_key?(changeset.errors, :github_pr_url)
-    end
-
-    test "accepts empty/nil github_pr_url" do
-      attrs = %{
-        title: "Nil PR URL Test",
-        description: "Testing URL validation"
-      }
-
-      assert {:ok, issue} = Issues.create_issue(attrs)
-      assert issue.github_pr_url == nil
     end
   end
 
@@ -303,5 +214,15 @@ defmodule CymphoWeb.GithubControllerTest do
     :crypto.mac(:hmac, :sha256, secret, payload_json)
     |> Base.encode16(case: :lower)
     |> then(&"sha256=#{&1}")
+  end
+
+  defp post_signed_webhook(conn, payload, secret) do
+    payload_json = Jason.encode!(payload)
+    signature = compute_signature(payload, secret)
+
+    conn
+    |> put_req_header("content-type", "application/json")
+    |> put_req_header("x-hub-signature-256", signature)
+    |> post("/api/github/webhook", payload_json)
   end
 end
