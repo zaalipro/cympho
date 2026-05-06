@@ -15,7 +15,6 @@ defmodule Cympho.Application do
       Cympho.Issues.AutoAssignmentReassigner,
       # Layer 2: NotificationSupervisor
       {Cympho.Notifications.NotificationSupervisor, []},
-      Cympho.Orchestrator.Dispatcher,
       heartbeat_watchdog_child(),
       board_approval_executor_child(),
       Cympho.Scheduler,
@@ -30,12 +29,14 @@ defmodule Cympho.Application do
       {Cympho.Plugins.Supervisor, []},
       # Skill hot-reload for development
       {Cympho.Skills.HotReloader, []},
-      # Rate limiting
+      # Rate limiting (must precede Dispatcher: orphan recovery broadcasts
+      # via BroadcastDedup, which owns an ETS table created in init/1).
       Cympho.RateLimiting.BroadcastDedup,
       Cympho.RateLimiting.IpRateLimiter,
       Cympho.RateLimiting.AgentActionLimiter,
       Cympho.WebhookDedup,
       Cympho.EventStore,
+      Cympho.Orchestrator.Dispatcher,
       CymphoWeb.Endpoint
     ]
 
