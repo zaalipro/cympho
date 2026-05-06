@@ -48,42 +48,64 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
       |> limit(1)
       |> Repo.one()
 
-    case existing do
-      nil ->
-        cap = max_pending_wakes_per_agent()
+    result =
+      case existing do
+        nil ->
+          cap = max_pending_wakes_per_agent()
 
-        if pending_count(agent_id) >= cap do
-          Logger.warning(
-            "WakeupQueue: rejecting wake for agent #{agent_id}, queue full (cap=#{cap})"
-          )
+          if pending_count(agent_id) >= cap do
+            Logger.warning(
+              "WakeupQueue: rejecting wake for agent #{agent_id}, queue full (cap=#{cap})"
+            )
 
-          {:error, :wakeup_queue_full}
-        else
-          %AgentWake{}
+            {:error, :wakeup_queue_full}
+          else
+            %AgentWake{}
+            |> AgentWake.changeset(%{
+              agent_id: agent_id,
+              issue_id: issue_id,
+              reason: reason,
+              status: "pending",
+              triggered_by_type: triggered_by_type,
+              triggered_by_id: triggered_by_id,
+              metadata: metadata
+            })
+            |> Repo.insert()
+          end
+
+        wake ->
+          Logger.debug("WakeupQueue: coalescing wake for agent #{agent_id}, issue #{issue_id}")
+
+          wake
           |> AgentWake.changeset(%{
-            agent_id: agent_id,
-            issue_id: issue_id,
-            reason: reason,
-            status: "pending",
             triggered_by_type: triggered_by_type,
             triggered_by_id: triggered_by_id,
-            metadata: metadata
+            metadata: merge_metadata(wake.metadata, metadata)
           })
-          |> Repo.insert()
-        end
+          |> Repo.update()
+      end
 
-      wake ->
-        Logger.debug("WakeupQueue: coalescing wake for agent #{agent_id}, issue #{issue_id}")
+    case result do
+      {:ok, wake} ->
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "wakeups:#{agent_id}",
+          {:wakeup_enqueued, agent_id, wake}
+        )
 
-        wake
-        |> AgentWake.changeset(%{
-          triggered_by_type: triggered_by_type,
-          triggered_by_id: triggered_by_id,
-          metadata: merge_metadata(wake.metadata, metadata)
-        })
-        |> Repo.update()
+        {:ok, wake}
+
+      other ->
+        other
     end
   end
+
+  @doc """
+  Returns the PubSub topic on which `enqueue/1` broadcasts wake events for an agent.
+  Subscribers receive `{:wakeup_enqueued, agent_id, %AgentWake{}}` on enqueue.
+  """
+  @spec topic_for_agent(String.t()) :: String.t()
+  def topic_for_agent(agent_id), do: "wakeups:#{agent_id}"
 
   @doc """
   Dequeues the next wake event for a given agent.

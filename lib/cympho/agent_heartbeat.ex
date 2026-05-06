@@ -13,7 +13,6 @@ defmodule Cympho.AgentHeartbeat do
   use GenServer
 
   alias Cympho.AgentHeartbeat.Supervisor
-  alias Cympho.AgentHeartbeat.Registry, as: HeartbeatRegistry
   alias Cympho.{Orchestrator, Issues, Agents, Activities, Skills}
   alias Cympho.Orchestrator.Dispatcher
   alias Cympho.Issues.Issue
@@ -52,12 +51,23 @@ defmodule Cympho.AgentHeartbeat do
   end
 
   @doc """
+  Looks up the heartbeat pid for an agent. Returns `{:ok, pid}` or `:error`.
+  """
+  @spec whereis(String.t()) :: {:ok, pid()} | :error
+  def whereis(agent_id) do
+    case Registry.lookup(Cympho.AgentHeartbeat.Registry, agent_id) do
+      [{pid, _}] -> {:ok, pid}
+      [] -> :error
+    end
+  end
+
+  @doc """
   Starts a heartbeat process for the given agent_id.
   Returns `{:ok, pid}` or `{:error, reason}`.
   """
   @spec start_for_agent(String.t()) :: {:ok, pid()} | {:error, atom()}
   def start_for_agent(agent_id) when is_binary(agent_id) do
-    case HeartbeatRegistry.lookup(agent_id) do
+    case whereis(agent_id) do
       {:ok, _pid} ->
         {:error, :already_started}
 
@@ -74,7 +84,7 @@ defmodule Cympho.AgentHeartbeat do
   """
   @spec stop_for_agent(String.t()) :: :ok | {:error, :not_found}
   def stop_for_agent(agent_id) do
-    case HeartbeatRegistry.lookup(agent_id) do
+    case whereis(agent_id) do
       {:ok, pid} ->
         if Process.alive?(pid) do
           try do
@@ -96,7 +106,7 @@ defmodule Cympho.AgentHeartbeat do
   """
   @spec status(String.t()) :: {:ok, status()} | {:error, :not_found}
   def status(agent_id) do
-    case HeartbeatRegistry.lookup(agent_id) do
+    case whereis(agent_id) do
       {:ok, pid} ->
         {:ok, GenServer.call(pid, :get_status)}
 
@@ -111,7 +121,7 @@ defmodule Cympho.AgentHeartbeat do
   """
   @spec set_working(String.t(), String.t()) :: :ok | {:error, :not_found}
   def set_working(agent_id, issue_id) do
-    case HeartbeatRegistry.lookup(agent_id) do
+    case whereis(agent_id) do
       {:ok, pid} ->
         GenServer.call(pid, {:set_working, issue_id})
 
@@ -126,7 +136,7 @@ defmodule Cympho.AgentHeartbeat do
   """
   @spec set_idle(String.t()) :: :ok | {:error, :not_found}
   def set_idle(agent_id) do
-    case HeartbeatRegistry.lookup(agent_id) do
+    case whereis(agent_id) do
       {:ok, pid} ->
         GenServer.call(pid, :set_idle)
 
@@ -140,7 +150,7 @@ defmodule Cympho.AgentHeartbeat do
   """
   @spec get_state(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get_state(agent_id) do
-    case HeartbeatRegistry.lookup(agent_id) do
+    case whereis(agent_id) do
       {:ok, pid} ->
         {:ok, GenServer.call(pid, :get_state)}
 
@@ -150,13 +160,33 @@ defmodule Cympho.AgentHeartbeat do
   end
 
   @doc """
+  Fetches state for many agents in parallel. Missing agents map to `{:error, :not_found}`.
+  Caps concurrency to avoid flooding the scheduler when called from a LiveView mount.
+  """
+  @spec get_states([String.t()]) :: %{String.t() => {:ok, map()} | {:error, :not_found}}
+  def get_states(agent_ids) when is_list(agent_ids) do
+    agent_ids
+    |> Task.async_stream(
+      fn id -> {id, get_state(id)} end,
+      max_concurrency: 16,
+      ordered: false,
+      timeout: 5_000,
+      on_timeout: :kill_task
+    )
+    |> Enum.reduce(%{}, fn
+      {:ok, {id, result}}, acc -> Map.put(acc, id, result)
+      {:exit, _}, acc -> acc
+    end)
+  end
+
+  @doc """
   Triggers an immediate heartbeat for the given agent_id.
   Sends a :heartbeat message to the GenServer to check for work immediately.
   Used by Wakes context to wake agents on comments, blocker resolution, and child completion.
   """
   @spec trigger_heartbeat(String.t()) :: :ok | {:error, :not_found}
   def trigger_heartbeat(agent_id) when is_binary(agent_id) do
-    case HeartbeatRegistry.lookup(agent_id) do
+    case whereis(agent_id) do
       {:ok, pid} ->
         send(pid, :heartbeat)
         :ok
@@ -175,6 +205,11 @@ defmodule Cympho.AgentHeartbeat do
     # Use default interval in init to avoid DB queries during startup.
     # Tests often exit before init completes, causing sandbox disconnect errors.
     timer_ref = Process.send_after(self(), :heartbeat, @default_heartbeat_interval)
+
+    Phoenix.PubSub.subscribe(
+      Cympho.PubSub,
+      Cympho.HeartbeatEngine.WakeupQueue.topic_for_agent(agent_id)
+    )
 
     state = %{
       agent_id: agent_id,
@@ -209,6 +244,12 @@ defmodule Cympho.AgentHeartbeat do
   @impl true
   def handle_info(:shutdown, state) do
     {:stop, :normal, state}
+  end
+
+  @impl true
+  def handle_info({:wakeup_enqueued, _agent_id, _wake}, state) do
+    send(self(), :heartbeat)
+    {:noreply, state}
   end
 
   defp do_heartbeat(state) do

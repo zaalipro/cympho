@@ -7,8 +7,7 @@ config :cympho, Cympho.Repo,
   database: "cympho_repo",
   pool_size: 10,
   stacktrace: true,
-  show_sensitive_data_on_connection_error: true,
-  pool_size: 10
+  show_sensitive_data_on_connection_error: true
 
 config :cympho, CymphoWeb.Endpoint,
   url: [host: "localhost"],

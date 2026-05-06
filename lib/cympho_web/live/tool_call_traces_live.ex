@@ -18,7 +18,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
        agent_id: "",
        issue_id: ""
      })
-     |> assign(:agents, Agents.list_agents())
+     |> assign(:agents, list_agents_scoped(company_id))
      |> assign(:statistics, nil)
      |> assign(:integrity_status, :unknown)
      |> assign(:selected_trace, nil)
@@ -156,6 +156,9 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
      |> assign(:export_data_csv, csv_content)
      |> put_flash(:info, "Exported #{length(traces)} traces as CSV")}
   end
+
+  defp list_agents_scoped(nil), do: []
+  defp list_agents_scoped(company_id), do: Agents.list_agents_by_company(company_id)
 
   defp load_traces(socket) do
     company_id = socket.assigns.company_id

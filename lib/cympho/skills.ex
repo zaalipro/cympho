@@ -14,6 +14,7 @@ defmodule Cympho.Skills do
     |> maybe_filter_by_company(company_id)
     |> maybe_filter_by_project(project_id)
     |> order_by([s], asc: s.name)
+    |> preload([:company, :project])
     |> Repo.all()
   end
 

@@ -55,22 +55,28 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   defp load_heartbeat_states(issues) do
-    issues
-    |> Enum.map(fn issue -> issue.assignee end)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq_by(& &1.id)
-    |> Enum.reduce(%{}, fn agent, acc ->
-      case AgentHeartbeat.get_state(agent.id) do
-        {:ok, state} ->
-          Map.put(acc, agent.id, state)
+    agent_ids =
+      issues
+      |> Enum.map(fn issue -> issue.assignee end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq_by(& &1.id)
+      |> Enum.map(& &1.id)
 
-        {:error, _} ->
-          Map.put(acc, agent.id, %{
-            agent_id: agent.id,
-            status: :offline,
-            current_issue_id: nil,
-            eta_ms: nil
-          })
+    results = AgentHeartbeat.get_states(agent_ids)
+
+    Map.new(agent_ids, fn id ->
+      case Map.get(results, id) do
+        {:ok, state} ->
+          {id, state}
+
+        _ ->
+          {id,
+           %{
+             agent_id: id,
+             status: :offline,
+             current_issue_id: nil,
+             eta_ms: nil
+           }}
       end
     end)
   end

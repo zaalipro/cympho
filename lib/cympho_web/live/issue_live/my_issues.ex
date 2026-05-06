@@ -24,8 +24,7 @@ defmodule CymphoWeb.IssueLive.MyIssues do
 
     agents =
       if company do
-        Agents.list_agents()
-        |> Enum.filter(&(&1.company_id == company.id))
+        Agents.list_agents_by_company(company.id)
       else
         []
       end

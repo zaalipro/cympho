@@ -51,10 +51,12 @@ defmodule Cympho.Notifications.Dispatcher do
   end
 
   @doc """
-  Dispatch a notification asynchronously using Task.Supervisor.
+  Dispatch a notification asynchronously, fire-and-forget. The spawned task
+  is supervised but no result message is sent back to the caller, so this is
+  safe to invoke from long-lived processes (e.g. GenServers).
   """
   def dispatch_async(%Message{} = message, supervisor \\ Cympho.TaskSupervisor) do
-    Task.Supervisor.async_nolink(supervisor, fn ->
+    Task.Supervisor.start_child(supervisor, fn ->
       dispatch(message)
     end)
   end

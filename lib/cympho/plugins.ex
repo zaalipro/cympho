@@ -16,6 +16,7 @@ defmodule Cympho.Plugins do
     |> maybe_filter_by_project(project_id)
     |> maybe_filter_by_status(status)
     |> order_by([p], asc: p.name)
+    |> preload([:company, :project])
     |> Repo.all()
   end
 

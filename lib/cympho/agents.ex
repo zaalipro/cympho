@@ -687,7 +687,7 @@ defmodule Cympho.Agents do
   end
 
   defp get_heartbeat_state(agent_id) do
-    case Cympho.AgentHeartbeat.Registry.lookup(agent_id) do
+    case Cympho.AgentHeartbeat.whereis(agent_id) do
       {:ok, pid} ->
         try do
           GenServer.call(pid, :get_state, 5000)

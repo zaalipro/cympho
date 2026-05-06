@@ -1,7 +1,7 @@
 defmodule CymphoWeb.SkillLive.Index do
   use CymphoWeb, :live_view
 
-  alias Cympho.{Skills, Companies, Repo}
+  alias Cympho.{Skills, Companies}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -98,7 +98,6 @@ defmodule CymphoWeb.SkillLive.Index do
     company_id = company_id || socket.assigns[:selected_company_id]
 
     Skills.list_skills(company_id: company_id, project_id: project_id)
-    |> Enum.map(fn s -> Repo.preload(s, [:company, :project]) end)
   end
 
   defp fetch_company_skill(socket, id) do

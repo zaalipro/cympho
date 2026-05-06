@@ -9,6 +9,7 @@ defmodule CymphoWeb.SearchLive.Index do
   @impl true
   def mount(_params, _session, socket) do
     current_user = socket.assigns.current_user
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
     socket =
       socket
@@ -16,7 +17,7 @@ defmodule CymphoWeb.SearchLive.Index do
       |> assign(:query, "")
       |> assign(:results, %{issues: [], agents: [], projects: [], goals: []})
       |> assign(:recent_searches, recent_searches_for_user(current_user))
-      |> assign(:agents, Agents.list_agents())
+      |> assign(:agents, list_agents_scoped(company_id))
       |> assign(:projects, Projects.list_projects())
       |> assign(:labels, Labels.list_labels())
       |> assign(:filters, %{
@@ -266,6 +267,9 @@ defmodule CymphoWeb.SearchLive.Index do
 
   defp recent_searches_for_user(nil), do: []
   defp recent_searches_for_user(user), do: RecentSearches.list_recent_searches(user.id)
+
+  defp list_agents_scoped(nil), do: []
+  defp list_agents_scoped(company_id), do: Agents.list_agents_by_company(company_id)
 
   defp render_issues(assigns, issues, title) do
     assigns = assign(assigns, issues: issues, section_title: title)

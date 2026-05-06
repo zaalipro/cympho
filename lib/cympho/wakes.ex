@@ -12,7 +12,6 @@ defmodule Cympho.Wakes do
   alias Cympho.Repo
   alias Cympho.Wakes.AgentWake
   alias Cympho.Issues.Issue
-  alias Cympho.AgentHeartbeat
   alias Cympho.Comments.Comment
   alias Cympho.HeartbeatEngine.WakeupQueue
   require Logger
@@ -142,8 +141,10 @@ defmodule Cympho.Wakes do
   end
 
   @doc """
-  Low-level function to wake an agent directly.
-  Logs the wake attempt and triggers an immediate heartbeat.
+  Low-level function to wake an agent directly. Persists the wake to the
+  WakeupQueue, which broadcasts to the agent's heartbeat process via PubSub.
+  Returns once the row is durable; the heartbeat trigger and dispatcher
+  pickup happen asynchronously off the broadcast.
   """
   @spec do_wake_agent(
           String.t(),
@@ -153,7 +154,7 @@ defmodule Cympho.Wakes do
           String.t() | nil,
           map()
         ) ::
-          {:ok, AgentWake.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
   def do_wake_agent(agent_id, issue_id, reason, triggered_by_type, triggered_by_id, metadata) do
     attrs = %{
       agent_id: agent_id,
@@ -166,19 +167,10 @@ defmodule Cympho.Wakes do
 
     case WakeupQueue.enqueue(attrs) do
       {:ok, agent_wake} ->
-        case AgentHeartbeat.trigger_heartbeat(agent_id) do
-          :ok ->
-            _ = Cympho.Orchestrator.Dispatcher.poll_now()
-            Logger.info("Wakes: triggered heartbeat for agent #{agent_id}, reason: #{reason}")
-            {:ok, agent_wake}
+        Logger.info("Wakes: enqueued wake for agent #{agent_id}, reason: #{reason}")
+        {:ok, agent_wake}
 
-          {:error, :not_found} ->
-            _ = Cympho.Orchestrator.Dispatcher.poll_now()
-            Logger.info("Wakes: agent heartbeat process not found for #{agent_id}")
-            {:ok, agent_wake}
-        end
-
-      {:error, _changeset} = error ->
+      {:error, _} = error ->
         error
     end
   end
