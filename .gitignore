@@ -30,3 +30,5 @@ Thumbs.db
 *.bak
 .claude/worktrees/
 erl_crash.dump
+
+*.png
