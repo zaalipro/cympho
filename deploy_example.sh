@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${SCRIPT_DIR}"
 
 DEPLOY_USER="${DEPLOY_USER:-root}"
-DEPLOY_HOST="${DEPLOY_HOST:-31.207.44.223}"
+DEPLOY_HOST="${DEPLOY_HOST:-yourserver}"
 DEPLOY_PORT="${DEPLOY_PORT:-22}"
 DEPLOY_TARGET="${DEPLOY_USER}@${DEPLOY_HOST}"
 
@@ -34,7 +34,7 @@ usage() {
 Usage: ./deploy.sh [--skip-tests] [--skip-public-check]
 
 Environment overrides:
-  DEPLOY_HOST           Default: 31.207.44.223
+  DEPLOY_HOST           Default: yourserver
   DEPLOY_USER           Default: root
   DEPLOY_PORT           Default: 22
   DEPLOY_AUTH_METHOD    Default: key (options: key, password)
