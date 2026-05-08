@@ -73,6 +73,44 @@ defmodule Cympho.AgentsTest do
     end
   end
 
+  describe "get_company_ceo/1" do
+    setup [:create_company]
+
+    test "returns the first non-terminated CEO for a company", %{company: company} do
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "CEO",
+          role: :ceo,
+          status: :idle
+        })
+
+      {:ok, _engineer} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Engineer",
+          role: :engineer,
+          status: :idle
+        })
+
+      assert {:ok, found} = Agents.get_company_ceo(company.id)
+      assert found.id == ceo.id
+    end
+
+    test "ignores terminated CEOs", %{company: company} do
+      {:ok, _terminated} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Old CEO",
+          role: :ceo,
+          status: :idle,
+          governance_status: "terminated"
+        })
+
+      assert {:error, :not_found} = Agents.get_company_ceo(company.id)
+    end
+  end
+
   describe "create_agent/1" do
     test "creates agent with valid data" do
       attrs = %{

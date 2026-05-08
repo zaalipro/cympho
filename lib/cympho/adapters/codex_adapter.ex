@@ -9,7 +9,23 @@ defmodule Cympho.Adapters.CodexAdapter do
   @behaviour Cympho.Adapters.Adapter
 
   @default_model "o4-mini"
+  @model_options [
+    {"GPT-5.5", "gpt-5.5"},
+    {"GPT-5.4", "gpt-5.4"},
+    {"GPT-5.4 mini", "gpt-5.4-mini"},
+    {"GPT-5.4 nano", "gpt-5.4-nano"},
+    {"Codex mini latest", "codex-mini-latest"},
+    {"o4-mini", "o4-mini"},
+    {"GPT-4.1", "gpt-4.1"}
+  ]
   @default_timeout 300_000
+
+  def default_model, do: @default_model
+
+  def model_options do
+    (@model_options ++ configured_model_options())
+    |> Enum.uniq_by(fn {_label, value} -> value end)
+  end
 
   @impl true
   def run(issue, agent_id, recipient_pid, opts) when is_pid(recipient_pid) do
@@ -208,6 +224,7 @@ defmodule Cympho.Adapters.CodexAdapter do
         type: :string,
         required: false,
         default: @default_model,
+        options: model_options(),
         description: "Model to use"
       },
       %{
@@ -285,6 +302,15 @@ defmodule Cympho.Adapters.CodexAdapter do
   defp validate_model(nil), do: :ok
   defp validate_model(model) when is_binary(model), do: :ok
   defp validate_model(_), do: {:error, "model must be a string"}
+
+  defp configured_model_options do
+    "CYMPHO_CODEX_MODELS"
+    |> System.get_env("")
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(fn model -> {model, model} end)
+  end
 
   defp validate_temperature(nil), do: :ok
 

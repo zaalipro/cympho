@@ -100,6 +100,9 @@ defmodule CymphoWeb.DashboardLive.Index do
     socket
     |> assign(:company, company)
     |> assign(:autonomy_status, autonomy_status(company))
+    |> assign(:runtime_enabled?, Dispatcher.enabled?())
+    |> assign(:operating_mode, operating_mode(company))
+    |> assign(:next_actions, next_actions(summary, company))
     |> assign(:queued_work, queued)
     |> assign(:running_work, running)
     |> assign(:blocked_work, blocked)
@@ -142,6 +145,88 @@ defmodule CymphoWeb.DashboardLive.Index do
   defp autonomy_status(%{status: "active"}), do: :active
   defp autonomy_status(_), do: :unconfigured
 
+  defp operating_mode(company) do
+    cond do
+      not Dispatcher.enabled?() ->
+        :review
+
+      autonomy_status(company) == :active ->
+        :autonomous
+
+      autonomy_status(company) == :paused ->
+        :paused
+
+      true ->
+        :setup
+    end
+  end
+
+  defp next_actions(summary, company) do
+    company_status = autonomy_status(company)
+    runtime_enabled? = Dispatcher.enabled?()
+
+    queued =
+      status_count(summary.issue_status_counts, :todo) +
+        status_count(summary.issue_status_counts, :in_review)
+
+    running = status_count(summary.issue_status_counts, :in_progress)
+    blocked = status_count(summary.issue_status_counts, :blocked)
+    agents = summary.total_agents
+
+    [
+      if(!runtime_enabled?,
+        do: %{
+          label: "Review mode is on",
+          detail: "Agent execution is disabled, so it is safe to inspect and edit the company.",
+          action: "Enable runtime when ready"
+        }
+      ),
+      if(company_status == :unconfigured,
+        do: %{
+          label: "Finish company setup",
+          detail: "Create the operating company, initial goal, and agent roster.",
+          action: "Open setup"
+        }
+      ),
+      if(agents == 0,
+        do: %{
+          label: "Hire your first agents",
+          detail: "A CEO, CTO, and engineer team make the board actionable.",
+          action: "Create agents"
+        }
+      ),
+      if(blocked > 0,
+        do: %{
+          label: "#{blocked} blocked #{pluralize(blocked, "issue")}",
+          detail: "Blocked work needs an owner decision before agents can continue.",
+          action: "Review blockers"
+        }
+      ),
+      if(runtime_enabled? and queued > 0 and running == 0,
+        do: %{
+          label: "Queued work is waiting",
+          detail: "#{queued} #{pluralize(queued, "issue")} can be picked up by available agents.",
+          action: "Open board"
+        }
+      )
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] ->
+        [
+          %{
+            label: "System is steady",
+            detail:
+              "No urgent bottlenecks detected. Review priorities or inspect recent activity.",
+            action: "Scan board"
+          }
+        ]
+
+      actions ->
+        actions
+    end
+  end
+
   def status_label(:backlog), do: "Backlog"
   def status_label(:todo), do: "To Do"
   def status_label(:in_progress), do: "In Progress"
@@ -154,12 +239,20 @@ defmodule CymphoWeb.DashboardLive.Index do
   def status_label(:error), do: "Error"
   def status_label(:active), do: "Active"
   def status_label(:paused), do: "Paused"
+  def status_label(:review), do: "Review mode"
+  def status_label(:autonomous), do: "Autonomous"
+  def status_label(:setup), do: "Setup needed"
   def status_label(:unconfigured), do: "Unconfigured"
   def status_label(other), do: String.capitalize(to_string(other))
 
   def autonomy_badge_class(:active), do: "border-green-500/25 bg-green-500/10 text-green-400"
   def autonomy_badge_class(:paused), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-400"
   def autonomy_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  def mode_badge_class(:autonomous), do: "border-green-500/25 bg-green-500/10 text-green-400"
+  def mode_badge_class(:review), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+  def mode_badge_class(:paused), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-400"
+  def mode_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
   def total_issues(counts) do
     Enum.reduce(counts, 0, fn %{count: c}, acc -> acc + c end)
@@ -172,6 +265,9 @@ defmodule CymphoWeb.DashboardLive.Index do
   def throughput_total(list) do
     Enum.reduce(list, 0, fn %{count: c}, acc -> acc + c end)
   end
+
+  def pluralize(1, word), do: word
+  def pluralize(_, word), do: word <> "s"
 
   def bar_percent(count, total) when total > 0, do: min(round(count / total * 100), 100)
   def bar_percent(_, _), do: 0

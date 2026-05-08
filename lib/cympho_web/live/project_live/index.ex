@@ -9,7 +9,7 @@ defmodule CymphoWeb.ProjectLive.Index do
       Projects.subscribe(socket.assigns.current_company.id)
     end
 
-    {:ok, assign(socket, :projects, Projects.list_projects())}
+    {:ok, assign(socket, :projects, list_projects(socket))}
   end
 
   @impl true
@@ -73,5 +73,12 @@ defmodule CymphoWeb.ProjectLive.Index do
     url
     |> String.replace(~r{^https?://}, "")
     |> String.trim_trailing("/")
+  end
+
+  defp list_projects(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Projects.list_projects_by_company(company_id)
+      _ -> Projects.list_projects()
+    end
   end
 end

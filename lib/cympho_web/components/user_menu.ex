@@ -14,6 +14,8 @@ defmodule CymphoWeb.Components.UserMenu do
     endpoint: CymphoWeb.Endpoint,
     router: CymphoWeb.Router
 
+  @dev Mix.env() == :dev
+
   attr :user, :any, default: nil
   attr :current_path, :string, default: "/"
 
@@ -50,9 +52,31 @@ defmodule CymphoWeb.Components.UserMenu do
           "bg-surface-2 border border-hairline shadow-elevated overflow-hidden"
         ]}
       >
+        <div :if={!@user} class="px-3 py-2.5 border-b border-hairline">
+          <p class="text-sm font-590 text-text-primary truncate">Guest session</p>
+          <p class="text-xs text-text-quaternary truncate">
+            Sign in to load company projects and agents.
+          </p>
+        </div>
         <div :if={@user} class="px-3 py-2.5 border-b border-hairline">
           <p class="text-sm font-590 text-text-primary truncate">{@user.name || "Account"}</p>
           <p class="text-xs text-text-quaternary truncate">{@user.email}</p>
+        </div>
+
+        <div :if={!@user} class="py-1">
+          <.menu_link
+            to={~p"/login"}
+            icon="hero-arrow-right-on-rectangle-mini"
+            current={@current_path}
+            label="Sign in"
+          />
+          <.menu_link
+            :if={dev?()}
+            to="/dev/login"
+            icon="hero-bolt-mini"
+            current={@current_path}
+            label="Dev owner"
+          />
         </div>
 
         <div class="py-1">
@@ -144,6 +168,12 @@ defmodule CymphoWeb.Components.UserMenu do
             current={@current_path}
             label="Settings"
           />
+          <.menu_logout_link
+            :if={@user}
+            to={~p"/logout"}
+            icon="hero-arrow-left-on-rectangle-mini"
+            label="Sign out"
+          />
         </div>
       </div>
     </div>
@@ -161,6 +191,19 @@ defmodule CymphoWeb.Components.UserMenu do
 
     ~H"""
     <.link navigate={@to} class={menu_row_class(@active?)} role="menuitem">
+      <span class={[@icon, "w-4 h-4 text-text-tertiary group-hover:text-text-primary"]}></span>
+      <span class="flex-1 text-left">{@label}</span>
+    </.link>
+    """
+  end
+
+  attr :to, :string, required: true
+  attr :icon, :string, required: true
+  attr :label, :string, required: true
+
+  defp menu_logout_link(assigns) do
+    ~H"""
+    <.link href={@to} method="delete" class={menu_row_class(false)} role="menuitem">
       <span class={[@icon, "w-4 h-4 text-text-tertiary group-hover:text-text-primary"]}></span>
       <span class="flex-1 text-left">{@label}</span>
     </.link>
@@ -194,4 +237,6 @@ defmodule CymphoWeb.Components.UserMenu do
   end
 
   defp initials(_), do: "?"
+
+  defp dev?, do: @dev
 end

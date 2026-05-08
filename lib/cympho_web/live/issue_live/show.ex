@@ -39,6 +39,7 @@ defmodule CymphoWeb.IssueLive.Show do
         runs = HeartbeatEngine.list_runs_for_issue(issue.id)
         interactions = IssueThreadInteractions.list_interactions(issue.id)
         work_products = WorkProducts.list_work_products(issue.id)
+        child_issues = Issues.list_child_issues(issue.id)
         tool_call_traces = ToolCallTraces.list_tool_call_traces(issue_id: issue.id)
         timeline = build_timeline(issue, runs, interactions, work_products, tool_call_traces)
         documents = Documents.list_documents(issue.id)
@@ -50,12 +51,14 @@ defmodule CymphoWeb.IssueLive.Show do
            comment_form: to_form(comment_changeset),
            agents: list_idle_agents(socket),
            all_agents: list_company_agents(socket),
+           orchestrator_enabled?: Cympho.Orchestrator.Dispatcher.enabled?(),
            show_agent_panel: false,
            editing: nil,
            assignee_search: "",
            runs: runs,
            interactions: interactions,
            work_products: work_products,
+           child_issues: child_issues,
            tool_call_traces: tool_call_traces,
            timeline: timeline,
            scrolled_to_bottom: true,
@@ -84,6 +87,7 @@ defmodule CymphoWeb.IssueLive.Show do
         socket
         |> assign(:page_title, issue.title)
         |> assign(:issue, issue)
+        |> assign(:child_issues, Issues.list_child_issues(issue.id))
 
       {:error, :not_found} ->
         socket
@@ -303,26 +307,34 @@ defmodule CymphoWeb.IssueLive.Show do
 
   @impl true
   def handle_event("toggle_agent_panel", _, socket) do
-    {:noreply, update(socket, :show_agent_panel, &(!&1))}
+    if socket.assigns.orchestrator_enabled? do
+      {:noreply, update(socket, :show_agent_panel, &(!&1))}
+    else
+      {:noreply, put_flash(socket, :error, "Agent execution is disabled in this runtime")}
+    end
   end
 
   @impl true
   def handle_event("spawn_agent", %{"agent_id" => agent_id}, socket) do
     issue = socket.assigns.issue
 
-    with {:ok, checked_out} <- Issues.checkout_issue(issue, agent_id),
-         {:ok, _pid} <- Orchestrator.start_and_run(checked_out, agent_id),
-         {:ok, agent} <- Agents.get_agent(agent_id),
-         {:ok, _updated_agent} <- Agents.update_agent(agent, %{status: :running}) do
-      {:noreply,
-       socket
-       |> put_flash(:info, "Agent started successfully")
-       |> assign(:issue, checked_out)
-       |> assign(:show_agent_panel, false)
-       |> assign(:agents, list_idle_agents(socket))}
+    if socket.assigns.orchestrator_enabled? do
+      with {:ok, checked_out} <- Issues.checkout_issue(issue, agent_id),
+           {:ok, _pid} <- Orchestrator.start_and_run(checked_out, agent_id),
+           {:ok, agent} <- Agents.get_agent(agent_id),
+           {:ok, _updated_agent} <- Agents.update_agent(agent, %{status: :running}) do
+        {:noreply,
+         socket
+         |> put_flash(:info, "Agent started successfully")
+         |> assign(:issue, checked_out)
+         |> assign(:show_agent_panel, false)
+         |> assign(:agents, list_idle_agents(socket))}
+      else
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to spawn agent: #{inspect(reason)}")}
+      end
     else
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to spawn agent: #{inspect(reason)}")}
+      {:noreply, put_flash(socket, :error, "Agent execution is disabled in this runtime")}
     end
   end
 
@@ -527,21 +539,31 @@ defmodule CymphoWeb.IssueLive.Show do
 
   @impl true
   def handle_info({:issue_updated, updated_issue}, socket) do
-    if socket.assigns.issue.id == updated_issue.id do
-      runs = HeartbeatEngine.list_runs_for_issue(updated_issue.id)
+    cond do
+      socket.assigns.issue.id == updated_issue.id ->
+        runs = HeartbeatEngine.list_runs_for_issue(updated_issue.id)
 
-      socket =
-        socket
-        |> assign(issue: updated_issue, runs: runs)
-        |> push_event("toast", %{
-          message: "Issue updated by another user",
-          type: "info",
-          key: "issue_#{updated_issue.id}_updated"
-        })
+        socket =
+          socket
+          |> assign(
+            issue: updated_issue,
+            runs: runs,
+            child_issues: Issues.list_child_issues(updated_issue.id)
+          )
+          |> push_event("toast", %{
+            message: "Issue updated by another user",
+            type: "info",
+            key: "issue_#{updated_issue.id}_updated"
+          })
 
-      {:noreply, maybe_rebuild_timeline(socket)}
-    else
-      {:noreply, socket}
+        {:noreply, maybe_rebuild_timeline(socket)}
+
+      updated_issue.parent_id == socket.assigns.issue.id ->
+        {:noreply,
+         assign(socket, :child_issues, Issues.list_child_issues(socket.assigns.issue.id))}
+
+      true ->
+        {:noreply, socket}
     end
   end
 
@@ -817,6 +839,39 @@ defmodule CymphoWeb.IssueLive.Show do
   def run_status_label("cancelled"), do: "Cancelled"
   def run_status_label(other), do: String.capitalize(to_string(other))
 
+  def status_label(:in_progress), do: "In progress"
+  def status_label(:in_review), do: "In review"
+
+  def status_label(status) do
+    status
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
+
+  def run_status_tone("completed"), do: "text-green-300"
+  def run_status_tone("succeeded"), do: "text-green-300"
+  def run_status_tone("running"), do: "text-blue-300"
+  def run_status_tone("failed"), do: "text-red-300"
+  def run_status_tone("timed_out"), do: "text-red-300"
+  def run_status_tone("pending"), do: "text-yellow-300"
+  def run_status_tone("queued"), do: "text-yellow-300"
+  def run_status_tone(_), do: "text-text-tertiary"
+
+  def format_work_product_kind(nil), do: "other"
+
+  def format_work_product_kind(kind) do
+    kind
+    |> to_string()
+    |> String.replace("_", " ")
+  end
+
+  def trace_status_color("success"), do: "bg-green-400"
+  def trace_status_color("error"), do: "bg-red-400"
+  def trace_status_color("timeout"), do: "bg-amber-400"
+  def trace_status_color("pending"), do: "bg-yellow-400"
+  def trace_status_color(_), do: "bg-gray-400"
+
   defp get_scoped_issue(socket, id) do
     case socket.assigns[:current_company] do
       %{id: company_id} -> Issues.get_company_issue(company_id, id)
@@ -890,6 +945,316 @@ defmodule CymphoWeb.IssueLive.Show do
   defp try_string_to_priority("high"), do: :high
   defp try_string_to_priority("critical"), do: :critical
   defp try_string_to_priority(_), do: nil
+
+  defp execution_metrics(issue, runs, work_products, child_issues, tool_call_traces) do
+    comments = comments_for_issue(issue)
+
+    %{
+      comments: length(comments),
+      agent_comments: Enum.count(comments, &(&1.author_type == "agent")),
+      runs: length(runs),
+      failed_runs: Enum.count(runs, &(&1.status in ["failed", "timed_out"])),
+      work_products: length(work_products),
+      code_products: Enum.count(work_products, &(&1.kind == "code_change")),
+      child_issues: length(child_issues),
+      open_child_issues: Enum.count(child_issues, &(&1.status not in [:done, :cancelled])),
+      tool_calls: length(tool_call_traces)
+    }
+  end
+
+  defp owner_brief_lines(issue, runs, work_products, child_issues) do
+    latest_run = List.first(runs)
+    open_children = Enum.count(child_issues, &(&1.status not in [:done, :cancelled]))
+
+    [
+      assignment_brief(issue),
+      latest_run_brief(latest_run),
+      artifact_brief(work_products),
+      child_issue_brief(child_issues, open_children)
+    ]
+    |> Enum.reject(&(&1 in [nil, ""]))
+  end
+
+  defp evidence_gaps(issue, runs, work_products, child_issues) do
+    metrics = execution_metrics(issue, runs, work_products, child_issues, [])
+
+    [
+      if(metrics.agent_comments == 0, do: "No agent completion or review comment yet."),
+      if(metrics.work_products == 0, do: "No work product attached yet."),
+      if(metrics.failed_runs > 0, do: "#{metrics.failed_runs} failed run needs attention."),
+      if(metrics.open_child_issues > 0, do: "#{metrics.open_child_issues} sub-issue still open."),
+      if(
+        metrics.code_products > 0 and
+          Cympho.Issues.Issue.pr_url(issue, issue.project) in [nil, ""],
+        do: "Code work exists but no PR link is set."
+      )
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] -> ["Evidence looks ready for review."]
+      gaps -> gaps
+    end
+  end
+
+  defp agent_contribution_cards(issue, runs, work_products, tool_call_traces, agents) do
+    comments = comments_for_issue(issue)
+    agent_by_id = Map.new(agents, &{&1.id, &1})
+
+    ids =
+      [
+        issue.assignee_id,
+        issue.created_by_agent_id
+      ] ++
+        Enum.map(Enum.filter(comments, &(&1.author_type == "agent")), & &1.author_id) ++
+        Enum.map(runs, & &1.agent_id) ++
+        Enum.map(work_products, & &1.created_by_agent_id) ++
+        Enum.map(tool_call_traces, &(&1.agent_id || &1.actor_id))
+
+    ids
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.uniq()
+    |> Enum.map(fn agent_id ->
+      agent = Map.get(agent_by_id, agent_id)
+
+      agent_comments =
+        Enum.filter(comments, &(&1.author_type == "agent" and &1.author_id == agent_id))
+
+      agent_runs = Enum.filter(runs, &(&1.agent_id == agent_id))
+      agent_products = Enum.filter(work_products, &(&1.created_by_agent_id == agent_id))
+
+      agent_traces =
+        Enum.filter(tool_call_traces, fn trace ->
+          trace.agent_id == agent_id or trace.actor_id == agent_id
+        end)
+
+      %{
+        id: agent_id,
+        name: agent_name(agent, agent_id),
+        role: agent_role(agent),
+        initials: agent_initials(agent, agent_id),
+        status: contribution_status(agent_runs, agent_comments, agent_products, agent_traces),
+        latest_at:
+          latest_contribution_at(agent_comments, agent_runs, agent_products, agent_traces),
+        counts: %{
+          comments: length(agent_comments),
+          runs: length(agent_runs),
+          products: length(agent_products),
+          traces: length(agent_traces)
+        },
+        highlights:
+          contribution_highlights(agent_comments, agent_runs, agent_products, agent_traces)
+      }
+    end)
+    |> Enum.sort_by(
+      fn card ->
+        card.latest_at && DateTime.to_unix(card.latest_at)
+      end,
+      :desc
+    )
+  end
+
+  defp comments_for_issue(%{comments: comments}) when is_list(comments), do: comments
+  defp comments_for_issue(_), do: []
+
+  defp assignment_brief(%{assignee: %{name: name}, status: status}) do
+    "#{name} owns this now. Current status is #{status_label(status)}."
+  end
+
+  defp assignment_brief(%{assigned_role: role, status: status}) when role not in [nil, ""] do
+    role = String.replace(role, "_", " ")
+    "Waiting for #{indefinite_article(role)} #{role}. Current status is #{status_label(status)}."
+  end
+
+  defp assignment_brief(%{status: status}) do
+    "No assignee yet. Current status is #{status_label(status)}."
+  end
+
+  defp latest_run_brief(nil), do: "No runtime run has been recorded yet."
+
+  defp latest_run_brief(run) do
+    label = run_status_label(run.status)
+    adapter = run.adapter || "runtime"
+
+    case run.error_reason do
+      reason when reason not in [nil, ""] ->
+        "Latest #{adapter} run #{String.downcase(label)}: #{reason}"
+
+      _ ->
+        "Latest #{adapter} run is #{String.downcase(label)}."
+    end
+  end
+
+  defp artifact_brief([]), do: "No attached work product yet."
+
+  defp artifact_brief(work_products) do
+    kinds =
+      work_products
+      |> Enum.map(&format_work_product_kind(&1.kind))
+      |> Enum.uniq()
+      |> Enum.join(", ")
+
+    "#{length(work_products)} work product#{plural_suffix(work_products)} attached: #{kinds}."
+  end
+
+  defp child_issue_brief([], _open_children), do: nil
+
+  defp child_issue_brief(child_issues, 0) do
+    "All #{length(child_issues)} sub-issues are closed."
+  end
+
+  defp child_issue_brief(child_issues, open_children) do
+    "#{open_children} of #{length(child_issues)} sub-issues still need work."
+  end
+
+  defp contribution_status(runs, comments, products, traces) do
+    latest_run = List.first(runs)
+
+    cond do
+      Enum.any?(runs, &(&1.status == "running")) -> "Running"
+      latest_run && latest_run.status in ["failed", "timed_out"] -> "Needs attention"
+      latest_run && latest_run.status in ["completed", "succeeded"] -> "Completed run"
+      products != [] -> "Delivered artifact"
+      comments != [] -> "Commented"
+      traces != [] -> "Used tools"
+      true -> "Assigned"
+    end
+  end
+
+  defp latest_contribution_at(comments, runs, products, traces) do
+    (Enum.map(comments, & &1.inserted_at) ++
+       Enum.map(runs, &(&1.completed_at || &1.started_at || &1.inserted_at)) ++
+       Enum.map(products, & &1.inserted_at) ++
+       Enum.map(traces, &(&1.occurred_at || &1.inserted_at)))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.max(DateTime, fn -> nil end)
+  end
+
+  defp contribution_highlights(comments, runs, products, traces) do
+    [
+      latest_comment_highlight(comments),
+      latest_run_highlight(runs),
+      latest_product_highlight(products),
+      tool_trace_highlight(traces)
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] ->
+        [
+          %{
+            label: "Next",
+            body: "No activity yet. The next run should leave a completion comment."
+          }
+        ]
+
+      highlights ->
+        highlights
+    end
+  end
+
+  defp latest_comment_highlight([]), do: nil
+
+  defp latest_comment_highlight(comments) do
+    latest = Enum.max_by(comments, & &1.inserted_at, DateTime)
+    %{label: "Commented", body: compact_body(latest.body, 180)}
+  end
+
+  defp latest_run_highlight([]), do: nil
+
+  defp latest_run_highlight(runs) do
+    latest = List.first(runs)
+    detail = latest.error_reason || latest.continuation_summary || latest.log_excerpt
+
+    %{
+      label: "Runtime",
+      body:
+        [run_status_label(latest.status), latest.adapter, compact_body(detail, 140)]
+        |> Enum.reject(&(&1 in [nil, ""]))
+        |> Enum.join(" - ")
+    }
+  end
+
+  defp latest_product_highlight([]), do: nil
+
+  defp latest_product_highlight(products) do
+    latest = List.first(products)
+    detail = latest.description || latest.url
+
+    %{
+      label: "Delivered",
+      body:
+        [latest.title, compact_body(detail, 140)]
+        |> Enum.reject(&(&1 in [nil, ""]))
+        |> Enum.join(" - ")
+    }
+  end
+
+  defp tool_trace_highlight([]), do: nil
+
+  defp tool_trace_highlight(traces) do
+    tools =
+      traces
+      |> Enum.map(& &1.tool_name)
+      |> Enum.reject(&(&1 in [nil, ""]))
+      |> Enum.uniq()
+      |> Enum.take(3)
+      |> Enum.join(", ")
+
+    %{
+      label: "Tools",
+      body: "#{length(traces)} tool calls#{if tools == "", do: "", else: ": #{tools}"}"
+    }
+  end
+
+  defp compact_body(nil, _max), do: nil
+  defp compact_body("", _max), do: nil
+
+  defp compact_body(body, max) do
+    body
+    |> String.replace(~r/```cympho-actions.*?```/s, "")
+    |> String.split("\n")
+    |> Enum.map(&String.trim/1)
+    |> Enum.find(&(&1 != ""))
+    |> case do
+      nil -> nil
+      line -> truncate_text(line, max)
+    end
+  end
+
+  defp truncate_text(text, max) when is_binary(text) and byte_size(text) > max do
+    String.slice(text, 0, max - 1) <> "..."
+  end
+
+  defp truncate_text(text, _max), do: text
+
+  defp agent_name(nil, id), do: "Agent #{String.slice(to_string(id), 0, 8)}"
+  defp agent_name(agent, _id), do: agent.name || "Unnamed agent"
+
+  defp agent_role(nil), do: "former agent"
+
+  defp agent_role(agent) do
+    agent.role
+    |> to_string()
+    |> String.replace("_", " ")
+  end
+
+  defp agent_initials(nil, id), do: id |> to_string() |> String.slice(0, 2) |> String.upcase()
+
+  defp agent_initials(agent, _id) do
+    (agent.name || "?")
+    |> String.split(~r/\s+/, trim: true)
+    |> Enum.take(2)
+    |> Enum.map(&String.first/1)
+    |> Enum.join()
+    |> String.upcase()
+  end
+
+  defp plural_suffix(list) when is_list(list) and length(list) == 1, do: ""
+  defp plural_suffix(_), do: "s"
+
+  defp indefinite_article(text) do
+    first = text |> to_string() |> String.downcase() |> String.first()
+    if first in ["a", "e", "i", "o", "u"], do: "an", else: "a"
+  end
 
   # Build a unified timeline of comments, interactions, runs, work_products, and tool_call_traces
   defp build_timeline(issue, runs, interactions, work_products, tool_call_traces) do

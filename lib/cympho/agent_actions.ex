@@ -34,7 +34,7 @@ defmodule Cympho.AgentActions do
     set_pr_url
     handoff
   )
-  @roles ~w(ceo cto engineer)
+  @roles ~w(ceo cto product_manager designer engineer)
   @priorities ~w(low medium high critical)
   @work_product_kinds ~w(code_change document url artifact other)
 
@@ -395,6 +395,7 @@ defmodule Cympho.AgentActions do
       [] ->
         with {:ok, transitioned} <- Issues.transition_issue(issue, :done),
              {:ok, released} <- Issues.force_release_issue(transitioned, :done),
+             {:ok, released} <- update_workflow_issue(released, agent, %{assigned_role: nil}),
              {:ok, _} <- maybe_agent_comment(issue, agent, action["notes"]) do
           {:ok, %{type: "approve_issue", issue_id: released.id}}
         end

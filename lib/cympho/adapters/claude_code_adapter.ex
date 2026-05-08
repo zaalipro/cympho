@@ -17,32 +17,34 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
   @impl true
   def health_check(config) do
     api_key = get_api_key(config)
-    has_claude = System.find_executable("claude") != nil
+    command = get_command(config)
+    has_claude = command_available?(command)
+    command_supplies_env? = configured_command?(config)
 
     cond do
-      (is_nil(api_key) or api_key == "") and not has_claude ->
+      missing_api_key?(api_key) and not command_supplies_env? and not has_claude ->
         %{
           status: :unhealthy,
-          message: "Claude CLI not found and API key not configured",
+          message: "#{command} CLI not found and API key not configured",
           checked_at: DateTime.utc_now()
         }
 
-      is_nil(api_key) or api_key == "" ->
+      missing_api_key?(api_key) and not command_supplies_env? ->
         %{
           status: :degraded,
-          message: "Claude CLI available but API key not configured",
+          message: "#{command} CLI available but API key not configured",
           checked_at: DateTime.utc_now()
         }
 
       not has_claude ->
         %{
           status: :degraded,
-          message: "API key configured but Claude CLI not found in PATH",
+          message: "API key configured but #{command} CLI not found in PATH",
           checked_at: DateTime.utc_now()
         }
 
       true ->
-        %{status: :healthy, message: "Claude CLI available", checked_at: DateTime.utc_now()}
+        %{status: :healthy, message: "#{command} CLI available", checked_at: DateTime.utc_now()}
     end
   end
 
@@ -71,6 +73,13 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
         description: "Working directory for Claude CLI (defaults to workspace path)"
       },
       %{
+        key: :command,
+        type: :string,
+        required: false,
+        default: "claude",
+        description: "CLI command to run (for example cz or cm)"
+      },
+      %{
         key: :resume,
         type: :boolean,
         required: false,
@@ -89,9 +98,11 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
   @impl true
   def available?(config) do
     api_key = get_api_key(config)
+    command = get_command(config)
     has_key = not is_nil(api_key) and api_key != ""
-    has_binary = System.find_executable("claude") != nil
-    has_key or has_binary
+    has_command = command_available?(command)
+    command_supplies_env? = configured_command?(config)
+    has_key or (has_command and command_supplies_env?)
   end
 
   @impl true
@@ -121,6 +132,45 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
     config[:api_key] || config["api_key"] ||
       Application.get_env(:cympho, :anthropic_api_key) ||
       System.get_env("ANTHROPIC_API_KEY")
+  end
+
+  defp get_command(config) do
+    config[:command] || config["command"] ||
+      Application.get_env(:cympho, :claude_code_command) ||
+      System.get_env("CYMPHO_CLAUDE_COMMAND") ||
+      "claude"
+  end
+
+  defp missing_api_key?(api_key), do: is_nil(api_key) or api_key == ""
+
+  defp configured_command?(config) do
+    command =
+      config[:command] ||
+        config["command"] ||
+        Application.get_env(:cympho, :claude_code_command) ||
+        System.get_env("CYMPHO_CLAUDE_COMMAND")
+
+    command not in [nil, "", "claude"]
+  end
+
+  defp command_available?(command) do
+    System.find_executable(command) != nil or shell_command_available?(command)
+  end
+
+  defp shell_command_available?(command) do
+    check =
+      "source \"$HOME/.cld\" 2>/dev/null || true; command -v #{shell_quote(command)} >/dev/null"
+
+    case System.cmd("bash", ["-lc", check], stderr_to_stdout: true) do
+      {_, 0} -> true
+      _ -> false
+    end
+  end
+
+  defp shell_quote(value) do
+    value
+    |> to_string()
+    |> String.replace("'", "'\"'\"'")
   end
 
   defp validate_stall_timeout(nil), do: :ok

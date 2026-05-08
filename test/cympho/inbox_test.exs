@@ -91,4 +91,14 @@ defmodule Cympho.InboxTest do
       assert length(archived) == 0
     end
   end
+
+  describe "counts_by_agent_for_company/1" do
+    test "returns status counts nested by agent", %{issue: issue, agent: agent} do
+      {:ok, _} = Inbox.ensure_inbox_entry(issue.id, agent.id)
+
+      counts = Inbox.counts_by_agent_for_company(agent.company_id)
+
+      assert counts[agent.id]["unread"] == 1
+    end
+  end
 end

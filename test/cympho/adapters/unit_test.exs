@@ -371,13 +371,16 @@ defmodule Cympho.Adapters.UnitTest do
       schema = CursorAdapter.config_schema()
 
       assert is_list(schema)
-      assert length(schema) == 5
+      assert length(schema) == 8
 
       keys = Enum.map(schema, fn e -> e.key end)
+      assert :command in keys
       assert :cursor_path in keys
       assert :workspace_path in keys
       assert :model in keys
       assert :headless in keys
+      assert :mode in keys
+      assert :force in keys
       assert :timeout in keys
 
       headless_entry = Enum.find(schema, fn e -> e.key == :headless end)
@@ -655,7 +658,7 @@ defmodule Cympho.Adapters.UnitTest do
       assert is_reference(ref)
 
       assert_receive {:session_started, ^ref}
-      assert_receive {:turn_completed, ^ref, result}
+      assert_receive {:turn_completed, ^ref, result}, 1_000
       assert result.output =~ "hello"
     end
 
@@ -683,7 +686,7 @@ defmodule Cympho.Adapters.UnitTest do
       assert is_reference(ref)
 
       assert_receive {:session_started, ^ref}
-      assert_receive {:turn_completed, ^ref, result}
+      assert_receive {:turn_completed, ^ref, result}, 1_000
 
       # Verify basic output works
       assert result.output =~ "test"
@@ -699,7 +702,7 @@ defmodule Cympho.Adapters.UnitTest do
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
 
       assert_receive {:session_started, ^ref}
-      assert_receive {:turn_completed, ^ref, result}
+      assert_receive {:turn_completed, ^ref, result}, 1_000
 
       # Verify that issue payload was passed in JSON format
       # The output is valid JSON, so it's returned as a map
@@ -725,7 +728,7 @@ defmodule Cympho.Adapters.UnitTest do
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
 
       assert_receive {:session_started, ^ref}
-      assert_receive {:turn_completed, ^ref, result}
+      assert_receive {:turn_completed, ^ref, result}, 1_000
 
       # JSON should be parsed into a map
       assert is_map(result)
@@ -747,7 +750,7 @@ defmodule Cympho.Adapters.UnitTest do
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
 
       assert_receive {:session_started, ^ref}
-      assert_receive {:turn_completed, ^ref, result}
+      assert_receive {:turn_completed, ^ref, result}, 1_000
 
       # Non-JSON output should be returned as-is
       assert result.output =~ "plain text output"
@@ -768,7 +771,7 @@ defmodule Cympho.Adapters.UnitTest do
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
 
       assert_receive {:session_started, ^ref}
-      assert_receive {:turn_ended_with_error, ^ref, {:exit_code, _code, _output}}
+      assert_receive {:turn_ended_with_error, ^ref, {:exit_code, _code, _output}}, 1_000
     end
 
     test "run/4 handles timeout" do

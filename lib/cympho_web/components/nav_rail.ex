@@ -188,13 +188,11 @@ defmodule CymphoWeb.Components.NavRail do
     <.link
       navigate={@to}
       class={[
-        "flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] font-510 transition-colors",
-        if(@active?,
-          do: "bg-surface-hover text-text-primary",
-          else: "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        )
+        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] font-510 transition-colors",
+        "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
       ]}
       data-nav-path={@to}
+      data-active={if @active?, do: "true", else: "false"}
       aria-current={if @active?, do: "page", else: nil}
     >
       <span class={[@icon, "w-4 h-4 shrink-0"]}></span>
@@ -223,12 +221,12 @@ defmodule CymphoWeb.Components.NavRail do
     <.link
       navigate={@href}
       class={[
-        "flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] font-510 transition-colors",
-        if(@active?,
-          do: "bg-surface-hover text-text-primary",
-          else: "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        )
+        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] font-510 transition-colors",
+        "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
       ]}
+      data-nav-path={@href}
+      data-active={if @active?, do: "true", else: "false"}
+      aria-current={if @active?, do: "page", else: nil}
     >
       <span
         class="h-2.5 w-2.5 rounded-full shrink-0 border border-white/10"
@@ -262,12 +260,12 @@ defmodule CymphoWeb.Components.NavRail do
     <.link
       navigate={@href}
       class={[
-        "flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] font-510 transition-colors",
-        if(@active?,
-          do: "bg-surface-hover text-text-primary",
-          else: "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        )
+        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] font-510 transition-colors",
+        "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
       ]}
+      data-nav-path={@href}
+      data-active={if @active?, do: "true", else: "false"}
+      aria-current={if @active?, do: "page", else: nil}
     >
       <span class={[role_icon(@agent.role), "w-4 h-4 shrink-0", role_icon_color(@agent.role)]}></span>
       <span class="flex-1 truncate">{@agent.name}</span>

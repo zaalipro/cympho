@@ -1,11 +1,17 @@
 <.page size="wide">
-  <.header title="Command Center" subtitle="Company status, agent capacity, and execution flow.">
+  <.header
+    title="Command Center"
+    subtitle="Decide what the company should do next, then watch agents execute it."
+  >
     <p class="mt-1 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
       Autonomous company
     </p>
     <:actions>
       <span class={"inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-510 #{autonomy_badge_class(@autonomy_status)}"}>
         {status_label(@autonomy_status)}
+      </span>
+      <span class={"inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-510 #{mode_badge_class(@operating_mode)}"}>
+        {status_label(@operating_mode)}
       </span>
       <.overflow_menu label="Company controls">
         <.menu_item
@@ -28,6 +34,55 @@
       </.app_link>
     </:actions>
   </.header>
+
+  <div class="mb-5 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div class="rounded-lg border border-border bg-panel/80 p-4">
+      <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+            Operating mode
+          </p>
+          <h2 class="mt-1 text-xl font-590 text-text-primary">
+            {status_label(@operating_mode)}
+          </h2>
+          <p class="mt-1 max-w-2xl text-sm text-text-tertiary">
+            <%= case @operating_mode do %>
+              <% :review -> %>
+                Execution is intentionally off. You can inspect, design, and edit without spending provider credits.
+              <% :autonomous -> %>
+                Runtime execution is enabled. Agents can pick up queued work according to policy.
+              <% :paused -> %>
+                Company autonomy is paused. Work remains visible, but agents will not advance it automatically.
+              <% _ -> %>
+                Finish setup so Cympho has a company mission, an agent roster, and work to execute.
+            <% end %>
+          </p>
+        </div>
+        <.app_link
+          navigate={~p"/kanban"}
+          class="inline-flex shrink-0 items-center justify-center rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover"
+        >
+          Open board
+        </.app_link>
+      </div>
+    </div>
+
+    <div class="rounded-lg border border-border bg-panel/80 p-4">
+      <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+        Next actions
+      </p>
+      <div class="mt-2 space-y-3">
+        <div
+          :for={action <- @next_actions}
+          class="border-t border-border/70 pt-3 first:border-t-0 first:pt-0"
+        >
+          <h2 class="text-sm font-590 text-text-primary">{action.label}</h2>
+          <p class="mt-1 text-sm text-text-tertiary">{action.detail}</p>
+          <p class="mt-2 text-xs font-590 text-brand">{action.action}</p>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
     <.metric

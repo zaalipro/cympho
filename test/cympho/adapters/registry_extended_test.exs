@@ -1,5 +1,5 @@
 defmodule Cympho.Adapters.RegistryExtendedTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Cympho.Adapters.Registry
 
@@ -36,21 +36,33 @@ defmodule Cympho.Adapters.RegistryExtendedTest do
   describe "resolve_agent/1" do
     test "resolves agent with registered adapter to module and config" do
       {:ok, module, config} =
-        Registry.resolve_agent(%{adapter: :claude_code, config: %{stall_timeout: 60_000}})
+        Registry.resolve_agent(%{adapter: :process, config: %{command: "echo"}})
 
       assert is_atom(module)
-      assert config == %{stall_timeout: 60_000}
+      assert config == %{command: "echo"}
     end
 
     test "resolves agent with nil adapter to default adapter" do
-      {:ok, module, config} = Registry.resolve_agent(%{adapter: nil, config: %{}})
-      assert is_atom(module)
-      assert config == %{}
+      original = Application.get_env(:cympho, :default_adapter)
+      Application.put_env(:cympho, :default_adapter, :process)
+
+      try do
+        {:ok, module, config} =
+          Registry.resolve_agent(%{adapter: nil, config: %{command: "echo"}})
+
+        assert is_atom(module)
+        assert config == %{command: "echo"}
+      after
+        if original do
+          Application.put_env(:cympho, :default_adapter, original)
+        else
+          Application.delete_env(:cympho, :default_adapter)
+        end
+      end
     end
 
     test "resolves agent without config key using empty config" do
-      {:ok, _module, config} = Registry.resolve_agent(%{adapter: :claude_code})
-      assert config == %{}
+      assert {:error, :no_adapter} = Registry.resolve_agent(%{adapter: :process})
     end
 
     test "walks fallback chain when primary is unavailable" do

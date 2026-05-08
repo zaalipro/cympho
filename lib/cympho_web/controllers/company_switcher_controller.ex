@@ -2,9 +2,10 @@ defmodule CymphoWeb.CompanySwitcherController do
   use CymphoWeb, :controller
 
   alias Cympho.Companies
+  alias Cympho.Users
 
   def switch(conn, %{"id" => company_id}) do
-    user = conn.assigns[:current_user]
+    user = conn.assigns[:current_user] || current_session_user(conn)
 
     cond do
       is_nil(user) ->
@@ -19,6 +20,19 @@ defmodule CymphoWeb.CompanySwitcherController do
           |> redirect(to: get_back_path(conn))
         else
           redirect(conn, to: "/")
+        end
+    end
+  end
+
+  defp current_session_user(conn) do
+    case get_session(conn, :user_id) do
+      nil ->
+        nil
+
+      user_id ->
+        case Users.get_user(user_id) do
+          {:ok, user} -> user
+          {:error, :not_found} -> nil
         end
     end
   end

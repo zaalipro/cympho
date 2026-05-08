@@ -33,6 +33,14 @@ defmodule CymphoWeb.Router do
   scope "/", CymphoWeb do
     pipe_through :browser
 
+    get "/login", SessionController, :new
+    post "/login", SessionController, :create
+    delete "/logout", SessionController, :delete
+
+    if Mix.env() == :dev do
+      get "/dev/login", DevSessionController, :login
+    end
+
     get "/switch-company/:id", CompanySwitcherController, :switch
 
     post "/issues/quick-create", QuickIssueController, :create
@@ -49,7 +57,7 @@ defmodule CymphoWeb.Router do
       live "/projects", ProjectLive.Index
       live "/projects/new", ProjectLive.New
       live "/projects/:id", ProjectLive.Show
-      live "/projects/:id/edit", ProjectLive.Edit
+      live "/projects/:id/edit", ProjectLive.Show
       live "/goals", GoalLive.Index
       live "/goals/new", GoalLive.New
       live "/goals/:id", GoalLive.Show

@@ -17,20 +17,23 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
 
   @impl true
   def available?(config \\ %{}) do
-    claude_in_path?() and api_key_present?(config)
+    claude_in_path?(config) and (api_key_present?(config) or configured_command?(config))
   end
 
   @impl true
   def health_check(config \\ %{}) do
+    command = cli_command(config)
+    command_supplies_env? = configured_command?(config)
+
     cond do
-      not claude_in_path?() ->
+      not claude_in_path?(config) ->
         %{
           status: :unhealthy,
-          message: "Claude CLI not found in PATH",
+          message: "#{command} CLI not found in PATH",
           checked_at: DateTime.utc_now()
         }
 
-      not api_key_present?(config) ->
+      not api_key_present?(config) and not command_supplies_env? ->
         %{
           status: :unhealthy,
           message: "ANTHROPIC_API_KEY not set",
@@ -38,15 +41,19 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
         }
 
       true ->
-        case System.cmd("claude", ["--version"], stderr_to_stdout: true) do
+        case command_version(command) do
           {_output, 0} ->
-            %{status: :healthy, message: "Claude CLI operational", checked_at: DateTime.utc_now()}
+            %{
+              status: :healthy,
+              message: "#{command} CLI operational",
+              checked_at: DateTime.utc_now()
+            }
 
           {output, code} ->
             %{
               status: :degraded,
               message:
-                "claude --version exited with code #{code}: #{String.slice(output, 0, 100)}",
+                "#{command} --version exited with code #{code}: #{String.slice(output, 0, 100)}",
               checked_at: DateTime.utc_now()
             }
         end
@@ -72,11 +79,12 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
     cwd = opts[:cwd] || Cympho.Workspace.workspace_path(issue.id)
     resume? = opts[:resume] || false
     stall_timeout = opts[:stall_timeout] || @stall_timeout
+    env = opts[:env] || runtime_context_env(opts[:runtime_context])
 
-    cmd = build_claude_command(issue, agent_id, resume?)
+    cmd = build_claude_command(issue, agent_id, resume?, opts)
 
     spawn(fn ->
-      do_run(session_id, cmd, cwd, recipient_pid, stall_timeout)
+      do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, env)
     end)
 
     session_id
@@ -84,11 +92,37 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
 
   ## Private — availability helpers
 
-  defp claude_in_path? do
-    case System.cmd("which", ["claude"]) do
-      {_, 0} -> true
-      _ -> false
+  defp claude_in_path?(config) do
+    command = cli_command(config)
+
+    cond do
+      System.find_executable(command) != nil ->
+        true
+
+      true ->
+        check =
+          "source \"$HOME/.cld\" 2>/dev/null || true; command -v #{shell_quote(command)} >/dev/null"
+
+        case System.cmd("bash", ["-lc", check], stderr_to_stdout: true) do
+          {_, 0} -> true
+          _ -> false
+        end
     end
+  end
+
+  defp configured_command?(config) do
+    command =
+      config[:command] ||
+        config["command"] ||
+        Application.get_env(:cympho, :claude_code_command) ||
+        System.get_env("CYMPHO_CLAUDE_COMMAND")
+
+    command not in [nil, "", "claude"]
+  end
+
+  defp command_version(command) do
+    version = "source \"$HOME/.cld\" 2>/dev/null || true; #{shell_quote(command)} --version"
+    System.cmd("bash", ["-lc", version], stderr_to_stdout: true)
   end
 
   defp api_key_present?(config) when is_map(config) do
@@ -135,9 +169,10 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
 
   ## Private — command building
 
-  defp build_claude_command(issue, _agent_id, resume?) do
+  defp build_claude_command(issue, _agent_id, resume?, opts) do
+    command = cli_command(opts)
+
     base = [
-      "claude",
       "-p",
       "--bare",
       "--output-format",
@@ -154,12 +189,27 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
         base
       end
 
-    bash_command(args, prompt)
+    bash_command(command, args, prompt)
   end
 
-  defp bash_command(claude_args, prompt) do
-    claude_cmd = Enum.join(["claude" | claude_args], " ")
-    ~s(bash -c '#{claude_cmd}' << 'PROMPT'\n#{prompt}\nPROMPT)
+  defp cli_command(config) do
+    config[:command] ||
+      config["command"] ||
+      Application.get_env(:cympho, :claude_code_command) ||
+      System.get_env("CYMPHO_CLAUDE_COMMAND") ||
+      "claude"
+  end
+
+  defp bash_command(command, claude_args, prompt) do
+    claude_cmd = Enum.map_join([command | claude_args], " ", &shell_quote/1)
+    cld_source = ~s(source "$HOME/.cld" 2>/dev/null || true)
+    ~s(bash -lc '#{cld_source}; #{claude_cmd}' << 'PROMPT'\n#{prompt}\nPROMPT)
+  end
+
+  defp shell_quote(value) do
+    value
+    |> to_string()
+    |> String.replace("'", "'\"'\"'")
   end
 
   defp build_prompt(issue) do
@@ -194,15 +244,18 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
 
   ## Private — Port execution
 
-  defp do_run(session_id, cmd, cwd, recipient_pid, stall_timeout) do
-    env = [{"ANTHROPIC_API_KEY", api_key(nil)} | env_whitelist()]
+  defp do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, runtime_env) do
+    anthropic_api_key =
+      runtime_env["ANTHROPIC_API_KEY"] || runtime_env[:ANTHROPIC_API_KEY] || api_key(nil)
+
+    env = api_key_env(anthropic_api_key) ++ runtime_env(runtime_env) ++ env_whitelist()
 
     port =
       Port.open({:spawn, cmd}, [
         :binary,
         :exit_status,
         cd: cwd,
-        env: env
+        env: port_env(env)
       ])
 
     send(recipient_pid, {:session_started, session_id})
@@ -255,7 +308,7 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
   defp parse_json_output(output) do
     trimmed = String.trim(output)
 
-    if trimmed == "" or trimmed =~ ~r/^Thinking|$/ do
+    if trimmed == "" or String.starts_with?(trimmed, "Thinking") do
       :continue
     else
       case Jason.decode(trimmed) do
@@ -263,6 +316,32 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapter do
         {:error, _} -> :error
       end
     end
+  end
+
+  defp api_key_env(key) when is_binary(key) and key != "", do: [{"ANTHROPIC_API_KEY", key}]
+  defp api_key_env(_key), do: []
+
+  defp runtime_context_env(%Cympho.RuntimeContext{env: env}) when is_map(env), do: env
+  defp runtime_context_env(_), do: %{}
+
+  defp runtime_env(env) when is_map(env) do
+    Enum.flat_map(env, fn {key, value} ->
+      key = to_string(key)
+
+      cond do
+        key == "ANTHROPIC_API_KEY" -> []
+        is_nil(value) -> []
+        true -> [{key, to_string(value)}]
+      end
+    end)
+  end
+
+  defp runtime_env(_env), do: []
+
+  defp port_env(env) do
+    Enum.map(env, fn {key, value} ->
+      {String.to_charlist(to_string(key)), String.to_charlist(to_string(value))}
+    end)
   end
 
   defp env_whitelist do

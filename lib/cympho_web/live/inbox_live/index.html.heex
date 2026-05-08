@@ -1,183 +1,206 @@
-<div class="p-6 lg:p-8 max-w-6xl mx-auto">
-  <.header title={@page_title}>
-    <:actions>
-      <span class="text-xs text-text-quaternary">{length(@inbox_items)} item(s)</span>
-    </:actions>
-  </.header>
-
-  <div class="space-y-3 mb-4">
-    <div class="flex items-center gap-3 flex-wrap">
-      <form phx-change="select_agent">
-        <select
-          name="agent_id"
-          class="bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-1.5"
-        >
-          <option value="all" selected={@selected_agent_id == "all"}>All agents</option>
-          <%= for agent <- @agents do %>
-            <option value={agent.id} selected={@selected_agent_id == agent.id}>
-              {agent.name}
-            </option>
-          <% end %>
-        </select>
-      </form>
-
-      <form phx-change="filter_status">
-        <select
-          name="status"
-          class="bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-1.5"
-        >
-          <option value="">All Statuses</option>
-          <option value="unread" selected={@current_status == "unread"}>Unread</option>
-          <option value="read" selected={@current_status == "read"}>Read</option>
-          <option value="dismissed" selected={@current_status == "dismissed"}>Dismissed</option>
-          <option value="archived" selected={@current_status == "archived"}>Archived</option>
-        </select>
-      </form>
-
-      <button
-        :if={@current_status != ""}
-        type="button"
-        phx-click="filter_status"
-        phx-value-status=""
-        class="text-xs text-text-quaternary hover:text-text-secondary transition-colors"
-      >
-        Clear filter
-      </button>
-    </div>
-  </div>
-
-  <div :if={@selected_agent_id != "" && @selected_agent_id != nil} class="space-y-2">
-    <div
-      :for={item <- @inbox_items}
-      class="group flex items-center gap-4 p-3 rounded-lg hover:bg-surface-hover transition-colors border border-transparent hover:border-border"
-    >
-      <div class="w-2 h-2 rounded-full shrink-0">
-        <span class={["inline-block w-2 h-2 rounded-full", unread_dot(item.status)]}></span>
-      </div>
-
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-3">
-          <%= if item.issue do %>
-            <.app_link
-              navigate={issue_link(item.issue)}
-              class="text-sm font-510 text-text-primary truncate hover:underline"
-            >
-              {item.issue.identifier || "Issue"}&mdash;{item.issue.title}
-            </.app_link>
-          <% else %>
-            <span class="text-sm font-510 text-text-tertiary truncate">Issue removed</span>
-          <% end %>
-          <span class={[
-            "text-xs px-2 py-0.5 rounded-full font-510",
-            status_badge_class(item.status)
-          ]}>
-            {String.capitalize(item.status)}
+<.page size="wide">
+  <div class="mb-5 overflow-visible rounded-lg border border-border bg-panel">
+    <div class="grid gap-4 p-4 xl:grid-cols-[minmax(260px,1fr)_minmax(560px,auto)] xl:items-center">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2.5">
+          <h1 class="text-2xl font-590 tracking-[-0.01em] text-text-primary">Inbox</h1>
+          <span class="rounded-full border border-border bg-surface px-2.5 py-1 text-xs text-text-quaternary">
+            {length(@inbox_items)} shown
+          </span>
+          <span class="rounded-full border border-border bg-surface px-2.5 py-1 text-xs text-text-quaternary">
+            {total_count(@inbox_counts)} total
           </span>
         </div>
-        <p class="text-xs text-text-quaternary mt-1">
-          <span :if={@selected_agent_id == "all" and item.agent}>
-            {item.agent.name} ·
+
+        <p class="mt-1 text-sm text-text-tertiary">
+          Agent handoffs, review signals, and issue notifications across the company.
+        </p>
+        <p class="mt-2 truncate text-sm text-text-secondary">
+          <span class="font-590 text-text-quaternary">Queue scope:</span>
+          <span class="font-590 text-text-primary">
+            {inbox_scope_label(@selected_agent_id, @selected_agent)}
           </span>
-          {format_timestamp(item.inserted_at)}
+          <span class="text-text-quaternary">·</span>
+          {status_filter_label(@current_status)} items
         </p>
       </div>
 
-      <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button
-          :if={item.status == "unread"}
-          type="button"
-          phx-click="mark_read"
-          phx-value-issue_id={item.issue_id}
-          phx-value-agent_id={item.agent_id}
-          class="p-1.5 rounded-lg text-text-quaternary hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
-          title="Mark as read"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M5 13l4 4L19 7"
-            />
-          </svg>
-        </button>
-        <button
-          :if={item.status in ["unread", "read"]}
-          type="button"
-          phx-click="dismiss"
-          phx-value-issue_id={item.issue_id}
-          phx-value-agent_id={item.agent_id}
-          class="p-1.5 rounded-lg text-text-quaternary hover:text-yellow-400 hover:bg-yellow-500/10 transition-colors"
-          title="Dismiss"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </button>
-        <button
-          :if={item.status in ["unread", "read", "dismissed"]}
-          type="button"
-          phx-click="archive"
-          phx-value-issue_id={item.issue_id}
-          phx-value-agent_id={item.agent_id}
-          class="p-1.5 rounded-lg text-text-quaternary hover:text-red-400 hover:bg-red-500/10 transition-colors"
-          title="Archive"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
-            />
-          </svg>
-        </button>
-        <button
-          :if={item.status in ["dismissed", "archived"]}
-          type="button"
-          phx-click="restore"
-          phx-value-issue_id={item.issue_id}
-          phx-value-agent_id={item.agent_id}
-          class="p-1.5 rounded-lg text-text-quaternary hover:text-green-400 hover:bg-green-500/10 transition-colors"
-          title="Restore to unread"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-            />
-          </svg>
-        </button>
+      <div class="grid gap-3 lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)] lg:items-center">
+        <form phx-change="select_agent">
+          <select
+            name="agent_id"
+            class="h-10 min-w-[220px] rounded-lg border border-border bg-surface px-3 text-sm text-text-secondary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+          >
+            <option value="all" selected={@selected_agent_id == "all"}>All agents</option>
+            <%= for agent <- @agents do %>
+              <option value={agent.id} selected={@selected_agent_id == agent.id}>
+                {agent_option_label(agent, @agent_counts)}
+              </option>
+            <% end %>
+          </select>
+        </form>
+
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          <.link
+            patch={inbox_url(@selected_agent_id, @current_status, %{status: nil})}
+            class={[
+              "min-h-10 rounded-lg border px-3 py-2 text-xs font-510 transition-colors",
+              status_tab_class(@current_status, nil)
+            ]}
+          >
+            <span class="flex items-center justify-between gap-2">
+              <span>All</span>
+              <span class="text-text-quaternary">{total_count(@inbox_counts)}</span>
+            </span>
+          </.link>
+          <.link
+            :for={status <- ["unread", "read", "dismissed", "archived"]}
+            patch={inbox_url(@selected_agent_id, @current_status, %{status: status})}
+            class={[
+              "min-h-10 rounded-lg border px-3 py-2 text-xs font-510 transition-colors",
+              status_tab_class(@current_status, status)
+            ]}
+          >
+            <span class="flex items-center justify-between gap-2">
+              <span class="flex min-w-0 items-center gap-1.5">
+                <span class={["h-1.5 w-1.5 shrink-0 rounded-full", status_dot(status)]}></span>
+                <span class="truncate">{String.capitalize(status)}</span>
+              </span>
+              <span class="text-text-quaternary">{count_for(@inbox_counts, status)}</span>
+            </span>
+          </.link>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div :if={!Enum.empty?(@inbox_items)} class="grid gap-3">
+    <div
+      :for={item <- @inbox_items}
+      class="group rounded-lg border border-border bg-panel transition-colors hover:border-border-hover hover:bg-surface-hover/40"
+    >
+      <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+        <div class="min-w-0">
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <span class={["h-2 w-2 rounded-full", status_dot(item.status)]}></span>
+            <span class={[
+              "rounded-full px-2 py-0.5 text-xs font-510",
+              status_badge_class(item.status)
+            ]}>
+              {String.capitalize(item.status)}
+            </span>
+            <span class="text-xs text-text-quaternary">
+              To {target_agent_name(item, @selected_agent)}
+            </span>
+            <span class="text-xs text-text-quaternary">·</span>
+            <span class="text-xs text-text-quaternary">{format_timestamp(item.inserted_at)}</span>
+          </div>
+
+          <%= if item.issue do %>
+            <.app_link
+              navigate={issue_link(item.issue)}
+              class="block min-w-0 text-base font-590 leading-6 text-text-primary hover:text-brand"
+            >
+              <span class="font-mono text-xs text-text-quaternary">
+                {item.issue.identifier || "Issue"}
+              </span>
+              <span class="mx-2 text-text-quaternary">·</span>
+              <span>{item.issue.title}</span>
+            </.app_link>
+
+            <p
+              :if={issue_description(item.issue)}
+              class="mt-2 max-w-3xl text-sm text-text-tertiary"
+            >
+              {issue_description(item.issue)}
+            </p>
+
+            <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <span class="rounded-full border border-border bg-surface px-2 py-0.5 text-text-secondary">
+                {issue_status_label(item.issue.status)}
+              </span>
+              <span class={[
+                "rounded-full border px-2 py-0.5 font-510",
+                priority_badge_class(item.issue.priority)
+              ]}>
+                {priority_label(item.issue.priority)}
+              </span>
+              <span :if={item.issue.assigned_role} class="text-text-quaternary">
+                Role: {item.issue.assigned_role}
+              </span>
+            </div>
+          <% else %>
+            <p class="text-base font-590 text-text-tertiary">Issue removed</p>
+            <p class="mt-2 text-sm text-text-quaternary">
+              This inbox entry points to an issue that is no longer available.
+            </p>
+          <% end %>
+        </div>
+
+        <div class="flex flex-wrap gap-2 lg:justify-end">
+          <.app_link
+            :if={item.issue}
+            navigate={issue_link(item.issue)}
+            class="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+          >
+            Open issue
+          </.app_link>
+          <button
+            :if={item.status == "unread"}
+            type="button"
+            phx-click="mark_read"
+            phx-value-issue_id={item.issue_id}
+            phx-value-agent_id={item.agent_id}
+            class="rounded-lg border border-blue-500/25 bg-blue-500/10 px-3 py-2 text-xs font-510 text-blue-300 hover:bg-blue-500/15"
+          >
+            Mark read
+          </button>
+          <button
+            :if={item.status in ["unread", "read"]}
+            type="button"
+            phx-click="dismiss"
+            phx-value-issue_id={item.issue_id}
+            phx-value-agent_id={item.agent_id}
+            class="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+          >
+            Dismiss
+          </button>
+          <button
+            :if={item.status in ["unread", "read", "dismissed"]}
+            type="button"
+            phx-click="archive"
+            phx-value-issue_id={item.issue_id}
+            phx-value-agent_id={item.agent_id}
+            class="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-red-300"
+          >
+            Archive
+          </button>
+          <button
+            :if={item.status in ["dismissed", "archived"]}
+            type="button"
+            phx-click="restore"
+            phx-value-issue_id={item.issue_id}
+            phx-value-agent_id={item.agent_id}
+            class="rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs font-510 text-emerald-300 hover:bg-emerald-500/15"
+          >
+            Restore
+          </button>
+        </div>
       </div>
     </div>
   </div>
 
   <div
-    :if={@selected_agent_id != "" && @selected_agent_id != nil && Enum.empty?(@inbox_items)}
-    class="flex flex-col items-center justify-center py-20 text-center"
+    :if={Enum.empty?(@inbox_items)}
+    class="rounded-lg border border-dashed border-border bg-panel px-6 py-16 text-center"
   >
-    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
-      <svg
-        class="w-6 h-6 text-text-tertiary"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
-        />
-      </svg>
+    <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-lg border border-border bg-surface">
+      <span class="hero-inbox-mini h-6 w-6 text-text-tertiary"></span>
     </div>
-    <p class="text-sm text-text-tertiary mb-4">No inbox items found.</p>
+    <p class="mt-4 text-sm font-590 text-text-secondary">No inbox items match this view.</p>
+    <p class="mx-auto mt-1 max-w-md text-sm text-text-quaternary">
+      Agent handoffs, review requests, and issue updates will appear here as the autonomous
+      workflow runs.
+    </p>
   </div>
-</div>
+</.page>

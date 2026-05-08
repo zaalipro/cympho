@@ -20,6 +20,7 @@ defmodule Cympho.AgentRunner do
   Options:
     - `:resume` — pass true to continue a multi-turn session
     - `:cwd` — working directory for the Claude CLI (defaults to workspace path)
+    - `:command` — CLI command to run (defaults to CYMPHO_CLAUDE_COMMAND or claude)
     - `: stall_timeout` — milliseconds before killing hung process (default 300_000 / 5 min)
   """
   def run(issue, agent_id, recipient_pid, opts \\ []) when is_pid(recipient_pid) do
@@ -39,8 +40,9 @@ defmodule Cympho.AgentRunner do
   end
 
   defp build_claude_command(issue, agent_id, resume?, opts) do
+    command = cli_command(opts)
+
     base = [
-      "claude",
       "-p",
       "--bare",
       "--output-format",
@@ -58,16 +60,31 @@ defmodule Cympho.AgentRunner do
       end
 
     # Build the full bash command with piped input
-    bash_command(args, prompt)
+    bash_command(command, args, prompt)
   end
 
-  defp bash_command(claude_args, prompt) do
-    claude_cmd = Enum.join(["claude" | claude_args], " ")
+  defp cli_command(opts) do
+    opts[:command] ||
+      opts["command"] ||
+      Application.get_env(:cympho, :claude_code_command) ||
+      System.get_env("CYMPHO_CLAUDE_COMMAND") ||
+      "claude"
+  end
+
+  defp bash_command(command, claude_args, prompt) do
+    claude_cmd = Enum.map_join([command | claude_args], " ", &shell_quote/1)
+    cld_source = ~s(source "$HOME/.cld" 2>/dev/null || true)
 
     # Use heredoc to pass prompt safely without shell interpretation.
     # The single-quoted 'EOF' delimiter prevents variable expansion,
     # command substitution, and other shell interpretations.
-    ~s(bash -c '#{claude_cmd}' << 'PROMPT'\n#{prompt}\nPROMPT)
+    ~s(bash -lc '#{cld_source}; #{claude_cmd}' << 'PROMPT'\n#{prompt}\nPROMPT)
+  end
+
+  defp shell_quote(value) do
+    value
+    |> to_string()
+    |> String.replace("'", "'\"'\"'")
   end
 
   def build_prompt(issue, opts) when is_list(opts) do
@@ -89,7 +106,7 @@ defmodule Cympho.AgentRunner do
         :binary,
         :exit_status,
         cd: cwd,
-        env: env
+        env: port_env(env)
       ])
 
     send(recipient_pid, {:session_started, session_id})
@@ -144,7 +161,7 @@ defmodule Cympho.AgentRunner do
   defp parse_json_output(output) do
     trimmed = String.trim(output)
 
-    if trimmed == "" or trimmed =~ ~r/^Thinking|$/ do
+    if trimmed == "" or String.starts_with?(trimmed, "Thinking") do
       :continue
     else
       case Jason.decode(trimmed) do
@@ -174,15 +191,21 @@ defmodule Cympho.AgentRunner do
     Enum.flat_map(env, fn {key, value} ->
       key = to_string(key)
 
-      if key == "ANTHROPIC_API_KEY" do
-        []
-      else
-        [{key, to_string(value)}]
+      cond do
+        key == "ANTHROPIC_API_KEY" -> []
+        is_nil(value) -> []
+        true -> [{key, to_string(value)}]
       end
     end)
   end
 
   defp runtime_env(_env), do: []
+
+  defp port_env(env) do
+    Enum.map(env, fn {key, value} ->
+      {String.to_charlist(to_string(key)), String.to_charlist(to_string(value))}
+    end)
+  end
 
   defp extract_and_send_tool_calls(result, session_id, recipient_pid) when is_map(result) do
     content = result["content"] || []

@@ -194,11 +194,19 @@ defmodule Cympho.Dashboard do
     %{
       id: issue.id,
       title: issue.title,
+      identifier: issue.identifier,
       status: issue.status,
       updated_at: issue.updated_at,
-      assignee: issue.assignee && issue.assignee.name,
-      project: issue.project && issue.project.name
+      assignee: assoc_name(issue, :assignee),
+      project: assoc_name(issue, :project)
     }
+  end
+
+  defp assoc_name(struct, key) do
+    case Map.get(struct, key) do
+      %{name: name} -> name
+      _ -> nil
+    end
   end
 
   defp agent_to_map(agent) do
@@ -219,7 +227,6 @@ defmodule Cympho.Dashboard do
       agent_id: item.agent_id,
       issue_id: item.issue_id,
       status: item.status,
-      unread_count: item.unread_count,
       agent: item.agent && agent_to_map(item.agent),
       issue: item.issue && bottle_neck_to_map(item.issue),
       inserted_at: item.inserted_at,

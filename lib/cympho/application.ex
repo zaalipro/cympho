@@ -17,7 +17,7 @@ defmodule Cympho.Application do
       {Cympho.Notifications.NotificationSupervisor, []},
       heartbeat_watchdog_child(),
       board_approval_executor_child(),
-      Cympho.Scheduler,
+      scheduler_child(),
       # HTTP client for adapters and notifications
       {Finch, name: Cympho.Finch},
       # Adapter system
@@ -49,11 +49,7 @@ defmodule Cympho.Application do
         # late-binding call here was a redundant double-registration.
         # Routine triggers are scheduled in a task so a transient failure
         # doesn't take down boot.
-        Task.Supervisor.start_child(
-          Cympho.TaskSupervisor,
-          fn -> Cympho.RoutineTriggers.schedule_all_triggers() end,
-          restart: :temporary
-        )
+        schedule_routine_triggers()
 
         {:ok, pid}
 
@@ -93,6 +89,22 @@ defmodule Cympho.Application do
   defp health_checker_child do
     if Application.get_env(:cympho, :start_health_checker?, true) do
       {Cympho.AgentAdapters.HealthChecker, []}
+    end
+  end
+
+  defp scheduler_child do
+    if Application.get_env(:cympho, :start_scheduler?, true) do
+      Cympho.Scheduler
+    end
+  end
+
+  defp schedule_routine_triggers do
+    if Application.get_env(:cympho, :schedule_routine_triggers?, true) do
+      Task.Supervisor.start_child(
+        Cympho.TaskSupervisor,
+        fn -> Cympho.RoutineTriggers.schedule_all_triggers() end,
+        restart: :temporary
+      )
     end
   end
 end

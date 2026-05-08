@@ -768,6 +768,144 @@ const ColorSwatchPicker = {
   }
 };
 
+// Adapter-specific config fields should follow the actual selected adapter,
+// even before LiveView has re-rendered the form.
+const AdapterConfigFields = {
+  mounted() {
+    this.sync = this.sync.bind(this);
+    this.rememberAdapter = this.rememberAdapter.bind(this);
+    this.rememberPanelField = this.rememberPanelField.bind(this);
+    this.adapterSelect = null;
+    this.pendingAdapter = null;
+    this.pendingPanelFields = new Map();
+    this.el.addEventListener('change', this.rememberPanelField);
+    this.el.addEventListener('input', this.rememberPanelField);
+    this._bindSelect();
+    this.sync();
+  },
+  updated() {
+    this._bindSelect();
+    this._restorePendingAdapter();
+    this._restorePendingPanelFields();
+    this.sync();
+  },
+  destroyed() {
+    this._unbindSelect();
+    this.el.removeEventListener('change', this.rememberPanelField);
+    this.el.removeEventListener('input', this.rememberPanelField);
+  },
+  _bindSelect() {
+    const nextSelect = this.el.querySelector('select[name="agent[adapter]"]');
+    if (nextSelect === this.adapterSelect) return;
+
+    this._unbindSelect();
+    this.adapterSelect = nextSelect;
+
+    if (this.adapterSelect) {
+      this.adapterSelect.addEventListener('change', this.rememberAdapter);
+      this.adapterSelect.addEventListener('input', this.rememberAdapter);
+    }
+  },
+  _unbindSelect() {
+    if (!this.adapterSelect || !this.rememberAdapter) return;
+
+    this.adapterSelect.removeEventListener('change', this.rememberAdapter);
+    this.adapterSelect.removeEventListener('input', this.rememberAdapter);
+  },
+  _restorePendingAdapter() {
+    if (!this.adapterSelect || !this.pendingAdapter) return;
+
+    const hasOption = Array.from(this.adapterSelect.options).some(
+      (option) => option.value === this.pendingAdapter
+    );
+
+    if (hasOption && this.adapterSelect.value !== this.pendingAdapter) {
+      this.adapterSelect.value = this.pendingAdapter;
+    }
+  },
+  rememberAdapter() {
+    this.pendingAdapter = this.adapterSelect?.value || null;
+    this.sync();
+  },
+  rememberPanelField(event) {
+    const target = event.target;
+    if (!target || !target.name) return;
+
+    const panel = target.closest('[data-adapter-panel]');
+    if (!panel || panel.hidden || panel.classList.contains('hidden')) return;
+
+    const adapter = panel.dataset.adapterPanel;
+    if (!adapter) return;
+
+    this.pendingPanelFields.set(`${adapter}:${target.name}`, target.value);
+    this.sync();
+  },
+  _restorePendingPanelFields() {
+    const adapter = this.pendingAdapter || this.adapterSelect?.value || 'claude_code';
+    const panel = this.el.querySelector(`[data-adapter-panel="${adapter}"]`);
+    if (!panel) return;
+
+    panel.querySelectorAll('input[name], select[name], textarea[name]').forEach((control) => {
+      const key = `${adapter}:${control.name}`;
+      if (!this.pendingPanelFields.has(key)) return;
+
+      const value = this.pendingPanelFields.get(key);
+      if (control.tagName === 'SELECT') {
+        const hasOption = Array.from(control.options).some((option) => option.value === value);
+        if (hasOption) control.value = value;
+        return;
+      }
+
+      control.value = value;
+    });
+  },
+  _syncProviderModelSelect(panel) {
+    const providerSelect = panel.querySelector('select[name="agent[provider]"]');
+    const modelSelect = panel.querySelector('select[name="agent[model]"]');
+    if (!providerSelect || !modelSelect) return;
+
+    const provider = providerSelect.value || '';
+    const options = Array.from(modelSelect.options);
+    const scopedOptions = options.filter((option) => option.dataset.provider !== undefined);
+    if (scopedOptions.length === 0) return;
+
+    let firstVisible = null;
+    let currentStillVisible = false;
+
+    scopedOptions.forEach((option) => {
+      const visible = option.dataset.provider === provider;
+      option.hidden = !visible;
+      option.disabled = !visible;
+
+      if (visible) {
+        firstVisible = firstVisible || option;
+        if (option.value === modelSelect.value) currentStillVisible = true;
+      }
+    });
+
+    if (!currentStillVisible && firstVisible) {
+      modelSelect.value = firstVisible.value;
+      this.pendingPanelFields.set(
+        `${panel.dataset.adapterPanel}:${modelSelect.name}`,
+        firstVisible.value
+      );
+    }
+  },
+  sync() {
+    const adapter = this.pendingAdapter || this.adapterSelect?.value || 'claude_code';
+
+    this.el.querySelectorAll('[data-adapter-panel]').forEach((panel) => {
+      const visible = panel.dataset.adapterPanel === adapter;
+      panel.hidden = !visible;
+      panel.classList.toggle('hidden', !visible);
+      if (visible) this._syncProviderModelSelect(panel);
+      panel.querySelectorAll('input, select, textarea, button').forEach((control) => {
+        control.disabled = !visible;
+      });
+    });
+  }
+};
+
 // Sidebar primary "New issue" button — open the quick-create modal.
 document.addEventListener('click', (e) => {
   const trig = e.target.closest('[data-quick-create-trigger]');
@@ -781,7 +919,16 @@ document.addEventListener('click', (e) => {
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
 const liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
-  hooks: {TimelineScroll, KanbanSortable, Toast, OrgChartExport, Combobox, UserMenu, ColorSwatchPicker}
+  hooks: {
+    TimelineScroll,
+    KanbanSortable,
+    Toast,
+    OrgChartExport,
+    Combobox,
+    UserMenu,
+    ColorSwatchPicker,
+    AdapterConfigFields
+  }
 });
 
 liveSocket.connect();

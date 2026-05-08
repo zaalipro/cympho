@@ -17,6 +17,8 @@ defmodule CymphoWeb.InboxLiveTest do
       {:ok, _view, html} = live(conn, "/inbox")
 
       assert html =~ "Inbox"
+      assert html =~ "Agent handoffs"
+      assert html =~ "Queue scope"
     end
 
     test "shows agent selector", %{conn: conn} do
@@ -84,7 +86,7 @@ defmodule CymphoWeb.InboxLiveTest do
 
   describe "filter transitions" do
     test "filters by status", %{conn: conn} do
-      {conn, _user, company} = ConnCase.register_and_log_in_user(conn)
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
 
       {:ok, agent} =
         Agents.create_agent(%{
@@ -95,16 +97,52 @@ defmodule CymphoWeb.InboxLiveTest do
           company_id: company.id
         })
 
+      conn = live_session_conn(conn, user, company)
       {:ok, view, _html} = live(conn, "/inbox?agent_id=#{agent.id}")
 
-      # Filter by "read" status
       view
-      |> element("form[phx-change='filter_status']")
-      |> render_change(%{"status" => "read"})
+      |> element("a[href*='status=read']", "Read")
+      |> render_click()
 
       path = assert_patch(view)
       assert path =~ "agent_id=#{agent.id}"
       assert path =~ "status=read"
+    end
+
+    test "renders informative inbox cards", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Inbox Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Review checkout failure",
+          description: "Investigate the provider environment before retrying.",
+          status: :todo,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: agent.id,
+          assigned_role: "engineer"
+        })
+
+      {:ok, _entry} = Inbox.ensure_inbox_entry(issue.id, agent.id)
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, _view, html} = live(conn, "/inbox")
+
+      assert html =~ "Review checkout failure"
+      assert html =~ "Investigate the provider environment"
+      assert html =~ "To Inbox Agent"
+      assert html =~ "High"
+      assert html =~ "Role: engineer"
+      assert html =~ "Open issue"
+      assert html =~ "Mark read"
     end
   end
 
@@ -219,5 +257,12 @@ defmodule CymphoWeb.InboxLiveTest do
       # When no agent_id is set, defaults to "all" agents view
       assert html =~ ~s(value="all" selected)
     end
+  end
+
+  defp live_session_conn(conn, user, company) do
+    conn
+    |> Plug.Test.init_test_session(%{})
+    |> Plug.Conn.put_session("user_id", user.id)
+    |> Plug.Conn.put_session("company_id", company.id)
   end
 end

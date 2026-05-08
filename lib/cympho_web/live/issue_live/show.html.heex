@@ -140,6 +140,196 @@
         </div>
       </form>
     </div>
+
+    <% metrics =
+      execution_metrics(@issue, @runs, @work_products, @child_issues, @tool_call_traces) %>
+    <% brief_lines = owner_brief_lines(@issue, @runs, @work_products, @child_issues) %>
+    <% gaps = evidence_gaps(@issue, @runs, @work_products, @child_issues) %>
+    <% contribution_cards =
+      agent_contribution_cards(
+        @issue,
+        @runs,
+        @work_products,
+        @tool_call_traces,
+        @all_agents
+      ) %>
+
+    <section class="px-4 lg:px-6 pb-5">
+      <div class="rounded-lg border border-hairline bg-surface-1/35">
+        <div class="border-b border-hairline px-4 py-3">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 class="text-sm font-510 text-ink">Execution brief</h2>
+              <p class="mt-1 text-caption text-ink-tertiary">
+                What has happened, what is missing, and who has touched this issue.
+              </p>
+            </div>
+            <span class="rounded-full border border-hairline bg-canvas px-2.5 py-1 text-caption text-ink-muted">
+              {metrics.tool_calls} tool calls
+            </span>
+          </div>
+        </div>
+
+        <div class="grid gap-px bg-hairline sm:grid-cols-2 xl:grid-cols-4">
+          <div class="bg-canvas px-4 py-3">
+            <p class="text-eyebrow text-ink-tertiary uppercase">Agent notes</p>
+            <p class="mt-1 text-xl font-510 text-ink">
+              {metrics.agent_comments}
+              <span class="text-sm text-ink-tertiary">/ {metrics.comments}</span>
+            </p>
+          </div>
+          <div class="bg-canvas px-4 py-3">
+            <p class="text-eyebrow text-ink-tertiary uppercase">Runs</p>
+            <p class="mt-1 text-xl font-510 text-ink">
+              {metrics.runs}
+              <span :if={metrics.failed_runs > 0} class="text-sm text-red-300">
+                {metrics.failed_runs} failed
+              </span>
+            </p>
+          </div>
+          <div class="bg-canvas px-4 py-3">
+            <p class="text-eyebrow text-ink-tertiary uppercase">Artifacts</p>
+            <p class="mt-1 text-xl font-510 text-ink">
+              {metrics.work_products}
+              <span :if={metrics.code_products > 0} class="text-sm text-ink-tertiary">
+                {metrics.code_products} code
+              </span>
+            </p>
+          </div>
+          <div class="bg-canvas px-4 py-3">
+            <p class="text-eyebrow text-ink-tertiary uppercase">Sub-issues</p>
+            <p class="mt-1 text-xl font-510 text-ink">
+              {metrics.child_issues}
+              <span :if={metrics.open_child_issues > 0} class="text-sm text-amber-300">
+                {metrics.open_child_issues} open
+              </span>
+            </p>
+          </div>
+        </div>
+
+        <div class="grid gap-px bg-hairline lg:grid-cols-[1fr_0.8fr]">
+          <div class="bg-surface-1/50 px-4 py-4">
+            <h3 class="text-eyebrow text-ink-tertiary uppercase">Owner update</h3>
+            <ul class="mt-2 space-y-2">
+              <li :for={line <- brief_lines} class="flex gap-2 text-sm text-ink-muted">
+                <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand"></span>
+                <span>{line}</span>
+              </li>
+            </ul>
+          </div>
+          <div class="bg-surface-1/50 px-4 py-4">
+            <h3 class="text-eyebrow text-ink-tertiary uppercase">Review signals</h3>
+            <ul class="mt-2 space-y-2">
+              <li :for={gap <- gaps} class="flex gap-2 text-sm text-ink-muted">
+                <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"></span>
+                <span>{gap}</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="border-t border-hairline px-4 py-4">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <h3 class="text-eyebrow text-ink-tertiary uppercase">Agent contributions</h3>
+            <span class="text-caption text-ink-tertiary">
+              {length(contribution_cards)} agents
+            </span>
+          </div>
+
+          <div
+            :if={Enum.empty?(contribution_cards)}
+            class="rounded-lg border border-dashed border-hairline px-4 py-5 text-sm text-ink-tertiary"
+          >
+            No agent has left a note, run, tool trace, or work product on this issue yet.
+          </div>
+
+          <div :if={!Enum.empty?(contribution_cards)} class="grid gap-3 xl:grid-cols-2">
+            <div
+              :for={card <- contribution_cards}
+              class="rounded-lg border border-hairline bg-canvas px-4 py-3"
+            >
+              <div class="flex items-start gap-3">
+                <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-hairline bg-surface-1 text-xs font-510 text-brand">
+                  {card.initials}
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="truncate text-sm font-510 text-ink">{card.name}</p>
+                    <span class="rounded bg-surface-1 px-1.5 py-0.5 text-[10px] uppercase text-ink-tertiary">
+                      {card.role}
+                    </span>
+                  </div>
+                  <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-ink-tertiary">
+                    <span>{card.status}</span>
+                    <span :if={card.latest_at}>{format_timeline_timestamp(card.latest_at)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-3 flex flex-wrap gap-1.5 text-[11px] text-ink-tertiary">
+                <span class="rounded bg-surface-1 px-2 py-1">
+                  {card.counts.comments} comments
+                </span>
+                <span class="rounded bg-surface-1 px-2 py-1">{card.counts.runs} runs</span>
+                <span class="rounded bg-surface-1 px-2 py-1">
+                  {card.counts.products} artifacts
+                </span>
+                <span class="rounded bg-surface-1 px-2 py-1">{card.counts.traces} tools</span>
+              </div>
+
+              <dl class="mt-3 space-y-2">
+                <div
+                  :for={highlight <- card.highlights}
+                  class="grid gap-1 sm:grid-cols-[88px_1fr]"
+                >
+                  <dt class="text-caption font-510 text-ink-tertiary">{highlight.label}</dt>
+                  <dd class="text-sm text-ink-muted">{highlight.body}</dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div :if={!Enum.empty?(@child_issues)} class="px-4 lg:px-6 pb-5">
+      <div class="border-y border-hairline bg-surface-1/25">
+        <div class="flex items-center justify-between gap-3 px-1 py-3">
+          <h2 class="text-eyebrow text-ink-tertiary uppercase">Sub-issues</h2>
+          <span class="text-caption text-ink-tertiary">{length(@child_issues)} total</span>
+        </div>
+        <div class="divide-y divide-hairline">
+          <.app_link
+            :for={child <- @child_issues}
+            navigate={~p"/issues/#{child.id}"}
+            class="group flex items-start gap-3 px-1 py-3 hover:bg-surface-1/60 transition-colors"
+          >
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-mono text-caption text-ink-tertiary">
+                  {child.identifier || "CYM-?"}
+                </span>
+                <span class="truncate text-sm font-510 text-ink group-hover:text-primary">
+                  {child.title}
+                </span>
+              </div>
+              <p
+                :if={child.description not in [nil, ""]}
+                class="mt-1 line-clamp-2 text-caption text-ink-tertiary"
+              >
+                {child.description}
+              </p>
+            </div>
+            <div class="flex shrink-0 flex-col items-end gap-1">
+              <.badge variant="status" value={to_string(child.status)} />
+              <span class="text-caption text-ink-tertiary">
+                {(child.assignee && child.assignee.name) || "Unassigned"}
+              </span>
+            </div>
+          </.app_link>
+        </div>
+      </div>
+    </div>
     
 <!-- Activity timeline -->
     <div class="px-4 lg:px-6 pb-3">
@@ -277,6 +467,7 @@
             :if={entry.type == :run}
             class="rounded-lg border border-border/50 bg-subtle p-3"
           >
+            <% run_agent = Enum.find(@all_agents, &(&1.id == entry.data.agent_id)) %>
             <div class="mb-2 flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <span class={"h-2 w-2 rounded-full #{run_status_color(entry.data.status)}"}>
@@ -286,6 +477,9 @@
                 </span>
                 <span class="text-xs text-text-quaternary">
                   {entry.data.adapter || "unknown"}
+                </span>
+                <span class="text-xs text-text-quaternary">
+                  by {(run_agent && run_agent.name) || "unknown agent"}
                 </span>
               </div>
               <span class="text-xs text-text-quaternary">
@@ -300,7 +494,28 @@
               <span :if={positive_cost?(entry.data.cost_usd)}>
                 {format_cost(entry.data.cost_usd)}
               </span>
+              <span :if={entry.data.invocation_source not in [nil, ""]}>
+                {String.replace(entry.data.invocation_source, "_", " ")}
+              </span>
             </div>
+            <p
+              :if={entry.data.continuation_summary not in [nil, ""]}
+              class="mt-2 whitespace-pre-wrap text-xs text-text-secondary"
+            >
+              {entry.data.continuation_summary}
+            </p>
+            <p
+              :if={entry.data.error_reason not in [nil, ""]}
+              class="mt-2 whitespace-pre-wrap text-xs text-red-300"
+            >
+              {entry.data.error_reason}
+            </p>
+            <p
+              :if={entry.data.log_excerpt not in [nil, ""]}
+              class="mt-2 line-clamp-3 text-xs text-text-tertiary"
+            >
+              {entry.data.log_excerpt}
+            </p>
           </div>
 
           <div
@@ -435,7 +650,88 @@
           </div>
 
           <div
-            :if={entry.type not in [:comment, :run, :interaction]}
+            :if={entry.type == :work_product}
+            class="rounded-lg border border-brand/25 bg-brand/5 p-4"
+          >
+            <div class="mb-2 flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-xs font-510 text-brand">Work product</span>
+                  <span class="rounded bg-surface-1 px-1.5 py-0.5 text-[10px] uppercase text-ink-tertiary">
+                    {format_work_product_kind(entry.data.kind)}
+                  </span>
+                </div>
+                <p class="mt-1 truncate text-sm font-510 text-ink">
+                  {entry.data.title}
+                </p>
+              </div>
+              <span class="shrink-0 text-xs text-text-quaternary">
+                {format_timeline_timestamp(entry.timestamp)}
+              </span>
+            </div>
+            <p
+              :if={entry.data.description not in [nil, ""]}
+              class="whitespace-pre-wrap text-sm text-text-secondary"
+            >
+              {entry.data.description}
+            </p>
+            <a
+              :if={entry.data.url not in [nil, ""]}
+              href={entry.data.url}
+              target="_blank"
+              rel="noopener"
+              class="mt-2 inline-flex max-w-full items-center gap-1.5 text-caption text-primary hover:underline"
+            >
+              <.icon name="hero-arrow-top-right-on-square-mini" class="h-3.5 w-3.5 shrink-0" />
+              <span class="truncate">{entry.data.url}</span>
+            </a>
+            <p
+              :if={entry.data.created_by_agent}
+              class="mt-2 text-caption text-ink-tertiary"
+            >
+              Attached by {entry.data.created_by_agent.name}
+            </p>
+          </div>
+
+          <div
+            :if={entry.type == :tool_call_trace}
+            class="rounded-lg border border-border/50 bg-subtle p-3"
+          >
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class={"h-2 w-2 rounded-full #{trace_status_color(entry.data.status)}"}>
+                  </span>
+                  <span class="truncate text-xs font-510 text-text-primary">
+                    {entry.data.tool_name}
+                  </span>
+                </div>
+                <p class="mt-0.5 text-xs text-text-quaternary">
+                  {entry.data.trace_type} · {"##{entry.data.sequence_number}"}
+                </p>
+              </div>
+              <span class="shrink-0 text-xs text-text-quaternary">
+                {format_timeline_timestamp(entry.timestamp)}
+              </span>
+            </div>
+            <p
+              :if={entry.data.error_message not in [nil, ""]}
+              class="text-xs text-red-300"
+            >
+              {entry.data.error_message}
+            </p>
+            <p
+              :if={entry.data.tool_result not in [nil, ""]}
+              class="line-clamp-3 text-xs text-text-tertiary"
+            >
+              {entry.data.tool_result}
+            </p>
+          </div>
+
+          <div
+            :if={
+              entry.type not in [:comment, :run, :interaction, :work_product, :tool_call_trace]
+            }
             class="text-xs text-text-quaternary"
           >
             Unknown entry type
@@ -516,8 +812,17 @@
       
 <!-- Agent controls — only the live actions, no labels-as-headers -->
       <div class="space-y-2">
+        <p :if={!@orchestrator_enabled?} class="text-caption text-ink-tertiary">
+          Agent execution is disabled for review mode.
+        </p>
         <div class="flex items-center gap-2">
-          <.button type="button" phx-click="toggle_agent_panel" size="sm" variant="secondary">
+          <.button
+            type="button"
+            phx-click="toggle_agent_panel"
+            size="sm"
+            variant="secondary"
+            disabled={!@orchestrator_enabled?}
+          >
             {(@show_agent_panel && "Hide") || "Start"} agent
           </.button>
           <.button
@@ -579,12 +884,15 @@
             <.button type="submit" size="sm">Save</.button>
           </div>
           <p
-            :if={@issue.project && @issue.project.repo_url in [nil, ""]}
+            :if={
+              @issue.project && @issue.project.repo_url in [nil, ""] &&
+                @issue.github_pr_url in [nil, ""]
+            }
             class="text-caption text-ink-tertiary"
           >
             Set a repo URL on
             <.app_link
-              navigate={~p"/projects/#{@issue.project.id}/edit"}
+              navigate={~p"/projects/#{@issue.project.id}"}
               class="text-primary hover:underline"
             >
               the project

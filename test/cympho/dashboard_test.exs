@@ -3,7 +3,10 @@ defmodule Cympho.DashboardTest do
 
   alias Cympho.Dashboard
   alias Cympho.Agents
+  alias Cympho.Companies
+  alias Cympho.Inbox
   alias Cympho.Issues
+  alias Cympho.Projects
 
   describe "active_agents_count/0" do
     test "returns 0 when no agents exist" do
@@ -135,6 +138,43 @@ defmodule Cympho.DashboardTest do
       assert Map.has_key?(summary, :routine_health)
       assert summary.active_agents >= 1
       assert summary.total_agents >= 1
+    end
+
+    test "includes recent inbox items without requiring aggregate fields" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Dashboard Inbox Co",
+          slug: "dashboard-inbox-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Dashboard Inbox Project",
+          prefix: "DIB",
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Inbox dashboard item",
+          project_id: project.id,
+          company_id: company.id
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Inbox Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, _state} = Inbox.ensure_inbox_entry(issue.id, agent.id)
+
+      summary = Dashboard.summary(company.id)
+
+      assert [%{status: "unread", issue: %{title: "Inbox dashboard item"}} | _] =
+               summary.recent_inbox
     end
   end
 

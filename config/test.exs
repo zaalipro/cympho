@@ -2,6 +2,8 @@ import Config
 
 config :cympho, env: :test
 
+config :cympho, :encryption_key, String.duplicate("t", 32)
+
 config :cympho, Cympho.Repo,
   username: System.get_env("TEST_DB_USER") || "paperclip",
   password: System.get_env("TEST_DB_PASSWORD") || "paperclip",
@@ -32,6 +34,8 @@ config :cympho, :orchestrator, enabled: false
 config :cympho, :start_board_approval_executor?, false
 config :cympho, :start_heartbeat_watchdog?, false
 config :cympho, :start_health_checker?, false
+config :cympho, :start_scheduler?, false
+config :cympho, :schedule_routine_triggers?, false
 
 config :phoenix, :plug_init_mode, :runtime
 

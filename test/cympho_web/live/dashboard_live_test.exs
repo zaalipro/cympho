@@ -22,6 +22,16 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert html =~ "Closed 7d"
     end
 
+    test "renders all computed next actions", %{conn: conn} do
+      {:ok, _} = Issues.create_issue(%{title: "Blocked work", status: :blocked})
+
+      {:ok, _view, html} = live(conn, "/dashboard")
+
+      assert html =~ "Next actions"
+      assert html =~ "Review mode is on"
+      assert html =~ "blocked issue"
+    end
+
     test "shows agent count from database", %{conn: conn} do
       {:ok, _} =
         Agents.create_agent(%{

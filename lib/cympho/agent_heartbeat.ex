@@ -31,6 +31,15 @@ defmodule Cympho.AgentHeartbeat do
 
   @default_heartbeat_interval :timer.seconds(60)
 
+  def child_spec(opts) do
+    %{
+      id: {__MODULE__, Keyword.fetch!(opts, :agent_id)},
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :transient,
+      type: :worker
+    }
+  end
+
   # ---------------------------------------------------------------------------
   # Client API
   # ---------------------------------------------------------------------------

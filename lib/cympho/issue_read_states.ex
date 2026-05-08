@@ -106,6 +106,19 @@ defmodule Cympho.IssueReadStates do
   def mark_read(user_id, issue_id, last_read_comment_id \\ nil)
 
   def mark_read(user_id, issue_id, last_read_comment_id) when is_binary(last_read_comment_id) do
+    do_mark_read(user_id, issue_id, last_read_comment_id)
+  end
+
+  def mark_read(user_id, issue_id, nil) do
+    # No specific comment - mark based on latest comment for this issue.
+    # Issues without comments still need a read state; do not recurse with nil.
+    comments = Cympho.Comments.list_comments(issue_id)
+    last_comment = List.last(comments)
+    last_comment_id = if last_comment, do: last_comment.id, else: nil
+    do_mark_read(user_id, issue_id, last_comment_id)
+  end
+
+  defp do_mark_read(user_id, issue_id, last_read_comment_id) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     case get_read_state(user_id, issue_id) do
@@ -143,14 +156,6 @@ defmodule Cympho.IssueReadStates do
             error
         end
     end
-  end
-
-  def mark_read(user_id, issue_id, nil) do
-    # No specific comment - mark based on latest comment for this issue
-    comments = Cympho.Comments.list_comments(issue_id)
-    last_comment = List.last(comments)
-    last_comment_id = if last_comment, do: last_comment.id, else: nil
-    mark_read(user_id, issue_id, last_comment_id)
   end
 
   @doc """

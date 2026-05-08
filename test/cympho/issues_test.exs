@@ -50,6 +50,41 @@ defmodule Cympho.IssuesTest do
     end
   end
 
+  describe "list_child_issues/1" do
+    test "returns ordered child issues without preloading unused comments", %{issue: parent} do
+      {:ok, assignee} =
+        Agents.create_agent(%{
+          name: "Child Owner",
+          role: :engineer,
+          status: :idle
+        })
+
+      {:ok, low} =
+        Issues.create_issue(%{
+          title: "Low child",
+          description: "d",
+          priority: :low,
+          parent_id: parent.id,
+          assignee_id: assignee.id
+        })
+
+      {:ok, critical} =
+        Issues.create_issue(%{
+          title: "Critical child",
+          description: "d",
+          priority: :critical,
+          parent_id: parent.id,
+          assignee_id: assignee.id
+        })
+
+      children = Issues.list_child_issues(parent.id)
+
+      assert Enum.map(children, & &1.id) == [critical.id, low.id]
+      assert Enum.all?(children, &match?(%Cympho.Agents.Agent{}, &1.assignee))
+      assert Enum.all?(children, &match?(%Ecto.Association.NotLoaded{}, &1.comments))
+    end
+  end
+
   describe "get_issue!/1" do
     test "returns the issue with given id", %{issue: issue} do
       found = Issues.get_issue!(issue.id)

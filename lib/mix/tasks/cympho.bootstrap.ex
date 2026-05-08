@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Cympho.Bootstrap do
     * `--mission` - Company mission / goal title (default: "Build and run the business autonomously")
     * `--engineers` - Number of engineer agents (default: 2)
     * `--prefix` - Issue prefix (default: "LLM")
-    * `--adapter` - Agent adapter: claude_code, codex, cursor, http, openclaw, process (default: codex)
+    * `--adapter` - Agent adapter: claude_code, codex, cursor, http, openclaw, process (default: claude_code)
     * `--yes` - Skip confirmation prompts
   """
 
@@ -49,7 +49,7 @@ defmodule Mix.Tasks.Cympho.Bootstrap do
     mission = opts[:mission] || "Build and run the business autonomously"
     engineers = opts[:engineers] || 2
     prefix = opts[:prefix] || "LLM"
-    adapter = (opts[:adapter] || "codex") |> String.to_atom()
+    adapter = (opts[:adapter] || "claude_code") |> String.to_atom()
     auto_yes = opts[:yes] || false
 
     unless company_name do

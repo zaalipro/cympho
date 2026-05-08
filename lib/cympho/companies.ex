@@ -209,7 +209,7 @@ defmodule Cympho.Companies do
     requested_prefix = attrs[:issue_prefix] || attrs["issue_prefix"] || "LLM"
     issue_prefix = unique_project_prefix(requested_prefix)
     engineer_count = attrs[:engineer_count] || attrs["engineer_count"] || 2
-    adapter = normalize_adapter(attrs[:adapter] || attrs["adapter"] || :codex)
+    adapter = normalize_adapter(attrs[:adapter] || attrs["adapter"] || :claude_code)
 
     Repo.transaction(fn ->
       company =
@@ -274,7 +274,7 @@ defmodule Cympho.Companies do
             "hiring" => true
           },
           instructions:
-            "Own the company goal, break strategy into goals and issues, delegate through the CTO, and keep the company running without waiting for humans unless a configured governance gate is hit."
+            "Own the company goal, break strategy into goals and issues, delegate product criteria to Product, experience work to Design, technical execution to the CTO, and keep the company running without waiting for humans unless a configured governance gate is hit."
         })
 
       cto =
@@ -323,6 +323,46 @@ defmodule Cympho.Companies do
         else
           []
         end
+
+      product_lead =
+        create_template_agent!(%{
+          company_id: company.id,
+          project_id: project.id,
+          parent_id: ceo.id,
+          created_by_agent_id: ceo.id,
+          name: "Product Lead",
+          title: "Product Lead",
+          role: :product_manager,
+          adapter: adapter,
+          max_concurrent_jobs: 1,
+          capabilities: %{
+            "acceptance_criteria" => true,
+            "prioritization" => true,
+            "stakeholder_alignment" => true
+          },
+          instructions:
+            "Turn owner intent into crisp acceptance criteria, user stories, dependencies, and definitions of done for the CEO and CTO."
+        })
+
+      design_lead =
+        create_template_agent!(%{
+          company_id: company.id,
+          project_id: project.id,
+          parent_id: ceo.id,
+          created_by_agent_id: ceo.id,
+          name: "Design Lead",
+          title: "Design Lead",
+          role: :designer,
+          adapter: adapter,
+          max_concurrent_jobs: 1,
+          capabilities: %{
+            "user_flows" => true,
+            "interaction_design" => true,
+            "visual_specs" => true
+          },
+          instructions:
+            "Produce user flows, interaction states, accessibility notes, and implementation-ready design specs for engineering."
+        })
 
       first_engineer = List.first(engineers, cto)
 
@@ -399,7 +439,7 @@ defmodule Cympho.Companies do
         company: company,
         project: project,
         goal: goal,
-        agents: [ceo, cto | engineers],
+        agents: [ceo, cto | engineers] ++ [product_lead, design_lead],
         seed_issues: seed_issues
       }
     end)
@@ -423,7 +463,7 @@ defmodule Cympho.Companies do
     try do
       String.to_existing_atom(adapter)
     rescue
-      ArgumentError -> :codex
+      ArgumentError -> :claude_code
     end
   end
 

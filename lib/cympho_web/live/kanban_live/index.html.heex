@@ -26,7 +26,11 @@
 >
   <.header
     title={@page_title}
-    subtitle="Move autonomous work from strategy to execution."
+    subtitle={
+      if @runtime_enabled?,
+        do: "Move autonomous work from strategy to execution.",
+        else: "Review and reshape work safely. Agent execution is off."
+    }
   >
     <:actions>
       <div class="flex flex-wrap items-center gap-2">
@@ -71,6 +75,13 @@
       </div>
     </:actions>
   </.header>
+
+  <div
+    :if={!@runtime_enabled?}
+    class="mb-3 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-sm text-sky-200"
+  >
+    Review mode is active. You can reorganize work here without starting agent runs.
+  </div>
 
   <div
     :if={@flash["error"]}

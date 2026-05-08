@@ -32,7 +32,7 @@ defmodule CymphoWeb.KanbanLive.Components do
 
       <div class="mt-3 flex flex-wrap items-center gap-2">
         <span class={"rounded-full px-2 py-0.5 text-[10px] font-510 " <> priority_class(@issue.priority)}>
-          {@issue.priority}
+          {String.capitalize(to_string(@issue.priority))}
         </span>
         <span class="flex items-center gap-1 text-xs text-text-quaternary">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -44,6 +44,7 @@ defmodule CymphoWeb.KanbanLive.Components do
             />
           </svg>
           {length(@issue.comments)}
+          <span class="sr-only">{pluralize(length(@issue.comments), "comment")}</span>
         </span>
         <%= if length(@issue.blocked_by || []) > 0 do %>
           <span class="text-xs text-red-400">
@@ -187,4 +188,7 @@ defmodule CymphoWeb.KanbanLive.Components do
   defp compact_status_label(:blocked), do: "Blocked"
   defp compact_status_label(:done), do: "Done"
   defp compact_status_label(:cancelled), do: "Cancel"
+
+  defp pluralize(1, word), do: word
+  defp pluralize(_, word), do: word <> "s"
 end

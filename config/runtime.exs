@@ -36,6 +36,16 @@ if secret_key_base = System.get_env("SECRET_KEY_BASE") do
   config :cympho, CymphoWeb.Endpoint, secret_key_base: secret_key_base
 end
 
+encryption_key = System.get_env("CYMPHO_ENCRYPTION_KEY")
+
+if config_env() == :prod and encryption_key in [nil, ""] do
+  raise "CYMPHO_ENCRYPTION_KEY must be set in production"
+end
+
+if encryption_key not in [nil, ""] do
+  config :cympho, :encryption_key, encryption_key
+end
+
 config :cympho, CymphoWeb.Endpoint,
   live_view: [signing_salt: System.get_env("LIVE_VIEW_SALT") || "cympho_live_view_signing_salt"],
   check_origin: ["//" <> (System.get_env("APP_HOST") || "localhost")]

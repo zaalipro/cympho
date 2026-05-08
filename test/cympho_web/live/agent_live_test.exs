@@ -1,5 +1,5 @@
 defmodule CymphoWeb.AgentLiveTest do
-  use CymphoWeb.LiveCase, async: true
+  use CymphoWeb.LiveCase, async: false
 
   import Phoenix.LiveViewTest
   alias Cympho.Agents
@@ -169,6 +169,266 @@ defmodule CymphoWeb.AgentLiveTest do
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
       assert html =~ "Adapter"
     end
+
+    test "shows effective Claude Code command in configuration", %{conn: conn} do
+      original = Application.get_env(:cympho, :claude_code_command)
+      Application.put_env(:cympho, :claude_code_command, "cz")
+
+      on_exit(fn ->
+        if original do
+          Application.put_env(:cympho, :claude_code_command, original)
+        else
+          Application.delete_env(:cympho, :claude_code_command)
+        end
+      end)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Cheap Runtime Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :claude_code
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+      assert html =~ "Runtime command"
+      assert html =~ "cz"
+    end
+
+    test "shows Codex model selector and hides runtime command", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Codex Runtime Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          config: %{"model" => "gpt-5.5"}
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      assert html =~ "Codex model"
+      assert html =~ "codex --model gpt-5.5"
+      assert html =~ ~r/<option value="codex" selected/
+      assert html =~ ~r/data-adapter-panel="claude_code"[^>]*hidden/
+      refute html =~ ~r/data-adapter-panel="codex"[^>]*hidden/
+    end
+
+    test "changing adapter to Codex reveals the model selector before save", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Switchable Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :claude_code
+        })
+
+      {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      html =
+        view
+        |> form("form[phx-submit='config_save']", %{
+          "agent" => %{
+            "name" => agent.name,
+            "title" => "",
+            "role" => "engineer",
+            "parent_id" => "",
+            "adapter" => "codex",
+            "max_concurrent_jobs" => "3"
+          }
+        })
+        |> render_change()
+
+      assert html =~ "Codex model"
+      assert html =~ "codex --model o4-mini"
+      assert html =~ ~r/<option value="codex" selected/
+      assert html =~ ~r/data-adapter-panel="claude_code"[^>]*hidden/
+      refute html =~ ~r/data-adapter-panel="codex"[^>]*hidden/
+
+      html =
+        view
+        |> form("form[phx-submit='config_save']", %{
+          "agent" => %{
+            "name" => agent.name,
+            "title" => "",
+            "role" => "engineer",
+            "parent_id" => "",
+            "adapter" => "codex",
+            "model" => "gpt-5.4-mini",
+            "max_concurrent_jobs" => "3"
+          }
+        })
+        |> render_change()
+
+      assert html =~ "codex --model gpt-5.4-mini"
+    end
+
+    test "saving Codex model writes adapter config", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Model Save Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :claude_code
+        })
+
+      {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      view
+      |> form("form[phx-submit='config_save']", %{
+        "agent" => %{
+          "name" => agent.name,
+          "title" => "",
+          "role" => "engineer",
+          "parent_id" => "",
+          "adapter" => "codex",
+          "max_concurrent_jobs" => "3"
+        }
+      })
+      |> render_change()
+
+      view
+      |> form("form[phx-submit='config_save']", %{
+        "agent" => %{
+          "name" => agent.name,
+          "title" => "",
+          "role" => "engineer",
+          "parent_id" => "",
+          "adapter" => "codex",
+          "model" => "gpt-5.4",
+          "max_concurrent_jobs" => "3"
+        }
+      })
+      |> render_submit()
+
+      {:ok, updated} = Agents.get_agent(agent.id)
+      assert updated.adapter == :codex
+      assert updated.config["model"] == "gpt-5.4"
+    end
+
+    test "Cursor configuration exposes command and model", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Cursor Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :claude_code
+        })
+
+      {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      view
+      |> form("form[phx-submit='config_save']", %{
+        "agent" => %{
+          "name" => agent.name,
+          "title" => "",
+          "role" => "engineer",
+          "parent_id" => "",
+          "adapter" => "cursor",
+          "runtime_command" => "agent",
+          "model" => "composer-2",
+          "max_concurrent_jobs" => "3"
+        }
+      })
+      |> render_submit()
+
+      {:ok, updated} = Agents.get_agent(agent.id)
+      assert updated.adapter == :cursor
+      assert updated.config["command"] == "agent"
+      assert updated.config["model"] == "composer-2"
+    end
+
+    test "OpenClaw configuration stores provider-qualified model", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "OpenClaw Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :claude_code
+        })
+
+      {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      view
+      |> form("form[phx-change='config_validate']", %{
+        "agent" => %{
+          "name" => agent.name,
+          "title" => "",
+          "role" => "engineer",
+          "parent_id" => "",
+          "adapter" => "openclaw",
+          "provider" => "zai",
+          "max_concurrent_jobs" => "3"
+        }
+      })
+      |> render_change()
+
+      view
+      |> form("form[phx-submit='config_save']", %{
+        "agent" => %{
+          "name" => agent.name,
+          "title" => "",
+          "role" => "engineer",
+          "parent_id" => "",
+          "adapter" => "openclaw",
+          "provider" => "zai",
+          "model" => "zai/glm-4.7",
+          "openclaw_endpoint" => "http://localhost:18789",
+          "openclaw_runtime" => "acp",
+          "openclaw_harness_id" => "codex",
+          "max_concurrent_jobs" => "3"
+        }
+      })
+      |> render_submit()
+
+      {:ok, updated} = Agents.get_agent(agent.id)
+      assert updated.adapter == :openclaw
+      assert updated.config["provider"] == "zai"
+      assert updated.config["model"] == "zai/glm-4.7"
+      assert updated.config["endpoint"] == "http://localhost:18789"
+      assert updated.config["agent_runtime"] == "acp"
+      assert updated.config["harness_id"] == "codex"
+    end
+
+    test "Process configuration stores preset command and model mapping", %{conn: conn} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Process Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :claude_code
+        })
+
+      {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      view
+      |> form("form[phx-submit='config_save']", %{
+        "agent" => %{
+          "name" => agent.name,
+          "title" => "",
+          "role" => "engineer",
+          "parent_id" => "",
+          "adapter" => "process",
+          "process_preset" => "codex",
+          "provider" => "openai",
+          "model" => "gpt-5.5",
+          "runtime_command" => "codex",
+          "runtime_cwd" => "/tmp",
+          "process_args" => "--force\n--output-format json",
+          "max_concurrent_jobs" => "3"
+        }
+      })
+      |> render_submit()
+
+      {:ok, updated} = Agents.get_agent(agent.id)
+      assert updated.adapter == :process
+      assert updated.config["process_preset"] == "codex"
+      assert updated.config["command"] == "codex"
+      assert updated.config["model"] == "gpt-5.5"
+      assert updated.config["model_arg_template"] == ["--model", "{{model}}"]
+      assert updated.config["args"] == ["--force", "--output-format json"]
+      assert updated.config["cwd"] == "/tmp"
+    end
   end
 
   describe "Adapter Selection" do
@@ -176,6 +436,42 @@ defmodule CymphoWeb.AgentLiveTest do
       {:ok, _view, html} = live(conn, "/agents/new")
 
       assert html =~ "Adapter"
+    end
+
+    test "new agent form shows Codex model selector when Codex is selected", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/agents/new")
+
+      html =
+        view
+        |> form("form", %{
+          "agent" => %{
+            "name" => "New Codex Agent",
+            "role" => "engineer",
+            "adapter" => "codex",
+            "parent_id" => "",
+            "instructions" => ""
+          }
+        })
+        |> render_change()
+
+      assert html =~ "Codex model"
+      assert html =~ "codex --model o4-mini"
+
+      html =
+        view
+        |> form("form", %{
+          "agent" => %{
+            "name" => "New Codex Agent",
+            "role" => "engineer",
+            "adapter" => "codex",
+            "model" => "gpt-5.5",
+            "parent_id" => "",
+            "instructions" => ""
+          }
+        })
+        |> render_change()
+
+      assert html =~ "codex --model gpt-5.5"
     end
   end
 

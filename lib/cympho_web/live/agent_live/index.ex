@@ -1,6 +1,7 @@
 defmodule CymphoWeb.AgentLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Agents
+  alias Cympho.Agents.RuntimeEnv
 
   import CymphoWeb.Format, only: [status_pill_class: 1]
 
@@ -232,6 +233,65 @@ defmodule CymphoWeb.AgentLive.Index do
 
   def show_spawn_button?(_), do: false
 
+  def runtime_command(%{adapter: adapter} = agent)
+      when adapter in [:claude_code, "claude_code"] do
+    runtime_config_value(agent, "command") ||
+      Application.get_env(:cympho, :claude_code_command) ||
+      System.get_env("CYMPHO_CLAUDE_COMMAND") ||
+      "claude"
+  end
+
+  def runtime_command(%{adapter: adapter}) when adapter in [:codex, "codex"], do: "codex"
+
+  def runtime_command(%{adapter: adapter} = agent)
+      when adapter in [:cursor, "cursor", :process, "process"] do
+    runtime_config_value(agent, "command") || adapter_label(adapter)
+  end
+
+  def runtime_command(%{adapter: adapter}), do: adapter_label(adapter)
+  def runtime_command(_), do: "No runtime"
+
+  def runtime_model(%{adapter: adapter} = agent)
+      when adapter in [
+             :codex,
+             "codex",
+             :cursor,
+             "cursor",
+             :openclaw,
+             "openclaw",
+             :process,
+             "process"
+           ] do
+    runtime_config_value(agent, "model") ||
+      default_runtime_model(adapter, agent)
+  end
+
+  def runtime_model(agent) do
+    env = RuntimeEnv.from_agent(agent)
+
+    env["ANTHROPIC_MODEL"] ||
+      env["ANTHROPIC_DEFAULT_SONNET_MODEL"] ||
+      env["OPENAI_MODEL"] ||
+      env["MODEL"] ||
+      "No model override"
+  end
+
+  defp default_runtime_model(adapter, _agent) when adapter in [:codex, "codex"],
+    do: Cympho.Adapters.CodexAdapter.default_model()
+
+  defp default_runtime_model(adapter, _agent) when adapter in [:cursor, "cursor"],
+    do: Cympho.Adapters.RuntimeOptions.cursor_default_model()
+
+  defp default_runtime_model(adapter, agent) when adapter in [:openclaw, "openclaw"] do
+    provider =
+      runtime_config_value(agent, "provider") ||
+        Cympho.Adapters.RuntimeOptions.openclaw_default_provider()
+
+    Cympho.Adapters.RuntimeOptions.openclaw_default_model(provider)
+  end
+
+  defp default_runtime_model(_adapter, _agent), do: "No model override"
+
   def format_elapsed(seconds) when is_integer(seconds) do
     hours = div(seconds, 3600)
     minutes = div(rem(seconds, 3600), 60)
@@ -256,11 +316,22 @@ defmodule CymphoWeb.AgentLive.Index do
   defp status_counts(nil), do: Agents.count_by_status()
   defp status_counts(company_id), do: Agents.count_by_status(company_id)
 
-  defp group_key(%{role: role}) when role in [:ceo, :cto, :engineer], do: role
+  defp runtime_config_value(%{runtime_config: runtime_config, config: config}, key) do
+    Map.get(runtime_config || %{}, key) ||
+      Map.get(runtime_config || %{}, String.to_atom(key)) ||
+      Map.get(config || %{}, key) ||
+      Map.get(config || %{}, String.to_atom(key))
+  end
+
+  defp group_key(%{role: role}) when role in [:ceo, :cto, :product_manager, :designer, :engineer],
+    do: role
+
   defp group_key(_), do: :other
 
   defp group_rank(:ceo), do: 0
   defp group_rank(:cto), do: 1
-  defp group_rank(:engineer), do: 2
-  defp group_rank(_), do: 3
+  defp group_rank(:product_manager), do: 2
+  defp group_rank(:designer), do: 3
+  defp group_rank(:engineer), do: 4
+  defp group_rank(_), do: 5
 end

@@ -3,6 +3,8 @@ defmodule CymphoWeb.InboxLive.Index do
   alias Cympho.Inbox
   alias Cympho.Agents
 
+  @statuses ~w(unread read dismissed archived)
+
   @impl true
   def mount(_params, _session, socket) do
     company_id =
@@ -15,7 +17,12 @@ defmodule CymphoWeb.InboxLive.Index do
       |> assign(:page_title, "Inbox")
       |> assign(:agents, agents)
       |> assign(:selected_agent_id, nil)
+      |> assign(:selected_agent, nil)
       |> assign(:subscribed_agent_id, nil)
+      |> assign(:current_status, nil)
+      |> assign(:inbox_items, [])
+      |> assign(:inbox_counts, %{})
+      |> assign(:agent_counts, %{})
 
     if connected?(socket) do
       if socket.assigns.selected_agent_id do
@@ -32,20 +39,18 @@ defmodule CymphoWeb.InboxLive.Index do
 
   @impl true
   def handle_params(params, _url, socket) do
-    status = params["status"] || nil
-    agent_id_param = params["agent_id"]
+    status = normalize_status(params["status"])
 
     agent_id =
-      cond do
-        agent_id_param == "all" -> "all"
-        agent_id_param && agent_id_param != "" -> agent_id_param
-        true -> "all"
-      end
+      params["agent_id"]
+      |> normalize_agent_id()
+      |> authorized_agent_id(socket)
 
     socket =
       socket
       |> assign(:current_status, status)
       |> assign(:selected_agent_id, agent_id)
+      |> assign(:selected_agent, selected_agent(socket.assigns.agents, agent_id))
       |> maybe_subscribe_to_agent()
       |> load_inbox()
 
@@ -65,7 +70,7 @@ defmodule CymphoWeb.InboxLive.Index do
     selected_agent_id = socket.assigns[:selected_agent_id]
 
     socket =
-      if payload[:agent_id] == selected_agent_id do
+      if selected_agent_id == "all" or payload[:agent_id] == selected_agent_id do
         {message, type} =
           case payload do
             %{new_status: "completed"} -> {"Agent completed a run", "success"}
@@ -176,7 +181,20 @@ defmodule CymphoWeb.InboxLive.Index do
           Inbox.list_inbox_for_agent(agent_id, opts)
       end
 
-    assign(socket, :inbox_items, items)
+    counts =
+      cond do
+        agent_id == "all" and company_id -> Inbox.status_counts_for_company(company_id)
+        agent_id in [nil, "", "all"] -> %{}
+        true -> Inbox.status_counts_for_agent(agent_id)
+      end
+
+    agent_counts =
+      if company_id, do: Inbox.counts_by_agent_for_company(company_id), else: %{}
+
+    socket
+    |> assign(:inbox_items, items)
+    |> assign(:inbox_counts, normalize_counts(counts))
+    |> assign(:agent_counts, agent_counts)
   end
 
   defp build_url(socket, overrides) do
@@ -194,7 +212,23 @@ defmodule CymphoWeb.InboxLive.Index do
     ~p"/inbox?#{query}"
   end
 
+  defp inbox_url(selected_agent_id, status, overrides) do
+    status = Map.get(overrides, :status, status)
+    agent_id = Map.get(overrides, :agent_id, selected_agent_id)
+
+    query =
+      %{
+        status: status,
+        agent_id: agent_id
+      }
+      |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
+      |> Enum.into(%{})
+
+    ~p"/inbox?#{query}"
+  end
+
   defp authorize_agent_access(nil, _socket), do: {:error, :unauthorized}
+  defp authorize_agent_access("all", _socket), do: {:ok, :all}
 
   defp authorize_agent_access(agent_id, socket) do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
@@ -231,14 +265,110 @@ defmodule CymphoWeb.InboxLive.Index do
     end
   end
 
-  defp unread_dot("unread"), do: "bg-blue-400"
-  defp unread_dot(_), do: "bg-transparent"
+  defp normalize_status(status) when status in @statuses, do: status
+  defp normalize_status(_), do: nil
+
+  defp normalize_agent_id("all"), do: "all"
+  defp normalize_agent_id(agent_id) when is_binary(agent_id) and agent_id != "", do: agent_id
+  defp normalize_agent_id(_), do: "all"
+
+  defp authorized_agent_id("all", _socket), do: "all"
+
+  defp authorized_agent_id(agent_id, socket) do
+    case authorize_agent_access(agent_id, socket) do
+      {:ok, _agent} -> agent_id
+      {:error, :unauthorized} -> "all"
+    end
+  end
+
+  defp selected_agent(_agents, "all"), do: nil
+  defp selected_agent(agents, agent_id), do: Enum.find(agents, &(&1.id == agent_id))
+
+  defp normalize_counts(counts) do
+    Map.merge(%{"unread" => 0, "read" => 0, "dismissed" => 0, "archived" => 0}, counts)
+  end
+
+  defp count_for(counts, status), do: Map.get(counts, status, 0)
+
+  defp total_count(counts) do
+    @statuses
+    |> Enum.map(&count_for(counts, &1))
+    |> Enum.sum()
+  end
+
+  defp agent_option_label(agent, agent_counts) do
+    counts = Map.get(agent_counts, agent.id, %{})
+    total = total_count(normalize_counts(counts))
+    unread = Map.get(counts, "unread", 0)
+
+    cond do
+      unread > 0 -> "#{agent.name} (#{unread} unread)"
+      total > 0 -> "#{agent.name} (#{total})"
+      true -> agent.name
+    end
+  end
+
+  defp inbox_scope_label("all", _agent), do: "All agents"
+  defp inbox_scope_label(_agent_id, %{name: name}), do: name
+  defp inbox_scope_label(_agent_id, _agent), do: "Selected agent"
+
+  defp status_filter_label(nil), do: "All"
+  defp status_filter_label(status), do: String.capitalize(status)
+
+  defp status_dot("unread"), do: "bg-blue-400"
+  defp status_dot("read"), do: "bg-slate-400"
+  defp status_dot("dismissed"), do: "bg-amber-400"
+  defp status_dot("archived"), do: "bg-red-400"
+  defp status_dot(_), do: "bg-slate-500"
 
   defp status_badge_class("unread"), do: "bg-blue-500/20 text-blue-400"
   defp status_badge_class("read"), do: "bg-gray-500/20 text-gray-400"
   defp status_badge_class("dismissed"), do: "bg-yellow-500/20 text-yellow-400"
   defp status_badge_class("archived"), do: "bg-red-500/20 text-red-400"
   defp status_badge_class(_), do: "bg-gray-500/20 text-gray-400"
+
+  defp status_tab_class(current, status) do
+    if current == status do
+      "border-brand bg-brand/15 text-text-primary"
+    else
+      "border-border bg-surface text-text-tertiary hover:bg-surface-hover hover:text-text-secondary"
+    end
+  end
+
+  defp priority_badge_class(:critical), do: "border-red-500/25 bg-red-500/15 text-red-300"
+  defp priority_badge_class(:high), do: "border-red-500/20 bg-red-500/10 text-red-300"
+  defp priority_badge_class(:medium), do: "border-yellow-500/20 bg-yellow-500/10 text-yellow-300"
+  defp priority_badge_class(:low), do: "border-slate-500/20 bg-slate-500/10 text-slate-300"
+  defp priority_badge_class(_), do: "border-border bg-surface text-text-quaternary"
+
+  defp issue_status_label(status) when is_atom(status) do
+    status |> to_string() |> String.replace("_", " ") |> String.capitalize()
+  end
+
+  defp issue_status_label(status) when is_binary(status) do
+    status |> String.replace("_", " ") |> String.capitalize()
+  end
+
+  defp issue_status_label(_), do: "Unknown"
+
+  defp priority_label(priority) when is_atom(priority),
+    do: priority |> to_string() |> String.capitalize()
+
+  defp priority_label(priority) when is_binary(priority), do: String.capitalize(priority)
+  defp priority_label(_), do: "No priority"
+
+  defp issue_description(%{description: description}) when is_binary(description) do
+    description
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+    |> String.slice(0, 180)
+  end
+
+  defp issue_description(_), do: nil
+
+  defp target_agent_name(%{agent: %{name: name}}, _selected_agent) when is_binary(name), do: name
+  defp target_agent_name(_item, %{name: name}) when is_binary(name), do: name
+  defp target_agent_name(_item, _selected_agent), do: "Unknown agent"
 
   defp issue_link(issue) when is_nil(issue), do: "#"
   defp issue_link(issue), do: ~p"/issues/#{issue.id}"

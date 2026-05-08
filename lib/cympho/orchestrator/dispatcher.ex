@@ -71,6 +71,13 @@ defmodule Cympho.Orchestrator.Dispatcher do
     end
   end
 
+  @doc "Returns whether autonomous dispatch is enabled for this runtime."
+  def enabled? do
+    :cympho
+    |> Application.get_env(:orchestrator, [])
+    |> Keyword.get(:enabled, @enabled_default)
+  end
+
   @doc "Requests an immediate poll scoped to one company."
   def poll_company(company_id) when is_binary(company_id) do
     case Process.whereis(__MODULE__) do
@@ -248,12 +255,6 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   defp schedule_poll do
     Process.send_after(self(), :poll, @poll_interval)
-  end
-
-  defp enabled? do
-    :cympho
-    |> Application.get_env(:orchestrator, [])
-    |> Keyword.get(:enabled, @enabled_default)
   end
 
   defp do_poll(%State{} = state, company_id \\ nil) do

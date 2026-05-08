@@ -12,12 +12,7 @@ defmodule CymphoWeb.ProjectLive.Show do
 
     case scoped_get_project(id, socket) do
       {:ok, project} ->
-        {:ok,
-         socket
-         |> assign(:project, project)
-         |> assign(:issues, list_project_issues(project))
-         |> assign(:status_counts, status_counts(project))
-         |> assign(:env_keys, list_env_keys(project))}
+        {:ok, assign_project(socket, project)}
 
       {:error, :not_found} ->
         {:ok, push_navigate(socket, to: ~p"/projects")}
@@ -34,12 +29,7 @@ defmodule CymphoWeb.ProjectLive.Show do
   defp apply_action(socket, :show, id) do
     case scoped_get_project(id, socket) do
       {:ok, project} ->
-        socket
-        |> assign(:page_title, project.name)
-        |> assign(:project, project)
-        |> assign(:issues, list_project_issues(project))
-        |> assign(:status_counts, status_counts(project))
-        |> assign(:env_keys, list_env_keys(project))
+        assign_project(socket, project)
 
       {:error, :not_found} ->
         socket
@@ -56,12 +46,77 @@ defmodule CymphoWeb.ProjectLive.Show do
   end
 
   @impl true
+  def handle_event("save", %{"project" => project_params}, socket) do
+    case Projects.update_project(socket.assigns.project, project_params) do
+      {:ok, project} ->
+        {:noreply,
+         socket
+         |> assign_project(project)
+         |> put_flash(:info, "Project updated")}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, form: to_form(changeset))}
+    end
+  end
+
+  def handle_event("add_env", %{"env" => %{"key" => key, "value" => value}}, socket) do
+    project = socket.assigns.project
+    key = key |> to_string() |> String.trim() |> String.upcase()
+
+    cond do
+      key == "" or value in [nil, ""] ->
+        {:noreply, put_flash(socket, :error, "Key and value are required")}
+
+      not String.match?(key, ~r/^[A-Z][A-Z0-9_]*$/) ->
+        {:noreply,
+         put_flash(socket, :error, "Key must be uppercase letters, digits, underscores")}
+
+      project.company_id == nil ->
+        {:noreply, put_flash(socket, :error, "Project missing company — cannot store secrets")}
+
+      true ->
+        attrs = %{
+          company_id: project.company_id,
+          scope: "project",
+          scope_id: project.id,
+          key: key,
+          value: value,
+          description: "Project env var"
+        }
+
+        case Secrets.create_secret(attrs) do
+          {:ok, _secret} ->
+            {:noreply,
+             socket
+             |> assign_project_secrets(project)
+             |> assign(:env_form, to_form(%{"key" => "", "value" => ""}, as: :env))
+             |> put_flash(:info, "Added #{key}")}
+
+          {:error, _changeset} ->
+            {:noreply, put_flash(socket, :error, "Could not save env var")}
+        end
+    end
+  end
+
+  def handle_event("delete_env", %{"id" => id}, socket) do
+    case Secrets.get_secret(id) do
+      {:ok, secret} ->
+        {:ok, _} = Secrets.delete_secret(secret)
+
+        {:noreply,
+         socket
+         |> assign_project_secrets(socket.assigns.project)
+         |> put_flash(:info, "Removed #{secret.key}")}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
   def handle_info({:project_updated, updated_project}, socket) do
     if socket.assigns.project.id == updated_project.id do
-      {:noreply,
-       socket
-       |> assign(:project, updated_project)
-       |> assign(:env_keys, list_env_keys(updated_project))}
+      {:noreply, assign_project(socket, updated_project)}
     else
       {:noreply, socket}
     end
@@ -99,13 +154,30 @@ defmodule CymphoWeb.ProjectLive.Show do
     }
   end
 
-  defp list_env_keys(%{id: id, company_id: company_id}) when is_binary(company_id) do
-    company_id
-    |> Secrets.list_secrets(scope: "project", scope_id: id)
-    |> Enum.map(& &1.key)
+  defp list_project_secrets(%{id: id, company_id: company_id}) when is_binary(company_id) do
+    Secrets.list_secrets(company_id, scope: "project", scope_id: id)
   end
 
-  defp list_env_keys(_), do: []
+  defp list_project_secrets(_), do: []
+
+  defp assign_project(socket, project) do
+    socket
+    |> assign(:page_title, project.name)
+    |> assign(:project, project)
+    |> assign(:form, to_form(Projects.change_project(project)))
+    |> assign(:env_form, to_form(%{"key" => "", "value" => ""}, as: :env))
+    |> assign(:issues, list_project_issues(project))
+    |> assign(:status_counts, status_counts(project))
+    |> assign_project_secrets(project)
+  end
+
+  defp assign_project_secrets(socket, project) do
+    secrets = list_project_secrets(project)
+
+    socket
+    |> assign(:secrets, secrets)
+    |> assign(:env_keys, Enum.map(secrets, & &1.key))
+  end
 
   def status_label(:in_progress), do: "In progress"
   def status_label(:in_review), do: "In review"

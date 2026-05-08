@@ -97,7 +97,7 @@ defmodule Cympho.Agents.RolePlaybook do
   ## ── mandate ────────────────────────────────────────────────────
 
   defp mandate(:ceo) do
-    "Own the company goal. Translate it into prioritised work, delegate through the CTO, and keep the business moving without waiting for humans unless a configured governance gate is hit."
+    "Own the company goal. Translate it into prioritised work, delegate product shaping to Product, experience work to Design, technical execution to the CTO, and keep the business moving without waiting for humans unless a configured governance gate is hit."
   end
 
   defp mandate(:cto) do
@@ -170,7 +170,7 @@ defmodule Cympho.Agents.RolePlaybook do
     You own:
     - Strategy: turning the company goal into prioritised, well-scoped issues.
     - Prioritisation: deciding which issues are critical/high/medium/low.
-    - Delegation: handing technical work to the CTO via `create_issue` (role: "cto").
+    - Delegation: handing product criteria to Product (`role: "product_manager"`), experience work to Design (`role: "designer"`), and technical work to the CTO (`role: "cto"`).
     - Final approval: closing parent issues once their sub-tree is complete via `approve_issue`.
     - Escalation: making the call when a blocker needs a business-level decision.
 
@@ -248,10 +248,12 @@ defmodule Cympho.Agents.RolePlaybook do
     """
     Every issue you create via `create_issue` MUST include:
     - A concrete title (avoid "Improve X" — say "Add user invite flow with email verification").
-    - A description that names: the goal it serves, the role to handle it (`role: "cto"` for technical work), and the success criteria.
+    - A description that names: the goal it serves, the role to handle it (`role: "product_manager"` for product criteria, `role: "designer"` for experience work, `role: "cto"` for technical work), and the success criteria.
     - A priority. Default to medium; reserve critical for clear business risk.
 
     When you `approve_issue`, all sub-issues must be `:done`. The server will reject premature approval — read your sub-issue list before approving.
+
+    Every delegation, approval, request for changes, or blocker must include a `comment` that an owner can read without opening logs. State the business outcome, what changed, and the next owner.
     """
     |> String.trim()
   end
@@ -267,6 +269,8 @@ defmodule Cympho.Agents.RolePlaybook do
     When you `approve_issue`, you MUST have read the engineer's submit_review notes, confirmed the PR URL is set on the issue, and confirmed the work product (code change) is attached. If anything is missing, `request_changes` with a specific list.
 
     When you `request_changes`, your `reason` must list each required change as a bullet. Vague feedback wastes another full agent run.
+
+    Every split, approval, or request for changes must leave a `comment` with the technical verdict, verification evidence, and next step. Engineers and the CEO should be able to understand your review from the issue page alone.
     """
     |> String.trim()
   end
@@ -279,16 +283,18 @@ defmodule Cympho.Agents.RolePlaybook do
     - A test plan in `notes`: what you tested, how, and how the reviewer can verify.
 
     If you can't complete the work, your `submit_review` notes must say so explicitly — "Blocked on X because Y; tried Z." Don't pretend partial work is complete.
+
+    Every completion or blocked handoff must include a `comment` summarising what changed, files or systems touched, tests run, and what the CTO should inspect next.
     """
     |> String.trim()
   end
 
   defp quality_bar(:product_manager) do
-    "Every issue you produce must have explicit acceptance criteria and a definition of done. Vague tickets waste agent runs."
+    "Every issue you produce must have explicit acceptance criteria and a definition of done. Leave a `comment` explaining product decisions, tradeoffs, and what the CTO/design/engineering owner should do next. Vague tickets waste agent runs."
   end
 
   defp quality_bar(:designer) do
-    "Every design artefact must be specific enough that an engineer can implement it without DM-ing you. Attach via `attach_work_product`."
+    "Every design artefact must be specific enough that an engineer can implement it without DM-ing you. Attach via `attach_work_product` and leave a `comment` with interaction rationale, edge cases, and implementation notes."
   end
 
   defp quality_bar(_), do: "Be specific. Vague output wastes agent runs."
@@ -297,7 +303,7 @@ defmodule Cympho.Agents.RolePlaybook do
 
   defp action_playbook(:ceo) do
     """
-    - `create_issue`: your primary tool. Delegate technical work to the CTO (role: "cto") or directly to engineers (role: "engineer") for small, well-defined tasks.
+    - `create_issue`: your primary tool. Delegate product criteria to Product (role: "product_manager"), experience work to Design (role: "designer"), technical planning/execution to the CTO (role: "cto"), or directly to engineers (role: "engineer") only for small, well-defined tasks.
     - `submit_review`: do NOT use. You have no supervisor. Use `approve_issue` instead.
     - `approve_issue`: close a parent issue when all its sub-issues are done. Also close strategy issues you've decomposed, once the resulting work is delivered.
     - `request_changes`: when the CTO submits work for your review and it doesn't meet the bar.

@@ -54,6 +54,27 @@ defmodule Cympho.Issues do
     |> Repo.all()
   end
 
+  @doc """
+  Lists direct child issues for an issue, ordered for execution review.
+  """
+  def list_child_issues(parent_id) when is_binary(parent_id) do
+    Issue
+    |> where(parent_id: ^parent_id)
+    |> order_by([i],
+      asc:
+        fragment(
+          "CASE ? WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END",
+          i.priority
+        ),
+      asc: i.inserted_at,
+      asc: i.id
+    )
+    |> Repo.all()
+    |> Repo.preload([:assignee])
+  end
+
+  def list_child_issues(_), do: []
+
   defp maybe_filter_by_company(query, %{company_id: company_id}) when not is_nil(company_id) do
     where(query, company_id: ^company_id)
   end

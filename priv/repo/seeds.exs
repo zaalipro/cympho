@@ -8,7 +8,7 @@ case Companies.list_companies() do
         goal_title: "Build and operate an autonomous software company",
         issue_prefix: "CYM",
         engineer_count: 3,
-        adapter: :codex
+        adapter: :claude_code
       })
 
     IO.puts("""

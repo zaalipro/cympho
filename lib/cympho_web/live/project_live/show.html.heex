@@ -1,5 +1,8 @@
-<.page size="content">
-  <.header title={@project.name} subtitle={@project.description}>
+<.page size="wide">
+  <.header
+    title={@project.name}
+    subtitle="Project settings, repository context, issues, and agent environment variables."
+  >
     <:actions>
       <.app_link
         navigate={~p"/projects"}
@@ -8,17 +11,17 @@
         Back
       </.app_link>
       <.app_link
-        navigate={~p"/projects/#{@project.id}/edit"}
-        class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-white hover:bg-primary-hover transition-colors"
+        navigate={~p"/issues/new?project_id=#{@project.id}"}
+        class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
       >
-        <.icon name="hero-pencil-square-mini" class="w-3.5 h-3.5" /> Edit
+        <.icon name="hero-plus-mini" class="h-3.5 w-3.5" /> New issue
       </.app_link>
     </:actions>
   </.header>
 
   <.panel class="mb-5 p-5">
     <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-      <div class="flex min-w-0 items-center gap-3">
+      <div class="flex min-w-0 flex-wrap items-center gap-3">
         <.badge variant="pill" value={@project.prefix} />
         <.badge variant="status" value={to_string(@project.status)} />
         <a
@@ -26,9 +29,9 @@
           href={@project.repo_url}
           target="_blank"
           rel="noopener"
-          class="inline-flex items-center gap-1.5 text-caption text-primary hover:underline truncate"
+          class="inline-flex min-w-0 items-center gap-1.5 truncate text-caption text-primary hover:underline"
         >
-          <.icon name="hero-link-mini" class="w-3.5 h-3.5 shrink-0" />
+          <.icon name="hero-link-mini" class="h-3.5 w-3.5 shrink-0" />
           <span class="truncate">{@project.repo_url}</span>
         </a>
       </div>
@@ -37,38 +40,134 @@
           :for={status <- [:backlog, :todo, :in_progress, :in_review, :done, :blocked]}
           class="rounded-lg border border-hairline bg-surface-1 px-3 py-2"
         >
-          <div class="text-eyebrow text-ink-tertiary uppercase">{status_label(status)}</div>
+          <div class="text-eyebrow uppercase text-ink-tertiary">{status_label(status)}</div>
           <div class="mt-1 text-lg font-590 text-ink">{Map.get(@status_counts, status, 0)}</div>
         </div>
       </div>
     </div>
   </.panel>
 
-  <div class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+  <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
+    <.panel>
+      <div class="border-b border-border px-5 py-4">
+        <h2 class="text-card-title text-ink">Project settings</h2>
+        <p class="mt-0.5 text-caption text-ink-tertiary">
+          Edit the project directly from the same page agents and owners use for context.
+        </p>
+      </div>
+
+      <.simple_form for={@form} phx-submit="save" class="space-y-5 p-5">
+        <.input field={@form[:name]} label="Name" required />
+        <.input
+          field={@form[:description]}
+          label="Description"
+          type="textarea"
+          rows={3}
+        />
+        <div class="grid gap-5 sm:grid-cols-2">
+          <.input field={@form[:prefix]} label="Prefix" required placeholder="PROJ" />
+          <.select
+            name="project[status]"
+            label="Status"
+            options={[Active: "active", Archived: "archived"]}
+          />
+        </div>
+        <.input
+          field={@form[:repo_url]}
+          label="Repository URL"
+          placeholder="https://github.com/owner/repo"
+        />
+
+        <.color_swatch_picker field={@form[:color]} label="Sidebar color" />
+
+        <:actions>
+          <div class="flex items-center justify-end border-t border-hairline pt-5">
+            <.button type="submit" variant="primary">Save changes</.button>
+          </div>
+        </:actions>
+      </.simple_form>
+    </.panel>
+
+    <.panel>
+      <div class="p-5 space-y-4">
+        <div>
+          <h2 class="text-card-title text-ink">Environment variables</h2>
+          <p class="mt-0.5 text-caption text-ink-tertiary">
+            Injected into agent runs working on this project's issues. Values are encrypted at rest and never displayed after save.
+          </p>
+        </div>
+
+        <div
+          :if={Enum.empty?(@secrets)}
+          class="rounded-md border border-dashed border-hairline px-3 py-4 text-center text-caption text-ink-tertiary"
+        >
+          No environment variables yet.
+        </div>
+
+        <ul
+          :if={!Enum.empty?(@secrets)}
+          class="overflow-hidden rounded-md border border-hairline divide-y divide-hairline"
+        >
+          <li
+            :for={secret <- @secrets}
+            class="flex items-center gap-3 px-3 py-2 transition-colors duration-100 hover:bg-surface-2/40"
+          >
+            <span class="hero-key-mini h-3.5 w-3.5 shrink-0 text-ink-tertiary" />
+            <span class="font-mono text-caption text-ink">{secret.key}</span>
+            <span class="font-mono text-caption text-ink-tertiary">••••••••</span>
+            <button
+              type="button"
+              phx-click="delete_env"
+              phx-value-id={secret.id}
+              data-confirm={"Remove #{secret.key}?"}
+              class="ml-auto text-caption text-ink-tertiary transition-colors hover:text-error"
+              aria-label={"Delete #{secret.key}"}
+            >
+              <.icon name="hero-trash-mini" class="h-3.5 w-3.5" />
+            </button>
+          </li>
+        </ul>
+
+        <.simple_form
+          for={@env_form}
+          phx-submit="add_env"
+          class="grid grid-cols-1 items-end gap-2 border-t border-hairline pt-2 sm:grid-cols-[160px_1fr_auto]"
+        >
+          <.input field={@env_form[:key]} label="Key" placeholder="GITHUB_TOKEN" />
+          <.input field={@env_form[:value]} type="password" label="Value" placeholder="ghp_..." />
+          <:actions>
+            <.button type="submit" variant="secondary">Add</.button>
+          </:actions>
+        </.simple_form>
+      </div>
+    </.panel>
+  </div>
+
+  <div class="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
     <.panel>
       <div class="p-5">
-        <div class="flex items-center justify-between mb-3">
+        <div class="mb-3 flex items-center justify-between">
           <h2 class="text-card-title text-ink">Recent issues</h2>
           <.app_link
             navigate={~p"/issues?project_id=#{@project.id}"}
-            class="text-caption text-ink-muted hover:text-ink transition-colors"
+            class="text-caption text-ink-muted transition-colors hover:text-ink"
           >
-            View all →
+            View all
           </.app_link>
         </div>
 
         <div
           :if={Enum.empty?(@issues)}
-          class="text-caption text-ink-tertiary border border-dashed border-hairline rounded-md px-3 py-6 text-center"
+          class="rounded-md border border-dashed border-hairline px-3 py-6 text-center text-caption text-ink-tertiary"
         >
           No issues in this project yet.
         </div>
 
         <ul
           :if={!Enum.empty?(@issues)}
-          class="border border-hairline rounded-md divide-y divide-hairline overflow-hidden bg-surface-1/40"
+          class="overflow-hidden rounded-md border border-hairline bg-surface-1/40 divide-y divide-hairline"
         >
-          <li :for={issue <- @issues} class="hover:bg-surface-2 transition-colors duration-100">
+          <li :for={issue <- @issues} class="transition-colors duration-100 hover:bg-surface-2">
             <.app_link
               navigate={~p"/issues/#{issue.id}"}
               class="flex items-center gap-3 px-3 py-2"
@@ -76,7 +175,7 @@
               <.badge variant="status" value={to_string(issue.status)} />
               <span
                 :if={issue.identifier}
-                class="font-mono text-caption text-ink-tertiary shrink-0"
+                class="shrink-0 font-mono text-caption text-ink-tertiary"
               >
                 {issue.identifier}
               </span>
@@ -91,25 +190,19 @@
     <.panel>
       <div class="p-5 space-y-4">
         <div>
-          <span class="text-eyebrow text-ink-tertiary uppercase">Repository</span>
+          <span class="text-eyebrow uppercase text-ink-tertiary">Repository</span>
           <a
             :if={@project.repo_url not in [nil, ""]}
             href={@project.repo_url}
             target="_blank"
             rel="noopener"
-            class="mt-1 inline-flex items-center gap-1.5 text-caption text-primary hover:underline truncate max-w-full"
+            class="mt-1 inline-flex max-w-full items-center gap-1.5 truncate text-caption text-primary hover:underline"
           >
-            <.icon name="hero-arrow-top-right-on-square-mini" class="w-3.5 h-3.5 shrink-0" />
+            <.icon name="hero-arrow-top-right-on-square-mini" class="h-3.5 w-3.5 shrink-0" />
             <span class="truncate">{@project.repo_url}</span>
           </a>
           <p :if={@project.repo_url in [nil, ""]} class="mt-1 text-caption text-ink-tertiary">
-            Not configured.
-            <.app_link
-              navigate={~p"/projects/#{@project.id}/edit"}
-              class="text-primary hover:underline"
-            >
-              Add a repo URL
-            </.app_link>
+            Not configured. Add a repository URL above.
           </p>
         </div>
 
@@ -117,13 +210,13 @@
 
         <div>
           <div class="flex items-center justify-between">
-            <span class="text-eyebrow text-ink-tertiary uppercase">Env vars</span>
+            <span class="text-eyebrow uppercase text-ink-tertiary">Env vars</span>
             <span class="text-caption text-ink-tertiary">{length(@env_keys)}</span>
           </div>
           <ul :if={!Enum.empty?(@env_keys)} class="mt-2 space-y-1">
             <li :for={key <- @env_keys} class="flex items-center gap-2">
-              <span class="hero-key-mini text-ink-tertiary w-3.5 h-3.5 shrink-0" />
-              <span class="font-mono text-caption text-ink-muted truncate">{key}</span>
+              <span class="hero-key-mini h-3.5 w-3.5 shrink-0 text-ink-tertiary" />
+              <span class="truncate font-mono text-caption text-ink-muted">{key}</span>
             </li>
           </ul>
           <p :if={Enum.empty?(@env_keys)} class="mt-1 text-caption text-ink-tertiary">

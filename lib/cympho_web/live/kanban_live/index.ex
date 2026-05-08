@@ -4,6 +4,7 @@ defmodule CymphoWeb.KanbanLive.Index do
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.AgentHeartbeat
+  alias Cympho.Orchestrator.Dispatcher
   alias Cympho.Projects
 
   @status_columns [:backlog, :todo, :in_progress, :in_review, :blocked, :done, :cancelled]
@@ -36,6 +37,7 @@ defmodule CymphoWeb.KanbanLive.Index do
       |> assign(:issues, issues)
       |> assign(:agent_heartbeat_states, agent_heartbeat_states)
       |> assign(:projects, projects)
+      |> assign(:runtime_enabled?, Dispatcher.enabled?())
       |> assign(
         :agents,
         if(company_id,

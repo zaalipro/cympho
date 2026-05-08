@@ -40,6 +40,23 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Returns the first active CEO agent for a company.
+  """
+  def get_company_ceo(company_id) do
+    case Repo.one(
+           from a in Agent,
+             where:
+               a.company_id == ^company_id and a.role == :ceo and
+                 a.governance_status != "terminated",
+             order_by: [asc: a.inserted_at, asc: a.id],
+             limit: 1
+         ) do
+      nil -> {:error, :not_found}
+      agent -> {:ok, agent}
+    end
+  end
+
+  @doc """
   Sidebar projection: id, name, role, status.
   CEO/CTO pinned at top, then alphabetical. Excludes terminated agents.
   """

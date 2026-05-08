@@ -298,4 +298,7 @@ defmodule CymphoWeb.IssueLive.Index do
       assigns.current_search != "" or assigns.current_assignee_id != "" or
       assigns.current_project_id != "" or assigns.current_label_id != ""
   end
+
+  defp pluralize(1, word), do: word
+  defp pluralize(_, word), do: word <> "s"
 end

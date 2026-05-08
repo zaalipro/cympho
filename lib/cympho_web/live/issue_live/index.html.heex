@@ -188,7 +188,7 @@
           </span>
           <span class="truncate text-sm font-510 text-text-primary">{issue.title}</span>
           <span class={"hidden rounded-full px-2 py-0.5 text-[11px] font-510 sm:inline-flex #{status_badge_class(issue.status)}"}>
-            {to_string(issue.status)}
+            {status_label(issue.status)}
           </span>
         </div>
         <p class="mt-1 truncate text-xs text-text-tertiary">
@@ -204,12 +204,12 @@
 
       <div class="hidden md:block">
         <span class={"inline-flex rounded-full px-2 py-0.5 text-[11px] font-510 #{priority_badge_class(issue.priority)}"}>
-          {to_string(issue.priority)}
+          {String.capitalize(to_string(issue.priority))}
         </span>
       </div>
 
       <div class="hidden items-center justify-end gap-2 text-xs text-text-quaternary md:flex">
-        <span>{length(issue.comments)} comments</span>
+        <span>{length(issue.comments)} {pluralize(length(issue.comments), "comment")}</span>
       </div>
 
       <div class="flex justify-end">

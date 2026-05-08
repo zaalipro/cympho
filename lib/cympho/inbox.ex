@@ -61,6 +61,42 @@ defmodule Cympho.Inbox do
     |> Repo.preload([:issue, :agent])
   end
 
+  def status_counts_for_company(company_id) do
+    from(s in InboxState,
+      join: a in Cympho.Agents.Agent,
+      on: a.id == s.agent_id,
+      where: a.company_id == ^company_id,
+      group_by: s.status,
+      select: {s.status, count(s.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  def status_counts_for_agent(agent_id) do
+    from(s in InboxState,
+      where: s.agent_id == ^agent_id,
+      group_by: s.status,
+      select: {s.status, count(s.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  def counts_by_agent_for_company(company_id) do
+    from(s in InboxState,
+      join: a in Cympho.Agents.Agent,
+      on: a.id == s.agent_id,
+      where: a.company_id == ^company_id,
+      group_by: [s.agent_id, s.status],
+      select: {s.agent_id, s.status, count(s.id)}
+    )
+    |> Repo.all()
+    |> Enum.reduce(%{}, fn {agent_id, status, count}, acc ->
+      Map.update(acc, agent_id, %{status => count}, &Map.put(&1, status, count))
+    end)
+  end
+
   def list_inbox_for_agent(agent_id, opts \\ []) do
     status = Keyword.get(opts, :status)
     limit = Keyword.get(opts, :limit, 100)

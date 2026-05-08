@@ -6,7 +6,7 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
 
   describe "infer_role/1" do
     test "returns :ceo for strategic keywords in title" do
-      issue = %{title: "Strategic roadmap planning", description: "Look at market trends"}
+      issue = %{title: "Strategic vision planning", description: "Look at market trends"}
       assert Router.infer_role(issue) == :ceo
     end
 
@@ -23,6 +23,21 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
     test "returns :cto for infrastructure keywords" do
       issue = %{title: "Infrastructure setup", description: "Deploy to AWS"}
       assert Router.infer_role(issue) == :cto
+    end
+
+    test "technical platform keywords outrank design/product words" do
+      issue = %{title: "Infrastructure UX audit", description: "Improve the deploy workflow"}
+      assert Router.infer_role(issue) == :cto
+    end
+
+    test "returns :product_manager for product keywords" do
+      issue = %{title: "Roadmap acceptance criteria", description: "Prioritize customer needs"}
+      assert Router.infer_role(issue) == :product_manager
+    end
+
+    test "returns :designer for design keywords" do
+      issue = %{title: "UX workflow prototype", description: "Improve usability"}
+      assert Router.infer_role(issue) == :designer
     end
 
     test "returns :engineer for implementation keywords" do
@@ -50,14 +65,19 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
       assert Router.infer_role(issue) == :ceo
     end
 
+    test "matches uppercase product and design abbreviations" do
+      assert Router.infer_role(%{title: "PM queue", description: ""}) == :product_manager
+      assert Router.infer_role(%{title: "UX research", description: ""}) == :designer
+    end
+
     test "assigned_role takes precedence over keywords" do
       issue = %{
         title: "Strategic architecture planning",
         description: "CEO and CTO keywords",
-        assigned_role: "engineer"
+        assigned_role: "designer"
       }
 
-      assert Router.infer_role(issue) == :engineer
+      assert Router.infer_role(issue) == :designer
     end
   end
 
@@ -68,6 +88,14 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
 
     test ":cto returns [:ceo]" do
       assert Router.fallback_chain(:cto) == [:ceo]
+    end
+
+    test ":product_manager returns [:ceo]" do
+      assert Router.fallback_chain(:product_manager) == [:ceo]
+    end
+
+    test ":designer returns [:product_manager, :ceo]" do
+      assert Router.fallback_chain(:designer) == [:product_manager, :ceo]
     end
 
     test ":engineer returns [:cto, :ceo]" do
@@ -101,6 +129,14 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
           max_concurrent_jobs: 3
         })
 
+      {:ok, designer} =
+        Agents.create_agent(%{
+          name: "Design Agent",
+          role: :designer,
+          status: :idle,
+          max_concurrent_jobs: 3
+        })
+
       {:ok, engineer2} =
         Agents.create_agent(%{
           name: "Engineer B",
@@ -120,6 +156,7 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
       %{
         ceo: ceo,
         cto: cto,
+        designer: designer,
         engineer1: engineer1,
         engineer2: engineer2,
         error_agent: error_agent
@@ -128,6 +165,13 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
 
     test "returns agent when one matches role", %{engineer1: agent} do
       assert Router.select_agent(:engineer, [agent]) == {:ok, agent}
+    end
+
+    test "returns product and design agents by their roles", %{ceo: ceo, designer: designer} do
+      product = %{ceo | role: :product_manager, name: "Product Agent"}
+
+      assert Router.select_agent(:product_manager, [product, designer]) == {:ok, product}
+      assert Router.select_agent(:designer, [product, designer]) == {:ok, designer}
     end
 
     test "filters out error status agents", %{engineer1: _, error_agent: error_agent} do

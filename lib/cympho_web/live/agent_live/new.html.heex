@@ -28,63 +28,336 @@
   </.header>
 
   <.panel>
-    <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-5 p-5">
-      <div class="grid gap-5 sm:grid-cols-2">
-        <.input field={@form[:name]} label="Name" required placeholder="Elixir Engineer" />
-        <.input field={@form[:role]} type="select" label="Role" required options={role_options()} />
-      </div>
-
-      <div class="grid gap-5 sm:grid-cols-2">
-        <.input
-          field={@form[:adapter]}
-          type="select"
-          label="Adapter"
-          required
-          options={adapter_options()}
-        />
-        <.input
-          field={@form[:parent_id]}
-          type="select"
-          label="Reports to"
-          options={@reports_to_options}
-        />
-      </div>
-
-      <.input
-        field={@form[:instructions]}
-        label="Instructions"
-        type="textarea"
-        rows={8}
-        placeholder="Describe the agent's responsibilities, constraints, and working style."
-      />
-
-      <div class="space-y-1.5">
-        <label class="block text-xs font-510 text-text-secondary">
-          Environment Variables
-        </label>
-        <textarea
-          name="agent[env_text]"
-          rows="4"
-          placeholder={~s(ANTHROPIC_BASE_URL=https://api.anthropic.com\nANTHROPIC_AUTH_TOKEN=...)}
-          class="w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-text-primary placeholder-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-        ><%= @env_text %></textarea>
-        <p class="text-xs text-text-quaternary">
-          One <code>KEY=VALUE</code> per line. Forwarded to the adapter subprocess.
-          Sensitive values (e.g. API keys) should go in Secrets — secrets override these on conflict.
-        </p>
-      </div>
-
-      <:actions>
-        <div class="flex items-center justify-end gap-2 border-t border-border pt-5">
-          <.app_link
-            navigate={~p"/agents"}
-            class="rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-          >
-            Cancel
-          </.app_link>
-          <.button type="submit" variant="primary">Create Agent</.button>
+    <div id="new-agent-config-fields" phx-hook="AdapterConfigFields">
+      <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-5 p-5">
+        <div class="grid gap-5 sm:grid-cols-2">
+          <.input field={@form[:name]} label="Name" required placeholder="Elixir Engineer" />
+          <.input
+            field={@form[:role]}
+            type="select"
+            label="Role"
+            required
+            options={role_options()}
+          />
         </div>
-      </:actions>
-    </.simple_form>
+
+        <div class="grid gap-5 sm:grid-cols-2">
+          <.input
+            field={@form[:adapter]}
+            type="select"
+            label="Adapter"
+            required
+            value={@selected_adapter}
+            options={adapter_options()}
+          />
+          <.input
+            field={@form[:parent_id]}
+            type="select"
+            label="Reports to"
+            options={@reports_to_options}
+          />
+        </div>
+
+        <div
+          data-adapter-panel="codex"
+          hidden={@selected_adapter != "codex"}
+          class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+        >
+          <div class="space-y-1.5">
+            <label for="new-agent-codex-model" class="block text-xs font-510 text-text-secondary">
+              Codex model
+            </label>
+            <select
+              id="new-agent-codex-model"
+              name="agent[model]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{label, value} <- codex_model_options()}
+                value={value}
+                selected={value == @runtime_model}
+              >
+                {label}
+              </option>
+            </select>
+            <p class="text-xs text-text-quaternary">
+              Passed to Codex CLI as <code>--model</code>. Command is fixed to <code>codex</code>.
+            </p>
+          </div>
+          <div class="rounded-lg border border-border bg-canvas px-3 py-2 text-xs">
+            <p class="font-mono text-text-secondary">codex --model {@runtime_model}</p>
+            <p class="mt-1 text-text-quaternary">Stored in agent config.</p>
+          </div>
+        </div>
+
+        <div
+          data-adapter-panel="cursor"
+          hidden={@selected_adapter != "cursor"}
+          class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
+        >
+          <div class="space-y-1.5">
+            <label
+              for="new-agent-cursor-command"
+              class="block text-xs font-510 text-text-secondary"
+            >
+              Cursor command
+            </label>
+            <input
+              id="new-agent-cursor-command"
+              name="agent[runtime_command]"
+              value={@runtime_command || "agent"}
+              placeholder="agent"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+          <div class="space-y-1.5">
+            <label for="new-agent-cursor-model" class="block text-xs font-510 text-text-secondary">
+              Cursor model
+            </label>
+            <select
+              id="new-agent-cursor-model"
+              name="agent[model]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{label, value} <- cursor_model_options()}
+                value={value}
+                selected={value == @runtime_model}
+              >
+                {label}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <div
+          data-adapter-panel="openclaw"
+          hidden={@selected_adapter != "openclaw"}
+          class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
+        >
+          <div class="space-y-1.5">
+            <label
+              for="new-agent-openclaw-provider"
+              class="block text-xs font-510 text-text-secondary"
+            >
+              Model provider
+            </label>
+            <select
+              id="new-agent-openclaw-provider"
+              name="agent[provider]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{label, value} <- openclaw_provider_options()}
+                value={value}
+                selected={value == @runtime_provider}
+              >
+                {label}
+              </option>
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <label
+              for="new-agent-openclaw-model"
+              class="block text-xs font-510 text-text-secondary"
+            >
+              Provider model
+            </label>
+            <select
+              id="new-agent-openclaw-model"
+              name="agent[model]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{provider, label, value} <- openclaw_provider_model_options()}
+                value={value}
+                data-provider={provider}
+                hidden={provider != @runtime_provider}
+                disabled={provider != @runtime_provider}
+                selected={provider == @runtime_provider and value == @runtime_model}
+              >
+                {label}
+              </option>
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <label
+              for="new-agent-openclaw-endpoint"
+              class="block text-xs font-510 text-text-secondary"
+            >
+              Gateway endpoint
+            </label>
+            <input
+              id="new-agent-openclaw-endpoint"
+              name="agent[openclaw_endpoint]"
+              value={@openclaw_endpoint}
+              placeholder="http://localhost:18789"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div class="space-y-1.5">
+              <label
+                for="new-agent-openclaw-runtime"
+                class="block text-xs font-510 text-text-secondary"
+              >
+                Runtime
+              </label>
+              <select
+                id="new-agent-openclaw-runtime"
+                name="agent[openclaw_runtime]"
+                class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              >
+                <option value="subagent" selected={@openclaw_runtime == "subagent"}>
+                  Subagent
+                </option>
+                <option value="acp" selected={@openclaw_runtime == "acp"}>ACP harness</option>
+              </select>
+            </div>
+            <div class="space-y-1.5">
+              <label
+                for="new-agent-openclaw-harness"
+                class="block text-xs font-510 text-text-secondary"
+              >
+                Harness id
+              </label>
+              <input
+                id="new-agent-openclaw-harness"
+                name="agent[openclaw_harness_id]"
+                value={@openclaw_harness_id}
+                placeholder="codex"
+                class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div
+          data-adapter-panel="process"
+          hidden={@selected_adapter != "process"}
+          class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
+        >
+          <div class="space-y-1.5">
+            <label
+              for="new-agent-process-preset"
+              class="block text-xs font-510 text-text-secondary"
+            >
+              Process preset
+            </label>
+            <select
+              id="new-agent-process-preset"
+              name="agent[process_preset]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{label, value} <- process_preset_options()}
+                value={value}
+                selected={value == @process_preset}
+              >
+                {label}
+              </option>
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <label
+              for="new-agent-process-provider"
+              class="block text-xs font-510 text-text-secondary"
+            >
+              Provider family
+            </label>
+            <select
+              id="new-agent-process-provider"
+              name="agent[provider]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{label, value} <- process_provider_options()}
+                value={value}
+                selected={value == @runtime_provider}
+              >
+                {label}
+              </option>
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <label
+              for="new-agent-process-model"
+              class="block text-xs font-510 text-text-secondary"
+            >
+              Model
+            </label>
+            <select
+              id="new-agent-process-model"
+              name="agent[model]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{provider, label, value} <- process_provider_model_options()}
+                value={value}
+                data-provider={provider}
+                hidden={provider != @runtime_provider}
+                disabled={provider != @runtime_provider}
+                selected={provider == @runtime_provider and value == @runtime_model}
+              >
+                {label}
+              </option>
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <label
+              for="new-agent-process-command"
+              class="block text-xs font-510 text-text-secondary"
+            >
+              Command
+            </label>
+            <input
+              id="new-agent-process-command"
+              name="agent[runtime_command]"
+              value={@runtime_command}
+              placeholder="codex"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+        </div>
+
+        <.input
+          field={@form[:instructions]}
+          label="Instructions"
+          type="textarea"
+          rows={8}
+          placeholder="Describe the agent's responsibilities, constraints, and working style."
+        />
+
+        <div class="space-y-1.5">
+          <label class="block text-xs font-510 text-text-secondary">
+            Environment Variables
+          </label>
+          <textarea
+            name="agent[env_text]"
+            rows="4"
+            placeholder={
+              ~s(ANTHROPIC_BASE_URL=https://api.anthropic.com\nANTHROPIC_AUTH_TOKEN=...)
+            }
+            class="w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-text-primary placeholder-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+          ><%= @env_text %></textarea>
+          <p class="text-xs text-text-quaternary">
+            One <code>KEY=VALUE</code> per line. Forwarded to the adapter subprocess.
+            Sensitive values (e.g. API keys) should go in Secrets — secrets override these on conflict.
+          </p>
+        </div>
+
+        <:actions>
+          <div class="flex items-center justify-end gap-2 border-t border-border pt-5">
+            <.app_link
+              navigate={~p"/agents"}
+              class="rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+            >
+              Cancel
+            </.app_link>
+            <.button type="submit" variant="primary">Create Agent</.button>
+          </div>
+        </:actions>
+      </.simple_form>
+    </div>
   </.panel>
 </.page>

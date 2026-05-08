@@ -187,16 +187,22 @@ defmodule Cympho.CompaniesTest do
       assert %Company{name: "Bootstrap Test Co"} = result.company
       assert result.project.name == "Company OS"
       assert %Goal{title: "Build something great", goal_type: :mission} = result.goal
-      assert length(result.agents) == 4
+      assert length(result.agents) == 6
 
-      [ceo, cto, eng1, eng2] = result.agents
+      [ceo, cto, eng1, eng2, product_lead, design_lead] = result.agents
       assert ceo.role == :ceo
+      assert ceo.instructions =~ "Product"
+      assert ceo.instructions =~ "Design"
       assert cto.role == :cto
       assert cto.parent_id == ceo.id
       assert eng1.role == :engineer
       assert eng1.parent_id == cto.id
       assert eng2.role == :engineer
       assert eng2.parent_id == cto.id
+      assert product_lead.role == :product_manager
+      assert product_lead.parent_id == ceo.id
+      assert design_lead.role == :designer
+      assert design_lead.parent_id == ceo.id
 
       assert length(result.seed_issues) == 5
       assert Enum.all?(result.seed_issues, &(&1.goal_id == result.goal.id))
@@ -210,10 +216,12 @@ defmodule Cympho.CompaniesTest do
                  engineer_count: 0
                })
 
-      assert length(result.agents) == 2
-      [ceo, cto] = result.agents
+      assert length(result.agents) == 4
+      [ceo, cto, product_lead, design_lead] = result.agents
       assert ceo.role == :ceo
       assert cto.role == :cto
+      assert product_lead.role == :product_manager
+      assert design_lead.role == :designer
 
       eng_issue =
         Enum.find(result.seed_issues, &(&1.assigned_role == "cto" and &1.issue_number == 4))

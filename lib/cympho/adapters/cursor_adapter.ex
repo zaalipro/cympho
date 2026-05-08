@@ -2,8 +2,9 @@ defmodule Cympho.Adapters.CursorAdapter do
   @moduledoc """
   Adapter for Cursor IDE CLI.
 
-  Spawns a `cursor` CLI process and communicates via stdin/stdout using JSON
-  output mode. Emits the standard session message protocol.
+  Spawns Cursor's CLI agent process in non-interactive mode. Newer Cursor
+  installs expose the `agent` entrypoint, while `cursor-agent` and older
+  `cursor` binaries remain supported as fallbacks.
   """
 
   @behaviour Cympho.Adapters.Adapter
@@ -61,8 +62,7 @@ defmodule Cympho.Adapters.CursorAdapter do
     try do
       cursor_bin = find_cursor_binary(config)
       timeout = config[:timeout] || config["timeout"] || @default_timeout
-
-      args = build_cursor_args(config)
+      {args, stdin} = build_cursor_invocation(prompt, cursor_bin, config)
 
       env = build_env(config)
 
@@ -72,7 +72,9 @@ defmodule Cympho.Adapters.CursorAdapter do
 
       port = Port.open({:spawn_executable, cursor_bin}, port_opts)
 
-      Port.command(port, "#{prompt}\n")
+      if stdin do
+        Port.command(port, "#{stdin}\n")
+      end
 
       result = collect_output(port, "", timeout)
       Port.close(port)
@@ -90,23 +92,42 @@ defmodule Cympho.Adapters.CursorAdapter do
     end
   end
 
-  defp build_cursor_args(config) do
-    base_args = ["--cli", "--format", "json", "--quiet"]
+  defp build_cursor_invocation(prompt, cursor_bin, config) do
+    executable = cursor_bin |> Path.basename() |> String.downcase()
 
-    headless =
-      if config[:headless] || config["headless"] do
-        ["--headless"]
-      else
-        []
-      end
+    if executable in ["agent", "cursor-agent"] do
+      args =
+        ["-p", prompt, "--output-format", "json"] ++
+          mode_args(config) ++ force_args(config) ++ model_args(config)
 
-    model_args =
-      case config[:model] || config["model"] do
-        nil -> []
-        model -> ["--model", to_string(model)]
-      end
+      {args, nil}
+    else
+      args =
+        ["--cli", "--format", "json", "--quiet"] ++ headless_args(config) ++ model_args(config)
 
-    base_args ++ headless ++ model_args
+      {args, prompt}
+    end
+  end
+
+  defp mode_args(config) do
+    case config[:mode] || config["mode"] do
+      mode when mode in ["ask", "plan"] -> ["--mode", mode]
+      _ -> []
+    end
+  end
+
+  defp force_args(config), do: if(config[:force] || config["force"], do: ["--force"], else: [])
+
+  defp headless_args(config),
+    do: if(config[:headless] || config["headless"], do: ["--headless"], else: [])
+
+  defp model_args(config) do
+    case config[:model] || config["model"] do
+      nil -> []
+      "" -> []
+      "auto" -> []
+      model -> ["--model", to_string(model)]
+    end
   end
 
   defp cursor_cwd_opt(config) do
@@ -158,9 +179,15 @@ defmodule Cympho.Adapters.CursorAdapter do
   end
 
   defp find_cursor_binary(config) do
-    case config[:cursor_path] || config["cursor_path"] do
-      nil -> System.find_executable("cursor") || raise "cursor binary not found in PATH"
-      path -> path
+    case config[:command] || config["command"] || config[:cursor_path] || config["cursor_path"] do
+      nil ->
+        System.find_executable("agent") ||
+          System.find_executable("cursor-agent") ||
+          System.find_executable("cursor") ||
+          raise "Cursor agent binary not found in PATH"
+
+      path ->
+        resolve_command_path(path)
     end
   end
 
@@ -192,11 +219,18 @@ defmodule Cympho.Adapters.CursorAdapter do
   def config_schema do
     [
       %{
+        key: :command,
+        type: :string,
+        required: false,
+        default: nil,
+        description: "Cursor CLI command (defaults to agent, cursor-agent, then cursor)"
+      },
+      %{
         key: :cursor_path,
         type: :string,
         required: false,
         default: nil,
-        description: "Path to Cursor executable (defaults to system PATH)"
+        description: "Legacy path to Cursor executable"
       },
       %{
         key: :workspace_path,
@@ -209,8 +243,9 @@ defmodule Cympho.Adapters.CursorAdapter do
         key: :model,
         type: :string,
         required: false,
-        default: nil,
-        description: "Model to use within Cursor"
+        default: Cympho.Adapters.RuntimeOptions.cursor_default_model(),
+        options: Cympho.Adapters.RuntimeOptions.cursor_model_options(),
+        description: "Model to pass to Cursor with --model; Auto omits the flag"
       },
       %{
         key: :headless,
@@ -218,6 +253,21 @@ defmodule Cympho.Adapters.CursorAdapter do
         required: false,
         default: false,
         description: "Run Cursor in headless mode"
+      },
+      %{
+        key: :mode,
+        type: :string,
+        required: false,
+        default: nil,
+        options: [{"Agent", ""}, {"Ask", "ask"}, {"Plan", "plan"}],
+        description: "Cursor CLI mode for newer agent entrypoints"
+      },
+      %{
+        key: :force,
+        type: :boolean,
+        required: false,
+        default: false,
+        description: "Allow Cursor print mode to write files without confirmation"
       },
       %{
         key: :timeout,
@@ -250,8 +300,12 @@ defmodule Cympho.Adapters.CursorAdapter do
   def validate_config(config) do
     config = atomize_keys(config)
 
-    with :ok <- validate_cursor_path(config[:cursor_path]),
+    with :ok <- validate_command(config[:command]),
+         :ok <- validate_cursor_path(config[:cursor_path]),
          :ok <- validate_workspace_path(config[:workspace_path]),
+         :ok <- validate_model(config[:model]),
+         :ok <- validate_mode(config[:mode]),
+         :ok <- validate_force(config[:force]),
          :ok <- validate_timeout(config[:timeout]),
          :ok <- validate_headless(config[:headless]) do
       :ok
@@ -266,11 +320,27 @@ defmodule Cympho.Adapters.CursorAdapter do
   end
 
   defp resolve_cursor_path(config) do
-    case config[:cursor_path] || config["cursor_path"] do
-      nil -> System.find_executable("cursor")
-      path -> path
+    case config[:command] || config["command"] || config[:cursor_path] || config["cursor_path"] do
+      nil ->
+        System.find_executable("agent") ||
+          System.find_executable("cursor-agent") ||
+          System.find_executable("cursor")
+
+      path ->
+        resolve_command_path(path)
     end
   end
+
+  defp resolve_command_path(path) when is_binary(path) do
+    cond do
+      String.starts_with?(path, "/") -> path
+      true -> System.find_executable(path) || path
+    end
+  end
+
+  defp validate_command(nil), do: :ok
+  defp validate_command(command) when is_binary(command), do: :ok
+  defp validate_command(_), do: {:error, "command must be a string"}
 
   defp validate_cursor_path(nil), do: :ok
 
@@ -287,6 +357,18 @@ defmodule Cympho.Adapters.CursorAdapter do
   end
 
   defp validate_workspace_path(_), do: {:error, "workspace_path must be a string"}
+
+  defp validate_model(nil), do: :ok
+  defp validate_model(model) when is_binary(model), do: :ok
+  defp validate_model(_), do: {:error, "model must be a string"}
+
+  defp validate_mode(nil), do: :ok
+  defp validate_mode(mode) when mode in ["", "ask", "plan"], do: :ok
+  defp validate_mode(_), do: {:error, "mode must be ask or plan"}
+
+  defp validate_force(nil), do: :ok
+  defp validate_force(force) when is_boolean(force), do: :ok
+  defp validate_force(_), do: {:error, "force must be a boolean"}
 
   defp validate_timeout(nil), do: :ok
 

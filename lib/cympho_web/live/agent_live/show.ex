@@ -5,9 +5,11 @@ defmodule CymphoWeb.AgentLive.Show do
   alias Cympho.Agents.Agent
   alias Cympho.Agents.InstructionFiles
   alias Cympho.Agents.RuntimeEnv
+  alias Cympho.Adapters.RuntimeOptions
   alias Cympho.HeartbeatEngine
   alias Cympho.Issues
   alias Cympho.Plugins
+  alias Cympho.Secrets
   alias Cympho.Skills
   alias Cympho.Wakes
   alias CymphoWeb.Markdown
@@ -77,9 +79,15 @@ defmodule CymphoWeb.AgentLive.Show do
   def handle_event("config_validate", %{"agent" => agent_params} = params, socket) do
     env_rows = env_rows_from_params(params, socket.assigns.env_rows)
     permissions = permissions_from_params(params, socket.assigns.permissions)
+    selected_adapter = selected_adapter_from_params(agent_params, socket.assigns.agent)
+    runtime = runtime_form_from_params(agent_params, socket.assigns.agent)
 
     full_params =
       agent_params
+      |> Map.put(
+        "config",
+        build_adapter_config(socket.assigns.agent, selected_adapter, runtime)
+      )
       |> Map.put("runtime_config", build_runtime_config(socket.assigns.agent, env_rows))
       |> Map.put("permissions", permissions)
 
@@ -92,15 +100,23 @@ defmodule CymphoWeb.AgentLive.Show do
      socket
      |> assign(:env_rows, env_rows)
      |> assign(:permissions, permissions)
+     |> assign(:selected_adapter, selected_adapter)
+     |> assign_runtime_form(runtime)
      |> assign(:form, to_form(changeset))}
   end
 
   def handle_event("config_save", %{"agent" => agent_params} = params, socket) do
     env_rows = env_rows_from_params(params, socket.assigns.env_rows)
     permissions = permissions_from_params(params, socket.assigns.permissions)
+    selected_adapter = selected_adapter_from_params(agent_params, socket.assigns.agent)
+    runtime = runtime_form_from_params(agent_params, socket.assigns.agent)
 
     full_params =
       agent_params
+      |> Map.put(
+        "config",
+        build_adapter_config(socket.assigns.agent, selected_adapter, runtime)
+      )
       |> Map.put("runtime_config", build_runtime_config(socket.assigns.agent, env_rows))
       |> Map.put("permissions", permissions)
 
@@ -125,6 +141,8 @@ defmodule CymphoWeb.AgentLive.Show do
          |> put_flash(:error, "Could not save configuration.")
          |> assign(:env_rows, env_rows)
          |> assign(:permissions, permissions)
+         |> assign(:selected_adapter, selected_adapter)
+         |> assign_runtime_form(runtime)
          |> assign(:form, to_form(Map.put(changeset, :action, :update)))}
     end
   end
@@ -303,6 +321,7 @@ defmodule CymphoWeb.AgentLive.Show do
     runs = HeartbeatEngine.list_runs_for_agent(agent.id, limit: 30)
     recent_issues = Issues.list_recent_for_agent(agent.id, 10)
     env_vars = RuntimeEnv.from_agent(agent)
+    secret_count = Secrets.list_secrets_for_agent(agent.id) |> length()
     changeset = Agents.change_agent(agent)
 
     socket
@@ -312,7 +331,10 @@ defmodule CymphoWeb.AgentLive.Show do
     |> assign(:latest_run, List.first(runs))
     |> assign(:recent_issues, recent_issues)
     |> assign(:env_vars, env_vars)
+    |> assign(:secret_count, secret_count)
     |> assign(:env_rows, env_rows_from(agent))
+    |> assign(:selected_adapter, selected_adapter_from_agent(agent))
+    |> assign_runtime_form(runtime_form_from_agent(agent))
     |> assign(:permissions, normalise_permissions(agent.permissions))
     |> assign(:instructions_preview?, false)
     |> assign(:form, to_form(changeset))
@@ -376,6 +398,17 @@ defmodule CymphoWeb.AgentLive.Show do
   defp normalize_agent_params(params) do
     params
     |> Map.update("adapter", "claude_code", &normalize_adapter/1)
+    |> Map.drop([
+      "model",
+      "provider",
+      "runtime_command",
+      "process_preset",
+      "process_args",
+      "runtime_cwd",
+      "openclaw_endpoint",
+      "openclaw_runtime",
+      "openclaw_harness_id"
+    ])
     |> normalize_parent_id()
   end
 
@@ -422,6 +455,200 @@ defmodule CymphoWeb.AgentLive.Show do
     (existing || %{})
     |> Map.put("env", env)
   end
+
+  defp build_adapter_config(%Agent{config: existing}, "codex", runtime) do
+    (existing || %{})
+    |> Map.put("provider", "openai-codex")
+    |> put_clean("model", runtime.model)
+  end
+
+  defp build_adapter_config(%Agent{config: existing}, "cursor", runtime) do
+    (existing || %{})
+    |> put_clean("command", runtime.command)
+    |> put_clean("model", runtime.model)
+  end
+
+  defp build_adapter_config(%Agent{config: existing}, "openclaw", runtime) do
+    (existing || %{})
+    |> put_clean("provider", runtime.provider)
+    |> put_clean("model", runtime.model)
+    |> put_clean("endpoint", runtime.openclaw_endpoint)
+    |> put_clean("agent_runtime", runtime.openclaw_runtime)
+    |> put_clean("harness_id", runtime.openclaw_harness_id)
+  end
+
+  defp build_adapter_config(%Agent{config: existing}, "process", runtime) do
+    preset_defaults = RuntimeOptions.process_defaults(runtime.process_preset)
+
+    (existing || %{})
+    |> Map.merge(preset_defaults)
+    |> put_clean("process_preset", runtime.process_preset)
+    |> put_clean("provider", runtime.provider)
+    |> put_clean("model", runtime.model)
+    |> put_clean("command", runtime.command)
+    |> put_clean("args", args_from_text(runtime.process_args))
+    |> put_clean("cwd", runtime.cwd)
+  end
+
+  defp build_adapter_config(%Agent{config: existing}, _adapter, _runtime), do: existing || %{}
+
+  defp put_clean(map, _key, value) when value in [nil, ""], do: map
+  defp put_clean(map, key, value), do: Map.put(map, key, value)
+
+  defp selected_adapter_from_params(params, agent) do
+    params
+    |> Map.get("adapter")
+    |> case do
+      nil -> selected_adapter_from_agent(agent)
+      adapter -> normalize_adapter(adapter)
+    end
+  end
+
+  defp selected_adapter_from_agent(%Agent{adapter: nil}), do: "claude_code"
+
+  defp selected_adapter_from_agent(%Agent{adapter: adapter}),
+    do: adapter |> to_string() |> normalize_adapter()
+
+  defp assign_runtime_form(socket, runtime) do
+    socket
+    |> assign(:runtime_model, runtime.model)
+    |> assign(:runtime_provider, runtime.provider)
+    |> assign(:runtime_command, runtime.command)
+    |> assign(:process_preset, runtime.process_preset)
+    |> assign(:process_args, runtime.process_args)
+    |> assign(:runtime_cwd, runtime.cwd)
+    |> assign(:openclaw_endpoint, runtime.openclaw_endpoint)
+    |> assign(:openclaw_runtime, runtime.openclaw_runtime)
+    |> assign(:openclaw_harness_id, runtime.openclaw_harness_id)
+  end
+
+  defp runtime_form_from_params(params, %Agent{} = agent) do
+    fallback = runtime_form_from_agent(agent)
+    selected_adapter = selected_adapter_from_params(params, agent)
+
+    provider =
+      params
+      |> param_string("provider", fallback.provider)
+      |> default_runtime_provider(selected_adapter)
+
+    process_preset = param_string(params, "process_preset", fallback.process_preset)
+
+    %{
+      model: param_string(params, "model", fallback.model),
+      provider: provider,
+      command: param_string(params, "runtime_command", fallback.command),
+      process_preset: process_preset,
+      process_args: param_string(params, "process_args", fallback.process_args),
+      cwd: param_string(params, "runtime_cwd", fallback.cwd),
+      openclaw_endpoint: param_string(params, "openclaw_endpoint", fallback.openclaw_endpoint),
+      openclaw_runtime: param_string(params, "openclaw_runtime", fallback.openclaw_runtime),
+      openclaw_harness_id:
+        param_string(params, "openclaw_harness_id", fallback.openclaw_harness_id)
+    }
+    |> maybe_default_runtime_model(selected_adapter, provider, process_preset)
+  end
+
+  defp runtime_form_from_agent(%Agent{config: config, adapter: adapter}) do
+    config = config || %{}
+    adapter = adapter |> to_string() |> normalize_adapter()
+    provider = config["provider"] || default_provider(adapter)
+    process_preset = config["process_preset"] || RuntimeOptions.process_default_preset()
+
+    %{
+      model: config["model"] || default_model(adapter, provider),
+      provider: provider,
+      command: config["command"] || default_command(adapter, process_preset),
+      process_preset: process_preset,
+      process_args: args_to_text(config["args"]),
+      cwd: config["cwd"] || "",
+      openclaw_endpoint: config["endpoint"] || "",
+      openclaw_runtime: config["agent_runtime"] || "subagent",
+      openclaw_harness_id: config["harness_id"] || ""
+    }
+  end
+
+  defp maybe_default_runtime_model(runtime, adapter, provider, process_preset) do
+    valid_models =
+      adapter
+      |> runtime_model_options(provider, process_preset)
+      |> Enum.map(fn {_label, value} -> value end)
+
+    if runtime.model in [nil, ""] or
+         (valid_models != [] and runtime.model not in valid_models) do
+      %{runtime | model: default_model(adapter, provider, process_preset)}
+    else
+      runtime
+    end
+  end
+
+  defp runtime_model_options("codex", _provider, _preset),
+    do: Cympho.Adapters.CodexAdapter.model_options()
+
+  defp runtime_model_options("cursor", _provider, _preset),
+    do: RuntimeOptions.cursor_model_options()
+
+  defp runtime_model_options("openclaw", provider, _preset),
+    do: RuntimeOptions.openclaw_model_options(provider)
+
+  defp runtime_model_options("process", provider, _preset),
+    do: RuntimeOptions.process_model_options(provider)
+
+  defp runtime_model_options(_adapter, _provider, _preset), do: []
+
+  defp default_provider("openclaw"), do: RuntimeOptions.openclaw_default_provider()
+  defp default_provider("process"), do: ""
+  defp default_provider("codex"), do: "openai-codex"
+  defp default_provider(_), do: ""
+
+  defp default_runtime_provider(provider, "openclaw") when provider in [nil, ""],
+    do: RuntimeOptions.openclaw_default_provider()
+
+  defp default_runtime_provider(provider, _adapter), do: provider || ""
+
+  defp default_model("codex", _provider), do: Cympho.Adapters.CodexAdapter.default_model()
+  defp default_model("cursor", _provider), do: RuntimeOptions.cursor_default_model()
+  defp default_model("openclaw", provider), do: RuntimeOptions.openclaw_default_model(provider)
+  defp default_model("process", provider), do: default_model("process", provider, nil)
+  defp default_model(_, _provider), do: ""
+
+  defp default_model("process", provider, _preset) do
+    provider
+    |> RuntimeOptions.process_model_options()
+    |> List.first()
+    |> case do
+      {_label, value} -> value
+      nil -> ""
+    end
+  end
+
+  defp default_model(adapter, provider, _preset), do: default_model(adapter, provider)
+
+  defp default_command("cursor", _preset), do: "agent"
+
+  defp default_command("process", preset),
+    do: RuntimeOptions.process_defaults(preset)["command"] || ""
+
+  defp default_command(_, _preset), do: ""
+
+  defp param_string(params, key, fallback) do
+    case Map.get(params, key) do
+      value when is_binary(value) -> String.trim(value)
+      _ -> fallback || ""
+    end
+  end
+
+  defp args_from_text(nil), do: []
+  defp args_from_text(""), do: []
+
+  defp args_from_text(text) when is_binary(text) do
+    text
+    |> String.split("\n", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp args_to_text(args) when is_list(args), do: Enum.join(args, "\n")
+  defp args_to_text(_), do: ""
 
   defp permissions_from_params(%{"permissions" => params}, fallback) when is_map(params) do
     Map.merge(fallback, Map.new(params, fn {k, v} -> {to_string(k), truthy?(v)} end))
@@ -470,6 +697,16 @@ defmodule CymphoWeb.AgentLive.Show do
     Agents.adapter_options()
     |> Enum.map(fn adapter -> {adapter_label_human(adapter), to_string(adapter)} end)
   end
+
+  def codex_model_options, do: Cympho.Adapters.CodexAdapter.model_options()
+  def cursor_model_options, do: RuntimeOptions.cursor_model_options()
+  def openclaw_provider_options, do: RuntimeOptions.openclaw_provider_options()
+  def openclaw_provider_model_options, do: RuntimeOptions.openclaw_provider_model_options()
+  def openclaw_model_options(provider), do: RuntimeOptions.openclaw_model_options(provider)
+  def process_preset_options, do: RuntimeOptions.process_preset_options()
+  def process_provider_options, do: RuntimeOptions.process_provider_options()
+  def process_provider_model_options, do: RuntimeOptions.process_provider_model_options()
+  def process_model_options(provider), do: RuntimeOptions.process_model_options(provider)
 
   def render_markdown(text), do: Markdown.to_html(text)
 
@@ -591,6 +828,25 @@ defmodule CymphoWeb.AgentLive.Show do
   def adapter_label(nil), do: "No adapter"
   def adapter_label(""), do: "No adapter"
   def adapter_label(adapter), do: adapter_label_human(adapter)
+
+  def adapter_runtime_label(%Agent{adapter: :claude_code} = agent) do
+    runtime_config_value(agent, "command") ||
+      Application.get_env(:cympho, :claude_code_command) ||
+      System.get_env("CYMPHO_CLAUDE_COMMAND") ||
+      "claude"
+  end
+
+  def adapter_runtime_label(%Agent{adapter: "claude_code"} = agent),
+    do: adapter_runtime_label(%Agent{agent | adapter: :claude_code})
+
+  def adapter_runtime_label(_agent), do: nil
+
+  defp runtime_config_value(%Agent{runtime_config: runtime_config, config: config}, key) do
+    Map.get(runtime_config || %{}, key) ||
+      Map.get(runtime_config || %{}, String.to_atom(key)) ||
+      Map.get(config || %{}, key) ||
+      Map.get(config || %{}, String.to_atom(key))
+  end
 
   defp adapter_label_human(:claude_code), do: "Claude Code"
   defp adapter_label_human(:codex), do: "Codex"

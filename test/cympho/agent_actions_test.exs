@@ -243,6 +243,7 @@ defmodule Cympho.AgentActionsTest do
       updated = Issues.get_issue!(issue.id)
       assert updated.status == :done
       assert updated.assignee_id == nil
+      assert updated.assigned_role == nil
       assert updated.checked_out_at == nil
     end
 

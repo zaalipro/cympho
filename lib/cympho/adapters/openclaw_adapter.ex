@@ -62,15 +62,36 @@ defmodule Cympho.Adapters.OpenClawAdapter do
       }
     }
 
-    # Merge with custom config if provided
-    custom_context = config[:context] || config["context"]
+    base
+    |> maybe_put("provider", config[:provider] || config["provider"])
+    |> maybe_put("model", config[:model] || config["model"])
+    |> maybe_put_runtime(config)
+    |> maybe_put_context(config[:context] || config["context"])
+  end
 
-    if custom_context do
-      put_in(base, ["task", "context"], custom_context)
-    else
-      base
+  defp maybe_put(map, _key, value) when value in [nil, ""], do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp maybe_put_runtime(payload, config) do
+    runtime = config[:agent_runtime] || config["agent_runtime"]
+    harness_id = config[:harness_id] || config["harness_id"]
+
+    cond do
+      runtime in [nil, ""] and harness_id in [nil, ""] ->
+        payload
+
+      true ->
+        runtime_payload =
+          %{}
+          |> maybe_put("type", runtime)
+          |> maybe_put("agentId", harness_id)
+
+        Map.put(payload, "runtime", runtime_payload)
     end
   end
+
+  defp maybe_put_context(payload, nil), do: payload
+  defp maybe_put_context(payload, context), do: put_in(payload, ["task", "context"], context)
 
   defp make_openclaw_request(endpoint, api_key, payload) do
     # Ensure inets application is started before using :httpc
@@ -225,6 +246,40 @@ defmodule Cympho.Adapters.OpenClawAdapter do
         description: "OpenClaw API key for authentication"
       },
       %{
+        key: :provider,
+        type: :string,
+        required: false,
+        default: Cympho.Adapters.RuntimeOptions.openclaw_default_provider(),
+        options: Cympho.Adapters.RuntimeOptions.openclaw_provider_options(),
+        description: "OpenClaw model provider id"
+      },
+      %{
+        key: :model,
+        type: :string,
+        required: false,
+        default: Cympho.Adapters.RuntimeOptions.openclaw_default_model(),
+        options:
+          Cympho.Adapters.RuntimeOptions.openclaw_model_options(
+            Cympho.Adapters.RuntimeOptions.openclaw_default_provider()
+          ),
+        description: "OpenClaw model id in provider/model form"
+      },
+      %{
+        key: :agent_runtime,
+        type: :string,
+        required: false,
+        default: "subagent",
+        options: [{"Subagent", "subagent"}, {"ACP", "acp"}],
+        description: "OpenClaw runtime to request for this task"
+      },
+      %{
+        key: :harness_id,
+        type: :string,
+        required: false,
+        default: nil,
+        description: "ACP harness id, for example codex or cursor"
+      },
+      %{
         key: :context,
         type: :map,
         required: false,
@@ -250,6 +305,10 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   def validate_config(config) do
     with :ok <- validate_endpoint(config["endpoint"] || config[:endpoint]),
          :ok <- validate_api_key(config["api_key"] || config[:api_key]),
+         :ok <- validate_string(config["provider"] || config[:provider], "provider"),
+         :ok <- validate_string(config["model"] || config[:model], "model"),
+         :ok <- validate_runtime(config["agent_runtime"] || config[:agent_runtime]),
+         :ok <- validate_string(config["harness_id"] || config[:harness_id], "harness_id"),
          :ok <- validate_context(config["context"] || config[:context]) do
       :ok
     end
@@ -270,6 +329,16 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   defp validate_api_key(nil), do: :ok
   defp validate_api_key(key) when is_binary(key), do: :ok
   defp validate_api_key(_), do: {:error, "api_key must be a string"}
+
+  defp validate_string(nil, _field), do: :ok
+  defp validate_string("", _field), do: :ok
+  defp validate_string(value, _field) when is_binary(value), do: :ok
+  defp validate_string(_value, field), do: {:error, "#{field} must be a string"}
+
+  defp validate_runtime(nil), do: :ok
+  defp validate_runtime(""), do: :ok
+  defp validate_runtime(runtime) when runtime in ["subagent", "acp"], do: :ok
+  defp validate_runtime(_), do: {:error, "agent_runtime must be subagent or acp"}
 
   defp validate_context(nil), do: :ok
 

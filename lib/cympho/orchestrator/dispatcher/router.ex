@@ -6,19 +6,21 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   selects the least-loaded eligible agent, and provides fallback chains.
   """
 
-  @strategic_keywords ~w[strategic vision roadmap funding market partnership acquisition ceo]
+  @strategic_keywords ~w[strategic vision funding market partnership acquisition ceo]
+  @product_keywords ~w[product roadmap customer acceptance requirements priority prioritization pm]
+  @design_keywords ~w[ux ui interface workflow prototype usability research]
   @technical_keywords ~w[technical architecture plan review refactor system infrastructure cto]
   @implementation_keywords ~w[implement build fix test code feature bug integration deploy]
 
   @doc """
   Infers the appropriate role for an issue based on keywords in title and description.
 
-  Returns `:ceo`, `:cto`, or `:engineer`.
+  Returns `:ceo`, `:cto`, `:product_manager`, `:designer`, or `:engineer`.
   """
-  @spec infer_role(map()) :: :ceo | :cto | :engineer
+  @spec infer_role(map()) :: :ceo | :cto | :product_manager | :designer | :engineer
   def infer_role(issue) do
     case assigned_role(issue) do
-      role when role in [:ceo, :cto, :engineer] ->
+      role when role in [:ceo, :cto, :product_manager, :designer, :engineer] ->
         role
 
       _ ->
@@ -29,9 +31,13 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   defp infer_role_from_text(issue) do
     text = "#{field(issue, :title)} #{field(issue, :description) || ""}" |> String.downcase()
 
+    # Matching order is routing priority. Strategic owner work stays with the
+    # CEO; technical platform words beat product/design words when both appear.
     cond do
       matches_any?(text, @strategic_keywords) -> :ceo
       matches_any?(text, @technical_keywords) -> :cto
+      matches_any?(text, @product_keywords) -> :product_manager
+      matches_any?(text, @design_keywords) -> :designer
       matches_any?(text, @implementation_keywords) -> :engineer
       true -> :engineer
     end
@@ -47,6 +53,8 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
 
   defp role_to_atom("ceo"), do: :ceo
   defp role_to_atom("cto"), do: :cto
+  defp role_to_atom("product_manager"), do: :product_manager
+  defp role_to_atom("designer"), do: :designer
   defp role_to_atom("engineer"), do: :engineer
   defp role_to_atom(_), do: nil
 
@@ -59,7 +67,9 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
 
   Returns {:ok, agent} or {:error, :no_agent_available}.
   """
-  @spec select_agent(:ceo | :cto | :engineer, [Cympho.Agents.Agent.t()]) ::
+  @spec select_agent(:ceo | :cto | :product_manager | :designer | :engineer, [
+          Cympho.Agents.Agent.t()
+        ]) ::
           {:ok, Cympho.Agents.Agent.t()} | {:error, :no_agent_available}
   def select_agent(role, eligible_agents) do
     eligible_agents
@@ -76,16 +86,25 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   Returns the ordered fallback chain for a role.
 
   - `:ceo` → [] (strategic queues for CEO only)
+  - `:product_manager` → [:ceo]
+  - `:designer` → [:product_manager, :ceo]
   - `:cto` → [:ceo]
   - `:engineer` → [:cto, :ceo]
   """
-  @spec fallback_chain(:ceo | :cto | :engineer) :: [:cto | :ceo, ...]
+  @spec fallback_chain(:ceo | :cto | :product_manager | :designer | :engineer) :: [
+          :product_manager | :cto | :ceo,
+          ...
+        ]
   def fallback_chain(:ceo), do: []
+  def fallback_chain(:product_manager), do: [:ceo]
+  def fallback_chain(:designer), do: [:product_manager, :ceo]
   def fallback_chain(:cto), do: [:ceo]
   def fallback_chain(:engineer), do: [:cto, :ceo]
 
   defp matches_any?(text, keywords) do
-    Enum.any?(keywords, &String.contains?(text, &1))
+    Enum.any?(keywords, fn keyword ->
+      Regex.match?(~r/(^|[^a-z0-9])#{Regex.escape(keyword)}([^a-z0-9]|$)/, text)
+    end)
   end
 
   defp agent_count_load(agent) do

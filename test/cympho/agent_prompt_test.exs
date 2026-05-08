@@ -70,6 +70,19 @@ defmodule Cympho.AgentPromptTest do
       assert prompt =~ "submit_review"
     end
 
+    test "action contract requires owner-facing comment updates", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      prompt = AgentPrompt.build(issue, engineer.id)
+
+      assert prompt =~
+               "Every response that advances, reviews, blocks, delegates, or completes work MUST include a `comment` action"
+
+      assert prompt =~ "owner-facing execution record"
+      assert prompt =~ "Every completion or blocked handoff must include a `comment`"
+    end
+
     test "CEO's action contract calls out submit_review as forbidden", %{
       issue: issue,
       ceo: ceo
@@ -80,6 +93,18 @@ defmodule Cympho.AgentPromptTest do
       # The forbidden list explicitly mentions submit_review
       assert prompt =~ "submit_review"
       assert prompt =~ "no_supervisor_to_review"
+    end
+
+    test "CEO's action example does not demonstrate forbidden submit_review", %{
+      issue: issue,
+      ceo: ceo
+    } do
+      prompt = AgentPrompt.build(issue, ceo.id)
+      [_before_example, example] = String.split(prompt, "### JSON shape and example", parts: 2)
+
+      refute example =~ ~s("type": "submit_review")
+      assert example =~ ~s("role": "product_manager")
+      assert example =~ ~s("role": "cto")
     end
   end
 

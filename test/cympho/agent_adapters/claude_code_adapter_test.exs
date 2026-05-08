@@ -131,6 +131,99 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapterTest do
     end
   end
 
+  describe "run/4" do
+    test "reports non-thinking non-json output as a parse error" do
+      tmp_dir =
+        Path.join(
+          System.tmp_dir!(),
+          "cympho-claude-adapter-parse-#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf(tmp_dir) end)
+
+      script_path = Path.join(tmp_dir, "fake-claude")
+
+      File.write!(script_path, """
+      #!/usr/bin/env bash
+      printf 'Plain progress line that is not JSON\\n'
+      """)
+
+      File.chmod!(script_path, 0o755)
+
+      issue = %Cympho.Issues.Issue{
+        id: Ecto.UUID.generate(),
+        title: "Parser regression smoke test",
+        description: "Confirm non-JSON output is not swallowed",
+        lineage: %{}
+      }
+
+      session_id =
+        ClaudeCodeAdapter.run(issue, Ecto.UUID.generate(), self(),
+          command: script_path,
+          cwd: tmp_dir
+        )
+
+      assert_receive {:session_started, ^session_id}, 5_000
+
+      assert_receive {:turn_ended_with_error, ^session_id, {:parse_error, output}}, 5_000
+      assert output =~ "Plain progress line"
+    end
+
+    test "passes runtime env into the adapter subprocess" do
+      tmp_dir =
+        Path.join(
+          System.tmp_dir!(),
+          "cympho-claude-adapter-#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf(tmp_dir) end)
+
+      capture_path = Path.join(tmp_dir, "env.capture")
+      script_path = Path.join(tmp_dir, "fake-claude")
+
+      File.write!(script_path, """
+      #!/usr/bin/env bash
+      {
+        echo "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL"
+        echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
+        echo "ANTHROPIC_MODEL=$ANTHROPIC_MODEL"
+      } > "#{capture_path}"
+      printf '{"content":[{"type":"text","text":"ok"}]}'
+      """)
+
+      File.chmod!(script_path, 0o755)
+
+      issue = %Cympho.Issues.Issue{
+        id: Ecto.UUID.generate(),
+        title: "Provider env smoke test",
+        description: "Confirm env variables reach the subprocess",
+        lineage: %{}
+      }
+
+      session_id =
+        ClaudeCodeAdapter.run(issue, Ecto.UUID.generate(), self(),
+          command: script_path,
+          cwd: tmp_dir,
+          env: %{
+            "ANTHROPIC_BASE_URL" => "https://cheap-provider.example/anthropic",
+            "ANTHROPIC_API_KEY" => "test-provider-key",
+            "ANTHROPIC_MODEL" => "cheap-model"
+          }
+        )
+
+      assert_receive {:session_started, ^session_id}, 1_000
+      assert_receive {:turn_completed, ^session_id, %{"content" => [%{"text" => "ok"}]}}, 1_000
+
+      assert File.read!(capture_path) =~
+               "ANTHROPIC_BASE_URL=https://cheap-provider.example/anthropic"
+
+      assert File.read!(capture_path) =~ "ANTHROPIC_API_KEY=test-provider-key"
+      assert File.read!(capture_path) =~ "ANTHROPIC_MODEL=cheap-model"
+    end
+  end
+
   describe "behaviour compliance" do
     test "implements Cympho.AgentAdapters.Adapter" do
       behaviours =

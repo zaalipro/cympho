@@ -460,7 +460,12 @@
   </div>
 
   <%!-- ── Configuration tab ─────────────────────────────────────── --%>
-  <div :if={@current_tab == "configuration"}>
+  <div
+    :if={@current_tab == "configuration"}
+    id={"agent-config-fields-#{@agent.id}"}
+    phx-hook="AdapterConfigFields"
+  >
+    <% selected_adapter = @selected_adapter || "claude_code" %>
     <.simple_form
       for={@form}
       phx-change="config_validate"
@@ -502,6 +507,7 @@
             type="select"
             label="Adapter type"
             required
+            value={selected_adapter}
             options={adapter_options()}
           />
           <div class="space-y-1.5">
@@ -519,6 +525,296 @@
                 {@form[:max_concurrent_jobs].value || 3}
               </span>
             </div>
+          </div>
+        </div>
+        <div
+          data-adapter-panel="claude_code"
+          hidden={selected_adapter != "claude_code"}
+          class="mt-4 rounded-lg border border-border bg-surface px-3 py-3"
+        >
+          <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
+            Runtime command
+          </p>
+          <p class="mt-1 font-mono text-xs text-text-secondary">
+            {adapter_runtime_label(@agent)}
+          </p>
+          <p class="mt-1 text-xs text-text-quaternary">
+            Claude-compatible wrappers use environment variables for provider and model routing.
+          </p>
+        </div>
+        <div
+          data-adapter-panel="codex"
+          hidden={selected_adapter != "codex"}
+          class="mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+        >
+          <div class="space-y-1.5">
+            <label for="agent-codex-model" class="block text-xs font-510 text-text-secondary">
+              Codex model
+            </label>
+            <select
+              id="agent-codex-model"
+              name="agent[model]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{label, value} <- codex_model_options()}
+                value={value}
+                selected={value == @runtime_model}
+              >
+                {label}
+              </option>
+            </select>
+            <p class="text-xs text-text-quaternary">
+              Passed to Codex CLI as <code>--model</code>. Command is fixed to <code>codex</code>.
+            </p>
+          </div>
+          <div class="rounded-lg border border-border bg-canvas px-3 py-2 text-xs">
+            <p class="font-mono text-text-secondary">codex --model {@runtime_model}</p>
+            <p class="mt-1 text-text-quaternary">Stored in agent config.</p>
+          </div>
+        </div>
+        <div
+          data-adapter-panel="cursor"
+          hidden={selected_adapter != "cursor"}
+          class="mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
+        >
+          <div class="space-y-1.5">
+            <label for="agent-cursor-command" class="block text-xs font-510 text-text-secondary">
+              Cursor command
+            </label>
+            <input
+              id="agent-cursor-command"
+              name="agent[runtime_command]"
+              value={@runtime_command || "agent"}
+              placeholder="agent"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+            <p class="text-xs text-text-quaternary">
+              Uses Cursor CLI print mode. <code>agent</code>
+              is preferred; <code>cursor-agent</code>
+              remains compatible.
+            </p>
+          </div>
+          <div class="space-y-1.5">
+            <label for="agent-cursor-model" class="block text-xs font-510 text-text-secondary">
+              Cursor model
+            </label>
+            <select
+              id="agent-cursor-model"
+              name="agent[model]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{label, value} <- cursor_model_options()}
+                value={value}
+                selected={value == @runtime_model}
+              >
+                {label}
+              </option>
+            </select>
+            <p class="text-xs text-text-quaternary">
+              Cursor can list installed-account models with <code>agent models</code>.
+            </p>
+          </div>
+        </div>
+        <div
+          data-adapter-panel="openclaw"
+          hidden={selected_adapter != "openclaw"}
+          class="mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 lg:grid-cols-2"
+        >
+          <div class="space-y-1.5">
+            <label
+              for="agent-openclaw-provider"
+              class="block text-xs font-510 text-text-secondary"
+            >
+              Model provider
+            </label>
+            <select
+              id="agent-openclaw-provider"
+              name="agent[provider]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{label, value} <- openclaw_provider_options()}
+                value={value}
+                selected={value == @runtime_provider}
+              >
+                {label}
+              </option>
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <label for="agent-openclaw-model" class="block text-xs font-510 text-text-secondary">
+              Provider model
+            </label>
+            <select
+              id="agent-openclaw-model"
+              name="agent[model]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{provider, label, value} <- openclaw_provider_model_options()}
+                value={value}
+                data-provider={provider}
+                hidden={provider != @runtime_provider}
+                disabled={provider != @runtime_provider}
+                selected={provider == @runtime_provider and value == @runtime_model}
+              >
+                {label}
+              </option>
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <label
+              for="agent-openclaw-endpoint"
+              class="block text-xs font-510 text-text-secondary"
+            >
+              Gateway endpoint
+            </label>
+            <input
+              id="agent-openclaw-endpoint"
+              name="agent[openclaw_endpoint]"
+              value={@openclaw_endpoint}
+              placeholder="http://localhost:18789"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div class="space-y-1.5">
+              <label
+                for="agent-openclaw-runtime"
+                class="block text-xs font-510 text-text-secondary"
+              >
+                Runtime
+              </label>
+              <select
+                id="agent-openclaw-runtime"
+                name="agent[openclaw_runtime]"
+                class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              >
+                <option value="subagent" selected={@openclaw_runtime == "subagent"}>
+                  Subagent
+                </option>
+                <option value="acp" selected={@openclaw_runtime == "acp"}>ACP harness</option>
+              </select>
+            </div>
+            <div class="space-y-1.5">
+              <label
+                for="agent-openclaw-harness"
+                class="block text-xs font-510 text-text-secondary"
+              >
+                Harness id
+              </label>
+              <input
+                id="agent-openclaw-harness"
+                name="agent[openclaw_harness_id]"
+                value={@openclaw_harness_id}
+                placeholder="codex"
+                class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              />
+            </div>
+          </div>
+        </div>
+        <div
+          data-adapter-panel="process"
+          hidden={selected_adapter != "process"}
+          class="mt-4 grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 lg:grid-cols-2"
+        >
+          <div class="space-y-1.5">
+            <label for="agent-process-preset" class="block text-xs font-510 text-text-secondary">
+              Process preset
+            </label>
+            <select
+              id="agent-process-preset"
+              name="agent[process_preset]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{label, value} <- process_preset_options()}
+                value={value}
+                selected={value == @process_preset}
+              >
+                {label}
+              </option>
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <label for="agent-process-provider" class="block text-xs font-510 text-text-secondary">
+              Provider family
+            </label>
+            <select
+              id="agent-process-provider"
+              name="agent[provider]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{label, value} <- process_provider_options()}
+                value={value}
+                selected={value == @runtime_provider}
+              >
+                {label}
+              </option>
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <label for="agent-process-model" class="block text-xs font-510 text-text-secondary">
+              Model
+            </label>
+            <select
+              id="agent-process-model"
+              name="agent[model]"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={{provider, label, value} <- process_provider_model_options()}
+                value={value}
+                data-provider={provider}
+                hidden={provider != @runtime_provider}
+                disabled={provider != @runtime_provider}
+                selected={provider == @runtime_provider and value == @runtime_model}
+              >
+                {label}
+              </option>
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <label for="agent-process-command" class="block text-xs font-510 text-text-secondary">
+              Command
+            </label>
+            <input
+              id="agent-process-command"
+              name="agent[runtime_command]"
+              value={@runtime_command}
+              placeholder="codex"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+          <div class="space-y-1.5">
+            <label for="agent-process-cwd" class="block text-xs font-510 text-text-secondary">
+              Working directory
+            </label>
+            <input
+              id="agent-process-cwd"
+              name="agent[runtime_cwd]"
+              value={@runtime_cwd}
+              placeholder="/workspace/project"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+          <div class="space-y-1.5">
+            <label for="agent-process-args" class="block text-xs font-510 text-text-secondary">
+              Extra args
+            </label>
+            <textarea
+              id="agent-process-args"
+              name="agent[process_args]"
+              rows="3"
+              placeholder="--force\n--output-format json"
+              class="w-full rounded-lg border border-border bg-panel px-3 py-2 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            ><%= @process_args %></textarea>
+            <p class="text-xs text-text-quaternary">
+              One argument per line. Presets add the model mapping automatically.
+            </p>
           </div>
         </div>
       </.panel>
@@ -544,6 +840,14 @@
         </div>
 
         <div class="space-y-2 p-5">
+          <div
+            :if={@secret_count > 0}
+            class="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200"
+          >
+            {@secret_count} encrypted secret{if @secret_count == 1, do: "", else: "s"} available
+            for this agent. Secret values are injected at runtime and are not shown here.
+          </div>
+
           <div :for={{row, idx} <- Enum.with_index(@env_rows)} class="flex items-center gap-2">
             <input
               type="text"

@@ -282,7 +282,7 @@ defmodule Cympho.AgentPrompt do
     [
       action_contract_intro(),
       role_action_guidance(role),
-      action_contract_example()
+      action_contract_example(role)
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")
@@ -294,6 +294,8 @@ defmodule Cympho.AgentPrompt do
     Return a concise summary followed by exactly one fenced `cympho-actions` block.
     The block must contain JSON with an `actions` array. The server will ignore
     any requested side effect that is not represented in this block.
+
+    Every response that advances, reviews, blocks, delegates, or completes work MUST include a `comment` action. The comment should state: what you did, evidence or verification, blockers if any, and who should act next. The issue page uses these comments as the owner-facing execution record.
     """
     |> String.trim()
   end
@@ -363,7 +365,152 @@ defmodule Cympho.AgentPrompt do
     |> String.trim()
   end
 
-  defp action_contract_example do
+  defp action_contract_example(:ceo) do
+    """
+    ### JSON shape and example
+    Each action requires `type` plus the fields listed in the action playbook above.
+
+    ```cympho-actions
+    {
+      "actions": [
+        {
+          "type": "comment",
+          "body": "I am splitting this into product, design, and technical work before execution."
+        },
+        {
+          "type": "create_issue",
+          "title": "Define onboarding activation success criteria",
+          "description": "Goal: make the owner request measurable before implementation. Role: product_manager. Success criteria: activation metric, launch scope, and definition of done are explicit.",
+          "role": "product_manager",
+          "priority": "high"
+        },
+        {
+          "type": "create_issue",
+          "title": "Plan onboarding implementation tasks",
+          "description": "Goal: turn the approved onboarding scope into engineer-ready work. Role: cto. Success criteria: sub-tickets have acceptance criteria, dependencies, and verification steps.",
+          "role": "cto",
+          "priority": "high"
+        }
+      ]
+    }
+    ```
+    """
+    |> String.trim()
+  end
+
+  defp action_contract_example(:cto) do
+    """
+    ### JSON shape and example
+    Each action requires `type` plus the fields listed in the action playbook above.
+
+    ```cympho-actions
+    {
+      "actions": [
+        {
+          "type": "comment",
+          "body": "I split this into the smallest engineer-owned implementation tickets."
+        },
+        {
+          "type": "create_issue",
+          "title": "Implement onboarding progress tracking",
+          "description": "What: add progress state and UI. Acceptance criteria: steps persist, current step is visible, and regression tests cover the flow. Dependencies: product acceptance criteria. Definition of done: PR linked, tests pass, manual verification recorded.",
+          "role": "engineer",
+          "priority": "high"
+        }
+      ]
+    }
+    ```
+    """
+    |> String.trim()
+  end
+
+  defp action_contract_example(:engineer) do
+    """
+    ### JSON shape and example
+    Each action requires `type` plus the fields listed in the action playbook above.
+
+    ```cympho-actions
+    {
+      "actions": [
+        {
+          "type": "comment",
+          "body": "Implemented the progress tracking path and added regression coverage."
+        },
+        {
+          "type": "attach_work_product",
+          "kind": "code_change",
+          "title": "Onboarding progress tracking implementation",
+          "description": "Changed the onboarding LiveView and added tests for step persistence."
+        },
+        {
+          "type": "set_pr_url",
+          "url": "https://github.com/acme/app/pull/42"
+        },
+        {
+          "type": "submit_review",
+          "role": "cto",
+          "notes": "Tests: mix test test/cympho_web/live/onboarding_live_test.exs. Manual: created a company and confirmed the active onboarding step persists after reload."
+        }
+      ]
+    }
+    ```
+    """
+    |> String.trim()
+  end
+
+  defp action_contract_example(:product_manager) do
+    """
+    ### JSON shape and example
+    Each action requires `type` plus the fields listed in the action playbook above.
+
+    ```cympho-actions
+    {
+      "actions": [
+        {
+          "type": "attach_work_product",
+          "kind": "document",
+          "title": "Onboarding acceptance criteria",
+          "description": "Defines activation metric, user stories, dependencies, and definition of done."
+        },
+        {
+          "type": "submit_review",
+          "role": "ceo",
+          "notes": "Spec is ready for CEO review and CTO implementation planning."
+        }
+      ]
+    }
+    ```
+    """
+    |> String.trim()
+  end
+
+  defp action_contract_example(:designer) do
+    """
+    ### JSON shape and example
+    Each action requires `type` plus the fields listed in the action playbook above.
+
+    ```cympho-actions
+    {
+      "actions": [
+        {
+          "type": "attach_work_product",
+          "kind": "artifact",
+          "title": "Onboarding flow design spec",
+          "description": "Includes states, empty/error cases, and responsive behavior for engineering."
+        },
+        {
+          "type": "submit_review",
+          "role": "ceo",
+          "notes": "Design spec is ready for CEO review and CTO implementation planning."
+        }
+      ]
+    }
+    ```
+    """
+    |> String.trim()
+  end
+
+  defp action_contract_example(_role) do
     """
     ### JSON shape and example
     Each action requires `type` plus the fields listed in the action playbook above.

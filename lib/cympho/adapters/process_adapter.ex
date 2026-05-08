@@ -67,8 +67,23 @@ defmodule Cympho.Adapters.ProcessAdapter do
   end
 
   defp build_args(_issue, _agent_id, config) do
-    # Return only the configured args - issue payload is passed via env
-    config[:args] || config["args"] || []
+    # Return configured args plus optional model forwarding args.
+    args = config[:args] || config["args"] || []
+    model = config[:model] || config["model"]
+
+    args ++ model_args(config, model)
+  end
+
+  defp model_args(_config, model) when model in [nil, ""], do: []
+
+  defp model_args(config, model) do
+    case config[:model_arg_template] || config["model_arg_template"] do
+      template when is_list(template) ->
+        Enum.map(template, &String.replace(to_string(&1), "{{model}}", to_string(model)))
+
+      _ ->
+        []
+    end
   end
 
   defp build_env(issue, agent_id, config) do
@@ -90,9 +105,11 @@ defmodule Cympho.Adapters.ProcessAdapter do
     ]
 
     custom_env = config[:env] || config["env"] || %{}
+    model_env = model_env(config)
 
     custom_env_list =
-      Enum.map(custom_env, fn {k, v} ->
+      Map.merge(custom_env, model_env)
+      |> Enum.map(fn {k, v} ->
         {to_string(k), to_string(v)}
       end)
 
@@ -115,6 +132,17 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
   defp runtime_context_env(%Cympho.RuntimeContext{env: env}) when is_map(env), do: env
   defp runtime_context_env(_), do: %{}
+
+  defp model_env(config) do
+    model = config[:model] || config["model"]
+    key = config[:model_env_key] || config["model_env_key"]
+
+    if model in [nil, ""] or key in [nil, ""] do
+      %{}
+    else
+      %{to_string(key) => to_string(model)}
+    end
+  end
 
   defp run_process(session_id, command, args, opts, recipient_pid, config) do
     send(recipient_pid, {:session_started, session_id})
@@ -269,6 +297,43 @@ defmodule Cympho.Adapters.ProcessAdapter do
         description: "Working directory"
       },
       %{
+        key: :process_preset,
+        type: :string,
+        required: false,
+        default: Cympho.Adapters.RuntimeOptions.process_default_preset(),
+        options: Cympho.Adapters.RuntimeOptions.process_preset_options(),
+        description: "Known CLI runtime preset"
+      },
+      %{
+        key: :provider,
+        type: :string,
+        required: false,
+        default: nil,
+        options: Cympho.Adapters.RuntimeOptions.process_provider_options(),
+        description: "Provider family used by the command"
+      },
+      %{
+        key: :model,
+        type: :string,
+        required: false,
+        default: nil,
+        description: "Model to forward through args or env when configured"
+      },
+      %{
+        key: :model_arg_template,
+        type: :list,
+        required: false,
+        default: [],
+        description: "Argument template, e.g. [\"--model\", \"{{model}}\"]"
+      },
+      %{
+        key: :model_env_key,
+        type: :string,
+        required: false,
+        default: nil,
+        description: "Environment variable name used to pass the model"
+      },
+      %{
         key: :timeout,
         type: :integer,
         required: false,
@@ -317,6 +382,13 @@ defmodule Cympho.Adapters.ProcessAdapter do
     with :ok <- validate_command(config["command"] || config[:command]),
          :ok <- validate_args(config["args"] || config[:args]),
          :ok <- validate_cwd(config["cwd"] || config[:cwd]),
+         :ok <-
+           validate_string(config["process_preset"] || config[:process_preset], "process_preset"),
+         :ok <- validate_string(config["provider"] || config[:provider], "provider"),
+         :ok <- validate_string(config["model"] || config[:model], "model"),
+         :ok <- validate_args(config["model_arg_template"] || config[:model_arg_template]),
+         :ok <-
+           validate_string(config["model_env_key"] || config[:model_env_key], "model_env_key"),
          :ok <- validate_timeout(config["timeout"] || config[:timeout]),
          :ok <- validate_env(config["env"] || config[:env]) do
       :ok
@@ -351,6 +423,11 @@ defmodule Cympho.Adapters.ProcessAdapter do
   end
 
   defp validate_cwd(_), do: {:error, "cwd must be a string"}
+
+  defp validate_string(nil, _field), do: :ok
+  defp validate_string("", _field), do: :ok
+  defp validate_string(value, _field) when is_binary(value), do: :ok
+  defp validate_string(_value, field), do: {:error, "#{field} must be a string"}
 
   defp validate_timeout(nil), do: :ok
 
