@@ -1,12 +1,23 @@
 defmodule Cympho.AgentPromptTest do
   use Cympho.DataCase, async: false
 
-  alias Cympho.{AgentPrompt, Companies, Issues, AgentActions}
+  alias Cympho.{
+    AgentPrompt,
+    AgentActions,
+    AgentPromptContract,
+    Companies,
+    Issues,
+    Repo,
+    WorkProducts
+  }
+
+  alias Cympho.Comments
+  alias Cympho.HeartbeatEngine.Run
 
   setup do
     {:ok,
      %{
-       agents: [ceo, cto, engineer | _],
+       agents: [ceo, cto, engineer | rest],
        seed_issues: seed_issues
      }} =
       Companies.create_autonomous_company(%{
@@ -16,7 +27,16 @@ defmodule Cympho.AgentPromptTest do
       })
 
     issue = List.first(seed_issues)
-    %{ceo: ceo, cto: cto, engineer: engineer, issue: issue}
+    agents = [ceo, cto, engineer | rest]
+
+    %{
+      ceo: ceo,
+      cto: cto,
+      engineer: engineer,
+      product_manager: Enum.find(agents, &(&1.role == :product_manager)),
+      designer: Enum.find(agents, &(&1.role == :designer)),
+      issue: issue
+    }
   end
 
   describe "build/3 — role playbook injection" do
@@ -79,8 +99,83 @@ defmodule Cympho.AgentPromptTest do
       assert prompt =~
                "Every response that advances, reviews, blocks, delegates, or completes work MUST include a `comment` action"
 
+      assert prompt =~ "[owner_update]"
+      assert prompt =~ "[delivery]"
+      assert prompt =~ "What happened"
+      assert prompt =~ "Current state"
+      assert prompt =~ "Next decision"
       assert prompt =~ "owner-facing execution record"
-      assert prompt =~ "Every completion or blocked handoff must include a `comment`"
+      assert prompt =~ "Split conservatively"
+      assert prompt =~ "excessive active sub-issues"
+      assert prompt =~ "Role completion contract"
+      assert prompt =~ "Completion contract status"
+      assert prompt =~ "Engineer / delivery owner"
+      assert prompt =~ "Before `submit_review`, add `[delivery] What happened:"
+      assert prompt =~ "Every completion or blocked handoff must include a tagged `comment`"
+      assert prompt =~ "Files changed"
+      assert prompt =~ "Verification"
+      assert prompt =~ "Risks"
+      assert prompt =~ "[blocked] Cause:"
+      assert prompt =~ "Attempted fix"
+      assert prompt =~ "Needs:"
+      assert prompt =~ "Pull request contract"
+      assert prompt =~ "Branch name must include the issue id"
+      assert prompt =~ "PR title must include the issue id"
+      assert prompt =~ "Task List"
+      assert prompt =~ "Validation"
+      assert prompt =~ "GitHub checkboxes"
+      assert prompt =~ "set_pr_url"
+      assert prompt =~ "code_change"
+      assert prompt =~ "Treat your final response summary as run memory"
+      assert prompt =~ "Avoid vague endings"
+    end
+
+    test "CEO and CTO prompts spell out their completion contracts", %{
+      issue: issue,
+      ceo: ceo,
+      cto: cto
+    } do
+      ceo_prompt = AgentPrompt.build(issue, ceo.id)
+      cto_prompt = AgentPrompt.build(issue, cto.id)
+
+      assert ceo_prompt =~ "owner-visible business update"
+      assert ceo_prompt =~ "add `[owner_update] What happened:"
+      assert ceo_prompt =~ "Business status: shipped/not shipped"
+      assert ceo_prompt =~ "Owner decision needed"
+      assert cto_prompt =~ "technical decomposition and review"
+      assert cto_prompt =~ "leave `[review] Verdict:"
+      assert cto_prompt =~ "Gaps"
+      assert cto_prompt =~ "Follow-up issues"
+      assert cto_prompt =~ "Verification"
+    end
+
+    test "per-role examples produce summary fields consumed by the issue digest", %{
+      issue: issue,
+      ceo: ceo,
+      cto: cto,
+      engineer: engineer,
+      product_manager: product_manager,
+      designer: designer
+    } do
+      ceo_prompt = AgentPrompt.build(issue, ceo.id)
+      cto_prompt = AgentPrompt.build(issue, cto.id)
+      engineer_prompt = AgentPrompt.build(issue, engineer.id)
+
+      assert ceo_prompt =~ "Business status: not shipped yet"
+      assert ceo_prompt =~ "Owner decision needed: none"
+      assert cto_prompt =~ "Follow-up issues: onboarding progress tracking"
+
+      for prompt <- [
+            engineer_prompt,
+            AgentPrompt.build(issue, product_manager.id),
+            AgentPrompt.build(issue, designer.id)
+          ] do
+        assert prompt =~ "Files changed:"
+        assert prompt =~ "Verification:"
+        assert prompt =~ "Risks:"
+        assert prompt =~ "Current state:"
+        assert prompt =~ "Next decision:"
+      end
     end
 
     test "CEO's action contract calls out submit_review as forbidden", %{
@@ -105,10 +200,123 @@ defmodule Cympho.AgentPromptTest do
       refute example =~ ~s("type": "submit_review")
       assert example =~ ~s("role": "product_manager")
       assert example =~ ~s("role": "cto")
+      assert example =~ "[owner_update]"
+    end
+
+    test "product and design examples demonstrate owner-facing comments", %{
+      issue: issue,
+      product_manager: product_manager,
+      designer: designer
+    } do
+      for agent <- [product_manager, designer] do
+        prompt = AgentPrompt.build(issue, agent.id)
+        [_before_example, example] = String.split(prompt, "### JSON shape and example", parts: 2)
+
+        assert example =~ ~s("type": "comment")
+      end
+    end
+  end
+
+  describe "prompt contract preview" do
+    test "builds role-specific required templates" do
+      engineer = AgentPromptContract.build(:engineer)
+      cto = AgentPromptContract.build(:cto)
+      ceo = AgentPromptContract.build(:ceo)
+
+      assert engineer.status == :good
+      assert engineer.required_template =~ "[delivery]"
+      assert engineer.required_template =~ "Files changed"
+      assert engineer.required_template =~ "Risks"
+      assert Enum.any?(engineer.snippets, &(&1.tag == "[blocked]"))
+
+      assert cto.required_template =~ "[review]"
+      assert cto.required_template =~ "Verdict"
+      assert cto.required_template =~ "Follow-up issues"
+
+      assert ceo.required_template =~ "[owner_update]"
+      assert ceo.required_template =~ "Business status"
+      assert ceo.required_template =~ "Owner decision needed"
+    end
+
+    test "flags weak and conflicting custom overrides" do
+      weak = AgentPromptContract.build(:engineer, "Do good work.")
+      conflict = AgentPromptContract.build(:engineer, "Skip comments and no tests.")
+
+      assert weak.status == :weak
+      assert weak.summary =~ "custom overrides do not reinforce"
+
+      assert conflict.status == :attention
+      assert Enum.any?(conflict.checks, &(&1.status == :attention))
     end
   end
 
   describe "build/3 — issue history" do
+    test "prompt includes digest quality gaps before review", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      prompt = AgentPrompt.build(issue, engineer.id)
+
+      assert prompt =~ "Digest quality checklist"
+      assert prompt =~ "Current owner digest:"
+      assert prompt =~ "Evidence coverage:"
+      assert prompt =~ "[missing] Agent completion note"
+      assert prompt =~ "[missing] Work product"
+      assert prompt =~ "need attention before submit_review"
+      assert prompt =~ "`attach_work_product`"
+    end
+
+    test "prompt marks digest quality ready when evidence is complete", %{
+      engineer: engineer
+    } do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Evidence-ready prompt issue",
+          description: "Implement and verify the thing.",
+          status: :in_review,
+          priority: :medium,
+          github_pr_url: "https://github.com/acme/app/pull/42"
+        })
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body:
+            "Implemented the change, attached the work product, and verified the focused test.",
+          author_type: "agent",
+          author_id: engineer.id,
+          issue_id: issue.id
+        })
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      Repo.insert!(%Run{
+        agent_id: engineer.id,
+        issue_id: issue.id,
+        status: "completed",
+        adapter: "codex",
+        continuation_summary: "Focused tests passed.",
+        inserted_at: now,
+        completed_at: now
+      })
+
+      {:ok, _work_product} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          created_by_agent_id: engineer.id,
+          kind: "code_change",
+          title: "Evidence-ready implementation",
+          description: "Code change with tests and PR link."
+        })
+
+      prompt = AgentPrompt.build(Issues.get_issue!(issue.id), engineer.id)
+
+      assert prompt =~ "Digest quality checklist"
+      assert prompt =~ "No digest gaps are currently blocking review"
+      assert prompt =~ "[ok] Agent completion note"
+      assert prompt =~ "[ok] Work product"
+      assert prompt =~ "[ok] Code reference"
+    end
+
     test "prompt includes recent comments and sub-issues", %{
       issue: issue,
       ceo: ceo,

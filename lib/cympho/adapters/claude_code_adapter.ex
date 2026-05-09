@@ -112,21 +112,21 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
 
   @impl true
   def validate_config(config) do
-    config = atomize_keys(config)
-
-    with :ok <- validate_stall_timeout(config[:stall_timeout]),
-         :ok <- validate_cwd(config[:cwd]),
-         :ok <- validate_resume(config[:resume]) do
+    with :ok <- validate_stall_timeout(config_value(config, :stall_timeout)),
+         :ok <- validate_cwd(config_value(config, :cwd)),
+         :ok <- validate_resume(config_value(config, :resume)) do
       :ok
     end
   end
 
-  defp atomize_keys(map) when is_map(map) do
-    Map.new(map, fn
-      {k, v} when is_binary(k) -> {String.to_atom(k), v}
-      {k, v} -> {k, v}
-    end)
+  defp config_value(config, key) when is_map(config) and is_atom(key) do
+    case Map.fetch(config, key) do
+      {:ok, value} -> value
+      :error -> Map.get(config, Atom.to_string(key))
+    end
   end
+
+  defp config_value(_config, _key), do: nil
 
   defp get_api_key(config) do
     config[:api_key] || config["api_key"] ||

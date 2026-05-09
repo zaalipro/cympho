@@ -6,6 +6,13 @@ defmodule Cympho.IssuesTest do
   alias Cympho.Issues.StateMachine
   alias Cympho.Projects
   alias Cympho.Agents
+  alias Cympho.Comments
+  alias Cympho.HeartbeatEngine.Run
+  alias Cympho.PullRequestContract
+  alias Cympho.ReviewNudges
+  alias Cympho.Repo
+  alias Cympho.WorkProducts
+  alias Cympho.Wakes
 
   setup do
     {:ok, issue} =
@@ -82,6 +89,154 @@ defmodule Cympho.IssuesTest do
       assert Enum.map(children, & &1.id) == [critical.id, low.id]
       assert Enum.all?(children, &match?(%Cympho.Agents.Agent{}, &1.assignee))
       assert Enum.all?(children, &match?(%Ecto.Association.NotLoaded{}, &1.comments))
+    end
+  end
+
+  describe "recheck_pr_quality/2" do
+    test "stores rich PR quality state and clears a satisfied PR nudge" do
+      {:ok, engineer} =
+        Agents.create_agent(%{
+          name: "PR Repair Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Fix PR quality",
+          identifier: "CYM-7",
+          status: :in_progress,
+          assignee_id: engineer.id,
+          github_pr_url: "https://github.com/acme/app/pull/7",
+          monitor_state: %{
+            "pr_quality" => %{
+              "status" => "attention",
+              "summary" => "1 PR contract gap needs fixes.",
+              "gaps" => [
+                %{"label" => "Branch name", "detail" => "Expected branch to include CYM-7."}
+              ]
+            }
+          }
+        })
+
+      assert {:ok, _queued} =
+               ReviewNudges.execute_contract_gap(issue, "pr_quality", agents: [engineer])
+
+      assert [_pending] = Wakes.list_review_nudges([issue.id])
+
+      body =
+        Jason.encode!(%{
+          "title" => PullRequestContract.title(issue),
+          "body" => PullRequestContract.body_template(issue),
+          "html_url" => issue.github_pr_url,
+          "number" => 7,
+          "state" => "open",
+          "head" => %{"ref" => PullRequestContract.branch_name(issue)}
+        })
+
+      http_fn = fn _url, _headers, _finch ->
+        {:ok, %Finch.Response{status: 200, body: body}}
+      end
+
+      assert {:ok, updated, %{status: :ready}} =
+               Issues.recheck_pr_quality(issue,
+                 http_fn: http_fn,
+                 token: "test",
+                 source: "manual_button"
+               )
+
+      assert updated.monitor_state["pr_quality"]["status"] == "ready"
+      assert updated.monitor_state["pr_quality"]["passed"] == true
+      assert updated.monitor_state["pr_quality"]["checked_source"] == "manual_button"
+      assert updated.monitor_state["pr_quality"]["missing_fields"] == []
+      assert updated.monitor_state["pr_quality"]["last_checked_at"]
+
+      assert [] = Wakes.list_review_nudges([issue.id])
+      assert [_cleared] = Wakes.list_review_nudges([issue.id], statuses: ["consumed"])
+    end
+
+    test "returns a clear error when no PR is linked", %{issue: issue} do
+      assert {:error, :missing_pr_url} = Issues.recheck_pr_quality(issue)
+    end
+  end
+
+  describe "transition_issue_with_review_gates/3" do
+    test "blocks review transition without review evidence" do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Guarded review transition",
+          description: "Owner request is clear.",
+          status: :in_progress,
+          priority: :medium
+        })
+
+      assert {:error,
+              {:review_gates_blocked, %{status: :in_review, blockers: blockers, message: message}}} =
+               Issues.transition_issue_with_review_gates(issue, :in_review)
+
+      assert message =~ "Review gates blocking status change"
+      assert Enum.any?(blockers, &(&1.key == :runtime_verification))
+      assert Enum.any?(blockers, &(&1.key == :agent_note))
+      assert Issues.get_issue!(issue.id).status == :in_progress
+    end
+
+    test "allows closure after runtime, artifact, and review evidence exist" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Review Gate Agent",
+          role: :cto,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Guarded closure transition",
+          description: "Owner request is clear.",
+          status: :in_review,
+          priority: :medium
+        })
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body:
+            "[delivery] What happened: delivered the work for review. Files changed: evidence document. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
+          author_type: "agent",
+          author_id: agent.id,
+          issue_id: issue.id
+        })
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body:
+            "[review] Verdict: accepted. What happened: verified the delivered work. Verification: runtime passed. Gaps: none. Follow-up issues: none. Next decision: close.",
+          author_type: "agent",
+          author_id: agent.id,
+          issue_id: issue.id
+        })
+
+      Repo.insert!(%Run{
+        agent_id: agent.id,
+        issue_id: issue.id,
+        status: "completed",
+        adapter: "process",
+        continuation_summary: "Verification passed."
+      })
+
+      {:ok, _work_product} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          created_by_agent_id: agent.id,
+          kind: "document",
+          title: "Closure evidence",
+          description: "Evidence for closure."
+        })
+
+      assert {:ok, updated} = Issues.transition_issue_with_review_gates(issue, :done)
+      assert updated.status == :done
     end
   end
 

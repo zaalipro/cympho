@@ -2,7 +2,7 @@ defmodule CymphoWeb.RoutineController do
   use CymphoWeb, :controller
   plug :accepts, ["json"]
 
-  alias Cympho.Routines
+  alias Cympho.{Agents, Projects, Routines}
 
   action_fallback CymphoWeb.FallbackController
 
@@ -21,16 +21,18 @@ defmodule CymphoWeb.RoutineController do
   end
 
   def create(conn, %{"routine" => routine_params}) do
-    case Routines.create_routine(routine_params) do
-      {:ok, routine} ->
-        conn
-        |> put_status(:created)
-        |> json(%{data: serialize(routine)})
+    with {:ok, routine_params} <- scoped_routine_params(conn, routine_params) do
+      case Routines.create_routine(routine_params) do
+        {:ok, routine} ->
+          conn
+          |> put_status(:created)
+          |> json(%{data: serialize(routine)})
 
-      {:error, changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{errors: translate_errors(changeset)})
+        {:error, changeset} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{errors: translate_errors(changeset)})
+      end
     end
   end
 
@@ -39,7 +41,8 @@ defmodule CymphoWeb.RoutineController do
   def update(conn, %{"id" => id, "routine" => routine_params}) do
     company_id = conn.assigns.current_company.id
 
-    with {:ok, routine} <- Routines.get_company_routine(company_id, id) do
+    with {:ok, routine_params} <- scoped_routine_params(conn, routine_params),
+         {:ok, routine} <- Routines.get_company_routine(company_id, id) do
       case Routines.update_routine(routine, routine_params) do
         {:ok, routine} ->
           json(conn, %{data: serialize(routine)})
@@ -116,6 +119,35 @@ defmodule CymphoWeb.RoutineController do
 
     (routine.agent && routine.agent.company_id == company_id) ||
       (routine.project && routine.project.company_id == company_id)
+  end
+
+  defp scoped_routine_params(conn, params) do
+    company_id = conn.assigns.current_company.id
+
+    with :ok <- validate_agent_ref(company_id, params["agent_id"]),
+         :ok <- validate_project_ref(company_id, params["project_id"]) do
+      {:ok, params}
+    end
+  end
+
+  defp validate_agent_ref(_company_id, nil), do: :ok
+  defp validate_agent_ref(_company_id, ""), do: :ok
+
+  defp validate_agent_ref(company_id, agent_id) do
+    case Agents.get_company_agent(company_id, agent_id) do
+      {:ok, _agent} -> :ok
+      {:error, _} -> {:error, :not_found}
+    end
+  end
+
+  defp validate_project_ref(_company_id, nil), do: :ok
+  defp validate_project_ref(_company_id, ""), do: :ok
+
+  defp validate_project_ref(company_id, project_id) do
+    case Projects.get_company_project(company_id, project_id) do
+      {:ok, _project} -> :ok
+      {:error, _} -> {:error, :not_found}
+    end
   end
 
   defp parse_int(nil), do: nil

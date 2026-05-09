@@ -20,6 +20,7 @@ defmodule CymphoWeb.InboxLive.Index do
       |> assign(:selected_agent, nil)
       |> assign(:subscribed_agent_id, nil)
       |> assign(:current_status, nil)
+      |> assign(:digest_density, "detailed")
       |> assign(:inbox_items, [])
       |> assign(:inbox_counts, %{})
       |> assign(:agent_counts, %{})
@@ -40,6 +41,7 @@ defmodule CymphoWeb.InboxLive.Index do
   @impl true
   def handle_params(params, _url, socket) do
     status = normalize_status(params["status"])
+    digest_density = normalize_digest_density(params["density"])
 
     agent_id =
       params["agent_id"]
@@ -49,6 +51,7 @@ defmodule CymphoWeb.InboxLive.Index do
     socket =
       socket
       |> assign(:current_status, status)
+      |> assign(:digest_density, digest_density)
       |> assign(:selected_agent_id, agent_id)
       |> assign(:selected_agent, selected_agent(socket.assigns.agents, agent_id))
       |> maybe_subscribe_to_agent()
@@ -200,11 +203,13 @@ defmodule CymphoWeb.InboxLive.Index do
   defp build_url(socket, overrides) do
     status = Map.get(overrides, "status", socket.assigns.current_status)
     agent_id = Map.get(overrides, "agent_id", socket.assigns.selected_agent_id)
+    digest_density = Map.get(overrides, "density", socket.assigns.digest_density)
 
     query =
       %{
         status: status,
-        agent_id: agent_id
+        agent_id: agent_id,
+        density: digest_density
       }
       |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
       |> Enum.into(%{})
@@ -212,14 +217,16 @@ defmodule CymphoWeb.InboxLive.Index do
     ~p"/inbox?#{query}"
   end
 
-  defp inbox_url(selected_agent_id, status, overrides) do
+  defp inbox_url(selected_agent_id, status, density, overrides) do
     status = Map.get(overrides, :status, status)
     agent_id = Map.get(overrides, :agent_id, selected_agent_id)
+    density = Map.get(overrides, :density, density)
 
     query =
       %{
         status: status,
-        agent_id: agent_id
+        agent_id: agent_id,
+        density: density
       }
       |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
       |> Enum.into(%{})
@@ -234,15 +241,9 @@ defmodule CymphoWeb.InboxLive.Index do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
     if company_id do
-      case Agents.get_agent(agent_id) do
-        {:ok, agent} when agent.company_id == company_id ->
-          {:ok, agent}
-
-        {:ok, _agent} ->
-          {:error, :unauthorized}
-
-        {:error, :not_found} ->
-          {:error, :unauthorized}
+      case Agents.get_company_agent(company_id, agent_id) do
+        {:ok, agent} -> {:ok, agent}
+        {:error, :not_found} -> {:error, :unauthorized}
       end
     else
       {:error, :unauthorized}
@@ -267,6 +268,10 @@ defmodule CymphoWeb.InboxLive.Index do
 
   defp normalize_status(status) when status in @statuses, do: status
   defp normalize_status(_), do: nil
+
+  defp normalize_digest_density("compact"), do: "compact"
+  defp normalize_digest_density("detailed"), do: "detailed"
+  defp normalize_digest_density(_), do: "detailed"
 
   defp normalize_agent_id("all"), do: "all"
   defp normalize_agent_id(agent_id) when is_binary(agent_id) and agent_id != "", do: agent_id
@@ -332,6 +337,14 @@ defmodule CymphoWeb.InboxLive.Index do
       "border-brand bg-brand/15 text-text-primary"
     else
       "border-border bg-surface text-text-tertiary hover:bg-surface-hover hover:text-text-secondary"
+    end
+  end
+
+  defp density_tab_class(current, density) do
+    if current == density do
+      "bg-brand text-white"
+    else
+      "text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
     end
   end
 

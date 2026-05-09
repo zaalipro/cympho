@@ -3,6 +3,7 @@ defmodule Cympho.CommentsTest do
 
   alias Cympho.Comments
   alias Cympho.Comments.Comment
+  alias Cympho.Companies
   alias Cympho.Issues
   alias Cympho.Agents
 
@@ -73,6 +74,57 @@ defmodule Cympho.CommentsTest do
       assert_raise Ecto.NoResultsError, fn ->
         Comments.get_comment!("00000000-0000-0000-0000-000000000000")
       end
+    end
+  end
+
+  describe "get_company_comment/2" do
+    test "returns only comments for issues in the company" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Comment Scope Co",
+          slug: "comment-scope-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Other Comment Scope Co",
+          slug: "other-comment-scope-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Scoped issue",
+          description: "belongs here",
+          company_id: company.id
+        })
+
+      {:ok, other_issue} =
+        Issues.create_issue(%{
+          title: "Other issue",
+          description: "belongs elsewhere",
+          company_id: other_company.id
+        })
+
+      {:ok, comment} =
+        Comments.create_comment(%{
+          body: "Visible comment",
+          author_type: "user",
+          author_id: "owner",
+          issue_id: issue.id
+        })
+
+      {:ok, other_comment} =
+        Comments.create_comment(%{
+          body: "Hidden comment",
+          author_type: "user",
+          author_id: "owner",
+          issue_id: other_issue.id
+        })
+
+      assert {:ok, found} = Comments.get_company_comment(company.id, comment.id)
+      assert found.id == comment.id
+      assert {:error, :not_found} = Comments.get_company_comment(company.id, other_comment.id)
+      assert {:error, :not_found} = Comments.get_company_comment(nil, comment.id)
     end
   end
 

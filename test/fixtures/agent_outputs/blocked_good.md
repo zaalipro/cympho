@@ -1,0 +1,1 @@
+[blocked] Cause: provider credentials are missing. Attempted fix: checked runtime env and project secrets. Needs: owner adds OPENAI_API_KEY or chooses a configured runtime profile. Current state: work is paused before spending retries. Next decision: owner configures credentials.

@@ -377,6 +377,65 @@ defmodule Cympho.AgentsTest do
     end
   end
 
+  describe "config revisions" do
+    test "snapshots instruction studio metadata", %{agent: agent} do
+      {:ok, agent} =
+        Agents.update_agent(agent, %{
+          adapter: :codex,
+          config: %{"model" => "gpt-5.5"},
+          runtime_config: %{"profile_id" => "codex-gpt-5.5"},
+          instructions:
+            "After every meaningful action, comment with [delivery] What happened, files changed, verification, and next decision. Open a PR with a task list."
+        })
+
+      assert {:ok, revision} = Agents.create_config_revision(agent)
+
+      assert revision.version == 1
+      assert revision.role == "engineer"
+      assert revision.adapter == "codex"
+      assert revision.config["model"] == "gpt-5.5"
+      assert revision.runtime_config["profile_id"] == "codex-gpt-5.5"
+      assert is_integer(revision.studio_score)
+      assert revision.studio_status in ["good", "weak", "attention"]
+      assert %{"audits" => audits, "scenarios" => scenarios} = revision.studio_audits
+      assert Enum.any?(audits, &(&1["key"] == "custom_override_coverage"))
+      assert Enum.any?(scenarios, &(&1["key"] == "delivery_package"))
+    end
+
+    test "restores only revisions for the same agent and records rollback", %{agent: agent} do
+      {:ok, other_agent} =
+        Agents.create_agent(%{
+          name: "Other Agent",
+          role: :engineer,
+          status: :idle,
+          instructions: "Other baseline."
+        })
+
+      {:ok, old_revision} =
+        Agents.create_config_revision(agent, %{
+          instructions: "Original safe instructions.",
+          config: %{"model" => "gpt-5.4"},
+          runtime_config: %{"profile_id" => "codex-mini"},
+          adapter: "codex"
+        })
+
+      {:ok, other_revision} = Agents.create_config_revision(other_agent)
+
+      assert {:error, :not_found} =
+               Agents.restore_config_revision(agent.id, other_revision.id)
+
+      assert {:ok, restored} = Agents.restore_config_revision(agent.id, old_revision.id)
+      assert restored.instructions == "Original safe instructions."
+      assert restored.config["model"] == "gpt-5.4"
+      assert restored.runtime_config["profile_id"] == "codex-mini"
+      assert restored.adapter == :codex
+
+      [rollback, ^old_revision] = Agents.list_config_revisions(agent.id)
+      assert rollback.source == "restore"
+      assert rollback.restored_from_revision_id == old_revision.id
+    end
+  end
+
   describe "spawn_agent/2" do
     setup [:start_heartbeat_supervisor]
 

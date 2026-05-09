@@ -8,7 +8,18 @@ defmodule Cympho.AgentActions do
 
   import Ecto.Query, warn: false
 
-  alias Cympho.{Activities, Agents, Comments, Issues, Repo, WorkProducts}
+  alias Cympho.{
+    Activities,
+    Agents,
+    Comments,
+    HeartbeatEngine,
+    IssueDigest,
+    Issues,
+    PullRequestContract,
+    Repo,
+    WorkProducts
+  }
+
   alias Cympho.Agents.Agent
   alias Cympho.Issues.Issue
   alias Cympho.AuditTrail.Instrumenter
@@ -23,6 +34,11 @@ defmodule Cympho.AgentActions do
   # chained creation is rejected so a buggy CEO→CTO→engineer→engineer→...
   # storm cannot run away.
   @max_request_depth Application.compile_env(:cympho, [:agent_actions, :max_request_depth], 5)
+  @max_active_child_issues_per_parent Application.compile_env(
+                                        :cympho,
+                                        [:agent_actions, :max_active_child_issues_per_parent],
+                                        12
+                                      )
   @supported_types ~w(
     create_issue
     submit_review
@@ -37,6 +53,7 @@ defmodule Cympho.AgentActions do
   @roles ~w(ceo cto product_manager designer engineer)
   @priorities ~w(low medium high critical)
   @work_product_kinds ~w(code_change document url artifact other)
+  @delivery_roles Agent.delivery_roles()
 
   # Actions that change governance state require the agent's role to be in this
   # set. Lower-privileged agents that emit them are rejected with
@@ -44,6 +61,17 @@ defmodule Cympho.AgentActions do
   @governance_roles [:ceo, :cto]
 
   @type action :: map()
+
+  @doc """
+  Returns the compiled safety limits used by the agent-action executor.
+  """
+  def limits do
+    %{
+      max_actions: @max_actions,
+      max_request_depth: @max_request_depth,
+      max_active_child_issues_per_parent: @max_active_child_issues_per_parent
+    }
+  end
 
   @doc """
   Parses exactly one fenced `cympho-actions` JSON block from an agent response.
@@ -193,6 +221,35 @@ defmodule Cympho.AgentActions do
 
   defp maybe_emit_rejection_comment(
          %Issue{} = issue,
+         {:quality_gate_failed, action_type, gaps}
+       ) do
+    gap_list = gaps |> Enum.map(&quality_gap_label/1) |> Enum.join(", ")
+    instruction = quality_gate_instruction(action_type, gaps)
+
+    system_comment(
+      issue,
+      "#{action_type} rejected: missing review evidence (#{gap_list}). #{instruction}"
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:review_gates_blocked, %{status: status, blockers: blockers, message: message}}
+       ) do
+    action_type = if status == :done, do: "approve_issue", else: "submit_review"
+
+    prompts =
+      blockers
+      |> Enum.map(& &1.prompt)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> Enum.join(" ")
+
+    system_comment(issue, "#{action_type} rejected: #{message}. #{prompts}")
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
          {:request_depth_exceeded, current, max}
        ) do
     system_comment(
@@ -200,6 +257,18 @@ defmodule Cympho.AgentActions do
       "create_issue rejected: request depth #{current} would exceed the maximum allowed " <>
         "depth of #{max}. Stop delegating further; either do the work yourself, " <>
         "block_issue with a reason, or escalate via submit_review."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:child_issue_limit_exceeded, current, max}
+       ) do
+    system_comment(
+      issue,
+      "create_issue rejected: this issue already has #{current} active sub-issue(s), " <>
+        "reaching the limit of #{max}. Stop splitting for now; review, finish, " <>
+        "request changes, or block the existing sub-issues before adding more."
     )
   end
 
@@ -360,11 +429,18 @@ defmodule Cympho.AgentActions do
 
   defp execute_action(issue, agent, %{"type" => "create_issue"} = action) do
     current_depth = issue.request_depth || 0
+    active_children = active_child_issue_count(issue)
 
-    if current_depth >= @max_request_depth do
-      {:error, {:request_depth_exceeded, current_depth, @max_request_depth}}
-    else
-      do_create_issue(issue, agent, action)
+    cond do
+      current_depth >= @max_request_depth ->
+        {:error, {:request_depth_exceeded, current_depth, @max_request_depth}}
+
+      active_children >= @max_active_child_issues_per_parent ->
+        {:error,
+         {:child_issue_limit_exceeded, active_children, @max_active_child_issues_per_parent}}
+
+      true ->
+        do_create_issue(issue, agent, action)
     end
   end
 
@@ -378,25 +454,35 @@ defmodule Cympho.AgentActions do
 
   defp execute_action(issue, agent, %{"type" => "submit_review"} = action) do
     assignee_id = resolve_review_assignee(agent, action["role"])
+    note = action["notes"] || "Submitted for #{human_role(action["role"])} review."
 
-    update_workflow_issue(issue, agent, %{
-      status: :in_review,
-      assignee_id: assignee_id,
-      checkout_run_id: nil,
-      checked_out_at: nil,
-      assigned_role: action["role"]
-    })
-    |> with_optional_agent_comment(issue, agent, action["notes"], "Submitted for review")
-    |> result_for("submit_review")
+    with :ok <- ensure_submit_review_quality(issue, agent, action),
+         {:ok, _comment} <- maybe_agent_comment(issue, agent, tagged_submit_review_note(note)),
+         {:ok, transitioned} <- Issues.transition_issue_with_review_gates(issue, :in_review),
+         {:ok, updated} <-
+           update_workflow_issue(transitioned, agent, %{
+             assignee_id: assignee_id,
+             checkout_run_id: nil,
+             checked_out_at: nil,
+             assigned_role: action["role"]
+           }) do
+      {:ok, %{type: "submit_review", issue_id: updated.id}}
+    end
   end
 
   defp execute_action(issue, agent, %{"type" => "approve_issue"} = action) do
-    case open_children(issue.id) do
+    case open_children(issue) do
       [] ->
-        with {:ok, transitioned} <- Issues.transition_issue(issue, :done),
+        note =
+          action["notes"] ||
+            "Approved this issue. Required work is complete and ready for the owner."
+
+        with :ok <- ensure_approval_quality(issue),
+             {:ok, _comment} <-
+               maybe_agent_comment(issue, agent, tagged_approval_note(agent, note)),
+             {:ok, transitioned} <- Issues.transition_issue_with_review_gates(issue, :done),
              {:ok, released} <- Issues.force_release_issue(transitioned, :done),
-             {:ok, released} <- update_workflow_issue(released, agent, %{assigned_role: nil}),
-             {:ok, _} <- maybe_agent_comment(issue, agent, action["notes"]) do
+             {:ok, released} <- update_workflow_issue(released, agent, %{assigned_role: nil}) do
           {:ok, %{type: "approve_issue", issue_id: released.id}}
         end
 
@@ -407,7 +493,7 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "request_changes"} = action) do
-    reason = action["reason"] || "Changes requested."
+    reason = tagged_review_note(action["reason"] || "Changes requested.")
 
     with {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
@@ -423,7 +509,7 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "block_issue"} = action) do
-    reason = action["reason"] || "Agent blocked this issue."
+    reason = tagged_blocked_note(action["reason"] || "Agent blocked this issue.")
 
     with {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
@@ -432,7 +518,7 @@ defmodule Cympho.AgentActions do
              checkout_run_id: nil,
              checked_out_at: nil
            }),
-         {:ok, _comment} <- system_comment(issue, reason) do
+         {:ok, _comment} <- maybe_agent_comment(issue, agent, reason) do
       {:ok, %{type: "block_issue", issue_id: updated.id}}
     end
   end
@@ -465,9 +551,21 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "set_pr_url"} = action) do
-    update_workflow_issue(issue, agent, %{github_pr_url: action["url"]})
-    |> with_optional_agent_comment(issue, agent, action["notes"], nil)
-    |> result_for("set_pr_url")
+    note = action["notes"] || "Linked pull request for review: #{action["url"]}"
+
+    pr_quality =
+      PullRequestContract.check_url(issue, action["url"], source: "agent_action:set_pr_url")
+
+    attrs = %{
+      github_pr_url: action["url"],
+      monitor_state: Issues.pr_quality_monitor_state(issue.monitor_state, pr_quality)
+    }
+
+    with {:ok, updated} <- update_workflow_issue(issue, agent, attrs),
+         {:ok, _comment} <- maybe_agent_comment(issue, agent, note),
+         {:ok, _quality_comment} <- maybe_pr_quality_comment(updated, pr_quality) do
+      {:ok, %{type: "set_pr_url", issue_id: updated.id, pr_quality: pr_quality.status}}
+    end
   end
 
   defp execute_action(issue, agent, %{"type" => "handoff"} = action) do
@@ -562,9 +660,9 @@ defmodule Cympho.AgentActions do
           actor_id: agent.id
         }
 
-        case Issues.create_issue(attrs) do
-          {:ok, created} -> {:ok, %{type: "create_issue", issue_id: created.id}}
-          error -> error
+        with {:ok, created} <- Issues.create_issue(attrs),
+             {:ok, _comment} <- maybe_agent_comment(issue, agent, created_issue_note(created)) do
+          {:ok, %{type: "create_issue", issue_id: created.id}}
         end
     end
   end
@@ -609,6 +707,129 @@ defmodule Cympho.AgentActions do
 
   defp role_matches?(parent_role, requested_role),
     do: to_string(parent_role) == to_string(requested_role)
+
+  defp ensure_submit_review_quality(issue, agent, action) do
+    gaps =
+      issue
+      |> digest_quality_gaps()
+      |> Enum.map(& &1.key)
+      |> required_submit_review_gaps(agent, action)
+
+    if gaps == [] do
+      :ok
+    else
+      {:error, {:quality_gate_failed, "submit_review", gaps}}
+    end
+  end
+
+  defp required_submit_review_gaps(gap_keys, agent, action) do
+    gap_keys = MapSet.new(gap_keys)
+
+    []
+    |> maybe_add_gap(
+      :agent_note,
+      MapSet.member?(gap_keys, :agent_note) and not explicit_note?(action)
+    )
+    |> maybe_add_gap(
+      :work_product,
+      agent.role in @delivery_roles and MapSet.member?(gap_keys, :work_product)
+    )
+    |> maybe_add_gap(
+      :delivery_comment,
+      MapSet.member?(gap_keys, :delivery_comment) and not explicit_note?(action)
+    )
+    |> maybe_add_gap(:code_reference, MapSet.member?(gap_keys, :code_reference))
+    |> Enum.reverse()
+  end
+
+  defp ensure_approval_quality(issue) do
+    gaps =
+      issue
+      |> digest_quality_gaps()
+      |> Enum.filter(&(&1.key in [:runtime_verification, :code_reference]))
+      |> Enum.reject(&(&1.key == :runtime_verification and &1.status == :missing))
+      |> Enum.map(& &1.key)
+
+    if gaps == [] do
+      :ok
+    else
+      {:error, {:quality_gate_failed, "approve_issue", gaps}}
+    end
+  end
+
+  defp digest_quality_gaps(issue) do
+    issue =
+      issue
+      |> Repo.preload([:comments, :project], force: true)
+
+    digest =
+      IssueDigest.build(
+        issue,
+        HeartbeatEngine.list_runs_for_issue(issue.id),
+        WorkProducts.list_work_products(issue.id),
+        Issues.list_child_issues(issue.id)
+      )
+
+    digest.quality.gaps
+    |> Kernel.++(digest.review_readiness.blockers)
+    |> Enum.reject(&(&1.key in [:review_decision, :ceo_owner_update]))
+    |> Enum.uniq_by(& &1.key)
+  end
+
+  defp explicit_note?(%{"notes" => notes}) when is_binary(notes), do: String.trim(notes) != ""
+  defp explicit_note?(_action), do: false
+
+  defp maybe_add_gap(gaps, gap, true), do: [gap | gaps]
+  defp maybe_add_gap(gaps, _gap, _condition), do: gaps
+
+  defp quality_gap_label(:agent_note), do: "agent completion note"
+  defp quality_gap_label(:work_product), do: "work product or PR reference"
+  defp quality_gap_label(:runtime_verification), do: "runtime verification"
+  defp quality_gap_label(:code_reference), do: "code reference"
+  defp quality_gap_label(:child_work), do: "sub-issue closure"
+  defp quality_gap_label(:delivery_comment), do: "tagged delivery comment"
+  defp quality_gap_label(:ceo_owner_update), do: "CEO owner update"
+  defp quality_gap_label(gap), do: gap |> to_string() |> String.replace("_", " ")
+
+  defp quality_gate_instruction("submit_review", gaps) do
+    pieces =
+      [
+        if(:agent_note in gaps,
+          do: "add a `comment` action or explicit submit_review notes explaining what changed"
+        ),
+        if(:work_product in gaps,
+          do: "attach a work product or set a PR URL"
+        ),
+        if(:delivery_comment in gaps,
+          do:
+            "include submit_review notes or add a `[delivery]` comment with what changed, verification, evidence, and next owner"
+        ),
+        if(:code_reference in gaps,
+          do: "set the GitHub PR URL or include a URL on the code-change work product"
+        )
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    "Before asking for review, #{Enum.join(pieces, "; ")}."
+  end
+
+  defp quality_gate_instruction("approve_issue", gaps) do
+    pieces =
+      [
+        if(:runtime_verification in gaps,
+          do: "wait for active runs to finish or resolve failed runtime runs"
+        ),
+        if(:code_reference in gaps,
+          do: "set the GitHub PR URL or include a URL on the code-change work product"
+        )
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    "Before approving, #{Enum.join(pieces, "; ")}."
+  end
+
+  defp quality_gate_instruction(_action_type, _gaps),
+    do: "Address the digest quality checklist and retry."
 
   defp find_recent_duplicate(company_id, title, goal_id) do
     since = DateTime.utc_now() |> DateTime.add(-24, :hour)
@@ -696,12 +917,24 @@ defmodule Cympho.AgentActions do
 
   # Returns sub-issues of `parent_id` that are not yet :done or :cancelled.
   # Used by approve_issue to refuse premature parent completion.
-  defp open_children(parent_id) do
+  defp open_children(%Issue{id: parent_id, company_id: company_id}) do
     from(i in Issue,
-      where: i.parent_id == ^parent_id and i.status not in [:done, :cancelled],
+      where:
+        i.parent_id == ^parent_id and i.company_id == ^company_id and
+          i.status not in [:done, :cancelled],
       select: %{id: i.id, identifier: i.identifier}
     )
     |> Repo.all()
+  end
+
+  defp active_child_issue_count(%Issue{id: parent_id, company_id: company_id}) do
+    from(i in Issue,
+      where:
+        i.parent_id == ^parent_id and i.company_id == ^company_id and
+          i.status not in [:done, :cancelled],
+      select: count(i.id)
+    )
+    |> Repo.one()
   end
 
   defp update_workflow_issue(issue, agent, attrs) do
@@ -713,23 +946,66 @@ defmodule Cympho.AgentActions do
     Issues.update_issue(issue, attrs)
   end
 
-  defp with_optional_agent_comment({:error, _} = error, _issue, _agent, _body, _fallback),
-    do: error
-
-  defp with_optional_agent_comment({:ok, updated}, issue, agent, body, fallback) do
-    case maybe_agent_comment(issue, agent, body || fallback) do
-      {:ok, _comment} -> {:ok, updated}
-      error -> error
+  defp maybe_pr_quality_comment(issue, pr_quality) do
+    case PullRequestContract.quality_comment(pr_quality) do
+      nil -> {:ok, %{id: nil}}
+      body -> system_comment(issue, body)
     end
   end
-
-  defp result_for({:ok, issue}, type), do: {:ok, %{type: type, issue_id: issue.id}}
-  defp result_for({:error, _} = error, _type), do: error
 
   defp maybe_agent_comment(_issue, _agent, nil), do: {:ok, %{id: nil}}
   defp maybe_agent_comment(_issue, _agent, ""), do: {:ok, %{id: nil}}
 
+  defp maybe_agent_comment(issue, agent, body) when is_binary(body) do
+    if String.trim(body) == "" do
+      {:ok, %{id: nil}}
+    else
+      do_agent_comment(issue, agent, String.trim(body))
+    end
+  end
+
   defp maybe_agent_comment(issue, agent, body) do
+    do_agent_comment(issue, agent, to_string(body))
+  end
+
+  defp tagged_submit_review_note(note) when is_binary(note), do: tagged_note("delivery", note)
+  defp tagged_submit_review_note(note), do: tagged_submit_review_note(to_string(note))
+
+  defp tagged_approval_note(%Agent{role: :ceo}, note) when is_binary(note) do
+    tagged_note("owner_update", note)
+  end
+
+  defp tagged_approval_note(_agent, note) when is_binary(note) do
+    tagged_note("review", note)
+  end
+
+  defp tagged_approval_note(agent, note), do: tagged_approval_note(agent, to_string(note))
+
+  defp tagged_review_note(note) when is_binary(note), do: tagged_note("review", note)
+
+  defp tagged_blocked_note(note) when is_binary(note), do: tagged_note("blocked", note)
+
+  defp tagged_note(prefix, note) do
+    if tagged_owner_visible_note?(note), do: note, else: "[#{prefix}] #{note}"
+  end
+
+  defp tagged_owner_visible_note?(note) do
+    normalized = String.downcase(note)
+
+    Enum.any?(
+      ~w(owner_update owner update decision handoff review blocked delivery),
+      fn tag ->
+        compact_tag = String.replace(tag, " ", "_")
+
+        String.contains?(normalized, "[#{tag}]") or
+          String.contains?(normalized, "[#{compact_tag}]") or
+          String.starts_with?(normalized, "#{tag}:") or
+          String.starts_with?(normalized, "#{compact_tag}:")
+      end
+    )
+  end
+
+  defp do_agent_comment(issue, agent, body) do
     Comments.create_comment(%{
       body: body,
       author_type: "agent",
@@ -745,6 +1021,21 @@ defmodule Cympho.AgentActions do
       author_id: "00000000-0000-0000-0000-000000000000",
       issue_id: issue.id
     })
+  end
+
+  defp created_issue_note(%Issue{} = created) do
+    role = created.assigned_role || "unassigned"
+    identifier = created.identifier || "new sub-issue"
+
+    "Created sub-issue #{identifier} for #{human_role(role)}: #{created.title}"
+  end
+
+  defp human_role(nil), do: "the next owner"
+
+  defp human_role(role) do
+    role
+    |> to_string()
+    |> String.replace("_", " ")
   end
 
   defp log_action(issue, agent, action, result) do

@@ -90,10 +90,33 @@ defmodule Cympho.HeartbeatEngineTest do
 
       {:ok, started} = HeartbeatEngine.start_run(run)
 
-      assert {:ok, failed} = HeartbeatEngine.fail_run(started, "stall_timeout")
+      assert {:ok, failed} = HeartbeatEngine.fail_run(started, :stall_timeout)
       assert failed.status == "failed"
-      assert failed.error_reason == "stall_timeout"
+      assert failed.error_reason == "Run timed out"
+      assert failed.run_metadata["adapter_error"]["category"] == "timeout"
       assert failed.completed_at
+    end
+
+    test "stores normalized adapter error metadata" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: insert_issue(),
+          adapter: "codex"
+        })
+
+      {:ok, started} = HeartbeatEngine.start_run(run)
+
+      assert {:ok, failed} =
+               HeartbeatEngine.fail_run(started, {:exit_code, 7, "provider failed"})
+
+      assert failed.error_reason == "Runtime exited with an error"
+      assert failed.log_excerpt == "provider failed"
+      assert failed.run_metadata["adapter_error"]["category"] == "nonzero_exit"
+      assert failed.run_metadata["adapter_error"]["message"] =~ "status 7"
     end
   end
 

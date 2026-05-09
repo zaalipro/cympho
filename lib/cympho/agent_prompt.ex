@@ -22,11 +22,14 @@ defmodule Cympho.AgentPrompt do
 
   import Ecto.Query, warn: false
 
-  alias Cympho.{Agents, Repo}
+  alias Cympho.{Agents, IssueDigest, PullRequestContract, Repo}
   alias Cympho.Agents.{Agent, RolePlaybook}
+  alias Cympho.AgentPromptContract
   alias Cympho.Comments.Comment
   alias Cympho.Decisions.Decision
+  alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues.Issue
+  alias Cympho.WorkProducts.IssueWorkProduct
 
   @recent_comments_limit 10
   @recent_decisions_limit 3
@@ -46,6 +49,9 @@ defmodule Cympho.AgentPrompt do
       agent_block(agent_or_id, agent),
       context_block(issue),
       history_block(history),
+      digest_quality_block(issue, history),
+      role_completion_contract_block(role_of(agent)),
+      pull_request_contract_block(issue, role_of(agent)),
       runtime_block(Keyword.get(opts, :runtime_context)),
       action_contract_block(role_of(agent)),
       skills_block(skills)
@@ -174,6 +180,64 @@ defmodule Cympho.AgentPrompt do
     |> Enum.join("\n\n")
   end
 
+  defp digest_quality_block(issue, history) do
+    issue_for_digest = Map.put(issue, :comments, history.comments)
+
+    digest =
+      IssueDigest.build(issue_for_digest, history.runs, history.work_products, history.children)
+
+    gap_count = length(digest.quality.gaps)
+
+    rows =
+      Enum.map(digest.quality.items, fn item ->
+        "- #{quality_marker(item.status)} #{item.label}: #{item.prompt}"
+      end)
+
+    contract_rows =
+      Enum.map(digest.completion_contract, fn item ->
+        "- #{quality_marker(item.status)} #{item.role} — #{item.label}: #{item.summary} Required shape: #{item.prompt}"
+      end)
+
+    gap_line =
+      if gap_count == 0 do
+        "No digest gaps are currently blocking review. Still leave a concise owner-facing comment when you act."
+      else
+        "#{gap_count} digest gap#{if gap_count == 1, do: "", else: "s"} need attention before submit_review, approve_issue, or closure."
+      end
+
+    """
+    ## Digest quality checklist
+    Current owner digest: #{digest.label} — #{digest.headline}
+    Evidence coverage: #{digest.coverage.score}% (#{digest.coverage.label})
+    Next owner-facing action: #{digest.next_action}
+
+    #{gap_line}
+
+    #{Enum.join(rows, "\n")}
+
+    Completion contract status:
+    #{Enum.join(contract_rows, "\n")}
+    """
+    |> String.trim()
+  rescue
+    _ ->
+      nil
+  end
+
+  defp quality_marker(:ok), do: "[ok]"
+  defp quality_marker(:attention), do: "[needs attention]"
+  defp quality_marker(:missing), do: "[missing]"
+  defp quality_marker(_), do: "[check]"
+
+  defp role_completion_contract_block(role), do: AgentPromptContract.prompt_block(role)
+
+  defp pull_request_contract_block(issue, role)
+       when role in [:engineer, :product_manager, :designer, :cto] do
+    PullRequestContract.prompt_block(issue)
+  end
+
+  defp pull_request_contract_block(_issue, _role), do: nil
+
   defp comments_section([]), do: nil
 
   defp comments_section(comments) do
@@ -295,7 +359,16 @@ defmodule Cympho.AgentPrompt do
     The block must contain JSON with an `actions` array. The server will ignore
     any requested side effect that is not represented in this block.
 
-    Every response that advances, reviews, blocks, delegates, or completes work MUST include a `comment` action. The comment should state: what you did, evidence or verification, blockers if any, and who should act next. The issue page uses these comments as the owner-facing execution record.
+    Every response that advances, reviews, blocks, delegates, or completes work MUST include a `comment` action. Start the comment body with one purpose tag: `[owner_update]`, `[decision]`, `[handoff]`, `[review]`, `[blocked]`, or `[delivery]`. Then state the fields that match your role:
+    - Engineer/Product/Design delivery: `[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ...`
+    - CTO review: `[review] Verdict: accepted/request changes/blocked. What happened: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ...`
+    - CEO owner update: `[owner_update] What happened: ... Business status: shipped/not shipped. Current state: ... Next decision: ... Owner decision needed: ...`
+    - Blocked work: `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ...`
+    Never emit `attach_work_product`, `submit_review`, `approve_issue`, `request_changes`, `block_issue`, `handoff`, or a meaningful `create_issue` without a paired owner-readable `comment`. The issue page uses these comments as the owner-facing execution record and groups noisy activity by those tags.
+
+    Treat your final response summary as run memory. Include objective, actions taken, files changed or artifacts, validation, risks/gaps, current state, and next decision. Avoid vague endings like "done", "fixed", or "tests passed" without the decision context; Cympho folds your summary and tagged comment into the issue memory panel.
+
+    Split conservatively. Prefer 2–5 focused sub-issues with acceptance criteria over a broad fan-out. The server can reject excessive active sub-issues; when that happens, review, finish, request changes, or block the existing work instead of creating more.
     """
     |> String.trim()
   end
@@ -375,7 +448,7 @@ defmodule Cympho.AgentPrompt do
       "actions": [
         {
           "type": "comment",
-          "body": "I am splitting this into product, design, and technical work before execution."
+          "body": "[owner_update] What happened: I am splitting this into product, design, and technical work before execution. Business status: not shipped yet. Current state: delegated planning. Next decision: review the Product and CTO sub-issues when they report back. Owner decision needed: none until the sub-issues return evidence."
         },
         {
           "type": "create_issue",
@@ -408,7 +481,7 @@ defmodule Cympho.AgentPrompt do
       "actions": [
         {
           "type": "comment",
-          "body": "I split this into the smallest engineer-owned implementation tickets."
+          "body": "[handoff] What happened: I split this into the smallest engineer-owned implementation tickets. Current state: engineers have scoped tasks. Next decision: review their PRs and verification notes. Follow-up issues: onboarding progress tracking."
         },
         {
           "type": "create_issue",
@@ -434,7 +507,7 @@ defmodule Cympho.AgentPrompt do
       "actions": [
         {
           "type": "comment",
-          "body": "Implemented the progress tracking path and added regression coverage."
+          "body": "[delivery] What happened: implemented the progress tracking path and added regression coverage. Files changed: onboarding LiveView and focused LiveView tests. Verification: ran the onboarding LiveView test file. Risks: persistence edge cases should be checked in review. Current state: ready for CTO review. Next decision: inspect the PR and test plan."
         },
         {
           "type": "attach_work_product",
@@ -467,6 +540,10 @@ defmodule Cympho.AgentPrompt do
     {
       "actions": [
         {
+          "type": "comment",
+          "body": "[delivery] What happened: finalized the product acceptance criteria and marked what the CTO needs before implementation. Files changed: product spec only. Verification: acceptance criteria cover activation metric, scope, and definition of done. Risks: engineering estimates may change scope. Current state: spec attached. Next decision: CEO or CTO should approve scope for implementation."
+        },
+        {
           "type": "attach_work_product",
           "kind": "document",
           "title": "Onboarding acceptance criteria",
@@ -493,6 +570,10 @@ defmodule Cympho.AgentPrompt do
     {
       "actions": [
         {
+          "type": "comment",
+          "body": "[delivery] What happened: completed the design handoff with states, edge cases, and responsive behavior for engineering. Files changed: design artifact/spec only. Verification: checked empty, loading, error, and mobile states. Risks: implementation must preserve accessibility states. Current state: design artifact attached. Next decision: engineering can implement against the spec."
+        },
+        {
           "type": "attach_work_product",
           "kind": "artifact",
           "title": "Onboarding flow design spec",
@@ -518,6 +599,10 @@ defmodule Cympho.AgentPrompt do
     ```cympho-actions
     {
       "actions": [
+        {
+          "type": "comment",
+          "body": "[handoff] What happened: reviewed the issue and delegated the implementation with acceptance criteria. Current state: implementation is assigned. Next decision: CTO reviews delivery evidence."
+        },
         {
           "type": "create_issue",
           "title": "Implement billing usage summary",
@@ -638,7 +723,9 @@ defmodule Cympho.AgentPrompt do
       comments: load_recent_comments(id),
       children: load_children(id),
       siblings: load_siblings(issue),
-      decisions: load_recent_decisions(field(issue, :company_id), field(issue, :goal_id))
+      decisions: load_recent_decisions(field(issue, :company_id), field(issue, :goal_id)),
+      runs: load_recent_runs(id),
+      work_products: load_recent_work_products(id)
     }
   rescue
     _ -> empty_history()
@@ -649,7 +736,9 @@ defmodule Cympho.AgentPrompt do
       comments: load_recent_comments(id),
       children: load_children(id),
       siblings: load_siblings(issue),
-      decisions: load_recent_decisions(field(issue, :company_id), field(issue, :goal_id))
+      decisions: load_recent_decisions(field(issue, :company_id), field(issue, :goal_id)),
+      runs: load_recent_runs(id),
+      work_products: load_recent_work_products(id)
     }
   rescue
     _ -> empty_history()
@@ -657,7 +746,8 @@ defmodule Cympho.AgentPrompt do
 
   defp load_history(_), do: empty_history()
 
-  defp empty_history, do: %{comments: [], children: [], siblings: [], decisions: []}
+  defp empty_history,
+    do: %{comments: [], children: [], siblings: [], decisions: [], runs: [], work_products: []}
 
   defp load_recent_comments(issue_id) do
     Comment
@@ -676,6 +766,26 @@ defmodule Cympho.AgentPrompt do
     |> limit(@max_children)
     |> Repo.all()
     |> Repo.preload(:assignee)
+  rescue
+    _ -> []
+  end
+
+  defp load_recent_runs(issue_id) do
+    Run
+    |> where([r], r.issue_id == ^issue_id)
+    |> order_by([r], desc: r.inserted_at, desc: r.id)
+    |> limit(10)
+    |> Repo.all()
+  rescue
+    _ -> []
+  end
+
+  defp load_recent_work_products(issue_id) do
+    IssueWorkProduct
+    |> where([w], w.issue_id == ^issue_id)
+    |> order_by([w], desc: w.inserted_at, desc: w.id)
+    |> limit(10)
+    |> Repo.all()
   rescue
     _ -> []
   end

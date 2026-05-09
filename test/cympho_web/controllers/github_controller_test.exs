@@ -4,6 +4,9 @@ defmodule CymphoWeb.GithubControllerTest do
   alias Cympho.Issues
   alias Cympho.Projects
   alias Cympho.Agents
+  alias Cympho.PullRequestContract
+  alias Cympho.ReviewNudges
+  alias Cympho.Wakes
 
   setup do
     # Create a project with a webhook secret
@@ -133,6 +136,57 @@ defmodule CymphoWeb.GithubControllerTest do
       # Verify a system comment was added
       updated_issue = Issues.get_issue!(issue.id)
       assert length(updated_issue.comments) > 0
+    end
+
+    test "PR synchronize refreshes quality state and clears queued PR nudges", %{
+      conn: conn,
+      issue: issue,
+      agent: agent,
+      project: project
+    } do
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          assignee_id: agent.id,
+          monitor_state: %{
+            "pr_quality" => %{
+              "status" => "attention",
+              "summary" => "1 PR contract gap needs fixes.",
+              "gaps" => [
+                %{"label" => "Task List checkboxes", "detail" => "Task List needs checkboxes."}
+              ]
+            }
+          }
+        })
+
+      assert {:ok, _queued} =
+               ReviewNudges.execute_contract_gap(issue, "pr_quality", agents: [agent])
+
+      assert [_pending] = Wakes.list_review_nudges([issue.id])
+
+      payload =
+        build_pr_payload("synchronize", issue.github_pr_url, %{
+          "title" => PullRequestContract.title(issue),
+          "body" => PullRequestContract.body_template(issue),
+          "head" => %{"ref" => PullRequestContract.branch_name(issue)},
+          "number" => 123,
+          "state" => "open"
+        })
+
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
+
+      assert response(conn, :ok) == ""
+
+      updated_issue = Issues.get_issue!(issue.id)
+      assert updated_issue.monitor_state["pr_quality"]["status"] == "ready"
+      assert updated_issue.monitor_state["pr_quality"]["passed"] == true
+
+      assert updated_issue.monitor_state["pr_quality"]["checked_source"] ==
+               "github_webhook:synchronize"
+
+      assert updated_issue.monitor_state["pr_quality"]["missing_fields"] == []
+
+      assert [] = Wakes.list_review_nudges([issue.id])
+      assert [_cleared] = Wakes.list_review_nudges([issue.id], statuses: ["consumed"])
     end
 
     test "duplicate delivery (same X-GitHub-Delivery) is short-circuited and runs side effects only once",

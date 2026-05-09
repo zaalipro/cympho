@@ -4,6 +4,7 @@ defmodule CymphoWeb.UserAuth do
 
   Provides an on_mount hook that:
   - Loads the current user from session
+  - Redirects unauthenticated browsers to the login page
   - Determines the current company from session or user default
   - Falls back to first membership company if needed
   - Assigns :current_user, :user_companies, :current_company to socket
@@ -13,15 +14,82 @@ defmodule CymphoWeb.UserAuth do
   import Ecto.Query
   alias Cympho.Users
 
+  def require_authenticated_user(conn, _opts) do
+    case Plug.Conn.get_session(conn, :user_id) do
+      user_id when is_binary(user_id) ->
+        case Users.get_user(user_id) do
+          {:ok, user} ->
+            Plug.Conn.assign(conn, :current_user, user)
+
+          {:error, :not_found} ->
+            redirect_to_login(conn)
+        end
+
+      _ ->
+        redirect_to_login(conn)
+    end
+  end
+
   def on_mount(:default, _params, session, socket) do
     socket =
       socket
       |> assign_current_user(session)
-      |> assign_user_companies()
-      |> assign_current_company(session)
-      |> assign_sidebar_data()
 
-    {:cont, socket}
+    if is_nil(socket.assigns.current_user) do
+      {:halt, Phoenix.LiveView.redirect(socket, to: "/login")}
+    else
+      socket =
+        socket
+        |> assign_user_companies()
+        |> assign_current_company(session)
+        |> assign_sidebar_data()
+
+      {:cont, socket}
+    end
+  end
+
+  def login_path(return_to) do
+    case safe_return_path(return_to) do
+      nil -> "/login"
+      path -> "/login?return_to=#{URI.encode_www_form(path)}"
+    end
+  end
+
+  def safe_return_path(path) when is_binary(path) do
+    cond do
+      path == "" ->
+        nil
+
+      not String.starts_with?(path, "/") ->
+        nil
+
+      String.starts_with?(path, "//") ->
+        nil
+
+      String.contains?(path, ["\n", "\r", "\t"]) ->
+        nil
+
+      true ->
+        path
+    end
+  end
+
+  def safe_return_path(_path), do: nil
+
+  defp redirect_to_login(conn) do
+    return_to = current_path(conn)
+
+    conn
+    |> Phoenix.Controller.put_flash(:error, "Sign in to continue.")
+    |> Phoenix.Controller.redirect(to: login_path(return_to))
+    |> Plug.Conn.halt()
+  end
+
+  defp current_path(conn) do
+    case conn.query_string do
+      "" -> conn.request_path
+      query -> conn.request_path <> "?" <> query
+    end
   end
 
   defp assign_sidebar_data(socket) do
@@ -43,7 +111,6 @@ defmodule CymphoWeb.UserAuth do
   defp assign_current_user(socket, session) do
     case session["user_id"] do
       nil ->
-        # Guest user
         assign(socket, :current_user, nil)
 
       user_id ->
@@ -61,7 +128,6 @@ defmodule CymphoWeb.UserAuth do
             assign(socket, :current_user, user_map)
 
           {:error, :not_found} ->
-            # Invalid user ID in session - treat as guest
             assign(socket, :current_user, nil)
         end
     end

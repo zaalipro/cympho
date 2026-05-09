@@ -31,7 +31,7 @@ defmodule CymphoWeb.IssueLive.Index do
 
   @impl true
   def handle_params(params, _url, socket) do
-    paginated = Issues.list_issues_paginated(with_company_scope(socket, params))
+    paginated = paginated_issues(socket, params)
     current_user = socket.assigns[:current_user]
 
     unread_issues =
@@ -177,7 +177,7 @@ defmodule CymphoWeb.IssueLive.Index do
       "page" => to_string(socket.assigns.page)
     }
 
-    paginated = Issues.list_issues_paginated(with_company_scope(socket, params))
+    paginated = paginated_issues(socket, params)
     current_user = socket.assigns[:current_user]
 
     unread_issues =
@@ -228,31 +228,42 @@ defmodule CymphoWeb.IssueLive.Index do
     end
   end
 
+  defp paginated_issues(socket, params) do
+    case socket.assigns[:current_company] do
+      %{id: _company_id} -> Issues.list_issues_paginated(with_company_scope(socket, params))
+      _ -> empty_page()
+    end
+  end
+
+  defp empty_page do
+    %{issues: [], page: 1, per_page: 25, total: 0, total_pages: 1}
+  end
+
   defp list_agents(socket) do
     case socket.assigns[:current_company] do
       %{id: company_id} -> Agents.list_agents_by_company(company_id)
-      _ -> Agents.list_agents()
+      _ -> []
     end
   end
 
   defp list_projects(socket) do
     case socket.assigns[:current_company] do
       %{id: company_id} -> Projects.list_projects_by_company(company_id)
-      _ -> Projects.list_projects()
+      _ -> []
     end
   end
 
   defp list_labels(socket) do
     case socket.assigns[:current_company] do
       %{id: company_id} -> Labels.list_labels_by_company(company_id)
-      _ -> Labels.list_labels()
+      _ -> []
     end
   end
 
   defp get_issue(socket, id) do
     case socket.assigns[:current_company] do
       %{id: company_id} -> Issues.get_company_issue(company_id, id)
-      _ -> Issues.get_issue(id)
+      _ -> {:error, :not_found}
     end
   end
 

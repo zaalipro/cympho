@@ -108,6 +108,12 @@ defmodule CymphoWeb.Components.UserMenu do
             label="Activity"
           />
           <.menu_link
+            to={~p"/operations"}
+            icon="hero-command-line-mini"
+            current={@current_path}
+            label="Operations"
+          />
+          <.menu_link
             to={~p"/workspaces"}
             icon="hero-rectangle-stack-mini"
             current={@current_path}

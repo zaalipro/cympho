@@ -5,10 +5,15 @@ defmodule CymphoWeb.AgentLive.Show do
   alias Cympho.Agents.Agent
   alias Cympho.Agents.InstructionFiles
   alias Cympho.Agents.RuntimeEnv
+  alias Cympho.Adapters.Error, as: AdapterError
+  alias Cympho.Adapters.Registry, as: AdapterRegistry
   alias Cympho.Adapters.RuntimeOptions
+  alias Cympho.AgentInstructionStudio
   alias Cympho.HeartbeatEngine
   alias Cympho.Issues
   alias Cympho.Plugins
+  alias Cympho.RuntimeCapacity
+  alias Cympho.RuntimeProfiles
   alias Cympho.Secrets
   alias Cympho.Skills
   alias Cympho.Wakes
@@ -30,7 +35,7 @@ defmodule CymphoWeb.AgentLive.Show do
       Agents.subscribe(socket.assigns.current_company.id)
     end
 
-    case Agents.get_agent(id) do
+    case get_scoped_agent(socket, id) do
       {:ok, agent} ->
         {:ok, assign_agent(socket, agent)}
 
@@ -46,7 +51,7 @@ defmodule CymphoWeb.AgentLive.Show do
     run_id = params["run_id"]
 
     socket =
-      case Agents.get_agent(id) do
+      case get_scoped_agent(socket, id) do
         {:ok, agent} ->
           socket
           |> assign(:page_title, agent.name)
@@ -79,16 +84,24 @@ defmodule CymphoWeb.AgentLive.Show do
   def handle_event("config_validate", %{"agent" => agent_params} = params, socket) do
     env_rows = env_rows_from_params(params, socket.assigns.env_rows)
     permissions = permissions_from_params(params, socket.assigns.permissions)
-    selected_adapter = selected_adapter_from_params(agent_params, socket.assigns.agent)
-    runtime = runtime_form_from_params(agent_params, socket.assigns.agent)
+    selected_profile_id = selected_profile_from_params(agent_params, socket.assigns.agent)
+
+    selected_adapter =
+      selected_adapter_from_params(agent_params, socket.assigns.agent, selected_profile_id)
+
+    runtime = runtime_form_from_params(agent_params, socket.assigns.agent, selected_profile_id)
 
     full_params =
       agent_params
+      |> Map.put("adapter", selected_adapter)
       |> Map.put(
         "config",
-        build_adapter_config(socket.assigns.agent, selected_adapter, runtime)
+        build_adapter_config(socket.assigns.agent, selected_adapter, runtime, selected_profile_id)
       )
-      |> Map.put("runtime_config", build_runtime_config(socket.assigns.agent, env_rows))
+      |> Map.put(
+        "runtime_config",
+        build_runtime_config(socket.assigns.agent, env_rows, selected_profile_id)
+      )
       |> Map.put("permissions", permissions)
 
     changeset =
@@ -99,32 +112,47 @@ defmodule CymphoWeb.AgentLive.Show do
     {:noreply,
      socket
      |> assign(:env_rows, env_rows)
+     |> assign(:env_vars, env_map_from_rows(env_rows))
      |> assign(:permissions, permissions)
      |> assign(:selected_adapter, selected_adapter)
+     |> assign_runtime_profile(selected_profile_id)
      |> assign_runtime_form(runtime)
+     |> assign(:adapter_health_check_result, nil)
+     |> assign(:instruction_patch_feedback, nil)
      |> assign(:form, to_form(changeset))}
   end
 
   def handle_event("config_save", %{"agent" => agent_params} = params, socket) do
     env_rows = env_rows_from_params(params, socket.assigns.env_rows)
     permissions = permissions_from_params(params, socket.assigns.permissions)
-    selected_adapter = selected_adapter_from_params(agent_params, socket.assigns.agent)
-    runtime = runtime_form_from_params(agent_params, socket.assigns.agent)
+    selected_profile_id = selected_profile_from_params(agent_params, socket.assigns.agent)
+
+    selected_adapter =
+      selected_adapter_from_params(agent_params, socket.assigns.agent, selected_profile_id)
+
+    runtime = runtime_form_from_params(agent_params, socket.assigns.agent, selected_profile_id)
 
     full_params =
       agent_params
+      |> Map.put("adapter", selected_adapter)
       |> Map.put(
         "config",
-        build_adapter_config(socket.assigns.agent, selected_adapter, runtime)
+        build_adapter_config(socket.assigns.agent, selected_adapter, runtime, selected_profile_id)
       )
-      |> Map.put("runtime_config", build_runtime_config(socket.assigns.agent, env_rows))
+      |> Map.put(
+        "runtime_config",
+        build_runtime_config(socket.assigns.agent, env_rows, selected_profile_id)
+      )
       |> Map.put("permissions", permissions)
 
     case Agents.update_agent(socket.assigns.agent, normalize_agent_params(full_params)) do
       {:ok, agent} ->
+        {socket, revision_message} =
+          maybe_record_config_revision(socket, socket.assigns.agent, agent)
+
         {:noreply,
          socket
-         |> put_flash(:info, "Configuration saved.")
+         |> put_flash(:info, revision_message)
          |> assign_agent(agent)}
 
       {:error, :pending_board_approval, approval_id} ->
@@ -140,29 +168,194 @@ defmodule CymphoWeb.AgentLive.Show do
          socket
          |> put_flash(:error, "Could not save configuration.")
          |> assign(:env_rows, env_rows)
+         |> assign(:env_vars, env_map_from_rows(env_rows))
          |> assign(:permissions, permissions)
          |> assign(:selected_adapter, selected_adapter)
+         |> assign_runtime_profile(selected_profile_id)
          |> assign_runtime_form(runtime)
+         |> assign(:adapter_health_check_result, nil)
+         |> assign(:instruction_patch_feedback, nil)
          |> assign(:form, to_form(Map.put(changeset, :action, :update)))}
+    end
+  end
+
+  def handle_event("apply_instruction_patch", %{"patch" => patch_id}, socket) do
+    role = current_form_value(socket, :role, socket.assigns.agent.role)
+
+    instructions =
+      current_form_value(socket, :instructions, socket.assigns.agent.instructions || "")
+
+    selected_adapter =
+      socket.assigns[:selected_adapter] || selected_adapter_from_agent(socket.assigns.agent)
+
+    runtime = runtime_form_from_assigns(socket.assigns)
+    studio = instruction_studio(role, instructions, selected_adapter, runtime)
+
+    case Enum.find(studio.patches, &(&1.id == patch_id)) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Instruction patch not found.")}
+
+      patch ->
+        updated_instructions = append_instruction_patch(instructions, patch)
+        updated_studio = instruction_studio(role, updated_instructions, selected_adapter, runtime)
+
+        params =
+          socket
+          |> current_agent_form_params(%{"instructions" => updated_instructions})
+          |> normalize_agent_params()
+
+        changeset =
+          socket.assigns.agent
+          |> Agents.change_agent(params)
+          |> Map.put(:action, :validate)
+
+        feedback = %{
+          patch_id: patch.id,
+          title: patch.title,
+          before_score: studio.score,
+          after_score: updated_studio.score,
+          changed?: updated_instructions != to_string(instructions || "")
+        }
+
+        {:noreply,
+         socket
+         |> assign(:instruction_patch_feedback, feedback)
+         |> assign(:form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("restore_config_revision", %{"id" => revision_id}, socket) do
+    case Agents.restore_config_revision(socket.assigns.agent.id, revision_id,
+           created_by_user_id: current_user_id(socket)
+         ) do
+      {:ok, agent} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Instruction revision restored.")
+         |> assign_agent(agent)}
+
+      {:error, :pending_board_approval, approval_id} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :info,
+           "Restore requires board approval. Request submitted (##{String.slice(approval_id, 0, 8)})."
+         )}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Instruction revision not found.")}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Could not restore instruction revision.")}
     end
   end
 
   def handle_event("add_env_row", _params, socket) do
     rows = socket.assigns.env_rows ++ [%{key: "", value: ""}]
-    {:noreply, assign(socket, :env_rows, rows)}
+
+    {:noreply,
+     socket
+     |> assign(:env_rows, rows)
+     |> assign(:env_vars, env_map_from_rows(rows))
+     |> assign(:adapter_health_check_result, nil)}
   end
 
   def handle_event("remove_env_row", %{"index" => index}, socket) do
     idx = String.to_integer(index)
     rows = List.delete_at(socket.assigns.env_rows, idx)
     rows = if rows == [], do: [%{key: "", value: ""}], else: rows
-    {:noreply, assign(socket, :env_rows, rows)}
+
+    {:noreply,
+     socket
+     |> assign(:env_rows, rows)
+     |> assign(:env_vars, env_map_from_rows(rows))
+     |> assign(:adapter_health_check_result, nil)}
   end
 
   def handle_event("toggle_permission", %{"key" => key}, socket) do
     current = !!Map.get(socket.assigns.permissions, key, false)
     permissions = Map.put(socket.assigns.permissions, key, !current)
     {:noreply, assign(socket, :permissions, permissions)}
+  end
+
+  def handle_event("select_runtime_profile", %{"profile_id" => profile_id}, socket) do
+    profile_id = RuntimeProfiles.normalize_id(profile_id)
+
+    selected_adapter =
+      RuntimeProfiles.adapter_for(
+        profile_id,
+        socket.assigns[:selected_adapter] || selected_adapter_from_agent(socket.assigns.agent)
+      )
+
+    runtime =
+      if RuntimeProfiles.custom?(profile_id) do
+        runtime_form_from_assigns(socket.assigns)
+      else
+        runtime_form_fallback(socket.assigns.agent, selected_adapter, profile_id)
+      end
+
+    {:noreply,
+     socket
+     |> assign(:selected_adapter, selected_adapter)
+     |> assign_runtime_profile(profile_id)
+     |> assign_runtime_form(runtime)
+     |> assign(:adapter_health_check_result, nil)}
+  end
+
+  def handle_event("apply_runtime_preset", %{"preset" => preset_id}, socket) do
+    case RuntimeProfiles.quick_preset(preset_id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Unknown runtime preset.")}
+
+      preset ->
+        profile_id = RuntimeProfiles.normalize_id(preset.profile_id)
+
+        selected_adapter =
+          RuntimeProfiles.adapter_for(
+            profile_id,
+            socket.assigns[:selected_adapter] || selected_adapter_from_agent(socket.assigns.agent)
+          )
+          |> normalize_adapter()
+
+        runtime = runtime_form_fallback(socket.assigns.agent, selected_adapter, profile_id)
+
+        changeset =
+          socket.assigns.agent
+          |> Agents.change_agent(%{
+            "adapter" => selected_adapter,
+            "max_concurrent_jobs" => preset.max_concurrent_jobs
+          })
+          |> Map.put(:action, :validate)
+
+        {:noreply,
+         socket
+         |> put_flash(:info, "#{preset.name} preset applied. Save to persist it.")
+         |> assign(:selected_adapter, selected_adapter)
+         |> assign_runtime_profile(profile_id)
+         |> assign_runtime_form(runtime)
+         |> assign(:adapter_health_check_result, nil)
+         |> assign(:form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("test_adapter", _params, socket) do
+    selected_adapter =
+      socket.assigns[:selected_adapter] || selected_adapter_from_agent(socket.assigns.agent)
+
+    runtime = runtime_form_from_assigns(socket.assigns)
+    profile_id = socket.assigns[:selected_runtime_profile_id] || RuntimeProfiles.custom_id()
+
+    config =
+      socket.assigns.agent
+      |> build_adapter_config(selected_adapter, runtime, profile_id)
+      |> preflight_config(
+        selected_adapter,
+        socket.assigns[:env_vars] || %{},
+        socket.assigns[:secret_count] || 0
+      )
+
+    {:noreply,
+     assign(socket, :adapter_health_check_result, adapter_health_check(selected_adapter, config))}
   end
 
   # ── Instructions tab — multi-file ─────────────────────────────────────
@@ -193,7 +386,7 @@ defmodule CymphoWeb.AgentLive.Show do
       true ->
         case InstructionFiles.create(agent, name, "") do
           {:ok, _file} ->
-            {:ok, agent} = Agents.get_agent(agent.id)
+            {:ok, agent} = get_scoped_agent(socket, agent.id)
 
             socket =
               socket
@@ -212,7 +405,7 @@ defmodule CymphoWeb.AgentLive.Show do
   def handle_event("delete_file", %{"file" => file}, socket) when file != @entry_file do
     case InstructionFiles.delete(socket.assigns.agent, file) do
       {:ok, _} ->
-        {:ok, agent} = Agents.get_agent(socket.assigns.agent.id)
+        {:ok, agent} = get_scoped_agent(socket, socket.assigns.agent.id)
 
         {:noreply,
          socket
@@ -232,7 +425,7 @@ defmodule CymphoWeb.AgentLive.Show do
 
     case InstructionFiles.upsert_content(socket.assigns.agent, file, content) do
       {:ok, _} ->
-        {:ok, agent} = Agents.get_agent(socket.assigns.agent.id)
+        {:ok, agent} = get_scoped_agent(socket, socket.assigns.agent.id)
 
         {:noreply,
          socket
@@ -315,6 +508,13 @@ defmodule CymphoWeb.AgentLive.Show do
 
   # ── Loading helpers ───────────────────────────────────────────────────
 
+  defp get_scoped_agent(socket, id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Agents.get_company_agent(company_id, id)
+      _ -> {:error, :not_found}
+    end
+  end
+
   defp assign_agent(socket, agent) do
     agent = Cympho.Repo.preload(agent, [:parent, :children])
     wake_history = Wakes.list_agent_wakes(agent.id)
@@ -323,6 +523,9 @@ defmodule CymphoWeb.AgentLive.Show do
     env_vars = RuntimeEnv.from_agent(agent)
     secret_count = Secrets.list_secrets_for_agent(agent.id) |> length()
     changeset = Agents.change_agent(agent)
+    selected_profile_id = RuntimeProfiles.from_agent(agent)
+    config_revisions = Agents.list_config_revisions(agent.id, limit: 8)
+    latest_prompt_tuning_revision = latest_prompt_tuning_revision(config_revisions)
 
     socket
     |> assign(:agent, agent)
@@ -334,7 +537,13 @@ defmodule CymphoWeb.AgentLive.Show do
     |> assign(:secret_count, secret_count)
     |> assign(:env_rows, env_rows_from(agent))
     |> assign(:selected_adapter, selected_adapter_from_agent(agent))
+    |> assign_runtime_profile(selected_profile_id)
     |> assign_runtime_form(runtime_form_from_agent(agent))
+    |> assign(:adapter_health_check_result, nil)
+    |> assign(:instruction_patch_feedback, nil)
+    |> assign(:config_revisions, config_revisions)
+    |> assign(:latest_config_revision, List.first(config_revisions))
+    |> assign(:latest_prompt_tuning_revision, latest_prompt_tuning_revision)
     |> assign(:permissions, normalise_permissions(agent.permissions))
     |> assign(:instructions_preview?, false)
     |> assign(:form, to_form(changeset))
@@ -407,7 +616,8 @@ defmodule CymphoWeb.AgentLive.Show do
       "runtime_cwd",
       "openclaw_endpoint",
       "openclaw_runtime",
-      "openclaw_harness_id"
+      "openclaw_harness_id",
+      "runtime_profile_id"
     ])
     |> normalize_parent_id()
   end
@@ -416,6 +626,75 @@ defmodule CymphoWeb.AgentLive.Show do
     case Map.get(params, "parent_id") do
       "" -> Map.put(params, "parent_id", nil)
       _ -> params
+    end
+  end
+
+  defp current_agent_form_params(socket, overrides) do
+    agent = socket.assigns.agent
+
+    %{
+      "name" => current_form_value(socket, :name, agent.name),
+      "title" => current_form_value(socket, :title, agent.title),
+      "role" => current_form_value(socket, :role, agent.role),
+      "parent_id" => current_form_value(socket, :parent_id, agent.parent_id),
+      "adapter" => socket.assigns[:selected_adapter] || selected_adapter_from_agent(agent),
+      "max_concurrent_jobs" =>
+        current_form_value(socket, :max_concurrent_jobs, agent.max_concurrent_jobs),
+      "instructions" => current_form_value(socket, :instructions, agent.instructions || "")
+    }
+    |> Map.merge(overrides)
+  end
+
+  defp current_form_value(socket, field, fallback) do
+    case socket.assigns.form[field].value do
+      nil -> fallback
+      value -> value
+    end
+  end
+
+  defp append_instruction_patch(current, patch) do
+    current = current |> to_string() |> String.trim()
+    marker = "## #{patch.title}"
+    block = "#{marker}\n#{patch.body}"
+
+    cond do
+      String.contains?(current, marker) or String.contains?(current, patch.body) ->
+        current
+
+      current == "" ->
+        block
+
+      true ->
+        current <> "\n\n" <> block
+    end
+  end
+
+  defp maybe_record_config_revision(socket, before_agent, after_agent) do
+    if tracked_config_changed?(before_agent, after_agent) do
+      case Agents.create_config_revision(after_agent, %{
+             created_by_user_id: current_user_id(socket)
+           }) do
+        {:ok, revision} ->
+          {socket, "Configuration saved. Instruction revision v#{revision.version} recorded."}
+
+        {:error, _changeset} ->
+          {socket, "Configuration saved, but instruction revision history could not be recorded."}
+      end
+    else
+      {socket, "Configuration saved."}
+    end
+  end
+
+  defp tracked_config_changed?(before_agent, after_agent) do
+    Enum.any?([:role, :adapter, :instructions, :config, :runtime_config], fn field ->
+      Map.get(before_agent, field) != Map.get(after_agent, field)
+    end)
+  end
+
+  defp current_user_id(socket) do
+    case socket.assigns[:current_user] do
+      %{id: id} -> id
+      _ -> nil
     end
   end
 
@@ -446,30 +725,63 @@ defmodule CymphoWeb.AgentLive.Show do
   defp safe_to_int(s) when is_binary(s), do: String.to_integer(s)
   defp safe_to_int(s), do: s
 
-  defp build_runtime_config(%Agent{runtime_config: existing}, rows) do
+  defp build_runtime_config(%Agent{runtime_config: existing}, rows, profile_id) do
+    profile_runtime_config = RuntimeProfiles.runtime_config(profile_id)
+    profile_env = Map.get(profile_runtime_config, "env", %{})
+
     env =
       rows
       |> Enum.reject(fn %{key: k} -> String.trim(k) == "" end)
       |> Enum.reduce(%{}, fn %{key: k, value: v}, acc -> Map.put(acc, String.trim(k), v) end)
 
     (existing || %{})
-    |> Map.put("env", env)
+    |> Map.merge(profile_runtime_config)
+    |> Map.put("env", Map.merge(profile_env, env))
+    |> Map.put("profile_id", RuntimeProfiles.normalize_id(profile_id))
   end
 
-  defp build_adapter_config(%Agent{config: existing}, "codex", runtime) do
-    (existing || %{})
+  defp env_map_from_rows(rows) do
+    rows
+    |> List.wrap()
+    |> Enum.reject(fn %{key: key} -> String.trim(to_string(key || "")) == "" end)
+    |> Enum.reduce(%{}, fn %{key: key, value: value}, acc ->
+      Map.put(acc, String.trim(to_string(key)), to_string(value || ""))
+    end)
+  end
+
+  defp build_adapter_config(agent, adapter, runtime, profile_id) do
+    agent
+    |> adapter_config_base(profile_id)
+    |> do_build_adapter_config(adapter, runtime)
+  end
+
+  defp adapter_config_base(%Agent{config: existing}, profile_id) do
+    if RuntimeProfiles.custom?(profile_id) do
+      existing || %{}
+    else
+      RuntimeProfiles.config(profile_id)
+    end
+  end
+
+  defp do_build_adapter_config(config, "codex", runtime) do
+    config
     |> Map.put("provider", "openai-codex")
     |> put_clean("model", runtime.model)
   end
 
-  defp build_adapter_config(%Agent{config: existing}, "cursor", runtime) do
-    (existing || %{})
+  defp do_build_adapter_config(config, "claude_code", runtime) do
+    config
+    |> put_clean("command", runtime.command)
+  end
+
+  defp do_build_adapter_config(config, "cursor", runtime) do
+    config
     |> put_clean("command", runtime.command)
     |> put_clean("model", runtime.model)
   end
 
-  defp build_adapter_config(%Agent{config: existing}, "openclaw", runtime) do
-    (existing || %{})
+  defp do_build_adapter_config(config, "openclaw", runtime) do
+    config
     |> put_clean("provider", runtime.provider)
     |> put_clean("model", runtime.model)
     |> put_clean("endpoint", runtime.openclaw_endpoint)
@@ -477,10 +789,10 @@ defmodule CymphoWeb.AgentLive.Show do
     |> put_clean("harness_id", runtime.openclaw_harness_id)
   end
 
-  defp build_adapter_config(%Agent{config: existing}, "process", runtime) do
+  defp do_build_adapter_config(config, "process", runtime) do
     preset_defaults = RuntimeOptions.process_defaults(runtime.process_preset)
 
-    (existing || %{})
+    config
     |> Map.merge(preset_defaults)
     |> put_clean("process_preset", runtime.process_preset)
     |> put_clean("provider", runtime.provider)
@@ -490,17 +802,72 @@ defmodule CymphoWeb.AgentLive.Show do
     |> put_clean("cwd", runtime.cwd)
   end
 
-  defp build_adapter_config(%Agent{config: existing}, _adapter, _runtime), do: existing || %{}
+  defp do_build_adapter_config(config, _adapter, _runtime), do: config
+
+  defp preflight_config(config, adapter, env_vars, secret_count) do
+    config
+    |> put_preflight_api_key(adapter, env_vars, secret_count)
+  end
+
+  defp put_preflight_api_key(config, "codex", env_vars, secret_count) do
+    config
+    |> put_preflight_key("api_key", env_first(env_vars, ["OPENAI_API_KEY", "CODEX_API_KEY"]))
+    |> maybe_mark_secret_key("api_key", secret_count)
+  end
+
+  defp put_preflight_api_key(config, "claude_code", env_vars, secret_count) do
+    config
+    |> put_preflight_key("api_key", env_first(env_vars, ["ANTHROPIC_API_KEY"]))
+    |> maybe_mark_secret_key("api_key", secret_count)
+  end
+
+  defp put_preflight_api_key(config, "openclaw", env_vars, secret_count) do
+    config
+    |> put_preflight_key("api_key", env_first(env_vars, ["OPENCLAW_API_KEY"]))
+    |> maybe_mark_secret_key("api_key", secret_count)
+  end
+
+  defp put_preflight_api_key(config, _adapter, _env_vars, _secret_count), do: config
+
+  defp put_preflight_key(config, _key, value) when value in [nil, ""], do: config
+  defp put_preflight_key(config, key, value), do: Map.put(config, key, value)
+
+  defp maybe_mark_secret_key(config, key, secret_count) when secret_count > 0 do
+    Map.put_new(config, key, "__encrypted_secret_available__")
+  end
+
+  defp maybe_mark_secret_key(config, _key, _secret_count), do: config
+
+  defp env_first(env_vars, keys) do
+    Enum.find_value(keys, fn key ->
+      value = Map.get(env_vars || %{}, key)
+      if value in [nil, ""], do: nil, else: value
+    end)
+  end
 
   defp put_clean(map, _key, value) when value in [nil, ""], do: map
   defp put_clean(map, key, value), do: Map.put(map, key, value)
 
-  defp selected_adapter_from_params(params, agent) do
+  defp selected_adapter_from_params(params, agent, profile_id) do
+    fallback =
+      params
+      |> Map.get("adapter")
+      |> case do
+        nil -> selected_adapter_from_agent(agent)
+        adapter -> normalize_adapter(adapter)
+      end
+
+    profile_id
+    |> RuntimeProfiles.adapter_for(fallback)
+    |> normalize_adapter()
+  end
+
+  defp selected_profile_from_params(params, agent) do
     params
-    |> Map.get("adapter")
+    |> Map.get("runtime_profile_id")
     |> case do
-      nil -> selected_adapter_from_agent(agent)
-      adapter -> normalize_adapter(adapter)
+      nil -> RuntimeProfiles.from_agent(agent)
+      profile_id -> RuntimeProfiles.normalize_id(profile_id)
     end
   end
 
@@ -522,35 +889,76 @@ defmodule CymphoWeb.AgentLive.Show do
     |> assign(:openclaw_harness_id, runtime.openclaw_harness_id)
   end
 
-  defp runtime_form_from_params(params, %Agent{} = agent) do
-    fallback = runtime_form_from_agent(agent)
-    selected_adapter = selected_adapter_from_params(params, agent)
+  defp assign_runtime_profile(socket, profile_id) do
+    profile_id = RuntimeProfiles.normalize_id(profile_id)
 
-    provider =
-      params
-      |> param_string("provider", fallback.provider)
-      |> default_runtime_provider(selected_adapter)
+    socket
+    |> assign(:runtime_profiles, RuntimeProfiles.all())
+    |> assign(:selected_runtime_profile_id, profile_id)
+    |> assign(:runtime_profile, RuntimeProfiles.get!(profile_id))
+  end
 
-    process_preset = param_string(params, "process_preset", fallback.process_preset)
+  defp runtime_form_from_params(params, %Agent{} = agent, profile_id) do
+    selected_adapter = selected_adapter_from_params(params, agent, profile_id)
+    fallback = runtime_form_fallback(agent, selected_adapter, profile_id)
 
+    if RuntimeProfiles.custom?(profile_id) do
+      provider =
+        params
+        |> param_string("provider", fallback.provider)
+        |> default_runtime_provider(selected_adapter)
+
+      process_preset = param_string(params, "process_preset", fallback.process_preset)
+
+      %{
+        model: param_string(params, "model", fallback.model),
+        provider: provider,
+        command: param_string(params, "runtime_command", fallback.command),
+        process_preset: process_preset,
+        process_args: param_string(params, "process_args", fallback.process_args),
+        cwd: param_string(params, "runtime_cwd", fallback.cwd),
+        openclaw_endpoint: param_string(params, "openclaw_endpoint", fallback.openclaw_endpoint),
+        openclaw_runtime: param_string(params, "openclaw_runtime", fallback.openclaw_runtime),
+        openclaw_harness_id:
+          param_string(params, "openclaw_harness_id", fallback.openclaw_harness_id)
+      }
+      |> maybe_default_runtime_model(selected_adapter, provider, process_preset)
+    else
+      fallback
+    end
+  end
+
+  defp runtime_form_fallback(agent, selected_adapter, profile_id) do
+    if RuntimeProfiles.custom?(profile_id) do
+      runtime_form_from_agent(agent)
+    else
+      RuntimeProfiles.config(profile_id)
+      |> runtime_form_from_config(selected_adapter)
+    end
+  end
+
+  defp runtime_form_from_assigns(assigns) do
     %{
-      model: param_string(params, "model", fallback.model),
-      provider: provider,
-      command: param_string(params, "runtime_command", fallback.command),
-      process_preset: process_preset,
-      process_args: param_string(params, "process_args", fallback.process_args),
-      cwd: param_string(params, "runtime_cwd", fallback.cwd),
-      openclaw_endpoint: param_string(params, "openclaw_endpoint", fallback.openclaw_endpoint),
-      openclaw_runtime: param_string(params, "openclaw_runtime", fallback.openclaw_runtime),
-      openclaw_harness_id:
-        param_string(params, "openclaw_harness_id", fallback.openclaw_harness_id)
+      model: assigns[:runtime_model] || "",
+      provider: assigns[:runtime_provider] || "",
+      command: assigns[:runtime_command] || "",
+      process_preset: assigns[:process_preset] || RuntimeOptions.process_default_preset(),
+      process_args: assigns[:process_args] || "",
+      cwd: assigns[:runtime_cwd] || "",
+      openclaw_endpoint: assigns[:openclaw_endpoint] || "",
+      openclaw_runtime: assigns[:openclaw_runtime] || "subagent",
+      openclaw_harness_id: assigns[:openclaw_harness_id] || ""
     }
-    |> maybe_default_runtime_model(selected_adapter, provider, process_preset)
   end
 
   defp runtime_form_from_agent(%Agent{config: config, adapter: adapter}) do
     config = config || %{}
     adapter = adapter |> to_string() |> normalize_adapter()
+    runtime_form_from_config(config, adapter)
+  end
+
+  defp runtime_form_from_config(config, adapter) do
+    config = config || %{}
     provider = config["provider"] || default_provider(adapter)
     process_preset = config["process_preset"] || RuntimeOptions.process_default_preset()
 
@@ -698,6 +1106,8 @@ defmodule CymphoWeb.AgentLive.Show do
     |> Enum.map(fn adapter -> {adapter_label_human(adapter), to_string(adapter)} end)
   end
 
+  def runtime_profile_options, do: RuntimeProfiles.options()
+
   def codex_model_options, do: Cympho.Adapters.CodexAdapter.model_options()
   def cursor_model_options, do: RuntimeOptions.cursor_model_options()
   def openclaw_provider_options, do: RuntimeOptions.openclaw_provider_options()
@@ -707,6 +1117,8 @@ defmodule CymphoWeb.AgentLive.Show do
   def process_provider_options, do: RuntimeOptions.process_provider_options()
   def process_provider_model_options, do: RuntimeOptions.process_provider_model_options()
   def process_model_options(provider), do: RuntimeOptions.process_model_options(provider)
+  def runtime_profile_summary(profile), do: RuntimeProfiles.summary_value(profile)
+  def quick_runtime_presets, do: RuntimeProfiles.quick_presets()
 
   def render_markdown(text), do: Markdown.to_html(text)
 
@@ -789,6 +1201,114 @@ defmodule CymphoWeb.AgentLive.Show do
   def run_dot_class("queued"), do: "bg-amber-300"
   def run_dot_class(_), do: "bg-gray-400"
 
+  defp adapter_error_for_run(run), do: AdapterError.from_run(run)
+
+  defp adapter_health_check(adapter, config) do
+    adapter = normalize_adapter(adapter)
+
+    case AdapterRegistry.lookup(String.to_existing_atom(adapter)) do
+      {:ok, module} ->
+        result = module.health_check(config || %{})
+        health_check_result(adapter, result)
+
+      :error ->
+        health_check_result(adapter, %{
+          status: :unhealthy,
+          message: "Adapter is not registered",
+          checked_at: DateTime.utc_now()
+        })
+    end
+  rescue
+    ArgumentError ->
+      health_check_result(adapter, %{
+        status: :unhealthy,
+        message: "Adapter is not registered",
+        checked_at: DateTime.utc_now()
+      })
+
+    error ->
+      health_check_result(adapter, %{
+        status: :unhealthy,
+        message: Exception.message(error),
+        checked_at: DateTime.utc_now()
+      })
+  end
+
+  defp health_check_result(adapter, result) when is_map(result) do
+    status = normalize_health_check_status(result[:status] || result["status"])
+    message = result[:message] || result["message"] || "Health check completed."
+
+    error =
+      if status == :healthy, do: nil, else: AdapterError.normalize(message, adapter: adapter)
+
+    %{
+      status: status,
+      label: health_check_status_label(status),
+      adapter: adapter_label_human(adapter),
+      message: message,
+      checked_at: result[:checked_at] || result["checked_at"] || DateTime.utc_now(),
+      error: error
+    }
+  end
+
+  defp normalize_health_check_status(:healthy), do: :healthy
+  defp normalize_health_check_status(:degraded), do: :degraded
+  defp normalize_health_check_status(:unhealthy), do: :unavailable
+  defp normalize_health_check_status(:unavailable), do: :unavailable
+  defp normalize_health_check_status("healthy"), do: :healthy
+  defp normalize_health_check_status("degraded"), do: :degraded
+  defp normalize_health_check_status("unhealthy"), do: :unavailable
+  defp normalize_health_check_status("unavailable"), do: :unavailable
+  defp normalize_health_check_status(_), do: :unavailable
+
+  defp health_check_status_label(:healthy), do: "Passed"
+  defp health_check_status_label(:degraded), do: "Needs attention"
+  defp health_check_status_label(:unavailable), do: "Blocked"
+  defp health_check_status_label(_), do: "Unknown"
+
+  defp health_check_badge_class(:healthy),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp health_check_badge_class(:degraded),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  defp health_check_badge_class(:unavailable),
+    do: "border-red-500/25 bg-red-500/10 text-red-300"
+
+  defp health_check_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  defp adapter_error_category_label(:missing_binary), do: "Missing command"
+  defp adapter_error_category_label(:missing_credentials), do: "Missing credentials"
+  defp adapter_error_category_label(:auth_failed), do: "Auth failed"
+  defp adapter_error_category_label(:timeout), do: "Timeout"
+  defp adapter_error_category_label(:malformed_output), do: "Malformed output"
+  defp adapter_error_category_label(:no_output), do: "No output"
+  defp adapter_error_category_label(:nonzero_exit), do: "Non-zero exit"
+  defp adapter_error_category_label(_), do: "Unclassified"
+
+  defp adapter_error_badge_class(:missing_binary),
+    do: "border-amber-500/30 bg-amber-500/10 text-amber-200"
+
+  defp adapter_error_badge_class(:missing_credentials),
+    do: "border-amber-500/30 bg-amber-500/10 text-amber-200"
+
+  defp adapter_error_badge_class(:auth_failed),
+    do: "border-red-500/30 bg-red-500/10 text-red-200"
+
+  defp adapter_error_badge_class(:timeout),
+    do: "border-yellow-500/30 bg-yellow-500/10 text-yellow-200"
+
+  defp adapter_error_badge_class(:malformed_output),
+    do: "border-violet-500/30 bg-violet-500/10 text-violet-200"
+
+  defp adapter_error_badge_class(:no_output),
+    do: "border-border bg-surface text-text-tertiary"
+
+  defp adapter_error_badge_class(:nonzero_exit),
+    do: "border-red-500/30 bg-red-500/10 text-red-200"
+
+  defp adapter_error_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
   @sensitive_substrings ~w(TOKEN SECRET PASSWORD API_KEY AUTH)
 
   def mask_secret_like(key, value) when is_binary(key) and is_binary(value) do
@@ -825,6 +1345,25 @@ defmodule CymphoWeb.AgentLive.Show do
   def health_pill_class(:unavailable), do: "border-border bg-surface text-text-quaternary"
   def health_pill_class(_), do: "border-border bg-surface text-text-secondary"
 
+  defp runtime_capacity(adapter, max_jobs, runs) do
+    running_runs =
+      runs
+      |> List.wrap()
+      |> Enum.count(&(&1.status in ["running", "queued", "pending"]))
+
+    RuntimeCapacity.agent(%{adapter: adapter, max_concurrent_jobs: max_jobs}, running_runs)
+  end
+
+  defp capacity_badge_class(:safe), do: "border-green-500/25 bg-green-500/10 text-green-400"
+  defp capacity_badge_class(:watch), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-300"
+  defp capacity_badge_class(:high), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  defp capacity_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  defp capacity_dot_class(:safe), do: "bg-green-400"
+  defp capacity_dot_class(:watch), do: "bg-yellow-300"
+  defp capacity_dot_class(:high), do: "bg-red-400"
+  defp capacity_dot_class(_), do: "bg-text-quaternary"
+
   def adapter_label(nil), do: "No adapter"
   def adapter_label(""), do: "No adapter"
   def adapter_label(adapter), do: adapter_label_human(adapter)
@@ -841,13 +1380,523 @@ defmodule CymphoWeb.AgentLive.Show do
 
   def adapter_runtime_label(_agent), do: nil
 
-  defp runtime_config_value(%Agent{runtime_config: runtime_config, config: config}, key) do
-    Map.get(runtime_config || %{}, key) ||
-      Map.get(runtime_config || %{}, String.to_atom(key)) ||
-      Map.get(config || %{}, key) ||
-      Map.get(config || %{}, String.to_atom(key))
+  def runtime_command_label(command, agent) when command in [nil, ""],
+    do: adapter_runtime_label(agent)
+
+  def runtime_command_label(command, _agent), do: command
+
+  defp adapter_readiness(adapter, runtime) do
+    adapter = normalize_adapter(adapter)
+    autonomy_enabled? = Cympho.Orchestrator.Dispatcher.enabled?()
+
+    items =
+      [selected_adapter_item(adapter)] ++
+        readiness_items(adapter, runtime) ++
+        [execution_mode_item(autonomy_enabled?)]
+
+    blocked_count = Enum.count(items, &(&1.status == :blocked))
+    attention_count = Enum.count(items, &(&1.status == :attention))
+
+    status =
+      cond do
+        blocked_count > 0 -> :command_not_found
+        attention_count > 0 -> :missing_config
+        not autonomy_enabled? -> :review_mode
+        true -> :ready
+      end
+
+    %{
+      label: readiness_label(status, attention_count),
+      status: status,
+      summary: adapter_readiness_summary(adapter, status, attention_count),
+      items: items
+    }
   end
 
+  defp readiness_label(:ready, _count), do: "Ready"
+  defp readiness_label(:review_mode, _count), do: "Review mode only"
+  defp readiness_label(:command_not_found, _count), do: "Command not found"
+  defp readiness_label(:missing_config, 1), do: "Missing config"
+  defp readiness_label(:missing_config, count), do: "#{count} config checks"
+  defp readiness_label(_status, _count), do: "Needs attention"
+
+  defp adapter_readiness_summary(adapter, :ready, _count) do
+    "#{adapter_label_human(adapter)} has the basic runtime fields it needs."
+  end
+
+  defp adapter_readiness_summary(adapter, :review_mode, _count) do
+    "#{adapter_label_human(adapter)} is configured, but autonomous dispatch is disabled for review mode."
+  end
+
+  defp adapter_readiness_summary(adapter, :command_not_found, _count) do
+    "#{adapter_label_human(adapter)} points at a CLI command Cympho cannot find on this machine."
+  end
+
+  defp adapter_readiness_summary(adapter, _status, count) do
+    "#{adapter_label_human(adapter)} needs #{count} runtime check#{if count == 1, do: "", else: "s"} before autonomous runs."
+  end
+
+  defp selected_adapter_item(adapter) do
+    readiness_item(:ok, "Selected adapter", adapter_label_human(adapter))
+  end
+
+  defp execution_mode_item(true) do
+    readiness_item(:ok, "Execution mode", "Autonomous dispatch is enabled.")
+  end
+
+  defp execution_mode_item(false) do
+    readiness_item(
+      :info,
+      "Execution mode",
+      "Review mode only. Saving is safe, but agents will not auto-dispatch.",
+      target_path: "/operations#runtime-services",
+      target_label: "Open service gates"
+    )
+  end
+
+  defp readiness_items("claude_code", runtime) do
+    command = first_present([runtime.command, adapter_runtime_label(runtime.agent), "claude"])
+
+    [
+      command_item("Runtime command", command,
+        shell?: true,
+        target_id: "agent-runtime-profile",
+        target_label: "Change profile"
+      ),
+      claude_credentials_item(command, runtime),
+      readiness_item(
+        :ok,
+        "Model routing",
+        "Set ANTHROPIC_MODEL, ANTHROPIC_BASE_URL, or wrapper defaults when using custom providers."
+      )
+    ]
+  end
+
+  defp readiness_items("codex", runtime) do
+    [
+      command_item("CLI command", "codex",
+        target_id: "agent-runtime-profile",
+        target_label: "Change profile"
+      ),
+      model_item("Codex model", runtime.model,
+        target_id: "agent-codex-model",
+        target_label: "Choose model"
+      ),
+      credentials_item(runtime, ["OPENAI_API_KEY", "CODEX_API_KEY"], "OpenAI/Codex key",
+        target_id: "agent-env-vars",
+        target_label: "Add env var"
+      ),
+      readiness_item(:ok, "Invocation", "Runs as codex --model #{runtime.model}.")
+    ]
+  end
+
+  defp readiness_items("cursor", runtime) do
+    [
+      command_item("Cursor command", runtime.command || "agent",
+        target_id: "agent-cursor-command",
+        target_label: "Edit command"
+      ),
+      model_item("Cursor model", runtime.model,
+        target_id: "agent-cursor-model",
+        target_label: "Choose model"
+      ),
+      readiness_item(
+        :ok,
+        "Account",
+        "Uses the local Cursor CLI account and installed model access."
+      )
+    ]
+  end
+
+  defp readiness_items("openclaw", runtime) do
+    [
+      readiness_item(:ok, "Provider", runtime.provider || "default provider"),
+      model_item("Provider model", runtime.model,
+        target_id: "agent-openclaw-model",
+        target_label: "Choose model"
+      ),
+      if(runtime.endpoint in [nil, ""],
+        do:
+          readiness_item(
+            :attention,
+            "Gateway endpoint",
+            "Add the OpenClaw gateway URL before autonomous runs.",
+            target_id: "agent-openclaw-endpoint",
+            target_label: "Set endpoint"
+          ),
+        else: readiness_item(:ok, "Gateway endpoint", runtime.endpoint)
+      )
+    ]
+  end
+
+  defp readiness_items("process", runtime) do
+    [
+      command_item("Command", runtime.command,
+        target_id: "agent-process-command",
+        target_label: "Edit command"
+      ),
+      model_item("Forwarded model", runtime.model,
+        target_id: "agent-process-model",
+        target_label: "Choose model"
+      ),
+      readiness_item(
+        :ok,
+        "Preset",
+        "Preset #{runtime.process_preset || "custom"} controls args and model forwarding."
+      )
+    ]
+  end
+
+  defp readiness_items(_adapter, _runtime) do
+    [
+      readiness_item(
+        :attention,
+        "Adapter contract",
+        "This adapter does not yet expose runtime readiness checks.",
+        target_id: "agent-runtime-profile",
+        target_label: "Change profile"
+      )
+    ]
+  end
+
+  defp claude_credentials_item(command, runtime) do
+    cond do
+      credentials_present?(runtime, ["ANTHROPIC_API_KEY"]) ->
+        readiness_item(:ok, "Credentials", "Anthropic-compatible credentials are configured.")
+
+      command not in [nil, "", "claude"] ->
+        readiness_item(
+          :ok,
+          "Credentials",
+          "#{command} can source provider credentials from a wrapper or $HOME/.cld."
+        )
+
+      true ->
+        readiness_item(
+          :attention,
+          "Credentials",
+          "Add ANTHROPIC_API_KEY as a secret/env var or choose a wrapper command.",
+          target_id: "agent-env-vars",
+          target_label: "Add env var"
+        )
+    end
+  end
+
+  defp credentials_item(runtime, keys, label, opts) do
+    if credentials_present?(runtime, keys) do
+      readiness_item(:ok, label, "Credential source is configured through secrets or env.")
+    else
+      key_hint = Enum.join(keys, " or ")
+
+      readiness_item(
+        :attention,
+        label,
+        "Add #{key_hint} as a secret or runtime env var.",
+        opts
+      )
+    end
+  end
+
+  defp credentials_present?(runtime, keys) do
+    runtime.secret_count > 0 ||
+      Enum.any?(keys, fn key -> Map.get(runtime.env_vars || %{}, key) not in [nil, ""] end)
+  end
+
+  defp command_item(label, command, opts) when command in [nil, ""] do
+    readiness_item(:attention, label, "Choose the command Cympho should execute.", opts)
+  end
+
+  defp command_item(label, command, opts) do
+    if command_available?(command, opts) do
+      readiness_item(:ok, label, "#{command} was found on this machine.")
+    else
+      readiness_item(
+        :blocked,
+        label,
+        "#{command} was not found in PATH or configured shell env.",
+        opts
+      )
+    end
+  end
+
+  defp model_item(label, model, opts) when model in [nil, ""] do
+    readiness_item(:attention, label, "Choose a model before autonomous runs.", opts)
+  end
+
+  defp model_item(label, model, _opts), do: readiness_item(:ok, label, model)
+
+  defp readiness_item(status, label, detail, opts \\ []) do
+    target =
+      opts
+      |> Keyword.take([:target_id, :target_label, :target_path])
+      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+      |> Map.new()
+
+    Map.merge(%{status: status, label: label, detail: detail}, target)
+  end
+
+  defp command_available?(command, opts) do
+    System.find_executable(command) != nil or
+      (Keyword.get(opts, :shell?, false) and shell_command_available?(command))
+  end
+
+  defp shell_command_available?(command) do
+    command = shell_quote(command)
+    script = "source \"$HOME/.cld\" 2>/dev/null || true; command -v #{command} >/dev/null 2>&1"
+
+    case System.cmd("bash", ["-lc", script], stderr_to_stdout: true) do
+      {_, 0} -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp shell_quote(value) do
+    "'" <> String.replace(to_string(value), "'", "'\"'\"'") <> "'"
+  end
+
+  defp first_present(values) do
+    Enum.find(values, fn
+      value when value in [nil, ""] -> false
+      _ -> true
+    end)
+  end
+
+  defp readiness_badge_class(:ready) do
+    "rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-xs font-510 text-emerald-300"
+  end
+
+  defp readiness_badge_class(:missing_config) do
+    "rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-1 text-xs font-510 text-amber-300"
+  end
+
+  defp readiness_badge_class(:review_mode) do
+    "rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-xs font-510 text-sky-300"
+  end
+
+  defp readiness_badge_class(:command_not_found) do
+    "rounded-full border border-red-500/25 bg-red-500/10 px-2.5 py-1 text-xs font-510 text-red-300"
+  end
+
+  defp readiness_dot_class(:ok), do: "h-2 w-2 rounded-full bg-emerald-400"
+  defp readiness_dot_class(:info), do: "h-2 w-2 rounded-full bg-sky-400"
+  defp readiness_dot_class(:attention), do: "h-2 w-2 rounded-full bg-amber-400"
+  defp readiness_dot_class(:blocked), do: "h-2 w-2 rounded-full bg-red-400"
+
+  defp instruction_studio(role, instructions, adapter, runtime) do
+    AgentInstructionStudio.analyze(role, instructions,
+      adapter: adapter,
+      command: runtime.command,
+      model: runtime.model,
+      provider: runtime.provider
+    )
+  end
+
+  defp studio_badge_class(:good) do
+    "rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-xs font-510 text-emerald-300"
+  end
+
+  defp studio_badge_class(:weak) do
+    "rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-1 text-xs font-510 text-amber-300"
+  end
+
+  defp studio_badge_class(:attention) do
+    "rounded-full border border-red-500/25 bg-red-500/10 px-2.5 py-1 text-xs font-510 text-red-300"
+  end
+
+  defp studio_badge_class(_status) do
+    "rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-510 text-text-tertiary"
+  end
+
+  defp eval_coverage_badge_class(:ok) do
+    "rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-xs font-510 text-emerald-300"
+  end
+
+  defp eval_coverage_badge_class(:attention) do
+    "rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-1 text-xs font-510 text-amber-300"
+  end
+
+  defp eval_coverage_badge_class(_status) do
+    "rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-510 text-text-tertiary"
+  end
+
+  defp eval_result_class(:ok), do: "border-border bg-canvas/60"
+  defp eval_result_class(:attention), do: "border-amber-500/25 bg-amber-500/[0.06]"
+  defp eval_result_class(_status), do: "border-border bg-canvas/60"
+
+  defp eval_expectation_class(:pass) do
+    "rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300"
+  end
+
+  defp eval_expectation_class(:catch) do
+    "rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-300"
+  end
+
+  defp eval_expectation_class(_expectation) do
+    "rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-tertiary"
+  end
+
+  defp eval_result_status_text(result) do
+    if Map.get(result, :passed?), do: "passed", else: "failed"
+  end
+
+  defp studio_status_dot_class(:ok), do: "h-2 w-2 rounded-full bg-emerald-400"
+  defp studio_status_dot_class(:good), do: "h-2 w-2 rounded-full bg-emerald-400"
+  defp studio_status_dot_class(:weak), do: "h-2 w-2 rounded-full bg-amber-400"
+  defp studio_status_dot_class(:attention), do: "h-2 w-2 rounded-full bg-red-400"
+  defp studio_status_dot_class(_status), do: "h-2 w-2 rounded-full bg-text-quaternary"
+
+  defp studio_card_class(:attention), do: "border-red-500/25 bg-red-500/[0.06]"
+  defp studio_card_class(:weak), do: "border-amber-500/25 bg-amber-500/[0.06]"
+  defp studio_card_class(_status), do: "border-border bg-surface"
+
+  defp instruction_patch_class(:primary), do: "border-brand/30 bg-brand/10"
+  defp instruction_patch_class(:danger), do: "border-red-500/25 bg-red-500/[0.06]"
+  defp instruction_patch_class(_tone), do: "border-border bg-surface"
+
+  defp instruction_save_guardrails(studio, latest_revision) do
+    []
+    |> maybe_score_drop_guardrail(studio, latest_revision)
+    |> maybe_contract_drop_guardrail(studio, latest_revision)
+    |> maybe_conflict_guardrail(studio)
+    |> Enum.reverse()
+  end
+
+  defp maybe_score_drop_guardrail(guardrails, studio, %{studio_score: previous_score})
+       when is_integer(previous_score) and studio.score < previous_score do
+    [
+      %{
+        status: :attention,
+        title: "Studio score drops on save",
+        detail:
+          "Current edit scores #{studio.score}/100, down from saved revision #{previous_score}/100."
+      }
+      | guardrails
+    ]
+  end
+
+  defp maybe_score_drop_guardrail(guardrails, _studio, _latest_revision), do: guardrails
+
+  defp maybe_contract_drop_guardrail(guardrails, studio, latest_revision) do
+    current = studio_audit_status(studio, :custom_override_coverage)
+    previous = revision_audit_status(latest_revision, "custom_override_coverage")
+
+    if previous == "ok" and current in [:weak, :attention] do
+      [
+        %{
+          status: :weak,
+          title: "Final-comment contract weakened",
+          detail:
+            "This edit removes explicit references to the required delivery/review/owner update fields."
+        }
+        | guardrails
+      ]
+    else
+      guardrails
+    end
+  end
+
+  defp maybe_conflict_guardrail(guardrails, studio) do
+    if studio_audit_status(studio, :guardrail_conflicts) == :attention do
+      [
+        %{
+          status: :attention,
+          title: "Conflicting guardrail found",
+          detail:
+            "Custom instructions appear to contradict comments, verification, review, or governance."
+        }
+        | guardrails
+      ]
+    else
+      guardrails
+    end
+  end
+
+  defp studio_audit_status(studio, key) do
+    studio.audits
+    |> Enum.find(&(&1.key == key))
+    |> case do
+      nil -> nil
+      audit -> audit.status
+    end
+  end
+
+  defp revision_audit_status(nil, _key), do: nil
+
+  defp revision_audit_status(revision, key) do
+    revision.studio_audits
+    |> Map.get("audits", [])
+    |> Enum.find(&(Map.get(&1, "key") == key))
+    |> case do
+      nil -> nil
+      audit -> Map.get(audit, "status")
+    end
+  end
+
+  defp instruction_guardrail_class(:attention), do: "border-red-500/25 bg-red-500/[0.06]"
+  defp instruction_guardrail_class(:weak), do: "border-amber-500/25 bg-amber-500/[0.06]"
+  defp instruction_guardrail_class(_status), do: "border-border bg-surface"
+
+  defp revision_score(nil), do: "No score"
+  defp revision_score(%{studio_score: nil}), do: "No score"
+  defp revision_score(%{studio_score: score}), do: "#{score}/100"
+
+  defp revision_score_delta(_revision, nil), do: "baseline"
+  defp revision_score_delta(%{studio_score: nil}, _previous), do: "no score"
+  defp revision_score_delta(_revision, %{studio_score: nil}), do: "baseline"
+
+  defp revision_score_delta(%{studio_score: score}, %{studio_score: previous_score}) do
+    delta = score - previous_score
+
+    cond do
+      delta > 0 -> "+#{delta}"
+      delta < 0 -> "#{delta}"
+      true -> "no change"
+    end
+  end
+
+  defp revision_source_label("restore"), do: "Restored"
+  defp revision_source_label("prompt_tuning"), do: "Prompt tuning"
+  defp revision_source_label("manual"), do: "Saved"
+  defp revision_source_label(nil), do: "Saved"
+  defp revision_source_label(source), do: String.capitalize(to_string(source))
+
+  defp latest_prompt_tuning_revision(config_revisions) do
+    Enum.find(config_revisions, &(&1.source == "prompt_tuning"))
+  end
+
+  defp revision_status_badge(nil), do: studio_badge_class(nil)
+
+  defp revision_status_badge(status) when is_binary(status) do
+    status
+    |> String.to_existing_atom()
+    |> studio_badge_class()
+  rescue
+    ArgumentError -> studio_badge_class(nil)
+  end
+
+  defp runtime_config_value(%Agent{runtime_config: runtime_config, config: config}, key) do
+    Map.get(runtime_config || %{}, key) ||
+      Map.get(runtime_config || %{}, existing_atom_key(key)) ||
+      Map.get(config || %{}, key) ||
+      Map.get(config || %{}, existing_atom_key(key))
+  end
+
+  defp existing_atom_key(key) when is_binary(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp existing_atom_key(key), do: key
+
+  defp adapter_label_human("claude_code"), do: "Claude Code"
+  defp adapter_label_human("codex"), do: "Codex"
+  defp adapter_label_human("cursor"), do: "Cursor"
+  defp adapter_label_human("http"), do: "HTTP"
+  defp adapter_label_human("openclaw"), do: "OpenClaw"
+  defp adapter_label_human("process"), do: "Process"
   defp adapter_label_human(:claude_code), do: "Claude Code"
   defp adapter_label_human(:codex), do: "Codex"
   defp adapter_label_human(:cursor), do: "Cursor"

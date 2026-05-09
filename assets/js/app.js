@@ -776,23 +776,31 @@ const AdapterConfigFields = {
     this.rememberAdapter = this.rememberAdapter.bind(this);
     this.rememberPanelField = this.rememberPanelField.bind(this);
     this.adapterSelect = null;
+    this.profileSelect = null;
     this.pendingAdapter = null;
     this.pendingPanelFields = new Map();
+    this.rememberProfile = this.rememberProfile.bind(this);
+    this.clearPendingRuntimePreset = this.clearPendingRuntimePreset.bind(this);
     this.el.addEventListener('change', this.rememberPanelField);
     this.el.addEventListener('input', this.rememberPanelField);
+    this.el.addEventListener('click', this.clearPendingRuntimePreset);
     this._bindSelect();
+    this._bindProfileSelect();
     this.sync();
   },
   updated() {
     this._bindSelect();
+    this._bindProfileSelect();
     this._restorePendingAdapter();
     this._restorePendingPanelFields();
     this.sync();
   },
   destroyed() {
     this._unbindSelect();
+    this._unbindProfileSelect();
     this.el.removeEventListener('change', this.rememberPanelField);
     this.el.removeEventListener('input', this.rememberPanelField);
+    this.el.removeEventListener('click', this.clearPendingRuntimePreset);
   },
   _bindSelect() {
     const nextSelect = this.el.querySelector('select[name="agent[adapter]"]');
@@ -812,6 +820,24 @@ const AdapterConfigFields = {
     this.adapterSelect.removeEventListener('change', this.rememberAdapter);
     this.adapterSelect.removeEventListener('input', this.rememberAdapter);
   },
+  _bindProfileSelect() {
+    const nextSelect = this.el.querySelector('select[name="agent[runtime_profile_id]"]');
+    if (nextSelect === this.profileSelect) return;
+
+    this._unbindProfileSelect();
+    this.profileSelect = nextSelect;
+
+    if (this.profileSelect) {
+      this.profileSelect.addEventListener('change', this.rememberProfile);
+      this.profileSelect.addEventListener('input', this.rememberProfile);
+    }
+  },
+  _unbindProfileSelect() {
+    if (!this.profileSelect || !this.rememberProfile) return;
+
+    this.profileSelect.removeEventListener('change', this.rememberProfile);
+    this.profileSelect.removeEventListener('input', this.rememberProfile);
+  },
   _restorePendingAdapter() {
     if (!this.adapterSelect || !this.pendingAdapter) return;
 
@@ -826,6 +852,37 @@ const AdapterConfigFields = {
   rememberAdapter() {
     this.pendingAdapter = this.adapterSelect?.value || null;
     this.sync();
+  },
+  rememberProfile(event) {
+    event?.stopPropagation?.();
+
+    const option = this.profileSelect?.selectedOptions?.[0];
+    const adapter = option?.dataset?.adapter;
+
+    if (this.profileSelect) {
+      this.pushEvent('select_runtime_profile', {
+        profile_id: this.profileSelect.value || 'custom'
+      });
+    }
+
+    if (!adapter) {
+      this.sync();
+      return;
+    }
+
+    this.pendingAdapter = adapter;
+
+    if (this.adapterSelect && this.adapterSelect.value !== adapter) {
+      this.adapterSelect.value = adapter;
+    }
+
+    this.sync();
+  },
+  clearPendingRuntimePreset(event) {
+    if (!event.target?.closest?.('[data-runtime-preset]')) return;
+
+    this.pendingAdapter = null;
+    this.pendingPanelFields.clear();
   },
   rememberPanelField(event) {
     const target = event.target;
@@ -915,6 +972,31 @@ document.addEventListener('click', (e) => {
   }
 });
 
+window.addEventListener('phx:issue:replace_url', (e) => {
+  const cleanUrl = e.detail?.url;
+  if (!cleanUrl) return;
+
+  const target = new URL(cleanUrl, window.location.origin);
+  if (window.location.href === target.href) return;
+
+  window.history.replaceState(window.history.state, '', cleanUrl);
+});
+
+// Backward-compatible cleanup hook for older issue-page diffs. The current
+// issue page uses a pushed event, but keeping this hook registered prevents
+// stale browser DOM from logging unknown-hook errors during hot reloads.
+const IssueGateCleanup = {
+  mounted() {
+    const cleanUrl = this.el.dataset.cleanUrl;
+    if (!cleanUrl) return;
+
+    const target = new URL(cleanUrl, window.location.origin);
+    if (window.location.href !== target.href) {
+      window.history.replaceState(window.history.state, '', cleanUrl);
+    }
+  }
+};
+
 // Boot
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
 const liveSocket = new LiveSocket("/live", Socket, {
@@ -927,7 +1009,8 @@ const liveSocket = new LiveSocket("/live", Socket, {
     Combobox,
     UserMenu,
     ColorSwatchPicker,
-    AdapterConfigFields
+    AdapterConfigFields,
+    IssueGateCleanup
   }
 });
 

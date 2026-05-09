@@ -35,8 +35,8 @@ defmodule CymphoWeb.OrgChartLive do
   def handle_event("select_agent", %{"agent_id" => agent_id}, socket) do
     current_company_id = socket.assigns[:current_company].id
 
-    case Agents.get_agent(agent_id) do
-      {:ok, agent} when agent.company_id == current_company_id ->
+    case Agents.get_company_agent(current_company_id, agent_id) do
+      {:ok, _agent} ->
         stats = Agents.get_agent_stats(agent_id)
         {:noreply, assign(socket, selected_agent_id: agent_id, selected_agent_stats: stats)}
 

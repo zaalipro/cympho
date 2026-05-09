@@ -1,0 +1,1231 @@
+<.page size="wide">
+  <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div>
+      <div class="flex flex-wrap items-center gap-2">
+        <h1 class="text-2xl font-590 tracking-tight text-text-primary">Operations</h1>
+        <span class={"inline-flex rounded-full border px-2.5 py-1 text-xs font-510 #{mode_badge_class(@runtime_mode.status)}"}>
+          {@runtime_mode.label}
+        </span>
+      </div>
+      <p class="mt-1 text-sm text-text-tertiary">
+        Runtime services, adapter health, and execution capacity for the current company.
+      </p>
+    </div>
+
+    <button
+      type="button"
+      phx-click="refresh"
+      class="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+    >
+      <span class="hero-arrow-path-mini h-4 w-4"></span> Refresh
+    </button>
+  </div>
+
+  <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+    <div class="space-y-4">
+      <section class="rounded-lg border border-border bg-panel p-5">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+              Runtime mode
+            </p>
+            <h2 class="mt-2 text-xl font-590 text-text-primary">{@runtime_mode.label}</h2>
+            <p class="mt-1 max-w-2xl text-sm leading-6 text-text-tertiary">
+              {@runtime_mode.summary}
+            </p>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-center">
+            <div class="rounded-lg border border-border bg-surface px-4 py-3">
+              <p class="text-2xl font-590 text-text-primary">
+                {@runtime_mode.disabled_services}
+              </p>
+              <p class="mt-1 text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+                Disabled
+              </p>
+            </div>
+            <div class="rounded-lg border border-border bg-surface px-4 py-3">
+              <p class="text-2xl font-590 text-text-primary">
+                {@runtime_mode.not_running_services}
+              </p>
+              <p class="mt-1 text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+                Not running
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="operations-doctor" class="rounded-lg border border-border bg-panel scroll-mt-6">
+        <div class="border-b border-border px-5 py-4">
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="text-sm font-590 text-text-primary">Operations Doctor</h2>
+                <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{doctor_badge_class(@doctor.level)}"}>
+                  {@doctor.label}
+                </span>
+                <details class="group relative inline-flex">
+                  <summary
+                    class="flex h-6 w-6 cursor-help list-none items-center justify-center rounded-full border border-border bg-surface text-[11px] font-590 text-text-tertiary hover:border-brand/40 hover:bg-brand/10 hover:text-brand [&::-webkit-details-marker]:hidden"
+                    aria-label="How Operations Doctor works"
+                  >
+                    ?
+                  </summary>
+                  <div class="absolute left-0 top-full z-40 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-panel p-3 text-left shadow-xl">
+                    <p class="text-xs font-590 text-text-primary">How this is diagnosed</p>
+                    <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                      Doctor combines service gates, adapter health, recent runtime failures,
+                      review nudges, local concurrency, and BEAM host footprint into one
+                      operator checklist.
+                    </p>
+                  </div>
+                </details>
+              </div>
+              <p class="mt-1 max-w-2xl text-sm leading-6 text-text-tertiary">
+                {@doctor.summary}
+              </p>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 text-center">
+              <div class="rounded-md border border-red-500/20 bg-red-500/[0.06] px-3 py-2">
+                <p class="text-sm font-590 text-red-300">{@doctor.counts.critical}</p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Fix
+                </p>
+              </div>
+              <div class="rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2">
+                <p class="text-sm font-590 text-amber-300">{@doctor.counts.warning}</p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Watch
+                </p>
+              </div>
+              <div class="rounded-md border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2">
+                <p class="text-sm font-590 text-emerald-300">{@doctor.counts.ok}</p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Clear
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid gap-px bg-border md:grid-cols-2">
+          <div :for={finding <- @doctor.findings} class="bg-panel p-4">
+            <div class={"h-full rounded-lg border px-3 py-3 #{doctor_card_class(finding.severity)}"}>
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{doctor_badge_class(finding.severity)}"}>
+                      {finding.label}
+                    </span>
+                    <h3 class="text-sm font-590 text-text-primary">{finding.title}</h3>
+                  </div>
+                  <p class="mt-2 text-xs leading-5 text-text-tertiary">{finding.body}</p>
+                </div>
+
+                <details class="group relative shrink-0">
+                  <summary
+                    class="flex h-6 w-6 cursor-help list-none items-center justify-center rounded-full border border-border bg-surface text-[11px] font-590 text-text-tertiary hover:border-brand/40 hover:bg-brand/10 hover:text-brand [&::-webkit-details-marker]:hidden"
+                    aria-label={"Why #{finding.title}?"}
+                  >
+                    ?
+                  </summary>
+                  <div class="absolute right-0 top-full z-40 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-panel p-3 text-left shadow-xl">
+                    <p class="text-xs font-590 text-text-primary">Why this matters</p>
+                    <p class="mt-1 text-xs leading-5 text-text-tertiary">{finding.why}</p>
+                    <p class="mt-3 text-xs font-590 text-text-primary">Recommended fix</p>
+                    <p class="mt-1 text-xs leading-5 text-text-tertiary">{finding.fix}</p>
+                  </div>
+                </details>
+              </div>
+
+              <div
+                :if={Map.get(finding, :target_path) || Map.get(finding, :command)}
+                class="mt-3 flex flex-wrap items-center gap-2"
+              >
+                <a
+                  :if={Map.get(finding, :target_path) && anchor_path?(finding.target_path)}
+                  href={finding.target_path}
+                  class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                >
+                  <span class="hero-arrow-down-mini h-3.5 w-3.5"></span>
+                  {finding.target_label}
+                </a>
+                <.app_link
+                  :if={Map.get(finding, :target_path) && not anchor_path?(finding.target_path)}
+                  navigate={finding.target_path}
+                  class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                >
+                  <span class="hero-wrench-screwdriver-mini h-3.5 w-3.5"></span>
+                  {finding.target_label}
+                </.app_link>
+                <code
+                  :if={Map.get(finding, :command)}
+                  class="max-w-full overflow-x-auto rounded-md border border-border bg-canvas px-2.5 py-1.5 font-mono text-[11px] text-text-tertiary"
+                >
+                  {finding.command}
+                </code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="prompt-drift-radar"
+        class="rounded-lg border border-border bg-panel scroll-mt-6"
+      >
+        <div class="border-b border-border px-5 py-4">
+          <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="text-sm font-590 text-text-primary">Prompt Drift Radar</h2>
+                <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{prompt_status_badge_class(if(@prompt_radar.counts.watchlist == 0, do: :ready, else: :needs_tuning))}"}>
+                  {@prompt_radar.counts.watchlist} need review
+                </span>
+                <details class="group relative inline-flex">
+                  <summary
+                    class="flex h-6 w-6 cursor-help list-none items-center justify-center rounded-full border border-border bg-surface text-[11px] font-590 text-text-tertiary hover:border-brand/40 hover:bg-brand/10 hover:text-brand [&::-webkit-details-marker]:hidden"
+                    aria-label="How Prompt Drift Radar works"
+                  >
+                    ?
+                  </summary>
+                  <div class="absolute left-0 top-full z-40 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-panel p-3 text-left shadow-xl">
+                    <p class="text-xs font-590 text-text-primary">How this is diagnosed</p>
+                    <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                      Radar analyzes every active agent's Instruction Studio score, prompt
+                      eval fixture coverage, and latest saved revision delta. It catches weak
+                      custom instructions, guardrail conflicts, and score regressions before
+                      they create noisy tickets.
+                    </p>
+                  </div>
+                </details>
+              </div>
+              <p class="mt-1 max-w-2xl text-xs leading-5 text-text-quaternary">
+                {@prompt_radar.summary}
+              </p>
+              <div :if={@prompt_radar.watchlist != []} class="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  phx-click="preview_prompt_plan"
+                  phx-value-scope="watchlist"
+                  class="inline-flex items-center gap-1.5 rounded-md border border-brand/30 bg-brand/10 px-2.5 py-1.5 text-xs font-510 text-brand hover:bg-brand/15"
+                >
+                  <span class="hero-sparkles-mini h-3.5 w-3.5"></span> Preview all safe patches
+                </button>
+                <p class="text-xs leading-6 text-text-quaternary">
+                  Additive only. Preview exact text before writing a rollback revision.
+                </p>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 text-center xl:grid-cols-6">
+              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
+                <p class="text-sm font-590 text-text-primary">{@prompt_radar.counts.total}</p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Agents
+                </p>
+              </div>
+              <div class="rounded-md border border-emerald-500/20 bg-emerald-500/[0.06] px-2.5 py-2">
+                <p class="text-sm font-590 text-emerald-300">{@prompt_radar.counts.ready}</p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Ready
+                </p>
+              </div>
+              <div class="rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-2.5 py-2">
+                <p class="text-sm font-590 text-amber-300">
+                  {@prompt_radar.counts.needs_tuning}
+                </p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Tuning
+                </p>
+              </div>
+              <div class="rounded-md border border-red-500/20 bg-red-500/[0.06] px-2.5 py-2">
+                <p class="text-sm font-590 text-red-300">
+                  {@prompt_radar.counts.guardrail_risk}
+                </p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Risk
+                </p>
+              </div>
+              <div class="rounded-md border border-red-500/20 bg-red-500/[0.06] px-2.5 py-2">
+                <p class="text-sm font-590 text-red-300">{@prompt_radar.counts.eval_gap}</p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Eval
+                </p>
+              </div>
+              <div class="rounded-md border border-blue-500/20 bg-blue-500/[0.06] px-2.5 py-2">
+                <p class="text-sm font-590 text-blue-300">{@prompt_radar.counts.regressed}</p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Drift
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          :if={@prompt_radar.counts.total == 0}
+          class="px-5 py-10 text-center text-sm text-text-tertiary"
+        >
+          No agents configured yet.
+        </div>
+
+        <div
+          :if={@prompt_radar.counts.total > 0 and @prompt_radar.watchlist == []}
+          class="px-5 py-6"
+        >
+          <div class="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-4">
+            <p class="text-sm font-590 text-emerald-200">
+              All agent prompts are inside guardrails.
+            </p>
+            <p class="mt-1 text-xs leading-5 text-text-tertiary">
+              Keep using the Instruction Studio after major role, adapter, or PR-contract changes.
+            </p>
+          </div>
+        </div>
+
+        <div :if={@prompt_radar.watchlist != []} class="grid gap-px bg-border xl:grid-cols-2">
+          <div :for={agent <- @prompt_radar.watchlist} class="bg-panel p-4">
+            <div class={"h-full rounded-lg border px-3 py-3 #{prompt_card_class(agent.status)}"}>
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{prompt_status_badge_class(agent.status)}"}>
+                      {agent.status_label}
+                    </span>
+                    <span class="font-mono text-xs text-text-quaternary">
+                      {agent.score}/100
+                    </span>
+                  </div>
+                  <p class="mt-2 truncate text-sm font-590 text-text-primary">{agent.name}</p>
+                  <p class="mt-0.5 text-xs text-text-quaternary">
+                    {role_label(agent.role)} · {adapter_label(agent.adapter)}
+                  </p>
+                </div>
+                <div class="text-right">
+                  <p class="text-xs font-590 text-text-primary">
+                    Eval {agent.eval_passed}/{agent.eval_total}
+                  </p>
+                  <p :if={agent.latest_revision} class="mt-0.5 text-[11px] text-text-quaternary">
+                    latest v{agent.latest_revision.version}
+                  </p>
+                </div>
+              </div>
+
+              <p class="mt-3 text-xs leading-5 text-text-tertiary">{agent.summary}</p>
+
+              <div
+                :if={agent.tuning.patch_count > 0}
+                class="mt-3 rounded-md border border-border bg-canvas/60 px-2.5 py-2"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                    Guided fixes
+                  </p>
+                  <p class="font-mono text-[11px] text-text-tertiary">
+                    {agent.score}/100 → {agent.tuning.projected_score}/100
+                  </p>
+                </div>
+                <div class="mt-2 flex flex-wrap gap-1.5">
+                  <span
+                    :for={patch <- agent.tuning.patches}
+                    class={"rounded px-1.5 py-0.5 text-[11px] #{prompt_patch_class(patch.tone)}"}
+                    title={patch.reason}
+                  >
+                    {patch.title}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                :if={agent.regressed}
+                class="mt-3 rounded-md border border-blue-500/20 bg-blue-500/[0.07] px-2.5 py-2 text-xs text-blue-100"
+              >
+                Score regression: {agent.regression.from_score}/100 → {agent.regression.to_score}/100
+                across saved revisions v{agent.regression.from_version} to v{agent.regression.to_version}.
+              </div>
+
+              <div :if={agent.top_gaps != []} class="mt-3 flex flex-wrap gap-1.5">
+                <span
+                  :for={gap <- agent.top_gaps}
+                  class={"rounded px-1.5 py-0.5 text-[11px] #{prompt_gap_class(gap.status)}"}
+                >
+                  {gap.label}
+                </span>
+              </div>
+
+              <div class="mt-3 flex flex-wrap gap-2">
+                <.app_link
+                  navigate={~p"/agents/#{agent.id}?tab=instructions"}
+                  class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                >
+                  Open Studio
+                </.app_link>
+                <button
+                  :if={agent.tuning.changed and agent.tuning.projected_score > agent.score}
+                  type="button"
+                  phx-click="preview_prompt_plan"
+                  phx-value-agent-id={agent.id}
+                  class="rounded-md border border-brand/30 bg-brand/10 px-2.5 py-1.5 text-xs font-510 text-brand hover:bg-brand/15"
+                >
+                  Preview patches
+                </button>
+                <.app_link
+                  :if={agent.last_good_revision}
+                  navigate={~p"/agents/#{agent.id}?tab=instructions"}
+                  class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                >
+                  Review last good v{agent.last_good_revision.version}
+                </.app_link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="prompt-contract-health"
+        class="rounded-lg border border-border bg-panel scroll-mt-6"
+      >
+        <div class="border-b border-border px-5 py-4">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="text-sm font-590 text-text-primary">Prompt Contract Health</h2>
+                <span class="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-510 text-text-tertiary">
+                  {@contract_failures.counts.entries} gaps
+                </span>
+              </div>
+              <p class="mt-1 text-xs leading-5 text-text-quaternary">
+                Contract and memory failures by agent, based on delivery, review, owner-update,
+                and issue-memory fields shown on issue pages.
+              </p>
+            </div>
+
+            <div class="grid grid-cols-4 gap-2 text-center">
+              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
+                <p class="text-sm font-590 text-text-primary">
+                  {@contract_failures.counts.issues}
+                </p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Issues
+                </p>
+              </div>
+              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
+                <p class="text-sm font-590 text-text-primary">
+                  {@contract_failures.counts.agents}
+                </p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Agents
+                </p>
+              </div>
+              <div class="rounded-md border border-red-500/20 bg-red-500/[0.06] px-2.5 py-2">
+                <p class="text-sm font-590 text-red-300">
+                  {@contract_failures.counts.missing}
+                </p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Missing
+                </p>
+              </div>
+              <div class="rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-2.5 py-2">
+                <p class="text-sm font-590 text-amber-300">
+                  {@contract_failures.counts.attention}
+                </p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Weak
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          :if={@contract_failures.counts.entries == 0}
+          class="px-5 py-10 text-center text-sm text-text-tertiary"
+        >
+          No prompt contract gaps found in open work.
+        </div>
+
+        <div
+          :if={@contract_failures.counts.entries > 0}
+          class="grid gap-px bg-border lg:grid-cols-2"
+        >
+          <div class="bg-panel p-5">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                By agent
+              </h3>
+              <span class="text-xs text-text-quaternary">
+                {@contract_failures.summary}
+              </span>
+            </div>
+            <div class="mt-4 space-y-2">
+              <div
+                :for={group <- @contract_failures.by_agent}
+                class="rounded-lg border border-border bg-surface px-3 py-3"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="truncate text-sm font-590 text-text-primary">
+                      {group.agent_name}
+                    </p>
+                    <p class="mt-0.5 text-xs text-text-quaternary">
+                      {role_label(group.agent_role)}
+                    </p>
+                  </div>
+                  <div class="text-right">
+                    <p class="font-mono text-sm text-text-primary">{group.count}</p>
+                    <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                      gaps
+                    </p>
+                  </div>
+                </div>
+
+                <div class="mt-3 flex flex-wrap gap-1.5">
+                  <span class="rounded bg-red-500/10 px-1.5 py-0.5 text-[11px] text-red-200">
+                    {group.missing} missing
+                  </span>
+                  <span class="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-200">
+                    {group.attention} weak
+                  </span>
+                  <span
+                    :for={field <- group.fields}
+                    class="rounded bg-canvas px-1.5 py-0.5 text-[11px] text-text-tertiary"
+                  >
+                    {field}
+                  </span>
+                </div>
+
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <.app_link
+                    :if={group.agent_id}
+                    navigate={~p"/agents/#{group.agent_id}?tab=configuration"}
+                    class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    Open agent
+                  </.app_link>
+                  <.app_link
+                    :if={group.latest_issue}
+                    navigate={~p"/issues/#{group.latest_issue.issue_id}"}
+                    class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    Open latest issue
+                  </.app_link>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-panel p-5">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                Active gaps
+              </h3>
+              <span class="text-xs text-text-quaternary">Newest open work first</span>
+            </div>
+            <div class="mt-4 space-y-2">
+              <div
+                :for={entry <- @contract_failures.entries}
+                class="rounded-lg border border-border bg-surface px-3 py-3"
+              >
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{contract_badge_class(entry.status)}"}>
+                        {entry.status_label}
+                      </span>
+                      <span class="text-xs font-510 text-text-secondary">
+                        {entry.contract_label}
+                      </span>
+                    </div>
+                    <p class="mt-2 truncate text-sm font-590 text-text-primary">
+                      {entry.issue_identifier} · {entry.issue_title}
+                    </p>
+                    <p class="mt-1 text-xs text-text-quaternary">
+                      Owner: {entry.agent_name}
+                      <span :if={entry.project_name}>{" · #{entry.project_name}"}</span>
+                    </p>
+                  </div>
+                  <div class="flex shrink-0 flex-wrap gap-2">
+                    <button
+                      type="button"
+                      phx-click="queue_contract_nudge"
+                      phx-value-issue-id={entry.issue_id}
+                      phx-value-contract={entry.contract_key}
+                      disabled={!entry.nudge_enabled? || entry.nudge_queued?}
+                      class={[
+                        "rounded-md border px-2.5 py-1.5 text-xs font-510",
+                        entry.nudge_enabled? && !entry.nudge_queued? &&
+                          "border-amber-500/25 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15",
+                        (!entry.nudge_enabled? || entry.nudge_queued?) &&
+                          "cursor-not-allowed border-border bg-panel text-text-quaternary"
+                      ]}
+                    >
+                      {entry.nudge_button_label}
+                    </button>
+                    <.app_link
+                      navigate={~p"/issues/#{entry.issue_id}"}
+                      class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                    >
+                      Open issue
+                    </.app_link>
+                  </div>
+                </div>
+
+                <p class="mt-2 text-xs leading-5 text-text-tertiary">{entry.summary}</p>
+                <div :if={entry.missing_fields != []} class="mt-2 flex flex-wrap gap-1.5">
+                  <span
+                    :for={field <- entry.missing_fields}
+                    class="rounded bg-red-500/10 px-1.5 py-0.5 text-[11px] text-red-100"
+                  >
+                    {field}
+                  </span>
+                </div>
+                <p class="mt-2 rounded-md border border-border bg-canvas px-2.5 py-2 text-[11px] leading-4 text-text-tertiary">
+                  {entry.recommendation}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="runtime-services" class="rounded-lg border border-border bg-panel scroll-mt-6">
+        <div class="border-b border-border px-5 py-4">
+          <h2 class="text-sm font-590 text-text-primary">Runtime Services</h2>
+          <p class="mt-1 text-xs text-text-quaternary">
+            These switches decide whether Cympho only reviews work or actively runs the company.
+          </p>
+        </div>
+        <div class="grid divide-y divide-border lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+          <div :for={service <- @services} class="p-4">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <h3 class="text-sm font-590 text-text-primary">{service.name}</h3>
+                <p class="mt-1 text-xs leading-5 text-text-tertiary">{service.description}</p>
+              </div>
+              <span class={"shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-510 #{status_badge_class(service.status)}"}>
+                {service.label}
+              </span>
+            </div>
+            <div class="mt-3 rounded-md border border-border bg-surface px-3 py-2">
+              <p class="text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                Operator action
+              </p>
+              <p class="mt-1 font-mono text-[11px] text-text-secondary">{service.env_var}=1</p>
+              <p class="mt-1 text-xs text-text-quaternary">{service.fix}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="runtime-capacity"
+        class="rounded-lg border border-border bg-panel p-5 scroll-mt-6"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+              Runtime capacity
+            </p>
+            <h2 class="mt-2 text-lg font-590 text-text-primary">{@capacity.summary}</h2>
+            <p class="mt-1 text-sm leading-6 text-text-tertiary">{@capacity.hint}</p>
+          </div>
+          <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{capacity_badge_class(@capacity.level)}"}>
+            {@capacity.label}
+          </span>
+        </div>
+        <div class="mt-4 grid gap-3 sm:grid-cols-4">
+          <div class="rounded-lg border border-border bg-surface px-3 py-3">
+            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+              Agents
+            </p>
+            <p class="mt-1 text-xl font-590 text-text-primary">{@capacity.total_agents}</p>
+          </div>
+          <div class="rounded-lg border border-border bg-surface px-3 py-3">
+            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+              Total slots
+            </p>
+            <p class="mt-1 text-xl font-590 text-text-primary">{@capacity.total_slots}</p>
+          </div>
+          <div class="rounded-lg border border-border bg-surface px-3 py-3">
+            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+              Local CLI slots
+            </p>
+            <p class="mt-1 text-xl font-590 text-text-primary">{@capacity.local_slots}</p>
+          </div>
+          <div class="rounded-lg border border-border bg-surface px-3 py-3">
+            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+              Active runs
+            </p>
+            <p class="mt-1 text-xl font-590 text-text-primary">{@capacity.running_runs}</p>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="host-footprint"
+        class="rounded-lg border border-border bg-panel p-5 scroll-mt-6"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+              Host footprint
+            </p>
+            <h2 class="mt-2 text-lg font-590 text-text-primary">{@host.summary}</h2>
+            <p class="mt-1 text-sm leading-6 text-text-tertiary">{@host.hint}</p>
+          </div>
+          <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{capacity_badge_class(@host.level)}"}>
+            {@host.label}
+          </span>
+        </div>
+        <div class="mt-4 grid gap-3 sm:grid-cols-4">
+          <div class="rounded-lg border border-border bg-surface px-3 py-3">
+            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+              BEAM memory
+            </p>
+            <p class="mt-1 text-xl font-590 text-text-primary">
+              {format_memory(@host.memory_bytes)}
+            </p>
+            <p class="mt-1 text-[11px] text-text-quaternary">
+              {format_memory(@host.process_memory_bytes)} process heap
+            </p>
+          </div>
+          <div class="rounded-lg border border-border bg-surface px-3 py-3">
+            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+              BEAM processes
+            </p>
+            <p class="mt-1 text-xl font-590 text-text-primary">{@host.process_count}</p>
+            <p class="mt-1 text-[11px] text-text-quaternary">
+              {@host.process_usage_percent}% of limit
+            </p>
+          </div>
+          <div class="rounded-lg border border-border bg-surface px-3 py-3">
+            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+              Schedulers
+            </p>
+            <p class="mt-1 text-xl font-590 text-text-primary">{@host.schedulers_online}</p>
+            <p class="mt-1 text-[11px] text-text-quaternary">Online CPU schedulers</p>
+          </div>
+          <div class="rounded-lg border border-border bg-surface px-3 py-3">
+            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+              Run queue
+            </p>
+            <p class="mt-1 text-xl font-590 text-text-primary">{@host.run_queue}</p>
+            <p class="mt-1 text-[11px] text-text-quaternary">Runnable BEAM work</p>
+          </div>
+        </div>
+        <div class="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-3">
+          <p class="text-xs font-590 uppercase tracking-[0.08em] text-amber-200">
+            External CLI memory
+          </p>
+          <p class="mt-1 text-sm leading-6 text-text-tertiary">{@host.cli_note}</p>
+        </div>
+      </section>
+
+      <section id="review-nudges" class="rounded-lg border border-border bg-panel scroll-mt-6">
+        <div class="border-b border-border px-5 py-4">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 class="text-sm font-590 text-text-primary">Review Nudges</h2>
+              <p class="mt-1 text-xs text-text-quaternary">
+                Evidence, review, and owner-update requests waiting across the company.
+              </p>
+            </div>
+            <div class="grid grid-cols-4 gap-2 text-center">
+              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
+                <p class="text-sm font-590 text-text-primary">
+                  {@review_nudges.counts.active}
+                </p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Active
+                </p>
+              </div>
+              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
+                <p class="text-sm font-590 text-red-300">{@review_nudges.counts.stale}</p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Stale
+                </p>
+              </div>
+              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
+                <p class="text-sm font-590 text-blue-300">{@review_nudges.counts.running}</p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Running
+                </p>
+              </div>
+              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
+                <p class="text-sm font-590 text-emerald-300">
+                  {@review_nudges.counts.cleared}
+                </p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Cleared
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          :if={@review_nudges.counts.total == 0}
+          class="px-5 py-10 text-center text-sm text-text-tertiary"
+        >
+          No review nudges have been queued yet.
+        </div>
+
+        <div :if={@review_nudges.counts.total > 0} class="grid gap-px bg-border lg:grid-cols-2">
+          <div class="bg-panel p-5">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                By agent
+              </h3>
+              <span class="text-xs text-text-quaternary">
+                {@review_nudges.counts.active} active
+              </span>
+            </div>
+            <div :if={@review_nudges.by_agent == []} class="mt-4 text-sm text-text-tertiary">
+              No active agent nudges.
+            </div>
+            <div :if={@review_nudges.by_agent != []} class="mt-4 space-y-2">
+              <div
+                :for={group <- @review_nudges.by_agent}
+                class="rounded-lg border border-border bg-surface px-3 py-2"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <p class="truncate text-sm font-510 text-text-primary">{group.label}</p>
+                  <span class="font-mono text-xs text-text-quaternary">{group.count}</span>
+                </div>
+                <p class="mt-1 text-xs text-text-quaternary">
+                  {group.stale} stale · {group.running} running
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-panel p-5">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                By blocker
+              </h3>
+              <span class="text-xs text-text-quaternary">Top wait states</span>
+            </div>
+            <div :if={@review_nudges.by_blocker == []} class="mt-4 text-sm text-text-tertiary">
+              No active blocker groups.
+            </div>
+            <div :if={@review_nudges.by_blocker != []} class="mt-4 space-y-2">
+              <div
+                :for={group <- @review_nudges.by_blocker}
+                class="rounded-lg border border-border bg-surface px-3 py-2"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <p class="truncate text-sm font-510 text-text-primary">{group.label}</p>
+                  <span class="font-mono text-xs text-text-quaternary">{group.count}</span>
+                </div>
+                <p class="mt-1 text-xs text-text-quaternary">
+                  {group.stale} stale · {group.running} running
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div :if={@review_nudges.active != []} class="border-t border-border">
+          <div class="border-b border-border px-5 py-3">
+            <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+              Active queue
+            </h3>
+          </div>
+          <div class="divide-y divide-border">
+            <div :for={nudge <- @review_nudges.active} class="px-5 py-4">
+              <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{nudge_badge_class(nudge.lifecycle)}"}>
+                      {nudge.status_label}
+                    </span>
+                    <span class="text-xs text-text-quaternary">
+                      Waiting {format_duration(nudge.age_seconds)}
+                    </span>
+                    <span class="text-xs text-text-quaternary">·</span>
+                    <span class="text-xs text-text-quaternary">
+                      {Enum.join(nudge.blocker_labels, ", ")}
+                    </span>
+                  </div>
+                  <p class="mt-2 truncate text-sm font-590 text-text-primary">
+                    {nudge.issue_identifier || short_id(nudge.issue_id)} · {nudge.issue_title}
+                  </p>
+                  <p class="mt-1 text-xs leading-5 text-text-tertiary">{nudge.summary}</p>
+                  <p class="mt-1 text-xs text-text-quaternary">Owner: {nudge.agent_name}</p>
+                </div>
+
+                <div class="flex shrink-0 flex-wrap gap-2 xl:justify-end">
+                  <.app_link
+                    :if={nudge.issue}
+                    navigate={~p"/issues/#{nudge.issue.id}"}
+                    class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    Open issue
+                  </.app_link>
+                  <.app_link
+                    :if={nudge.agent}
+                    navigate={~p"/agents/#{nudge.agent.id}?tab=inbox"}
+                    class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    Open agent
+                  </.app_link>
+                  <button
+                    type="button"
+                    phx-click="clear_review_nudge"
+                    phx-value-id={nudge.id}
+                    class="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-510 text-emerald-300 hover:bg-emerald-500/15"
+                  >
+                    Mark handled
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div :if={@review_nudges.cleared != []} class="border-t border-border">
+          <div class="border-b border-border px-5 py-3">
+            <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+              Recently cleared
+            </h3>
+          </div>
+          <div class="divide-y divide-border">
+            <div
+              :for={nudge <- @review_nudges.cleared}
+              class="flex flex-wrap items-center justify-between gap-3 px-5 py-3"
+            >
+              <div class="min-w-0">
+                <p class="truncate text-sm font-510 text-text-primary">
+                  {nudge.issue_identifier || short_id(nudge.issue_id)} · {nudge.issue_title}
+                </p>
+                <p class="mt-0.5 text-xs text-text-quaternary">
+                  {Enum.join(nudge.blocker_labels, ", ")} · {nudge.agent_name}
+                </p>
+              </div>
+              <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{nudge_badge_class(nudge.lifecycle)}"}>
+                {nudge.status_label}
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="rounded-lg border border-border bg-panel">
+        <div class="border-b border-border px-5 py-4">
+          <h2 class="text-sm font-590 text-text-primary">Highest Pressure Agents</h2>
+          <p class="mt-1 text-xs text-text-quaternary">
+            Local CLI adapters consume real OS memory; BEAM processes stay lightweight.
+          </p>
+        </div>
+        <div :if={@pressure_agents == []} class="px-5 py-8 text-center text-sm text-text-tertiary">
+          No agents configured yet.
+        </div>
+        <div :if={@pressure_agents != []} class="divide-y divide-border">
+          <.app_link
+            :for={item <- @pressure_agents}
+            navigate={~p"/agents/#{item.id}?tab=configuration"}
+            class="block px-5 py-3 hover:bg-surface-hover/60"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="min-w-0">
+                <p class="truncate text-sm font-590 text-text-primary">{item.name}</p>
+                <p class="mt-0.5 text-xs text-text-quaternary">
+                  {role_label(item.role)} · {adapter_label(item.adapter)} · {item.profile}
+                </p>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{capacity_badge_class(item.pressure.level)}"}>
+                  {item.pressure.label}
+                </span>
+                <span class="font-mono text-xs text-text-quaternary">
+                  {item.pressure.slot_label}
+                </span>
+              </div>
+            </div>
+          </.app_link>
+        </div>
+      </section>
+    </div>
+
+    <aside class="space-y-4">
+      <section class="rounded-lg border border-border bg-panel">
+        <div class="border-b border-border px-4 py-3">
+          <h2 class="text-sm font-590 text-text-primary">Next Actions</h2>
+        </div>
+        <div class="space-y-2 p-3">
+          <div
+            :for={action <- @next_actions}
+            class={"rounded-lg border px-3 py-3 #{action_class(action.tone)}"}
+          >
+            <p class="text-sm font-590 text-text-primary">{action.title}</p>
+            <p class="mt-1 text-xs leading-5 text-text-tertiary">{action.body}</p>
+            <div
+              :if={Map.get(action, :target_path) || Map.get(action, :command)}
+              class="mt-3 flex flex-wrap items-center gap-2"
+            >
+              <a
+                :if={Map.get(action, :target_path) && anchor_path?(action.target_path)}
+                href={action.target_path}
+                class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+              >
+                <span class="hero-arrow-down-mini h-3.5 w-3.5"></span>
+                {action.target_label}
+              </a>
+              <.app_link
+                :if={Map.get(action, :target_path) && not anchor_path?(action.target_path)}
+                navigate={action.target_path}
+                class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+              >
+                <span class="hero-wrench-screwdriver-mini h-3.5 w-3.5"></span>
+                {action.target_label}
+              </.app_link>
+              <code
+                :if={Map.get(action, :command)}
+                class="max-w-full overflow-x-auto rounded-md border border-border bg-canvas px-2.5 py-1.5 font-mono text-[11px] text-text-tertiary"
+              >
+                {action.command}
+              </code>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="adapter-health" class="rounded-lg border border-border bg-panel scroll-mt-6">
+        <div class="border-b border-border px-4 py-3">
+          <h2 class="text-sm font-590 text-text-primary">Adapter Health</h2>
+        </div>
+        <div :if={@health == []} class="px-4 py-8 text-center text-sm text-text-tertiary">
+          No adapters assigned to agents yet.
+        </div>
+        <div :if={@health != []} class="divide-y divide-border">
+          <div :for={adapter <- @health} class="px-4 py-3">
+            <div class="flex items-center justify-between gap-3">
+              <p class="text-sm font-590 text-text-primary">{adapter.label}</p>
+              <p class="text-xs text-text-quaternary">{adapter.total} agents</p>
+            </div>
+            <div class="mt-2 grid grid-cols-3 gap-2 text-center">
+              <div class="rounded border border-border bg-surface px-2 py-1.5">
+                <p class="text-sm font-590 text-emerald-300">{adapter.healthy}</p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Healthy
+                </p>
+              </div>
+              <div class="rounded border border-border bg-surface px-2 py-1.5">
+                <p class="text-sm font-590 text-amber-300">{adapter.degraded}</p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Warn
+                </p>
+              </div>
+              <div class="rounded border border-border bg-surface px-2 py-1.5">
+                <p class="text-sm font-590 text-red-300">{adapter.unavailable}</p>
+                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  Down
+                </p>
+              </div>
+            </div>
+            <div :if={adapter.problem_agents != []} class="mt-3 space-y-1.5">
+              <p class="text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                Needs attention
+              </p>
+              <.app_link
+                :for={agent <- adapter.problem_agents}
+                navigate={~p"/agents/#{agent.id}?tab=configuration"}
+                class="flex items-center justify-between gap-3 rounded-md border border-border bg-surface px-2.5 py-2 hover:bg-surface-hover"
+              >
+                <span class="min-w-0">
+                  <span class="block truncate text-xs font-510 text-text-primary">
+                    {agent.name}
+                  </span>
+                  <span class="mt-0.5 block text-[11px] text-text-quaternary">
+                    {role_label(agent.role)}
+                  </span>
+                </span>
+                <span class={"shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-510 #{health_status_badge_class(agent.status)}"}>
+                  {health_status_label(agent.status)}
+                </span>
+              </.app_link>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="recent-failures" class="rounded-lg border border-border bg-panel scroll-mt-6">
+        <div class="border-b border-border px-4 py-3">
+          <h2 class="text-sm font-590 text-text-primary">Recent Runtime Failures</h2>
+        </div>
+        <div
+          :if={@recent_failures == []}
+          class="px-4 py-8 text-center text-sm text-text-tertiary"
+        >
+          No failed runs found.
+        </div>
+        <div :if={@recent_failures != []} class="divide-y divide-border">
+          <div :for={failure <- @recent_failures} class="px-4 py-3">
+            <div class="flex items-center justify-between gap-3">
+              <span class="rounded-full border border-red-500/25 bg-red-500/10 px-2 py-0.5 text-[11px] font-510 text-red-300">
+                {failure.category}
+              </span>
+              <span class="text-[11px] text-text-quaternary">
+                {format_relative(failure.completed_at || failure.inserted_at)}
+              </span>
+            </div>
+            <p class="mt-2 text-sm font-510 text-text-primary">{failure.title}</p>
+            <p :if={failure.hint} class="mt-1 text-xs leading-5 text-text-tertiary">
+              {failure.hint}
+            </p>
+            <div class="mt-2 flex flex-wrap gap-2 text-xs">
+              <.app_link
+                :if={failure.agent}
+                navigate={~p"/agents/#{failure.agent.id}?tab=runs&run_id=#{failure.id}"}
+                class="text-brand hover:text-accent-hover"
+              >
+                {failure.agent.name}
+              </.app_link>
+              <.app_link
+                :if={failure.issue}
+                navigate={~p"/issues/#{failure.issue.id}"}
+                class="text-text-tertiary hover:text-text-primary"
+              >
+                {failure.issue.identifier || short_id(failure.issue.id)}
+              </.app_link>
+            </div>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <div
+    :if={@prompt_plan_preview}
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="prompt-plan-preview-title"
+  >
+    <div class="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-2xl">
+      <div class="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+        <div>
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 id="prompt-plan-preview-title" class="text-base font-590 text-text-primary">
+              Prompt Patch Preview
+            </h2>
+            <span class="rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[11px] font-510 text-brand">
+              {@prompt_plan_preview.agent_count} {plural_noun(
+                @prompt_plan_preview.agent_count,
+                "agent"
+              )}
+            </span>
+            <span class="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-510 text-text-tertiary">
+              {@prompt_plan_preview.patch_count} {plural_noun(
+                @prompt_plan_preview.patch_count,
+                "patch",
+                "patches"
+              )}
+            </span>
+          </div>
+          <p class="mt-1 max-w-2xl text-xs leading-5 text-text-tertiary">
+            Review the exact additive text Cympho will append. Existing instructions stay intact,
+            and every apply records an agent config revision for rollback.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          phx-click="close_prompt_preview"
+          class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        >
+          Close
+        </button>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div
+          :if={@prompt_plan_preview.empty?}
+          class="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-5 text-sm text-emerald-100"
+        >
+          No safe additive patches are currently available for this selection.
+        </div>
+
+        <div :if={!@prompt_plan_preview.empty?} class="space-y-3">
+          <div
+            :for={agent <- @prompt_plan_preview.agents}
+            class="rounded-lg border border-border bg-surface px-3 py-3"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="truncate text-sm font-590 text-text-primary">{agent.name}</p>
+                <p class="mt-0.5 text-xs text-text-quaternary">
+                  {role_label(agent.role)} · {adapter_label(agent.adapter)}
+                </p>
+              </div>
+              <div class="text-right">
+                <p class="font-mono text-sm text-text-primary">
+                  {agent.current_score}/100 → {agent.projected_score}/100
+                </p>
+                <p class="mt-0.5 text-[11px] text-text-quaternary">
+                  {agent.current_status_label} → {agent.projected_status_label}
+                </p>
+              </div>
+            </div>
+
+            <div class="mt-3 space-y-2">
+              <div
+                :for={patch <- agent.patches}
+                class="rounded-md border border-border bg-canvas px-3 py-2"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class={"rounded px-1.5 py-0.5 text-[11px] #{prompt_patch_class(patch.tone)}"}>
+                    {patch.title}
+                  </span>
+                  <span class="text-[11px] text-text-quaternary">{patch.reason}</span>
+                </div>
+                <pre class="mt-2 whitespace-pre-wrap rounded border border-border bg-panel px-2.5 py-2 text-[11px] leading-5 text-text-secondary">{patch.body}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-4">
+        <p class="text-xs text-text-quaternary">
+          These are generated from Instruction Studio guardrails, not free-form rewrites.
+        </p>
+        <div class="flex flex-wrap gap-2">
+          <button
+            type="button"
+            phx-click="close_prompt_preview"
+            class="rounded-md border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+          >
+            Cancel
+          </button>
+          <button
+            :if={
+              @prompt_plan_preview.scope == :watchlist and @prompt_plan_preview.agent_count > 0
+            }
+            type="button"
+            phx-click="apply_prompt_plan"
+            phx-value-scope="watchlist"
+            data-confirm="Apply these additive Studio patches to every agent in the preview?"
+            class="rounded-md border border-brand/30 bg-brand/15 px-3 py-2 text-sm font-510 text-brand hover:bg-brand/20"
+          >
+            Apply all patches
+          </button>
+          <button
+            :if={@prompt_plan_preview.scope == :agent and @prompt_plan_preview.agent_count > 0}
+            type="button"
+            phx-click="apply_prompt_plan"
+            phx-value-agent-id={hd(@prompt_plan_preview.agents).id}
+            data-confirm="Apply these additive Studio patches to this agent?"
+            class="rounded-md border border-brand/30 bg-brand/15 px-3 py-2 text-sm font-510 text-brand hover:bg-brand/20"
+          >
+            Apply patches
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</.page>

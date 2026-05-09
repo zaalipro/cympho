@@ -7,7 +7,9 @@ defmodule Cympho.Dashboard do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Agents.Agent
+  alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues.Issue
+  alias Cympho.RuntimeCapacity
 
   def active_agents_count(company_id \\ nil) do
     Agent
@@ -114,8 +116,49 @@ defmodule Cympho.Dashboard do
       routine_health: routine_health(),
       recent_activities: Enum.map(recent_activities(10, company_id), &activity_to_map/1),
       recent_inbox: Enum.map(recent_inbox(company_id, 6), &inbox_to_map/1),
-      cost_summary: cost_summary(company_id)
+      cost_summary: cost_summary(company_id),
+      runtime_capacity: runtime_capacity(company_id)
     }
+  end
+
+  def empty_summary do
+    %{
+      active_agents: 0,
+      total_agents: 0,
+      active_agent_list: [],
+      agent_status_counts: [],
+      issue_status_counts: [],
+      throughput: %{created: [], closed: []},
+      bottlenecks: [],
+      routine_health: routine_health(),
+      recent_activities: [],
+      recent_inbox: [],
+      cost_summary: %{total_cost: Decimal.new(0), run_count: 0},
+      runtime_capacity: RuntimeCapacity.company([])
+    }
+  end
+
+  def runtime_capacity(company_id \\ nil) do
+    agents =
+      Agent
+      |> scoped(company_id)
+      |> where([a], a.status != :terminated)
+      |> where([a], a.governance_status != "terminated")
+      |> Repo.all()
+
+    running_counts =
+      Run
+      |> scoped(company_id)
+      |> where([r], r.status in ["running", "queued", "pending"])
+      |> group_by([r], r.agent_id)
+      |> select([r], {r.agent_id, count(r.id)})
+      |> Repo.all()
+      |> Map.new()
+
+    RuntimeCapacity.company(agents, running_counts)
+  rescue
+    _ ->
+      RuntimeCapacity.company([])
   end
 
   def recent_inbox(nil, _limit), do: []

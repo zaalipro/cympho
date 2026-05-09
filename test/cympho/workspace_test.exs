@@ -169,4 +169,54 @@ defmodule Cympho.Workspace.RepoUrlTest do
       assert {:error, :no_repo_configured} = Workspace.get_repo_url(project.id)
     end
   end
+
+  describe "create_for_issue/1" do
+    test "clones the repo onto a branch named from the issue identifier and title" do
+      repo_dir = local_git_repo!()
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Branch Project",
+          prefix: "BP",
+          settings: %{"repo_url" => repo_dir}
+        })
+
+      issue = %{
+        id: Ecto.UUID.generate(),
+        identifier: "CYM-88",
+        title: "Improve PR docs",
+        project_id: project.id
+      }
+
+      on_exit(fn ->
+        File.rm_rf!(repo_dir)
+        File.rm_rf!(Workspace.workspace_path(issue))
+      end)
+
+      assert {:ok, path} = Workspace.create_for_issue(issue)
+      assert File.dir?(path)
+
+      assert {"CYM-88/improve-pr-docs\n", 0} =
+               System.cmd("git", ["branch", "--show-current"], cd: path)
+    end
+  end
+
+  defp local_git_repo! do
+    repo_dir = Path.join(System.tmp_dir!(), "cympho_repo_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(repo_dir)
+
+    assert {_output, 0} = System.cmd("git", ["init", "--quiet"], cd: repo_dir)
+
+    assert {_output, 0} =
+             System.cmd("git", ["config", "user.email", "test@example.com"], cd: repo_dir)
+
+    assert {_output, 0} = System.cmd("git", ["config", "user.name", "Cympho Test"], cd: repo_dir)
+
+    File.write!(Path.join(repo_dir, "README.md"), "# Test\n")
+
+    assert {_output, 0} = System.cmd("git", ["add", "README.md"], cd: repo_dir)
+    assert {_output, 0} = System.cmd("git", ["commit", "--quiet", "-m", "initial"], cd: repo_dir)
+
+    repo_dir
+  end
 end

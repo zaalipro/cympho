@@ -9,7 +9,7 @@ defmodule CymphoWeb.CompanySwitcherController do
 
     cond do
       is_nil(user) ->
-        redirect(conn, to: "/")
+        redirect(conn, to: "/login")
 
       true ->
         # Verify the user has access to this company

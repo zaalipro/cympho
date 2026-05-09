@@ -71,32 +71,45 @@ defmodule Cympho.Adapters.CodexAdapter do
         "--quiet"
       ]
 
-      env = build_env(config, opts)
+      env = config |> build_env(opts) |> port_env()
 
-      port =
-        Port.open(
-          {:spawn_executable, codex_bin},
-          [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}] ++
-            cwd_opt(config, opts)
-        )
+      port_opts =
+        [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}] ++
+          cwd_opt(config, opts)
 
-      Port.command(port, "#{prompt}\n")
+      with_port({:spawn_executable, codex_bin}, port_opts, fn port ->
+        write_prompt(port, prompt)
 
-      result = collect_output(port, "", timeout)
-      Port.close(port)
-
-      case result do
-        {:ok, raw} ->
-          parse_codex_output(raw)
-
-        {:error, _} = err ->
-          err
-      end
+        case collect_output(port, "", timeout) do
+          {:ok, raw} -> parse_codex_output(raw)
+          {:error, _} = err -> err
+        end
+      end)
     rescue
       e ->
         {:error, "Codex process failed: #{inspect(e)}"}
     end
   end
+
+  defp with_port(open_spec, port_opts, fun) do
+    port = Port.open(open_spec, port_opts)
+
+    try do
+      fun.(port)
+    after
+      close_port(port)
+    end
+  end
+
+  defp close_port(port) when is_port(port) do
+    try do
+      Port.close(port)
+    rescue
+      ArgumentError -> :ok
+    end
+  end
+
+  defp close_port(_port), do: :ok
 
   defp collect_output(port, acc, timeout) do
     receive do
@@ -110,32 +123,49 @@ defmodule Cympho.Adapters.CodexAdapter do
         {:error, "Codex exited with status #{code}: #{acc}"}
     after
       timeout ->
-        Port.close(port)
+        close_port(port)
         {:error, :timeout}
     end
+  end
+
+  defp write_prompt(port, prompt) do
+    Port.command(port, "#{prompt}\n")
+    :ok
+  rescue
+    ArgumentError -> :closed
   end
 
   defp parse_codex_output(raw) do
     raw = String.trim(raw)
 
-    case String.split(raw, "\n") do
-      [line] ->
-        case Jason.decode(line) do
-          {:ok, json} -> {:ok, json}
-          {:error, _} -> {:ok, %{"output" => raw}}
-        end
+    if raw == "" do
+      {:error, :no_output}
+    else
+      parse_codex_lines(String.split(raw, "\n"), raw)
+    end
+  end
 
-      lines ->
-        parsed =
-          lines
-          |> Enum.map(&Jason.decode/1)
-          |> Enum.filter(fn
-            {:ok, _} -> true
-            _ -> false
-          end)
-          |> Enum.map(fn {:ok, m} -> m end)
+  defp parse_codex_lines([line], raw) do
+    case Jason.decode(line) do
+      {:ok, json} -> {:ok, json}
+      {:error, _} -> {:error, {:parse_error, raw}}
+    end
+  end
 
-        {:ok, %{"turns" => parsed}}
+  defp parse_codex_lines(lines, raw) do
+    parsed =
+      lines
+      |> Enum.map(&Jason.decode/1)
+      |> Enum.filter(fn
+        {:ok, _} -> true
+        _ -> false
+      end)
+      |> Enum.map(fn {:ok, m} -> m end)
+
+    if Enum.empty?(parsed) do
+      {:error, {:parse_error, raw}}
+    else
+      {:ok, %{"turns" => parsed}}
     end
   end
 
@@ -173,17 +203,30 @@ defmodule Cympho.Adapters.CodexAdapter do
 
   defp normalize_env(env, skip_keys) when is_map(env) do
     Enum.flat_map(env, fn {key, value} ->
-      key = to_string(key)
+      key = env_string(key)
 
       if key in skip_keys do
         []
       else
-        [{key, to_string(value)}]
+        [{key, value}]
       end
     end)
   end
 
   defp normalize_env(_env, _skip_keys), do: []
+
+  defp port_env(env) do
+    Enum.map(env, fn {key, value} ->
+      {env_charlist(key), env_charlist(value)}
+    end)
+  end
+
+  defp env_string(value) when is_binary(value), do: value
+  defp env_string(value) when is_list(value), do: List.to_string(value)
+  defp env_string(value), do: to_string(value)
+
+  defp env_charlist(value) when is_list(value), do: value
+  defp env_charlist(value), do: value |> env_string() |> String.to_charlist()
 
   @impl true
   def health_check(config) do
@@ -272,22 +315,22 @@ defmodule Cympho.Adapters.CodexAdapter do
 
   @impl true
   def validate_config(config) do
-    config = atomize_keys(config)
-
-    with :ok <- validate_api_key(config[:api_key]),
-         :ok <- validate_model(config[:model]),
-         :ok <- validate_temperature(config[:temperature]),
-         :ok <- validate_max_tokens(config[:max_tokens]) do
+    with :ok <- validate_api_key(config_value(config, :api_key)),
+         :ok <- validate_model(config_value(config, :model)),
+         :ok <- validate_temperature(config_value(config, :temperature)),
+         :ok <- validate_max_tokens(config_value(config, :max_tokens)) do
       :ok
     end
   end
 
-  defp atomize_keys(map) when is_map(map) do
-    Map.new(map, fn
-      {k, v} when is_binary(k) -> {String.to_atom(k), v}
-      {k, v} -> {k, v}
-    end)
+  defp config_value(config, key) when is_map(config) and is_atom(key) do
+    case Map.fetch(config, key) do
+      {:ok, value} -> value
+      :error -> Map.get(config, Atom.to_string(key))
+    end
   end
+
+  defp config_value(_config, _key), do: nil
 
   defp get_api_key(config) do
     config[:api_key] || config["api_key"] ||

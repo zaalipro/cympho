@@ -3,8 +3,20 @@ defmodule Cympho.OrchestratorTest do
 
   import Mock
 
-  alias Cympho.{Agents, Companies, Issues, Orchestrator, Repo}
+  alias Cympho.{
+    Agents,
+    Comments,
+    Companies,
+    Inbox,
+    Issues,
+    Orchestrator,
+    Repo,
+    Wakes,
+    WorkProducts
+  }
+
   alias Cympho.Agents.Agent
+  alias Cympho.HeartbeatEngine.Run
 
   @moduletag :capture_log
 
@@ -99,6 +111,133 @@ defmodule Cympho.OrchestratorTest do
         assert_called(Cympho.HeartbeatEngine.create_run(:_))
 
         Orchestrator.stop(issue_id)
+      end
+    end
+
+    test "adds a generated delivery comment when artifact action omits owner note", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      session_id = "session-auto-note"
+      run_id = Ecto.UUID.generate()
+
+      result = %{
+        "content" => [
+          %{
+            "type" => "text",
+            "text" => """
+            Done.
+
+            ```cympho-actions
+            {"actions":[{"type":"attach_work_product","title":"Artifact bundle","kind":"document","description":"Output bundle"}]}
+            ```
+            """
+          }
+        ]
+      }
+
+      with_mocks([
+        {Cympho.AgentAdapters, [],
+         [
+           resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+         ]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+           start_run: fn _ -> :ok end,
+           complete_run: fn _run, _attrs -> {:ok, %{id: run_id}} end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        send(pid, {:turn_completed, session_id, result})
+        Process.sleep(150)
+
+        comments = Comments.list_comments(issue.id)
+
+        assert Enum.any?(
+                 comments,
+                 &(&1.body =~ "[delivery] What happened: attached review evidence")
+               )
+
+        assert Enum.any?(comments, &(&1.body =~ "Artifact bundle"))
+
+        [work_product] = WorkProducts.list_work_products(issue.id)
+        assert work_product.title == "Artifact bundle"
+      end
+    end
+
+    test "queues a completion contract nudge when a successful run leaves missing evidence", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      session_id = "session-contract-nudge"
+      run_id = Ecto.UUID.generate()
+      issue_id = issue.id
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      result = %{
+        "content" => [
+          %{
+            "type" => "text",
+            "text" => """
+            Done.
+
+            ```cympho-actions
+            {"actions":[{"type":"comment","body":"Done."}]}
+            ```
+            """
+          }
+        ]
+      }
+
+      completed_run = %Run{
+        id: run_id,
+        issue_id: issue.id,
+        agent_id: agent_id,
+        status: "completed",
+        adapter: "claude_code",
+        inserted_at: now,
+        completed_at: now
+      }
+
+      with_mocks([
+        {Cympho.AgentAdapters, [],
+         [
+           resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+         ]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+           start_run: fn _ -> :ok end,
+           complete_run: fn _run, _attrs -> {:ok, %{id: run_id}} end,
+           list_runs_for_issue: fn ^issue_id -> [completed_run] end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        send(pid, {:turn_completed, session_id, result})
+        Process.sleep(200)
+
+        assert [wake] = Wakes.list_review_nudges([issue.id])
+        assert wake.agent_id == agent_id
+        assert wake.metadata["source"] == "review_nudge"
+        assert "Work product" in wake.metadata["blocker_labels"]
+        assert "Delivery comment" in wake.metadata["blocker_labels"]
+        assert Inbox.get_inbox_state(issue.id, agent_id)
+
+        assert Enum.any?(Comments.list_comments(issue.id), fn comment ->
+                 comment.author_type == "system" and
+                   comment.body =~ "Auto-nudge queued for Orchestrator Agent"
+               end)
       end
     end
   end

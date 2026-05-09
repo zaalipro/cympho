@@ -33,6 +33,39 @@ defmodule Cympho.Github do
 
   def parse_repo_url(_), do: {:error, :invalid_url}
 
+  @doc """
+  Parses a GitHub pull request URL into `{owner, repo, number}`.
+
+  Accepts `https://github.com/owner/repo/pull/123`.
+  """
+  def parse_pull_request_url(url) when is_binary(url) do
+    url
+    |> URI.parse()
+    |> case do
+      %URI{scheme: "https", host: "github.com", path: path} ->
+        path
+        |> String.trim_leading("/")
+        |> String.trim_trailing("/")
+        |> String.split("/")
+        |> case do
+          [owner, repo, "pull", number] ->
+            with {number, ""} <- Integer.parse(number) do
+              {:ok, {owner, repo, number}}
+            else
+              _ -> {:error, :invalid_url}
+            end
+
+          _ ->
+            {:error, :invalid_url}
+        end
+
+      _ ->
+        {:error, :invalid_url}
+    end
+  end
+
+  def parse_pull_request_url(_), do: {:error, :invalid_url}
+
   defp parse_https(url) do
     url
     |> String.trim_leading("https://github.com/")
@@ -97,6 +130,90 @@ defmodule Cympho.Github do
     end
   end
 
+  @doc """
+  Fetches pull request metadata needed by the PR quality gate.
+
+  A GitHub token is required so private repos work and tests/dev do not make
+  accidental unauthenticated network calls.
+  """
+  def fetch_pull_request(url, opts \\ [])
+
+  def fetch_pull_request(url, opts) when is_binary(url) do
+    with {:ok, {owner, repo, number}} <- parse_pull_request_url(url) do
+      fetch_pull_request(owner, repo, number, opts)
+    end
+  end
+
+  def fetch_pull_request(_url, _opts), do: {:error, :invalid_url}
+
+  def fetch_pull_request(owner, repo, number, opts)
+      when is_binary(owner) and is_binary(repo) and is_integer(number) do
+    http_fn = Keyword.get(opts, :http_fn, &default_http_request/3)
+    finch = Keyword.get(opts, :finch, @finch_name)
+    token = Keyword.get(opts, :token) || github_token()
+
+    if token in [nil, ""] do
+      {:error, :missing_token}
+    else
+      url = "https://api.github.com/repos/#{owner}/#{repo}/pulls/#{number}"
+
+      headers = [
+        {"authorization", "Bearer #{token}"},
+        {"accept", "application/vnd.github+json"},
+        {"user-agent", "cympho"}
+      ]
+
+      case http_fn.(url, headers, finch) do
+        {:ok, %Finch.Response{status: 200, body: body}} ->
+          parse_pull_request_body(body)
+
+        {:ok, %Finch.Response{status: 404}} ->
+          {:error, :not_found}
+
+        {:ok, %Finch.Response{status: status, body: body}} ->
+          {:error, {:unexpected_status, status, body}}
+
+        {:error, reason} ->
+          {:error, {:request_failed, reason}}
+      end
+    end
+  end
+
+  def fetch_pull_request(_owner, _repo, _number, _opts), do: {:error, :invalid_url}
+
+  @doc """
+  Normalizes a GitHub pull_request webhook payload into the metadata shape used
+  by the PR quality gate.
+  """
+  def pull_request_metadata(%{} = pr) do
+    %{
+      title: pr["title"] || "",
+      body: pr["body"] || "",
+      branch_name: get_in(pr, ["head", "ref"]) || "",
+      url: pr["html_url"],
+      number: pr["number"],
+      state: pr["state"]
+    }
+  end
+
+  def pull_request_metadata(_pr), do: %{}
+
+  defp parse_pull_request_body(body) do
+    with {:ok, decoded} <- Jason.decode(body) do
+      {:ok,
+       %{
+         title: decoded["title"] || "",
+         body: decoded["body"] || "",
+         branch_name: get_in(decoded, ["head", "ref"]) || "",
+         url: decoded["html_url"],
+         number: decoded["number"],
+         state: decoded["state"]
+       }}
+    else
+      {:error, error} -> {:error, {:invalid_json, Exception.message(error)}}
+    end
+  end
+
   defp default_http_request(url, headers, finch) do
     Finch.build(:get, url, headers) |> Finch.request(finch)
   end
@@ -116,15 +233,43 @@ defmodule Cympho.Github do
       iex> build_branch_name(%{prefix: "LLM", sequence: 1, title: "Fix: CSS & HTML issues!!!"})
       "LLM-1/fix-css-html-issues"
   """
+  def build_branch_name(%{identifier: identifier, title: title})
+      when is_binary(identifier) and identifier != "" do
+    slug =
+      title
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9]+/, "-")
+      |> String.trim("-")
+      |> empty_slug()
+      |> truncate_slug(identifier)
+
+    "#{identifier}/#{slug}"
+  end
+
   def build_branch_name(%{prefix: prefix, sequence: seq, title: title}) do
     slug =
       title
       |> String.downcase()
       |> String.replace(~r/[^a-z0-9]+/, "-")
       |> String.trim("-")
+      |> empty_slug()
       |> truncate_slug(prefix, seq)
 
     "#{prefix}-#{seq}/#{slug}"
+  end
+
+  defp truncate_slug(slug, identifier) do
+    prefix_len = String.length("#{identifier}/")
+    max_slug_len = max(80 - prefix_len, 1)
+
+    if String.length(slug) > max_slug_len do
+      slug
+      |> String.slice(0, max_slug_len)
+      |> String.trim("-")
+      |> empty_slug()
+    else
+      slug
+    end
   end
 
   defp truncate_slug(slug, prefix, seq) do
@@ -135,10 +280,14 @@ defmodule Cympho.Github do
       slug
       |> String.slice(0, max_slug_len)
       |> String.trim("-")
+      |> empty_slug()
     else
       slug
     end
   end
+
+  defp empty_slug(""), do: "work"
+  defp empty_slug(slug), do: slug
 
   defp github_token do
     Application.get_env(:cympho, :github_token)

@@ -1,9 +1,11 @@
 defmodule CymphoWeb.KanbanLive.Components do
   use Phoenix.Component
+  import CymphoWeb.Components.IssueDigest
   alias CymphoWeb.KanbanLive.Index
 
   attr :issue, :map, required: true
   attr :status, :atom, required: true
+  attr :digest_density, :string, default: "detailed"
   attr :agents, :list, default: []
   attr :agent_heartbeat_states, :map, default: %{}
   attr :editing_card_id, :any, default: nil
@@ -29,6 +31,8 @@ defmodule CymphoWeb.KanbanLive.Components do
       >
         {@issue.title}
       </.link>
+
+      <.issue_digest_card issue={@issue} density={@digest_density} class="mt-2" />
 
       <div class="mt-3 flex flex-wrap items-center gap-2">
         <span class={"rounded-full px-2 py-0.5 text-[10px] font-510 " <> priority_class(@issue.priority)}>

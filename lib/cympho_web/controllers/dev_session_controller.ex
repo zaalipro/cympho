@@ -14,13 +14,14 @@ defmodule CymphoWeb.DevSessionController do
   @dev_email "owner@cympho.local"
   @dev_password "password1234"
 
-  def login(conn, _params) do
+  def login(conn, params) do
     user = ensure_dev_owner!()
+    return_to = CymphoWeb.UserAuth.safe_return_path(params["return_to"]) || "/"
 
     conn
     |> SessionController.sign_in(user)
     |> put_flash(:info, "Signed in as local owner")
-    |> redirect(to: "/")
+    |> redirect(to: return_to)
   end
 
   defp ensure_dev_owner! do

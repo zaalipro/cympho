@@ -42,11 +42,11 @@ defmodule CymphoWeb.PromptInspectorLive do
   end
 
   defp render_prompt(%{assigns: %{issue_id: issue_id, agent_id: agent_id}} = socket) do
-    case Issues.get_issue(issue_id) do
-      {:ok, issue} ->
-        prompt = AgentPrompt.build(issue, agent_id)
-        assign(socket, prompt: prompt, error: nil)
-
+    with {:ok, issue} <- get_scoped_issue(socket, issue_id),
+         :ok <- validate_scoped_agent(socket, agent_id) do
+      prompt = AgentPrompt.build(issue, agent_id)
+      assign(socket, prompt: prompt, error: nil)
+    else
       {:error, _} ->
         assign(socket, prompt: nil, error: "Issue not found.")
     end
@@ -57,6 +57,28 @@ defmodule CymphoWeb.PromptInspectorLive do
 
   defp blank_to_nil(""), do: nil
   defp blank_to_nil(value), do: value
+
+  defp get_scoped_issue(socket, issue_id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Issues.get_company_issue(company_id, issue_id)
+      _ -> Issues.get_issue(issue_id)
+    end
+  end
+
+  defp validate_scoped_agent(_socket, nil), do: :ok
+
+  defp validate_scoped_agent(socket, agent_id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} ->
+        case Agents.get_company_agent(company_id, agent_id) do
+          {:ok, _agent} -> :ok
+          {:error, _} -> {:error, :not_found}
+        end
+
+      _ ->
+        :ok
+    end
+  end
 
   defp list_agents(nil), do: []
 

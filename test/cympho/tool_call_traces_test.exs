@@ -79,6 +79,7 @@ defmodule Cympho.ToolCallTracesTest do
 
     test "prevents duplicate content_hash", %{company: company} do
       actor_id = Ecto.UUID.generate()
+      fixed_time = DateTime.utc_now() |> DateTime.truncate(:second)
 
       attrs = %{
         trace_type: "llm_tool_call",
@@ -87,7 +88,8 @@ defmodule Cympho.ToolCallTracesTest do
         status: "pending",
         company_id: company.id,
         actor_type: "agent",
-        actor_id: actor_id
+        actor_id: actor_id,
+        occurred_at: fixed_time
       }
 
       assert {:ok, _trace1} = ToolCallTraces.create_tool_call_trace(attrs)

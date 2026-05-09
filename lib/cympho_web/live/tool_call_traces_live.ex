@@ -59,21 +59,10 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
   @impl true
   def handle_event("select_trace", %{"id" => id}, socket) do
-    case ToolCallTraces.get_tool_call_trace(id) do
+    case get_scoped_trace(socket.assigns.company_id, id) do
       {:ok, trace} ->
-        trace =
-          case trace.agent_id do
-            nil ->
-              trace
-
-            agent_id ->
-              case Cympho.Agents.get_agent(agent_id) do
-                {:ok, agent} -> %{trace | agent: agent}
-                {:error, _} -> trace
-              end
-          end
-
-        {:noreply, assign(socket, :selected_trace, trace)}
+        {:noreply,
+         assign(socket, :selected_trace, preload_scoped_agent(trace, socket.assigns.company_id))}
 
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Trace not found")}
@@ -196,18 +185,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
     traces =
       ToolCallTraces.list_tool_call_traces(opts)
-      |> Enum.map(fn trace ->
-        case trace.agent_id do
-          nil ->
-            trace
-
-          agent_id ->
-            case Cympho.Agents.get_agent(agent_id) do
-              {:ok, agent} -> %{trace | agent: agent}
-              {:error, _} -> trace
-            end
-        end
-      end)
+      |> Enum.map(&preload_scoped_agent(&1, company_id))
 
     statistics = ToolCallTraces.get_statistics(company_id)
 
@@ -216,6 +194,23 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
     |> assign(:statistics, statistics)
     |> assign(:export_data_json, nil)
     |> assign(:export_data_csv, nil)
+  end
+
+  defp get_scoped_trace(company_id, id) do
+    case ToolCallTraces.get_tool_call_trace(id) do
+      {:ok, %{company_id: ^company_id} = trace} -> {:ok, trace}
+      {:ok, _trace} -> {:error, :not_found}
+      {:error, _} -> {:error, :not_found}
+    end
+  end
+
+  defp preload_scoped_agent(%{agent_id: nil} = trace, _company_id), do: trace
+
+  defp preload_scoped_agent(trace, company_id) do
+    case Agents.get_company_agent(company_id, trace.agent_id) do
+      {:ok, agent} -> %{trace | agent: agent}
+      {:error, _} -> trace
+    end
   end
 
   def status_color("success"), do: "text-green-400"

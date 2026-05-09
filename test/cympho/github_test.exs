@@ -72,6 +72,18 @@ defmodule Cympho.GithubTest do
     end
   end
 
+  describe "parse_pull_request_url/1" do
+    test "parses GitHub PR URLs" do
+      assert {:ok, {"openai", "symphony", 123}} =
+               Github.parse_pull_request_url("https://github.com/openai/symphony/pull/123")
+    end
+
+    test "rejects non-PR URLs" do
+      assert {:error, :invalid_url} =
+               Github.parse_pull_request_url("https://github.com/openai/symphony/issues/123")
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # branch_exists?/3
   # ---------------------------------------------------------------------------
@@ -158,6 +170,61 @@ defmodule Cympho.GithubTest do
     end
   end
 
+  describe "fetch_pull_request/2" do
+    test "returns normalized PR metadata" do
+      body =
+        Jason.encode!(%{
+          "title" => "CYM-42: Improve PR quality",
+          "body" => "## Summary\n- Good",
+          "html_url" => "https://github.com/owner/repo/pull/42",
+          "number" => 42,
+          "state" => "open",
+          "head" => %{"ref" => "CYM-42/improve-pr-quality"}
+        })
+
+      http_fn = fn url, _headers, _finch ->
+        assert url == "https://api.github.com/repos/owner/repo/pulls/42"
+        {:ok, %Finch.Response{status: 200, body: body}}
+      end
+
+      assert {:ok, pr} =
+               Github.fetch_pull_request("https://github.com/owner/repo/pull/42",
+                 http_fn: http_fn,
+                 token: "test"
+               )
+
+      assert pr.title == "CYM-42: Improve PR quality"
+      assert pr.branch_name == "CYM-42/improve-pr-quality"
+      assert pr.number == 42
+    end
+
+    test "does not make unauthenticated PR fetches" do
+      assert {:error, :missing_token} =
+               Github.fetch_pull_request("https://github.com/owner/repo/pull/42")
+    end
+  end
+
+  describe "pull_request_metadata/1" do
+    test "normalizes webhook pull request payloads" do
+      assert %{
+               title: "CYM-42: Improve PR quality",
+               body: "## Summary\n- Good",
+               branch_name: "CYM-42/improve-pr-quality",
+               url: "https://github.com/owner/repo/pull/42",
+               number: 42,
+               state: "open"
+             } =
+               Github.pull_request_metadata(%{
+                 "title" => "CYM-42: Improve PR quality",
+                 "body" => "## Summary\n- Good",
+                 "html_url" => "https://github.com/owner/repo/pull/42",
+                 "number" => 42,
+                 "state" => "open",
+                 "head" => %{"ref" => "CYM-42/improve-pr-quality"}
+               })
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # build_branch_name/1
   # ---------------------------------------------------------------------------
@@ -166,6 +233,11 @@ defmodule Cympho.GithubTest do
     test "builds standard branch name from issue" do
       issue = %{prefix: "LLM", sequence: 42, title: "Add login page"}
       assert Github.build_branch_name(issue) == "LLM-42/add-login-page"
+    end
+
+    test "builds branch name from canonical issue identifier" do
+      issue = %{identifier: "CYM-42", title: "Add login page"}
+      assert Github.build_branch_name(issue) == "CYM-42/add-login-page"
     end
 
     test "lowercases the title" do
@@ -203,6 +275,11 @@ defmodule Cympho.GithubTest do
     test "handles numeric-only title" do
       issue = %{prefix: "LLM", sequence: 7, title: "12345"}
       assert Github.build_branch_name(issue) == "LLM-7/12345"
+    end
+
+    test "uses fallback slug when title has no branch-safe text" do
+      issue = %{identifier: "CYM-9", title: "!!!"}
+      assert Github.build_branch_name(issue) == "CYM-9/work"
     end
 
     test "handles title with underscores" do

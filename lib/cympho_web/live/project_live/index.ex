@@ -78,7 +78,7 @@ defmodule CymphoWeb.ProjectLive.Index do
   defp list_projects(socket) do
     case socket.assigns[:current_company] do
       %{id: company_id} -> Projects.list_projects_by_company(company_id)
-      _ -> Projects.list_projects()
+      _ -> []
     end
   end
 end

@@ -27,9 +27,9 @@ defmodule CymphoWeb.KanbanLive.Index do
     projects =
       if company_id,
         do: Projects.list_projects_by_company(company_id),
-        else: Projects.list_projects()
+        else: []
 
-    issues = Issues.list_issues(company_filter(company_id))
+    issues = list_company_issues(company_id)
     agent_heartbeat_states = load_heartbeat_states(issues)
 
     socket =
@@ -42,16 +42,18 @@ defmodule CymphoWeb.KanbanLive.Index do
         :agents,
         if(company_id,
           do: Cympho.Agents.list_agents_by_company(company_id),
-          else: Cympho.Agents.list_agents()
+          else: []
         )
       )
       |> assign(:collapsed_columns, MapSet.new())
       |> assign(:swimlane_mode, false)
+      |> assign(:digest_density, "detailed")
       |> assign(:filter_assignee_id, nil)
       |> assign(:filter_priority, nil)
       |> assign(:filter_search, "")
       |> assign(:editing_card_id, nil)
       |> assign(:card_action_open, nil)
+      |> assign(:blocked_transition, nil)
 
     {:ok, socket}
   end
@@ -94,6 +96,7 @@ defmodule CymphoWeb.KanbanLive.Index do
   @impl true
   def handle_params(params, _url, socket) do
     project_id = params["project_id"]
+    digest_density = normalize_digest_density(params["density"])
 
     selected_project =
       case {project_id, socket.assigns[:current_company]} do
@@ -114,6 +117,7 @@ defmodule CymphoWeb.KanbanLive.Index do
       socket
       |> assign(:selected_project_id, project_id)
       |> assign(:selected_project, selected_project)
+      |> assign(:digest_density, digest_density)
       |> assign(:page_title, "Kanban Board")
       |> apply_project_filter(project_id)
 
@@ -121,18 +125,28 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   defp apply_project_filter(socket, nil) do
-    assign(socket, :issues, Issues.list_issues(company_filter(current_company_id(socket))))
+    assign(socket, :issues, list_company_issues(current_company_id(socket)))
   end
 
   defp apply_project_filter(socket, project_id) do
-    opts =
-      company_filter(current_company_id(socket))
-      |> Map.put(:project_id, project_id)
+    issues =
+      case current_company_id(socket) do
+        nil ->
+          []
 
-    assign(socket, :issues, Issues.list_issues(opts))
+        company_id ->
+          %{company_id: company_id, project_id: project_id}
+          |> Issues.list_issues()
+      end
+
+    assign(socket, :issues, issues)
   end
 
   @impl true
+  def handle_info(%Phoenix.Socket.Broadcast{event: "issue_update"}, socket) do
+    {:noreply, apply_project_filter(socket, socket.assigns[:selected_project_id])}
+  end
+
   def handle_info({:issue_created, issue}, socket) do
     {:noreply, update(socket, :issues, fn issues -> [issue | issues] end)}
   end
@@ -222,43 +236,40 @@ defmodule CymphoWeb.KanbanLive.Index do
     if is_nil(to_status) do
       {:noreply, socket}
     else
-      issue = Issues.get_issue!(id)
-      from_status = issue.status
+      case get_scoped_issue(socket, id) do
+        {:ok, issue} ->
+          from_status = issue.status
 
-      # Optimistic: update local assigns before the DB write so the server's
-      # render matches the SortableJS-moved DOM. On rollback we push the
-      # original status back to JS and shake the card.
-      socket = update_local_status(socket, id, to_status)
+          # Optimistic: update local assigns before the DB write so the server's
+          # render matches the SortableJS-moved DOM. On rollback we push the
+          # original status back to JS and shake the card.
+          socket = update_local_status(socket, id, to_status)
 
-      case Issues.transition_issue(issue, to_status) do
-        {:ok, _updated_issue} ->
-          {:noreply, push_event(socket, "kanban:confirm", %{issue_id: id})}
+          case Issues.transition_issue_with_review_gates(issue, to_status) do
+            {:ok, _updated_issue} ->
+              {:noreply,
+               socket
+               |> assign(:blocked_transition, nil)
+               |> push_event("kanban:confirm", %{issue_id: id})}
 
-        {:error, reason} ->
-          message =
-            case reason do
-              :invalid_transition ->
-                "Invalid status transition from #{from_status} to #{to_status}"
+            {:error, reason} ->
+              message = transition_error_message(reason, from_status, to_status)
+              blocker = transition_blocker(issue, reason, from_status, to_status, message)
 
-              :blocked_by_active_issues ->
-                "Cannot complete — issue is blocked by active issues"
+              {:noreply,
+               socket
+               |> assign(:blocked_transition, blocker)
+               |> rollback_transition(id, to_status, from_status, message)}
+          end
 
-              other ->
-                "Could not move issue: #{inspect(other)}"
-            end
-
-          {:noreply,
-           socket
-           |> update_local_status(id, from_status)
-           |> put_flash(:error, message)
-           |> push_event("kanban:rollback", %{
-             issue_id: id,
-             from_status: to_string(to_status),
-             to_status: to_string(from_status)
-           })
-           |> push_event("shake_card", %{issue_id: id})}
+        {:error, :not_found} ->
+          {:noreply, put_flash(socket, :error, "Issue not found")}
       end
     end
+  end
+
+  def handle_event("dismiss_transition_blocker", _params, socket) do
+    {:noreply, assign(socket, :blocked_transition, nil)}
   end
 
   def handle_event("toggle_column", %{"status" => status_str}, socket) do
@@ -280,19 +291,19 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   def handle_event("filter_project", %{"project_id" => project_id}, socket) do
     if project_id == "" do
-      {:noreply, push_patch(socket, to: ~p"/kanban")}
+      {:noreply, push_patch(socket, to: kanban_url(nil, socket.assigns.digest_density))}
     else
-      {:noreply, push_patch(socket, to: ~p"/kanban?project_id=#{project_id}")}
+      {:noreply, push_patch(socket, to: kanban_url(project_id, socket.assigns.digest_density))}
     end
   end
 
   def handle_event("combobox_project", %{"selected" => nil}, socket) do
-    {:noreply, push_patch(socket, to: ~p"/kanban")}
+    {:noreply, push_patch(socket, to: kanban_url(nil, socket.assigns.digest_density))}
   end
 
   def handle_event("combobox_project", %{"selected" => project_id}, socket)
       when is_binary(project_id) do
-    {:noreply, push_patch(socket, to: ~p"/kanban?project_id=#{project_id}")}
+    {:noreply, push_patch(socket, to: kanban_url(project_id, socket.assigns.digest_density))}
   end
 
   def handle_event("filter_assignee", %{"assignee_id" => assignee_id}, socket) do
@@ -354,6 +365,155 @@ defmodule CymphoWeb.KanbanLive.Index do
     end)
   end
 
+  defp rollback_transition(socket, issue_id, attempted_status, original_status, message) do
+    socket
+    |> update_local_status(issue_id, original_status)
+    |> put_flash(:error, message)
+    |> push_event("kanban:rollback", %{
+      issue_id: issue_id,
+      from_status: to_string(attempted_status),
+      to_status: to_string(original_status)
+    })
+    |> push_event("shake_card", %{issue_id: issue_id})
+  end
+
+  defp transition_error_message(:invalid_transition, from_status, to_status) do
+    "Invalid status transition from #{from_status} to #{to_status}"
+  end
+
+  defp transition_error_message(:blocked_by_active_issues, _from_status, _to_status) do
+    "Cannot complete — issue is blocked by active issues"
+  end
+
+  defp transition_error_message(
+         {:review_gates_blocked, %{message: message}},
+         _from_status,
+         _to_status
+       ) do
+    message
+  end
+
+  defp transition_error_message(other, _from_status, _to_status) do
+    "Could not move issue: #{inspect(other)}"
+  end
+
+  defp transition_blocker(
+         issue,
+         {:review_gates_blocked, %{blockers: blockers}},
+         from_status,
+         to_status,
+         message
+       ) do
+    %{
+      issue_id: issue.id,
+      issue_title: issue.title,
+      issue_identifier: issue.identifier || fallback_identifier(issue),
+      from_status: from_status,
+      to_status: to_status,
+      message: message,
+      blockers: blockers,
+      actions: transition_blocker_actions(issue.id, blockers)
+    }
+  end
+
+  defp transition_blocker(issue, reason, from_status, to_status, message) do
+    %{
+      issue_id: issue.id,
+      issue_title: issue.title,
+      issue_identifier: issue.identifier || fallback_identifier(issue),
+      from_status: from_status,
+      to_status: to_status,
+      message: message,
+      blockers: [
+        %{
+          key: reason,
+          label: transition_error_label(reason),
+          prompt: transition_error_prompt(reason)
+        }
+      ],
+      actions: [%{label: "Open issue", path: "/issues/#{issue.id}"}]
+    }
+  end
+
+  defp transition_blocker_actions(issue_id, blockers) do
+    issue_path = "/issues/#{issue_id}"
+
+    [
+      %{label: "Open issue", path: issue_path}
+      | blockers
+        |> Enum.flat_map(&blocker_action(issue_path, &1))
+        |> Enum.uniq_by(& &1.label)
+    ]
+  end
+
+  defp blocker_action(issue_path, %{key: :runtime_verification}) do
+    [
+      %{
+        label: "Start verification",
+        path: gate_path(issue_path, "verification", "issue-agent-panel")
+      }
+    ]
+  end
+
+  defp blocker_action(issue_path, %{key: :agent_note}) do
+    [
+      %{
+        label: "Add completion note",
+        path: gate_path(issue_path, "delivery_note", "issue-comments")
+      }
+    ]
+  end
+
+  defp blocker_action(issue_path, %{key: :owner_summary}) do
+    [%{label: "Add owner update", path: gate_path(issue_path, "owner_update", "issue-comments")}]
+  end
+
+  defp blocker_action(issue_path, %{key: :work_product}) do
+    [
+      %{
+        label: "Attach work product",
+        path: gate_path(issue_path, "work_product", "issue-work-product-form")
+      }
+    ]
+  end
+
+  defp blocker_action(issue_path, %{key: :child_work}) do
+    [%{label: "Open sub-issues", path: "#{issue_path}#issue-sub-issues"}]
+  end
+
+  defp blocker_action(issue_path, %{key: :review_decision}) do
+    [
+      %{
+        label: "Add review comment",
+        path: gate_path(issue_path, "review_comment", "issue-comments")
+      }
+    ]
+  end
+
+  defp blocker_action(issue_path, %{key: :code_reference}) do
+    [%{label: "Set PR link", path: gate_path(issue_path, "code_reference", "issue-github-pr")}]
+  end
+
+  defp blocker_action(_issue_path, _blocker), do: []
+
+  defp gate_path(issue_path, gate, anchor), do: "#{issue_path}?gate=#{gate}##{anchor}"
+
+  defp transition_error_label(:invalid_transition), do: "Invalid workflow move"
+  defp transition_error_label(:blocked_by_active_issues), do: "Active dependency"
+  defp transition_error_label(_), do: "Move blocked"
+
+  defp transition_error_prompt(:invalid_transition) do
+    "Use one of the card's available next-status buttons instead."
+  end
+
+  defp transition_error_prompt(:blocked_by_active_issues) do
+    "Finish or cancel the active blocker before closing this issue."
+  end
+
+  defp transition_error_prompt(_), do: "Open the issue and resolve the blocker before retrying."
+
+  defp fallback_identifier(issue), do: "CYM-" <> String.slice(issue.id, 0, 4)
+
   defp try_string_to_status(string) do
     if Enum.member?(Issue.status_options(), String.to_existing_atom(string)) do
       String.to_existing_atom(string)
@@ -383,6 +543,30 @@ defmodule CymphoWeb.KanbanLive.Index do
   def status_label(:cancelled), do: "Cancelled"
 
   def status_columns, do: @status_columns
+
+  def kanban_url(project_id, density) do
+    query =
+      %{
+        project_id: project_id,
+        density: density
+      }
+      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+      |> Enum.into(%{})
+
+    ~p"/kanban?#{query}"
+  end
+
+  defp normalize_digest_density("compact"), do: "compact"
+  defp normalize_digest_density("detailed"), do: "detailed"
+  defp normalize_digest_density(_), do: "detailed"
+
+  def density_tab_class(current, density) do
+    if current == density do
+      "bg-brand text-white"
+    else
+      "text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+    end
+  end
 
   def wip_limit(nil, _status), do: nil
 
@@ -473,6 +657,13 @@ defmodule CymphoWeb.KanbanLive.Index do
     socket.assigns[:current_company] && socket.assigns.current_company.id
   end
 
-  defp company_filter(nil), do: %{}
-  defp company_filter(company_id), do: %{company_id: company_id}
+  defp list_company_issues(nil), do: []
+  defp list_company_issues(company_id), do: Issues.list_issues(%{company_id: company_id})
+
+  defp get_scoped_issue(socket, id) do
+    case current_company_id(socket) do
+      nil -> {:error, :not_found}
+      company_id -> Issues.get_company_issue(company_id, id)
+    end
+  end
 end

@@ -2,7 +2,7 @@ defmodule Cympho.WakesTest do
   use Cympho.DataCase, async: true
 
   alias Cympho.Wakes
-  alias Cympho.{Agents, Issues, Comments, Projects}
+  alias Cympho.{Agents, Companies, Issues, Comments, Projects}
 
   setup do
     {:ok, project} =
@@ -27,6 +27,77 @@ defmodule Cympho.WakesTest do
       })
 
     %{agent: agent, issue: issue, project: project}
+  end
+
+  describe "list_review_nudges/2" do
+    test "can scope review nudges by company" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Wake Scope Co",
+          slug: "wake-scope-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Other Wake Scope Co",
+          slug: "other-wake-scope-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Scoped Wake Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, other_agent} =
+        Agents.create_agent(%{
+          name: "Other Wake Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: other_company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Scoped wake issue",
+          status: :in_progress,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, other_issue} =
+        Issues.create_issue(%{
+          title: "Other wake issue",
+          status: :in_progress,
+          company_id: other_company.id,
+          assignee_id: other_agent.id
+        })
+
+      {:ok, wake} =
+        Wakes.do_wake_agent(agent.id, issue.id, "manual_dispatch", "system", "test", %{
+          "source" => "review_nudge"
+        })
+
+      {:ok, _other_wake} =
+        Wakes.do_wake_agent(
+          other_agent.id,
+          other_issue.id,
+          "manual_dispatch",
+          "system",
+          "test",
+          %{"source" => "review_nudge"}
+        )
+
+      issue_ids = [issue.id, other_issue.id]
+
+      assert Enum.map(Wakes.list_review_nudges(issue_ids, company_id: company.id), & &1.id) == [
+               wake.id
+             ]
+
+      assert [] = Wakes.list_review_nudges(issue_ids, company_id: nil)
+    end
   end
 
   describe "notify_comment/1" do

@@ -54,23 +54,19 @@ defmodule CymphoWeb.UserAuthTest do
       assert live_assigns(view).current_user.id == user.id
     end
 
-    test "assigns nil current_user for guest (no session)" do
+    test "redirects guests to login" do
       conn = build_conn() |> Plug.Test.init_test_session(%{})
 
-      {:ok, view, _html} = live(conn, "/issues")
-
-      assert live_assigns(view).current_user == nil
+      assert_redirected_to_login(conn)
     end
 
-    test "assigns nil current_user for invalid user_id in session" do
+    test "redirects sessions with invalid user_id to login" do
       conn =
         build_conn()
         |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", "00000000-0000-0000-0000-000000000000")
 
-      {:ok, view, _html} = live(conn, "/issues")
-
-      assert live_assigns(view).current_user == nil
+      assert_redirected_to_login(conn)
     end
 
     test "loads user_companies for authenticated user", %{user: user} do
@@ -84,15 +80,13 @@ defmodule CymphoWeb.UserAuthTest do
       assert length(live_assigns(view).user_companies) == 2
     end
 
-    test "guest user gets empty company list (no cross-tenant enumeration)", %{
+    test "guest user cannot inspect company lists", %{
       company1: _company1,
       company2: _company2
     } do
       conn = build_conn() |> Plug.Test.init_test_session(%{})
 
-      {:ok, view, _html} = live(conn, "/issues")
-
-      assert live_assigns(view).user_companies == []
+      assert_redirected_to_login(conn)
     end
 
     test "uses session company_id when valid", %{user: user, company2: company2} do
@@ -156,12 +150,10 @@ defmodule CymphoWeb.UserAuthTest do
       assert live_assigns(view).current_company.id == company1.id
     end
 
-    test "guest user gets nil current_company (no cross-tenant access)", %{company1: _company1} do
+    test "guest user cannot inspect current_company", %{company1: _company1} do
       conn = build_conn() |> Plug.Test.init_test_session(%{})
 
-      {:ok, view, _html} = live(conn, "/issues")
-
-      assert live_assigns(view).current_company == nil
+      assert_redirected_to_login(conn)
     end
 
     test "assigns nil current_company for user with no memberships" do
@@ -244,5 +236,10 @@ defmodule CymphoWeb.UserAuthTest do
 
   defp live_assigns(view) do
     :sys.get_state(view.pid).socket.assigns
+  end
+
+  defp assert_redirected_to_login(conn) do
+    assert {:error, {:redirect, %{to: "/login?return_to=%2Fissues"}}} =
+             live(conn, "/issues")
   end
 end

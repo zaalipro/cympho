@@ -101,15 +101,19 @@ defmodule CymphoWeb.ProjectLive.Show do
   def handle_event("delete_env", %{"id" => id}, socket) do
     case Secrets.get_secret(id) do
       {:ok, secret} ->
-        {:ok, _} = Secrets.delete_secret(secret)
+        if secret_belongs_to_project?(secret, socket.assigns.project) do
+          {:ok, _} = Secrets.delete_secret(secret)
 
-        {:noreply,
-         socket
-         |> assign_project_secrets(socket.assigns.project)
-         |> put_flash(:info, "Removed #{secret.key}")}
+          {:noreply,
+           socket
+           |> assign_project_secrets(socket.assigns.project)
+           |> put_flash(:info, "Removed #{secret.key}")}
+        else
+          {:noreply, put_flash(socket, :error, "Environment variable not found")}
+        end
 
       _ ->
-        {:noreply, socket}
+        {:noreply, put_flash(socket, :error, "Environment variable not found")}
     end
   end
 
@@ -159,6 +163,11 @@ defmodule CymphoWeb.ProjectLive.Show do
   end
 
   defp list_project_secrets(_), do: []
+
+  defp secret_belongs_to_project?(secret, project) do
+    secret.company_id == project.company_id and secret.scope == "project" and
+      secret.scope_id == project.id
+  end
 
   defp assign_project(socket, project) do
     socket

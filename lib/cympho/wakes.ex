@@ -196,8 +196,58 @@ defmodule Cympho.Wakes do
   end
 
   @doc """
+  Returns active review-nudge wakes for the given issues.
+  """
+  def list_review_nudges(issue_ids, opts \\ []) do
+    issue_ids =
+      issue_ids
+      |> List.wrap()
+      |> Enum.reject(&is_nil/1)
+
+    statuses = Keyword.get(opts, :statuses, ["pending", "running"])
+    company_id = Keyword.get(opts, :company_id, :any)
+
+    if issue_ids == [] do
+      []
+    else
+      AgentWake
+      |> where([w], w.issue_id in ^issue_ids and w.status in ^statuses)
+      |> where([w], fragment("?->>'source' = ?", w.metadata, "review_nudge"))
+      |> scope_review_nudges(company_id)
+      |> order_by([w], desc: w.inserted_at)
+      |> preload([:agent])
+      |> Repo.all()
+    end
+  end
+
+  defp scope_review_nudges(query, :any), do: query
+
+  defp scope_review_nudges(query, company_id) when is_binary(company_id) do
+    from w in query,
+      join: i in assoc(w, :issue),
+      where: i.company_id == ^company_id
+  end
+
+  defp scope_review_nudges(query, _company_id), do: where(query, false)
+
+  def consume_review_nudge(%AgentWake{} = wake) do
+    if (wake.metadata || %{})["source"] == "review_nudge" do
+      WakeupQueue.mark_consumed(wake)
+    else
+      {:error, :not_review_nudge}
+    end
+  end
+
+  @doc """
   Gets a single agent wake by id.
   """
+  def get_agent_wake(id) do
+    case Repo.get(AgentWake, id) do
+      nil -> {:error, :not_found}
+      wake -> {:ok, Repo.preload(wake, [:agent, :issue])}
+    end
+  end
+
   def get_agent_wake!(id), do: Repo.get!(AgentWake, id)
 
   defp all_blockers_done?(%Issue{} = issue) do

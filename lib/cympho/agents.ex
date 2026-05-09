@@ -7,6 +7,7 @@ defmodule Cympho.Agents do
   alias Cympho.Repo
   alias Cympho.Agents.Agent
   alias Cympho.Agents.AgentConfigRevision
+  alias Cympho.AgentInstructionStudio
   alias Cympho.BoardApprovals
   alias Cympho.Issues.Issue
 
@@ -932,11 +933,19 @@ defmodule Cympho.Agents do
   @doc """
   Returns all config revisions for an agent, ordered by version (newest first).
   """
-  def list_config_revisions(agent_id) when is_binary(agent_id) do
-    AgentConfigRevision
-    |> where(agent_id: ^agent_id)
-    |> order_by(desc: :version)
-    |> Repo.all()
+  def list_config_revisions(agent_id, opts \\ []) when is_binary(agent_id) do
+    query =
+      AgentConfigRevision
+      |> where(agent_id: ^agent_id)
+      |> order_by(desc: :version)
+
+    query =
+      case Keyword.get(opts, :limit) do
+        limit when is_integer(limit) and limit > 0 -> limit(query, ^limit)
+        _ -> query
+      end
+
+    Repo.all(query)
   end
 
   @doc """
@@ -954,7 +963,26 @@ defmodule Cympho.Agents do
   Creates a new config revision for an agent.
   Automatically increments the version number.
   """
-  def create_config_revision(agent_id, attrs \\ %{}) do
+  def create_config_revision(%Agent{} = agent, attrs) when is_map(attrs) do
+    studio = Map.get(attrs, :studio) || AgentInstructionStudio.analyze(agent)
+
+    attrs =
+      attrs
+      |> Map.drop([:studio])
+      |> Map.put_new(:role, atom_to_string(agent.role))
+      |> Map.put_new(:adapter, atom_to_string(agent.adapter))
+      |> Map.put_new(:instructions, agent.instructions)
+      |> Map.put_new(:config, agent.config || %{})
+      |> Map.put_new(:runtime_config, agent.runtime_config || %{})
+      |> Map.put_new(:studio_score, studio.score)
+      |> Map.put_new(:studio_status, atom_to_string(studio.status))
+      |> Map.put_new(:studio_audits, studio_revision_payload(studio))
+      |> Map.put_new(:source, "manual")
+
+    create_config_revision(agent.id, attrs)
+  end
+
+  def create_config_revision(agent_id, attrs) when is_binary(agent_id) do
     latest_version =
       get_latest_version_number(agent_id)
 
@@ -967,6 +995,11 @@ defmodule Cympho.Agents do
     |> AgentConfigRevision.changeset(new_attrs)
     |> Repo.insert()
   end
+
+  def create_config_revision(%Agent{} = agent), do: create_config_revision(agent, %{})
+
+  def create_config_revision(agent_id) when is_binary(agent_id),
+    do: create_config_revision(agent_id, %{})
 
   @doc """
   Gets the current version number for an agent's config revisions.
@@ -983,27 +1016,31 @@ defmodule Cympho.Agents do
   Restores an agent to a specific config revision.
   Creates a new revision with the restored content.
   """
-  def restore_config_revision(agent_id, revision_id) do
+  def restore_config_revision(agent_id, revision_id, opts \\ []) do
     case Repo.get(AgentConfigRevision, revision_id) do
       nil ->
         {:error, :not_found}
 
-      revision ->
+      %{agent_id: ^agent_id} = revision ->
         case get_agent(agent_id) do
           {:ok, agent} ->
-            attrs = %{
-              instructions: revision.instructions,
-              config: revision.config
-            }
+            attrs = restore_config_attrs(revision)
 
-            with {:ok, _new_revision} <- create_config_revision(agent_id, attrs),
-                 {:ok, _updated_agent} <- update_agent(agent, attrs) do
-              {:ok, agent}
+            with {:ok, updated_agent} <- update_agent(agent, attrs),
+                 {:ok, _new_revision} <-
+                   create_config_revision(
+                     updated_agent,
+                     restore_revision_attrs(revision, opts)
+                   ) do
+              {:ok, updated_agent}
             end
 
           {:error, reason} ->
             {:error, reason}
         end
+
+      _revision ->
+        {:error, :not_found}
     end
   end
 
@@ -1021,7 +1058,9 @@ defmodule Cympho.Agents do
       true ->
         %{
           instructions_diff: compare_text(revision1.instructions, revision2.instructions),
-          config_diff: compare_maps(revision1.config, revision2.config)
+          config_diff: compare_maps(revision1.config, revision2.config),
+          runtime_config_diff: compare_maps(revision1.runtime_config, revision2.runtime_config),
+          score_diff: compare_scores(revision1.studio_score, revision2.studio_score)
         }
     end
   end
@@ -1034,6 +1073,64 @@ defmodule Cympho.Agents do
 
   defp compare_maps(map1, map2) when map1 == map2, do: :unchanged
   defp compare_maps(_map1, _map2), do: :changed
+
+  defp compare_scores(score1, score2) when score1 == score2, do: :unchanged
+  defp compare_scores(nil, _score2), do: :added
+  defp compare_scores(_score1, nil), do: :removed
+  defp compare_scores(score1, score2) when score1 < score2, do: :improved
+  defp compare_scores(_score1, _score2), do: :regressed
+
+  defp restore_config_attrs(revision) do
+    %{
+      instructions: revision.instructions,
+      config: revision.config || %{},
+      runtime_config: revision.runtime_config || %{}
+    }
+    |> maybe_put(:role, revision.role)
+    |> maybe_put(:adapter, revision.adapter)
+  end
+
+  defp restore_revision_attrs(revision, opts) do
+    %{
+      source: "restore",
+      restored_from_revision_id: revision.id
+    }
+    |> maybe_put(:created_by_user_id, Keyword.get(opts, :created_by_user_id))
+    |> maybe_put(:created_by_agent_id, Keyword.get(opts, :created_by_agent_id))
+  end
+
+  defp studio_revision_payload(studio) do
+    %{
+      "audits" =>
+        Enum.map(studio.audits, fn audit ->
+          %{
+            "key" => atom_to_string(audit.key),
+            "label" => audit.label,
+            "status" => atom_to_string(audit.status),
+            "detail" => audit.detail,
+            "fix" => audit.fix
+          }
+        end),
+      "scenarios" =>
+        Enum.map(studio.scenarios, fn scenario ->
+          %{
+            "key" => atom_to_string(scenario.key),
+            "label" => scenario.label,
+            "status" => atom_to_string(scenario.status),
+            "detail" => scenario.detail,
+            "fix" => scenario.fix
+          }
+        end)
+    }
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, _key, ""), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp atom_to_string(nil), do: nil
+  defp atom_to_string(value) when is_atom(value), do: Atom.to_string(value)
+  defp atom_to_string(value), do: to_string(value)
 
   @doc """
   Returns statistics for a specific agent including:

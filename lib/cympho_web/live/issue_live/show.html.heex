@@ -1,4 +1,8 @@
-<div class="flex flex-col lg:flex-row min-h-screen bg-canvas">
+<div
+  id="issue-show"
+  data-clean-url={@gate_clean_url}
+  class="flex flex-col lg:flex-row min-h-screen bg-canvas"
+>
   <!-- Main Timeline Column -->
   <div class="flex-1 flex flex-col min-w-0">
     <!-- Breadcrumb / identifier strip -->
@@ -141,18 +145,310 @@
       </form>
     </div>
 
+    <% gate_resolution = review_gate_resolution(assigns) %>
+    <% next_owner = next_owner_assignment(assigns, gate_resolution) %>
+
+    <.issue_digest_panel
+      issue={@issue}
+      runs={@runs}
+      work_products={@work_products}
+      child_issues={@child_issues}
+      agents={@all_agents}
+      review_gate_actions={gate_resolution.actions}
+      review_nudges={gate_resolution.nudges}
+    />
+
+    <section class="px-4 lg:px-6 pb-5">
+      <div
+        id="issue-next-owner"
+        class="rounded-lg border border-hairline bg-surface-1/45 px-4 py-3"
+      >
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-[11px] font-590 uppercase tracking-wider text-ink-tertiary">
+                Next owner
+              </span>
+              <span class={next_owner_status_class(next_owner.status)}>
+                {next_owner.status_label}
+              </span>
+              <span
+                :if={next_owner.blocker_label}
+                class="rounded-full border border-border bg-canvas px-2 py-0.5 text-[11px] text-ink-tertiary"
+              >
+                {next_owner.blocker_label}
+              </span>
+            </div>
+            <div class="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <h2 class="text-base font-590 text-ink">{next_owner.owner}</h2>
+              <span class="text-xs text-ink-tertiary">{next_owner.role}</span>
+            </div>
+            <p class="mt-1 max-w-4xl text-sm leading-5 text-ink-muted">
+              {next_owner.reason}
+            </p>
+          </div>
+
+          <div class="flex shrink-0 flex-wrap gap-2">
+            <%= for action <- next_owner.actions do %>
+              <a
+                :if={action.type == :anchor}
+                href={action.href}
+                class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+              >
+                {action.label}
+              </a>
+              <button
+                :if={action.type == :event}
+                type="button"
+                phx-click="resolve_review_gate"
+                phx-value-action={action.action}
+                class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+              >
+                {action.label}
+              </button>
+            <% end %>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section
+      :if={!gate_resolution[:active?] and !Enum.empty?(gate_resolution.cleared_nudges)}
+      class="px-4 lg:px-6 pb-5"
+    >
+      <div class="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-4 py-3">
+        <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="text-sm font-590 text-ink">Review nudges satisfied</h2>
+              <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-510 text-emerald-200">
+                Cleared
+              </span>
+            </div>
+            <p class="mt-1 max-w-3xl text-sm leading-5 text-ink-muted">
+              The latest requested evidence has landed, so the matching inbox marker was cleared.
+            </p>
+          </div>
+
+          <div class="flex flex-wrap gap-2 md:justify-end">
+            <span
+              :for={nudge <- Enum.take(gate_resolution.cleared_nudges, 3)}
+              class="rounded-md border border-emerald-500/20 bg-canvas px-2.5 py-1.5 text-xs text-emerald-100"
+            >
+              {Enum.join(nudge.blocker_labels, ", ")}
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section :if={gate_resolution[:active?]} class="px-4 lg:px-6 pb-5">
+      <div class="rounded-lg border border-amber-500/25 bg-amber-500/[0.07]">
+        <div class="flex flex-col gap-3 border-b border-amber-500/20 px-4 py-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="text-sm font-590 text-ink">Resolve review gates</h2>
+              <span class="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 text-amber-200">
+                {length(gate_resolution.blockers)} blocking
+              </span>
+            </div>
+            <p class="mt-1 max-w-3xl text-sm leading-5 text-ink-muted">
+              The issue cannot move to review or close until these evidence gaps are handled.
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <%= for action <- gate_resolution.actions do %>
+              <a
+                :if={action.type == :anchor}
+                href={action.href}
+                class="rounded-md border border-amber-500/30 bg-panel px-2.5 py-1.5 text-xs font-510 text-amber-100 transition-colors hover:bg-amber-500/15 hover:text-amber-50"
+              >
+                {action.label}
+              </a>
+              <button
+                :if={action.type == :event}
+                type="button"
+                phx-click="resolve_review_gate"
+                phx-value-action={action.action}
+                class="rounded-md border border-amber-500/30 bg-panel px-2.5 py-1.5 text-xs font-510 text-amber-100 transition-colors hover:bg-amber-500/15 hover:text-amber-50"
+              >
+                {action.label}
+              </button>
+            <% end %>
+          </div>
+        </div>
+
+        <div class="grid gap-px bg-amber-500/15 md:grid-cols-2 xl:grid-cols-3">
+          <div
+            :for={blocker <- gate_resolution.blockers}
+            class="bg-canvas/70 px-4 py-3"
+          >
+            <p class="text-xs font-590 text-amber-100">{blocker.label}</p>
+            <p class="mt-1 text-xs leading-5 text-ink-tertiary">{blocker.prompt}</p>
+          </div>
+        </div>
+
+        <div class="border-t border-amber-500/20 bg-canvas/45 px-4 py-4">
+          <div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h3 class="text-sm font-590 text-ink">Auto-nudges</h3>
+              <p class="mt-1 text-xs leading-5 text-ink-tertiary">
+                Queue the right agent into inbox and wake them with the exact missing evidence.
+              </p>
+            </div>
+            <span class="text-xs text-ink-tertiary">
+              {length(gate_resolution.nudges)} suggested
+            </span>
+          </div>
+
+          <div class="grid gap-3 xl:grid-cols-2">
+            <div
+              :for={nudge <- gate_resolution.nudges}
+              class="rounded-lg border border-hairline bg-surface-1/70 px-3 py-3"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="truncate text-sm font-510 text-ink">{nudge.agent_name}</p>
+                    <span class="rounded bg-canvas px-1.5 py-0.5 text-[10px] uppercase text-ink-tertiary">
+                      {nudge.agent_role || "unrouted"}
+                    </span>
+                    <span class={[
+                      "rounded-full border px-2 py-0.5 text-[10px] font-510",
+                      if(nudge.queued?,
+                        do: "border-brand/30 bg-brand/10 text-brand",
+                        else: "border-amber-500/30 bg-amber-500/10 text-amber-100"
+                      )
+                    ]}>
+                      {nudge.status_label}
+                    </span>
+                  </div>
+                  <p class="mt-1 text-caption text-ink-tertiary">{nudge.summary}</p>
+                  <p class="mt-2 text-[11px] leading-4 text-ink-tertiary">
+                    Covers {length(nudge.blocker_labels)} gate{if length(nudge.blocker_labels) ==
+                                                                    1, do: "", else: "s"}: {Enum.join(
+                      nudge.blocker_labels,
+                      ", "
+                    )}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  phx-click="queue_review_nudge"
+                  phx-value-key={nudge.key}
+                  disabled={!nudge.enabled?}
+                  class={[
+                    "shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-510 transition-colors",
+                    if(nudge.enabled?,
+                      do:
+                        "border-brand/30 bg-brand/10 text-brand hover:border-brand/50 hover:bg-brand/15",
+                      else: "cursor-not-allowed border-border bg-canvas text-ink-tertiary"
+                    )
+                  ]}
+                >
+                  {nudge.button_label}
+                </button>
+              </div>
+              <p class="mt-3 rounded-md bg-canvas px-3 py-2 text-xs leading-5 text-ink-muted">
+                {nudge.prompt}
+              </p>
+            </div>
+
+            <p
+              :if={Enum.empty?(gate_resolution.nudges)}
+              class="rounded-lg border border-dashed border-hairline px-3 py-4 text-sm text-ink-tertiary"
+            >
+              No automatic nudge is available for the current gate state.
+            </p>
+          </div>
+        </div>
+
+        <div
+          :if={@show_work_product_form}
+          id="issue-work-product-form"
+          class="border-t border-amber-500/20 bg-canvas/55 px-4 py-4"
+        >
+          <div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h3 class="text-sm font-590 text-ink">Attach artifact evidence</h3>
+              <p class="mt-1 text-xs leading-5 text-ink-tertiary">
+                Add a deliverable, spec, URL, or other proof so reviewers can see what changed.
+              </p>
+            </div>
+          </div>
+
+          <.simple_form
+            for={@work_product_form}
+            id="work-product-form"
+            phx-change="validate_work_product"
+            phx-submit="attach_work_product"
+            class="grid gap-3 lg:grid-cols-[1fr_220px]"
+          >
+            <.input
+              field={@work_product_form[:title]}
+              label="Title"
+              placeholder="Short evidence title"
+              required
+            />
+            <.input
+              field={@work_product_form[:kind]}
+              type="select"
+              label="Kind"
+              options={work_product_kind_options()}
+              required
+            />
+            <div class="lg:col-span-2">
+              <.input
+                field={@work_product_form[:url]}
+                label="URL"
+                placeholder="https://github.com/org/repo/pull/123"
+              />
+            </div>
+            <div class="lg:col-span-2">
+              <.input
+                field={@work_product_form[:description]}
+                type="textarea"
+                rows={4}
+                label="Description"
+                placeholder="What this artifact proves, who produced it, and what a reviewer should inspect."
+              />
+            </div>
+            <:actions>
+              <.button type="submit" size="sm">Attach work product</.button>
+              <.button type="button" variant="ghost" size="sm" phx-click="cancel_work_product">
+                Cancel
+              </.button>
+            </:actions>
+          </.simple_form>
+        </div>
+      </div>
+    </section>
+
     <% metrics =
       execution_metrics(@issue, @runs, @work_products, @child_issues, @tool_call_traces) %>
     <% brief_lines = owner_brief_lines(@issue, @runs, @work_products, @child_issues) %>
     <% gaps = evidence_gaps(@issue, @runs, @work_products, @child_issues) %>
+    <% narrative_cards =
+      work_narrative_cards(
+        @issue,
+        @runs,
+        @work_products,
+        @child_issues,
+        @all_agents
+      ) %>
     <% contribution_cards =
       agent_contribution_cards(
         @issue,
         @runs,
         @work_products,
         @tool_call_traces,
+        @child_issues,
         @all_agents
       ) %>
+    <% delegation_cards = delegation_map_cards(@child_health_cards, @all_agents) %>
+    <% review_queue = cto_review_queue(@child_health_cards) %>
+    <% owner_update = ceo_owner_update_status(@issue, @child_health_cards) %>
+    <% health_by_child_id = child_health_by_id(@child_health_cards) %>
 
     <section class="px-4 lg:px-6 pb-5">
       <div class="rounded-lg border border-hairline bg-surface-1/35">
@@ -230,6 +526,179 @@
 
         <div class="border-t border-hairline px-4 py-4">
           <div class="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h3 class="text-eyebrow text-ink-tertiary uppercase">Work narrative</h3>
+              <p class="mt-1 text-caption text-ink-tertiary">
+                Condensed owner-readable phases before the raw activity stream.
+              </p>
+            </div>
+            <span class="text-caption text-ink-tertiary">{length(narrative_cards)} phases</span>
+          </div>
+
+          <div class="grid gap-3 xl:grid-cols-3">
+            <div
+              :for={card <- narrative_cards}
+              class="rounded-lg border border-hairline bg-canvas px-4 py-3"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="text-sm font-510 text-ink">{card.title}</p>
+                  <p class="mt-1 text-caption text-ink-tertiary">{card.summary}</p>
+                </div>
+                <span class={narrative_status_class(card.status)}>
+                  {card.status_label}
+                </span>
+              </div>
+              <ul class="mt-3 space-y-1.5">
+                <li
+                  :for={line <- card.evidence}
+                  class="flex gap-2 text-caption text-ink-tertiary"
+                >
+                  <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand/70"></span>
+                  <span>{line}</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="border-t border-hairline px-4 py-4">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h3 class="text-eyebrow text-ink-tertiary uppercase">Delegation map</h3>
+              <p class="mt-1 text-caption text-ink-tertiary">
+                How CEO/CTO work fans out into product, design, engineering, and review.
+              </p>
+            </div>
+            <span class="text-caption text-ink-tertiary">
+              {length(@child_health_cards)} tracked sub-issues
+            </span>
+          </div>
+
+          <div class="grid gap-3 xl:grid-cols-4">
+            <div
+              :for={card <- delegation_cards}
+              class="rounded-lg border border-hairline bg-canvas px-4 py-3"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="text-sm font-510 text-ink">{card.title}</p>
+                  <p class="mt-1 text-caption text-ink-tertiary">{card.summary}</p>
+                </div>
+                <span class={delegation_status_class(card.status)}>{card.status_label}</span>
+              </div>
+              <p class="mt-3 text-caption text-ink-tertiary">Owner: {card.owner}</p>
+              <div class="mt-3 space-y-2">
+                <.app_link
+                  :for={child <- card.children}
+                  navigate={~p"/issues/#{child.issue_id}"}
+                  class="block rounded-md border border-hairline bg-surface-1/55 px-3 py-2 hover:bg-surface-1"
+                >
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="truncate text-caption font-510 text-ink">{child.title}</span>
+                    <span class={child_health_state_class(child.state)}>
+                      {child.review_label}
+                    </span>
+                  </div>
+                  <p class="mt-1 font-mono text-[11px] text-ink-tertiary">
+                    {child.identifier || "CYM-?"} · {child.assignee}
+                  </p>
+                </.app_link>
+                <p
+                  :if={Enum.empty?(card.children)}
+                  class="rounded-md border border-dashed border-hairline px-3 py-2 text-caption text-ink-tertiary"
+                >
+                  No child work routed here yet.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid gap-px border-t border-hairline bg-hairline lg:grid-cols-[1fr_0.85fr]">
+          <div class="bg-surface-1/45 px-4 py-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h3 class="text-eyebrow text-ink-tertiary uppercase">CTO review queue</h3>
+                <p class="mt-1 text-caption text-ink-tertiary">
+                  Which delegated work is ready to inspect before it reaches the CEO.
+                </p>
+              </div>
+              <span class="rounded-full border border-hairline bg-canvas px-2.5 py-1 text-caption text-ink-muted">
+                {length(review_queue.ready)} ready
+              </span>
+            </div>
+
+            <div class="mt-3 grid gap-2 sm:grid-cols-4">
+              <div class="rounded-md bg-canvas px-3 py-2">
+                <p class="text-[10px] uppercase text-ink-tertiary">Ready</p>
+                <p class="mt-1 text-lg font-510 text-emerald-300">{length(review_queue.ready)}</p>
+              </div>
+              <div class="rounded-md bg-canvas px-3 py-2">
+                <p class="text-[10px] uppercase text-ink-tertiary">Missing</p>
+                <p class="mt-1 text-lg font-510 text-amber-300">{length(review_queue.missing)}</p>
+              </div>
+              <div class="rounded-md bg-canvas px-3 py-2">
+                <p class="text-[10px] uppercase text-ink-tertiary">Blocked</p>
+                <p class="mt-1 text-lg font-510 text-red-300">{length(review_queue.blocked)}</p>
+              </div>
+              <div class="rounded-md bg-canvas px-3 py-2">
+                <p class="text-[10px] uppercase text-ink-tertiary">Closed</p>
+                <p class="mt-1 text-lg font-510 text-ink">{length(review_queue.closed)}</p>
+              </div>
+            </div>
+
+            <div class="mt-3 divide-y divide-hairline rounded-md border border-hairline bg-canvas">
+              <.app_link
+                :for={child <- review_queue.items}
+                navigate={~p"/issues/#{child.issue_id}"}
+                class="flex items-start justify-between gap-3 px-3 py-2 hover:bg-surface-1"
+              >
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-510 text-ink">{child.title}</p>
+                  <p class="mt-1 text-caption text-ink-tertiary">{child.next}</p>
+                </div>
+                <span class={child_health_state_class(child.state)}>{child.review_label}</span>
+              </.app_link>
+              <p
+                :if={Enum.empty?(review_queue.items)}
+                class="px-3 py-3 text-sm text-ink-tertiary"
+              >
+                No delegated child work has been created yet.
+              </p>
+            </div>
+          </div>
+
+          <div class="bg-surface-1/45 px-4 py-4">
+            <h3 class="text-eyebrow text-ink-tertiary uppercase">CEO owner update readiness</h3>
+            <div class="mt-3 rounded-lg border border-hairline bg-canvas px-4 py-3">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-sm font-510 text-ink">{owner_update.title}</p>
+                  <p class="mt-1 text-caption text-ink-tertiary">{owner_update.summary}</p>
+                </div>
+                <span class={delegation_status_class(owner_update.status)}>
+                  {owner_update.status_label}
+                </span>
+              </div>
+              <ul class="mt-3 space-y-2">
+                <li
+                  :for={line <- owner_update.evidence}
+                  class="flex gap-2 text-caption text-ink-tertiary"
+                >
+                  <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand/70"></span>
+                  <span>{line}</span>
+                </li>
+              </ul>
+              <p class="mt-3 rounded-md bg-surface-1 px-3 py-2 text-sm text-ink-muted">
+                {owner_update.next}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="border-t border-hairline px-4 py-4">
+          <div class="mb-3 flex items-center justify-between gap-3">
             <h3 class="text-eyebrow text-ink-tertiary uppercase">Agent contributions</h3>
             <span class="text-caption text-ink-tertiary">
               {length(contribution_cards)} agents
@@ -274,6 +743,9 @@
                 <span class="rounded bg-surface-1 px-2 py-1">
                   {card.counts.products} artifacts
                 </span>
+                <span class="rounded bg-surface-1 px-2 py-1">
+                  {card.counts.created_issues} sub-issues
+                </span>
                 <span class="rounded bg-surface-1 px-2 py-1">{card.counts.traces} tools</span>
               </div>
 
@@ -292,7 +764,7 @@
       </div>
     </section>
 
-    <div :if={!Enum.empty?(@child_issues)} class="px-4 lg:px-6 pb-5">
+    <div :if={!Enum.empty?(@child_issues)} id="issue-sub-issues" class="px-4 lg:px-6 pb-5">
       <div class="border-y border-hairline bg-surface-1/25">
         <div class="flex items-center justify-between gap-3 px-1 py-3">
           <h2 class="text-eyebrow text-ink-tertiary uppercase">Sub-issues</h2>
@@ -304,6 +776,7 @@
             navigate={~p"/issues/#{child.id}"}
             class="group flex items-start gap-3 px-1 py-3 hover:bg-surface-1/60 transition-colors"
           >
+            <% health = Map.get(health_by_child_id, child.id) %>
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-mono text-caption text-ink-tertiary">
@@ -319,9 +792,23 @@
               >
                 {child.description}
               </p>
+              <div :if={health} class="mt-2 flex flex-wrap gap-1.5">
+                <span
+                  :for={chip <- health.evidence}
+                  class={child_health_chip_class(chip.status)}
+                >
+                  {chip.label}
+                </span>
+              </div>
+              <p :if={health} class="mt-2 text-caption text-ink-tertiary">
+                Next: {health.next}
+              </p>
             </div>
             <div class="flex shrink-0 flex-col items-end gap-1">
               <.badge variant="status" value={to_string(child.status)} />
+              <span :if={health} class={child_health_state_class(health.state)}>
+                {health.review_label}
+              </span>
               <span class="text-caption text-ink-tertiary">
                 {(child.assignee && child.assignee.name) || "Unassigned"}
               </span>
@@ -332,15 +819,66 @@
     </div>
     
 <!-- Activity timeline -->
-    <div class="px-4 lg:px-6 pb-3">
-      <h2 class="text-eyebrow text-ink-tertiary uppercase">Activity</h2>
+    <% visible_timeline = filtered_timeline(@timeline, @timeline_filter) %>
+    <div id="issue-activity" class="px-4 lg:px-6 pb-3">
+      <div class="flex flex-col gap-3 border-t border-border/60 pt-5 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 class="text-eyebrow text-ink-tertiary uppercase">Activity</h2>
+          <p class="mt-1 text-caption text-ink-tertiary">
+            {timeline_summary(@timeline, @timeline_filter)}
+          </p>
+          <p
+            :if={@timeline_filter == "signal"}
+            class="mt-1 max-w-[520px] text-[11px] leading-4 text-ink-tertiary"
+          >
+            Signal mode keeps tagged comments, artifacts, failed runs, and completed runs with summaries visible while folding routine chatter into All.
+          </p>
+        </div>
+        <div class="flex max-w-full gap-1 overflow-x-auto rounded-lg border border-border bg-surface p-1">
+          <button
+            :for={{filter, label, count, title} <- timeline_filter_options(@timeline)}
+            type="button"
+            title={title}
+            phx-click="set_timeline_filter"
+            phx-value-filter={filter}
+            class={[
+              "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-510 transition-colors",
+              if(@timeline_filter == filter,
+                do: "bg-brand text-white",
+                else: "text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+              )
+            ]}
+          >
+            <span>{label}</span>
+            <span class={[
+              "rounded-full px-1.5 py-0.5 text-[10px]",
+              if(@timeline_filter == filter,
+                do: "bg-white/20 text-white",
+                else: "bg-canvas text-text-quaternary"
+              )
+            ]}>
+              {count}
+            </span>
+          </button>
+        </div>
+      </div>
     </div>
     <div
       id="timeline-stream"
       class="flex-1 overflow-y-auto px-4 lg:px-6 pb-4 space-y-4"
       phx-hook="TimelineScroll"
     >
-      <div :for={entry <- @timeline} id={"entry-#{entry.type}-#{entry.id}"} class="flex gap-3">
+      <div
+        :if={Enum.empty?(visible_timeline)}
+        class="rounded-lg border border-dashed border-border bg-subtle px-4 py-10 text-center text-sm text-text-tertiary"
+      >
+        {timeline_empty_message(@timeline_filter)}
+      </div>
+      <div
+        :for={entry <- visible_timeline}
+        id={"entry-#{entry.type}-#{entry.id}"}
+        class="flex gap-3"
+      >
         <!-- Avatar/Icon Column -->
         <div class="flex-shrink-0 flex flex-col items-center gap-1">
           <div class={
@@ -438,6 +976,9 @@
                 >
                   Agent
                 </span>
+                <span class={"rounded border px-1.5 py-0.5 text-[10px] font-510 #{comment_category_class(entry.data)}"}>
+                  {comment_category_label(entry.data)}
+                </span>
               </div>
               <div class="flex items-center gap-2">
                 <span class="text-xs text-text-quaternary">
@@ -468,6 +1009,7 @@
             class="rounded-lg border border-border/50 bg-subtle p-3"
           >
             <% run_agent = Enum.find(@all_agents, &(&1.id == entry.data.agent_id)) %>
+            <% adapter_error = adapter_error_for_run(entry.data) %>
             <div class="mb-2 flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <span class={"h-2 w-2 rounded-full #{run_status_color(entry.data.status)}"}>
@@ -504,18 +1046,30 @@
             >
               {entry.data.continuation_summary}
             </p>
-            <p
-              :if={entry.data.error_reason not in [nil, ""]}
-              class="mt-2 whitespace-pre-wrap text-xs text-red-300"
+            <div
+              :if={adapter_error}
+              class="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.06] p-3"
             >
-              {entry.data.error_reason}
-            </p>
-            <p
-              :if={entry.data.log_excerpt not in [nil, ""]}
-              class="mt-2 line-clamp-3 text-xs text-text-tertiary"
-            >
-              {entry.data.log_excerpt}
-            </p>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class={"inline-flex rounded-full border px-2 py-0.5 text-[11px] font-510 #{adapter_error_badge_class(adapter_error.category)}"}>
+                  {adapter_error_category_label(adapter_error.category)}
+                </span>
+                <span class="text-xs font-510 text-text-primary">{adapter_error.title}</span>
+              </div>
+              <p class="mt-2 text-xs leading-5 text-text-secondary">{adapter_error.message}</p>
+              <p :if={adapter_error.hint not in [nil, ""]} class="mt-1 text-xs text-text-tertiary">
+                {adapter_error.hint}
+              </p>
+              <details
+                :if={adapter_error.detail not in [nil, ""]}
+                class="mt-2 text-xs text-text-tertiary"
+              >
+                <summary class="cursor-pointer select-none text-text-quaternary hover:text-text-secondary">
+                  Show adapter details
+                </summary>
+                <pre class="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded border border-border bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-text-secondary"><%= adapter_error.detail %></pre>
+              </details>
+            </div>
           </div>
 
           <div
@@ -720,12 +1274,13 @@
             >
               {entry.data.error_message}
             </p>
-            <p
+            <details
               :if={entry.data.tool_result not in [nil, ""]}
-              class="line-clamp-3 text-xs text-text-tertiary"
+              class="mt-2 rounded border border-border/50 bg-canvas px-2 py-1 text-xs text-text-tertiary"
             >
-              {entry.data.tool_result}
-            </p>
+              <summary class="cursor-pointer text-text-quaternary">Show raw tool result</summary>
+              <p class="mt-2 whitespace-pre-wrap">{entry.data.tool_result}</p>
+            </details>
           </div>
 
           <div
@@ -741,17 +1296,29 @@
     </div>
     
 <!-- Sticky Composer -->
-    <div class="p-4 lg:p-6 border-t border-border bg-surface/50">
+    <div id="issue-comments" class="p-4 lg:p-6 border-t border-border bg-surface/50">
       <div class="mb-2 text-xs font-510 uppercase tracking-wider text-text-secondary">
         Add Comment
       </div>
       <form id="comment-form" phx-submit="add_comment" class="space-y-3">
+        <div class="flex flex-wrap gap-1.5">
+          <button
+            :for={template <- @comment_templates}
+            type="button"
+            phx-click="use_comment_template"
+            phx-value-template={template.key}
+            title={template.hint}
+            class="inline-flex items-center gap-1 rounded-md border border-border bg-canvas px-2 py-1 text-[11px] font-510 text-text-tertiary transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+          >
+            {template.label}
+          </button>
+        </div>
         <div class="flex gap-2">
           <div class="flex-1">
             <.input
               field={@comment_form[:body]}
               type="textarea"
-              placeholder="Add a comment..."
+              placeholder="Add a comment, or choose a template above..."
               class="min-h-[60px] max-h-[200px] resize-y"
               rows={2}
             />
@@ -811,7 +1378,7 @@
       <hr class="border-hairline" />
       
 <!-- Agent controls — only the live actions, no labels-as-headers -->
-      <div class="space-y-2">
+      <div id="issue-agent-panel" class="space-y-2">
         <p :if={!@orchestrator_enabled?} class="text-caption text-ink-tertiary">
           Agent execution is disabled for review mode.
         </p>
@@ -860,6 +1427,7 @@
       
 <!-- GitHub PR — number-only field; URL composed from project.repo_url -->
       <details
+        id="issue-github-pr"
         class="group"
         open={@issue.github_pr_number not in [nil, 0] or @issue.github_pr_url not in [nil, ""]}
       >
@@ -909,6 +1477,82 @@
             <.icon name="hero-arrow-top-right-on-square-mini" class="w-3.5 h-3.5 shrink-0" />
             <span class="truncate">{Cympho.Issues.Issue.pr_url(@issue, @issue.project)}</span>
           </a>
+          <div
+            :if={pr_quality(@issue)}
+            class={"rounded-md border px-2.5 py-2 text-caption #{pr_quality_status_class(pr_quality(@issue))}"}
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-590">{pr_quality(@issue)["status_label"] || "PR quality"}</span>
+              <span
+                :if={pr_quality_checked_label(pr_quality(@issue))}
+                class="text-[10px] opacity-70"
+              >
+                {pr_quality_checked_label(pr_quality(@issue))}
+              </span>
+            </div>
+            <p class="mt-1 leading-4">{pr_quality(@issue)["summary"]}</p>
+            <ul :if={pr_quality_gaps(pr_quality(@issue)) != []} class="mt-2 space-y-1">
+              <li :for={gap <- pr_quality_gaps(pr_quality(@issue))} class="leading-4">
+                <span class="font-590">{gap["label"]}</span>: {gap["detail"]}
+              </li>
+            </ul>
+          </div>
+          <details
+            :if={pr_quality(@issue) && pr_quality(@issue)["status"] == "attention"}
+            class="rounded-md border border-amber-500/20 bg-amber-500/[0.04] px-2.5 py-2 text-caption text-amber-100"
+          >
+            <% repair_packet = pr_repair_packet(@issue) %>
+            <summary class="cursor-pointer font-590 text-amber-100">
+              PR repair packet
+            </summary>
+            <div class="mt-2 space-y-2 text-[11px] leading-4">
+              <div>
+                <p class="uppercase tracking-[0.08em] text-amber-100/55">Expected branch</p>
+                <code class="mt-1 block rounded border border-amber-500/15 bg-black/25 px-2 py-1 text-amber-50">
+                  {repair_packet.branch_name}
+                </code>
+              </div>
+              <div>
+                <p class="uppercase tracking-[0.08em] text-amber-100/55">Expected title</p>
+                <code class="mt-1 block rounded border border-amber-500/15 bg-black/25 px-2 py-1 text-amber-50">
+                  {repair_packet.title}
+                </code>
+              </div>
+              <div>
+                <p class="uppercase tracking-[0.08em] text-amber-100/55">Missing fields</p>
+                <ul class="mt-1 space-y-0.5">
+                  <li :for={field <- pr_repair_missing_fields(repair_packet)}>
+                    - {field}
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <p class="uppercase tracking-[0.08em] text-amber-100/55">Suggested commands</p>
+                <pre class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded border border-amber-500/15 bg-black/25 px-2 py-1 font-mono text-[10px] text-amber-50">{pr_repair_commands(repair_packet)}</pre>
+              </div>
+              <details>
+                <summary class="cursor-pointer text-amber-100/80">PR body template</summary>
+                <pre class="mt-1 max-h-44 overflow-auto whitespace-pre-wrap rounded border border-amber-500/15 bg-black/25 px-2 py-1 font-mono text-[10px] text-amber-50">{repair_packet.body_template}</pre>
+              </details>
+            </div>
+          </details>
+          <button
+            :if={Cympho.Issues.Issue.pr_url(@issue, @issue.project)}
+            type="button"
+            phx-click="check_github_pr_quality"
+            class="text-caption text-ink-tertiary hover:text-ink-muted"
+          >
+            Check PR quality
+          </button>
+          <button
+            :if={pr_quality(@issue) && pr_quality(@issue)["status"] == "attention"}
+            type="button"
+            phx-click="queue_contract_nudge"
+            phx-value-contract="pr_quality"
+            class="text-caption text-amber-200 hover:text-amber-100"
+          >
+            Nudge agent to fix PR
+          </button>
           <button
             :if={@issue.github_pr_number not in [nil, 0] or @issue.github_pr_url not in [nil, ""]}
             type="button"

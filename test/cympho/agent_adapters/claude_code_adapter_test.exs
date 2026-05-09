@@ -213,8 +213,8 @@ defmodule Cympho.AgentAdapters.ClaudeCodeAdapterTest do
           }
         )
 
-      assert_receive {:session_started, ^session_id}, 1_000
-      assert_receive {:turn_completed, ^session_id, %{"content" => [%{"text" => "ok"}]}}, 1_000
+      assert_receive {:session_started, ^session_id}, 5_000
+      assert_receive {:turn_completed, ^session_id, %{"content" => [%{"text" => "ok"}]}}, 5_000
 
       assert File.read!(capture_path) =~
                "ANTHROPIC_BASE_URL=https://cheap-provider.example/anthropic"

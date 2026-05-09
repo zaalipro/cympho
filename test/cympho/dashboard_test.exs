@@ -136,8 +136,31 @@ defmodule Cympho.DashboardTest do
       assert Map.has_key?(summary, :throughput)
       assert Map.has_key?(summary, :bottlenecks)
       assert Map.has_key?(summary, :routine_health)
+      assert Map.has_key?(summary, :runtime_capacity)
       assert summary.active_agents >= 1
       assert summary.total_agents >= 1
+    end
+
+    test "includes runtime capacity pressure" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Capacity Co",
+          slug: "capacity-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, _agent} =
+        Agents.create_agent(%{
+          name: "Capacity Agent",
+          role: :engineer,
+          adapter: :codex,
+          max_concurrent_jobs: 6,
+          company_id: company.id
+        })
+
+      summary = Dashboard.summary(company.id)
+
+      assert summary.runtime_capacity.level == :high
+      assert summary.runtime_capacity.local_slots == 6
     end
 
     test "includes recent inbox items without requiring aggregate fields" do

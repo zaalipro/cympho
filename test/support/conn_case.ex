@@ -59,7 +59,12 @@ defmodule CymphoWeb.ConnCase do
 
     {:ok, token} = Cympho.UserAuthJWT.generate_token(user, company.id)
 
-    conn = Plug.Conn.put_req_header(conn, "authorization", "Bearer " <> token)
+    conn =
+      conn
+      |> Plug.Test.init_test_session(%{})
+      |> Plug.Conn.put_session(:user_id, user.id)
+      |> Plug.Conn.put_session(:company_id, company.id)
+      |> Plug.Conn.put_req_header("authorization", "Bearer " <> token)
 
     {conn, user, company}
   end

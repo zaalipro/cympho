@@ -9,6 +9,7 @@ defmodule Cympho.Inbox.InboxState do
     field :dismissed_at, :utc_datetime
     field :archived_at, :utc_datetime
     field :read_at, :utc_datetime
+    field :review_nudge, :map, virtual: true
     belongs_to :issue, Cympho.Issues.Issue
     belongs_to :agent, Cympho.Agents.Agent
     timestamps(type: :utc_datetime)

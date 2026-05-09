@@ -19,11 +19,10 @@ defmodule CymphoWeb.SettingsLiveTest do
     %{user: user}
   end
 
-  defp build_conn_(), do: Phoenix.ConnTest.build_conn()
+  defp build_conn_(), do: CymphoWeb.LiveCase.authenticated_conn()
 
   defp conn_with_session(user_id) do
-    Phoenix.ConnTest.build_conn()
-    |> Plug.Test.init_test_session(%{})
+    build_conn_()
     |> Plug.Conn.put_session("settings_user_id", user_id)
   end
 

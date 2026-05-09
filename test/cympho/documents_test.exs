@@ -257,5 +257,29 @@ defmodule Cympho.DocumentsTest do
       assert found.id == revision.id
       assert found.title == "v0"
     end
+
+    test "returns revisions only for the matching document", %{issue: issue} do
+      {:ok, doc} =
+        Documents.create_document(%{key: "plan", title: "v0", body: "body0", issue_id: issue.id})
+
+      {:ok, other_doc} =
+        Documents.create_document(%{
+          key: "notes",
+          title: "other v0",
+          body: "other body0",
+          issue_id: issue.id
+        })
+
+      {:ok, _} = Documents.update_document(doc, %{title: "v1", body: "body1"})
+      {:ok, _} = Documents.update_document(other_doc, %{title: "other v1", body: "other body1"})
+
+      [revision | _] = Documents.list_revisions(doc.id)
+      [other_revision | _] = Documents.list_revisions(other_doc.id)
+
+      assert {:ok, found} = Documents.get_document_revision(doc.id, revision.id)
+      assert found.id == revision.id
+      assert {:error, :not_found} = Documents.get_document_revision(doc.id, other_revision.id)
+      assert {:error, :not_found} = Documents.get_document_revision(nil, revision.id)
+    end
   end
 end

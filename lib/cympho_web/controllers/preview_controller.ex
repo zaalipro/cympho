@@ -10,13 +10,15 @@ defmodule CymphoWeb.PreviewController do
   alias Cympho.Workspaces.PreviewUrl
 
   def proxy(conn, %{"service_id" => service_id}) do
-    service = Workspaces.get_runtime_service!(service_id)
-    proxy_to_service(conn, service)
-  rescue
-    Ecto.NoResultsError ->
-      conn
-      |> put_status(:not_found)
-      |> json(%{error: "Runtime service not found"})
+    case scoped_runtime_service(conn, service_id) do
+      {:ok, service} ->
+        proxy_to_service(conn, service)
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: "Runtime service not found"})
+    end
   end
 
   defp proxy_to_service(conn, %RuntimeService{} = service) do
@@ -68,47 +70,63 @@ defmodule CymphoWeb.PreviewController do
   Get preview URL for a runtime service.
   """
   def show(conn, %{"service_id" => service_id}) do
-    service = Workspaces.get_runtime_service!(service_id)
-    base_url = get_base_url(conn)
-    preview_url = PreviewUrl.generate_preview_url(service, base_url)
+    case scoped_runtime_service(conn, service_id) do
+      {:ok, service} ->
+        base_url = get_base_url(conn)
+        preview_url = PreviewUrl.generate_preview_url(service, base_url)
 
-    json(conn, %{
-      data: %{
-        id: service.id,
-        service_name: service.service_name,
-        status: service.status,
-        port: service.port,
-        preview_url: preview_url,
-        target_url: if(service.status == "running", do: PreviewUrl.get_target_url(service))
-      }
-    })
-  rescue
-    Ecto.NoResultsError ->
-      conn
-      |> put_status(:not_found)
-      |> json(%{error: "Runtime service not found"})
+        json(conn, %{
+          data: %{
+            id: service.id,
+            service_name: service.service_name,
+            status: service.status,
+            port: service.port,
+            preview_url: preview_url,
+            target_url: if(service.status == "running", do: PreviewUrl.get_target_url(service))
+          }
+        })
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: "Runtime service not found"})
+    end
   end
 
   @doc """
   List previewable services for an execution workspace.
   """
-  def index(conn, %{"execution_workspace_id" => ew_id}) do
-    services = Workspaces.list_runtime_services(ew_id)
-    base_url = get_base_url(conn)
+  def index(conn, %{"id" => ew_id}) do
+    case Workspaces.get_company_execution_workspace(company_id(conn), ew_id) do
+      {:ok, execution_workspace} ->
+        services = Workspaces.list_runtime_services(execution_workspace.id)
+        base_url = get_base_url(conn)
 
-    previews =
-      Enum.map(services, fn service ->
-        %{
-          id: service.id,
-          service_name: service.service_name,
-          status: service.status,
-          port: service.port,
-          preview_url: PreviewUrl.generate_preview_url(service, base_url)
-        }
-      end)
+        previews =
+          Enum.map(services, fn service ->
+            %{
+              id: service.id,
+              service_name: service.service_name,
+              status: service.status,
+              port: service.port,
+              preview_url: PreviewUrl.generate_preview_url(service, base_url)
+            }
+          end)
 
-    json(conn, %{data: previews})
+        json(conn, %{data: previews})
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: "Execution workspace not found"})
+    end
   end
+
+  defp scoped_runtime_service(conn, service_id) do
+    Workspaces.get_company_runtime_service(company_id(conn), service_id)
+  end
+
+  defp company_id(conn), do: conn.assigns.current_company.id
 
   defp get_base_url(conn) do
     scheme = if conn.scheme == :https, do: "https", else: "http"

@@ -2,6 +2,8 @@ defmodule Cympho.Agents.Agent do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @delivery_roles [:engineer, :product_manager, :designer]
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
   schema "agents" do
@@ -70,6 +72,8 @@ defmodule Cympho.Agents.Agent do
 
     timestamps(type: :utc_datetime)
   end
+
+  def delivery_roles, do: @delivery_roles
 
   @doc false
   def changeset(agent, attrs) do

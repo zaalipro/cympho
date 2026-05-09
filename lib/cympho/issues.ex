@@ -13,6 +13,9 @@ defmodule Cympho.Issues do
   alias Cympho.Agents.Agent
   alias Cympho.Approvals
   alias Cympho.Comments
+  alias Cympho.HeartbeatEngine
+  alias Cympho.IssueDigest
+  alias Cympho.PullRequestContract
   alias Cympho.Activities
   alias Cympho.Companies.Company
   alias Cympho.ExecutionPolicies
@@ -20,6 +23,7 @@ defmodule Cympho.Issues do
   alias Cympho.Wakes
   alias Cympho.Labels.Label
   alias Cympho.Goals
+  alias Cympho.WorkProducts
 
   # Hard upper bound for unbounded issue listings. The kanban/search callers
   # pass a company filter but otherwise have no `LIMIT`; without a safety cap
@@ -58,8 +62,26 @@ defmodule Cympho.Issues do
   Lists direct child issues for an issue, ordered for execution review.
   """
   def list_child_issues(parent_id) when is_binary(parent_id) do
-    Issue
-    |> where(parent_id: ^parent_id)
+    case Repo.one(from i in Issue, where: i.id == ^parent_id, select: {i.id, i.company_id}) do
+      nil ->
+        []
+
+      {_parent_id, nil} ->
+        Issue
+        |> where([i], i.parent_id == ^parent_id and is_nil(i.company_id))
+        |> ordered_child_issues()
+
+      {_parent_id, company_id} ->
+        Issue
+        |> where(parent_id: ^parent_id, company_id: ^company_id)
+        |> ordered_child_issues()
+    end
+  end
+
+  def list_child_issues(_), do: []
+
+  defp ordered_child_issues(query) do
+    query
     |> order_by([i],
       asc:
         fragment(
@@ -72,8 +94,6 @@ defmodule Cympho.Issues do
     |> Repo.all()
     |> Repo.preload([:assignee])
   end
-
-  def list_child_issues(_), do: []
 
   defp maybe_filter_by_company(query, %{company_id: company_id}) when not is_nil(company_id) do
     where(query, company_id: ^company_id)
@@ -254,6 +274,54 @@ defmodule Cympho.Issues do
     end
   end
 
+  @doc """
+  Fetches the linked GitHub PR, audits it against the issue contract, and stores
+  the latest quality result on `issue.monitor_state["pr_quality"]`.
+  """
+  def recheck_pr_quality(%Issue{} = issue, opts \\ []) do
+    issue = issue_with_project(issue)
+    url = Keyword.get(opts, :url) || Issue.pr_url(issue, issue.project)
+
+    if blank?(url) do
+      {:error, :missing_pr_url}
+    else
+      pr_quality =
+        PullRequestContract.check_url(
+          issue,
+          url,
+          Keyword.put_new(opts, :source, "manual")
+        )
+
+      persist_pr_quality(issue, pr_quality)
+    end
+  end
+
+  @doc """
+  Audits already-available PR metadata, usually from a GitHub webhook payload,
+  and stores the quality result without making a second GitHub API request.
+  """
+  def record_pr_quality_from_metadata(%Issue{} = issue, metadata, opts \\ [])
+      when is_map(metadata) do
+    issue = issue_with_project(issue)
+    source = Keyword.get(opts, :source, "github_webhook")
+    metadata = Map.put_new(metadata, :url, Issue.pr_url(issue, issue.project))
+    pr_quality = PullRequestContract.audit_metadata(issue, metadata, source: source)
+
+    persist_pr_quality(issue, pr_quality)
+  end
+
+  def pr_quality_monitor_state(monitor_state, pr_quality) do
+    monitor_state
+    |> normalize_monitor_state()
+    |> Map.put("pr_quality", PullRequestContract.monitor_state_payload(pr_quality))
+  end
+
+  def clear_pr_quality_monitor_state(monitor_state) do
+    monitor_state
+    |> normalize_monitor_state()
+    |> Map.delete("pr_quality")
+  end
+
   def create_issue(attrs \\ %{}) do
     attrs = normalize_attrs(attrs)
     attrs = maybe_generate_identifier(attrs)
@@ -335,6 +403,29 @@ defmodule Cympho.Issues do
   end
 
   defp normalize_attrs(attrs) when is_map(attrs), do: attrs
+
+  defp persist_pr_quality(%Issue{} = issue, pr_quality) do
+    case update_issue(issue, %{
+           monitor_state: pr_quality_monitor_state(issue.monitor_state, pr_quality)
+         }) do
+      {:ok, updated} -> {:ok, updated, pr_quality}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp issue_with_project(%Issue{} = issue) do
+    issue = Repo.get(Issue, issue.id) || issue
+
+    case Map.get(issue, :project) do
+      %Ecto.Association.NotLoaded{} -> Repo.preload(issue, :project)
+      _project -> issue
+    end
+  end
+
+  defp normalize_monitor_state(%{} = monitor_state), do: monitor_state
+  defp normalize_monitor_state(_), do: %{}
+
+  defp blank?(value), do: value in [nil, ""]
 
   defp get_param(attrs, key) when is_atom(key) do
     Map.get(attrs, key) || Map.get(attrs, Atom.to_string(key))
@@ -429,6 +520,8 @@ defmodule Cympho.Issues do
         event_type,
         build_update_metadata(old_issue, updated, attrs)
       )
+
+      _ = Cympho.ReviewNudges.reconcile_issue(updated)
 
       {:ok, updated}
     end
@@ -548,12 +641,61 @@ defmodule Cympho.Issues do
     transition_issue(issue, new_status, nil)
   end
 
+  @doc """
+  Transitions an issue through the owner-facing review readiness gates.
+
+  `transition_issue/2` remains the low-level state-machine primitive for system
+  lifecycle work and tests. Product surfaces and agent actions should use this
+  function when moving work into review or closure so they cannot bypass the
+  same evidence policy.
+  """
+  def transition_issue_with_review_gates(%Issue{} = issue, new_status, agent_id \\ nil) do
+    issue = %{issue | execution_state: ExecutionState.normalize(issue.execution_state)}
+
+    cond do
+      new_status == :done and is_blocked?(issue) ->
+        {:error, :blocked_by_active_issues}
+
+      not StateMachine.valid_transition?(issue.status, new_status) ->
+        {:error, :invalid_transition}
+
+      (blockers = review_status_blockers(issue, new_status)) != [] ->
+        {:error,
+         {:review_gates_blocked,
+          %{
+            status: new_status,
+            blockers: blockers,
+            message: IssueDigest.review_status_block_message(new_status, blockers)
+          }}}
+
+      is_binary(agent_id) ->
+        transition_issue(issue, new_status, agent_id)
+
+      true ->
+        transition_issue(issue, new_status)
+    end
+  end
+
   defp validate_reviewer_role(%Agent{} = agent) do
     if agent.role in [:cto, :ceo] do
       :ok
     else
       {:error, :chain_of_command_violation}
     end
+  end
+
+  defp review_status_blockers(%Issue{} = issue, status) do
+    issue =
+      issue
+      |> Repo.preload([:comments, :project], force: true)
+
+    IssueDigest.review_status_blockers(
+      issue,
+      status,
+      HeartbeatEngine.list_runs_for_issue(issue.id),
+      WorkProducts.list_work_products(issue.id),
+      list_child_issues(issue.id)
+    )
   end
 
   defp do_transition(%Issue{} = issue, new_status) do

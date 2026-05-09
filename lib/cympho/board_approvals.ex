@@ -438,7 +438,7 @@ defmodule Cympho.BoardApprovals do
   Proposes a company config change requiring board approval.
   """
   def propose_config_change(company_id, config_key, config_value, requested_by \\ nil) do
-    update_attrs = %{String.to_atom(config_key) => config_value}
+    update_attrs = %{to_string(config_key) => config_value}
 
     if governance_required?(company_id, "policy_change") do
       create_board_approval(

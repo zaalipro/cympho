@@ -1,7 +1,7 @@
 defmodule CymphoWeb.GithubController do
   use CymphoWeb, :controller
   import Ecto.Query, warn: false
-  alias Cympho.{Issues, Repo}
+  alias Cympho.{Github, Issues, Repo}
   alias Cympho.Issues.Issue
   alias Cympho.Projects.Project
   require Logger
@@ -20,6 +20,7 @@ defmodule CymphoWeb.GithubController do
          :ok <- verify_signature(conn, project),
          :fresh <- Cympho.WebhookDedup.check_and_mark(delivery_id) do
       Logger.info("GitHub webhook received: action=#{action}, pr_url=#{pr_url}")
+      issue = record_pr_quality_from_webhook(issue, action, pr)
       handle_pr_action(issue, action, pr)
       send_resp(conn, :ok, "")
     else
@@ -92,6 +93,24 @@ defmodule CymphoWeb.GithubController do
     case conn.assigns[:raw_body] do
       chunks when is_list(chunks) -> chunks |> Enum.reverse() |> IO.iodata_to_binary()
       _ -> nil
+    end
+  end
+
+  defp record_pr_quality_from_webhook(issue, action, pr) do
+    metadata = Github.pull_request_metadata(pr)
+
+    case Issues.record_pr_quality_from_metadata(issue, metadata,
+           source: "github_webhook:#{action}"
+         ) do
+      {:ok, updated, _pr_quality} ->
+        updated
+
+      {:error, reason} ->
+        Logger.warning(
+          "Failed to record PR quality from webhook for issue #{issue.id}: #{inspect(reason)}"
+        )
+
+        issue
     end
   end
 

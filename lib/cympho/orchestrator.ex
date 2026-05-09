@@ -38,6 +38,7 @@ defmodule Cympho.Orchestrator do
   import Ecto.Query, only: [from: 2]
 
   alias Cympho.{
+    Adapters.Error,
     Issues,
     Comments,
     Agents,
@@ -45,13 +46,25 @@ defmodule Cympho.Orchestrator do
     HeartbeatEngine,
     AgentAdapters,
     AgentActions,
+    IssueDigest,
+    ReviewNudges,
     Runtime,
+    WorkProducts,
     AuditTrail.Instrumenter
   }
 
   alias Cympho.Issues.Issue
 
   @heartbeat_tick_interval 30_000
+  @completion_contract_blocker_keys MapSet.new([
+                                      :agent_note,
+                                      :owner_summary,
+                                      :work_product,
+                                      :delivery_comment,
+                                      :review_decision,
+                                      :ceo_owner_update,
+                                      :code_reference
+                                    ])
 
   @registry Cympho.OrchestratorRegistry
 
@@ -209,6 +222,7 @@ defmodule Cympho.Orchestrator do
     create_agent_comment(issue, agent_id, body)
 
     action_result = handle_agent_actions(issue, agent_id, body)
+    maybe_queue_completion_contract_nudge(issue, agent_id, action_result)
 
     case action_result do
       :ok ->
@@ -245,7 +259,7 @@ defmodule Cympho.Orchestrator do
 
     fail_engine_run(session, reason)
 
-    error_body = "Agent work error: #{inspect(reason)}"
+    error_body = Error.comment(reason, adapter: session_adapter_name(session))
 
     {:ok, _comment} =
       Comments.create_comment(%{
@@ -569,7 +583,7 @@ defmodule Cympho.Orchestrator do
   defp fail_engine_run(%__MODULE__{run_id: run_id}, reason) do
     try do
       {:ok, run} = HeartbeatEngine.get_run(run_id)
-      HeartbeatEngine.fail_run(run, reason_to_string(reason))
+      HeartbeatEngine.fail_run(run, reason)
     rescue
       e ->
         :logger.warning("[Orchestrator] Failed to fail engine run: #{inspect(e)}")
@@ -603,9 +617,16 @@ defmodule Cympho.Orchestrator do
   defp parse_cost(val) when is_binary(val), do: Decimal.new(val)
   defp parse_cost(val), do: Decimal.new("#{val}")
 
-  defp reason_to_string(reason) when is_binary(reason), do: reason
-  defp reason_to_string(reason) when is_atom(reason), do: Atom.to_string(reason)
-  defp reason_to_string(reason), do: inspect(reason)
+  defp session_adapter_name(%__MODULE__{run_id: run_id}) when not is_nil(run_id) do
+    case HeartbeatEngine.get_run(run_id) do
+      {:ok, run} -> run.adapter
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp session_adapter_name(_session), do: nil
 
   defp schedule_heartbeat_tick do
     Process.send_after(self(), :heartbeat_tick, @heartbeat_tick_interval)
@@ -642,7 +663,9 @@ defmodule Cympho.Orchestrator do
 
   defp handle_agent_actions(issue, agent_id, body) do
     with {:ok, actions} <- AgentActions.parse(body),
-         {:ok, _result} <- AgentActions.execute(issue, agent_id, actions) do
+         {:ok, result} <- AgentActions.execute(issue, agent_id, actions) do
+      maybe_create_completion_handoff_comment(issue, agent_id, body, actions, result)
+
       if AgentActions.unresolved_current_issue?(issue, agent_id) do
         block_issue_with_comment(issue, "Agent actions did not resolve the current issue.")
         {:error, :unresolved_current_issue}
@@ -657,6 +680,143 @@ defmodule Cympho.Orchestrator do
         )
 
         {:error, reason}
+    end
+  end
+
+  defp maybe_queue_completion_contract_nudge(issue, agent_id, :ok) do
+    with {:ok, issue} <- Issues.get_issue(issue.id),
+         false <- issue.status in [:blocked, :cancelled, :done],
+         {:ok, agent} <- Agents.get_agent(agent_id) do
+      runs = HeartbeatEngine.list_runs_for_issue(issue.id)
+      work_products = WorkProducts.list_work_products(issue.id)
+      child_issues = Issues.list_child_issues(issue.id)
+
+      blockers =
+        issue
+        |> IssueDigest.build(runs, work_products, child_issues)
+        |> get_in([:review_readiness, :blockers])
+        |> List.wrap()
+        |> Enum.filter(&MapSet.member?(@completion_contract_blocker_keys, &1.key))
+
+      agents = completion_contract_agents(issue, agent)
+
+      case preferred_completion_nudge(issue, blockers, agents, child_issues, agent_id) do
+        nil ->
+          :ok
+
+        nudge ->
+          case ReviewNudges.execute(issue, nudge.key,
+                 blockers: blockers,
+                 agents: agents,
+                 child_issues: child_issues
+               ) do
+            {:ok, _queued} ->
+              :ok
+
+            {:error, reason} ->
+              :logger.warning(
+                "[Orchestrator] Completion contract nudge failed for issue #{issue.id}: #{inspect(reason)}"
+              )
+
+              :ok
+          end
+      end
+    else
+      _ -> :ok
+    end
+  rescue
+    exception ->
+      :logger.warning(
+        "[Orchestrator] Completion contract guard failed for issue #{issue.id}: #{Exception.message(exception)}"
+      )
+
+      :ok
+  end
+
+  defp maybe_queue_completion_contract_nudge(_issue, _agent_id, _action_result), do: :ok
+
+  defp completion_contract_agents(issue, agent) do
+    if issue.company_id do
+      issue.company_id
+      |> Agents.list_agents_by_company()
+      |> case do
+        [] -> [agent]
+        agents -> agents
+      end
+    else
+      [agent]
+    end
+  end
+
+  defp preferred_completion_nudge(_issue, [], _agents, _child_issues, _agent_id), do: nil
+
+  defp preferred_completion_nudge(issue, blockers, agents, child_issues, agent_id) do
+    issue
+    |> ReviewNudges.plan(blockers, agents: agents, child_issues: child_issues)
+    |> Enum.reject(&(&1.queued? or not &1.enabled?))
+    |> then(fn nudges ->
+      Enum.find(nudges, &(&1.type == :delivery and &1.agent_id == agent_id)) ||
+        Enum.find(nudges, &(&1.agent_id == agent_id)) ||
+        Enum.find(nudges, &(&1.type == :delivery)) ||
+        List.first(nudges)
+    end)
+  end
+
+  defp maybe_create_completion_handoff_comment(issue, agent_id, body, actions, result) do
+    cond do
+      owner_visible_agent_note?(body) ->
+        :ok
+
+      Enum.any?(actions, &(&1["type"] == "comment")) ->
+        :ok
+
+      completion_body = generated_completion_comment(actions, result) ->
+        create_agent_comment(issue, agent_id, completion_body)
+
+      true ->
+        :ok
+    end
+  end
+
+  defp owner_visible_agent_note?(body) when is_binary(body) do
+    Cympho.IssueDigest.comment_category(%{author_type: "agent", body: body}) != :routine
+  end
+
+  defp owner_visible_agent_note?(_body), do: false
+
+  defp generated_completion_comment(actions, result) do
+    types = Enum.map(actions, & &1["type"])
+
+    cond do
+      "attach_work_product" in types ->
+        artifact_titles =
+          actions
+          |> Enum.filter(&(&1["type"] == "attach_work_product"))
+          |> Enum.map(& &1["title"])
+          |> Enum.reject(&(&1 in [nil, ""]))
+
+        artifact_list =
+          case artifact_titles do
+            [] -> "attached work product evidence"
+            titles -> Enum.join(titles, ", ")
+          end
+
+        issue_state =
+          result
+          |> Map.get(:issue, %{})
+          |> Map.get(:status, :unknown)
+          |> to_string()
+
+        """
+        [delivery] What happened: attached review evidence for this issue.
+        Current state: issue is #{issue_state}; evidence is now available in work products.
+        Evidence or verification: #{artifact_list}.
+        Next decision: reviewer should inspect the artifact, then approve, request changes, or ask for more verification.
+        """
+        |> String.trim()
+
+      true ->
+        nil
     end
   end
 
@@ -728,7 +888,7 @@ defmodule Cympho.Orchestrator do
     agent_id = session.agent_id
 
     error_body =
-      "Adapter resolution failed: unknown adapter `#{adapter_type}`. Check agent configuration."
+      Error.comment({:unknown_adapter, adapter_type}, adapter: session_adapter_name(session))
 
     fail_engine_run(session, {:unknown_adapter, adapter_type})
 
@@ -747,7 +907,7 @@ defmodule Cympho.Orchestrator do
       "[Orchestrator] Adapter resolution failed for issue #{issue.id}: #{inspect(reason)}"
     )
 
-    error_body = "Adapter resolution failed: #{inspect(reason)}"
+    error_body = Error.comment(reason, adapter: session_adapter_name(session))
 
     if reason == :no_adapter_available do
       record_adapter_failure(agent_id)

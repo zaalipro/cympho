@@ -253,7 +253,7 @@ defmodule Cympho.Agents.RolePlaybook do
 
     When you `approve_issue`, all sub-issues must be `:done`. The server will reject premature approval — read your sub-issue list before approving.
 
-    Every delegation, approval, request for changes, or blocker must include a `comment` that an owner can read without opening logs. State the business outcome, what changed, and the next owner.
+    Every delegation, approval, request for changes, or blocker must include a `comment` that an owner can read without opening logs. Start it with `[owner_update]`, `[decision]`, `[handoff]`, or `[blocked]`. Owner updates must include What happened, Business status: shipped/not shipped, Current state, Next decision, and Owner decision needed. Blocked notes must include Cause, Attempted fix, Needs, Current state, and Next decision.
     """
     |> String.trim()
   end
@@ -270,7 +270,7 @@ defmodule Cympho.Agents.RolePlaybook do
 
     When you `request_changes`, your `reason` must list each required change as a bullet. Vague feedback wastes another full agent run.
 
-    Every split, approval, or request for changes must leave a `comment` with the technical verdict, verification evidence, and next step. Engineers and the CEO should be able to understand your review from the issue page alone.
+    Every split, approval, or request for changes must leave a tagged `comment` (`[handoff]`, `[review]`, `[decision]`, or `[blocked]`) with the technical verdict, verification evidence, and next step. CTO review comments must include Verdict, What happened, Verification, Gaps, Follow-up issues, and Next decision. Engineers and the CEO should be able to understand your review from the issue page alone.
     """
     |> String.trim()
   end
@@ -284,17 +284,17 @@ defmodule Cympho.Agents.RolePlaybook do
 
     If you can't complete the work, your `submit_review` notes must say so explicitly — "Blocked on X because Y; tried Z." Don't pretend partial work is complete.
 
-    Every completion or blocked handoff must include a `comment` summarising what changed, files or systems touched, tests run, and what the CTO should inspect next.
+    Every completion or blocked handoff must include a tagged `comment` (`[delivery]` or `[blocked]`). Delivery comments must include What happened, Files changed, Verification, Risks, Current state, and Next decision. Blocked comments must include Cause, Attempted fix, Needs, Current state, and Next decision.
     """
     |> String.trim()
   end
 
   defp quality_bar(:product_manager) do
-    "Every issue you produce must have explicit acceptance criteria and a definition of done. Leave a `comment` explaining product decisions, tradeoffs, and what the CTO/design/engineering owner should do next. Vague tickets waste agent runs."
+    "Every issue you produce must have explicit acceptance criteria and a definition of done. Leave a tagged `comment` (`[delivery]`, `[decision]`, or `[handoff]`) explaining product decisions, tradeoffs, and what the CTO/design/engineering owner should do next. Delivery comments must include What happened, Files changed (spec/artifact names are acceptable), Verification, Risks, Current state, and Next decision. Vague tickets waste agent runs."
   end
 
   defp quality_bar(:designer) do
-    "Every design artefact must be specific enough that an engineer can implement it without DM-ing you. Attach via `attach_work_product` and leave a `comment` with interaction rationale, edge cases, and implementation notes."
+    "Every design artefact must be specific enough that an engineer can implement it without DM-ing you. Attach via `attach_work_product` and leave a tagged `[delivery]` comment with interaction rationale, edge cases, implementation notes, Verification, Risks, Current state, and Next decision."
   end
 
   defp quality_bar(_), do: "Be specific. Vague output wastes agent runs."

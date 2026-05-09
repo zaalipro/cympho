@@ -7,6 +7,7 @@ defmodule CymphoWeb.SessionController do
   alias Cympho.Companies.CompanyMembership
   alias Cympho.Repo
   alias Cympho.Users.User
+  alias CymphoWeb.UserAuth
 
   @dev Mix.env() == :dev
 
@@ -18,12 +19,14 @@ defmodule CymphoWeb.SessionController do
 
   def create(conn, %{"user" => %{"email" => email, "password" => password}})
       when is_binary(email) and is_binary(password) do
+    return_to = UserAuth.safe_return_path(conn.params["return_to"]) || "/"
+
     case Authentication.authenticate_user(email, password) do
       {:ok, %User{} = user} ->
         conn
         |> sign_in(user)
         |> put_flash(:info, "Signed in")
-        |> redirect(to: "/")
+        |> redirect(to: return_to)
 
       {:error, :invalid_credentials} ->
         conn
@@ -67,6 +70,8 @@ defmodule CymphoWeb.SessionController do
 
   defp sign_in_page(params, error) do
     email = params["email"] || ""
+    return_to = UserAuth.safe_return_path(params["return_to"])
+    return_to_input = hidden_return_to_input(return_to)
     csrf = Plug.CSRFProtection.get_csrf_token()
     error_html = if error, do: ~s(<p class="error">#{escape(error)}</p>), else: ""
 
@@ -98,6 +103,7 @@ defmodule CymphoWeb.SessionController do
         <main>
           <form method="post" action="/login">
             <input type="hidden" name="_csrf_token" value="#{csrf}">
+            #{return_to_input}
             <div>
               <h1>Sign in to Cympho</h1>
               <p>Enter the company cockpit with your real projects, agents, and approvals.</p>
@@ -112,7 +118,7 @@ defmodule CymphoWeb.SessionController do
               <input name="user[password]" type="password" autocomplete="current-password" required>
             </label>
             <button type="submit">Sign in</button>
-            #{dev_shortcut()}
+            #{dev_shortcut(return_to)}
           </form>
         </main>
       </body>
@@ -120,12 +126,24 @@ defmodule CymphoWeb.SessionController do
     """
   end
 
-  defp dev_shortcut do
+  defp dev_shortcut(return_to) do
     if @dev do
-      ~s(<p class="dev">Local dev: <a href="/dev/login">enter seeded company</a></p>)
+      href =
+        case UserAuth.login_path(return_to) do
+          "/login" -> "/dev/login"
+          "/login?" <> query -> "/dev/login?#{query}"
+        end
+
+      ~s(<p class="dev">Local dev: <a href="#{escape(href)}">enter seeded company</a></p>)
     else
       ""
     end
+  end
+
+  defp hidden_return_to_input(nil), do: ""
+
+  defp hidden_return_to_input(return_to) do
+    ~s(<input type="hidden" name="return_to" value="#{escape(return_to)}">)
   end
 
   defp escape(value) when is_binary(value),

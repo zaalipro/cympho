@@ -10,6 +10,10 @@ defmodule CymphoWeb.Router do
     plug :put_secure_browser_headers
   end
 
+  pipeline :authenticated_browser do
+    plug :require_authenticated_user
+  end
+
   pipeline :api do
     plug :accepts, ["json"]
   end
@@ -37,9 +41,14 @@ defmodule CymphoWeb.Router do
     post "/login", SessionController, :create
     delete "/logout", SessionController, :delete
 
-    if Mix.env() == :dev do
+    # Compiled only into dev/test builds; production releases never expose this shortcut.
+    if Mix.env() in [:dev, :test] do
       get "/dev/login", DevSessionController, :login
     end
+  end
+
+  scope "/", CymphoWeb do
+    pipe_through [:browser, :authenticated_browser]
 
     get "/switch-company/:id", CompanySwitcherController, :switch
 
@@ -48,6 +57,7 @@ defmodule CymphoWeb.Router do
     live_session :default, on_mount: [{CymphoWeb.UserAuth, :default}] do
       live "/", DashboardLive.Index, :home
       live "/dashboard", DashboardLive.Index
+      live "/operations", OperationsLive.Index
       live "/issues", IssueLive.Index
       live "/issues/new", IssueLive.New
       live "/issues/:id", IssueLive.Show
@@ -126,6 +136,10 @@ defmodule CymphoWeb.Router do
     end
   end
 
+  defp require_authenticated_user(conn, opts) do
+    CymphoWeb.UserAuth.require_authenticated_user(conn, opts)
+  end
+
   # ── Public API endpoints (no auth) ──
   scope "/api", CymphoWeb do
     pipe_through :api
@@ -133,7 +147,6 @@ defmodule CymphoWeb.Router do
     post "/register", RegistrationController, :create
     post "/login", LoginController, :create
     post "/telegram/webhook", TelegramController, :webhook
-    post "/invites/:token/accept", CompanyController, :accept_invite
 
     # Public webhook with per-route HMAC secret check inside controller.
     post "/routine-triggers/:public_id/fire", RoutineTriggerController, :fire
@@ -152,6 +165,7 @@ defmodule CymphoWeb.Router do
 
     resources "/users", UserController, only: [:index, :show, :create, :update, :delete]
     patch "/users/:id/notification-prefs", UserController, :update_notification_prefs
+    post "/invites/:token/accept", CompanyController, :accept_invite
 
     get "/search", SearchController, :search
     get "/dashboard", DashboardController, :index

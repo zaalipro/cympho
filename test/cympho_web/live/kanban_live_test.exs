@@ -1,14 +1,23 @@
 defmodule CymphoWeb.KanbanLiveTest do
   use CymphoWeb.LiveCase, async: true
   import Phoenix.LiveViewTest
+  alias Cympho.Agents
+  alias Cympho.Comments
+  alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues
   alias Cympho.Projects
+  alias Cympho.Repo
+  alias Cympho.WorkProducts
+
+  defp create_agent(attrs), do: Agents.create_agent(scoped_attrs(attrs))
+  defp create_issue(attrs), do: Issues.create_issue(scoped_attrs(attrs))
+  defp create_project(attrs), do: Projects.create_project(scoped_attrs(attrs))
 
   setup do
-    {:ok, project} = Projects.create_project(%{name: "Test Project", prefix: "TP"})
+    {:ok, project} = create_project(%{name: "Test Project", prefix: "TP"})
 
     {:ok, issue_backlog} =
-      Issues.create_issue(%{
+      create_issue(%{
         title: "Backlog Issue",
         description: "backlog",
         status: :backlog,
@@ -17,7 +26,7 @@ defmodule CymphoWeb.KanbanLiveTest do
       })
 
     {:ok, issue_todo} =
-      Issues.create_issue(%{
+      create_issue(%{
         title: "Todo Issue",
         description: "todo",
         status: :todo,
@@ -44,6 +53,20 @@ defmodule CymphoWeb.KanbanLiveTest do
       {:ok, _view, html} = live(conn(), "/kanban")
       assert html =~ "Backlog Issue"
       assert html =~ "Todo Issue"
+      assert html =~ "Compact"
+      assert html =~ "Detailed"
+      assert html =~ "Not started"
+      assert html =~ "No agent work has started yet."
+      assert html =~ "Start with the CEO"
+    end
+
+    test "supports compact digest density" do
+      {:ok, _view, html} = live(conn(), "/kanban?density=compact")
+
+      assert html =~ "Backlog Issue"
+      assert html =~ "Not started"
+      assert html =~ "No agent work has started yet."
+      refute html =~ "Start with the CEO"
     end
 
     test "renders drag-and-drop attributes" do
@@ -77,10 +100,10 @@ defmodule CymphoWeb.KanbanLiveTest do
 
     test "blocked issue cannot move to done" do
       {:ok, blocking} =
-        Issues.create_issue(%{title: "Blocker", description: "blocks", status: :in_progress})
+        create_issue(%{title: "Blocker", description: "blocks", status: :in_progress})
 
       {:ok, blocked} =
-        Issues.create_issue(%{title: "Blocked", description: "blocked", status: :in_review})
+        create_issue(%{title: "Blocked", description: "blocked", status: :in_review})
 
       Issues.add_blocker(blocked, blocking)
       {:ok, view, _html} = live(conn(), "/kanban")
@@ -90,6 +113,120 @@ defmodule CymphoWeb.KanbanLiveTest do
       |> render_hook("transition_issue", %{"id" => blocked.id, "to_status" => "done"})
 
       assert render(view) =~ "issue is blocked"
+    end
+
+    test "review gates block moving to review without delivery evidence" do
+      {:ok, issue} =
+        create_issue(%{
+          title: "Board review needs evidence",
+          description: "Owner request is clear.",
+          status: :in_progress,
+          priority: :medium
+        })
+
+      {:ok, view, _html} = live(conn(), "/kanban")
+
+      view
+      |> element("#kanban-board")
+      |> render_hook("transition_issue", %{"id" => issue.id, "to_status" => "in_review"})
+
+      html = render(view)
+      assert html =~ "Move blocked"
+      assert html =~ "Board review needs evidence"
+      assert html =~ "Review gates blocking status change"
+      assert html =~ "Runtime verification"
+      assert html =~ "Agent completion note"
+      assert html =~ "Start verification"
+      assert html =~ "Add completion note"
+      assert html =~ "Attach work product"
+      assert html =~ ~s(href="/issues/#{issue.id}?gate=verification#issue-agent-panel")
+      assert html =~ ~s(href="/issues/#{issue.id}?gate=delivery_note#issue-comments")
+      assert html =~ ~s(href="/issues/#{issue.id}?gate=work_product#issue-work-product-form")
+      assert Issues.get_issue!(issue.id).status == :in_progress
+    end
+
+    test "approval gates block moving to done without a CTO or CEO review decision" do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Board Delivery Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Board closure needs review",
+          description: "Owner request is clear.",
+          status: :in_progress,
+          priority: :medium
+        })
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body: "[delivery] What happened: delivered board-visible work.",
+          author_type: "agent",
+          author_id: agent.id,
+          issue_id: issue.id
+        })
+
+      Repo.insert!(%Run{
+        company_id: issue.company_id,
+        agent_id: agent.id,
+        issue_id: issue.id,
+        status: "completed",
+        adapter: "process",
+        continuation_summary: "Verification passed."
+      })
+
+      {:ok, _work_product} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          created_by_agent_id: agent.id,
+          kind: "document",
+          title: "Board closure evidence",
+          description: "Non-code closure evidence."
+        })
+
+      {:ok, view, _html} = live(conn(), "/kanban")
+
+      view
+      |> element("#kanban-board")
+      |> render_hook("transition_issue", %{"id" => issue.id, "to_status" => "done"})
+
+      html = render(view)
+      assert html =~ "Move blocked"
+      assert html =~ "Board closure needs review"
+      assert html =~ "Approval gates blocking closure"
+      assert html =~ "CTO/CEO review decision"
+      assert html =~ "Add review comment"
+      assert html =~ ~s(href="/issues/#{issue.id}?gate=review_comment#issue-comments")
+      assert Issues.get_issue!(issue.id).status == :in_progress
+    end
+
+    test "blocked transition panel can be dismissed" do
+      {:ok, issue} =
+        create_issue(%{
+          title: "Dismissible blocker",
+          description: "Owner request is clear.",
+          status: :in_progress,
+          priority: :medium
+        })
+
+      {:ok, view, _html} = live(conn(), "/kanban")
+
+      view
+      |> element("#kanban-board")
+      |> render_hook("transition_issue", %{"id" => issue.id, "to_status" => "in_review"})
+
+      assert render(view) =~ "Move blocked"
+
+      view
+      |> element("#kanban-transition-blocker button", "Dismiss")
+      |> render_click()
+
+      refute render(view) =~ "Move blocked"
     end
 
     test "shake event on invalid transition", %{issue_todo: issue} do
@@ -111,7 +248,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     end
 
     test "shows Unassigned group" do
-      Issues.create_issue(%{title: "Unassigned", description: "none", status: :todo})
+      create_issue(%{title: "Unassigned", description: "none", status: :todo})
       {:ok, view, _html} = live(conn(), "/kanban")
       view |> element("#kanban-board") |> render_hook("toggle_swimlanes", %{})
       assert render(view) =~ "Unassigned"
@@ -184,9 +321,9 @@ defmodule CymphoWeb.KanbanLiveTest do
         )
 
     test "filters by project", %{project: project} do
-      {:ok, other} = Projects.create_project(%{name: "Other", prefix: "OT"})
+      {:ok, other} = create_project(%{name: "Other", prefix: "OT"})
 
-      Issues.create_issue(%{
+      create_issue(%{
         title: "Other Issue",
         description: "other",
         status: :backlog,

@@ -1,5 +1,6 @@
 defmodule CymphoWeb.ApprovalController do
   use CymphoWeb, :controller
+  alias Cympho.{Agents, Issues}
   alias Cympho.Approvals
 
   action_fallback CymphoWeb.FallbackController
@@ -16,23 +17,29 @@ defmodule CymphoWeb.ApprovalController do
   end
 
   def create(conn, %{"approval" => approval_params}) do
+    company_id = conn.assigns.current_company.id
+    issue_ids = approval_params["issue_ids"] || []
+
     attrs = %{
       type: approval_params["type"],
       requested_by_agent_id: approval_params["requested_by_agent_id"],
       payload: approval_params["payload"],
-      issue_ids: approval_params["issue_ids"] || []
+      issue_ids: issue_ids
     }
 
-    case Approvals.create_approval(attrs) do
-      {:ok, approval} ->
-        conn
-        |> put_status(:created)
-        |> json(%{data: approval})
+    with :ok <- validate_agent_ref(company_id, attrs.requested_by_agent_id),
+         :ok <- validate_issue_refs(company_id, issue_ids) do
+      case Approvals.create_approval(attrs) do
+        {:ok, approval} ->
+          conn
+          |> put_status(:created)
+          |> json(%{data: approval})
 
-      {:error, changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{errors: format_errors(changeset)})
+        {:error, changeset} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{errors: format_errors(changeset)})
+      end
     end
   end
 
@@ -56,7 +63,7 @@ defmodule CymphoWeb.ApprovalController do
           resolution_reason: approval_params["resolution_reason"]
         }
 
-        case Approvals.resolve_approval(id, String.to_atom(status), opts) do
+        case Approvals.resolve_approval(id, approval_resolution(status), opts) do
           {:ok, approval} ->
             json(conn, %{data: approval})
 
@@ -85,11 +92,39 @@ defmodule CymphoWeb.ApprovalController do
   defp parse_status(""), do: nil
 
   defp parse_status(s) when is_binary(s) do
-    case s |> String.downcase() |> String.to_atom() do
-      status when status in [:pending, :approved, :denied, :cancelled] -> status
+    case String.downcase(s) do
+      "pending" -> :pending
+      "approved" -> :approved
+      "denied" -> :denied
+      "cancelled" -> :cancelled
       _ -> nil
     end
   end
 
   defp parse_status(_), do: nil
+
+  defp approval_resolution("approved"), do: :approved
+  defp approval_resolution("denied"), do: :denied
+
+  defp validate_agent_ref(_company_id, nil), do: :ok
+  defp validate_agent_ref(_company_id, ""), do: :ok
+
+  defp validate_agent_ref(company_id, agent_id) do
+    case Agents.get_company_agent(company_id, agent_id) do
+      {:ok, _agent} -> :ok
+      {:error, _} -> {:error, :not_found}
+    end
+  end
+
+  defp validate_issue_refs(company_id, issue_ids) do
+    if Enum.all?(issue_ids, &company_issue?(company_id, &1)) do
+      :ok
+    else
+      {:error, :not_found}
+    end
+  end
+
+  defp company_issue?(company_id, issue_id) do
+    match?({:ok, _issue}, Issues.get_company_issue(company_id, issue_id))
+  end
 end

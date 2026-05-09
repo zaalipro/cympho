@@ -8,6 +8,8 @@ defmodule Cympho.Workspace do
 
   @workspace_root Application.compile_env(:cympho, :workspace_root, "/tmp/cympho/workspaces")
 
+  alias Cympho.PullRequestContract
+
   @doc """
   Returns the workspace root directory.
   """
@@ -29,12 +31,13 @@ defmodule Cympho.Workspace do
 
   Returns `{:ok, workspace_path}` or `{:error, reason}`.
   """
-  def create_for_issue(%{id: issue_id, project_id: project_id}) do
+  def create_for_issue(%{id: issue_id, project_id: project_id} = issue) do
     path = workspace_path(issue_id)
 
     with :ok <- ensure_root_exists(),
          :ok <- validate_path_is_safe(path),
-         {:ok, _} <- clone_repo(project_id, path) do
+         {:ok, _} <- clone_repo(project_id, path),
+         {:ok, _branch} <- checkout_issue_branch(path, issue) do
       {:ok, path}
     end
   end
@@ -108,6 +111,15 @@ defmodule Cympho.Workspace do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp checkout_issue_branch(path, issue) do
+    branch_name = PullRequestContract.branch_name(issue)
+
+    case System.cmd("git", ["checkout", "-B", branch_name], cd: path) do
+      {_output, 0} -> {:ok, branch_name}
+      {error, exit_code} -> {:error, {:git_checkout_failed, exit_code, error}}
     end
   end
 

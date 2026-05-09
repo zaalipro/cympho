@@ -2,6 +2,7 @@ defmodule Cympho.Inbox do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Inbox.InboxState
+  alias Cympho.Wakes
 
   @pubsub Cympho.PubSub
   @topic "inbox"
@@ -58,7 +59,7 @@ defmodule Cympho.Inbox do
 
     query
     |> Repo.all()
-    |> Repo.preload([:issue, :agent])
+    |> preload_inbox_items()
   end
 
   def status_counts_for_company(company_id) do
@@ -111,7 +112,13 @@ defmodule Cympho.Inbox do
       )
 
     query = if status, do: where(query, status: ^status), else: query
-    Repo.all(query) |> Repo.preload([:issue])
+    query |> Repo.all() |> preload_inbox_items()
+  end
+
+  defp preload_inbox_items(items) do
+    items
+    |> Repo.preload([:agent, issue: [:comments, :assignee, :project]])
+    |> attach_review_nudges()
   end
 
   def mark_read(issue_id, agent_id) do
@@ -182,7 +189,20 @@ defmodule Cympho.Inbox do
     end
   end
 
-  def ensure_inbox_entry(issue_id, agent_id) do
+  def notify_entry_updated(issue_id, agent_id) do
+    case get_inbox_state(issue_id, agent_id) do
+      nil ->
+        :ok
+
+      state ->
+        broadcast_change(agent_id, {:inbox_updated, state})
+        :ok
+    end
+  end
+
+  def ensure_inbox_entry(issue_id, agent_id, opts \\ []) do
+    refresh? = Keyword.get(opts, :refresh?, false)
+
     changeset =
       %InboxState{}
       |> InboxState.changeset(%{issue_id: issue_id, agent_id: agent_id, status: "unread"})
@@ -198,6 +218,7 @@ defmodule Cympho.Inbox do
             {:error, :not_found}
 
           state ->
+            state = maybe_refresh_state(state, refresh?)
             broadcast_change(agent_id, {:inbox_created, state})
             {:ok, state}
         end
@@ -205,5 +226,47 @@ defmodule Cympho.Inbox do
       {:error, changeset} ->
         {:error, changeset}
     end
+  end
+
+  defp maybe_refresh_state(state, false), do: state
+
+  defp maybe_refresh_state(state, true) do
+    case state |> InboxState.restore_changeset() |> Repo.update() do
+      {:ok, updated} ->
+        broadcast_change(state.agent_id, {:inbox_updated, updated})
+        updated
+
+      {:error, _changeset} ->
+        state
+    end
+  end
+
+  defp attach_review_nudges([]), do: []
+
+  defp attach_review_nudges(items) do
+    issue_ids = items |> Enum.map(& &1.issue_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+
+    nudges_by_pair =
+      issue_ids
+      |> Wakes.list_review_nudges()
+      |> Enum.group_by(&{&1.issue_id, &1.agent_id})
+      |> Map.new(fn {pair, [wake | _]} -> {pair, review_nudge_map(wake)} end)
+
+    Enum.map(items, fn item ->
+      %{item | review_nudge: Map.get(nudges_by_pair, {item.issue_id, item.agent_id})}
+    end)
+  end
+
+  defp review_nudge_map(wake) do
+    metadata = wake.metadata || %{}
+
+    %{
+      wake_id: wake.id,
+      status: wake.status,
+      summary: metadata["summary"] || "Review evidence needed",
+      blocker_labels: List.wrap(metadata["blocker_labels"]),
+      prompt: metadata["prompt"],
+      queued_at: wake.inserted_at
+    }
   end
 end

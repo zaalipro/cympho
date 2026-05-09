@@ -48,6 +48,8 @@ defmodule Cympho.WorkProducts do
           {:work_product_created, work_product}
         )
 
+        _ = Cympho.ReviewNudges.reconcile_issue(work_product.issue_id)
+
         {:ok, work_product}
 
       {:error, changeset} ->

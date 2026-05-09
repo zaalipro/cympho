@@ -3,6 +3,7 @@ defmodule CymphoWeb.DashboardLive.Index do
   alias Cympho.Dashboard
   alias Cympho.Companies
   alias Cympho.Orchestrator.Dispatcher
+  alias Cympho.RuntimeOperations
   alias CymphoWeb.Events
 
   @impl true
@@ -87,8 +88,9 @@ defmodule CymphoWeb.DashboardLive.Index do
 
   defp assign_metrics(socket) do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
-    summary = Dashboard.summary(company_id)
+    summary = if company_id, do: Dashboard.summary(company_id), else: Dashboard.empty_summary()
     company = current_company(socket)
+    operations = RuntimeOperations.snapshot(company_id)
 
     queued =
       status_count(summary.issue_status_counts, :todo) +
@@ -102,7 +104,8 @@ defmodule CymphoWeb.DashboardLive.Index do
     |> assign(:autonomy_status, autonomy_status(company))
     |> assign(:runtime_enabled?, Dispatcher.enabled?())
     |> assign(:operating_mode, operating_mode(company))
-    |> assign(:next_actions, next_actions(summary, company))
+    |> assign(:next_actions, next_actions(summary, company, operations))
+    |> assign(:execution_health, execution_health(summary, operations))
     |> assign(:queued_work, queued)
     |> assign(:running_work, running)
     |> assign(:blocked_work, blocked)
@@ -117,6 +120,7 @@ defmodule CymphoWeb.DashboardLive.Index do
     |> assign(:recent_activities, summary.recent_activities)
     |> assign(:recent_inbox, summary.recent_inbox)
     |> assign(:cost_summary, summary.cost_summary)
+    |> assign(:runtime_capacity, summary.runtime_capacity)
   end
 
   defp current_company(socket) do
@@ -161,7 +165,7 @@ defmodule CymphoWeb.DashboardLive.Index do
     end
   end
 
-  defp next_actions(summary, company) do
+  defp next_actions(summary, company, operations) do
     company_status = autonomy_status(company)
     runtime_enabled? = Dispatcher.enabled?()
 
@@ -174,6 +178,24 @@ defmodule CymphoWeb.DashboardLive.Index do
     agents = summary.total_agents
 
     [
+      if(operations.review_nudges.counts.stale > 0,
+        do: %{
+          label: "Review nudges are stale",
+          detail:
+            "#{operations.review_nudges.counts.stale} evidence #{pluralize(operations.review_nudges.counts.stale, "request")} need owner follow-up.",
+          action: "Open Operations",
+          path: "/operations#review-nudges"
+        }
+      ),
+      if(length(operations.recent_failures) > 0,
+        do: %{
+          label: "Runtime failures need inspection",
+          detail:
+            "#{length(operations.recent_failures)} recent #{pluralize(length(operations.recent_failures), "run")} failed across the company.",
+          action: "Open failures",
+          path: "/operations#runtime-failures"
+        }
+      ),
       if(!runtime_enabled?,
         do: %{
           label: "Review mode is on",
@@ -227,6 +249,69 @@ defmodule CymphoWeb.DashboardLive.Index do
     end
   end
 
+  defp execution_health(summary, operations) do
+    review_nudges = operations.review_nudges
+    cto_review = status_count(summary.issue_status_counts, :in_review)
+    owner_updates = owner_update_count(review_nudges)
+    runtime_failures = length(operations.recent_failures)
+    overloaded_agents = Enum.count(operations.pressure_agents, &(&1.pressure.level == :high))
+
+    [
+      %{
+        label: "Review nudges",
+        value: review_nudges.counts.active,
+        hint: "Agent evidence requests",
+        path: "/operations#review-nudges",
+        tone: if(review_nudges.counts.active > 0, do: :attention, else: :ok)
+      },
+      %{
+        label: "Stale nudges",
+        value: review_nudges.counts.stale,
+        hint: "Waiting over 30 minutes",
+        path: "/operations#review-nudges",
+        tone: if(review_nudges.counts.stale > 0, do: :danger, else: :ok)
+      },
+      %{
+        label: "CTO review",
+        value: cto_review,
+        hint: "Issues in review",
+        path: "/kanban",
+        tone: if(cto_review > 0, do: :brand, else: :muted)
+      },
+      %{
+        label: "Owner updates",
+        value: owner_updates,
+        hint: "CEO/customer updates queued",
+        path: "/operations#review-nudges",
+        tone: if(owner_updates > 0, do: :attention, else: :ok)
+      },
+      %{
+        label: "Runtime failures",
+        value: runtime_failures,
+        hint: "Recent failed runs",
+        path: "/operations#runtime-failures",
+        tone: if(runtime_failures > 0, do: :danger, else: :ok)
+      },
+      %{
+        label: "CLI pressure",
+        value: overloaded_agents,
+        hint: "Agents over safe local load",
+        path: "/operations#runtime-capacity",
+        tone: if(overloaded_agents > 0, do: :danger, else: :ok)
+      }
+    ]
+  end
+
+  defp owner_update_count(%{active: active}) do
+    Enum.count(active, fn nudge ->
+      keys = Enum.map(nudge.blocker_keys || [], &to_string/1)
+      labels = Enum.map(nudge.blocker_labels || [], &(to_string(&1) |> String.downcase()))
+
+      Enum.any?(keys, &(&1 in ["ceo_owner_update", "owner_summary"])) or
+        Enum.any?(labels, &(String.contains?(&1, "owner") or String.contains?(&1, "ceo")))
+    end)
+  end
+
   def status_label(:backlog), do: "Backlog"
   def status_label(:todo), do: "To Do"
   def status_label(:in_progress), do: "In Progress"
@@ -253,6 +338,29 @@ defmodule CymphoWeb.DashboardLive.Index do
   def mode_badge_class(:review), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
   def mode_badge_class(:paused), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-400"
   def mode_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  def capacity_badge_class(:safe), do: "border-green-500/25 bg-green-500/10 text-green-400"
+  def capacity_badge_class(:watch), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-300"
+  def capacity_badge_class(:high), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def capacity_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  def capacity_bar_class(:safe), do: "bg-green-400"
+  def capacity_bar_class(:watch), do: "bg-yellow-300"
+  def capacity_bar_class(:high), do: "bg-red-400"
+  def capacity_bar_class(_), do: "bg-text-quaternary"
+
+  def health_signal_class(:danger), do: "border-red-500/25 bg-red-500/10"
+  def health_signal_class(:attention), do: "border-yellow-500/25 bg-yellow-500/10"
+  def health_signal_class(:brand), do: "border-brand/35 bg-brand/10"
+  def health_signal_class(:ok), do: "border-green-500/20 bg-green-500/5"
+  def health_signal_class(_), do: "border-border bg-surface/40"
+
+  def capacity_percent(%{local_slots: local_slots, total_slots: total_slots})
+      when total_slots > 0 do
+    min(round(local_slots / total_slots * 100), 100)
+  end
+
+  def capacity_percent(_), do: 0
 
   def total_issues(counts) do
     Enum.reduce(counts, 0, fn %{count: c}, acc -> acc + c end)

@@ -64,33 +64,47 @@ defmodule Cympho.Adapters.CursorAdapter do
       timeout = config[:timeout] || config["timeout"] || @default_timeout
       {args, stdin} = build_cursor_invocation(prompt, cursor_bin, config)
 
-      env = build_env(config)
+      env = config |> build_env() |> port_env()
 
       port_opts =
         [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}] ++
           cursor_cwd_opt(config)
 
-      port = Port.open({:spawn_executable, cursor_bin}, port_opts)
+      with_port({:spawn_executable, cursor_bin}, port_opts, fn port ->
+        if stdin do
+          write_stdin(port, stdin)
+        end
 
-      if stdin do
-        Port.command(port, "#{stdin}\n")
-      end
-
-      result = collect_output(port, "", timeout)
-      Port.close(port)
-
-      case result do
-        {:ok, raw} ->
-          parse_cursor_output(raw)
-
-        {:error, _} = err ->
-          err
-      end
+        case collect_output(port, "", timeout) do
+          {:ok, raw} -> parse_cursor_output(raw)
+          {:error, _} = err -> err
+        end
+      end)
     rescue
       e ->
         {:error, "Cursor process failed: #{inspect(e)}"}
     end
   end
+
+  defp with_port(open_spec, port_opts, fun) do
+    port = Port.open(open_spec, port_opts)
+
+    try do
+      fun.(port)
+    after
+      close_port(port)
+    end
+  end
+
+  defp close_port(port) when is_port(port) do
+    try do
+      Port.close(port)
+    rescue
+      ArgumentError -> :ok
+    end
+  end
+
+  defp close_port(_port), do: :ok
 
   defp build_cursor_invocation(prompt, cursor_bin, config) do
     executable = cursor_bin |> Path.basename() |> String.downcase()
@@ -149,32 +163,49 @@ defmodule Cympho.Adapters.CursorAdapter do
         {:error, "Cursor exited with status #{code}: #{acc}"}
     after
       timeout ->
-        Port.close(port)
+        close_port(port)
         {:error, :timeout}
     end
+  end
+
+  defp write_stdin(port, stdin) do
+    Port.command(port, "#{stdin}\n")
+    :ok
+  rescue
+    ArgumentError -> :closed
   end
 
   defp parse_cursor_output(raw) do
     raw = String.trim(raw)
 
-    case String.split(raw, "\n") do
-      [line] ->
-        case Jason.decode(line) do
-          {:ok, json} -> {:ok, json}
-          {:error, _} -> {:ok, %{"output" => raw}}
-        end
+    if raw == "" do
+      {:error, :no_output}
+    else
+      parse_cursor_lines(String.split(raw, "\n"), raw)
+    end
+  end
 
-      lines ->
-        parsed =
-          lines
-          |> Enum.map(&Jason.decode/1)
-          |> Enum.filter(fn
-            {:ok, _} -> true
-            _ -> false
-          end)
-          |> Enum.map(fn {:ok, m} -> m end)
+  defp parse_cursor_lines([line], raw) do
+    case Jason.decode(line) do
+      {:ok, json} -> {:ok, json}
+      {:error, _} -> {:error, {:parse_error, raw}}
+    end
+  end
 
-        {:ok, %{"turns" => parsed}}
+  defp parse_cursor_lines(lines, raw) do
+    parsed =
+      lines
+      |> Enum.map(&Jason.decode/1)
+      |> Enum.filter(fn
+        {:ok, _} -> true
+        _ -> false
+      end)
+      |> Enum.map(fn {:ok, m} -> m end)
+
+    if Enum.empty?(parsed) do
+      {:error, {:parse_error, raw}}
+    else
+      {:ok, %{"turns" => parsed}}
     end
   end
 
@@ -194,6 +225,19 @@ defmodule Cympho.Adapters.CursorAdapter do
   defp build_env(_config) do
     [{"TERM", "dumb"}]
   end
+
+  defp port_env(env) do
+    Enum.map(env, fn {key, value} ->
+      {env_charlist(key), env_charlist(value)}
+    end)
+  end
+
+  defp env_string(value) when is_binary(value), do: value
+  defp env_string(value) when is_list(value), do: List.to_string(value)
+  defp env_string(value), do: to_string(value)
+
+  defp env_charlist(value) when is_list(value), do: value
+  defp env_charlist(value), do: value |> env_string() |> String.to_charlist()
 
   @impl true
   def health_check(config) do
@@ -298,26 +342,26 @@ defmodule Cympho.Adapters.CursorAdapter do
 
   @impl true
   def validate_config(config) do
-    config = atomize_keys(config)
-
-    with :ok <- validate_command(config[:command]),
-         :ok <- validate_cursor_path(config[:cursor_path]),
-         :ok <- validate_workspace_path(config[:workspace_path]),
-         :ok <- validate_model(config[:model]),
-         :ok <- validate_mode(config[:mode]),
-         :ok <- validate_force(config[:force]),
-         :ok <- validate_timeout(config[:timeout]),
-         :ok <- validate_headless(config[:headless]) do
+    with :ok <- validate_command(config_value(config, :command)),
+         :ok <- validate_cursor_path(config_value(config, :cursor_path)),
+         :ok <- validate_workspace_path(config_value(config, :workspace_path)),
+         :ok <- validate_model(config_value(config, :model)),
+         :ok <- validate_mode(config_value(config, :mode)),
+         :ok <- validate_force(config_value(config, :force)),
+         :ok <- validate_timeout(config_value(config, :timeout)),
+         :ok <- validate_headless(config_value(config, :headless)) do
       :ok
     end
   end
 
-  defp atomize_keys(map) when is_map(map) do
-    Map.new(map, fn
-      {k, v} when is_binary(k) -> {String.to_atom(k), v}
-      {k, v} -> {k, v}
-    end)
+  defp config_value(config, key) when is_map(config) and is_atom(key) do
+    case Map.fetch(config, key) do
+      {:ok, value} -> value
+      :error -> Map.get(config, Atom.to_string(key))
+    end
   end
+
+  defp config_value(_config, _key), do: nil
 
   defp resolve_cursor_path(config) do
     case config[:command] || config["command"] || config[:cursor_path] || config["cursor_path"] do

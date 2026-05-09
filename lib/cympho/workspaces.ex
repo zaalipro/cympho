@@ -40,6 +40,15 @@ defmodule Cympho.Workspaces do
     end
   end
 
+  def get_company_project_workspace(company_id, id) do
+    case Repo.one(
+           from pw in ProjectWorkspace, where: pw.id == ^id and pw.company_id == ^company_id
+         ) do
+      nil -> {:error, :not_found}
+      pw -> {:ok, pw}
+    end
+  end
+
   def create_project_workspace(attrs \\ %{}) do
     %ProjectWorkspace{}
     |> ProjectWorkspace.changeset(attrs)
@@ -71,6 +80,15 @@ defmodule Cympho.Workspaces do
 
   def get_execution_workspace(id) do
     case Repo.get(ExecutionWorkspace, id) do
+      nil -> {:error, :not_found}
+      ew -> {:ok, ew}
+    end
+  end
+
+  def get_company_execution_workspace(company_id, id) do
+    case Repo.one(
+           from ew in ExecutionWorkspace, where: ew.id == ^id and ew.company_id == ^company_id
+         ) do
       nil -> {:error, :not_found}
       ew -> {:ok, ew}
     end
@@ -148,6 +166,13 @@ defmodule Cympho.Workspaces do
 
   def get_runtime_service(id) do
     case Repo.get(RuntimeService, id) do
+      nil -> {:error, :not_found}
+      service -> {:ok, service}
+    end
+  end
+
+  def get_company_runtime_service(company_id, id) do
+    case Repo.one(from rs in RuntimeService, where: rs.id == ^id and rs.company_id == ^company_id) do
       nil -> {:error, :not_found}
       service -> {:ok, service}
     end
@@ -238,6 +263,15 @@ defmodule Cympho.Workspaces do
     |> Repo.update()
   end
 
+  def get_company_environment_lease(company_id, id) do
+    case Repo.one(
+           from el in EnvironmentLease, where: el.id == ^id and el.company_id == ^company_id
+         ) do
+      nil -> {:error, :not_found}
+      lease -> {:ok, lease}
+    end
+  end
+
   def expire_stale_leases do
     now = DateTime.utc_now()
 
@@ -267,6 +301,13 @@ defmodule Cympho.Workspaces do
 
   def get_environment(id) do
     case Repo.get(Environment, id) do
+      nil -> {:error, :not_found}
+      env -> {:ok, env}
+    end
+  end
+
+  def get_company_environment(company_id, id) do
+    case Repo.one(from e in Environment, where: e.id == ^id and e.company_id == ^company_id) do
       nil -> {:error, :not_found}
       env -> {:ok, env}
     end

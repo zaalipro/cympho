@@ -11,10 +11,9 @@ defmodule CymphoWeb.AgentLive.Index do
       Agents.subscribe(socket.assigns.current_company.id)
     end
 
-    current_agent = session["current_agent"]
-    full_agent = current_agent && Agents.get_agent(current_agent.id) |> then(fn {:ok, a} -> a end)
-
     company_id = current_company_id(socket)
+    current_agent = session["current_agent"]
+    full_agent = scoped_session_agent(current_agent, company_id)
 
     socket =
       assign(socket, :agents, list_agents(company_id))
@@ -120,21 +119,26 @@ defmodule CymphoWeb.AgentLive.Index do
 
   @impl true
   def handle_event("delete_agent", %{"id" => id}, socket) do
-    agent = Agents.get_agent!(id)
-    {:ok, _} = Agents.delete_agent(agent)
-    {:noreply, socket}
+    case get_scoped_agent(socket, id) do
+      {:ok, agent} ->
+        {:ok, _} = Agents.delete_agent(agent)
+        {:noreply, socket}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Agent not found")}
+    end
   end
 
   def handle_event("kill_session", %{"id" => agent_id}, socket) do
-    case Agents.kill_session(agent_id) do
-      :ok ->
-        {:noreply, put_flash(socket, :info, "Agent session stopped successfully")}
-
+    with {:ok, _agent} <- get_scoped_agent(socket, agent_id),
+         :ok <- Agents.kill_session(agent_id) do
+      {:noreply, put_flash(socket, :info, "Agent session stopped successfully")}
+    else
       {:error, :not_running} ->
         {:noreply, put_flash(socket, :error, "Agent is not currently running")}
 
       {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Agent heartbeat not found")}
+        {:noreply, put_flash(socket, :error, "Agent not found")}
     end
   end
 
@@ -315,6 +319,29 @@ defmodule CymphoWeb.AgentLive.Index do
 
   defp status_counts(nil), do: Agents.count_by_status()
   defp status_counts(company_id), do: Agents.count_by_status(company_id)
+
+  defp get_scoped_agent(socket, id) do
+    case current_company_id(socket) do
+      nil -> Agents.get_agent(id)
+      company_id -> Agents.get_company_agent(company_id, id)
+    end
+  end
+
+  defp scoped_session_agent(nil, _company_id), do: nil
+
+  defp scoped_session_agent(%{id: id}, company_id) when is_binary(company_id) do
+    case Agents.get_company_agent(company_id, id) do
+      {:ok, agent} -> agent
+      {:error, _} -> nil
+    end
+  end
+
+  defp scoped_session_agent(%{id: id}, nil) do
+    case Agents.get_agent(id) do
+      {:ok, agent} -> agent
+      {:error, _} -> nil
+    end
+  end
 
   defp runtime_config_value(%{runtime_config: runtime_config, config: config}, key) do
     Map.get(runtime_config || %{}, key) ||

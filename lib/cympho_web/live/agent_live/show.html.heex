@@ -496,11 +496,514 @@
         </div>
       </.panel>
 
+      <% form_role = @form[:role].value || @agent.role %>
+      <% form_instructions = @form[:instructions].value || @agent.instructions || "" %>
+      <% instruction_studio =
+        instruction_studio(form_role, form_instructions, selected_adapter, %{
+          command: @runtime_command,
+          model: @runtime_model,
+          provider: @runtime_provider
+        }) %>
+      <% prompt_contract = instruction_studio.prompt_contract %>
+      <% instruction_guardrails =
+        instruction_save_guardrails(instruction_studio, @latest_config_revision) %>
+      <.panel class="overflow-hidden">
+        <div class="flex flex-col gap-3 border-b border-border px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                Agent Instruction Studio
+              </h3>
+              <span class={studio_badge_class(instruction_studio.status)}>
+                {instruction_studio.status_label}
+              </span>
+              <span class="rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-510 text-text-tertiary">
+                {instruction_studio.score}/100
+              </span>
+              <span class={eval_coverage_badge_class(instruction_studio.eval_coverage.status)}>
+                Eval {instruction_studio.eval_coverage.passed}/{instruction_studio.eval_coverage.total}
+              </span>
+              <details class="group relative inline-flex">
+                <summary
+                  class="flex h-6 w-6 cursor-help list-none items-center justify-center rounded-full border border-border bg-surface text-[11px] font-590 text-text-tertiary hover:border-brand/40 hover:bg-brand/10 hover:text-brand [&::-webkit-details-marker]:hidden"
+                  aria-label="How instruction studio health works"
+                >
+                  ?
+                </summary>
+                <div class="absolute left-0 top-full z-40 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-panel p-3 text-left shadow-xl">
+                  <p class="text-xs font-590 text-text-primary">How this is checked</p>
+                  <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                    Cympho combines the injected role playbook, custom instructions, runtime
+                    adapter, completion contract, and role scenarios. The studio warns before
+                    instructions create noisy issues, weak PRs, or silent handoffs.
+                  </p>
+                </div>
+              </details>
+            </div>
+            <p class="mt-2 text-sm leading-6 text-text-tertiary">
+              {instruction_studio.summary}
+            </p>
+            <p class="mt-1 text-xs leading-5 text-text-quaternary">
+              Eval coverage: {instruction_studio.eval_coverage.summary}
+            </p>
+            <details class="mt-3 rounded-lg border border-border bg-surface">
+              <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs font-590 text-text-secondary hover:bg-surface-hover [&::-webkit-details-marker]:hidden">
+                <span>Eval details</span>
+                <span class="font-510 text-text-quaternary">
+                  {instruction_studio.eval_coverage.status_label}
+                </span>
+              </summary>
+              <div class="grid gap-2 border-t border-border p-3">
+                <div
+                  :for={result <- instruction_studio.eval_coverage.results}
+                  class={[
+                    "rounded-lg border px-3 py-2",
+                    eval_result_class(result.status)
+                  ]}
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex min-w-0 items-center gap-2">
+                      <span class={studio_status_dot_class(result.status)}></span>
+                      <p class="truncate text-xs font-590 text-text-primary">
+                        {result.label}
+                      </p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span class="rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-quaternary">
+                        {result.kind_label}
+                      </span>
+                      <span class={eval_expectation_class(result.expectation)}>
+                        {result.expectation_label}
+                      </span>
+                      <span class="rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-tertiary">
+                        {eval_result_status_text(result)}
+                      </span>
+                    </div>
+                  </div>
+                  <p class="mt-1 text-xs leading-5 text-text-quaternary">
+                    {result.audit_summary}
+                  </p>
+                  <div
+                    :if={result.validated_fields != []}
+                    class="mt-2 flex flex-wrap items-center gap-1.5"
+                  >
+                    <span class="text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                      Validates
+                    </span>
+                    <span
+                      :for={field <- result.validated_fields}
+                      class="rounded bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-text-tertiary"
+                    >
+                      {field}
+                    </span>
+                  </div>
+                  <div
+                    :if={result.gap_fields != []}
+                    class="mt-2 flex flex-wrap items-center gap-1.5"
+                  >
+                    <span class="text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                      Catches
+                    </span>
+                    <span
+                      :for={field <- result.gap_fields}
+                      class="rounded bg-red-500/10 px-1.5 py-0.5 font-mono text-[10px] text-red-300"
+                    >
+                      {field}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </details>
+            <div
+              :if={@instruction_patch_feedback}
+              class="mt-3 rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-xs leading-5 text-brand"
+            >
+              <%= if @instruction_patch_feedback.changed? do %>
+                Applied {@instruction_patch_feedback.title}. Studio score {@instruction_patch_feedback.before_score} → {@instruction_patch_feedback.after_score}.
+                Save changes to persist it.
+              <% else %>
+                {@instruction_patch_feedback.title} is already present. Studio score remains {@instruction_patch_feedback.after_score}.
+              <% end %>
+            </div>
+            <div
+              :if={instruction_guardrails != []}
+              class="mt-3 grid gap-2"
+            >
+              <div
+                :for={guardrail <- instruction_guardrails}
+                class={[
+                  "rounded-lg border px-3 py-2 text-xs leading-5",
+                  instruction_guardrail_class(guardrail.status)
+                ]}
+              >
+                <p class="font-590 text-text-primary">{guardrail.title}</p>
+                <p class="mt-0.5 text-text-tertiary">{guardrail.detail}</p>
+              </div>
+            </div>
+          </div>
+          <div class="rounded-lg border border-border bg-surface px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+              Effective role
+            </p>
+            <p class="mt-1 text-sm font-590 text-text-primary">{prompt_contract.role_label}</p>
+          </div>
+        </div>
+
+        <div class="grid gap-px bg-border lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.75fr)]">
+          <div class="bg-panel p-5">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h4 class="text-sm font-590 text-text-primary">Custom instructions</h4>
+                <p class="mt-1 text-xs leading-5 text-text-quaternary">
+                  These are layered after the injected role playbook. Keep them short, specific,
+                  and compatible with the contract.
+                </p>
+              </div>
+            </div>
+            <textarea
+              id={@form[:instructions].id}
+              name={@form[:instructions].name}
+              rows="7"
+              spellcheck="true"
+              class="mt-3 w-full rounded-lg border border-border bg-canvas px-3 py-3 text-sm leading-6 text-text-primary placeholder-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              placeholder="Add company-specific guardrails, review expectations, or domain context. The role contract is injected automatically."
+            ><%= form_instructions %></textarea>
+            <p class="mt-2 text-xs leading-5 text-text-quaternary">
+              For longer reusable files, use the Instructions tab. This field is for compact
+              agent-specific overrides.
+            </p>
+            <div class="mt-3 rounded-lg border border-border bg-surface px-3 py-3">
+              <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p class="text-xs font-590 text-text-primary">Required final comment</p>
+                <span class="rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-quaternary">
+                  issue digest source
+                </span>
+              </div>
+              <code class="block whitespace-pre-wrap font-mono text-[11px] leading-5 text-text-tertiary">
+                {prompt_contract.required_template}
+              </code>
+            </div>
+          </div>
+
+          <div class="bg-panel p-5">
+            <h4 class="text-sm font-590 text-text-primary">Contract health</h4>
+            <div class="mt-3 space-y-2">
+              <div
+                :for={check <- instruction_studio.audits}
+                class={[
+                  "rounded-lg border px-3 py-2",
+                  studio_card_class(check.status)
+                ]}
+              >
+                <div class="flex items-center gap-2">
+                  <span class={studio_status_dot_class(check.status)}></span>
+                  <p class="text-xs font-510 text-text-secondary">{check.label}</p>
+                </div>
+                <p class="mt-1 text-xs leading-5 text-text-quaternary">{check.detail}</p>
+                <p class="mt-1 text-[11px] leading-4 text-text-quaternary">{check.fix}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="border-t border-border px-5 py-4">
+          <div class="flex flex-col gap-1">
+            <h4 class="text-sm font-590 text-text-primary">Effective prompt preview</h4>
+            <p class="text-xs leading-5 text-text-quaternary">
+              This is the instruction stack Cympho assembles around the agent before runtime
+              context is added.
+            </p>
+          </div>
+          <div class="mt-3 grid gap-2 lg:grid-cols-2">
+            <details
+              :for={section <- instruction_studio.effective_sections}
+              class={[
+                "rounded-lg border px-3 py-2",
+                studio_card_class(section.status)
+              ]}
+            >
+              <summary class="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    <span class={studio_status_dot_class(section.status)}></span>
+                    <p class="text-xs font-590 text-text-primary">{section.label}</p>
+                  </div>
+                  <span class="rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-quaternary">
+                    {section.source}
+                  </span>
+                </div>
+                <p class="mt-1 text-xs leading-5 text-text-quaternary">{section.summary}</p>
+              </summary>
+              <pre class="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-text-tertiary"><%= section.preview %></pre>
+            </details>
+          </div>
+        </div>
+
+        <div class="border-t border-border px-5 py-4">
+          <div class="flex flex-col gap-1">
+            <h4 class="text-sm font-590 text-text-primary">Scenario checks</h4>
+            <p class="text-xs leading-5 text-text-quaternary">
+              Role-specific situations Cympho expects this agent to handle without creating
+              ambiguous handoffs.
+            </p>
+          </div>
+          <div class="mt-3 grid gap-2 lg:grid-cols-3">
+            <div
+              :for={scenario <- instruction_studio.scenarios}
+              class={[
+                "rounded-lg border px-3 py-3",
+                studio_card_class(scenario.status)
+              ]}
+            >
+              <div class="flex items-center gap-2">
+                <span class={studio_status_dot_class(scenario.status)}></span>
+                <p class="text-xs font-590 text-text-primary">{scenario.label}</p>
+              </div>
+              <p class="mt-2 text-xs leading-5 text-text-tertiary">{scenario.detail}</p>
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                <span class="rounded bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-text-tertiary">
+                  {scenario.required_signal}
+                </span>
+                <span class="text-[11px] leading-4 text-text-quaternary">{scenario.fix}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="border-t border-border px-5 py-4">
+          <div class="flex flex-col gap-1">
+            <h4 class="text-sm font-590 text-text-primary">Quick snippets</h4>
+            <p class="text-xs leading-5 text-text-quaternary">
+              Use these exact tags in comments, review notes, or instruction files so issue pages
+              can summarize the agent's work cleanly.
+            </p>
+          </div>
+          <div class="mt-3 grid gap-2 lg:grid-cols-2">
+            <div
+              :for={snippet <- prompt_contract.snippets}
+              class="rounded-lg border border-border bg-surface px-3 py-2"
+            >
+              <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p class="text-xs font-590 text-text-primary">{snippet.label}</p>
+                <span class="rounded bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-text-tertiary">
+                  {snippet.tag}
+                </span>
+              </div>
+              <code class="block whitespace-pre-wrap font-mono text-[11px] leading-5 text-text-tertiary">
+                {snippet.body}
+              </code>
+            </div>
+          </div>
+        </div>
+
+        <div class="border-t border-border px-5 py-4">
+          <div class="flex flex-col gap-1">
+            <h4 class="text-sm font-590 text-text-primary">Suggested instruction patches</h4>
+            <p class="text-xs leading-5 text-text-quaternary">
+              Apply a patch into the custom instructions field when you want the default contract
+              reinforced for this specific agent. Nothing is persisted until you save.
+            </p>
+          </div>
+          <div class="mt-3 grid gap-2 lg:grid-cols-2">
+            <div
+              :for={patch <- instruction_studio.patches}
+              class={[
+                "rounded-lg border px-3 py-3",
+                instruction_patch_class(patch.tone)
+              ]}
+            >
+              <div class="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p class="text-xs font-590 text-text-primary">{patch.title}</p>
+                  <p class="mt-1 text-xs leading-5 text-text-quaternary">{patch.reason}</p>
+                </div>
+                <span class="rounded bg-canvas px-1.5 py-0.5 font-mono text-[10px] text-text-quaternary">
+                  {patch.id}
+                </span>
+              </div>
+              <pre class="mt-3 whitespace-pre-wrap rounded-md border border-border bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-text-secondary"><%= patch.body %></pre>
+              <button
+                type="button"
+                phx-click="apply_instruction_patch"
+                phx-value-patch={patch.id}
+                class="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-brand/40 hover:bg-surface-hover hover:text-text-primary"
+              >
+                Apply patch
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="border-t border-border px-5 py-4">
+          <div class="flex flex-col gap-1">
+            <h4 class="text-sm font-590 text-text-primary">Instruction history</h4>
+            <p class="text-xs leading-5 text-text-quaternary">
+              Every saved instruction/runtime contract change gets a score snapshot so prompt
+              tuning can be reviewed and rolled back.
+            </p>
+            <p
+              :if={@latest_prompt_tuning_revision}
+              class="text-xs leading-5 text-brand"
+            >
+              Last prompt tuning: v{@latest_prompt_tuning_revision.version} · {revision_score(
+                @latest_prompt_tuning_revision
+              )} · {format_datetime(@latest_prompt_tuning_revision.inserted_at)}
+            </p>
+          </div>
+          <div
+            :if={@config_revisions == []}
+            class="mt-3 rounded-lg border border-dashed border-border bg-surface px-3 py-4 text-sm text-text-tertiary"
+          >
+            No revisions yet. The first configuration save will create a baseline.
+          </div>
+          <div :if={@config_revisions != []} class="mt-3 grid gap-2">
+            <div
+              :for={{revision, index} <- Enum.with_index(@config_revisions)}
+              class="rounded-lg border border-border bg-surface px-3 py-3"
+            >
+              <% previous_revision = Enum.at(@config_revisions, index + 1) %>
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="text-sm font-590 text-text-primary">
+                      v{revision.version}
+                    </p>
+                    <span class={revision_status_badge(revision.studio_status)}>
+                      {revision.studio_status || "snapshot"}
+                    </span>
+                    <span class="rounded-full border border-border bg-canvas px-2 py-0.5 text-[11px] font-510 text-text-tertiary">
+                      {revision_score(revision)}
+                    </span>
+                    <span class="rounded-full border border-border bg-canvas px-2 py-0.5 text-[11px] font-510 text-text-quaternary">
+                      {revision_score_delta(revision, previous_revision)}
+                    </span>
+                  </div>
+                  <p class="mt-1 text-xs leading-5 text-text-quaternary">
+                    {revision_source_label(revision.source)} {format_datetime(
+                      revision.inserted_at
+                    )} · {adapter_label_human(revision.adapter || @agent.adapter)} · {revision.role ||
+                      @agent.role}
+                  </p>
+                </div>
+                <button
+                  :if={index > 0}
+                  type="button"
+                  phx-click="restore_config_revision"
+                  phx-value-id={revision.id}
+                  data-confirm={"Restore instruction revision v#{revision.version}?"}
+                  class="inline-flex items-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-brand/40 hover:bg-surface-hover hover:text-text-primary"
+                >
+                  Restore
+                </button>
+                <span
+                  :if={index == 0}
+                  class="rounded-md border border-border bg-canvas px-2.5 py-1.5 text-xs font-510 text-text-quaternary"
+                >
+                  Current saved
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </.panel>
+
       <%!-- Adapter --%>
       <.panel class="p-5">
         <h3 class="mb-4 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-          Adapter
+          Runtime Profile
         </h3>
+        <div class="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
+          <div class="space-y-1.5">
+            <label
+              for="agent-runtime-profile"
+              class="block text-xs font-510 text-text-secondary"
+            >
+              Profile
+            </label>
+            <select
+              id="agent-runtime-profile"
+              name="agent[runtime_profile_id]"
+              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            >
+              <option
+                :for={profile <- @runtime_profiles}
+                value={profile.id}
+                data-adapter={profile.adapter || ""}
+                selected={profile.id == @selected_runtime_profile_id}
+              >
+                {profile.name}
+              </option>
+            </select>
+            <p class="text-xs leading-5 text-text-quaternary">
+              Profiles apply adapter, command, model, and provider defaults. Use Custom when you
+              need raw adapter control.
+            </p>
+          </div>
+
+          <div class="rounded-lg border border-border bg-surface px-3 py-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded-full border border-brand/30 bg-brand/10 px-2 py-0.5 text-[11px] font-510 text-brand">
+                {@runtime_profile.posture}
+              </span>
+              <span
+                :if={@runtime_profile.adapter}
+                class="rounded-full border border-border bg-canvas px-2 py-0.5 text-[11px] font-510 text-text-tertiary"
+              >
+                {adapter_label(@runtime_profile.adapter)}
+              </span>
+            </div>
+            <p class="mt-2 text-sm font-510 text-text-primary">{@runtime_profile.name}</p>
+            <p class="mt-1 text-xs leading-5 text-text-quaternary">
+              {@runtime_profile.description}
+            </p>
+            <p class="mt-2 font-mono text-xs text-text-secondary">
+              {runtime_profile_summary(@runtime_profile)}
+            </p>
+          </div>
+        </div>
+
+        <div class="mb-5 rounded-lg border border-border bg-surface px-3 py-3">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                Quick presets
+              </h4>
+              <p class="mt-1 text-xs text-text-quaternary">
+                Apply a safe profile and concurrency posture, then save when it looks right.
+              </p>
+            </div>
+          </div>
+          <div class="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <button
+              :for={preset <- quick_runtime_presets()}
+              type="button"
+              phx-click="apply_runtime_preset"
+              phx-value-preset={preset.id}
+              data-runtime-preset={preset.id}
+              class="rounded-lg border border-border bg-panel px-3 py-2 text-left transition-colors hover:border-brand/40 hover:bg-surface-hover"
+            >
+              <span class="block text-sm font-590 text-text-primary">{preset.name}</span>
+              <span class="mt-1 block text-xs leading-5 text-text-quaternary">
+                {preset.description}
+              </span>
+              <span class="mt-2 block font-mono text-[11px] text-text-tertiary">
+                {preset.profile_id} · {preset.max_concurrent_jobs} slot{if preset.max_concurrent_jobs ==
+                                                                             1, do: "", else: "s"}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div class="mb-4 flex items-center justify-between gap-3 border-t border-border pt-4">
+          <div>
+            <h4 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+              Adapter
+            </h4>
+            <p class="mt-1 text-xs text-text-quaternary">
+              The profile chooses the adapter unless Custom is selected.
+            </p>
+          </div>
+        </div>
         <div class="grid gap-5 sm:grid-cols-2">
           <.input
             field={@form[:adapter]}
@@ -527,6 +1030,156 @@
             </div>
           </div>
         </div>
+
+        <% readiness =
+          adapter_readiness(selected_adapter, %{
+            agent: @agent,
+            command: @runtime_command,
+            endpoint: @openclaw_endpoint,
+            env_vars: @env_vars,
+            model: @runtime_model,
+            process_preset: @process_preset,
+            provider: @runtime_provider,
+            secret_count: @secret_count
+          }) %>
+        <div class="mt-5 border-t border-border pt-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                Agent preflight
+              </h4>
+              <p class="mt-1 text-xs text-text-quaternary">{readiness.summary}</p>
+              <p class="mt-1 text-[11px] leading-4 text-text-quaternary">
+                Read-only check. It validates saved or unsaved fields, local commands, and
+                credential signals without starting an agent or calling a provider.
+              </p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                phx-click="test_adapter"
+                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+              >
+                <span class="hero-bolt-mini h-3.5 w-3.5"></span> Test adapter
+              </button>
+              <span class={readiness_badge_class(readiness.status)}>
+                {readiness.label}
+              </span>
+            </div>
+          </div>
+          <div class="mt-3 grid gap-2 lg:grid-cols-3">
+            <div
+              :for={item <- readiness.items}
+              class="rounded-md border border-border bg-surface px-3 py-2"
+            >
+              <div class="flex items-center gap-2">
+                <span class={readiness_dot_class(item.status)}></span>
+                <p class="text-xs font-510 text-text-secondary">{item.label}</p>
+              </div>
+              <p class="mt-1 text-xs text-text-quaternary">{item.detail}</p>
+              <div
+                :if={Map.get(item, :target_id) || Map.get(item, :target_path)}
+                class="mt-2 flex flex-wrap items-center gap-2"
+              >
+                <a
+                  :if={Map.get(item, :target_id)}
+                  href={"##{Map.get(item, :target_id)}"}
+                  class="inline-flex items-center rounded-md border border-border bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary hover:border-brand/40 hover:bg-surface-hover hover:text-text-primary"
+                >
+                  {Map.get(item, :target_label) || "Fix"}
+                </a>
+                <a
+                  :if={Map.get(item, :target_path)}
+                  href={Map.get(item, :target_path)}
+                  class="inline-flex items-center rounded-md border border-border bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary hover:border-brand/40 hover:bg-surface-hover hover:text-text-primary"
+                >
+                  {Map.get(item, :target_label) || "Open"}
+                </a>
+              </div>
+            </div>
+          </div>
+          <div
+            :if={@adapter_health_check_result}
+            class="mt-3 rounded-lg border border-border bg-surface px-3 py-3"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                  Adapter preflight
+                </p>
+                <p class="mt-1 text-sm font-510 text-text-primary">
+                  {@adapter_health_check_result.adapter}
+                </p>
+              </div>
+              <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{health_check_badge_class(@adapter_health_check_result.status)}"}>
+                {@adapter_health_check_result.label}
+              </span>
+            </div>
+            <p class="mt-2 text-xs leading-5 text-text-tertiary">
+              {@adapter_health_check_result.message}
+            </p>
+            <div
+              :if={@adapter_health_check_result.error}
+              class="mt-3 rounded-md border border-border bg-canvas px-3 py-2"
+            >
+              <div class="flex flex-wrap items-center gap-2">
+                <span class={"rounded-full border px-2 py-0.5 text-[10px] font-510 #{adapter_error_badge_class(@adapter_health_check_result.error.category)}"}>
+                  {adapter_error_category_label(@adapter_health_check_result.error.category)}
+                </span>
+                <span class="text-xs font-590 text-text-primary">
+                  {@adapter_health_check_result.error.title}
+                </span>
+              </div>
+              <p class="mt-1 text-xs leading-5 text-text-quaternary">
+                {@adapter_health_check_result.error.hint}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <% capacity =
+          runtime_capacity(
+            selected_adapter,
+            @form[:max_concurrent_jobs].value || 3,
+            @recent_runs
+          ) %>
+        <div class="mt-4 rounded-lg border border-border bg-surface px-3 py-3">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                Runtime capacity
+              </h4>
+              <p class="mt-1 text-xs text-text-quaternary">{capacity.summary}</p>
+            </div>
+            <span class={"inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-510 #{capacity_badge_class(capacity.level)}"}>
+              <span class={"h-1.5 w-1.5 rounded-full #{capacity_dot_class(capacity.level)}"}>
+              </span>
+              {capacity.label}
+            </span>
+          </div>
+          <div class="mt-3 grid gap-2 sm:grid-cols-3">
+            <div class="rounded-md border border-border bg-canvas px-3 py-2">
+              <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+                Runtime type
+              </p>
+              <p class="mt-1 text-xs font-510 text-text-secondary">{capacity.runtime_type}</p>
+            </div>
+            <div class="rounded-md border border-border bg-canvas px-3 py-2">
+              <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+                Slots
+              </p>
+              <p class="mt-1 text-xs font-510 text-text-secondary">{capacity.slot_label}</p>
+            </div>
+            <div class="rounded-md border border-border bg-canvas px-3 py-2">
+              <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+                Active runs
+              </p>
+              <p class="mt-1 text-xs font-510 text-text-secondary">{capacity.running_runs}</p>
+            </div>
+          </div>
+          <p class="mt-3 text-xs leading-5 text-text-quaternary">{capacity.hint}</p>
+        </div>
+
         <div
           data-adapter-panel="claude_code"
           hidden={selected_adapter != "claude_code"}
@@ -536,7 +1189,7 @@
             Runtime command
           </p>
           <p class="mt-1 font-mono text-xs text-text-secondary">
-            {adapter_runtime_label(@agent)}
+            {runtime_command_label(@runtime_command, @agent)}
           </p>
           <p class="mt-1 text-xs text-text-quaternary">
             Claude-compatible wrappers use environment variables for provider and model routing.
@@ -820,7 +1473,7 @@
       </.panel>
 
       <%!-- Environment Variables --%>
-      <.panel class="overflow-hidden">
+      <.panel id="agent-env-vars" class="overflow-hidden">
         <div class="flex items-center justify-between border-b border-border px-5 py-3">
           <div>
             <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
@@ -946,6 +1599,7 @@
         class="max-h-[70vh] divide-y divide-border overflow-y-auto"
       >
         <li :for={run <- @recent_runs}>
+          <% adapter_error = adapter_error_for_run(run) %>
           <button
             type="button"
             phx-click="select_run"
@@ -981,6 +1635,12 @@
             </p>
             <span class="text-[11px] text-text-quaternary">
               {(run.input_tokens || 0) + (run.output_tokens || 0)} tok
+            </span>
+            <span
+              :if={adapter_error}
+              class={"w-fit rounded-full border px-2 py-0.5 text-[10px] font-510 #{adapter_error_badge_class(adapter_error.category)}"}
+            >
+              {adapter_error_category_label(adapter_error.category)}
             </span>
           </button>
         </li>
@@ -1049,6 +1709,7 @@
         </code>
       </div>
 
+      <% selected_adapter_error = adapter_error_for_run(@selected_run) %>
       <div class="px-5 py-4">
         <p class="text-xs uppercase tracking-[0.08em] text-text-quaternary mb-2">
           Transcript / Summary
@@ -1060,6 +1721,27 @@
           {render_markdown(@selected_run.continuation_summary)}
         </div>
 
+        <div
+          :if={selected_adapter_error}
+          class="mt-4 rounded-lg border border-red-500/20 bg-red-500/[0.06] p-4"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <span class={"inline-flex rounded-full border px-2 py-0.5 text-[11px] font-510 #{adapter_error_badge_class(selected_adapter_error.category)}"}>
+              {adapter_error_category_label(selected_adapter_error.category)}
+            </span>
+            <span class="text-sm font-590 text-text-primary">{selected_adapter_error.title}</span>
+          </div>
+          <p class="mt-2 text-sm leading-6 text-text-secondary">
+            {selected_adapter_error.message}
+          </p>
+          <p
+            :if={selected_adapter_error.hint not in [nil, ""]}
+            class="mt-1 text-xs text-text-tertiary"
+          >
+            {selected_adapter_error.hint}
+          </p>
+        </div>
+
         <div :if={@selected_run.log_excerpt && @selected_run.log_excerpt != ""} class="mt-4">
           <p class="text-xs uppercase tracking-[0.08em] text-text-quaternary mb-1">
             Adapter log excerpt
@@ -1067,8 +1749,13 @@
           <pre class="max-h-96 overflow-auto rounded-lg border border-border bg-surface px-3 py-2 font-mono text-[11px] leading-5 text-text-secondary"><%= @selected_run.log_excerpt %></pre>
         </div>
 
-        <div :if={@selected_run.error_reason} class="mt-4">
-          <p class="text-xs uppercase tracking-[0.08em] text-text-quaternary mb-1">Error</p>
+        <div
+          :if={@selected_run.error_reason && is_nil(selected_adapter_error)}
+          class="mt-4"
+        >
+          <p class="text-xs uppercase tracking-[0.08em] text-text-quaternary mb-1">
+            Error
+          </p>
           <pre class="overflow-auto rounded-lg border border-red-500/25 bg-red-500/5 px-3 py-2 font-mono text-[11px] leading-5 text-red-300"><%= @selected_run.error_reason %></pre>
         </div>
 
@@ -1076,7 +1763,7 @@
           :if={
             @selected_run.continuation_summary in [nil, ""] and
               @selected_run.log_excerpt in [nil, ""] and
-              is_nil(@selected_run.error_reason)
+              is_nil(@selected_run.error_reason) and is_nil(selected_adapter_error)
           }
           class="rounded-lg border border-border bg-surface px-4 py-8 text-center text-sm text-text-tertiary"
         >

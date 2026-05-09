@@ -138,14 +138,36 @@ defmodule Cympho.Documents do
 
   def get_revision!(id), do: Repo.get!(IssueDocumentRevision, id)
 
+  def get_revision(id) do
+    case Repo.get(IssueDocumentRevision, id) do
+      nil -> {:error, :not_found}
+      revision -> {:ok, revision}
+    end
+  end
+
+  def get_document_revision(document_id, id) when is_binary(document_id) do
+    revision =
+      Repo.one(
+        from r in IssueDocumentRevision,
+          where: r.document_id == ^document_id and r.id == ^id
+      )
+
+    case revision do
+      nil -> {:error, :not_found}
+      revision -> {:ok, revision}
+    end
+  end
+
+  def get_document_revision(_document_id, _id), do: {:error, :not_found}
+
   def rollback_to_revision(
         %IssueDocument{} = document,
         revision_id,
         author_id \\ nil,
         author_type \\ "agent"
       ) do
-    case get_revision!(revision_id) do
-      %IssueDocumentRevision{} = revision ->
+    case get_document_revision(document.id, revision_id) do
+      {:ok, %IssueDocumentRevision{} = revision} ->
         # Check for pending approvals on the issue
         if has_pending_approvals?(document.issue_id) do
           {:error, :pending_approvals}
@@ -180,6 +202,9 @@ defmodule Cympho.Documents do
               {:error, changeset}
           end
         end
+
+      {:error, _} ->
+        {:error, :not_found}
     end
   end
 

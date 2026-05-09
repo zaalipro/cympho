@@ -8,18 +8,23 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
   alias Cympho.Projects
   alias Cympho.Labels
 
+  defp create_agent(attrs), do: Agents.create_agent(scoped_attrs(attrs))
+  defp create_issue(attrs), do: Issues.create_issue(scoped_attrs(attrs))
+  defp create_label(attrs), do: Labels.create_label(scoped_attrs(attrs))
+  defp create_project(attrs), do: Projects.create_project(scoped_attrs(attrs))
+
   setup do
     {:ok, project} =
-      Projects.create_project(%{name: "Test Project", prefix: "TP"})
+      create_project(%{name: "Test Project", prefix: "TP"})
 
     {:ok, agent} =
-      Agents.create_agent(%{name: "Filter Agent", role: :engineer, status: :idle})
+      create_agent(%{name: "Filter Agent", role: :engineer, status: :idle})
 
     {:ok, label} =
-      Labels.create_label(%{name: "bug", color: "#ff0000"})
+      create_label(%{name: "bug", color: "#ff0000"})
 
     {:ok, issue1} =
-      Issues.create_issue(%{
+      create_issue(%{
         title: "Pagination test issue one",
         description: "First issue for testing",
         status: :backlog,
@@ -31,7 +36,7 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
     {:ok, _label} = Issues.add_label_to_issue(issue1, label)
 
     {:ok, _issue2} =
-      Issues.create_issue(%{
+      create_issue(%{
         title: "Pagination test issue two",
         description: "Second issue for testing",
         status: :in_progress,
@@ -39,7 +44,7 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
       })
 
     {:ok, _issue3} =
-      Issues.create_issue(%{
+      create_issue(%{
         title: "Another completely different title",
         description: "Third issue for testing",
         status: :todo,
@@ -239,7 +244,7 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
   describe "Index - Pagination" do
     test "shows pagination controls when multiple pages", %{conn: conn} do
       for i <- 1..30 do
-        Issues.create_issue(%{
+        create_issue(%{
           title: "Bulk issue #{i}",
           description: "Bulk test"
         })
@@ -261,7 +266,7 @@ defmodule CymphoWeb.IssueLive.IndexFilterTest do
 
     test "pagination resets to page 1 when filter changes", %{conn: conn} do
       for i <- 1..15 do
-        Issues.create_issue(%{
+        create_issue(%{
           title: "More issues #{i}",
           description: "Bulk"
         })

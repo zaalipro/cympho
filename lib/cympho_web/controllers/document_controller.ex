@@ -49,9 +49,9 @@ defmodule CymphoWeb.DocumentController do
         "revision_id" => revision_id
       }) do
     with {:ok, issue} <- scoped_issue(conn, issue_id),
-         {:ok, document} <- Documents.get_document_by_key(issue.id, key) do
+         {:ok, document} <- Documents.get_document_by_key(issue.id, key),
+         {:ok, revision} <- scoped_revision(document, revision_id) do
       revisions = Documents.list_revisions(document.id)
-      revision = Documents.get_revision!(revision_id)
       render(conn, :show_revision, document: document, revisions: revisions, revision: revision)
     end
   end
@@ -63,7 +63,9 @@ defmodule CymphoWeb.DocumentController do
         "other_revision_id" => other_revision_id
       }) do
     with {:ok, issue} <- scoped_issue(conn, issue_id),
-         {:ok, document} <- Documents.get_document_by_key(issue.id, key) do
+         {:ok, document} <- Documents.get_document_by_key(issue.id, key),
+         :ok <- validate_revision_ref(document, revision_id),
+         :ok <- validate_revision_ref(document, other_revision_id) do
       diff = Documents.get_diff(revision_id, other_revision_id)
       render(conn, :diff, document: document, diff: diff)
     end
@@ -74,7 +76,8 @@ defmodule CymphoWeb.DocumentController do
     author_type = "user"
 
     with {:ok, issue} <- scoped_issue(conn, issue_id),
-         {:ok, document} <- Documents.get_document_by_key(issue.id, key) do
+         {:ok, document} <- Documents.get_document_by_key(issue.id, key),
+         :ok <- validate_revision_ref(document, revision_id) do
       case Documents.rollback_to_revision(document, revision_id, author_id, author_type) do
         {:ok, _updated} ->
           conn
@@ -98,5 +101,16 @@ defmodule CymphoWeb.DocumentController do
 
   defp scoped_issue(conn, issue_id) do
     Issues.get_company_issue(conn.assigns.current_company.id, issue_id)
+  end
+
+  defp scoped_revision(document, revision_id) do
+    Documents.get_document_revision(document.id, revision_id)
+  end
+
+  defp validate_revision_ref(document, revision_id) do
+    case scoped_revision(document, revision_id) do
+      {:ok, _revision} -> :ok
+      {:error, _} -> {:error, :not_found}
+    end
   end
 end

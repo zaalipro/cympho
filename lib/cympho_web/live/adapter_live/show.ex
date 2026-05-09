@@ -85,7 +85,7 @@ defmodule CymphoWeb.AdapterLive.Show do
 
   @impl true
   def handle_event("validate_config", %{"config" => config_params}, socket) do
-    config = atomize_config_keys(config_params)
+    config = normalize_config_keys(config_params, socket.assigns.config_schema)
 
     case Adapters.validate_config(socket.assigns.adapter_key, config) do
       :ok ->
@@ -98,7 +98,7 @@ defmodule CymphoWeb.AdapterLive.Show do
 
   @impl true
   def handle_event("save_config", %{"config" => config_params}, socket) do
-    config = atomize_config_keys(config_params)
+    config = normalize_config_keys(config_params, socket.assigns.config_schema)
 
     case Adapters.validate_config(socket.assigns.adapter_key, config) do
       :ok ->
@@ -129,11 +129,20 @@ defmodule CymphoWeb.AdapterLive.Show do
     end)
   end
 
-  defp atomize_config_keys(params) when is_map(params) do
-    Map.new(params, fn {k, v} ->
-      key = if is_binary(k), do: String.to_atom(k), else: k
-      {key, parse_config_value(v)}
+  defp normalize_config_keys(params, schema) when is_map(params) do
+    allowed_keys =
+      Map.new(schema, fn entry ->
+        {Atom.to_string(entry.key), entry.key}
+      end)
+
+    params
+    |> Enum.flat_map(fn {k, v} ->
+      case Map.fetch(allowed_keys, to_string(k)) do
+        {:ok, key} -> [{key, parse_config_value(v)}]
+        :error -> []
+      end
     end)
+    |> Map.new()
   end
 
   defp parse_config_value(""), do: nil

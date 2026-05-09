@@ -19,7 +19,7 @@ defmodule CymphoWeb.IssueLive.New do
      |> assign(:page_title, "New Issue")
      |> assign(:projects, projects)
      |> assign(:issue_scope, scope)
-     |> assign(:intake_route, intake_route(scope))
+     |> assign(:intake_route, intake_route(scope, socket.assigns[:current_company]))
      |> assign(:runtime_enabled?, Dispatcher.enabled?())
      |> assign(:form, to_form(changeset))}
   end
@@ -39,6 +39,14 @@ defmodule CymphoWeb.IssueLive.New do
   end
 
   @impl true
+  def handle_event(
+        "save",
+        %{"issue" => _issue_params},
+        %{assigns: %{current_company: nil}} = socket
+      ) do
+    {:noreply, put_flash(socket, :error, "Choose a company before creating issues.")}
+  end
+
   def handle_event("save", %{"issue" => issue_params}, socket) do
     params = @default_attrs |> Map.merge(socket.assigns.issue_scope) |> Map.merge(issue_params)
 
@@ -101,7 +109,7 @@ defmodule CymphoWeb.IssueLive.New do
   defp list_projects(socket) do
     case socket.assigns[:current_company] do
       %{id: company_id} -> Projects.list_projects_by_company(company_id)
-      _ -> Projects.list_projects()
+      _ -> []
     end
   end
 
@@ -123,12 +131,12 @@ defmodule CymphoWeb.IssueLive.New do
     end
   end
 
-  defp intake_route(%{"assignee_id" => agent_id, "assigned_role" => role}) do
-    case Agents.get_agent(agent_id) do
+  defp intake_route(%{"assignee_id" => agent_id, "assigned_role" => role}, %{id: company_id}) do
+    case Agents.get_company_agent(company_id, agent_id) do
       {:ok, agent} -> %{agent: agent, role: role}
       {:error, _} -> nil
     end
   end
 
-  defp intake_route(_scope), do: nil
+  defp intake_route(_scope, _company), do: nil
 end

@@ -8,6 +8,7 @@ defmodule CymphoWeb.InboxLiveTest do
   alias Cympho.Inbox
   alias Cympho.Issues
   alias Cympho.Repo
+  alias Cympho.ReviewNudges
   alias Cympho.Inbox.InboxState
   alias CymphoWeb.ConnCase
 
@@ -141,8 +142,53 @@ defmodule CymphoWeb.InboxLiveTest do
       assert html =~ "To Inbox Agent"
       assert html =~ "High"
       assert html =~ "Role: engineer"
+      assert html =~ "Assigned, but no delivery evidence yet."
+      assert html =~ "Next action"
+      assert html =~ "Start the assigned agent"
       assert html =~ "Open issue"
       assert html =~ "Mark read"
+
+      {:ok, _view, compact_html} = live(conn, "/inbox?density=compact")
+
+      assert compact_html =~ "Review checkout failure"
+      assert compact_html =~ "Assigned, but no delivery evidence yet."
+      refute compact_html =~ "Start the assigned agent"
+    end
+
+    test "labels review-nudge inbox items", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Review Nudged Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Needs review evidence",
+          description: "Missing evidence should be obvious in inbox.",
+          status: :in_progress,
+          priority: :medium,
+          company_id: company.id,
+          assigned_role: "engineer"
+        })
+
+      blocker = %{key: :delivery_comment, label: "Delivery comment", prompt: "Missing delivery"}
+      [nudge] = ReviewNudges.plan(issue, [blocker], agents: [agent])
+
+      assert {:ok, _queued} =
+               ReviewNudges.execute(issue, nudge.key, blockers: [blocker], agents: [agent])
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, _view, html} = live(conn, "/inbox")
+
+      assert html =~ "Needs review evidence"
+      assert html =~ "Review evidence needed"
+      assert html =~ "Queued by review gate"
+      assert html =~ "Delivery comment"
     end
   end
 

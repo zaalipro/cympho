@@ -75,6 +75,7 @@ defmodule CymphoWeb do
       import CymphoWeb.Components.ColorSwatchPicker
       import CymphoWeb.Components.CompanyRail
       import CymphoWeb.Components.CompanySwitcherStatic
+      import CymphoWeb.Components.IssueDigest
       import CymphoWeb.Components.NavRail
       import CymphoWeb.Components.UserMenu
       import CymphoWeb.Gettext

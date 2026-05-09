@@ -14,6 +14,7 @@ defmodule Cympho.HeartbeatEngine do
 
   import Ecto.Query, warn: false
   alias Cympho.Repo
+  alias Cympho.Adapters.Error, as: AdapterError
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.{Agents, Workspace}
   require Logger
@@ -66,6 +67,7 @@ defmodule Cympho.HeartbeatEngine do
       log_audit(updated, "run_completed")
       record_cost_event(updated)
       CymphoWeb.Events.broadcast_run_status(updated, :run_completed)
+      _ = Cympho.ReviewNudges.reconcile_issue(updated.issue_id)
     end)
   end
 
@@ -74,10 +76,17 @@ defmodule Cympho.HeartbeatEngine do
   @doc """
   Marks a run as failed with an error reason.
   """
-  @spec fail_run(Run.t(), String.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t()}
+  @spec fail_run(Run.t(), term()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t()}
   def fail_run(%Run{status: "running"} = run, error_reason) do
+    attrs =
+      AdapterError.run_attrs(error_reason, run.run_metadata || %{},
+        adapter: run.adapter,
+        detail: run.log_excerpt
+      )
+      |> Map.take([:error_reason, :log_excerpt, :run_metadata])
+
     run
-    |> Run.fail_changeset(%{error_reason: error_reason})
+    |> Run.fail_changeset(attrs)
     |> Repo.update()
     |> tap_ok(fn updated ->
       log_audit(updated, "run_failed")

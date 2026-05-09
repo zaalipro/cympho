@@ -23,6 +23,30 @@ defmodule Cympho.Comments do
   @doc """
   Gets a single comment by id.
   """
+  def get_comment(id) do
+    case Repo.get(Comment, id) do
+      nil -> {:error, :not_found}
+      comment -> {:ok, comment}
+    end
+  end
+
+  def get_company_comment(company_id, id) when is_binary(company_id) do
+    comment =
+      Repo.one(
+        from c in Comment,
+          join: i in Issue,
+          on: i.id == c.issue_id,
+          where: i.company_id == ^company_id and c.id == ^id
+      )
+
+    case comment do
+      nil -> {:error, :not_found}
+      comment -> {:ok, comment}
+    end
+  end
+
+  def get_company_comment(_company_id, _id), do: {:error, :not_found}
+
   def get_comment!(id), do: Repo.get!(Comment, id)
 
   @doc """
@@ -63,6 +87,7 @@ defmodule Cympho.Comments do
 
         # Wake the assigned agent if the issue is active
         _ = Wakes.notify_comment(comment)
+        maybe_reconcile_review_nudges(comment)
 
         {:ok, comment}
 
@@ -137,4 +162,19 @@ defmodule Cympho.Comments do
   def subscribe(company_id) do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:comments")
   end
+
+  defp maybe_reconcile_review_nudges(comment) do
+    unless auto_nudge_system_comment?(comment) do
+      _ = Cympho.ReviewNudges.reconcile_issue(comment.issue_id)
+    end
+
+    :ok
+  end
+
+  defp auto_nudge_system_comment?(%Comment{author_type: "system", body: body})
+       when is_binary(body) do
+    String.starts_with?(body, "Auto-nudge ")
+  end
+
+  defp auto_nudge_system_comment?(_comment), do: false
 end
