@@ -93,6 +93,22 @@ defmodule CymphoWeb.AgentLiveTest do
       {:ok, _view, html} = live(conn, "/agents")
       assert html =~ "/agents/new"
     end
+
+    test "agents page links to remote hiring marketplace", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/agents")
+      assert html =~ "/agents/remote"
+    end
+  end
+
+  describe "Remote agent marketplace" do
+    test "renders configuration guidance when Agrenting is not connected", %{conn: conn} do
+      {:ok, view, html} = live(conn, "/agents/remote")
+
+      assert html =~ "Hire Remote Agent"
+      assert render(view) =~ "Agrenting is not connected"
+      assert render(view) =~ "Connect Agrenting"
+      assert render(view) =~ "/settings/integrations"
+    end
   end
 
   describe "Show - Agent Details" do

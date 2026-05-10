@@ -70,7 +70,7 @@ defmodule Cympho.Secrets do
 
   def create_secret(attrs) do
     with {:ok, encrypted} <- encrypt_value(attrs[:value] || attrs["value"]) do
-      attrs = Map.drop(attrs, [:value, "value"]) |> Map.put(:encrypted_value, encrypted)
+      attrs = Map.drop(attrs, [:value, "value"]) |> Map.put("encrypted_value", encrypted)
 
       %Secret{}
       |> Secret.changeset(attrs)
@@ -86,7 +86,7 @@ defmodule Cympho.Secrets do
 
         plaintext ->
           {:ok, encrypted} = encrypt_value(plaintext)
-          attrs |> Map.drop([:value, "value"]) |> Map.put(:encrypted_value, encrypted)
+          attrs |> Map.drop([:value, "value"]) |> Map.put("encrypted_value", encrypted)
       end
 
     secret

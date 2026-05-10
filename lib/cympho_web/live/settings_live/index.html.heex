@@ -1,6 +1,18 @@
 <div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0">
   <.header title={@page_title} subtitle="Notification channels and event delivery preferences." />
 
+  <nav class="mb-5 flex flex-wrap items-center gap-2">
+    <span class="rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-sm font-510 text-brand">
+      Notifications
+    </span>
+    <.app_link
+      navigate={~p"/settings/integrations"}
+      class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+    >
+      Integrations
+    </.app_link>
+  </nav>
+
   <div
     :if={@user == nil}
     class="rounded-xl border border-border bg-surface px-6 py-16 text-center"

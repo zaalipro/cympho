@@ -41,7 +41,6 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @max_retries Application.compile_env(:cympho, [:orchestrator, :max_retries], 5)
   @base_backoff_ms Application.compile_env(:cympho, [:orchestrator, :base_backoff_ms], 30_000)
   @max_backoff_ms Application.compile_env(:cympho, [:orchestrator, :max_backoff_ms], 600_000)
-  @enabled_default Application.compile_env(:cympho, [:orchestrator, :enabled], true)
 
   # Client
 
@@ -75,7 +74,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
   def enabled? do
     :cympho
     |> Application.get_env(:orchestrator, [])
-    |> Keyword.get(:enabled, @enabled_default)
+    |> Keyword.get(:enabled, true)
   end
 
   @doc "Requests an immediate poll scoped to one company."
@@ -219,6 +218,11 @@ defmodule Cympho.Orchestrator.Dispatcher do
     new_state = %{state | running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id)}
     broadcast_state(new_state)
     {:noreply, new_state}
+  end
+
+  @impl true
+  def handle_info({:EXIT, _from, _reason}, %State{} = state) do
+    {:noreply, state}
   end
 
   # Graceful shutdown: on SIGTERM (or supervisor stop) the BEAM is about to

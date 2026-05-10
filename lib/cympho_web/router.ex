@@ -79,6 +79,7 @@ defmodule CymphoWeb.Router do
       live "/board-approvals/:id", BoardApprovalLive.Show
       live "/agents", AgentLive.Index
       live "/agents/new", AgentLive.New
+      live "/agents/remote", AgentLive.Remote
       live "/agents/:id", AgentLive.Show
       live "/adapters", AdapterLive.Index
       live "/adapters/:key", AdapterLive.Show
@@ -89,6 +90,7 @@ defmodule CymphoWeb.Router do
       live "/routines/:id/edit", RoutineLive.Edit
       live "/onboarding", OnboardingLive.Index
       live "/settings", SettingsLive.Index
+      live "/settings/integrations", SettingsLive.Integrations
       live "/execution-policies", ExecutionPolicyLive.Index
       live "/execution-policies/new", ExecutionPolicyLive.New
       live "/execution-policies/:id", ExecutionPolicyLive.Show

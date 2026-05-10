@@ -342,14 +342,16 @@ defmodule Cympho.AgentsTest do
       assert :codex in options
       assert :cursor in options
       assert :http in options
+      assert :openclaw in options
       assert :process in options
+      assert :agrenting in options
     end
   end
 
   describe "Agent.adapter_options/0" do
     test "returns valid adapter types from schema" do
       options = Agent.adapter_options()
-      assert options == [:claude_code, :codex, :cursor, :http, :openclaw, :process]
+      assert options == [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting]
     end
   end
 
@@ -360,7 +362,7 @@ defmodule Cympho.AgentsTest do
     end
 
     test "accepts all valid adapter values" do
-      for adapter <- [:claude_code, :codex, :cursor, :http, :process] do
+      for adapter <- [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting] do
         changeset =
           Agents.change_agent(%Agent{}, %{name: "Test", role: :engineer, adapter: adapter})
 

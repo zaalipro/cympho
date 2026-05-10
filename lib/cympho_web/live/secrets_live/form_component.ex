@@ -4,7 +4,7 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
   alias Cympho.Secrets.Secret
 
   @impl true
-  def update(%{secret: secret, form_mode: form_mode, company_id: company_id}, socket) do
+  def update(%{secret: secret, form_mode: form_mode, company_id: company_id} = assigns, socket) do
     changeset =
       case {form_mode, secret} do
         {:edit, %Secret{} = secret} -> Secret.changeset(secret, %{})
@@ -19,6 +19,7 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
       |> assign(:secret, secret)
       |> assign(:form_mode, form_mode)
       |> assign(:company_id, company_id)
+      |> assign(:on_cancel, Map.get(assigns, :on_cancel))
       |> assign(:form, form)
 
     {:ok, socket}
@@ -61,7 +62,8 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
 
     case result do
       {:ok, secret} ->
-        {:reply, {:ok, secret}, socket}
+        send(self(), {__MODULE__, {:saved, secret}})
+        {:noreply, socket}
 
       {:error, changeset} ->
         {:noreply, assign(socket, :form, to_form(changeset, as: :secret))}

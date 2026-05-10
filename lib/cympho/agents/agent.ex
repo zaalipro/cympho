@@ -38,7 +38,8 @@ defmodule Cympho.Agents.Agent do
     field :max_concurrent_jobs, :integer, default: 3
     field :last_heartbeat_at, :utc_datetime
 
-    field :adapter, Ecto.Enum, values: [:claude_code, :codex, :cursor, :http, :openclaw, :process]
+    field :adapter, Ecto.Enum,
+      values: [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting]
 
     field :health_status, Ecto.Enum,
       values: [:healthy, :degraded, :unavailable],
@@ -144,7 +145,7 @@ defmodule Cympho.Agents.Agent do
     ]
 
   def role_options, do: [:engineer, :product_manager, :designer, :ceo, :cto]
-  def adapter_options, do: [:claude_code, :codex, :cursor, :http, :openclaw, :process]
+  def adapter_options, do: [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting]
   def health_status_options, do: [:healthy, :degraded, :unavailable]
 
   def status_changeset(agent, attrs) do

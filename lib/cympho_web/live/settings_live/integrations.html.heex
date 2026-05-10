@@ -1,0 +1,222 @@
+<.page size="wide">
+  <.header
+    title="Integrations"
+    subtitle="Connect company-level services that extend how Cympho agents work."
+  >
+    <:actions>
+      <.app_link
+        navigate={~p"/agents/remote"}
+        class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+      >
+        <.icon name="hero-user-plus" class="h-4 w-4" /> Remote agents
+      </.app_link>
+    </:actions>
+  </.header>
+
+  <nav class="mb-5 flex flex-wrap items-center gap-2">
+    <.app_link
+      navigate={~p"/settings"}
+      class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+    >
+      Notifications
+    </.app_link>
+    <span class="rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-sm font-510 text-brand">
+      Integrations
+    </span>
+  </nav>
+
+  <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+    <.panel>
+      <div class="border-b border-border p-5">
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div class="flex min-w-0 gap-3">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-brand/25 bg-brand/10 text-brand">
+              <.icon name="hero-sparkles" class="h-5 w-5" />
+            </div>
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="text-base font-590 text-text-primary">Agrenting</h2>
+                <span class={"rounded-full border px-2 py-0.5 text-xs font-510 #{connection_badge_class(@agrenting_status)}"}>
+                  {connection_badge_label(@agrenting_status)}
+                </span>
+              </div>
+              <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
+                Hire marketplace agents and run them from Cympho without exposing the API key to individual users.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <form phx-submit="save_agrenting" class="p-5">
+        <div class="grid gap-5 lg:grid-cols-2">
+          <label class="space-y-1.5">
+            <span class="text-xs font-510 text-text-secondary">API key</span>
+            <input
+              type="password"
+              name="agrenting[api_key]"
+              value={@agrenting_form[:api_key].value}
+              placeholder={
+                if api_key_present?(@agrenting_status),
+                  do: "Leave blank to keep current key",
+                  else: "ap_..."
+              }
+              autocomplete="off"
+              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+            <p class="text-xs leading-5 text-text-quaternary">
+              Stored as a company secret and used only for Agrenting marketplace requests.
+            </p>
+          </label>
+
+          <label class="space-y-1.5">
+            <span class="text-xs font-510 text-text-secondary">Base URL</span>
+            <input
+              type="url"
+              name="agrenting[base_url]"
+              value={@agrenting_form[:base_url].value}
+              placeholder="https://www.agrenting.com"
+              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+            <p class="text-xs leading-5 text-text-quaternary">
+              Keep the default unless your Agrenting workspace uses a custom endpoint.
+            </p>
+          </label>
+
+          <label class="space-y-1.5 lg:col-span-2">
+            <span class="text-xs font-510 text-text-secondary">Repo access token</span>
+            <input
+              type="password"
+              name="agrenting[repo_access_token]"
+              value={@agrenting_form[:repo_access_token].value}
+              placeholder={
+                if repo_token_present?(@agrenting_status),
+                  do: "Leave blank to keep current token",
+                  else: "Optional token for push delivery"
+              }
+              autocomplete="off"
+              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+            <p class="text-xs leading-5 text-text-quaternary">
+              Optional. Use this when remote agents need to push work products back to a repository.
+            </p>
+          </label>
+        </div>
+
+        <div class="mt-5 flex flex-col gap-3 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
+          <div class="min-h-5 text-sm text-text-tertiary">
+            <span
+              :if={test_result_label(@agrenting_test_result)}
+              class={[
+                "inline-flex items-center gap-2",
+                if(match?({:ok, _}, @agrenting_test_result),
+                  do: "text-success",
+                  else: "text-red-400"
+                )
+              ]}
+            >
+              <.icon
+                name={
+                  if match?({:ok, _}, @agrenting_test_result),
+                    do: "hero-check-circle",
+                    else: "hero-exclamation-circle"
+                }
+                class="h-4 w-4"
+              />
+              {test_result_label(@agrenting_test_result)}
+            </span>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2 sm:justify-end">
+            <button
+              type="button"
+              phx-click="disconnect_agrenting"
+              data-confirm="Disconnect Agrenting for this company?"
+              class={[
+                "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
+                if(agrenting_connected?(@agrenting_status),
+                  do:
+                    "border-red-500/25 bg-red-500/10 text-red-300 hover:bg-red-500/15 hover:text-red-200",
+                  else: "hidden"
+                )
+              ]}
+            >
+              <.icon name="hero-link-slash" class="h-4 w-4" /> Disconnect
+            </button>
+            <button
+              type="button"
+              phx-click="test_agrenting"
+              disabled={!agrenting_connected?(@agrenting_status)}
+              class={[
+                "inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-510 transition-colors",
+                if(agrenting_connected?(@agrenting_status),
+                  do:
+                    "bg-button text-text-secondary hover:bg-button-hover hover:text-text-primary",
+                  else: "cursor-not-allowed bg-surface text-text-quaternary"
+                )
+              ]}
+            >
+              <.icon name="hero-signal" class="h-4 w-4" /> Test
+            </button>
+            <button
+              type="submit"
+              phx-disable-with="Saving..."
+              class="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-accent-hover"
+            >
+              <.icon name="hero-check" class="h-4 w-4" /> Save connection
+            </button>
+          </div>
+        </div>
+      </form>
+    </.panel>
+
+    <div class="space-y-4">
+      <.panel>
+        <div class="p-5">
+          <h3 class="text-sm font-590 text-text-primary">Connection State</h3>
+          <dl class="mt-4 space-y-3 text-sm">
+            <div class="flex items-center justify-between gap-3 border-b border-border pb-3">
+              <dt class="text-text-tertiary">API key</dt>
+              <dd class="font-510 text-text-primary">
+                {present_label(api_key_present?(@agrenting_status))}
+              </dd>
+            </div>
+            <div class="flex items-center justify-between gap-3 border-b border-border pb-3">
+              <dt class="text-text-tertiary">Marketplace</dt>
+              <dd class="max-w-[190px] truncate font-mono text-xs text-text-primary">
+                {@agrenting_status.base_url}
+              </dd>
+            </div>
+            <div class="flex items-center justify-between gap-3 border-b border-border pb-3">
+              <dt class="text-text-tertiary">URL mode</dt>
+              <dd class="font-510 text-text-primary">
+                {if custom_base_url?(@agrenting_status), do: "Custom", else: "Default"}
+              </dd>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <dt class="text-text-tertiary">Repo token</dt>
+              <dd class="font-510 text-text-primary">
+                {present_label(repo_token_present?(@agrenting_status))}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </.panel>
+
+      <.panel>
+        <div class="p-5">
+          <h3 class="text-sm font-590 text-text-primary">Remote Hiring</h3>
+          <p class="mt-2 text-sm leading-5 text-text-tertiary">
+            Once connected, marketplace agents appear in Cympho with pricing, capabilities, and a local proxy agent record.
+          </p>
+          <.app_link
+            navigate={~p"/agents/remote"}
+            class="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-button px-3 py-2 text-sm font-510 text-text-secondary hover:bg-button-hover hover:text-text-primary"
+          >
+            <.icon name="hero-arrow-right" class="h-4 w-4" /> Browse agents
+          </.app_link>
+        </div>
+      </.panel>
+    </div>
+  </div>
+</.page>

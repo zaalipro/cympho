@@ -35,92 +35,97 @@
     </:actions>
   </.header>
 
-  <div class="mb-5 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_320px_340px]">
-    <div class="rounded-lg border border-border bg-panel/80 p-4">
-      <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
+  <div class="mb-4 rounded-lg border border-border bg-panel/80 px-3 py-2.5">
+    <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(220px,0.8fr)_minmax(0,1.7fr)_minmax(260px,0.85fr)] xl:items-center">
+      <section class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
           <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
             Operating mode
           </p>
-          <h2 class="mt-1 text-xl font-590 text-text-primary">
+          <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-510 #{mode_badge_class(@operating_mode)}"}>
             {status_label(@operating_mode)}
-          </h2>
-          <p class="mt-1 max-w-2xl text-sm text-text-tertiary">
-            <%= case @operating_mode do %>
-              <% :review -> %>
-                Execution is intentionally off. You can inspect, design, and edit without spending provider credits.
-              <% :autonomous -> %>
-                Runtime execution is enabled. Agents can pick up queued work according to policy.
-              <% :paused -> %>
-                Company autonomy is paused. Work remains visible, but agents will not advance it automatically.
-              <% _ -> %>
-                Finish setup so Cympho has a company mission, an agent roster, and work to execute.
-            <% end %>
-          </p>
+          </span>
         </div>
-        <.app_link
-          navigate={~p"/kanban"}
-          class="inline-flex shrink-0 items-center justify-center rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover"
-        >
-          Open board
-        </.app_link>
-      </div>
-    </div>
+        <p class="mt-1 truncate text-xs text-text-tertiary">
+          <%= case @operating_mode do %>
+            <% :review -> %>
+              Inspect and edit safely without provider spend.
+            <% :autonomous -> %>
+              Runtime is enabled and agents can pick up queued work.
+            <% :paused -> %>
+              Autonomy is paused; work stays visible.
+            <% _ -> %>
+              Finish setup so agents have a mission and roster.
+          <% end %>
+        </p>
+      </section>
 
-    <div class="rounded-lg border border-border bg-panel/80 p-4">
-      <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-        Next actions
-      </p>
-      <div class="mt-2 space-y-3">
-        <div
-          :for={action <- @next_actions}
-          class="border-t border-border/70 pt-3 first:border-t-0 first:pt-0"
-        >
-          <h2 class="text-sm font-590 text-text-primary">{action.label}</h2>
-          <p class="mt-1 text-sm text-text-tertiary">{action.detail}</p>
+      <section class="min-w-0 border-y border-border/70 py-2 xl:border-x xl:border-y-0 xl:px-3 xl:py-0">
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+            Next actions
+          </p>
           <a
-            :if={Map.get(action, :path)}
-            href={action.path}
-            class="mt-2 inline-flex text-xs font-590 text-brand hover:text-accent-hover"
+            href="/operations"
+            class="shrink-0 text-xs font-590 text-brand hover:text-accent-hover"
           >
-            {action.action}
+            Open Operations
           </a>
-          <p :if={!Map.get(action, :path)} class="mt-2 text-xs font-590 text-brand">
-            {action.action}
-          </p>
         </div>
-      </div>
-    </div>
+        <div class="mt-1.5 grid gap-1.5 sm:grid-cols-3">
+          <div
+            :for={action <- @next_actions}
+            class="min-w-0 rounded-md border border-border/70 bg-surface/40 px-2.5 py-1.5"
+            title={action.detail}
+          >
+            <h2 class="truncate text-xs font-590 text-text-primary">{action.label}</h2>
+            <p class="sr-only">{action.detail}</p>
+            <a
+              :if={Map.get(action, :path)}
+              href={action.path}
+              class="mt-0.5 inline-flex max-w-full truncate text-[11px] font-590 text-brand hover:text-accent-hover"
+            >
+              {action.action}
+            </a>
+            <p
+              :if={!Map.get(action, :path)}
+              class="mt-0.5 truncate text-[11px] font-590 text-brand"
+            >
+              {action.action}
+            </p>
+          </div>
+        </div>
+      </section>
 
-    <div class="rounded-lg border border-border bg-panel/80 p-4">
-      <div class="flex items-start justify-between gap-3">
-        <div>
+      <section class="min-w-0">
+        <div class="flex items-center justify-between gap-3">
           <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
             Runtime capacity
           </p>
-          <h2 class="mt-1 text-xl font-590 text-text-primary">
+          <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-510 #{capacity_badge_class(@runtime_capacity.level)}"}>
+            {@runtime_capacity.local_slots} local slots
+          </span>
+        </div>
+        <div class="mt-2 flex items-center gap-3">
+          <h2 class="shrink-0 text-lg font-590 text-text-primary">
             {@runtime_capacity.label}
           </h2>
-        </div>
-        <span class={"inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-510 #{capacity_badge_class(@runtime_capacity.level)}"}>
-          {@runtime_capacity.local_slots} local slots
-        </span>
-      </div>
-      <p class="mt-2 text-sm text-text-tertiary">{@runtime_capacity.summary}</p>
-      <div class="mt-3">
-        <div class="flex items-center justify-between text-[11px] text-text-quaternary">
-          <span>CLI/process pressure</span>
-          <span>{@runtime_capacity.running_runs} running</span>
-        </div>
-        <div class="mt-1 h-1.5 rounded-full bg-canvas">
-          <div
-            class={"h-1.5 rounded-full #{capacity_bar_class(@runtime_capacity.level)}"}
-            style={"width: #{capacity_percent(@runtime_capacity)}%"}
-          >
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center justify-between text-[11px] text-text-quaternary">
+              <span>CLI/process pressure</span>
+              <span>{@runtime_capacity.running_runs} running</span>
+            </div>
+            <div class="mt-1 h-1.5 rounded-full bg-canvas">
+              <div
+                class={"h-1.5 rounded-full #{capacity_bar_class(@runtime_capacity.level)}"}
+                style={"width: #{capacity_percent(@runtime_capacity)}%"}
+              >
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-      <p class="mt-3 text-xs leading-5 text-text-quaternary">{@runtime_capacity.hint}</p>
+        <p class="mt-1 truncate text-xs text-text-quaternary">{@runtime_capacity.summary}</p>
+      </section>
     </div>
   </div>
 

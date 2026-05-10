@@ -227,6 +227,16 @@ defmodule Cympho.Runtime do
     put_config_new(config, "api_key", env["OPENCLAW_API_KEY"])
   end
 
+  defp with_secret_backed_api_key(config, :agrenting, env) do
+    config
+    |> put_config_new("api_key", env["AGRENTING_API_KEY"])
+    |> put_config_new("base_url", env["AGRENTING_URL"])
+    |> put_config_new(
+      "repo_access_token",
+      env["AGRENTING_REPO_ACCESS_TOKEN"] || env["GITHUB_TOKEN"]
+    )
+  end
+
   defp with_secret_backed_api_key(config, _adapter, _env), do: config
 
   defp put_config_new(config, _key, nil), do: config

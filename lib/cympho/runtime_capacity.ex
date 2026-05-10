@@ -8,7 +8,7 @@ defmodule Cympho.RuntimeCapacity do
   """
 
   @local_adapters ~w(claude_code codex cursor process)
-  @gateway_adapters ~w(http openclaw)
+  @gateway_adapters ~w(http openclaw agrenting)
 
   @type level :: :safe | :watch | :high
 

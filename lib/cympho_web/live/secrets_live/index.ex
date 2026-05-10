@@ -14,6 +14,7 @@ defmodule CymphoWeb.SecretsLive.Index do
       |> assign(:show_form, false)
       |> assign(:form_mode, :create)
       |> assign(:versions, [])
+      |> assign(:show_versions, false)
       |> load_secrets()
 
     {:ok, socket}
@@ -32,6 +33,17 @@ defmodule CymphoWeb.SecretsLive.Index do
 
   @impl true
   def handle_params(_params, _url, socket) do
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({CymphoWeb.SecretsLive.FormComponent, {:saved, _result}}, socket) do
+    socket =
+      socket
+      |> put_flash(:info, "Secret saved successfully")
+      |> assign(:show_form, false)
+      |> load_secrets()
+
     {:noreply, socket}
   end
 

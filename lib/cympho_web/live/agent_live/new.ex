@@ -420,4 +420,5 @@ defmodule CymphoWeb.AgentLive.New do
   defp adapter_label(:http), do: "HTTP"
   defp adapter_label(:openclaw), do: "OpenClaw"
   defp adapter_label(:process), do: "Process"
+  defp adapter_label(:agrenting), do: "Agrenting"
 end

@@ -247,6 +247,13 @@ defmodule CymphoWeb.AgentLive.Index do
 
   def runtime_command(%{adapter: adapter}) when adapter in [:codex, "codex"], do: "codex"
 
+  def runtime_command(%{adapter: adapter} = agent) when adapter in [:agrenting, "agrenting"] do
+    case runtime_config_value(agent, "agent_did") || config_value(agent, "agent_did") do
+      nil -> "Agrenting remote"
+      did -> "Agrenting - #{did}"
+    end
+  end
+
   def runtime_command(%{adapter: adapter} = agent)
       when adapter in [:cursor, "cursor", :process, "process"] do
     runtime_config_value(agent, "command") || adapter_label(adapter)
@@ -264,7 +271,9 @@ defmodule CymphoWeb.AgentLive.Index do
              :openclaw,
              "openclaw",
              :process,
-             "process"
+             "process",
+             :agrenting,
+             "agrenting"
            ] do
     runtime_config_value(agent, "model") ||
       default_runtime_model(adapter, agent)
@@ -295,6 +304,9 @@ defmodule CymphoWeb.AgentLive.Index do
   end
 
   defp default_runtime_model(_adapter, _agent), do: "No model override"
+
+  defp config_value(%{config: config}, key) when is_map(config), do: config[key]
+  defp config_value(_, _), do: nil
 
   def format_elapsed(seconds) when is_integer(seconds) do
     hours = div(seconds, 3600)

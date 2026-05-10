@@ -827,6 +827,13 @@ defmodule CymphoWeb.AgentLive.Show do
     |> maybe_mark_secret_key("api_key", secret_count)
   end
 
+  defp put_preflight_api_key(config, "agrenting", env_vars, secret_count) do
+    config
+    |> put_preflight_key("api_key", env_first(env_vars, ["AGRENTING_API_KEY"]))
+    |> put_preflight_key("base_url", env_first(env_vars, ["AGRENTING_URL"]))
+    |> maybe_mark_secret_key("api_key", secret_count)
+  end
+
   defp put_preflight_api_key(config, _adapter, _env_vars, _secret_count), do: config
 
   defp put_preflight_key(config, _key, value) when value in [nil, ""], do: config
@@ -1547,6 +1554,21 @@ defmodule CymphoWeb.AgentLive.Show do
     ]
   end
 
+  defp readiness_items("agrenting", runtime) do
+    config = runtime.agent.config || %{}
+
+    [
+      credentials_item(runtime, ["AGRENTING_API_KEY"], "Agrenting API key",
+        target_path: "/companies/#{runtime.agent.company_id}/secrets",
+        target_label: "Open secrets"
+      ),
+      required_config_item(config, "agent_did", "Remote agent DID"),
+      required_config_item(config, "capability", "Default capability"),
+      required_config_item(config, "max_price", "Max price per run"),
+      readiness_item(:ok, "Delivery mode", config["delivery_mode"] || "output")
+    ]
+  end
+
   defp readiness_items(_adapter, _runtime) do
     [
       readiness_item(
@@ -1624,6 +1646,13 @@ defmodule CymphoWeb.AgentLive.Show do
   end
 
   defp model_item(label, model, _opts), do: readiness_item(:ok, label, model)
+
+  defp required_config_item(config, key, label) do
+    case Map.get(config, key) do
+      value when value not in [nil, ""] -> readiness_item(:ok, label, to_string(value))
+      _ -> readiness_item(:attention, label, "Set by the remote-agent hire flow.")
+    end
+  end
 
   defp readiness_item(status, label, detail, opts \\ []) do
     target =
@@ -1897,12 +1926,14 @@ defmodule CymphoWeb.AgentLive.Show do
   defp adapter_label_human("http"), do: "HTTP"
   defp adapter_label_human("openclaw"), do: "OpenClaw"
   defp adapter_label_human("process"), do: "Process"
+  defp adapter_label_human("agrenting"), do: "Agrenting"
   defp adapter_label_human(:claude_code), do: "Claude Code"
   defp adapter_label_human(:codex), do: "Codex"
   defp adapter_label_human(:cursor), do: "Cursor"
   defp adapter_label_human(:http), do: "HTTP"
   defp adapter_label_human(:openclaw), do: "OpenClaw"
   defp adapter_label_human(:process), do: "Process"
+  defp adapter_label_human(:agrenting), do: "Agrenting"
   defp adapter_label_human(other), do: to_string(other)
 
   def reports_count(%{children: children}) when is_list(children), do: length(children)

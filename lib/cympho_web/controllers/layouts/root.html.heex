@@ -203,6 +203,10 @@
         </a>
       </div>
     </nav>
+
+    <% quick_projects = assigns[:nav_projects] || []
+    quick_agents = assigns[:nav_agents] || []
+    quick_ceo = Enum.find(quick_agents, &(&1.role == :ceo)) %>
     
 <!-- Quick create issue modal (press C) -->
     <div
@@ -212,7 +216,7 @@
       <form
         action={~p"/issues/quick-create"}
         method="post"
-        class="bg-surface-2 border border-hairline rounded-lg shadow-dialog w-full max-w-md mx-4 overflow-hidden"
+        class="bg-surface-2 border border-hairline rounded-lg shadow-dialog w-full max-w-2xl mx-4 overflow-hidden"
         id="quick-create-form"
       >
         <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
@@ -232,7 +236,66 @@
           placeholder="Issue title…"
           class="w-full px-4 py-3 bg-transparent text-body text-ink placeholder:text-ink-tertiary focus:outline-none"
         />
-        <div class="px-4 pb-3 flex items-center justify-end gap-2">
+        <div class="grid gap-3 border-y border-hairline px-4 py-3 sm:grid-cols-3">
+          <label class="block">
+            <span class="mb-1 block text-[11px] font-590 uppercase tracking-[0.08em] text-ink-tertiary">
+              Project
+            </span>
+            <select
+              name="project_id"
+              class="h-9 w-full rounded-md border border-hairline bg-surface px-2 text-caption text-ink focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <%= if Enum.empty?(quick_projects) do %>
+                <option value="">No project</option>
+              <% else %>
+                <option
+                  :for={project <- quick_projects}
+                  value={project.id}
+                >
+                  {project.name}
+                </option>
+              <% end %>
+            </select>
+          </label>
+
+          <label class="block">
+            <span class="mb-1 block text-[11px] font-590 uppercase tracking-[0.08em] text-ink-tertiary">
+              Assignee
+            </span>
+            <select
+              name="assignee_id"
+              class="h-9 w-full rounded-md border border-hairline bg-surface px-2 text-caption text-ink focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="">Unassigned</option>
+              <option
+                :for={agent <- quick_agents}
+                value={agent.id}
+                selected={quick_ceo && agent.id == quick_ceo.id}
+              >
+                {agent.name}
+              </option>
+            </select>
+          </label>
+
+          <label class="block">
+            <span class="mb-1 block text-[11px] font-590 uppercase tracking-[0.08em] text-ink-tertiary">
+              Status
+            </span>
+            <select
+              name="status"
+              class="h-9 w-full rounded-md border border-hairline bg-surface px-2 text-caption text-ink focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="backlog">Backlog</option>
+              <option value="todo" selected>To Do</option>
+              <option value="in_progress">In Progress</option>
+              <option value="in_review">In Review</option>
+              <option value="blocked">Blocked</option>
+              <option value="done">Done</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </label>
+        </div>
+        <div class="px-4 py-3 flex items-center justify-end gap-2">
           <button
             type="button"
             data-quick-create-cancel

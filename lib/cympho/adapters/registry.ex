@@ -9,6 +9,7 @@ defmodule Cympho.Adapters.Registry do
     - `:http`        → Cympho.Adapters.HttpAdapter
     - `:openclaw`    → Cympho.Adapters.OpenClawAdapter
     - `:process`     → Cympho.Adapters.ProcessAdapter
+    - `:agrenting`   → Cympho.Adapters.AgrentingAdapter
   """
 
   use GenServer
@@ -69,7 +70,8 @@ defmodule Cympho.Adapters.Registry do
       {:cursor, Cympho.Adapters.CursorAdapter},
       {:http, Cympho.Adapters.HttpAdapter},
       {:openclaw, Cympho.Adapters.OpenClawAdapter},
-      {:process, Cympho.Adapters.ProcessAdapter}
+      {:process, Cympho.Adapters.ProcessAdapter},
+      {:agrenting, Cympho.Adapters.AgrentingAdapter}
     ]
 
     Enum.each(builtins, fn {key, mod} ->
@@ -170,7 +172,8 @@ defmodule Cympho.Adapters.Registry do
       {:cursor, Cympho.Adapters.CursorAdapter},
       {:http, Cympho.Adapters.HttpAdapter},
       {:openclaw, Cympho.Adapters.OpenClawAdapter},
-      {:process, Cympho.Adapters.ProcessAdapter}
+      {:process, Cympho.Adapters.ProcessAdapter},
+      {:agrenting, Cympho.Adapters.AgrentingAdapter}
     ]
 
     Enum.each(builtins, fn {key, mod} ->
