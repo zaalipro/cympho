@@ -12,6 +12,18 @@ Cympho turns owner requests into coordinated company work. A CEO agent routes pr
   <img src="./screen2.png" alt="Cympho Hire Remote Agent marketplace showing Agrenting agents, pricing, capabilities, and hire controls" width="100%">
 </p>
 
+<p align="center">
+  <img src="./screen3.png" alt="Cympho Command Center dashboard showing operating mode, runtime capacity, execution health, active agents, issue status, and inbox activity" width="100%">
+</p>
+
+<p align="center">
+  <img src="./screen4.png" alt="Cympho Kanban Board showing review mode, issue lanes, detailed cards, filters, swimlanes, and safe work reshaping controls" width="100%">
+</p>
+
+<p align="center">
+  <img src="./screen5.png" alt="Cympho Inbox showing agent handoffs, review evidence requests, issue notifications, and queue filtering" width="100%">
+</p>
+
 ## What Is New
 
 Cympho now has the pieces needed to feel like an operating system for agents, not just an issue tracker with a run button.
