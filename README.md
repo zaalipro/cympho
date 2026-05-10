@@ -5,11 +5,11 @@
 Cympho turns owner requests into coordinated company work. A CEO agent routes priorities, Product and Design shape the brief, the CTO breaks large work into executable issues, and engineer agents produce inspectable changes with comments, runs, work products, PR evidence, and review trails.
 
 <p align="center">
-  <img src="./screen1.png" alt="Cympho inbox showing agent handoffs, review signals, issue context, and owner-facing nudges" width="100%">
+  <img src="./screen1.png" alt="Cympho Integrations settings showing Agrenting connected with company-scoped secret status and remote hiring controls" width="100%">
 </p>
 
 <p align="center">
-  <img src="./screen2.png" alt="Cympho kanban board showing review mode, multi-project issue flow, and delivery evidence cards" width="100%">
+  <img src="./screen2.png" alt="Cympho Hire Remote Agent marketplace showing Agrenting agents, pricing, capabilities, and hire controls" width="100%">
 </p>
 
 ## What Is New
@@ -22,6 +22,7 @@ Cympho now has the pieces needed to feel like an operating system for agents, no
 - **Review gates and nudges**: Cympho detects missing delivery notes, work products, verification, PR references, CTO review, and owner updates, then queues targeted follow-ups for the right agent.
 - **PR quality contract**: agents are guided toward issue-aware branch names, clear PR titles, task-list descriptions, review evidence, and owner-facing status.
 - **Adapter hardening**: Claude Code wrappers, Codex, Cursor, OpenClaw, HTTP, and Process adapters can be configured per agent with safer runtime env handling.
+- **Agrenting remote agents**: connect an Agrenting API key, browse marketplace agents inside Cympho, and rent remote agents as local Cympho operators.
 - **Multi-tenant auth hardening**: dashboard pages require login, LiveViews and APIs use company-scoped lookups, and test coverage guards against cross-company leaks.
 - **Review mode by default**: run the UI safely without background agent execution or provider spend, then opt into autonomous execution when you are ready.
 
@@ -61,7 +62,7 @@ The goal is not just to start an agent. The goal is to make the whole operating 
 - **Board**: kanban flow across backlog, todo, in progress, review, done, blocked, and cancelled states, with safe review-mode controls.
 - **Inbox**: compact and detailed agent updates grouped by status, assignee, issue context, and review nudge state.
 - **Projects**: repository settings, environment variables, project issues, and workspace metadata in one editable page.
-- **Agents**: role prompts, Instruction Studio, adapter configuration, runtime model/command controls, env vars, health, budget, governance, and history.
+- **Agents**: role prompts, Instruction Studio, adapter configuration, remote Agrenting hiring, runtime model/command controls, env vars, health, budget, governance, and history.
 - **Plugins and Skills**: extension points for tool capabilities and custom agent workflows.
 
 ## Agent Roles
@@ -117,8 +118,64 @@ Cympho supports multiple execution backends:
 - **OpenClaw**: OpenClaw-compatible runtime configuration.
 - **Process**: local command execution for tests and controlled automation.
 - **HTTP**: remote adapter integration over an HTTP contract.
+- **Agrenting**: rent marketplace agents and attach them to Cympho as remote operators.
 
 Each agent can carry its own adapter, model/runtime configuration, concurrency limit, budget, instructions, and environment. Claude-compatible wrappers can source provider variables from `$HOME/.cld` in development, while production should use managed environment variables or the app secret store.
+
+## Rent Remote Agents From Agrenting
+
+Cympho can discover and rent agents from the Agrenting marketplace. Rented agents are created in Cympho as local proxy agents, so they can be assigned to issues, shown in agent lists, and run through the normal Cympho orchestration loop.
+
+### 1. Get an Agrenting API key
+
+Create or copy an Agrenting user API key from your Agrenting account. The key is only needed once per Cympho company.
+
+### 2. Connect Agrenting in Cympho
+
+1. Start Cympho and log in.
+2. Open **Settings**.
+3. Select **Integrations**.
+4. Find the **Agrenting** card.
+5. Paste your Agrenting API key into **API key**.
+6. Leave **Base URL** as `https://www.agrenting.com` unless you use a custom Agrenting deployment.
+7. Optionally add a **Repo access token** if rented agents need to push work products back to a repository.
+8. Click **Save connection**.
+9. Click **Test** to verify Cympho can reach Agrenting and discover marketplace agents.
+
+Cympho stores these values as company secrets:
+
+- `AGRENTING_API_KEY` for marketplace discovery and hiring.
+- `AGRENTING_URL` only when you use a custom Agrenting base URL.
+- `AGRENTING_REPO_ACCESS_TOKEN` when you provide an optional repository token.
+
+### 3. Browse marketplace agents
+
+1. Open **Agents**.
+2. Click **Hire Remote Agent**.
+3. Search or filter the Agrenting marketplace by name, model, DID, or capability.
+4. Review each agent's status, price, rating, provider/model, and capabilities.
+
+If Agrenting is not connected yet, this page shows a **Connect Agrenting** button that takes you back to **Settings -> Integrations**.
+
+### 4. Rent an agent
+
+1. Choose a marketplace agent.
+2. Pick the capability Cympho should hire for.
+3. Choose the local Cympho role, such as Engineer, Product Lead, Design Lead, CTO, or CEO.
+4. Confirm the max price and delivery mode.
+5. Click **Hire in Cympho**.
+
+After the hire completes, Cympho creates a local agent record backed by Agrenting. The remote agent appears in the normal Cympho agent list and can be assigned to issues like any other agent.
+
+### 5. Run rented agents safely
+
+Renting from Agrenting may spend Agrenting marketplace balance depending on the agent and price. Cympho still boots in review mode by default, so background execution does not start unless you enable it deliberately:
+
+```bash
+CYMPHO_ORCHESTRATOR_ENABLED=1 mix phx.server
+```
+
+Keep the Agrenting API key in the integration settings or company secret store. Do not commit API keys or repository tokens to source control.
 
 ## Quick Start
 
