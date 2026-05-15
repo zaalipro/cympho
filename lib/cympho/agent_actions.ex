@@ -662,7 +662,25 @@ defmodule Cympho.AgentActions do
 
         with {:ok, created} <- Issues.create_issue(attrs),
              {:ok, _comment} <- maybe_agent_comment(issue, agent, created_issue_note(created)) do
-          {:ok, %{type: "create_issue", issue_id: created.id}}
+          # Wake the dispatcher so the child issue is picked up by its role
+          # immediately instead of waiting up to one poll interval. Cascading
+          # decomposition (CEO→CTO→engineers) otherwise accrues a 30s lag per
+          # level.
+          _ =
+            Cympho.Orchestrator.Dispatcher.enqueue_wake(
+              created.id,
+              "child_created",
+              %{parent_id: issue.id}
+            )
+
+          {:ok,
+           %{
+             type: "create_issue",
+             issue_id: created.id,
+             identifier: created.identifier || created.id,
+             assigned_role: action["role"],
+             status: created.status
+           }}
         end
     end
   end

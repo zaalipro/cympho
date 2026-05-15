@@ -141,6 +141,77 @@ defmodule Cympho.Wakes do
   end
 
   @doc """
+  Wakes the parent issue's assignee when a child enters `:in_review`.
+
+  Surfaces mid-flight progress to the supervising agent (typically CTO/CEO)
+  without waiting for them to re-read the parent on their next turn. Dedup
+  window prevents re-wake storms when a child flips review → todo → review.
+  """
+  @spec notify_child_in_review(Issue.t()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def notify_child_in_review(%Issue{parent_id: nil}), do: {:error, :no_parent}
+
+  def notify_child_in_review(%Issue{} = child_issue) do
+    parent = Repo.get!(Issue, child_issue.parent_id)
+
+    cond do
+      is_nil(parent.assignee_id) ->
+        {:error, :no_assignee}
+
+      parent.status in [:done, :cancelled] ->
+        {:error, :parent_closed}
+
+      recent_wake?(parent.assignee_id, parent.id, "child_status_changed", 60) ->
+        {:error, :deduped}
+
+      true ->
+        do_wake_agent(
+          parent.assignee_id,
+          parent.id,
+          "child_status_changed",
+          "system",
+          child_issue.id,
+          %{child_id: child_issue.id, child_status: to_string(child_issue.status)}
+        )
+    end
+  end
+
+  @doc """
+  Wakes the CEO (or current assignee) of a root issue whose subtree just
+  finished, asking for the terminal review/approval. Without this, the
+  state machine auto-completes the root via `maybe_complete_parent` and
+  the boss never inspects the final deliverable.
+  """
+  @spec wake_for_final_review(Issue.t()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def wake_for_final_review(%Issue{assignee_id: nil}), do: {:error, :no_assignee}
+
+  def wake_for_final_review(%Issue{} = issue) do
+    do_wake_agent(
+      issue.assignee_id,
+      issue.id,
+      "final_review_required",
+      "system",
+      issue.id,
+      %{}
+    )
+  end
+
+  defp recent_wake?(agent_id, issue_id, reason, seconds) do
+    cutoff = DateTime.utc_now() |> DateTime.add(-seconds, :second)
+
+    Repo.exists?(
+      from(w in AgentWake,
+        where:
+          w.agent_id == ^agent_id and
+            w.issue_id == ^issue_id and
+            w.reason == ^reason and
+            w.inserted_at > ^cutoff
+      )
+    )
+  end
+
+  @doc """
   Low-level function to wake an agent directly. Persists the wake to the
   WakeupQueue, which broadcasts to the agent's heartbeat process via PubSub.
   Returns once the row is durable; the heartbeat trigger and dispatcher
@@ -196,6 +267,83 @@ defmodule Cympho.Wakes do
   end
 
   @doc """
+  For each given issue id, returns the most-recent pending wake (if any),
+  with the `:agent` association preloaded. Returns `%{issue_id => wake}`.
+
+  Used by surfaces that want to render a "⏱ Waiting on X · 3m" badge
+  without N+1 lookups — pre-fetch once per page render.
+  """
+  @spec most_recent_pending_for_issues([binary()]) :: %{binary() => AgentWake.t()}
+  def most_recent_pending_for_issues(issue_ids) when is_list(issue_ids) do
+    issue_ids = Enum.reject(issue_ids, &is_nil/1)
+
+    if issue_ids == [] do
+      %{}
+    else
+      AgentWake
+      |> where([w], w.issue_id in ^issue_ids and w.status in ["pending", "running"])
+      |> order_by([w], asc: w.issue_id, desc: w.inserted_at)
+      |> preload(:agent)
+      |> Repo.all()
+      |> Enum.reduce(%{}, fn wake, acc -> Map.put_new(acc, wake.issue_id, wake) end)
+    end
+  end
+
+  def most_recent_pending_for_issues(_), do: %{}
+
+  @review_queue_reasons ~w(final_review_required child_status_changed issue_children_completed)
+
+  @doc """
+  Returns active "Awaiting your review" wakes for an inbox-style queue.
+
+  Scope can be `{:agent, agent_id}` (the wakes belonging to that agent) or
+  `{:company, company_id}` (every wake on an issue in that company — used
+  when the inbox is in "all agents" view).
+
+  Returns a list of `%{wake: AgentWake.t(), issue: Issue.t()}` with both
+  preloaded. Filtered by `reason in ("final_review_required",
+  "child_status_changed", "issue_children_completed")` — the wakes the
+  autonomous loop produces when something is asking for human or boss
+  judgment.
+  """
+  @spec list_review_queue({:agent, binary()} | {:company, binary()}, keyword()) ::
+          [%{wake: AgentWake.t(), issue: Issue.t()}]
+  def list_review_queue(scope, opts \\ [])
+
+  def list_review_queue({:agent, nil}, _opts), do: []
+
+  def list_review_queue({:agent, agent_id}, opts) when is_binary(agent_id) do
+    limit = Keyword.get(opts, :limit, 50)
+
+    AgentWake
+    |> where([w], w.agent_id == ^agent_id and w.status in ["pending", "running"])
+    |> where([w], w.reason in ^@review_queue_reasons)
+    |> order_by([w], desc: w.inserted_at)
+    |> limit(^limit)
+    |> preload([:issue, :agent])
+    |> Repo.all()
+    |> Enum.reject(&(&1.issue == nil))
+    |> Enum.map(&%{wake: &1, issue: &1.issue})
+  end
+
+  def list_review_queue({:company, company_id}, opts) when is_binary(company_id) do
+    limit = Keyword.get(opts, :limit, 50)
+
+    AgentWake
+    |> join(:inner, [w], i in assoc(w, :issue))
+    |> where([w, i], i.company_id == ^company_id and w.status in ["pending", "running"])
+    |> where([w, _i], w.reason in ^@review_queue_reasons)
+    |> order_by([w], desc: w.inserted_at)
+    |> limit(^limit)
+    |> preload([:issue, :agent])
+    |> Repo.all()
+    |> Enum.reject(&(&1.issue == nil))
+    |> Enum.map(&%{wake: &1, issue: &1.issue})
+  end
+
+  def list_review_queue(_, _), do: []
+
+  @doc """
   Returns active review-nudge wakes for the given issues.
   """
   def list_review_nudges(issue_ids, opts \\ []) do
@@ -237,6 +385,15 @@ defmodule Cympho.Wakes do
       {:error, :not_review_nudge}
     end
   end
+
+  @doc """
+  Marks any pending/running wake consumed, regardless of source.
+
+  Used by surfaces (e.g. the human-driven Inbox approve flow) that resolve
+  the *reason* for the wake outside the agent loop and need to clear the
+  queue entry directly.
+  """
+  def consume_wake(%AgentWake{} = wake), do: WakeupQueue.mark_consumed(wake)
 
   @doc """
   Gets a single agent wake by id.

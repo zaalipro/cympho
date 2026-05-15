@@ -80,6 +80,59 @@ defmodule Cympho.Issues do
 
   def list_child_issues(_), do: []
 
+  @doc """
+  Walks the descendant subtree starting at `parent_id` and returns a flat
+  list of `%{issue: Issue.t(), depth: non_neg_integer(), has_children?: boolean}`
+  in DFS order, capped at `max_depth` levels (default 4).
+
+  This is the rendering payload for the decomposition tree on the issue
+  detail page: keep it flat so a HEEx `:for` can render it without
+  recursive function components, and let depth drive indentation.
+
+  Cycle guard via a visited MapSet — even though `parent_id` is constrained
+  to a single FK, we belt-and-brace against accidental loops.
+  """
+  @spec list_descendants_tree(binary(), non_neg_integer()) :: [
+          %{issue: Issue.t(), depth: non_neg_integer(), has_children?: boolean}
+        ]
+  def list_descendants_tree(parent_id, max_depth \\ 4)
+
+  def list_descendants_tree(parent_id, max_depth) when is_binary(parent_id) do
+    walk_descendants(parent_id, 0, max_depth, MapSet.new())
+    |> Enum.reverse()
+  end
+
+  def list_descendants_tree(_, _), do: []
+
+  defp walk_descendants(parent_id, depth, max_depth, visited) do
+    cond do
+      depth >= max_depth ->
+        []
+
+      MapSet.member?(visited, parent_id) ->
+        []
+
+      true ->
+        children = list_child_issues(parent_id)
+        visited = MapSet.put(visited, parent_id)
+
+        Enum.reduce(children, [], fn child, acc ->
+          subtree = walk_descendants(child.id, depth + 1, max_depth, visited)
+
+          # If we recursed and got nothing, do one shallow probe at the
+          # boundary so the tree can render a "+more" affordance honestly.
+          has_children? =
+            if subtree != [] do
+              true
+            else
+              depth + 1 >= max_depth and not Enum.empty?(list_child_issues(child.id))
+            end
+
+          [%{issue: child, depth: depth, has_children?: has_children?} | subtree ++ acc]
+        end)
+    end
+  end
+
   defp ordered_child_issues(query) do
     query
     |> order_by([i],
@@ -355,12 +408,68 @@ defmodule Cympho.Issues do
         )
 
         CymphoWeb.Events.broadcast_issue_update(issue, :issue_created)
+        maybe_auto_ignite(issue, attrs)
         {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
       {:error, changeset} ->
         {:error, changeset}
     end
   end
+
+  # Synchronous-ish ignition for autonomous top-level issues.
+  #
+  # New issues created via the UI/API land in `:backlog`, but the dispatcher
+  # only polls `[:todo, :in_review]`. Without this hook the only thing that
+  # rescues backlog work is `AutoAssignmentReassigner`, which runs on
+  # agent-idle events — so a strategic issue created while all eligible
+  # agents are busy is stranded indefinitely.
+  #
+  # We fan out the assign + wake under `Task.Supervisor` so the caller's
+  # transaction-and-broadcast path stays snappy. If no agent is eligible we
+  # leave the issue in `:backlog` and the existing reassigner picks it up.
+  defp maybe_auto_ignite(%Issue{} = issue, attrs) do
+    if auto_ignite?(issue, attrs) do
+      run_ignition = fn ->
+        case Cympho.Issues.AutoAssignment.assign_issue(issue) do
+          {:ok, assigned} ->
+            _ =
+              Cympho.Orchestrator.Dispatcher.enqueue_wake(
+                assigned.id,
+                "issue_created",
+                %{}
+              )
+
+            :ok
+
+          {:error, :no_eligible_agent, _} ->
+            :ok
+        end
+      end
+
+      # Production: dispatch off the calling process so create_issue stays
+      # snappy. Tests opt for synchronous so the Ecto sandbox connection is
+      # available to the assigner.
+      if Application.get_env(:cympho, :auto_ignite_sync, false) do
+        run_ignition.()
+      else
+        Task.Supervisor.start_child(Cympho.TaskSupervisor, run_ignition)
+      end
+    end
+
+    :ok
+  end
+
+  defp auto_ignite?(%Issue{} = issue, attrs) do
+    Application.get_env(:cympho, :auto_ignite_on_create, true) and
+      is_nil(issue.parent_id) and
+      is_nil(issue.assignee_id) and
+      issue.status in [:backlog, :todo] and
+      not truthy?(get_param(attrs, :skip_auto_assign))
+  end
+
+  defp truthy?(true), do: true
+  defp truthy?("true"), do: true
+  defp truthy?(_), do: false
 
   defp create_company_scoped_issue(company_id, attrs) do
     Repo.transaction(fn ->
@@ -775,10 +884,17 @@ defmodule Cympho.Issues do
 
   defp do_transition_update(issue, attrs) do
     with {:ok, updated} <- update_issue(issue, attrs) do
-      if updated.status == :done do
-        unblock_dependents(issue.id)
-        _ = Wakes.notify_children_completed(updated)
-        maybe_complete_parent(updated)
+      cond do
+        updated.status == :done ->
+          unblock_dependents(issue.id)
+          _ = Wakes.notify_children_completed(updated)
+          maybe_complete_parent(updated)
+
+        updated.status == :in_review ->
+          _ = Wakes.notify_child_in_review(updated)
+
+        true ->
+          :ok
       end
 
       if updated.status in [:done, :cancelled], do: Approvals.cancel_pending_for_issue(issue.id)
@@ -794,21 +910,43 @@ defmodule Cympho.Issues do
     # concurrently could both observe `all_done?` and double-transition; without
     # the EXISTS subquery, a new child created between read and act would slip
     # through.
+    #
+    # Root issues owned by a CEO get one extra step: instead of auto-:done,
+    # we transition the root to :in_review and wake the CEO for terminal
+    # sign-off. The CEO's `approve_issue` is the only path that runs the
+    # `ensure_approval_quality` gate, so bypassing it would silently skip
+    # the boss-level review of the deliverable that matters most.
     Repo.transaction(fn ->
       parent =
         from(i in Issue, where: i.id == ^parent_id, lock: "FOR UPDATE")
         |> Repo.one()
+        |> case do
+          %Issue{} = p -> Repo.preload(p, :assignee)
+          other -> other
+        end
 
       with %Issue{} = parent <- parent,
            false <- parent.status in [:done, :cancelled],
            false <- parent_has_open_child?(parent_id) do
-        case do_transition(parent, :done) do
-          {:ok, _} ->
-            add_system_comment(parent, "Auto-completed: all sub-issues are done")
-            :ok
+        if root_with_ceo_review?(parent) do
+          case do_transition(parent, :in_review) do
+            {:ok, transitioned} ->
+              _ = Wakes.wake_for_final_review(transitioned)
+              add_system_comment(parent, "Subtree complete — awaiting CEO sign-off")
+              :ok
 
-          {:error, reason} ->
-            Repo.rollback(reason)
+            {:error, reason} ->
+              Repo.rollback(reason)
+          end
+        else
+          case do_transition(parent, :done) do
+            {:ok, _} ->
+              add_system_comment(parent, "Auto-completed: all sub-issues are done")
+              :ok
+
+            {:error, reason} ->
+              Repo.rollback(reason)
+          end
         end
       else
         _ -> :ok
@@ -817,6 +955,16 @@ defmodule Cympho.Issues do
 
     :ok
   end
+
+  defp root_with_ceo_review?(%Issue{parent_id: nil} = parent) do
+    role_string = parent.assigned_role && to_string(parent.assigned_role)
+    role_string == "ceo" or assignee_role(parent) == :ceo
+  end
+
+  defp root_with_ceo_review?(_), do: false
+
+  defp assignee_role(%Issue{assignee: %Agent{role: role}}), do: role
+  defp assignee_role(_), do: nil
 
   defp parent_has_open_child?(parent_id) do
     from(c in Issue,

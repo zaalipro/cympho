@@ -37,6 +37,11 @@ config :cympho, :start_health_checker?, false
 config :cympho, :start_scheduler?, false
 config :cympho, :schedule_routine_triggers?, false
 
+# Auto-ignition fans out assign + wake under Task.Supervisor on every
+# `Issues.create_issue`. Tests create issues by the thousand and expect
+# deterministic state; the autonomous loop test opts back in explicitly.
+config :cympho, :auto_ignite_on_create, false
+
 config :phoenix, :plug_init_mode, :runtime
 
 config :swoosh, :api_client, Swoosh.ApiClient.Test

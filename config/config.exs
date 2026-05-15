@@ -51,9 +51,23 @@ config :cympho, Cympho.Scheduler,
       schedule: "17 3 * * *",
       task: {Cympho.Retention, :run_all, []},
       overlap: false
+    ],
+    # Every 5 minutes, re-emit / escalate any review nudges that have gone
+    # stale. The scanner is idempotent and cheap when there are no nudges,
+    # so it can run frequently without cost. Overlap-guarded so a slow
+    # sweep doesn't pile up.
+    review_nudge_stale_scan: [
+      schedule: "*/5 * * * *",
+      task: {Cympho.ReviewNudges.StaleScanner, :sweep, [[]]},
+      overlap: false
     ]
   ],
   timezone: "Etc/UTC"
+
+config :cympho, :review_nudges,
+  stale_t1_seconds: 120,
+  stale_t2_seconds: 600,
+  max_re_emits: 3
 
 config :swoosh, :api_client, Swoosh.ApiClient.Finch
 
