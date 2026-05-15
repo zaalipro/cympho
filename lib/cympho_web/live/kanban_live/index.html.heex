@@ -437,6 +437,7 @@
                         status={status}
                         digest_density={@digest_density}
                         agent_heartbeat_states={@agent_heartbeat_states}
+                        pending_wake={Map.get(@pending_wakes, issue.id)}
                       />
                     <% end %>
                   <% end %>

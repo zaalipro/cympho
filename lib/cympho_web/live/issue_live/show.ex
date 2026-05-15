@@ -48,7 +48,9 @@ defmodule CymphoWeb.IssueLive.Show do
         interactions = IssueThreadInteractions.list_interactions(issue.id)
         work_products = WorkProducts.list_work_products(issue.id)
         child_issues = Issues.list_child_issues(issue.id)
+        child_tree = Issues.list_descendants_tree(issue.id, 4)
         child_health_cards = child_issue_health_cards(child_issues)
+        pending_wake = load_pending_wake_for_issue(issue)
         tool_call_traces = ToolCallTraces.list_tool_call_traces(issue_id: issue.id)
         timeline = build_timeline(issue, runs, interactions, work_products, tool_call_traces)
         documents = Documents.list_documents(issue.id)
@@ -72,7 +74,9 @@ defmodule CymphoWeb.IssueLive.Show do
            interactions: interactions,
            work_products: work_products,
            child_issues: child_issues,
+           child_tree: child_tree,
            child_health_cards: child_health_cards,
+           pending_wake: pending_wake,
            tool_call_traces: tool_call_traces,
            timeline: timeline,
            timeline_filter: "signal",
@@ -1073,11 +1077,21 @@ defmodule CymphoWeb.IssueLive.Show do
 
   defp assign_child_rollup(socket, issue_id) do
     child_issues = Issues.list_child_issues(issue_id)
+    child_tree = Issues.list_descendants_tree(issue_id, 4)
+    pending_wake = load_pending_wake_for_issue(socket.assigns[:issue])
 
     assign(socket,
       child_issues: child_issues,
+      child_tree: child_tree,
+      pending_wake: pending_wake,
       child_health_cards: child_issue_health_cards(child_issues)
     )
+  end
+
+  defp load_pending_wake_for_issue(nil), do: nil
+
+  defp load_pending_wake_for_issue(%{id: id}) do
+    Cympho.Wakes.most_recent_pending_for_issues([id]) |> Map.get(id)
   end
 
   defp refresh_issue_assigns(socket) do

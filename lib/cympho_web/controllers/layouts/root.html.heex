@@ -187,19 +187,25 @@
           <span class="text-[10px] font-510">Agents</span>
         </a>
         <a
-          href="/projects"
-          class="mobile-nav-item flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-brand transition-colors min-w-[48px] min-h-[44px] justify-center"
-          data-mobile-nav-path="/projects"
+          href="/inbox"
+          class="mobile-nav-item relative flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-quaternary active:text-brand transition-colors min-w-[48px] min-h-[44px] justify-center"
+          data-mobile-nav-path="/inbox"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               stroke-linecap="round"
               stroke-linejoin="round"
               stroke-width="2"
-              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+              d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
             />
           </svg>
-          <span class="text-[10px] font-510">Projects</span>
+          <span class="text-[10px] font-510">Inbox</span>
+          <span
+            :if={(assigns[:inbox_badge_count] || 0) > 0}
+            class="absolute top-1 right-2 min-w-[14px] rounded-full bg-brand px-1 text-[9px] font-590 leading-[14px] text-white text-center"
+          >
+            {min(assigns[:inbox_badge_count] || 0, 99)}
+          </span>
         </a>
       </div>
     </nav>

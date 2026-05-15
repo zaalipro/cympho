@@ -1,5 +1,6 @@
 defmodule CymphoWeb.KanbanLive.Components do
   use Phoenix.Component
+  import CymphoWeb.Components, only: [pending_wake_badge: 1]
   import CymphoWeb.Components.IssueDigest
   alias CymphoWeb.KanbanLive.Index
 
@@ -8,6 +9,7 @@ defmodule CymphoWeb.KanbanLive.Components do
   attr :digest_density, :string, default: "detailed"
   attr :agents, :list, default: []
   attr :agent_heartbeat_states, :map, default: %{}
+  attr :pending_wake, :any, default: nil
   attr :editing_card_id, :any, default: nil
   attr :card_action_open, :any, default: nil
 
@@ -23,6 +25,8 @@ defmodule CymphoWeb.KanbanLive.Components do
         </span>
         <span class={"h-1.5 w-1.5 shrink-0 rounded-full " <> status_pin_class(@issue.status)}></span>
       </div>
+
+      <.pending_wake_badge :if={@pending_wake} wake={@pending_wake} class="mb-2" />
 
       <.link
         navigate={"/issues/#{@issue.id}"}

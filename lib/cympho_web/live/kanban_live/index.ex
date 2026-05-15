@@ -31,11 +31,13 @@ defmodule CymphoWeb.KanbanLive.Index do
 
     issues = list_company_issues(company_id)
     agent_heartbeat_states = load_heartbeat_states(issues)
+    pending_wakes = load_pending_wakes(issues)
 
     socket =
       socket
       |> assign(:issues, issues)
       |> assign(:agent_heartbeat_states, agent_heartbeat_states)
+      |> assign(:pending_wakes, pending_wakes)
       |> assign(:projects, projects)
       |> assign(:runtime_enabled?, Dispatcher.enabled?())
       |> assign(
@@ -56,6 +58,12 @@ defmodule CymphoWeb.KanbanLive.Index do
       |> assign(:blocked_transition, nil)
 
     {:ok, socket}
+  end
+
+  defp load_pending_wakes(issues) do
+    issues
+    |> Enum.map(& &1.id)
+    |> Cympho.Wakes.most_recent_pending_for_issues()
   end
 
   defp load_heartbeat_states(issues) do
@@ -125,7 +133,11 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   defp apply_project_filter(socket, nil) do
-    assign(socket, :issues, list_company_issues(current_company_id(socket)))
+    issues = list_company_issues(current_company_id(socket))
+
+    socket
+    |> assign(:issues, issues)
+    |> assign(:pending_wakes, load_pending_wakes(issues))
   end
 
   defp apply_project_filter(socket, project_id) do
@@ -139,7 +151,9 @@ defmodule CymphoWeb.KanbanLive.Index do
           |> Issues.list_issues()
       end
 
-    assign(socket, :issues, issues)
+    socket
+    |> assign(:issues, issues)
+    |> assign(:pending_wakes, load_pending_wakes(issues))
   end
 
   @impl true

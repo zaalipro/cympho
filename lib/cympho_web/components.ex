@@ -245,6 +245,76 @@ defmodule CymphoWeb.Components do
     """
   end
 
+  attr :wake, :any, required: true
+  attr :agent, :any, default: nil
+  attr :class, :any, default: nil
+
+  @doc """
+  Renders a small "⏱ Waiting on X · 3m" chip when an issue has an active
+  pending wake. Color tone reflects staleness, matching the stale-nudge
+  thresholds used by `Cympho.ReviewNudges.StaleScanner`
+  (default T1 = 120 s, T2 = 600 s).
+
+  The wake (and optionally its agent) must be pre-fetched by the caller —
+  e.g. via `Cympho.Wakes.most_recent_pending_for_issues/1` — so this
+  component never hits the DB.
+  """
+  def pending_wake_badge(%{wake: nil} = assigns) do
+    ~H""
+  end
+
+  def pending_wake_badge(assigns) do
+    assigns =
+      assigns
+      |> assign_new(:agent, fn -> Map.get(assigns.wake, :agent) end)
+      |> assign(:age_seconds, wake_age_seconds(assigns.wake))
+
+    ~H"""
+    <span
+      class={[
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-510 leading-none",
+        pending_wake_tone(@age_seconds),
+        @class
+      ]}
+      title={pending_wake_title(@wake, @agent, @age_seconds)}
+    >
+      <span aria-hidden="true">⏱</span>
+      <span class="font-mono tabular-nums">{pending_wake_label(@wake, @agent, @age_seconds)}</span>
+    </span>
+    """
+  end
+
+  defp wake_age_seconds(%{inserted_at: %DateTime{} = ts}),
+    do: DateTime.diff(DateTime.utc_now(), ts, :second)
+
+  defp wake_age_seconds(_), do: 0
+
+  defp pending_wake_tone(age) do
+    cond do
+      age >= 600 -> "border-red-500/35 bg-red-500/10 text-red-300"
+      age >= 120 -> "border-amber-500/35 bg-amber-500/10 text-amber-300"
+      true -> "border-border bg-surface/60 text-text-tertiary"
+    end
+  end
+
+  defp pending_wake_label(_wake, agent, age) do
+    target = wake_target_label(agent)
+    "Waiting on #{target} · #{format_wake_age(age)}"
+  end
+
+  defp pending_wake_title(wake, agent, age) do
+    target = wake_target_label(agent)
+    reason = (wake && wake.reason) || "wake"
+    "#{reason}: waiting on #{target} for #{format_wake_age(age)}"
+  end
+
+  defp wake_target_label(%{name: name}) when is_binary(name) and name != "", do: name
+  defp wake_target_label(_), do: "agent"
+
+  defp format_wake_age(seconds) when seconds < 60, do: "#{max(seconds, 0)}s"
+  defp format_wake_age(seconds) when seconds < 3600, do: "#{div(seconds, 60)}m"
+  defp format_wake_age(seconds), do: "#{div(seconds, 3600)}h"
+
   attr :navigate, :string, required: true
   attr :class, :string, default: ""
   attr :rest, :global

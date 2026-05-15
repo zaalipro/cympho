@@ -3,7 +3,7 @@ defmodule CymphoWeb.InboxLive.Index do
   alias Cympho.Inbox
   alias Cympho.Agents
 
-  @statuses ~w(unread read dismissed archived)
+  @statuses ~w(unread read dismissed archived review)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -122,6 +122,28 @@ defmodule CymphoWeb.InboxLive.Index do
     {:noreply, push_patch(socket, to: build_url(socket, %{"status" => status}))}
   end
 
+  def handle_event(
+        "approve_review",
+        %{"issue_id" => issue_id, "wake_id" => wake_id},
+        socket
+      ) do
+    handle_review_action(socket, issue_id, wake_id, :done, "Issue approved and closed.")
+  end
+
+  def handle_event(
+        "request_review_changes",
+        %{"issue_id" => issue_id, "wake_id" => wake_id},
+        socket
+      ) do
+    handle_review_action(
+      socket,
+      issue_id,
+      wake_id,
+      :todo,
+      "Sent back to engineering for changes."
+    )
+  end
+
   def handle_event("select_agent", %{"agent_id" => "all"}, socket) do
     socket =
       socket
@@ -165,6 +187,50 @@ defmodule CymphoWeb.InboxLive.Index do
     end
   end
 
+  defp handle_review_action(socket, issue_id, wake_id, target_status, ok_message) do
+    with {:ok, issue} <- Cympho.Issues.get_issue(issue_id),
+         {:ok, _} <- transition_for_review(issue, target_status),
+         :ok <- consume_wake_if_present(wake_id) do
+      {:noreply,
+       socket
+       |> put_flash(:info, ok_message)
+       |> load_inbox()}
+    else
+      {:error, reason} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Could not complete review action: #{inspect(reason)}"
+         )}
+    end
+  end
+
+  # `transition_issue_with_review_gates/3` runs the same quality gates an
+  # agent's approve_issue action hits, so a human approving from the inbox
+  # gets the same enforcement.
+  defp transition_for_review(issue, :done) do
+    Cympho.Issues.transition_issue_with_review_gates(issue, :done, nil)
+  end
+
+  defp transition_for_review(issue, :todo) do
+    Cympho.Issues.transition_issue(issue, :todo)
+  end
+
+  defp consume_wake_if_present(nil), do: :ok
+  defp consume_wake_if_present(""), do: :ok
+
+  defp consume_wake_if_present(wake_id) do
+    case Cympho.Wakes.get_agent_wake(wake_id) do
+      {:ok, wake} ->
+        _ = Cympho.Wakes.consume_wake(wake)
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
   defp load_inbox(socket) do
     agent_id = socket.assigns[:selected_agent_id]
     status = socket.assigns[:current_status]
@@ -172,6 +238,9 @@ defmodule CymphoWeb.InboxLive.Index do
 
     items =
       cond do
+        status == "review" ->
+          build_review_queue_items(agent_id, company_id)
+
         agent_id == "all" and company_id ->
           opts = [limit: 100] ++ if(status, do: [status: status], else: [])
           Inbox.list_recent_for_company(company_id, opts)
@@ -191,6 +260,8 @@ defmodule CymphoWeb.InboxLive.Index do
         true -> Inbox.status_counts_for_agent(agent_id)
       end
 
+    counts = Map.put(counts, "review", review_queue_count(agent_id, company_id))
+
     agent_counts =
       if company_id, do: Inbox.counts_by_agent_for_company(company_id), else: %{}
 
@@ -198,6 +269,43 @@ defmodule CymphoWeb.InboxLive.Index do
     |> assign(:inbox_items, items)
     |> assign(:inbox_counts, normalize_counts(counts))
     |> assign(:agent_counts, agent_counts)
+  end
+
+  # Returns the "Awaiting my review" pseudo-items: wake-driven entries that
+  # share the inbox row shape so the existing template can render them.
+  # `kind: :review_queue` tags each so we can swap action buttons.
+  defp build_review_queue_items(agent_id, company_id) do
+    scope = review_scope(agent_id, company_id)
+
+    scope
+    |> Cympho.Wakes.list_review_queue(limit: 100)
+    |> Enum.map(fn %{wake: wake, issue: issue} ->
+      %{
+        kind: :review_queue,
+        wake: wake,
+        wake_id: wake.id,
+        issue: issue,
+        issue_id: issue.id,
+        agent: wake.agent,
+        agent_id: wake.agent_id,
+        status: "review",
+        review_nudge: nil,
+        inserted_at: wake.inserted_at
+      }
+    end)
+  end
+
+  defp review_queue_count(agent_id, company_id) do
+    scope = review_scope(agent_id, company_id)
+    scope |> Cympho.Wakes.list_review_queue(limit: 200) |> length()
+  end
+
+  defp review_scope(agent_id, company_id) do
+    cond do
+      agent_id in [nil, "", "all"] and is_binary(company_id) -> {:company, company_id}
+      is_binary(agent_id) -> {:agent, agent_id}
+      true -> {:agent, nil}
+    end
   end
 
   defp build_url(socket, overrides) do
@@ -324,12 +432,14 @@ defmodule CymphoWeb.InboxLive.Index do
   defp status_dot("read"), do: "bg-slate-400"
   defp status_dot("dismissed"), do: "bg-amber-400"
   defp status_dot("archived"), do: "bg-red-400"
+  defp status_dot("review"), do: "bg-brand"
   defp status_dot(_), do: "bg-slate-500"
 
   defp status_badge_class("unread"), do: "bg-blue-500/20 text-blue-400"
   defp status_badge_class("read"), do: "bg-gray-500/20 text-gray-400"
   defp status_badge_class("dismissed"), do: "bg-yellow-500/20 text-yellow-400"
   defp status_badge_class("archived"), do: "bg-red-500/20 text-red-400"
+  defp status_badge_class("review"), do: "bg-brand/20 text-brand"
   defp status_badge_class(_), do: "bg-gray-500/20 text-gray-400"
 
   defp status_tab_class(current, status) do

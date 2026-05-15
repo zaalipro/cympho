@@ -58,6 +58,7 @@
       <div class="mt-3 flex flex-wrap items-center gap-2">
         <.badge variant="status" value={to_string(@issue.status)} />
         <.badge variant="priority" value={to_string(@issue.priority)} />
+        <.pending_wake_badge :if={@pending_wake} wake={@pending_wake} />
         <span
           :if={@issue.assignee}
           class="inline-flex items-center gap-1.5 text-caption text-ink-muted"
@@ -764,33 +765,49 @@
       </div>
     </section>
 
-    <div :if={!Enum.empty?(@child_issues)} id="issue-sub-issues" class="px-4 lg:px-6 pb-5">
+    <div :if={!Enum.empty?(@child_tree)} id="issue-sub-issues" class="px-4 lg:px-6 pb-5">
       <div class="border-y border-hairline bg-surface-1/25">
         <div class="flex items-center justify-between gap-3 px-1 py-3">
-          <h2 class="text-eyebrow text-ink-tertiary uppercase">Sub-issues</h2>
-          <span class="text-caption text-ink-tertiary">{length(@child_issues)} total</span>
+          <h2 class="text-eyebrow text-ink-tertiary uppercase">Decomposition</h2>
+          <span class="text-caption text-ink-tertiary">
+            {length(@child_tree)} {if length(@child_tree) == 1, do: "issue", else: "issues"} in subtree
+          </span>
         </div>
         <div class="divide-y divide-hairline">
           <.app_link
-            :for={child <- @child_issues}
-            navigate={~p"/issues/#{child.id}"}
-            class="group flex items-start gap-3 px-1 py-3 hover:bg-surface-1/60 transition-colors"
+            :for={node <- @child_tree}
+            navigate={~p"/issues/#{node.issue.id}"}
+            class="group flex items-start gap-3 py-3 hover:bg-surface-1/60 transition-colors"
+            style={"padding-left: #{node.depth * 18 + 4}px;"}
           >
-            <% health = Map.get(health_by_child_id, child.id) %>
+            <% health = Map.get(health_by_child_id, node.issue.id) %>
+            <span
+              :if={node.depth > 0}
+              aria-hidden="true"
+              class="mt-2 inline-block w-2 shrink-0 border-l border-b border-hairline-strong rounded-bl-sm self-stretch"
+              style="height: 14px;"
+            ></span>
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-mono text-caption text-ink-tertiary">
-                  {child.identifier || "CYM-?"}
+                  {node.issue.identifier || "CYM-?"}
                 </span>
                 <span class="truncate text-sm font-510 text-ink group-hover:text-primary">
-                  {child.title}
+                  {node.issue.title}
+                </span>
+                <span
+                  :if={node.depth >= 3 and node.has_children?}
+                  class="rounded bg-surface-1 px-1.5 py-0.5 font-mono text-[10px] text-ink-tertiary"
+                  title="More descendants below this node — open the issue to drill in."
+                >
+                  +more
                 </span>
               </div>
               <p
-                :if={child.description not in [nil, ""]}
+                :if={node.issue.description not in [nil, ""]}
                 class="mt-1 line-clamp-2 text-caption text-ink-tertiary"
               >
-                {child.description}
+                {node.issue.description}
               </p>
               <div :if={health} class="mt-2 flex flex-wrap gap-1.5">
                 <span
@@ -804,13 +821,15 @@
                 Next: {health.next}
               </p>
             </div>
-            <div class="flex shrink-0 flex-col items-end gap-1">
-              <.badge variant="status" value={to_string(child.status)} />
+            <div class="flex shrink-0 flex-col items-end gap-1 pr-1">
+              <.badge variant="status" value={to_string(node.issue.status)} />
               <span :if={health} class={child_health_state_class(health.state)}>
                 {health.review_label}
               </span>
               <span class="text-caption text-ink-tertiary">
-                {(child.assignee && child.assignee.name) || "Unassigned"}
+                {(node.issue.assignee && node.issue.assignee.name) ||
+                  (node.issue.assigned_role && "Role: #{node.issue.assigned_role}") ||
+                  "Unassigned"}
               </span>
             </div>
           </.app_link>

@@ -56,7 +56,7 @@
             </span>
           </.link>
           <.link
-            :for={status <- ["unread", "read", "dismissed", "archived"]}
+            :for={status <- ["unread", "read", "dismissed", "archived", "review"]}
             patch={
               inbox_url(@selected_agent_id, @current_status, @digest_density, %{status: status})
             }
@@ -68,7 +68,9 @@
             <span class="flex items-center justify-between gap-2">
               <span class="flex min-w-0 items-center gap-1.5">
                 <span class={["h-1.5 w-1.5 shrink-0 rounded-full", status_dot(status)]}></span>
-                <span class="truncate">{String.capitalize(status)}</span>
+                <span class="truncate">
+                  {if status == "review", do: "Awaiting review", else: String.capitalize(status)}
+                </span>
               </span>
               <span class="text-text-quaternary">{count_for(@inbox_counts, status)}</span>
             </span>
@@ -238,6 +240,27 @@
             class="rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs font-510 text-emerald-300 hover:bg-emerald-500/15"
           >
             Restore
+          </button>
+          <button
+            :if={Map.get(item, :kind) == :review_queue and item.issue}
+            type="button"
+            phx-click="approve_review"
+            phx-value-issue_id={item.issue_id}
+            phx-value-wake_id={item.wake_id}
+            data-confirm={"Approve #{(item.issue && item.issue.identifier) || "issue"} and close it?"}
+            class="rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-3 py-2 text-xs font-590 text-emerald-200 hover:bg-emerald-500/25"
+          >
+            Approve
+          </button>
+          <button
+            :if={Map.get(item, :kind) == :review_queue and item.issue}
+            type="button"
+            phx-click="request_review_changes"
+            phx-value-issue_id={item.issue_id}
+            phx-value-wake_id={item.wake_id}
+            class="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-510 text-amber-200 hover:bg-amber-500/15"
+          >
+            Request changes
           </button>
         </div>
       </div>
