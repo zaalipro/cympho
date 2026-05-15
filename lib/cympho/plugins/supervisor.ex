@@ -5,7 +5,7 @@ defmodule Cympho.Plugins.Supervisor do
   use DynamicSupervisor
 
   def start_link(_opts) do
-    DynamicSupervisor.start_link(__MODULE__, name: __MODULE__)
+    DynamicSupervisor.start_link(__MODULE__, [], name: __MODULE__)
   end
 
   def start_plugin(module, args) do
