@@ -316,17 +316,6 @@ defmodule CymphoWeb.OperationsLive.Index do
     end
   end
 
-  defp mode_badge_class(:autonomous),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-
-  defp mode_badge_class(:review),
-    do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
-
-  defp mode_badge_class(:degraded),
-    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-
-  defp mode_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
   defp status_badge_class(:running),
     do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
 
@@ -370,6 +359,26 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp doctor_card_class(:info), do: "border-blue-500/20 bg-blue-500/[0.07]"
   defp doctor_card_class(:ok), do: "border-emerald-500/20 bg-emerald-500/[0.07]"
   defp doctor_card_class(_), do: "border-border bg-surface"
+
+  defp action_left_bar(:ok), do: "border-l-emerald-500/70"
+  defp action_left_bar(:attention), do: "border-l-amber-500/70"
+  defp action_left_bar(:danger), do: "border-l-red-500/70"
+  defp action_left_bar(_), do: "border-l-brand/70"
+
+  defp mode_text_class(:autonomous), do: "text-green-300"
+  defp mode_text_class(:review), do: "text-sky-300"
+  defp mode_text_class(:degraded), do: "text-amber-300"
+  defp mode_text_class(_), do: "text-text-tertiary"
+
+  defp mode_dot_class(:autonomous), do: "bg-green-400"
+  defp mode_dot_class(:review), do: "bg-sky-400"
+  defp mode_dot_class(:degraded), do: "bg-amber-400"
+  defp mode_dot_class(_), do: "bg-gray-500"
+
+  defp mode_pulse_color(:autonomous), do: "rgba(74, 222, 128, 0.55)"
+  defp mode_pulse_color(:review), do: "rgba(56, 189, 248, 0.55)"
+  defp mode_pulse_color(:degraded), do: "rgba(252, 211, 77, 0.55)"
+  defp mode_pulse_color(_), do: "rgba(148, 163, 184, 0.45)"
 
   defp nudge_badge_class(:queued), do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
   defp nudge_badge_class(:running), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"

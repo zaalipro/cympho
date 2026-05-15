@@ -14,6 +14,23 @@ module.exports = {
     "../lib/cympho_web.ex",
     "../lib/cympho_web/**/*.*ex"
   ],
+  // Hero icon classes built from helper-returned names (e.g. `hero-#{icon}-mini`)
+  // never appear as literal strings in source, so Tailwind's JIT can't generate
+  // them. List them here so they always ship.
+  safelist: [
+    "hero-eye-mini",
+    "hero-play-mini",
+    "hero-pause-mini",
+    "hero-exclamation-triangle-mini",
+    "hero-bell-alert-mini",
+    "hero-information-circle-mini",
+    "hero-check-circle-mini",
+    "hero-minus-circle-mini",
+    "hero-sparkles-mini",
+    "hero-no-symbol-mini",
+    "hero-user-group-mini",
+    "hero-arrow-right-circle-mini",
+  ],
   theme: {
     extend: {
       colors: {

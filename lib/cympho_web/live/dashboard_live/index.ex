@@ -6,6 +6,8 @@ defmodule CymphoWeb.DashboardLive.Index do
   alias Cympho.RuntimeOperations
   alias CymphoWeb.Events
 
+  @activity_buffer 30
+
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) && socket.assigns[:current_company] do
@@ -19,11 +21,21 @@ defmodule CymphoWeb.DashboardLive.Index do
         Cympho.PubSub,
         "company:#{socket.assigns.current_company.id}:company"
       )
+
+      # Live activity ticker — every Activities.log_activity broadcast lands
+      # here as {:activity_created, %Activity{}}. We prepend into the same
+      # @recent_activities list the template already iterates, capped at
+      # @activity_buffer entries to bound the LiveView's diff.
+      Phoenix.PubSub.subscribe(
+        Cympho.PubSub,
+        "company:#{socket.assigns.current_company.id}:activities"
+      )
     end
 
     socket =
       socket
       |> assign(:page_title, "Dashboard")
+      |> assign(:flash_activity_id, nil)
       |> assign_metrics()
 
     {:ok, socket}
@@ -55,6 +67,46 @@ defmodule CymphoWeb.DashboardLive.Index do
 
     msg = "Run #{payload[:event_type]} (#{payload[:status]})"
     {:noreply, socket |> push_event("toast", %{message: msg, type: type}) |> assign_metrics()}
+  end
+
+  def handle_info({:activity_created, activity}, socket) do
+    entry = activity_to_dashboard_map(activity)
+
+    activities =
+      [entry | socket.assigns[:recent_activities] || []]
+      |> Enum.uniq_by(& &1.id)
+      |> Enum.take(@activity_buffer)
+
+    Process.send_after(self(), {:clear_flash_activity, entry.id}, 800)
+
+    {:noreply,
+     socket
+     |> assign(:recent_activities, activities)
+     |> assign(:flash_activity_id, entry.id)}
+  end
+
+  def handle_info({:clear_flash_activity, id}, socket) do
+    if socket.assigns[:flash_activity_id] == id do
+      {:noreply, assign(socket, :flash_activity_id, nil)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Mirrors Cympho.Dashboard.activity_to_map/1 — kept inline so the LiveView
+  # can convert PubSub-broadcast structs to the same shape the template
+  # already renders from `Dashboard.summary`. Update both when the shape
+  # changes.
+  defp activity_to_dashboard_map(activity) do
+    %{
+      id: activity.id,
+      actor_type: activity.actor_type,
+      actor_id: activity.actor_id,
+      action: activity.action,
+      issue_id: activity.issue_id,
+      metadata: activity.metadata,
+      inserted_at: activity.inserted_at
+    }
   end
 
   @impl true
@@ -349,6 +401,20 @@ defmodule CymphoWeb.DashboardLive.Index do
   def capacity_bar_class(:high), do: "bg-red-400"
   def capacity_bar_class(_), do: "bg-text-quaternary"
 
+  def capacity_text_class(:safe), do: "text-green-400"
+  def capacity_text_class(:watch), do: "text-yellow-300"
+  def capacity_text_class(:high), do: "text-red-400"
+  def capacity_text_class(_), do: "text-text-quaternary"
+
+  def autonomy_text_class(:active), do: "text-green-300"
+  def autonomy_text_class(:paused), do: "text-yellow-300"
+  def autonomy_text_class(_), do: "text-text-tertiary"
+
+  def mode_text_class(:autonomous), do: "text-green-300"
+  def mode_text_class(:review), do: "text-sky-300"
+  def mode_text_class(:paused), do: "text-yellow-300"
+  def mode_text_class(_), do: "text-text-tertiary"
+
   def health_signal_class(:danger), do: "border-red-500/25 bg-red-500/10"
   def health_signal_class(:attention), do: "border-yellow-500/25 bg-yellow-500/10"
   def health_signal_class(:brand), do: "border-brand/35 bg-brand/10"
@@ -373,6 +439,16 @@ defmodule CymphoWeb.DashboardLive.Index do
   def throughput_total(list) do
     Enum.reduce(list, 0, fn %{count: c}, acc -> acc + c end)
   end
+
+  # Lookup the closed count for a given date in the throughput.closed list.
+  def closed_for(date, closed_list) when is_list(closed_list) do
+    Enum.find_value(closed_list, 0, fn
+      %{date: ^date, count: count} -> count
+      _ -> nil
+    end)
+  end
+
+  def closed_for(_, _), do: 0
 
   def pluralize(1, word), do: word
   def pluralize(_, word), do: word <> "s"
@@ -484,4 +560,128 @@ defmodule CymphoWeb.DashboardLive.Index do
   def activity_label("heartbeat"), do: "Heartbeat"
   def activity_label("agent_action"), do: "Agent Action"
   def activity_label(other), do: String.capitalize(to_string(other))
+
+  # Hex stroke color for an issue status in the SVG donut. Mirrors the
+  # tailwind classes from status_bar_color/1 but as a literal — SVG stroke
+  # can't take tailwind utility classes.
+  def status_stroke(:backlog), do: "#9ca3af"
+  def status_stroke(:todo), do: "#60a5fa"
+  def status_stroke(:in_progress), do: "#facc15"
+  def status_stroke(:in_review), do: "#c084fc"
+  def status_stroke(:done), do: "#4ade80"
+  def status_stroke(:blocked), do: "#f87171"
+  def status_stroke(:cancelled), do: "#6b7280"
+  def status_stroke(_), do: "#9ca3af"
+
+  def agent_stroke(:idle), do: "#4ade80"
+  def agent_stroke(:running), do: "#60a5fa"
+  def agent_stroke(:error), do: "#f87171"
+  def agent_stroke(:paused), do: "#6b7280"
+  def agent_stroke(:terminated), do: "#374151"
+  def agent_stroke(_), do: "#9ca3af"
+
+  def health_tone_text(:danger), do: "text-red-300"
+  def health_tone_text(:attention), do: "text-yellow-300"
+  def health_tone_text(:brand), do: "text-brand"
+  def health_tone_text(:ok), do: "text-green-300"
+  def health_tone_text(_), do: "text-text-quaternary"
+
+  def health_tone_glow(:danger), do: "from-red-500/[0.10] to-transparent"
+  def health_tone_glow(:attention), do: "from-yellow-500/[0.10] to-transparent"
+  def health_tone_glow(:brand), do: "from-brand/[0.12] to-transparent"
+  def health_tone_glow(:ok), do: "from-green-500/[0.06] to-transparent"
+  def health_tone_glow(_), do: "from-transparent to-transparent"
+
+  def health_tone_icon(:danger), do: "exclamation-triangle"
+  def health_tone_icon(:attention), do: "bell-alert"
+  def health_tone_icon(:brand), do: "sparkles"
+  def health_tone_icon(:ok), do: "check-circle"
+  def health_tone_icon(_), do: "minus-circle"
+
+  # Autonomy pulse colors used by the header status dot via inline CSS var.
+  def autonomy_pulse_color(:active), do: "rgba(74, 222, 128, 0.55)"
+  def autonomy_pulse_color(:paused), do: "rgba(250, 204, 21, 0.55)"
+  def autonomy_pulse_color(_), do: "rgba(148, 163, 184, 0.45)"
+
+  def autonomy_dot_color(:active), do: "bg-green-400"
+  def autonomy_dot_color(:paused), do: "bg-yellow-400"
+  def autonomy_dot_color(_), do: "bg-gray-500"
+
+  # Convert a 0..100 percentage into the (length, gap) values for a
+  # stroke-dasharray on a 56-pixel SVG donut. Circumference for r=20
+  # is 2 * pi * 20 = ~125.66.
+  def gauge_arc(percent) do
+    pct = max(min(percent, 100), 0)
+    circumference = 125.66
+    filled = circumference * pct / 100
+    "#{filled} #{circumference}"
+  end
+
+  # Compute donut slices for a list of %{status:, count:}. Each slice gets a
+  # stroke-dasharray ("portion total") and stroke-dashoffset (rotation in
+  # percentage units, where 25 = 12 o'clock since circumference is
+  # normalized via pathLength="100").
+  def donut_arcs(entries, color_fun) do
+    total = Enum.reduce(entries, 0, fn %{count: c}, acc -> acc + c end)
+
+    if total == 0 do
+      []
+    else
+      {arcs, _} =
+        Enum.map_reduce(entries, 0, fn %{status: status, count: count}, acc ->
+          pct = count / total * 100
+
+          arc = %{
+            status: status,
+            count: count,
+            color: color_fun.(status),
+            dash_array: "#{pct} 100",
+            dash_offset: -acc
+          }
+
+          {arc, acc + pct}
+        end)
+
+      Enum.reject(arcs, &(&1.count == 0))
+    end
+  end
+
+  # Convert a list of counts into an SVG polyline `points` string sized
+  # to a 60x20 viewbox. Last point is on the right edge.
+  def sparkline_points(values) when is_list(values) and length(values) > 1 do
+    max_v = Enum.max(values, fn -> 1 end)
+    max_v = if max_v <= 0, do: 1, else: max_v
+    step = 60 / (length(values) - 1)
+
+    values
+    |> Enum.with_index()
+    |> Enum.map(fn {v, i} ->
+      x = Float.round(i * step, 2)
+      y = Float.round(20 - v / max_v * 18 - 1, 2)
+      "#{x},#{y}"
+    end)
+    |> Enum.join(" ")
+  end
+
+  def sparkline_points(_), do: "0,10 60,10"
+
+  # Hours-since-updated as a short label. "Stuck for 3h", "Stuck for 2d".
+  def stuck_for(%DateTime{} = updated_at) do
+    diff_sec = DateTime.diff(DateTime.utc_now(), updated_at, :second)
+    hours = div(diff_sec, 3600)
+
+    cond do
+      hours >= 48 -> "#{div(hours, 24)}d"
+      hours >= 1 -> "#{hours}h"
+      true -> "#{max(div(diff_sec, 60), 1)}m"
+    end
+  end
+
+  def stuck_for(_), do: "—"
+
+  # Throughput → list of counts for a sparkline. Returns 7 values.
+  def throughput_counts(list) when is_list(list),
+    do: Enum.map(list, & &1.count)
+
+  def throughput_counts(_), do: [0, 0, 0, 0, 0, 0, 0]
 end

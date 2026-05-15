@@ -416,6 +416,52 @@ button, a, select, input[type="submit"] {
   animation: fade-in 0.15s ease-out;
 }
 
+/* Mission-control status pulse — used on the dashboard hero status dot
+   and on the running-agent avatar ring. Halo grows + fades. */
+@keyframes cympho-pulse {
+  0%   { box-shadow: 0 0 0 0 var(--cympho-pulse-color, rgba(94,106,210,0.55)); }
+  70%  { box-shadow: 0 0 0 8px rgba(94,106,210,0); }
+  100% { box-shadow: 0 0 0 0 rgba(94,106,210,0); }
+}
+
+.cympho-pulse-dot {
+  animation: cympho-pulse 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Activity-feed flash: subtle backdrop highlight applied to the newest
+   ticker entry for ~800 ms when it arrives via PubSub. */
+@keyframes cympho-activity-flash {
+  0%   { background-color: rgba(94, 106, 210, 0.18); }
+  100% { background-color: transparent; }
+}
+
+.cympho-activity-flash {
+  animation: cympho-activity-flash 0.8s ease-out;
+}
+
+/* Faint film-grain overlay applied once on the dashboard page wrapper.
+   SVG fractal noise → no extra asset, no network cost. */
+.cympho-noise::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.6'/></svg>");
+}
+
+/* Soft vignette on the dashboard page so the canvas edges fall off. */
+.cympho-vignette::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.35) 100%);
+}
+
 /* ============================================
    Search Bar
    ============================================ */

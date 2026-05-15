@@ -1,52 +1,87 @@
-<.page size="wide">
-  <.header
-    title="Command Center"
-    subtitle="Decide what the company should do next, then watch agents execute it."
-  >
-    <p class="mt-1 text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-      Autonomous company
-    </p>
-    <:actions>
-      <span class={"inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-510 #{autonomy_badge_class(@autonomy_status)}"}>
-        {status_label(@autonomy_status)}
-      </span>
-      <span class={"inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-510 #{mode_badge_class(@operating_mode)}"}>
-        {status_label(@operating_mode)}
-      </span>
-      <.overflow_menu label="Company controls">
-        <.menu_item
-          :if={@company && @autonomy_status == :active}
-          phx-click="pause_company"
-          data-confirm="Pause autonomous execution for this company?"
-        >
-          Pause autonomy
-        </.menu_item>
-        <.menu_item :if={@company && @autonomy_status == :paused} phx-click="resume_company">
-          Resume autonomy
-        </.menu_item>
-        <.menu_item navigate={~p"/onboarding"}>Start company setup</.menu_item>
-      </.overflow_menu>
-      <.app_link
-        navigate={~p"/kanban"}
-        class="rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover"
+<.page size="wide" class="cympho-noise cympho-vignette">
+  <div class="relative z-10">
+    <%!-- ============================================================
+         Hero — title sits over a brand-tinted radial backdrop. The
+         status line replaces the original pair of pill badges with a
+         mission-control rhythm: animated pulse dot · mode · operating.
+         ============================================================ --%>
+    <div class="relative mb-5 overflow-hidden rounded-xl border border-border bg-panel/40">
+      <div
+        class="pointer-events-none absolute inset-0"
+        style="background: radial-gradient(ellipse 720px 280px at 0% 0%, rgba(94,106,210,0.12), transparent 55%), radial-gradient(ellipse 480px 240px at 100% 100%, rgba(94,106,210,0.06), transparent 60%);"
       >
-        Open board
-      </.app_link>
-    </:actions>
-  </.header>
+      </div>
+      <div class="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand/50 to-transparent">
+      </div>
 
-  <div class="mb-4 rounded-lg border border-border bg-panel/80 px-3 py-2.5">
-    <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(220px,0.8fr)_minmax(0,1.7fr)_minmax(260px,0.85fr)] xl:items-center">
+      <div class="relative px-5 py-5 sm:px-6">
+        <.header>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+              <span
+                class={[
+                  "cympho-pulse-dot inline-block h-2 w-2 rounded-full",
+                  autonomy_dot_color(@autonomy_status)
+                ]}
+                style={"--cympho-pulse-color: #{autonomy_pulse_color(@autonomy_status)};"}
+              >
+              </span>
+              <span class="text-text-tertiary">Autonomous company</span>
+              <span class="text-text-quaternary/60">·</span>
+              <span class={[autonomy_text_class(@autonomy_status)]}>
+                {status_label(@autonomy_status)}
+              </span>
+              <span class="text-text-quaternary/60">·</span>
+              <span class={[mode_text_class(@operating_mode)]}>
+                {status_label(@operating_mode)}
+              </span>
+            </div>
+            <h1 class="mt-2 text-headline text-text-primary">Command Center</h1>
+            <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
+              Decide what the company should do next, then watch agents execute it.
+            </p>
+          </div>
+          <:actions>
+            <.overflow_menu label="Company controls">
+              <.menu_item
+                :if={@company && @autonomy_status == :active}
+                phx-click="pause_company"
+                data-confirm="Pause autonomous execution for this company?"
+              >
+                Pause autonomy
+              </.menu_item>
+              <.menu_item :if={@company && @autonomy_status == :paused} phx-click="resume_company">
+                Resume autonomy
+              </.menu_item>
+              <.menu_item navigate={~p"/onboarding"}>Start company setup</.menu_item>
+            </.overflow_menu>
+            <.app_link
+              navigate={~p"/kanban"}
+              class="rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white shadow-[0_8px_24px_-12px_rgba(94,106,210,0.7)] hover:bg-accent-hover"
+            >
+              Open board
+            </.app_link>
+          </:actions>
+        </.header>
+      </div>
+    </div>
+
+    <%!-- ============================================================
+         Operating-mode strip — three columns, properly proportioned
+         so descriptions stop truncating. Right column hosts the
+         radial pressure gauge (replaces the old 1.5px flat bar).
+         ============================================================ --%>
+    <div class="mb-4 grid grid-cols-1 gap-3 rounded-xl border border-border bg-panel p-5 shadow-elevated xl:grid-cols-[minmax(220px,0.85fr)_minmax(0,1.75fr)_minmax(280px,0.95fr)] xl:gap-5">
       <section class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
-          <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
             Operating mode
           </p>
           <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-510 #{mode_badge_class(@operating_mode)}"}>
             {status_label(@operating_mode)}
           </span>
         </div>
-        <p class="mt-1 truncate text-xs text-text-tertiary">
+        <p class="mt-2 text-sm leading-5 text-text-tertiary">
           <%= case @operating_mode do %>
             <% :review -> %>
               Inspect and edit safely without provider spend.
@@ -60,350 +95,574 @@
         </p>
       </section>
 
-      <section class="min-w-0 border-y border-border/70 py-2 xl:border-x xl:border-y-0 xl:px-3 xl:py-0">
+      <section class="min-w-0 border-y border-border/70 py-3 xl:border-x xl:border-y-0 xl:px-5 xl:py-0">
         <div class="flex items-center justify-between gap-3">
-          <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
             Next actions
           </p>
           <a
             href="/operations"
             class="shrink-0 text-xs font-590 text-brand hover:text-accent-hover"
           >
-            Open Operations
+            Open Operations →
           </a>
         </div>
-        <div class="mt-1.5 grid gap-1.5 sm:grid-cols-3">
-          <div
-            :for={action <- @next_actions}
-            class="min-w-0 rounded-md border border-border/70 bg-surface/40 px-2.5 py-1.5"
-            title={action.detail}
-          >
-            <h2 class="truncate text-xs font-590 text-text-primary">{action.label}</h2>
-            <p class="sr-only">{action.detail}</p>
+        <ul class="mt-2 space-y-1.5">
+          <li :for={{action, idx} <- Enum.with_index(@next_actions, 1)} class="group min-w-0">
             <a
-              :if={Map.get(action, :path)}
-              href={action.path}
-              class="mt-0.5 inline-flex max-w-full truncate text-[11px] font-590 text-brand hover:text-accent-hover"
+              href={Map.get(action, :path) || "#"}
+              class="flex items-start gap-3 rounded-md border-l-2 border-transparent py-1 pl-3 pr-2 transition hover:border-brand hover:bg-surface/40"
+              title={action.detail}
             >
-              {action.action}
+              <span class="mt-0.5 w-5 shrink-0 font-mono text-[11px] tabular-nums text-text-quaternary">
+                {String.pad_leading(Integer.to_string(idx), 2, "0")}
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-510 text-text-primary group-hover:text-text-primary">
+                  {action.label}
+                </span>
+                <span class="block truncate text-[11px] font-590 text-brand">
+                  {action.action}
+                </span>
+              </span>
             </a>
-            <p
-              :if={!Map.get(action, :path)}
-              class="mt-0.5 truncate text-[11px] font-590 text-brand"
-            >
-              {action.action}
-            </p>
-          </div>
-        </div>
+          </li>
+        </ul>
       </section>
 
       <section class="min-w-0">
         <div class="flex items-center justify-between gap-3">
-          <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
             Runtime capacity
           </p>
           <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-510 #{capacity_badge_class(@runtime_capacity.level)}"}>
             {@runtime_capacity.local_slots} local slots
           </span>
         </div>
-        <div class="mt-2 flex items-center gap-3">
-          <h2 class="shrink-0 text-lg font-590 text-text-primary">
-            {@runtime_capacity.label}
-          </h2>
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center justify-between text-[11px] text-text-quaternary">
-              <span>CLI/process pressure</span>
-              <span>{@runtime_capacity.running_runs} running</span>
-            </div>
-            <div class="mt-1 h-1.5 rounded-full bg-canvas">
-              <div
-                class={"h-1.5 rounded-full #{capacity_bar_class(@runtime_capacity.level)}"}
-                style={"width: #{capacity_percent(@runtime_capacity)}%"}
-              >
-              </div>
+        <div class="mt-3 flex items-center gap-4">
+          <div class={["relative shrink-0", capacity_text_class(@runtime_capacity.level)]}>
+            <svg
+              viewBox="0 0 50 50"
+              class="h-16 w-16 -rotate-90 drop-shadow-[0_0_12px_rgba(94,106,210,0.25)]"
+            >
+              <circle
+                cx="25"
+                cy="25"
+                r="20"
+                fill="none"
+                stroke="rgba(255,255,255,0.06)"
+                stroke-width="4"
+              />
+              <circle
+                cx="25"
+                cy="25"
+                r="20"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="4"
+                stroke-linecap="round"
+                stroke-dasharray={gauge_arc(capacity_percent(@runtime_capacity))}
+              />
+            </svg>
+            <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+              <span class="font-mono text-[14px] font-590 leading-none tabular-nums text-text-primary">
+                {capacity_percent(@runtime_capacity)}%
+              </span>
             </div>
           </div>
+          <div class="min-w-0 flex-1">
+            <h2 class="truncate text-base font-590 text-text-primary">
+              {@runtime_capacity.label}
+            </h2>
+            <p class="mt-0.5 text-[11px] text-text-quaternary">
+              <span class="font-mono tabular-nums text-text-tertiary">
+                {@runtime_capacity.running_runs}
+              </span>
+              running · CLI/process pressure
+            </p>
+            <p class="mt-1.5 line-clamp-2 text-xs leading-4 text-text-tertiary">
+              {@runtime_capacity.summary}
+            </p>
+          </div>
         </div>
-        <p class="mt-1 truncate text-xs text-text-quaternary">{@runtime_capacity.summary}</p>
       </section>
     </div>
-  </div>
 
-  <div class="mb-5 rounded-lg border border-border bg-panel/80 p-4">
-    <div class="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-          Execution health
-        </p>
-        <h2 class="mt-1 text-base font-590 text-text-primary">Owner morning brief</h2>
-      </div>
-      <a href="/operations" class="text-xs font-590 text-text-tertiary hover:text-text-primary">
-        Open Operations
-      </a>
-    </div>
-
-    <div class="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
-      <a
-        :for={signal <- @execution_health}
-        href={signal.path}
-        class={"rounded-lg border px-3 py-3 transition hover:-translate-y-0.5 hover:bg-surface-hover #{health_signal_class(signal.tone)}"}
-      >
-        <p class="truncate text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
-          {signal.label}
-        </p>
-        <p class="mt-2 text-2xl font-590 text-text-primary">{signal.value}</p>
-        <p class="mt-1 min-h-8 text-xs leading-4 text-text-tertiary">{signal.hint}</p>
-      </a>
-    </div>
-  </div>
-
-  <div class="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
-    <.metric
-      label="Queued"
-      value={@queued_work}
-      hint={"Total #{total_issues(@issue_status_counts)} issues"}
-    />
-    <.metric label="Running" value={@running_work} hint="Checked out" tone="brand" />
-    <.metric label="Blocked" value={@blocked_work} hint="Needs action" tone="danger" />
-    <.metric
-      label="Agents"
-      value={"#{@active_agents} / #{@total_agents}"}
-      hint="Active capacity"
-      tone="success"
-    />
-    <.metric
-      label="Closed 7d"
-      value={throughput_total(@throughput.closed)}
-      hint={"Cost #{format_cost(@cost_summary.total_cost)}"}
-    />
-  </div>
-
-  <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-stretch">
-    <.panel class="flex flex-col overflow-hidden">
-      <div class="flex items-center justify-between border-b border-border px-4 py-3">
+    <%!-- ============================================================
+         Execution Health — tone-keyed tiles with gradient atmosphere,
+         monospace display-md numbers, hero-icon accents.
+         ============================================================ --%>
+    <div class="mb-5 rounded-xl border border-border bg-panel/60 p-4 shadow-elevated">
+      <div class="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 class="text-sm font-590 text-text-primary">Active Agents</h2>
-          <p class="mt-0.5 text-xs text-text-quaternary">Current execution roster</p>
-        </div>
-        <.app_link
-          navigate={~p"/org-chart"}
-          class="text-xs text-text-tertiary hover:text-text-primary"
-        >
-          Org chart
-        </.app_link>
-      </div>
-
-      <.empty_state
-        :if={Enum.empty?(@active_agent_list)}
-        title="No active agents"
-        message="Start a company to create the CEO, CTO, and engineers."
-        class="py-10"
-      />
-
-      <div :if={!Enum.empty?(@active_agent_list)} class="divide-y divide-border">
-        <div
-          :for={agent <- @active_agent_list}
-          class="flex items-center gap-3 px-4 py-3 hover:bg-surface-hover/70"
-        >
-          <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-xs font-590 text-brand">
-            {agent_initials(agent)}
-          </div>
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-510 text-text-primary">{agent.name}</p>
-            <p class="truncate text-xs text-text-tertiary">
-              {agent.title || status_label(agent.role)}
-            </p>
-          </div>
-          <span class={"h-2 w-2 shrink-0 rounded-full #{agent_status_dot(agent.status)}"}></span>
-        </div>
-      </div>
-    </.panel>
-
-    <div class="flex flex-col gap-4">
-      <.panel class="flex-1 p-4">
-        <h2 class="mb-4 text-sm font-590 text-text-primary">Issues by Status</h2>
-        <div class="space-y-3">
-          <div
-            :for={%{status: status, count: count} <- @issue_status_counts}
-            class="flex items-center gap-3"
-          >
-            <span class={"h-2.5 w-2.5 shrink-0 rounded-full #{status_dot_color(status)}"}></span>
-            <span class="w-24 text-xs text-text-tertiary">{status_label(status)}</span>
-            <div class="h-1.5 flex-1 rounded-full bg-canvas">
-              <div
-                class={"h-1.5 rounded-full #{status_bar_color(status)}"}
-                style={"width: #{bar_percent(count, total_issues(@issue_status_counts))}%"}
-              >
-              </div>
-            </div>
-            <span class="w-8 text-right text-xs font-590 text-text-secondary">{count}</span>
-          </div>
-        </div>
-      </.panel>
-
-      <.panel class="flex-1 p-4">
-        <h2 class="mb-4 text-sm font-590 text-text-primary">Agents by Status</h2>
-        <div class="space-y-3">
-          <div
-            :for={%{status: status, count: count} <- @agent_status_counts}
-            class="flex items-center gap-3"
-          >
-            <span class={"h-2.5 w-2.5 shrink-0 rounded-full #{agent_status_dot(status)}"}></span>
-            <span class="w-24 text-xs text-text-tertiary">{status_label(status)}</span>
-            <div class="h-1.5 flex-1 rounded-full bg-canvas">
-              <div
-                class={"h-1.5 rounded-full #{agent_status_bar(status)}"}
-                style={"width: #{bar_percent(count, @total_agents)}%"}
-              >
-              </div>
-            </div>
-            <span class="w-8 text-right text-xs font-590 text-text-secondary">{count}</span>
-          </div>
-        </div>
-      </.panel>
-    </div>
-
-    <.panel class="flex flex-col overflow-hidden">
-      <div class="flex items-center justify-between border-b border-border px-4 py-3">
-        <div>
-          <h2 class="text-sm font-590 text-text-primary">Inbox</h2>
-          <p class="mt-0.5 text-xs text-text-quaternary">Latest agent inbox items</p>
-        </div>
-        <.app_link
-          navigate={~p"/inbox"}
-          class="text-xs text-text-tertiary hover:text-text-primary"
-        >
-          Open inbox
-        </.app_link>
-      </div>
-
-      <.empty_state
-        :if={Enum.empty?(@recent_inbox)}
-        title="Inbox empty"
-        message="Agent activity will surface here as it arrives."
-        class="py-10"
-      />
-
-      <div :if={!Enum.empty?(@recent_inbox)} class="divide-y divide-border">
-        <.app_link
-          :for={item <- @recent_inbox}
-          navigate={inbox_item_link(item)}
-          class="block px-4 py-3 hover:bg-surface-hover/70"
-        >
-          <div class="flex items-center gap-2">
-            <span class={"h-2 w-2 shrink-0 rounded-full #{inbox_dot(item.status)}"}></span>
-            <p class="min-w-0 flex-1 truncate text-sm font-510 text-text-primary">
-              {inbox_item_title(item)}
-            </p>
-          </div>
-          <p class="mt-1 truncate text-xs text-text-quaternary">
-            {inbox_item_meta(item)}
+          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Execution health
           </p>
-        </.app_link>
-      </div>
-    </.panel>
-  </div>
-
-  <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(320px,1fr)]">
-    <.panel class="p-4">
-      <div class="mb-4 flex items-center justify-between">
-        <h2 class="text-sm font-590 text-text-primary">Issue Throughput</h2>
-        <span class="text-xs text-text-quaternary">Last 7 days</span>
-      </div>
-      <div class="flex h-40 items-end gap-2">
-        <div
-          :for={%{date: date, count: count} <- @throughput.created}
-          class="flex flex-1 flex-col items-center gap-2"
-        >
-          <span class="text-[11px] text-text-quaternary">{count}</span>
-          <div class="flex w-full items-end rounded-t bg-canvas" style="height: 112px;">
-            <div
-              class="w-full rounded-t bg-brand/70"
-              style={"height: #{chart_height(count, @throughput.created)}%"}
-            >
-            </div>
-          </div>
-          <span class="w-full truncate text-center text-[11px] text-text-quaternary">
-            {format_date(date)}
-          </span>
+          <h2 class="mt-1 text-base font-590 text-text-primary">Owner morning brief</h2>
         </div>
+        <a href="/operations" class="text-xs font-590 text-text-tertiary hover:text-text-primary">
+          Open Operations →
+        </a>
       </div>
-    </.panel>
 
-    <div class="space-y-4">
-      <.panel class="overflow-hidden">
-        <div class="border-b border-border px-4 py-3">
-          <h2 class="text-sm font-590 text-text-primary">Recent Activity</h2>
+      <div class="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
+        <a
+          :for={signal <- @execution_health}
+          href={signal.path}
+          class={"group relative overflow-hidden rounded-lg border px-3 py-3 transition hover:-translate-y-0.5 hover:shadow-elevated #{health_signal_class(signal.tone)}"}
+        >
+          <div class={"pointer-events-none absolute inset-0 bg-gradient-to-br opacity-80 transition group-hover:opacity-100 #{health_tone_glow(signal.tone)}"}>
+          </div>
+          <div class="relative">
+            <div class="flex items-start justify-between gap-2">
+              <p class="truncate text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                {signal.label}
+              </p>
+              <span class={["shrink-0", health_tone_text(signal.tone)]}>
+                <span class={"hero-#{health_tone_icon(signal.tone)}-mini opacity-70"}></span>
+              </span>
+            </div>
+            <p class={[
+              "mt-2 font-mono text-[32px] font-590 leading-none tabular-nums",
+              health_tone_text(signal.tone)
+            ]}>
+              {signal.value}
+            </p>
+            <p class="mt-2 min-h-8 text-xs leading-4 text-text-tertiary">{signal.hint}</p>
+          </div>
+        </a>
+      </div>
+    </div>
+
+    <%!-- ============================================================
+         Work Metrics — single instrument band. Five inline columns
+         with vertical dividers. Monospace numerals + sparklines.
+         ============================================================ --%>
+    <div class="mb-5 grid grid-cols-2 divide-y divide-border overflow-hidden rounded-xl border border-border bg-panel sm:grid-cols-3 sm:divide-y-0 sm:divide-x lg:grid-cols-5">
+      <%!-- Queued --%>
+      <div class="px-4 py-3.5 sm:border-r sm:border-border">
+        <div class="flex items-center justify-between">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Queued
+          </p>
+          <svg
+            viewBox="0 0 60 20"
+            preserveAspectRatio="none"
+            class="h-5 w-14 text-text-quaternary/60"
+          >
+            <polyline
+              points={sparkline_points(throughput_counts(@throughput.created))}
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.2"
+              stroke-linejoin="round"
+              stroke-linecap="round"
+            />
+          </svg>
+        </div>
+        <p class="mt-1.5 font-mono text-[28px] font-590 leading-none tabular-nums text-text-primary">
+          {@queued_work}
+        </p>
+        <p class="mt-1 truncate text-xs text-text-quaternary">
+          Total {total_issues(@issue_status_counts)} issues
+        </p>
+      </div>
+
+      <%!-- Running --%>
+      <div class="px-4 py-3.5 sm:border-r-0 lg:border-r lg:border-border">
+        <div class="flex items-center justify-between">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Running
+          </p>
+          <span class="hero-play-mini text-brand/70"></span>
+        </div>
+        <p class="mt-1.5 font-mono text-[28px] font-590 leading-none tabular-nums text-brand">
+          {@running_work}
+        </p>
+        <p class="mt-1 truncate text-xs text-text-quaternary">Checked out</p>
+      </div>
+
+      <%!-- Blocked --%>
+      <div class="px-4 py-3.5 lg:border-r lg:border-border">
+        <div class="flex items-center justify-between">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Blocked
+          </p>
+          <span class="hero-no-symbol-mini text-red-400/70"></span>
+        </div>
+        <p class={[
+          "mt-1.5 font-mono text-[28px] font-590 leading-none tabular-nums",
+          if(@blocked_work > 0, do: "text-red-300", else: "text-text-primary")
+        ]}>
+          {@blocked_work}
+        </p>
+        <p class="mt-1 truncate text-xs text-text-quaternary">Needs action</p>
+      </div>
+
+      <%!-- Agents --%>
+      <div class="px-4 py-3.5 lg:border-r lg:border-border">
+        <div class="flex items-center justify-between">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Agents
+          </p>
+          <span class="hero-user-group-mini text-green-400/70"></span>
+        </div>
+        <p class="mt-1.5 font-mono text-[28px] font-590 leading-none tabular-nums text-green-300">
+          {@active_agents}<span class="text-text-quaternary/80">/{@total_agents}</span>
+        </p>
+        <p class="mt-1 truncate text-xs text-text-quaternary">Active capacity</p>
+      </div>
+
+      <%!-- Closed 7d --%>
+      <div class="px-4 py-3.5">
+        <div class="flex items-center justify-between">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Closed 7d
+          </p>
+          <svg viewBox="0 0 60 20" preserveAspectRatio="none" class="h-5 w-14 text-green-400/70">
+            <polyline
+              points={sparkline_points(throughput_counts(@throughput.closed))}
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.2"
+              stroke-linejoin="round"
+              stroke-linecap="round"
+            />
+          </svg>
+        </div>
+        <p class="mt-1.5 font-mono text-[28px] font-590 leading-none tabular-nums text-text-primary">
+          {throughput_total(@throughput.closed)}
+        </p>
+        <p class="mt-1 truncate text-xs text-text-quaternary">
+          Cost {format_cost(@cost_summary.total_cost)}
+        </p>
+      </div>
+    </div>
+
+    <%!-- ============================================================
+         Mid row — Active Agents | Twin donuts | Inbox
+         ============================================================ --%>
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-stretch">
+      <.panel class="flex flex-col overflow-hidden">
+        <div class="flex items-center justify-between border-b border-border px-4 py-3">
+          <div>
+            <h2 class="text-sm font-590 text-text-primary">Active Agents</h2>
+            <p class="mt-0.5 text-[11px] text-text-quaternary">Current execution roster</p>
+          </div>
+          <.app_link
+            navigate={~p"/org-chart"}
+            class="text-xs text-text-tertiary hover:text-text-primary"
+          >
+            Org chart →
+          </.app_link>
         </div>
 
         <.empty_state
-          :if={Enum.empty?(@recent_activities)}
-          title="No recent activity"
-          message="Agent and issue events will appear here."
+          :if={Enum.empty?(@active_agent_list)}
+          title="No active agents"
+          message="Start a company to create the CEO, CTO, and engineers."
           class="py-10"
         />
 
-        <div
-          :if={!Enum.empty?(@recent_activities)}
-          class="max-h-72 divide-y divide-border overflow-y-auto"
-        >
+        <div :if={!Enum.empty?(@active_agent_list)} class="divide-y divide-border">
           <div
-            :for={activity <- @recent_activities}
-            class="flex items-start gap-3 px-4 py-3 hover:bg-surface-hover/70"
+            :for={agent <- @active_agent_list}
+            class="group flex items-center gap-3 border-l-2 border-transparent px-4 py-3 transition hover:border-brand hover:bg-surface-hover/70"
           >
-            <span class={"mt-1.5 h-2 w-2 shrink-0 rounded-full #{activity_icon(activity.action)}"}>
-            </span>
+            <div class="relative shrink-0">
+              <div class="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-gradient-to-br from-brand/15 to-surface text-xs font-590 text-brand">
+                {agent_initials(agent)}
+              </div>
+              <span
+                class={[
+                  "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-panel",
+                  agent_status_dot(agent.status),
+                  agent.status == :running && "cympho-pulse-dot"
+                ]}
+                style={
+                  if agent.status == :running, do: "--cympho-pulse-color: rgba(96,165,250,0.6);"
+                }
+              >
+              </span>
+            </div>
             <div class="min-w-0 flex-1">
-              <p class="truncate text-sm text-text-primary">
-                {activity_label(activity.action)}
-                <span :if={activity.issue_id} class="text-text-quaternary">
-                  {activity.issue_id |> String.slice(0, 8)}
-                </span>
-              </p>
-              <p class="mt-0.5 text-xs text-text-quaternary">
-                {Calendar.strftime(activity.inserted_at, "%b %d, %H:%M")}
+              <p class="truncate text-sm font-510 text-text-primary">{agent.name}</p>
+              <p class="truncate text-[11px] text-text-quaternary">
+                {agent.title || status_label(agent.role)}
               </p>
             </div>
+            <span class="hidden font-mono text-[10px] uppercase tracking-[0.1em] text-text-quaternary group-hover:inline">
+              {status_label(agent.status)}
+            </span>
           </div>
         </div>
       </.panel>
 
-      <.panel class="p-4">
-        <div class="mb-3 flex items-center justify-between">
-          <h2 class="text-sm font-590 text-text-primary">Bottlenecks</h2>
-          <span
-            :if={Enum.any?(@bottlenecks)}
-            class="rounded-full bg-red-500/10 px-2 py-0.5 text-xs text-red-300"
+      <%!-- Twin donuts: Issues + Agents by status --%>
+      <.panel class="flex flex-col p-4">
+        <div class="grid grid-cols-2 gap-4">
+          <%= for {title, counts, color_fun, total} <- [
+            {"Issues by Status", @issue_status_counts, &status_stroke/1, total_issues(@issue_status_counts)},
+            {"Agents by Status", @agent_status_counts, &agent_stroke/1, @total_agents}
+          ] do %>
+            <div class="min-w-0">
+              <h2 class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                {title}
+              </h2>
+              <div class="mt-3 flex flex-col items-center">
+                <div class="relative h-28 w-28">
+                  <svg viewBox="0 0 36 36" class="h-28 w-28 -rotate-90">
+                    <circle
+                      cx="18"
+                      cy="18"
+                      r="15.9155"
+                      fill="none"
+                      stroke="rgba(255,255,255,0.05)"
+                      stroke-width="3.2"
+                    />
+                    <%= for arc <- donut_arcs(counts, color_fun) do %>
+                      <circle
+                        cx="18"
+                        cy="18"
+                        r="15.9155"
+                        fill="none"
+                        stroke={arc.color}
+                        stroke-width="3.2"
+                        stroke-linecap="butt"
+                        stroke-dasharray={arc.dash_array}
+                        stroke-dashoffset={arc.dash_offset}
+                      />
+                    <% end %>
+                  </svg>
+                  <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                    <span class="font-mono text-[26px] font-590 leading-none tabular-nums text-text-primary">
+                      {if total > 0, do: total, else: "—"}
+                    </span>
+                    <span class="mt-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
+                      Total
+                    </span>
+                  </div>
+                </div>
+                <ul class="mt-3 w-full space-y-1">
+                  <li
+                    :for={%{status: status, count: count} <- counts}
+                    :if={count > 0}
+                    class="flex items-center gap-2"
+                  >
+                    <span
+                      class="h-2 w-2 shrink-0 rounded-full"
+                      style={"background: #{color_fun.(status)};"}
+                    >
+                    </span>
+                    <span class="min-w-0 flex-1 truncate text-[11px] text-text-tertiary">
+                      {status_label(status)}
+                    </span>
+                    <span class="font-mono text-[11px] tabular-nums text-text-secondary">
+                      {count}
+                    </span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      </.panel>
+
+      <.panel class="flex flex-col overflow-hidden">
+        <div class="flex items-center justify-between border-b border-border px-4 py-3">
+          <div>
+            <h2 class="text-sm font-590 text-text-primary">Inbox</h2>
+            <p class="mt-0.5 text-[11px] text-text-quaternary">Latest agent inbox items</p>
+          </div>
+          <.app_link
+            navigate={~p"/inbox"}
+            class="text-xs text-text-tertiary hover:text-text-primary"
           >
-            {length(@bottlenecks)} stuck
-          </span>
+            Open inbox →
+          </.app_link>
         </div>
 
-        <p :if={Enum.empty?(@bottlenecks)} class="text-sm text-text-tertiary">
-          No bottleneck issues detected.
-        </p>
+        <.empty_state
+          :if={Enum.empty?(@recent_inbox)}
+          title="Inbox empty"
+          message="Agent activity will surface here as it arrives."
+          class="py-10"
+        />
 
-        <div :if={Enum.any?(@bottlenecks)} class="space-y-2">
+        <div :if={!Enum.empty?(@recent_inbox)} class="divide-y divide-border">
           <.app_link
-            :for={issue <- @bottlenecks}
-            navigate={~p"/issues/#{issue.id}"}
-            class="block rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 hover:bg-red-500/15"
+            :for={item <- @recent_inbox}
+            navigate={inbox_item_link(item)}
+            class="group flex items-start gap-3 border-l-2 border-transparent px-4 py-3 transition hover:border-brand hover:bg-surface-hover/70"
           >
-            <p class="truncate text-sm font-510 text-text-primary">{issue.title}</p>
-            <p class="mt-0.5 truncate text-xs text-text-tertiary">
-              In review since {Calendar.strftime(issue.updated_at, "%b %d, %H:%M")}
-            </p>
+            <span class={[
+              "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+              inbox_dot(item.status)
+            ]}>
+            </span>
+            <div class="min-w-0 flex-1">
+              <p class={[
+                "truncate text-sm text-text-primary",
+                if(item.status == "unread", do: "font-590", else: "font-510")
+              ]}>
+                {inbox_item_title(item)}
+              </p>
+              <p class="mt-0.5 truncate text-[11px] text-text-quaternary">
+                {inbox_item_meta(item)}
+              </p>
+            </div>
+            <span class="ml-2 shrink-0 rounded-md border border-border/60 bg-surface/40 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-text-quaternary">
+              {Calendar.strftime(item.inserted_at, "%b %d")}
+            </span>
           </.app_link>
         </div>
       </.panel>
+    </div>
 
+    <%!-- ============================================================
+         Bottom row — Throughput chart | Activity / Bottlenecks / Routine
+         ============================================================ --%>
+    <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(320px,1fr)]">
       <.panel class="p-4">
-        <h2 class="mb-3 text-sm font-590 text-text-primary">Routine Health</h2>
-        <div class="flex items-center gap-3">
-          <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-300"></span>
-          <span class="text-sm text-text-tertiary">{@routine_health.message}</span>
+        <div class="mb-4 flex items-center justify-between">
+          <div>
+            <h2 class="text-sm font-590 text-text-primary">Issue Throughput</h2>
+            <p class="mt-0.5 text-[11px] text-text-quaternary">Created vs. closed, last 7 days</p>
+          </div>
+          <div class="flex items-center gap-3 text-[11px] text-text-quaternary">
+            <span class="inline-flex items-center gap-1.5">
+              <span class="h-2 w-2 rounded-sm bg-brand"></span> Created
+            </span>
+            <span class="inline-flex items-center gap-1.5">
+              <span class="h-2 w-2 rounded-sm bg-green-400/70"></span> Closed
+            </span>
+          </div>
+        </div>
+        <div
+          class="relative flex h-40 items-end gap-2 rounded-md"
+          style="background-image: repeating-linear-gradient(to top, rgba(255,255,255,0.04) 0, rgba(255,255,255,0.04) 1px, transparent 1px, transparent 33.333%);"
+        >
+          <div
+            :for={%{date: date, count: count} <- @throughput.created}
+            class="group flex flex-1 flex-col items-center gap-2"
+          >
+            <span class="font-mono text-[10px] tabular-nums text-text-quaternary opacity-0 transition group-hover:opacity-100">
+              {count}
+            </span>
+            <div class="relative flex h-28 w-full items-end justify-center gap-0.5">
+              <div
+                class="w-2/5 rounded-t-md bg-gradient-to-t from-brand/25 to-brand transition group-hover:from-brand/40 group-hover:to-accent-hover"
+                style={"height: #{chart_height(count, @throughput.created)}%;"}
+              >
+              </div>
+              <div
+                class="w-2/5 rounded-t-md bg-gradient-to-t from-green-500/15 to-green-400/80 transition group-hover:from-green-500/25 group-hover:to-green-300"
+                style={"height: #{chart_height(closed_for(date, @throughput.closed), @throughput.closed)}%;"}
+              >
+              </div>
+            </div>
+            <span class="w-full truncate text-center font-mono text-[10px] tabular-nums text-text-quaternary">
+              {format_date(date)}
+            </span>
+          </div>
         </div>
       </.panel>
+
+      <div class="space-y-4">
+        <.panel class="overflow-hidden">
+          <div class="border-b border-border px-4 py-3">
+            <h2 class="text-sm font-590 text-text-primary">Recent Activity</h2>
+          </div>
+
+          <.empty_state
+            :if={Enum.empty?(@recent_activities)}
+            title="No recent activity"
+            message="Agent and issue events will appear here."
+            class="py-10"
+          />
+
+          <div
+            :if={!Enum.empty?(@recent_activities)}
+            class="relative max-h-72 overflow-y-auto px-4 py-2"
+          >
+            <div class="absolute bottom-2 left-[22px] top-2 w-px bg-border"></div>
+            <ul class="relative space-y-2.5">
+              <li
+                :for={activity <- @recent_activities}
+                class={[
+                  "relative flex items-start gap-3 rounded-md py-1 pl-4 transition hover:bg-surface-hover/60",
+                  @flash_activity_id == activity.id && "cympho-activity-flash"
+                ]}
+              >
+                <span class={[
+                  "absolute left-[2px] top-2 h-2 w-2 rounded-full ring-2 ring-panel",
+                  activity_icon(activity.action)
+                ]}>
+                </span>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm text-text-primary">
+                    {activity_label(activity.action)}
+                    <span
+                      :if={activity.issue_id}
+                      class="font-mono text-[11px] text-text-quaternary"
+                    >
+                      {activity.issue_id |> String.slice(0, 8)}
+                    </span>
+                  </p>
+                  <p class="mt-0.5 font-mono text-[10px] tabular-nums text-text-quaternary">
+                    {Calendar.strftime(activity.inserted_at, "%b %d · %H:%M")}
+                  </p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </.panel>
+
+        <.panel class="p-4">
+          <div class="mb-3 flex items-center justify-between">
+            <h2 class="text-sm font-590 text-text-primary">Bottlenecks</h2>
+            <span
+              :if={Enum.any?(@bottlenecks)}
+              class="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 font-mono text-[10px] tabular-nums text-red-300"
+            >
+              {length(@bottlenecks)} stuck
+            </span>
+          </div>
+
+          <p :if={Enum.empty?(@bottlenecks)} class="text-sm text-text-tertiary">
+            No bottleneck issues detected.
+          </p>
+
+          <div :if={Enum.any?(@bottlenecks)} class="space-y-2">
+            <.app_link
+              :for={issue <- @bottlenecks}
+              navigate={~p"/issues/#{issue.id}"}
+              class="block rounded-lg border border-red-500/20 border-l-2 border-l-red-500/80 bg-red-500/[0.06] px-3 py-2 transition hover:bg-red-500/[0.10]"
+            >
+              <div class="flex items-start justify-between gap-2">
+                <p class="min-w-0 flex-1 truncate text-sm font-510 text-text-primary">
+                  {issue.title}
+                </p>
+                <span class="shrink-0 rounded-md bg-red-500/15 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-red-300">
+                  {stuck_for(issue.updated_at)}
+                </span>
+              </div>
+              <p class="mt-0.5 truncate text-[11px] text-text-quaternary">
+                In review since {Calendar.strftime(issue.updated_at, "%b %d, %H:%M")}
+              </p>
+            </.app_link>
+          </div>
+        </.panel>
+
+        <.panel class="p-4">
+          <h2 class="mb-3 text-sm font-590 text-text-primary">Routine Health</h2>
+          <div class="flex items-center gap-3 rounded-md bg-amber-500/[0.06] px-3 py-2">
+            <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-300 shadow-[0_0_8px_rgba(252,211,77,0.6)]">
+            </span>
+            <span class="text-sm text-text-tertiary">{@routine_health.message}</span>
+          </div>
+        </.panel>
+      </div>
     </div>
   </div>
 </.page>

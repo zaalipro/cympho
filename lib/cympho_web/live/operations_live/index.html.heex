@@ -1,13 +1,23 @@
 <.page size="wide">
-  <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-    <div>
-      <div class="flex flex-wrap items-center gap-2">
-        <h1 class="text-2xl font-590 tracking-tight text-text-primary">Operations</h1>
-        <span class={"inline-flex rounded-full border px-2.5 py-1 text-xs font-510 #{mode_badge_class(@runtime_mode.status)}"}>
-          {@runtime_mode.label}
+  <header class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div class="min-w-0">
+      <div class="flex items-center gap-2 text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+        <span
+          class={[
+            "cympho-pulse-dot inline-block h-1.5 w-1.5 rounded-full",
+            mode_dot_class(@runtime_mode.status)
+          ]}
+          style={"--cympho-pulse-color: #{mode_pulse_color(@runtime_mode.status)};"}
+        >
         </span>
+        <span class="text-text-tertiary">Runtime mode</span>
+        <span class="text-text-quaternary/60">·</span>
+        <span class={mode_text_class(@runtime_mode.status)}>{@runtime_mode.label}</span>
       </div>
-      <p class="mt-1 text-sm text-text-tertiary">
+      <h1 class="mt-2 text-[22px] font-590 leading-7 tracking-tight text-text-primary">
+        Operations
+      </h1>
+      <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
         Runtime services, adapter health, and execution capacity for the current company.
       </p>
     </div>
@@ -15,39 +25,46 @@
     <button
       type="button"
       phx-click="refresh"
-      class="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+      class="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
     >
       <span class="hero-arrow-path-mini h-4 w-4"></span> Refresh
     </button>
-  </div>
+  </header>
 
   <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
     <div class="space-y-4">
-      <section class="rounded-lg border border-border bg-panel p-5">
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+      <section class="rounded-lg border border-border bg-panel">
+        <div class="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div class="min-w-0">
+            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Runtime mode
             </p>
-            <h2 class="mt-2 text-xl font-590 text-text-primary">{@runtime_mode.label}</h2>
-            <p class="mt-1 max-w-2xl text-sm leading-6 text-text-tertiary">
+            <div class="mt-1.5 flex flex-wrap items-baseline gap-2">
+              <h2 class={[
+                "text-lg font-590",
+                mode_text_class(@runtime_mode.status)
+              ]}>
+                {@runtime_mode.label}
+              </h2>
+            </div>
+            <p class="mt-1.5 max-w-xl text-sm leading-5 text-text-tertiary">
               {@runtime_mode.summary}
             </p>
           </div>
-          <div class="grid grid-cols-2 gap-2 text-center">
-            <div class="rounded-lg border border-border bg-surface px-4 py-3">
-              <p class="text-2xl font-590 text-text-primary">
+          <div class="flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
+            <div class="bg-surface/60 px-4 py-2.5">
+              <p class="font-mono text-[20px] font-590 leading-none tabular-nums text-text-primary">
                 {@runtime_mode.disabled_services}
               </p>
-              <p class="mt-1 text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+              <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                 Disabled
               </p>
             </div>
-            <div class="rounded-lg border border-border bg-surface px-4 py-3">
-              <p class="text-2xl font-590 text-text-primary">
+            <div class="bg-surface/60 px-4 py-2.5">
+              <p class="font-mono text-[20px] font-590 leading-none tabular-nums text-text-primary">
                 {@runtime_mode.not_running_services}
               </p>
-              <p class="mt-1 text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+              <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                 Not running
               </p>
             </div>
@@ -55,7 +72,10 @@
         </div>
       </section>
 
-      <section id="operations-doctor" class="rounded-lg border border-border bg-panel scroll-mt-6">
+      <section
+        id="operations-doctor"
+        class="rounded-lg border border-border bg-panel scroll-mt-6"
+      >
         <div class="border-b border-border px-5 py-4">
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -86,22 +106,28 @@
               </p>
             </div>
 
-            <div class="grid grid-cols-3 gap-2 text-center">
-              <div class="rounded-md border border-red-500/20 bg-red-500/[0.06] px-3 py-2">
-                <p class="text-sm font-590 text-red-300">{@doctor.counts.critical}</p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+            <div class="flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
+              <div class="min-w-[68px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[18px] font-590 leading-none tabular-nums text-red-300">
+                  {@doctor.counts.critical}
+                </p>
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Fix
                 </p>
               </div>
-              <div class="rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2">
-                <p class="text-sm font-590 text-amber-300">{@doctor.counts.warning}</p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+              <div class="min-w-[68px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[18px] font-590 leading-none tabular-nums text-amber-300">
+                  {@doctor.counts.warning}
+                </p>
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Watch
                 </p>
               </div>
-              <div class="rounded-md border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2">
-                <p class="text-sm font-590 text-emerald-300">{@doctor.counts.ok}</p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+              <div class="min-w-[68px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[18px] font-590 leading-none tabular-nums text-emerald-300">
+                  {@doctor.counts.ok}
+                </p>
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Clear
                 </p>
               </div>
@@ -146,7 +172,7 @@
                 <a
                   :if={Map.get(finding, :target_path) && anchor_path?(finding.target_path)}
                   href={finding.target_path}
-                  class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  class="inline-flex items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
                 >
                   <span class="hero-arrow-down-mini h-3.5 w-3.5"></span>
                   {finding.target_label}
@@ -154,14 +180,14 @@
                 <.app_link
                   :if={Map.get(finding, :target_path) && not anchor_path?(finding.target_path)}
                   navigate={finding.target_path}
-                  class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  class="inline-flex items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
                 >
                   <span class="hero-wrench-screwdriver-mini h-3.5 w-3.5"></span>
                   {finding.target_label}
                 </.app_link>
                 <code
                   :if={Map.get(finding, :command)}
-                  class="max-w-full overflow-x-auto rounded-md border border-border bg-canvas px-2.5 py-1.5 font-mono text-[11px] text-text-tertiary"
+                  class="max-w-full overflow-x-auto rounded-md border border-border bg-canvas px-2.5 py-1.5 font-mono text-[11px] text-text-secondary"
                 >
                   {finding.command}
                 </code>
@@ -219,44 +245,52 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-3 gap-2 text-center xl:grid-cols-6">
-              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
-                <p class="text-sm font-590 text-text-primary">{@prompt_radar.counts.total}</p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+            <div class="flex shrink-0 flex-wrap items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-text-primary">
+                  {@prompt_radar.counts.total}
+                </p>
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Agents
                 </p>
               </div>
-              <div class="rounded-md border border-emerald-500/20 bg-emerald-500/[0.06] px-2.5 py-2">
-                <p class="text-sm font-590 text-emerald-300">{@prompt_radar.counts.ready}</p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-emerald-300">
+                  {@prompt_radar.counts.ready}
+                </p>
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Ready
                 </p>
               </div>
-              <div class="rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-2.5 py-2">
-                <p class="text-sm font-590 text-amber-300">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-amber-300">
                   {@prompt_radar.counts.needs_tuning}
                 </p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Tuning
                 </p>
               </div>
-              <div class="rounded-md border border-red-500/20 bg-red-500/[0.06] px-2.5 py-2">
-                <p class="text-sm font-590 text-red-300">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-red-300">
                   {@prompt_radar.counts.guardrail_risk}
                 </p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Risk
                 </p>
               </div>
-              <div class="rounded-md border border-red-500/20 bg-red-500/[0.06] px-2.5 py-2">
-                <p class="text-sm font-590 text-red-300">{@prompt_radar.counts.eval_gap}</p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-red-300">
+                  {@prompt_radar.counts.eval_gap}
+                </p>
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Eval
                 </p>
               </div>
-              <div class="rounded-md border border-blue-500/20 bg-blue-500/[0.06] px-2.5 py-2">
-                <p class="text-sm font-590 text-blue-300">{@prompt_radar.counts.regressed}</p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-blue-300">
+                  {@prompt_radar.counts.regressed}
+                </p>
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Drift
                 </p>
               </div>
@@ -403,36 +437,36 @@
               </p>
             </div>
 
-            <div class="grid grid-cols-4 gap-2 text-center">
-              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
-                <p class="text-sm font-590 text-text-primary">
+            <div class="flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-text-primary">
                   {@contract_failures.counts.issues}
                 </p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Issues
                 </p>
               </div>
-              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
-                <p class="text-sm font-590 text-text-primary">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-text-primary">
                   {@contract_failures.counts.agents}
                 </p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Agents
                 </p>
               </div>
-              <div class="rounded-md border border-red-500/20 bg-red-500/[0.06] px-2.5 py-2">
-                <p class="text-sm font-590 text-red-300">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-red-300">
                   {@contract_failures.counts.missing}
                 </p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Missing
                 </p>
               </div>
-              <div class="rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-2.5 py-2">
-                <p class="text-sm font-590 text-amber-300">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-amber-300">
                   {@contract_failures.counts.attention}
                 </p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Weak
                 </p>
               </div>
@@ -460,57 +494,65 @@
                 {@contract_failures.summary}
               </span>
             </div>
-            <div class="mt-4 space-y-2">
+            <div class="mt-3 divide-y divide-border overflow-hidden rounded-md border border-border">
               <div
                 :for={group <- @contract_failures.by_agent}
-                class="rounded-lg border border-border bg-surface px-3 py-3"
+                class="bg-surface/40 px-3 py-2.5"
               >
-                <div class="flex items-start justify-between gap-3">
+                <div class="flex items-baseline justify-between gap-3">
                   <div class="min-w-0">
-                    <p class="truncate text-sm font-590 text-text-primary">
+                    <p class="truncate text-sm font-510 text-text-primary">
                       {group.agent_name}
                     </p>
-                    <p class="mt-0.5 text-xs text-text-quaternary">
+                    <p class="mt-0.5 text-[11px] text-text-quaternary">
                       {role_label(group.agent_role)}
                     </p>
                   </div>
-                  <div class="text-right">
-                    <p class="font-mono text-sm text-text-primary">{group.count}</p>
-                    <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                  <div class="shrink-0 text-right">
+                    <span class="font-mono text-[15px] font-590 tabular-nums text-text-primary">
+                      {group.count}
+                    </span>
+                    <span class="ml-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
                       gaps
-                    </p>
+                    </span>
                   </div>
                 </div>
 
-                <div class="mt-3 flex flex-wrap gap-1.5">
-                  <span class="rounded bg-red-500/10 px-1.5 py-0.5 text-[11px] text-red-200">
+                <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span
+                    :if={group.missing > 0}
+                    class="rounded bg-red-500/10 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-red-200"
+                  >
                     {group.missing} missing
                   </span>
-                  <span class="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-200">
+                  <span
+                    :if={group.attention > 0}
+                    class="rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-amber-200"
+                  >
                     {group.attention} weak
                   </span>
                   <span
                     :for={field <- group.fields}
-                    class="rounded bg-canvas px-1.5 py-0.5 text-[11px] text-text-tertiary"
+                    class="rounded bg-canvas px-1.5 py-0.5 text-[10px] text-text-tertiary"
                   >
                     {field}
                   </span>
                 </div>
 
-                <div class="mt-3 flex flex-wrap gap-2">
+                <div class="mt-2 flex flex-wrap items-center gap-3 text-[11px]">
                   <.app_link
                     :if={group.agent_id}
                     navigate={~p"/agents/#{group.agent_id}?tab=configuration"}
-                    class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                    class="font-510 text-text-tertiary hover:text-text-primary"
                   >
-                    Open agent
+                    Open agent →
                   </.app_link>
                   <.app_link
                     :if={group.latest_issue}
                     navigate={~p"/issues/#{group.latest_issue.issue_id}"}
-                    class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                    class="font-510 text-text-tertiary hover:text-text-primary"
                   >
-                    Open latest issue
+                    Open latest issue →
                   </.app_link>
                 </div>
               </div>
@@ -524,52 +566,24 @@
               </h3>
               <span class="text-xs text-text-quaternary">Newest open work first</span>
             </div>
-            <div class="mt-4 space-y-2">
-              <div
-                :for={entry <- @contract_failures.entries}
-                class="rounded-lg border border-border bg-surface px-3 py-3"
-              >
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                  <div class="min-w-0">
+            <div class="mt-3 divide-y divide-border overflow-hidden rounded-md border border-border">
+              <div :for={entry <- @contract_failures.entries} class="bg-surface/40 px-3 py-2.5">
+                <div class="flex flex-wrap items-start justify-between gap-2">
+                  <div class="min-w-0 flex-1">
                     <div class="flex flex-wrap items-center gap-2">
-                      <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{contract_badge_class(entry.status)}"}>
+                      <span class={"rounded-full border px-2 py-0.5 text-[10px] font-510 #{contract_badge_class(entry.status)}"}>
                         {entry.status_label}
                       </span>
-                      <span class="text-xs font-510 text-text-secondary">
+                      <span class="text-[11px] font-510 text-text-tertiary">
                         {entry.contract_label}
                       </span>
                     </div>
-                    <p class="mt-2 truncate text-sm font-590 text-text-primary">
+                    <p class="mt-1.5 truncate text-sm font-510 text-text-primary">
                       {entry.issue_identifier} · {entry.issue_title}
                     </p>
-                    <p class="mt-1 text-xs text-text-quaternary">
-                      Owner: {entry.agent_name}
-                      <span :if={entry.project_name}>{" · #{entry.project_name}"}</span>
+                    <p class="mt-0.5 truncate text-[11px] text-text-quaternary">
+                      Owner: {entry.agent_name}<span :if={entry.project_name}>{" · #{entry.project_name}"}</span>
                     </p>
-                  </div>
-                  <div class="flex shrink-0 flex-wrap gap-2">
-                    <button
-                      type="button"
-                      phx-click="queue_contract_nudge"
-                      phx-value-issue-id={entry.issue_id}
-                      phx-value-contract={entry.contract_key}
-                      disabled={!entry.nudge_enabled? || entry.nudge_queued?}
-                      class={[
-                        "rounded-md border px-2.5 py-1.5 text-xs font-510",
-                        entry.nudge_enabled? && !entry.nudge_queued? &&
-                          "border-amber-500/25 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15",
-                        (!entry.nudge_enabled? || entry.nudge_queued?) &&
-                          "cursor-not-allowed border-border bg-panel text-text-quaternary"
-                      ]}
-                    >
-                      {entry.nudge_button_label}
-                    </button>
-                    <.app_link
-                      navigate={~p"/issues/#{entry.issue_id}"}
-                      class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                    >
-                      Open issue
-                    </.app_link>
                   </div>
                 </div>
 
@@ -577,21 +591,46 @@
                 <div :if={entry.missing_fields != []} class="mt-2 flex flex-wrap gap-1.5">
                   <span
                     :for={field <- entry.missing_fields}
-                    class="rounded bg-red-500/10 px-1.5 py-0.5 text-[11px] text-red-100"
+                    class="rounded bg-red-500/10 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-red-200"
                   >
                     {field}
                   </span>
                 </div>
-                <p class="mt-2 rounded-md border border-border bg-canvas px-2.5 py-2 text-[11px] leading-4 text-text-tertiary">
+                <p class="mt-2 border-l-2 border-border pl-2 text-[11px] leading-4 text-text-quaternary">
                   {entry.recommendation}
                 </p>
+
+                <div class="mt-2.5 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    phx-click="queue_contract_nudge"
+                    phx-value-issue-id={entry.issue_id}
+                    phx-value-contract={entry.contract_key}
+                    disabled={!entry.nudge_enabled? || entry.nudge_queued?}
+                    class={[
+                      "rounded-md border px-2 py-1 text-[11px] font-510",
+                      entry.nudge_enabled? && !entry.nudge_queued? &&
+                        "border-amber-500/25 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15",
+                      (!entry.nudge_enabled? || entry.nudge_queued?) &&
+                        "cursor-not-allowed border-border bg-panel text-text-quaternary"
+                    ]}
+                  >
+                    {entry.nudge_button_label}
+                  </button>
+                  <.app_link
+                    navigate={~p"/issues/#{entry.issue_id}"}
+                    class="rounded-md border border-border bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    Open issue
+                  </.app_link>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section id="runtime-services" class="rounded-lg border border-border bg-panel scroll-mt-6">
+      <section id="runtime-services" class="scroll-mt-6 rounded-lg border border-border bg-panel">
         <div class="border-b border-border px-5 py-4">
           <h2 class="text-sm font-590 text-text-primary">Runtime Services</h2>
           <p class="mt-1 text-xs text-text-quaternary">
@@ -609,12 +648,14 @@
                 {service.label}
               </span>
             </div>
-            <div class="mt-3 rounded-md border border-border bg-surface px-3 py-2">
-              <p class="text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+            <div class="mt-3">
+              <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                 Operator action
               </p>
-              <p class="mt-1 font-mono text-[11px] text-text-secondary">{service.env_var}=1</p>
-              <p class="mt-1 text-xs text-text-quaternary">{service.fix}</p>
+              <code class="mt-1.5 block overflow-x-auto rounded-md border border-border bg-canvas px-2.5 py-1.5 font-mono text-[11px] text-text-secondary">
+                {service.env_var}=1
+              </code>
+              <p class="mt-1.5 text-[11px] leading-4 text-text-quaternary">{service.fix}</p>
             </div>
           </div>
         </div>
@@ -622,105 +663,119 @@
 
       <section
         id="runtime-capacity"
-        class="rounded-lg border border-border bg-panel p-5 scroll-mt-6"
+        class="scroll-mt-6 rounded-lg border border-border bg-panel p-5"
       >
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Runtime capacity
             </p>
-            <h2 class="mt-2 text-lg font-590 text-text-primary">{@capacity.summary}</h2>
-            <p class="mt-1 text-sm leading-6 text-text-tertiary">{@capacity.hint}</p>
+            <h2 class="mt-1.5 text-base font-590 text-text-primary">{@capacity.summary}</h2>
+            <p class="mt-1 text-sm leading-5 text-text-tertiary">{@capacity.hint}</p>
           </div>
           <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{capacity_badge_class(@capacity.level)}"}>
             {@capacity.label}
           </span>
         </div>
-        <div class="mt-4 grid gap-3 sm:grid-cols-4">
-          <div class="rounded-lg border border-border bg-surface px-3 py-3">
-            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+        <div class="mt-4 grid divide-y divide-border overflow-hidden rounded-md border border-border sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+          <div class="px-4 py-3">
+            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Agents
             </p>
-            <p class="mt-1 text-xl font-590 text-text-primary">{@capacity.total_agents}</p>
+            <p class="mt-1.5 font-mono text-[20px] font-590 leading-none tabular-nums text-text-primary">
+              {@capacity.total_agents}
+            </p>
           </div>
-          <div class="rounded-lg border border-border bg-surface px-3 py-3">
-            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+          <div class="px-4 py-3">
+            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Total slots
             </p>
-            <p class="mt-1 text-xl font-590 text-text-primary">{@capacity.total_slots}</p>
+            <p class="mt-1.5 font-mono text-[20px] font-590 leading-none tabular-nums text-text-primary">
+              {@capacity.total_slots}
+            </p>
           </div>
-          <div class="rounded-lg border border-border bg-surface px-3 py-3">
-            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+          <div class="px-4 py-3">
+            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Local CLI slots
             </p>
-            <p class="mt-1 text-xl font-590 text-text-primary">{@capacity.local_slots}</p>
+            <p class="mt-1.5 font-mono text-[20px] font-590 leading-none tabular-nums text-text-primary">
+              {@capacity.local_slots}
+            </p>
           </div>
-          <div class="rounded-lg border border-border bg-surface px-3 py-3">
-            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+          <div class="px-4 py-3">
+            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Active runs
             </p>
-            <p class="mt-1 text-xl font-590 text-text-primary">{@capacity.running_runs}</p>
+            <p class="mt-1.5 font-mono text-[20px] font-590 leading-none tabular-nums text-text-primary">
+              {@capacity.running_runs}
+            </p>
           </div>
         </div>
       </section>
 
       <section
         id="host-footprint"
-        class="rounded-lg border border-border bg-panel p-5 scroll-mt-6"
+        class="scroll-mt-6 rounded-lg border border-border bg-panel p-5"
       >
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Host footprint
             </p>
-            <h2 class="mt-2 text-lg font-590 text-text-primary">{@host.summary}</h2>
-            <p class="mt-1 text-sm leading-6 text-text-tertiary">{@host.hint}</p>
+            <h2 class="mt-1.5 text-base font-590 text-text-primary">{@host.summary}</h2>
+            <p class="mt-1 text-sm leading-5 text-text-tertiary">{@host.hint}</p>
           </div>
           <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{capacity_badge_class(@host.level)}"}>
             {@host.label}
           </span>
         </div>
-        <div class="mt-4 grid gap-3 sm:grid-cols-4">
-          <div class="rounded-lg border border-border bg-surface px-3 py-3">
-            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+        <div class="mt-4 grid divide-y divide-border overflow-hidden rounded-md border border-border sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+          <div class="px-4 py-3">
+            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               BEAM memory
             </p>
-            <p class="mt-1 text-xl font-590 text-text-primary">
+            <p class="mt-1.5 font-mono text-[18px] font-590 leading-none tabular-nums text-text-primary">
               {format_memory(@host.memory_bytes)}
             </p>
-            <p class="mt-1 text-[11px] text-text-quaternary">
+            <p class="mt-2 text-[11px] text-text-quaternary">
               {format_memory(@host.process_memory_bytes)} process heap
             </p>
           </div>
-          <div class="rounded-lg border border-border bg-surface px-3 py-3">
-            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+          <div class="px-4 py-3">
+            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               BEAM processes
             </p>
-            <p class="mt-1 text-xl font-590 text-text-primary">{@host.process_count}</p>
-            <p class="mt-1 text-[11px] text-text-quaternary">
+            <p class="mt-1.5 font-mono text-[18px] font-590 leading-none tabular-nums text-text-primary">
+              {@host.process_count}
+            </p>
+            <p class="mt-2 font-mono text-[11px] tabular-nums text-text-quaternary">
               {@host.process_usage_percent}% of limit
             </p>
           </div>
-          <div class="rounded-lg border border-border bg-surface px-3 py-3">
-            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+          <div class="px-4 py-3">
+            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Schedulers
             </p>
-            <p class="mt-1 text-xl font-590 text-text-primary">{@host.schedulers_online}</p>
-            <p class="mt-1 text-[11px] text-text-quaternary">Online CPU schedulers</p>
+            <p class="mt-1.5 font-mono text-[18px] font-590 leading-none tabular-nums text-text-primary">
+              {@host.schedulers_online}
+            </p>
+            <p class="mt-2 text-[11px] text-text-quaternary">Online CPU schedulers</p>
           </div>
-          <div class="rounded-lg border border-border bg-surface px-3 py-3">
-            <p class="text-[11px] uppercase tracking-[0.08em] text-text-quaternary">
+          <div class="px-4 py-3">
+            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Run queue
             </p>
-            <p class="mt-1 text-xl font-590 text-text-primary">{@host.run_queue}</p>
-            <p class="mt-1 text-[11px] text-text-quaternary">Runnable BEAM work</p>
+            <p class="mt-1.5 font-mono text-[18px] font-590 leading-none tabular-nums text-text-primary">
+              {@host.run_queue}
+            </p>
+            <p class="mt-2 text-[11px] text-text-quaternary">Runnable BEAM work</p>
           </div>
         </div>
-        <div class="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-3">
-          <p class="text-xs font-590 uppercase tracking-[0.08em] text-amber-200">
+        <div class="mt-4 rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2.5">
+          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-amber-200">
             External CLI memory
           </p>
-          <p class="mt-1 text-sm leading-6 text-text-tertiary">{@host.cli_note}</p>
+          <p class="mt-1 text-sm leading-5 text-text-tertiary">{@host.cli_note}</p>
         </div>
       </section>
 
@@ -733,32 +788,36 @@
                 Evidence, review, and owner-update requests waiting across the company.
               </p>
             </div>
-            <div class="grid grid-cols-4 gap-2 text-center">
-              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
-                <p class="text-sm font-590 text-text-primary">
+            <div class="flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-text-primary">
                   {@review_nudges.counts.active}
                 </p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Active
                 </p>
               </div>
-              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
-                <p class="text-sm font-590 text-red-300">{@review_nudges.counts.stale}</p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-red-300">
+                  {@review_nudges.counts.stale}
+                </p>
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Stale
                 </p>
               </div>
-              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
-                <p class="text-sm font-590 text-blue-300">{@review_nudges.counts.running}</p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-blue-300">
+                  {@review_nudges.counts.running}
+                </p>
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Running
                 </p>
               </div>
-              <div class="rounded-md border border-border bg-surface px-2.5 py-2">
-                <p class="text-sm font-590 text-emerald-300">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-emerald-300">
                   {@review_nudges.counts.cleared}
                 </p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Cleared
                 </p>
               </div>
@@ -921,7 +980,10 @@
             Local CLI adapters consume real OS memory; BEAM processes stay lightweight.
           </p>
         </div>
-        <div :if={@pressure_agents == []} class="px-5 py-8 text-center text-sm text-text-tertiary">
+        <div
+          :if={@pressure_agents == []}
+          class="px-5 py-8 text-center text-sm text-text-tertiary"
+        >
           No agents configured yet.
         </div>
         <div :if={@pressure_agents != []} class="divide-y divide-border">
@@ -953,24 +1015,31 @@
 
     <aside class="space-y-4">
       <section class="rounded-lg border border-border bg-panel">
-        <div class="border-b border-border px-4 py-3">
+        <div class="flex items-center justify-between border-b border-border px-4 py-3">
           <h2 class="text-sm font-590 text-text-primary">Next Actions</h2>
+          <span class="font-mono text-[10px] tabular-nums text-text-quaternary">
+            {length(@next_actions)}
+          </span>
         </div>
         <div class="space-y-2 p-3">
           <div
             :for={action <- @next_actions}
-            class={"rounded-lg border px-3 py-3 #{action_class(action.tone)}"}
+            class={[
+              "rounded-md border border-l-2 px-3 py-2.5",
+              action_class(action.tone),
+              action_left_bar(action.tone)
+            ]}
           >
             <p class="text-sm font-590 text-text-primary">{action.title}</p>
             <p class="mt-1 text-xs leading-5 text-text-tertiary">{action.body}</p>
             <div
               :if={Map.get(action, :target_path) || Map.get(action, :command)}
-              class="mt-3 flex flex-wrap items-center gap-2"
+              class="mt-2.5 flex flex-wrap items-center gap-1.5"
             >
               <a
                 :if={Map.get(action, :target_path) && anchor_path?(action.target_path)}
                 href={action.target_path}
-                class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                class="inline-flex items-center gap-1.5 rounded-md border border-border bg-panel px-2 py-1 text-xs font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
               >
                 <span class="hero-arrow-down-mini h-3.5 w-3.5"></span>
                 {action.target_label}
@@ -978,14 +1047,14 @@
               <.app_link
                 :if={Map.get(action, :target_path) && not anchor_path?(action.target_path)}
                 navigate={action.target_path}
-                class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                class="inline-flex items-center gap-1.5 rounded-md border border-border bg-panel px-2 py-1 text-xs font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
               >
                 <span class="hero-wrench-screwdriver-mini h-3.5 w-3.5"></span>
                 {action.target_label}
               </.app_link>
               <code
                 :if={Map.get(action, :command)}
-                class="max-w-full overflow-x-auto rounded-md border border-border bg-canvas px-2.5 py-1.5 font-mono text-[11px] text-text-tertiary"
+                class="max-w-full overflow-x-auto rounded-md border border-border bg-canvas px-2 py-1 font-mono text-[11px] text-text-secondary"
               >
                 {action.command}
               </code>
@@ -1005,24 +1074,32 @@
           <div :for={adapter <- @health} class="px-4 py-3">
             <div class="flex items-center justify-between gap-3">
               <p class="text-sm font-590 text-text-primary">{adapter.label}</p>
-              <p class="text-xs text-text-quaternary">{adapter.total} agents</p>
+              <p class="font-mono text-[11px] tabular-nums text-text-quaternary">
+                {adapter.total} agents
+              </p>
             </div>
-            <div class="mt-2 grid grid-cols-3 gap-2 text-center">
-              <div class="rounded border border-border bg-surface px-2 py-1.5">
-                <p class="text-sm font-590 text-emerald-300">{adapter.healthy}</p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+            <div class="mt-2 flex items-stretch gap-px overflow-hidden rounded border border-border bg-border">
+              <div class="flex-1 bg-panel px-2 py-1.5 text-center">
+                <p class="font-mono text-[13px] font-590 leading-none tabular-nums text-emerald-300">
+                  {adapter.healthy}
+                </p>
+                <p class="mt-1 text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
                   Healthy
                 </p>
               </div>
-              <div class="rounded border border-border bg-surface px-2 py-1.5">
-                <p class="text-sm font-590 text-amber-300">{adapter.degraded}</p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+              <div class="flex-1 bg-panel px-2 py-1.5 text-center">
+                <p class="font-mono text-[13px] font-590 leading-none tabular-nums text-amber-300">
+                  {adapter.degraded}
+                </p>
+                <p class="mt-1 text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
                   Warn
                 </p>
               </div>
-              <div class="rounded border border-border bg-surface px-2 py-1.5">
-                <p class="text-sm font-590 text-red-300">{adapter.unavailable}</p>
-                <p class="text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+              <div class="flex-1 bg-panel px-2 py-1.5 text-center">
+                <p class="font-mono text-[13px] font-590 leading-none tabular-nums text-red-300">
+                  {adapter.unavailable}
+                </p>
+                <p class="mt-1 text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
                   Down
                 </p>
               </div>
