@@ -136,7 +136,16 @@ Each agent can carry its own adapter, model/runtime configuration, concurrency l
 
 ## Rent Remote Agents From Agrenting
 
-Cympho can discover and rent agents from the Agrenting marketplace. Rented agents are created in Cympho as local proxy agents, so they can be assigned to issues, shown in agent lists, and run through the normal Cympho orchestration loop.
+Cympho can discover and rent agents from the [Agrenting](https://www.agrenting.com) marketplace. Rented agents are created in Cympho as local proxy agents, so they can be assigned to issues, shown in agent lists, and run through the normal Cympho orchestration loop.
+
+### Why Rent Remote Agents
+
+Two concrete operating wins, both important for autonomous companies:
+
+- **Per-ticket cost drops by an order of magnitude.** A single local Claude/Codex CLI agent working a non-trivial ticket through to PR can burn **$15+ in provider tokens** per run — long context, many tool calls, retries on review failures. Equivalent specialist agents on Agrenting often quote **~$1 flat per task** because they amortize context, share warm caches, and bill on outcome rather than tokens. For a company that closes dozens of tickets a day, the autonomous loop becomes affordable instead of speculative.
+- **Scale headcount without scaling your machine.** Every *local* agent costs you a Phoenix process slot, a heartbeat GenServer, an Ecto checkout, and a CLI subprocess (often hundreds of MB of RAM each — Claude Code, Codex, and Cursor are not light). Adding a tenth local engineer can OOM a small VM. *Remote* agents only consume one lightweight `Cympho.Agents.Agent` proxy row plus the HTTP adapter; the actual model + tools execute on Agrenting's infrastructure. You can hire fifty remote engineers without the laptop fan spinning up.
+
+Cympho's budget system (per-agent monthly caps + governance approval gates) bounds remote spend the same way it bounds local spend — `mix cympho.compare` reports both under `cost_control`. Mix-and-match is the intended pattern: keep a few high-context local agents (CEO, CTO) for cross-cutting strategy and rent specialists from Agrenting for the long tail.
 
 ### 1. Get an Agrenting API key
 
@@ -239,20 +248,45 @@ CYMPHO_CLAUDE_COMMAND=cz mix phx.server
 
 The app can source provider environment from `$HOME/.cld` for local wrapper commands, and agent runtime settings can inject provider variables such as model names, base URLs, and API keys. Keep secrets in local environment files or the app secret store; do not commit them.
 
-## Cympho Vs. Single-Agent Issue Runners
+## Cympho Vs. Paperclip
 
-| Dimension | Single-agent runner | Cympho |
+Paperclip ([paperclipai/paperclip](https://github.com/paperclipai/paperclip)) is the most-starred open-source agent-orchestration product and the closest competitor to Cympho. Paperclip is a Node.js server with a React UI; Cympho is an Elixir/Phoenix BEAM application. The product surface looks similar — both ship org charts, heartbeats, budgets, governance, and ticketed work — but the foundations make different things natural. Cympho ships a `mix cympho.compare` task that introspects the running app and asserts the comparison below row by row; it exits non-zero on any regression so feature parity can gate CI.
+
+### Where We Match
+
+Cympho ships parity with Paperclip on the documented orchestration vocabulary:
+
+- Bring-your-own-agent adapters, org chart with roles and reporting lines, goal/issue/decomposition, board governance + approvals, per-agent budgets, instance and company secrets, routines on cron and webhooks, workspaces with previews and exec sandboxes, plugin host services.
+- Operating shell: ticketed work with comments, threaded conversations, work products, durable activity log, multi-company isolation, company export/import with secret scrubbing.
+
+### How We Differ
+
+The substantive deltas — each grounded in a Cympho module or process that `mix cympho.compare` checks at runtime:
+
+| Capability | Paperclip | Cympho |
 | --- | --- | --- |
-| Operating model | One agent works one issue | Multi-role company loop with CEO, CTO, Product, Design, and Engineers |
-| Visibility | Logs and final output | Digest, comments, runs, work products, PR evidence, review gates, and inbox |
-| Delegation | Usually manual | Agents can create sub-issues, hand off work, and route review |
-| Prompt control | Static instructions | Instruction Studio, contracts, scenarios, and additive tuning |
-| Review quality | Depends on the agent | Delivery, review, owner-update, and PR contracts are checked deterministically |
-| Runtime safety | Easy to spend by accident | Review mode by default, explicit worker flags, budgets, and governance controls |
-| Scaling model | More processes, more logs | OTP-supervised services, scoped PubSub, queues, and real-time LiveViews |
-| Multi-project work | Often ad hoc | Projects, repo settings, env vars, issues, and activity are first-class |
-| Adapter choice | Usually one CLI | Claude Code, Codex, Cursor, OpenClaw, HTTP, and Process adapters |
-| Owner updates | Often missing | CEO/owner-update contract and digest surfaces keep owners informed |
+| Real-time UI | React + fetch/poll | Phoenix LiveView + 7 dedicated Channels (`heartbeats`, `runs`, `activity`, `comments`, `issue`, `issues`, `company`) + ETS replay buffer (`Cympho.EventStore`); reconnecting clients catch up without losing state |
+| Process model | Single Node.js event loop | OTP per-agent supervision under `Cympho.AgentHeartbeat.Supervisor`; one failing agent cannot take down the company |
+| Tool-call traces | Audit-log entries | First-class `Cympho.ToolCallTraces` context with its own LiveView, filterable + exportable |
+| Decision reversal | "Rollback" mentioned in copy | Explicit primitive: `Cympho.Decisions.reverse_decision/3` with audit log and company-scoped broadcast |
+| AI-driven control plane | Not documented | Built-in MCP server (`Cympho.Mcp.Server`) exposes Cympho as tools so Claude and other models can drive it directly |
+| Skill hot-reload | Redeploy required | `Cympho.Skills.HotReloader` hot-loads skill manifests at runtime via the BEAM |
+| Multi-company safety | `company_id` scoping | `company_id` scoping plus `Cympho.PubSubGuard` runtime guard against cross-tenant event leakage |
+
+Smaller wins that don't need their own row: Cympho ships a 7th adapter (`agrenting`) beyond Paperclip's documented six; `Cympho.ReviewNudges` proactively tracks stale evidence requests with a Quantum-driven scanner that re-emits and escalates instead of letting nudges die; per-socket token-bucket rate limiting and broadcast dedup run as supervised GenServers without exposing public ETS handles.
+
+### The Autonomy Gap
+
+The sharpest difference is the autonomous loop itself. Paperclip documents the *ingredients* — heartbeats, governance, decomposition. Cympho ships the *closed loop* that ties them together: new top-level issues auto-ignite to an eligible CEO instead of stranding in `:backlog`; CEO `create_issue` actions emit immediate wakes so engineers pick up children in seconds rather than waiting for a 30-second poll; parent agents are woken on each child entering `:in_review` via `Wakes.notify_child_in_review/1`, so a CTO supervising fan-out sees mid-flight progress without re-reading; CEO-owned root issues route through `:in_review` and a `final_review_required` wake instead of silently auto-completing, so the boss-level quality gate (`ensure_approval_quality`) fires on every shipped deliverable; and `Cympho.ReviewNudges.StaleScanner` re-emits wakes at T1 and escalates across the role-fallback chain at T2 so nudges cannot die silently. With humans only invoked for the goal and the final sign-off, an end-to-end run executes without manual nudges in the dashboard.
+
+### Verify It Yourself
+
+```bash
+mix cympho.compare           # text table with per-row evidence
+mix cympho.compare --json    # machine-readable; exits non-zero on any gap
+```
+
+The task introspects the live OTP tree, the registered adapter list, and exported context functions — every claim above maps to a row tagged `WIN` (Cympho exceeds) or `PAR` (parity).
 
 ## Architecture
 
