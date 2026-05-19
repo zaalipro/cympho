@@ -51,6 +51,7 @@ defmodule Cympho.AgentPrompt do
       context_block(issue),
       decomposition_depth_block(issue, role_of(agent)),
       team_status_block(issue, role_of(agent)),
+      budget_block(issue, agent),
       history_block(history),
       digest_quality_block(issue, history),
       role_completion_contract_block(role_of(agent)),
@@ -131,6 +132,61 @@ defmodule Cympho.AgentPrompt do
   end
 
   defp decomposition_depth_block(_issue, _role), do: nil
+
+  # Show the agent how much budget they have left at the company and agent
+  # scopes so they can self-pace. Without this, agents only learn about
+  # budget exhaustion via runtime preflight failure (`:budget_blocked`)
+  # which wastes a turn. Renders nothing when no budget is configured.
+  defp budget_block(issue, agent) do
+    company_id = field(issue, :company_id)
+    agent_id = agent && Map.get(agent, :id)
+
+    company_line = budget_line("company", company_id)
+    agent_line = budget_line("agent", agent_id)
+
+    case Enum.reject([company_line, agent_line], &is_nil/1) do
+      [] ->
+        nil
+
+      lines ->
+        """
+        ## Budget
+        #{Enum.join(lines, "\n")}
+        Pace your turn so you don't push the spend over the cap; if you're close, hand off rather than continuing.
+        """
+        |> String.trim()
+    end
+  end
+
+  defp budget_line(_scope_type, nil), do: nil
+
+  defp budget_line(scope_type, scope_id) when is_binary(scope_id) do
+    case Cympho.Budgets.check_budget_constraint(scope_type, scope_id) do
+      {:ok, nil} ->
+        nil
+
+      {:ok, budget} ->
+        spent = budget.spent_amount || Decimal.new(0)
+        limit = budget.limit_amount
+        available = Cympho.Budgets.Budget.available_amount(budget)
+
+        period = Map.get(budget, :period, "n/a")
+        currency = Map.get(budget, :currency, "USD")
+
+        "- #{scope_type}: spent #{format_amount(spent)}/#{format_amount(limit)} #{currency} " <>
+          "(#{format_amount(available)} remaining, #{period})"
+
+      {:error, :budget_exhausted} ->
+        "- #{scope_type}: BUDGET EXHAUSTED — do not start expensive work this turn; " <>
+          "hand off or comment with the blocker."
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp format_amount(%Decimal{} = d), do: Decimal.to_string(d, :normal)
+  defp format_amount(n) when is_integer(n) or is_float(n), do: to_string(n)
+  defp format_amount(_), do: "?"
 
   # Surfaces "why you're being run right now" to the agent. Without this the
   # agent only sees the issue context and has to infer intent from comments —
