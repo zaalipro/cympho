@@ -49,6 +49,8 @@ defmodule Cympho.AgentPrompt do
       issue_block(issue),
       agent_block(agent_or_id, agent),
       context_block(issue),
+      decomposition_depth_block(issue, role_of(agent)),
+      team_status_block(issue, role_of(agent)),
       history_block(history),
       digest_quality_block(issue, history),
       role_completion_contract_block(role_of(agent)),
@@ -61,6 +63,74 @@ defmodule Cympho.AgentPrompt do
     |> Enum.join("\n\n")
     |> String.trim()
   end
+
+  # Show the CTO and CEO the engineer pool: who's idle, who's loaded, and
+  # the total active assignment count. Without this they fan out work to
+  # roles that don't have anyone to absorb it.
+  defp team_status_block(issue, role) when role in [:ceo, :cto] do
+    company_id = field(issue, :company_id)
+
+    if is_binary(company_id) do
+      lines =
+        [:engineer, :release_engineer, :product_manager, :designer]
+        |> Enum.map(&team_status_line(&1, company_id))
+        |> Enum.reject(&is_nil/1)
+
+      if lines == [] do
+        nil
+      else
+        "## Team status\n" <> Enum.join(lines, "\n")
+      end
+    else
+      nil
+    end
+  end
+
+  defp team_status_block(_issue, _role), do: nil
+
+  defp team_status_line(role, company_id) do
+    case Cympho.Agents.list_agents_by_role(role) do
+      [] ->
+        nil
+
+      all ->
+        scoped = Enum.filter(all, &(&1.company_id == company_id))
+
+        if scoped == [] do
+          nil
+        else
+          idle = Enum.count(scoped, &(&1.status == :idle))
+          working = Enum.count(scoped, &(&1.status == :running))
+          total_in_flight =
+            scoped
+            |> Enum.map(fn a -> Cympho.Agents.count_active_assignments(a.id) end)
+            |> Enum.sum()
+
+          "- #{role}: #{length(scoped)} agents (#{idle} idle, #{working} working) " <>
+            "— #{total_in_flight} active assignments"
+        end
+    end
+  end
+
+  # Show how deep the current issue sits in the decomposition tree, and how
+  # many more levels are available before the @max_request_depth guardrail
+  # rejects further `create_issue` actions. Without this the CEO/CTO can
+  # spam decompositions and watch them silently fail.
+  defp decomposition_depth_block(issue, role) when role in [:ceo, :cto] do
+    current = field(issue, :request_depth) || 0
+    limits = Cympho.AgentActions.limits()
+    max_depth = limits.max_request_depth
+    remaining = max(max_depth - current, 0)
+
+    """
+    ## Sub-issue depth
+    Current depth: #{current} / #{max_depth} (#{remaining} levels remain).
+    Active children under this issue contribute to the per-parent cap of #{limits.max_active_child_issues_per_parent}.
+    """
+    |> String.trim()
+  end
+
+  defp decomposition_depth_block(_issue, _role), do: nil
 
   # Surfaces "why you're being run right now" to the agent. Without this the
   # agent only sees the issue context and has to infer intent from comments —
@@ -608,7 +678,7 @@ defmodule Cympho.AgentPrompt do
   defp role_action_guidance(:ceo) do
     """
     ### Allowed actions for your role (CEO)
-    - `create_issue`, `approve_issue`, `request_changes`, `block_issue`, `comment`, `attach_work_product`, `set_pr_url`, `handoff`, `seed_mission_issues`, `spawn_agent`, `delegate`, `intervene`, `merge_pr`, `force_fix_pr`
+    - `create_issue`, `approve_issue`, `request_changes`, `block_issue`, `comment`, `attach_work_product`, `set_pr_url`, `handoff`, `seed_mission_issues`, `spawn_agent`, `delegate`, `intervene`, `merge_pr`, `force_fix_pr`, `cancel_issue`
 
     ### MUST NOT emit
     - `submit_review` — you have no supervisor; use `approve_issue` to close work. The server will reject `submit_review` from the CEO with `:no_supervisor_to_review`.
@@ -625,6 +695,14 @@ defmodule Cympho.AgentPrompt do
 
     ### When to use `intervene`
     Emit on `issue_stalled_in_progress` wakes when a subordinate's issue has been sitting without movement. Required: `mode` (`reassign` | `force_handoff` | `unblock` | `cancel`) and `reason`. `reassign` requires `to_agent_id` or `to_role`. Pick the cheapest recovery: `unblock` if the blocker no longer applies, `force_handoff` to put it back in the role pool, `reassign` to pin to a specific agent, `cancel` only when the work is no longer wanted.
+
+    ### When to use `cancel_issue`
+    Strategic cancel: a piece of work is no longer needed because the mission pivoted, scope shrank, or a different approach made it obsolete. Required: `reason`. Distinct from `intervene cancel`, which is the supervisor-driven recovery on stalled work — use `cancel_issue` for proactive scope changes, `intervene` for stuck issues.
+
+    ### Decomposition fields on `create_issue`
+    Optional fields you should use when relevant:
+      - `depends_on`: a list of sibling issue titles or issue ids — the new issue starts `:todo` but the dispatcher won't pick it up until every blocker is `:done`. Prefer this over running children in parallel when ordering matters.
+      - `estimated_minutes`: rough size of the work (positive integer). The dispatcher uses this to balance load — a 30-min task and a 3-day task look identical otherwise. Default is 60 when omitted.
     """
     |> String.trim()
   end
@@ -632,7 +710,7 @@ defmodule Cympho.AgentPrompt do
   defp role_action_guidance(:cto) do
     """
     ### Allowed actions for your role (CTO)
-    - `create_issue`, `submit_review`, `approve_issue`, `request_changes`, `block_issue`, `comment`, `attach_work_product`, `set_pr_url`, `handoff`, `spawn_agent`, `delegate`, `escalate`, `intervene`, `merge_pr`, `force_fix_pr`
+    - `create_issue`, `submit_review`, `approve_issue`, `request_changes`, `block_issue`, `comment`, `attach_work_product`, `set_pr_url`, `handoff`, `spawn_agent`, `delegate`, `escalate`, `intervene`, `merge_pr`, `force_fix_pr`, `cancel_issue`
 
     Use `submit_review` (routes to CEO) when you've personally produced a small piece of work; use `approve_issue`/`request_changes` to gate engineering submissions you receive.
 
@@ -647,6 +725,12 @@ defmodule Cympho.AgentPrompt do
 
     ### When to use `intervene`
     Emit on `issue_stalled_in_progress` wakes for engineering work below you. Same modes as the CEO: `reassign`, `force_handoff`, `unblock`, `cancel`. Pair with a clear `[handoff]` or `[review]` comment so the next owner has context.
+
+    ### Decomposition: depends_on and estimated_minutes
+    When you `create_issue` for engineers, prefer setting:
+      - `depends_on`: list of sibling titles or issue ids that must finish first. Use it whenever ordering matters (e.g. database schema before API).
+      - `estimated_minutes`: rough size in minutes. The dispatcher load-balances by sum-of-estimates per agent — without it, a 30-min ticket and a 3-day ticket look identical to the router.
+    Use `cancel_issue` (with `reason`) for strategic cancels; use `intervene cancel` only when recovering a stalled issue.
     """
     |> String.trim()
   end

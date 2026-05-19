@@ -86,7 +86,13 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   def select_agent(role, eligible_agents) do
     eligible_agents
     |> Enum.filter(fn agent -> agent.role == role and agent.status != :error end)
-    |> Enum.sort_by(fn agent -> {agent_count_load(agent), agent.name} end)
+    |> Enum.sort_by(fn agent ->
+      # Weighted load: prefer the agent with the smallest sum of
+      # `estimated_minutes` across in-flight issues; fall back to raw
+      # count and name for stable ordering. Issues without an estimate
+      # contribute the configured default (60 min) so they aren't free.
+      {agent_estimated_load(agent), agent_count_load(agent), agent.name}
+    end)
     |> List.first()
     |> case do
       nil -> {:error, :no_agent_available}
@@ -128,4 +134,30 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   defp agent_count_load(agent) do
     Cympho.Agents.count_active_assignments(agent.id)
   end
+
+  @default_estimate_minutes 60
+
+  # Sum of `monitor_state["estimated_minutes"]` across this agent's in-flight
+  # issues. Issues with no estimate contribute the default, so a brand-new
+  # issue can't slip in for free.
+  defp agent_estimated_load(agent) do
+    import Ecto.Query, warn: false
+    alias Cympho.Issues.Issue
+
+    estimates =
+      Cympho.Repo.all(
+        from i in Issue,
+          where:
+            i.assignee_id == ^agent.id and
+              i.status in ^[:todo, :in_progress, :in_review, :blocked],
+          select: i.monitor_state
+      )
+
+    Enum.reduce(estimates, 0, fn ms, acc ->
+      acc + estimate_minutes(ms)
+    end)
+  end
+
+  defp estimate_minutes(%{"estimated_minutes" => n}) when is_integer(n) and n > 0, do: n
+  defp estimate_minutes(_), do: @default_estimate_minutes
 end

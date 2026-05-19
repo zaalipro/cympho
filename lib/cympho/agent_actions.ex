@@ -65,6 +65,7 @@ defmodule Cympho.AgentActions do
     merge_pr
     force_fix_pr
     resolve_conflict
+    cancel_issue
   )
   @roles ~w(ceo cto product_manager designer engineer release_engineer)
   @priorities ~w(low medium high critical)
@@ -308,7 +309,7 @@ defmodule Cympho.AgentActions do
     create_issue submit_review approve_issue request_changes
     block_issue handoff set_pr_url
     seed_mission_issues delegate escalate intervene
-    merge_pr force_fix_pr resolve_conflict
+    merge_pr force_fix_pr resolve_conflict cancel_issue
   )
   defp mutates_issue?(%{"type" => type}) when type in @mutating_action_types, do: true
   defp mutates_issue?(_), do: false
@@ -367,6 +368,16 @@ defmodule Cympho.AgentActions do
   # Anyone can resolve their own merge conflicts. release_engineer takes
   # the lead but engineers can fix conflicts on their own PRs.
   defp authorize_action(%{"type" => "resolve_conflict"}, _agent), do: :ok
+
+  # cancel_issue is a strategic action — only governance roles can decide
+  # an issue is no longer needed. Distinct from `intervene cancel` which
+  # is supervisor-driven recovery on a stalled issue.
+  defp authorize_action(%{"type" => "cancel_issue"}, %Agent{role: role})
+       when role in @governance_roles,
+       do: :ok
+
+  defp authorize_action(%{"type" => "cancel_issue"}, _agent),
+    do: {:error, :unauthorized_action}
 
   # escalate is the inverse of governance: any non-CEO role can ask for boss
   # intervention. The CEO has no parent, so escalation from the CEO is a
@@ -433,7 +444,9 @@ defmodule Cympho.AgentActions do
       "create_issue" ->
         with :ok <- require_string(action, "title"),
              :ok <- validate_role(action["role"]),
-             :ok <- validate_priority(Map.get(action, "priority", "medium")) do
+             :ok <- validate_priority(Map.get(action, "priority", "medium")),
+             :ok <- validate_optional_depends_on(action["depends_on"]),
+             :ok <- validate_optional_estimate(action["estimated_minutes"]) do
           {:ok,
            Map.merge(action, %{
              "description" => Map.get(action, "description", ""),
@@ -540,6 +553,11 @@ defmodule Cympho.AgentActions do
              :ok <- validate_optional_string(action, "summary") do
           {:ok, action}
         end
+
+      "cancel_issue" ->
+        with :ok <- require_string(action, "reason") do
+          {:ok, action}
+        end
     end
   end
 
@@ -583,6 +601,29 @@ defmodule Cympho.AgentActions do
   end
 
   defp validate_intervene_target(_action), do: :ok
+
+  defp validate_optional_depends_on(nil), do: :ok
+  defp validate_optional_depends_on([]), do: :ok
+
+  defp validate_optional_depends_on(refs) when is_list(refs) do
+    if Enum.all?(refs, &is_binary/1),
+      do: :ok,
+      else: {:error, :invalid_depends_on}
+  end
+
+  defp validate_optional_depends_on(_), do: {:error, :invalid_depends_on}
+
+  defp validate_optional_estimate(nil), do: :ok
+  defp validate_optional_estimate(n) when is_integer(n) and n > 0, do: :ok
+
+  defp validate_optional_estimate(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n > 0 -> :ok
+      _ -> {:error, :invalid_estimate}
+    end
+  end
+
+  defp validate_optional_estimate(_), do: {:error, :invalid_estimate}
 
   # Initiatives are a non-empty list of issue specs. Each must have a title and
   # role. Description is optional. Priority defaults to "high" — mission-level
@@ -830,6 +871,13 @@ defmodule Cympho.AgentActions do
     do_resolve_conflict(issue, agent, action)
   end
 
+  # Strategic cancel — CEO/CTO decide this work is no longer needed and
+  # transition the issue to the terminal :cancelled state. Distinct from
+  # `intervene cancel`, which is supervisor recovery on a stalled issue.
+  defp execute_action(issue, agent, %{"type" => "cancel_issue"} = action) do
+    do_cancel_issue(issue, agent, action)
+  end
+
   defp execute_action(issue, agent, %{"type" => "handoff"} = action) do
     handoff_reason = action["reason"] || "Handing off to #{action["role"]}."
     context_body = build_handoff_context(issue, agent, action, handoff_reason)
@@ -904,6 +952,10 @@ defmodule Cympho.AgentActions do
         end
 
       nil ->
+        monitor_state =
+          %{}
+          |> maybe_put_estimate(action["estimated_minutes"])
+
         attrs = %{
           title: action["title"],
           description: action["description"] || "",
@@ -919,21 +971,26 @@ defmodule Cympho.AgentActions do
           origin_id: issue.id,
           request_depth: (issue.request_depth || 0) + 1,
           actor_type: "agent",
-          actor_id: agent.id
+          actor_id: agent.id,
+          monitor_state: monitor_state
         }
 
         with {:ok, created} <- Issues.create_issue(attrs),
+             {:ok, blocker_results} <- attach_depends_on(created, issue, action["depends_on"]),
              {:ok, _comment} <- maybe_agent_comment(issue, agent, created_issue_note(created)) do
           # Wake the dispatcher so the child issue is picked up by its role
           # immediately instead of waiting up to one poll interval. Cascading
           # decomposition (CEO→CTO→engineers) otherwise accrues a 30s lag per
-          # level.
-          _ =
-            Cympho.Orchestrator.Dispatcher.enqueue_wake(
-              created.id,
-              "child_created",
-              %{parent_id: issue.id}
-            )
+          # level. Skip if the new issue has unresolved blockers — the
+          # dispatcher's `is_blocked?` check would reject it anyway.
+          if blocker_results.unresolved == 0 do
+            _ =
+              Cympho.Orchestrator.Dispatcher.enqueue_wake(
+                created.id,
+                "child_created",
+                %{parent_id: issue.id}
+              )
+          end
 
           {:ok,
            %{
@@ -941,11 +998,92 @@ defmodule Cympho.AgentActions do
              issue_id: created.id,
              identifier: created.identifier || created.id,
              assigned_role: action["role"],
-             status: created.status
+             status: created.status,
+             depends_on_resolved: blocker_results.resolved,
+             depends_on_unresolved: blocker_results.unresolved
            }}
         end
     end
   end
+
+  defp maybe_put_estimate(monitor, nil), do: monitor
+  defp maybe_put_estimate(monitor, val) when is_integer(val) and val > 0,
+    do: Map.put(monitor, "estimated_minutes", val)
+  defp maybe_put_estimate(monitor, val) when is_binary(val) do
+    case Integer.parse(val) do
+      {n, ""} when n > 0 -> Map.put(monitor, "estimated_minutes", n)
+      _ -> monitor
+    end
+  end
+  defp maybe_put_estimate(monitor, _), do: monitor
+
+  # Resolve a list of `depends_on` references and add them as blockers.
+  # Each ref can be:
+  #   - an issue id (UUID string)
+  #   - a sibling issue title (string), looked up among siblings under the
+  #     same parent issue or goal
+  # Failures are tracked but don't roll back the parent issue creation —
+  # the agent gets a per-issue resolved/unresolved count and can retry.
+  defp attach_depends_on(_created, _parent_issue, nil), do: {:ok, %{resolved: 0, unresolved: 0}}
+  defp attach_depends_on(_created, _parent_issue, []), do: {:ok, %{resolved: 0, unresolved: 0}}
+
+  defp attach_depends_on(%Issue{} = created, %Issue{} = parent_issue, refs) when is_list(refs) do
+    siblings = sibling_pool(created, parent_issue)
+
+    {resolved, unresolved} =
+      Enum.reduce(refs, {0, 0}, fn ref, {ok, fail} ->
+        case resolve_blocker_ref(ref, siblings, created.company_id) do
+          {:ok, blocker_issue} ->
+            case Issues.add_blocker(created, blocker_issue) do
+              {:ok, _} -> {ok + 1, fail}
+              {:error, _} -> {ok, fail + 1}
+            end
+
+          :error ->
+            {ok, fail + 1}
+        end
+      end)
+
+    {:ok, %{resolved: resolved, unresolved: unresolved}}
+  end
+
+  defp attach_depends_on(_created, _parent_issue, _other),
+    do: {:ok, %{resolved: 0, unresolved: 0}}
+
+  defp sibling_pool(%Issue{parent_id: nil, goal_id: goal_id}, _parent_issue)
+       when is_binary(goal_id) do
+    Repo.all(from i in Issue, where: i.goal_id == ^goal_id)
+  end
+
+  defp sibling_pool(%Issue{parent_id: parent_id}, _parent_issue) when is_binary(parent_id) do
+    Repo.all(from i in Issue, where: i.parent_id == ^parent_id)
+  end
+
+  defp sibling_pool(_created, _parent_issue), do: []
+
+  defp resolve_blocker_ref(ref, siblings, _company_id) when is_binary(ref) do
+    cond do
+      uuid_like?(ref) ->
+        case Repo.get(Issue, ref) do
+          %Issue{} = i -> {:ok, i}
+          _ -> :error
+        end
+
+      true ->
+        case Enum.find(siblings, &(&1.title == ref)) do
+          %Issue{} = sibling -> {:ok, sibling}
+          _ -> :error
+        end
+    end
+  end
+
+  defp resolve_blocker_ref(_ref, _siblings, _company_id), do: :error
+
+  defp uuid_like?(s) when is_binary(s) do
+    Regex.match?(~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i, s)
+  end
+
+  defp uuid_like?(_), do: false
 
   # Seed N initiative-level issues from a mission goal in one transaction.
   # The CEO is the only caller (authorize_action/2 enforces this). The goal
@@ -1735,6 +1873,22 @@ defmodule Cympho.AgentActions do
          type: "resolve_conflict",
          issue_id: issue.id,
          agent_id: agent.id
+       }}
+    end
+  end
+
+  defp do_cancel_issue(issue, agent, action) do
+    reason = action["reason"]
+
+    with {:ok, transitioned} <- Issues.transition_issue_with_review_gates(issue, :cancelled),
+         {:ok, released} <- Issues.force_release_issue(transitioned, :cancelled),
+         {:ok, _comment} <-
+           maybe_agent_comment(issue, agent, "[owner_update] Cancelled: #{reason}") do
+      {:ok,
+       %{
+         type: "cancel_issue",
+         issue_id: released.id,
+         status: released.status
        }}
     end
   end
