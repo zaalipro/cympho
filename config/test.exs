@@ -45,6 +45,7 @@ config :cympho, :start_scheduler?, false
 config :cympho, :schedule_routine_triggers?, false
 config :cympho, :start_backlog_planner?, false
 config :cympho, :start_oversight_patrol?, false
+config :cympho, :start_decisions_executor?, false
 
 # Auto-ignition fans out assign + wake under Task.Supervisor on every
 # `Issues.create_issue`. Tests create issues by the thousand and expect

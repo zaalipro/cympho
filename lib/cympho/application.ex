@@ -39,6 +39,7 @@ defmodule Cympho.Application do
       Cympho.Orchestrator.Dispatcher,
       backlog_planner_child(),
       oversight_patrol_child(),
+      decisions_executor_child(),
       CymphoWeb.Endpoint
     ]
 
@@ -115,6 +116,15 @@ defmodule Cympho.Application do
   defp oversight_patrol_child do
     if Application.get_env(:cympho, :start_oversight_patrol?, true) do
       Cympho.Oversight.Patrol
+    end
+  end
+
+  # The decisions executor subscribes to a global PubSub topic and applies
+  # side-effects on every Decision created. It writes to the DB and starts
+  # tasks; tests opt in via `start_supervised` to control sandboxing.
+  defp decisions_executor_child do
+    if Application.get_env(:cympho, :start_decisions_executor?, true) do
+      Cympho.Decisions.Executor
     end
   end
 

@@ -137,6 +137,15 @@ defmodule Cympho.Decisions do
           {:decision_created, decision}
         )
 
+        # Global topic for Cympho.Decisions.Executor — subscribes once and
+        # acts on every company's decisions instead of one subscription
+        # per company.
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "system:decisions",
+          {:decision_created, decision}
+        )
+
         maybe_mark_parent_superseded(decision)
 
         {:ok, decision}
