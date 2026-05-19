@@ -40,6 +40,7 @@ defmodule Cympho.Application do
       backlog_planner_child(),
       oversight_patrol_child(),
       decisions_executor_child(),
+      execution_policy_advancer_child(),
       CymphoWeb.Endpoint
     ]
 
@@ -125,6 +126,16 @@ defmodule Cympho.Application do
   defp decisions_executor_child do
     if Application.get_env(:cympho, :start_decisions_executor?, true) do
       Cympho.Decisions.Executor
+    end
+  end
+
+  # Auto-advances execution-policy stages flagged `auto_advance: true`.
+  # Subscribes to `system:execution_policies` PubSub and uses the Repo via
+  # `Issues.execution_policy_decision/3`, so it has the same sandbox-in-test
+  # gating story as the other background GenServers above.
+  defp execution_policy_advancer_child do
+    if Application.get_env(:cympho, :start_execution_policy_advancer?, true) do
+      Cympho.ExecutionPolicies.Advancer
     end
   end
 

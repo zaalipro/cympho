@@ -46,6 +46,13 @@ config :cympho, :schedule_routine_triggers?, false
 config :cympho, :start_backlog_planner?, false
 config :cympho, :start_oversight_patrol?, false
 config :cympho, :start_decisions_executor?, false
+config :cympho, :start_execution_policy_advancer?, false
+
+# Spec 01: keep the LLM router disabled in tests by default so the keyword
+# router runs deterministically and no Finch calls are made. Tests that
+# exercise the classifier opt back in via Application.put_env.
+config :cympho, :llm_router_enabled?, false
+config :cympho, :llm_classifier_timeout_ms, 1_500
 
 # Auto-ignition fans out assign + wake under Task.Supervisor on every
 # `Issues.create_issue`. Tests create issues by the thousand and expect

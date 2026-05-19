@@ -1,4 +1,24 @@
 defmodule Cympho.Issues.Issue do
+  @moduledoc """
+  Issue schema.
+
+  ## `monitor_state["routing"]` shape
+
+  When `Cympho.Routing.classify_and_persist/1` resolves an issue's role, it
+  records provenance under `monitor_state["routing"]` so the system can tell
+  whether the role came from the LLM, the keyword router, or a fallback. The
+  shape is:
+
+      %{
+        "source"        => "llm" | "keyword" | "fallback",
+        "classified_at" => iso8601 string,
+        "model"         => string | nil
+      }
+
+  Re-classification is gated on `monitor_state["routing"]["source"] == "llm"`
+  so manually edited `assigned_role` values are not clobbered.
+  """
+
   use Ecto.Schema
   import Ecto.Changeset
 

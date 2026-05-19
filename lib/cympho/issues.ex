@@ -502,6 +502,7 @@ defmodule Cympho.Issues do
         )
 
         CymphoWeb.Events.broadcast_issue_update(issue, :issue_created)
+        issue = maybe_classify_role(issue, attrs)
         maybe_auto_ignite(issue, attrs)
         {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
@@ -560,6 +561,55 @@ defmodule Cympho.Issues do
       issue.status in [:backlog, :todo] and
       not truthy?(get_param(attrs, :skip_auto_assign))
   end
+
+  # LLM-classified routing hook (spec 01). Only fires for top-level issues
+  # that have no explicit `assigned_role`, mirroring the auto-ignite gate
+  # so we don't reclassify deep-tree child issues that carry an explicit
+  # role from their parent agent. Returns the (possibly updated) issue
+  # struct so the caller's broadcast / auto-ignite flow sees the new role.
+  defp maybe_classify_role(%Issue{} = issue, attrs) do
+    if classify_on_create?(issue, attrs) do
+      run_classify = fn ->
+        try do
+          Cympho.Routing.classify_and_persist(issue)
+        rescue
+          e ->
+            require Logger
+
+            Logger.warning(
+              "[Routing] classify_and_persist crashed for issue=#{issue.id}: " <>
+                Exception.message(e)
+            )
+
+            {:error, e}
+        end
+      end
+
+      cond do
+        Application.get_env(:cympho, :auto_ignite_sync, false) ->
+          case run_classify.() do
+            {:ok, updated} -> updated
+            _ -> issue
+          end
+
+        true ->
+          Task.Supervisor.start_child(Cympho.TaskSupervisor, run_classify)
+          issue
+      end
+    else
+      issue
+    end
+  end
+
+  defp classify_on_create?(%Issue{} = issue, attrs) do
+    is_nil(issue.parent_id) and
+      blank_assigned_role?(issue) and
+      not truthy?(get_param(attrs, :skip_auto_assign))
+  end
+
+  defp blank_assigned_role?(%Issue{assigned_role: nil}), do: true
+  defp blank_assigned_role?(%Issue{assigned_role: ""}), do: true
+  defp blank_assigned_role?(_), do: false
 
   defp truthy?(true), do: true
   defp truthy?("true"), do: true
@@ -726,9 +776,52 @@ defmodule Cympho.Issues do
 
       _ = Cympho.ReviewNudges.reconcile_issue(updated)
 
+      _ = maybe_reclassify_role(old_issue, updated, attrs)
+
       {:ok, updated}
     end
   end
+
+  # Re-run the LLM classifier when title/description changed AND the prior
+  # role was LLM-derived (`monitor_state["routing"]["source"] == "llm"`).
+  # Keyword-derived or manually-set roles are left alone so operators can
+  # pin a role and trust it sticks.
+  defp maybe_reclassify_role(%Issue{} = old_issue, %Issue{} = updated, attrs) do
+    if reclassify?(old_issue, updated, attrs) do
+      Task.Supervisor.start_child(Cympho.TaskSupervisor, fn ->
+        try do
+          Cympho.Routing.classify_and_persist(updated)
+        rescue
+          e ->
+            require Logger
+
+            Logger.warning(
+              "[Routing] reclassify crashed for issue=#{updated.id}: " <>
+                Exception.message(e)
+            )
+        end
+      end)
+
+      :ok
+    else
+      :ok
+    end
+  end
+
+  defp reclassify?(%Issue{} = old_issue, %Issue{} = updated, attrs) do
+    text_changed? =
+      (Map.has_key?(attrs, :title) or Map.has_key?(attrs, "title")) and
+        old_issue.title != updated.title
+
+    desc_changed? =
+      (Map.has_key?(attrs, :description) or Map.has_key?(attrs, "description")) and
+        old_issue.description != updated.description
+
+    (text_changed? or desc_changed?) and llm_sourced_routing?(updated)
+  end
+
+  defp llm_sourced_routing?(%Issue{monitor_state: %{"routing" => %{"source" => "llm"}}}), do: true
+  defp llm_sourced_routing?(_), do: false
 
   defp do_update_issue(%Issue{} = issue, %{status: _new_status} = attrs) do
     attrs = with_status_side_effects(issue, attrs)
@@ -1649,34 +1742,44 @@ defmodule Cympho.Issues do
       :approve ->
         approved_state = ExecutionState.approve(issue.execution_state, decided_by)
 
+        completed_index = approved_state.current_stage_index
+
         case ExecutionState.advance(approved_state, policy, decided_by) do
           {:done, final_state} ->
-            update_issue(issue, %{
-              status: :done,
-              execution_state: final_state,
-              assignee_id: nil
-            })
-            |> tap(fn {:ok, updated} ->
-              unblock_dependents(issue.id)
-              _ = Wakes.notify_children_completed(issue)
-              maybe_trigger_verification(updated)
-            end)
+            result =
+              update_issue(issue, %{
+                status: :done,
+                execution_state: final_state,
+                assignee_id: nil
+              })
+              |> tap(fn {:ok, updated} ->
+                unblock_dependents(issue.id)
+                _ = Wakes.notify_children_completed(issue)
+                maybe_trigger_verification(updated)
+              end)
+
+            broadcast_stage_completed(result, policy, completed_index, :final)
+            result
 
           {:ok, next_state} ->
             next_assignee = next_state.current_participant
 
-            update_issue(issue, %{
-              execution_state: next_state,
-              assignee_id: next_assignee,
-              status: :in_review
-            })
-            |> tap(fn {:ok, _} ->
-              if ExecutionState.require_human?(next_state, policy) do
-                notify_human_approval_needed(issue, next_state)
-              else
-                wake_next_participant(next_assignee, issue.id)
-              end
-            end)
+            result =
+              update_issue(issue, %{
+                execution_state: next_state,
+                assignee_id: next_assignee,
+                status: :in_review
+              })
+              |> tap(fn {:ok, _} ->
+                if ExecutionState.require_human?(next_state, policy) do
+                  notify_human_approval_needed(issue, next_state)
+                else
+                  wake_next_participant(next_assignee, issue.id)
+                end
+              end)
+
+            broadcast_stage_completed(result, policy, completed_index, :advanced)
+            result
         end
 
       :request_changes ->
@@ -1724,6 +1827,36 @@ defmodule Cympho.Issues do
         )
     end
   end
+
+  # Broadcast on both the company topic (legacy) and the system topic the
+  # ExecutionPolicies.Advancer subscribes to. `transition` is `:advanced`
+  # when another stage follows, `:final` when the policy completed.
+  defp broadcast_stage_completed({:ok, %Issue{} = updated}, policy, completed_index, transition) do
+    payload = %{
+      issue: updated,
+      policy: policy,
+      completed_stage_index: completed_index,
+      transition: transition
+    }
+
+    if updated.company_id do
+      Phoenix.PubSub.broadcast(
+        Cympho.PubSub,
+        "company:#{updated.company_id}:execution_policies",
+        {:stage_completed, payload}
+      )
+    end
+
+    Phoenix.PubSub.broadcast(
+      Cympho.PubSub,
+      "system:execution_policies",
+      {:stage_completed, payload}
+    )
+
+    :ok
+  end
+
+  defp broadcast_stage_completed(_other, _policy, _idx, _transition), do: :ok
 
   def add_label_to_issue(%Issue{} = issue, %Label{} = label) do
     issue = Repo.preload(issue, :labels)

@@ -84,4 +84,9 @@ config :cympho, Cympho.Finch,
     ]
   ]
 
+# Autonomy polish (spec 01) — defaults
+config :cympho, :llm_router_enabled?, true
+config :cympho, :llm_classifier_timeout_ms, 1_500
+config :cympho, :start_execution_policy_advancer?, true
+
 import_config "#{config_env()}.exs"

@@ -156,7 +156,15 @@ Then expose `propose_decision` as an agent action (CEO only) so agents can recor
 
 ### B) Tightening existing flows
 
-#### B1. Router is keyword-based and brittle
+#### B1. Router is keyword-based and brittle — ✅ shipped (spec `.specs/01_remaining_autonomy_polish_spec.md`)
+
+The LLM-classified `assigned_role` now runs at issue creation via
+`Cympho.Routing.classify_and_persist/1` (fan-out under `Cympho.TaskSupervisor`)
+with the keyword router as a deterministic fallback. Re-classification on
+edit only fires when the prior role was LLM-derived; manual / keyword
+labels stay pinned. Toggle via `:cympho, :llm_router_enabled?`.
+
+
 
 `lib/cympho/orchestrator/dispatcher/router.ex:7-12` uses static keyword lists:
 
@@ -246,7 +254,16 @@ The plumbing exists: `consume_pending_wakes/2` (`orchestrator.ex:478`) marks the
 
 ### C) Governance / policy levers
 
-#### C1. `ExecutionPolicies` is a 41-line CRUD with a powerful schema unused
+#### C1. `ExecutionPolicies` is a 41-line CRUD with a powerful schema unused — ✅ shipped (spec `.specs/01_remaining_autonomy_polish_spec.md`)
+
+`Cympho.ExecutionPolicies.Advancer` is a GenServer subscribed to
+`system:execution_policies` (broadcast by `Issues.execution_policy_decision/3`)
+that auto-advances stages whose `auto_advance: true` config is set. Emits
+`[:cympho, :execution_policy, :advanced]` / `:completed` telemetry. Gated
+by `:cympho, :start_execution_policy_advancer?` (defaults `true`; tests
+opt out).
+
+
 
 `lib/cympho/execution_policies.ex` is `list/get/create/update/delete`. **There is no `evaluate/2`, `next_stage/1`, or stage advancement.** The schema (`execution_policies/execution_policy.ex`) has `stage_configs :: {:array, :map}` and a sibling `execution_stage_result.ex` tracks per-stage outcomes — these tables exist but nothing drives them autonomously.
 
@@ -732,7 +749,16 @@ After PR 2.5 the team self-corrects when work stalls. After PR 2.75 the CTO deco
 
 ---
 
-## 6.6 Two specific failure modes to test against
+## 6.6 Two specific failure modes to test against — ✅ shipped (spec `.specs/01_remaining_autonomy_polish_spec.md`)
+
+`Cympho.Adapters.MockAdapter` (test-env-only, gated by
+`Cympho.Adapters.Registry.register/2`'s `:mock` guard) is scriptable per
+`{agent_id, issue_id}`. The integration tests
+`test/cympho/integration/mission_better_than_linear_test.exs` and
+`test/cympho/integration/stuck_engineer_recovery_test.exs` exercise the
+full autonomy spine end-to-end without external network calls.
+
+
 
 A useful litmus test for any of these patches:
 

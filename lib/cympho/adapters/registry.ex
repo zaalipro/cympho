@@ -22,8 +22,24 @@ defmodule Cympho.Adapters.Registry do
   end
 
   @spec register(adapter_key(), adapter_module()) :: :ok
+  def register(:mock, module) when is_atom(module) do
+    unless test_env?() do
+      raise ArgumentError,
+            "Cympho.Adapters.Registry: refusing to register :mock adapter outside test env"
+    end
+
+    GenServer.call(__MODULE__, {:register, :mock, module})
+  end
+
   def register(key, module) when is_atom(key) and is_atom(module) do
     GenServer.call(__MODULE__, {:register, key, module})
+  end
+
+  # Only registers the mock adapter when the application is explicitly
+  # configured as the test environment (set in `config/test.exs`). Other
+  # envs leave `:cympho :env` unset, so the guard fails closed.
+  defp test_env? do
+    Application.get_env(:cympho, :env) == :test
   end
 
   @spec lookup(adapter_key()) :: {:ok, adapter_module()} | :error
@@ -64,7 +80,20 @@ defmodule Cympho.Adapters.Registry do
 
   @spec register_builtin() :: :ok
   def register_builtin do
-    builtins = [
+    Enum.each(builtin_specs(), fn {key, mod} ->
+      if Code.ensure_loaded?(mod) do
+        register(key, mod)
+      end
+    end)
+
+    :ok
+  end
+
+  # The mock adapter is registered only when running tests. We refuse to
+  # bind `:mock` outside `Mix.env() == :test` so a production release
+  # cannot accidentally route to scripted payloads.
+  defp builtin_specs do
+    base = [
       {:claude_code, Cympho.Adapters.ClaudeCodeAdapter},
       {:codex, Cympho.Adapters.CodexAdapter},
       {:cursor, Cympho.Adapters.CursorAdapter},
@@ -74,14 +103,14 @@ defmodule Cympho.Adapters.Registry do
       {:agrenting, Cympho.Adapters.AgrentingAdapter}
     ]
 
-    Enum.each(builtins, fn {key, mod} ->
-      if Code.ensure_loaded?(mod) do
-        register(key, mod)
-      end
-    end)
-
-    :ok
+    if include_mock_adapter?() do
+      base ++ [{:mock, Cympho.Adapters.MockAdapter}]
+    else
+      base
+    end
   end
+
+  defp include_mock_adapter?, do: test_env?()
 
   @doc """
   Lists all registered adapter type atoms.
@@ -166,17 +195,7 @@ defmodule Cympho.Adapters.Registry do
   # because that's a GenServer.call to ourselves and would deadlock waiting
   # for init to finish.
   defp register_builtin_direct do
-    builtins = [
-      {:claude_code, Cympho.Adapters.ClaudeCodeAdapter},
-      {:codex, Cympho.Adapters.CodexAdapter},
-      {:cursor, Cympho.Adapters.CursorAdapter},
-      {:http, Cympho.Adapters.HttpAdapter},
-      {:openclaw, Cympho.Adapters.OpenClawAdapter},
-      {:process, Cympho.Adapters.ProcessAdapter},
-      {:agrenting, Cympho.Adapters.AgrentingAdapter}
-    ]
-
-    Enum.each(builtins, fn {key, mod} ->
+    Enum.each(builtin_specs(), fn {key, mod} ->
       if Code.ensure_loaded?(mod), do: :ets.insert(__MODULE__, {key, mod})
     end)
 
