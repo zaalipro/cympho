@@ -287,6 +287,100 @@ defmodule Cympho.Issues do
     |> Repo.preload([:comments, :blocked_by, :blocks, :labels])
   end
 
+  @doc """
+  Lists issues that have stalled past role-specific time thresholds in a
+  given company. Used by `Cympho.Oversight.Patrol` to find work the
+  supervisor needs to intervene on.
+
+  Options (all in minutes; pass `0` to disable a state):
+    * `:in_progress_minutes` (default 120) — stuck during execution
+    * `:in_review_minutes`   (default 60)  — reviewer hasn't picked up
+    * `:blocked_minutes`     (default 30)  — blocker not yet resolved
+
+  Issues with `origin_type == "backlog_planner"` (the synthetic mission
+  planning issue) are excluded — those are intentionally re-used and not
+  "stuck" in the usual sense.
+  """
+  @spec list_stuck_issues(binary(), keyword()) :: [Issue.t()]
+  def list_stuck_issues(company_id, opts \\ []) when is_binary(company_id) do
+    in_progress_min = Keyword.get(opts, :in_progress_minutes, 120)
+    in_review_min = Keyword.get(opts, :in_review_minutes, 60)
+    blocked_min = Keyword.get(opts, :blocked_minutes, 30)
+
+    now = DateTime.utc_now()
+
+    in_progress_cutoff =
+      if in_progress_min > 0,
+        do: DateTime.add(now, -in_progress_min * 60, :second),
+        else: nil
+
+    in_review_cutoff =
+      if in_review_min > 0,
+        do: DateTime.add(now, -in_review_min * 60, :second),
+        else: nil
+
+    blocked_cutoff =
+      if blocked_min > 0,
+        do: DateTime.add(now, -blocked_min * 60, :second),
+        else: nil
+
+    case combined_stuck_clause(in_progress_cutoff, in_review_cutoff, blocked_cutoff) do
+      nil ->
+        # All thresholds disabled — return empty list.
+        []
+
+      stuck_clause ->
+        from(i in Issue,
+          where: i.company_id == ^company_id,
+          where: is_nil(i.origin_type) or i.origin_type != "backlog_planner",
+          where: ^stuck_clause,
+          order_by: [asc: i.updated_at]
+        )
+        |> Repo.all()
+    end
+  end
+
+  # Build a single dynamic clause OR'ing the per-state stuck conditions
+  # together. We must combine them in the dynamic itself (not via or_where)
+  # because or_where would OR with the company / origin_type filters above
+  # it and let cross-company rows through.
+  defp combined_stuck_clause(in_progress_cutoff, in_review_cutoff, blocked_cutoff) do
+    parts =
+      [
+        in_progress_dynamic(in_progress_cutoff),
+        in_review_dynamic(in_review_cutoff),
+        blocked_dynamic(blocked_cutoff)
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    case parts do
+      [] -> nil
+      [single] -> single
+      [first | rest] -> Enum.reduce(rest, first, fn part, acc -> dynamic(^acc or ^part) end)
+    end
+  end
+
+  defp in_progress_dynamic(nil), do: nil
+
+  defp in_progress_dynamic(cutoff) do
+    dynamic(
+      [i],
+      i.status == :in_progress and not is_nil(i.checked_out_at) and i.checked_out_at < ^cutoff
+    )
+  end
+
+  defp in_review_dynamic(nil), do: nil
+
+  defp in_review_dynamic(cutoff) do
+    dynamic([i], i.status == :in_review and i.updated_at < ^cutoff)
+  end
+
+  defp blocked_dynamic(nil), do: nil
+
+  defp blocked_dynamic(cutoff) do
+    dynamic([i], i.status == :blocked and i.updated_at < ^cutoff)
+  end
+
   def get_issue!(id),
     do:
       Repo.get!(Issue, id)

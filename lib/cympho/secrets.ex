@@ -70,7 +70,11 @@ defmodule Cympho.Secrets do
 
   def create_secret(attrs) do
     with {:ok, encrypted} <- encrypt_value(attrs[:value] || attrs["value"]) do
-      attrs = Map.drop(attrs, [:value, "value"]) |> Map.put("encrypted_value", encrypted)
+      attrs =
+        attrs
+        |> stringify_keys()
+        |> Map.drop(["value"])
+        |> Map.put("encrypted_value", encrypted)
 
       %Secret{}
       |> Secret.changeset(attrs)
@@ -82,17 +86,34 @@ defmodule Cympho.Secrets do
     attrs =
       case attrs[:value] || attrs["value"] do
         nil ->
-          attrs
+          stringify_keys(attrs)
 
         plaintext ->
           {:ok, encrypted} = encrypt_value(plaintext)
-          attrs |> Map.drop([:value, "value"]) |> Map.put("encrypted_value", encrypted)
+
+          attrs
+          |> stringify_keys()
+          |> Map.drop(["value"])
+          |> Map.put("encrypted_value", encrypted)
       end
 
     secret
     |> Secret.changeset(attrs)
     |> Repo.update()
   end
+
+  # Normalize a map to use only string keys. Without this, callers that mix
+  # atom and string keys (e.g. `%{scope: "x", "encrypted_value" => bin}`)
+  # crash Ecto.Changeset.cast/4 with "expected params to be a map with atoms
+  # or string keys, got a map with mixed keys".
+  defp stringify_keys(%{} = attrs) do
+    Map.new(attrs, fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+      {k, v} -> {k, v}
+    end)
+  end
+
+  defp stringify_keys(other), do: other
 
   def rotate_secret(%Secret{} = secret, new_value) do
     with {:ok, encrypted} <- encrypt_value(new_value) do

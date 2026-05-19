@@ -212,6 +212,207 @@ defmodule Cympho.Wakes do
   end
 
   @doc """
+  Wakes a target agent because their subordinate is asking for boss-level
+  intervention on a stuck issue. Distinct from a comment wake — escalations
+  carry the intent "I cannot finish this; please redirect or unblock me."
+
+  `target_agent_id` is typically resolved as the parent_id of the escalating
+  agent, falling back to a CEO when no parent exists.
+  """
+  @spec wake_for_escalation(String.t(), String.t() | nil, map()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def wake_for_escalation(target_agent_id, issue_id, metadata \\ %{})
+      when is_binary(target_agent_id) do
+    do_wake_agent(
+      target_agent_id,
+      issue_id,
+      "escalation_from_subordinate",
+      "agent",
+      metadata[:from_agent_id] || metadata["from_agent_id"],
+      metadata
+    )
+  end
+
+  @doc """
+  Wakes a target agent because a manager just directly assigned them work via
+  the `delegate` action. Different from `agent_handoff` — handoff is "this
+  isn't my work", whereas a directive is "do this specifically."
+  """
+  @spec wake_for_manager_directive(String.t(), String.t() | nil, map()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def wake_for_manager_directive(target_agent_id, issue_id, metadata \\ %{})
+      when is_binary(target_agent_id) do
+    do_wake_agent(
+      target_agent_id,
+      issue_id,
+      "manager_directive",
+      "agent",
+      metadata[:from_agent_id] || metadata["from_agent_id"],
+      metadata
+    )
+  end
+
+  @doc """
+  Wakes the issue's delivery agent because GitHub (a human reviewer or another
+  agent) requested changes on the PR. Metadata typically carries `review_id`
+  and an array of `line_comments`.
+  """
+  @spec wake_for_pr_review_changes_requested(String.t(), String.t(), map()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def wake_for_pr_review_changes_requested(agent_id, issue_id, metadata \\ %{})
+      when is_binary(agent_id) and is_binary(issue_id) do
+    do_wake_agent(
+      agent_id,
+      issue_id,
+      "pr_review_changes_requested",
+      "system",
+      nil,
+      metadata
+    )
+  end
+
+  @doc """
+  Wakes the issue's delivery agent because GitHub left a non-blocking
+  `commented` review on the PR.
+  """
+  @spec wake_for_pr_review_commented(String.t(), String.t(), map()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def wake_for_pr_review_commented(agent_id, issue_id, metadata \\ %{})
+      when is_binary(agent_id) and is_binary(issue_id) do
+    do_wake_agent(
+      agent_id,
+      issue_id,
+      "pr_review_commented",
+      "system",
+      nil,
+      metadata
+    )
+  end
+
+  @doc """
+  Wakes the issue's delivery agent when one or more line-level review
+  comments were added to the PR.
+  """
+  @spec wake_for_pr_line_comments_added(String.t(), String.t(), map()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def wake_for_pr_line_comments_added(agent_id, issue_id, metadata \\ %{})
+      when is_binary(agent_id) and is_binary(issue_id) do
+    do_wake_agent(
+      agent_id,
+      issue_id,
+      "pr_line_comments_added",
+      "system",
+      nil,
+      metadata
+    )
+  end
+
+  @doc """
+  Wakes the issue's delivery agent when CI has reported a failure on the PR.
+  Metadata carries `check_run_url`, `conclusion`, and `name` (e.g., test job).
+  """
+  @spec wake_for_ci_failed(String.t(), String.t(), map()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def wake_for_ci_failed(agent_id, issue_id, metadata \\ %{})
+      when is_binary(agent_id) and is_binary(issue_id) do
+    do_wake_agent(agent_id, issue_id, "ci_failed", "system", nil, metadata)
+  end
+
+  @doc """
+  Wakes a release engineer (or fallback role) when a PR has merge conflicts.
+  Metadata carries `pr_url`, `head_sha`, `base_branch`.
+  """
+  @spec wake_for_merge_conflict(String.t(), String.t(), map()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def wake_for_merge_conflict(agent_id, issue_id, metadata \\ %{})
+      when is_binary(agent_id) and is_binary(issue_id) do
+    do_wake_agent(
+      agent_id,
+      issue_id,
+      "merge_conflict_detected",
+      "system",
+      nil,
+      metadata
+    )
+  end
+
+  @doc """
+  Wakes a release engineer when a PR is approved + green + mergeable. They
+  should `merge_pr` next.
+  """
+  @spec wake_for_pr_ready_to_merge(String.t(), String.t(), map()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def wake_for_pr_ready_to_merge(agent_id, issue_id, metadata \\ %{})
+      when is_binary(agent_id) and is_binary(issue_id) do
+    do_wake_agent(agent_id, issue_id, "pr_ready_to_merge", "system", nil, metadata)
+  end
+
+  @doc """
+  Wakes the supervisor agent for an issue that's been sitting in `:in_progress`
+  (or `:in_review` / `:blocked`) without movement past a configured threshold.
+  Driven from `Cympho.Oversight.Patrol` — the supervisor (typically CTO for
+  engineering work, CEO for root issues) is expected to either `intervene`
+  (reassign / unblock / cancel) or post a directive `[handoff]` comment.
+  """
+  @spec wake_for_stalled_issue(String.t(), String.t(), map()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def wake_for_stalled_issue(supervisor_agent_id, issue_id, metadata \\ %{})
+      when is_binary(supervisor_agent_id) and is_binary(issue_id) do
+    do_wake_agent(
+      supervisor_agent_id,
+      issue_id,
+      "issue_stalled_in_progress",
+      "system",
+      nil,
+      metadata
+    )
+  end
+
+  @doc """
+  Wakes the CEO when the dispatcher's fallback chain has exhausted itself
+  with no eligible agent. This is the dispatcher giving up and asking the
+  CEO to either spawn a new agent or cancel the work.
+  """
+  @spec wake_for_no_agent_for_role(String.t(), String.t() | nil, map()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def wake_for_no_agent_for_role(ceo_agent_id, issue_id, metadata \\ %{})
+      when is_binary(ceo_agent_id) do
+    do_wake_agent(
+      ceo_agent_id,
+      issue_id,
+      "no_agent_for_role",
+      "system",
+      nil,
+      metadata
+    )
+  end
+
+  @doc """
+  Wakes the CEO when the company has live mission goals but no active issues
+  in flight — the "fire and forget" loop's idle handoff.
+
+  The caller is expected to have already created (or located) a synthetic
+  planning issue for the CEO to operate on; this function only enqueues the
+  wake. `metadata` should at minimum include `company_id` so consumers can
+  scope their replan logic.
+
+  Returns `{:ok, agent_wake}` or `{:error, reason}`.
+  """
+  @spec wake_for_mission_idle(String.t(), String.t() | nil, map()) ::
+          {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
+  def wake_for_mission_idle(ceo_agent_id, planning_issue_id \\ nil, metadata \\ %{})
+      when is_binary(ceo_agent_id) do
+    do_wake_agent(
+      ceo_agent_id,
+      planning_issue_id,
+      "mission_idle",
+      "system",
+      nil,
+      metadata
+    )
+  end
+
+  @doc """
   Low-level function to wake an agent directly. Persists the wake to the
   WakeupQueue, which broadcasts to the agent's heartbeat process via PubSub.
   Returns once the row is durable; the heartbeat trigger and dispatcher

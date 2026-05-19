@@ -1145,6 +1145,7 @@ defmodule CymphoWeb.AgentLive.Show do
   def status_label(other), do: other |> to_string()
 
   def role_label(:engineer), do: "Engineer"
+  def role_label(:release_engineer), do: "Release Engineer"
   def role_label(:ceo), do: "CEO"
   def role_label(:cto), do: "CTO"
   def role_label(:product_manager), do: "Product Manager"

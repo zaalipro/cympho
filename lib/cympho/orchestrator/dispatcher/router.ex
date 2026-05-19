@@ -10,17 +10,25 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   @product_keywords ~w[product roadmap customer acceptance requirements priority prioritization pm]
   @design_keywords ~w[ux ui interface workflow prototype usability research]
   @technical_keywords ~w[technical architecture plan review refactor system infrastructure cto]
-  @implementation_keywords ~w[implement build fix test code feature bug integration deploy]
+  @implementation_keywords ~w[implement build fix test code feature bug integration]
+  # Release-engineering work: branch coordination, merge mechanics, deploys,
+  # tagging. Keep this BEFORE @implementation_keywords so a "deploy the auth
+  # service" issue lands with the release engineer rather than a generic
+  # engineer. "deploy" was previously in @implementation_keywords; it now
+  # routes to release_engineer.
+  @release_keywords ~w[merge rebase release deploy ship version tag changelog hotfix conflict]
 
   @doc """
   Infers the appropriate role for an issue based on keywords in title and description.
 
-  Returns `:ceo`, `:cto`, `:product_manager`, `:designer`, or `:engineer`.
+  Returns `:ceo`, `:cto`, `:product_manager`, `:designer`, `:engineer`, or `:release_engineer`.
   """
-  @spec infer_role(map()) :: :ceo | :cto | :product_manager | :designer | :engineer
+  @spec infer_role(map()) ::
+          :ceo | :cto | :product_manager | :designer | :engineer | :release_engineer
   def infer_role(issue) do
     case assigned_role(issue) do
-      role when role in [:ceo, :cto, :product_manager, :designer, :engineer] ->
+      role
+      when role in [:ceo, :cto, :product_manager, :designer, :engineer, :release_engineer] ->
         role
 
       _ ->
@@ -33,11 +41,14 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
 
     # Matching order is routing priority. Strategic owner work stays with the
     # CEO; technical platform words beat product/design words when both appear.
+    # Release keywords are checked before implementation keywords so explicit
+    # merge/deploy work doesn't fall to a generic engineer.
     cond do
       matches_any?(text, @strategic_keywords) -> :ceo
       matches_any?(text, @technical_keywords) -> :cto
       matches_any?(text, @product_keywords) -> :product_manager
       matches_any?(text, @design_keywords) -> :designer
+      matches_any?(text, @release_keywords) -> :release_engineer
       matches_any?(text, @implementation_keywords) -> :engineer
       true -> :engineer
     end
@@ -56,6 +67,7 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   defp role_to_atom("product_manager"), do: :product_manager
   defp role_to_atom("designer"), do: :designer
   defp role_to_atom("engineer"), do: :engineer
+  defp role_to_atom("release_engineer"), do: :release_engineer
   defp role_to_atom(_), do: nil
 
   defp field(%{} = map, key), do: Map.get(map, key) || Map.get(map, Atom.to_string(key))
@@ -91,8 +103,10 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   - `:cto` → [:ceo]
   - `:engineer` → [:cto, :ceo]
   """
-  @spec fallback_chain(:ceo | :cto | :product_manager | :designer | :engineer) :: [
-          :product_manager | :cto | :ceo,
+  @spec fallback_chain(
+          :ceo | :cto | :product_manager | :designer | :engineer | :release_engineer
+        ) :: [
+          :product_manager | :cto | :ceo | :engineer,
           ...
         ]
   def fallback_chain(:ceo), do: []
@@ -100,6 +114,10 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   def fallback_chain(:designer), do: [:product_manager, :ceo]
   def fallback_chain(:cto), do: [:ceo]
   def fallback_chain(:engineer), do: [:cto, :ceo]
+  # Release engineers fall back to a generic engineer (any engineer can do
+  # the work in a pinch), then up the chain. CTO is the ultimate ownership
+  # tier for technical work.
+  def fallback_chain(:release_engineer), do: [:engineer, :cto, :ceo]
 
   defp matches_any?(text, keywords) do
     Enum.any?(keywords, fn keyword ->

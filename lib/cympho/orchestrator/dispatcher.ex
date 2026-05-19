@@ -465,6 +465,15 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   defp record_dispatch_failure(%Cympho.Issues.Issue{} = issue, %State{} = state, reason) do
+    # When the fallback chain has nothing to assign — every role from the
+    # issue's primary role through every fallback is empty or busy — wake
+    # the CEO so they can decide between hiring a new agent (`spawn_agent`),
+    # re-decomposing the issue, or cancelling. Without this signal, the
+    # dispatcher silently backs off for up to 10 minutes.
+    if reason == :no_agent do
+      escalate_no_agent_for_role(issue)
+    end
+
     current_entry = state.retry_attempts[issue.id]
     attempts = if current_entry, do: current_entry.attempts, else: 0
 
@@ -490,6 +499,41 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
       %{state | retry_attempts: new_retries}
     end
+  end
+
+  # Best-effort escalation. If the company has no CEO this no-ops; the issue
+  # will continue to back off and will be retried when the next agent goes
+  # idle (which won't help, but at least nothing crashes).
+  defp escalate_no_agent_for_role(%Cympho.Issues.Issue{company_id: nil}), do: :ok
+
+  defp escalate_no_agent_for_role(%Cympho.Issues.Issue{
+         id: issue_id,
+         company_id: company_id,
+         assigned_role: role
+       }) do
+    case Cympho.Agents.get_company_ceo(company_id) do
+      {:ok, %Cympho.Agents.Agent{id: ceo_id}} ->
+        # Coalesce: don't spam if a recent no_agent_for_role already exists
+        # for this issue. The wake queue dedups on agent+issue+reason, so
+        # this is more of a logging guard than a correctness one.
+        _ =
+          Cympho.Wakes.wake_for_no_agent_for_role(ceo_id, issue_id, %{
+            "company_id" => company_id,
+            "missing_role" => role && to_string(role)
+          })
+
+        :ok
+
+      _ ->
+        :ok
+    end
+  rescue
+    e ->
+      :logger.warning(
+        "[Dispatcher] no_agent escalation failed for issue #{issue_id}: #{Exception.message(e)}"
+      )
+
+      :ok
   end
 
   defp agent_for_issue(%Cympho.Issues.Issue{} = issue) do

@@ -41,6 +41,17 @@ defmodule Cympho.Wakes.AgentWake do
     final_review_required
     review_nudge_re_emit
     review_nudge_escalated
+    mission_idle
+    escalation_from_subordinate
+    manager_directive
+    no_agent_for_role
+    issue_stalled_in_progress
+    pr_review_changes_requested
+    pr_line_comments_added
+    pr_review_commented
+    ci_failed
+    merge_conflict_detected
+    pr_ready_to_merge
   )
 
   def changeset(agent_wake, attrs) do

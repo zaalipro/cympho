@@ -32,7 +32,8 @@ defmodule Cympho.Adapters.AgrentingAdapter do
     prompt =
       Cympho.AgentPrompt.build(issue, agent_id,
         skills: Keyword.get(opts, :skills, []),
-        runtime_context: Keyword.get(opts, :runtime_context)
+        runtime_context: Keyword.get(opts, :runtime_context),
+        wake_context: Keyword.get(opts, :wake_context)
       )
 
     case dispatch_and_wait(issue, agent_id, prompt, config, opts) do

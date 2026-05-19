@@ -146,6 +146,7 @@ defmodule Cympho.Issues.Issue do
   def role_rank(:ceo), do: 3
   def role_rank(:cto), do: 2
   def role_rank(:engineer), do: 1
+  def role_rank(:release_engineer), do: 1
   def role_rank(:product_manager), do: 1
   def role_rank(:designer), do: 1
   def role_rank(_), do: 0

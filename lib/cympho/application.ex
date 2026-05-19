@@ -37,6 +37,8 @@ defmodule Cympho.Application do
       Cympho.WebhookDedup,
       Cympho.EventStore,
       Cympho.Orchestrator.Dispatcher,
+      backlog_planner_child(),
+      oversight_patrol_child(),
       CymphoWeb.Endpoint
     ]
 
@@ -95,6 +97,24 @@ defmodule Cympho.Application do
   defp scheduler_child do
     if Application.get_env(:cympho, :start_scheduler?, true) do
       Cympho.Scheduler
+    end
+  end
+
+  # The backlog planner runs periodic DB queries (Companies.list_companies,
+  # active issue counts, mission goal counts) and writes wakes. Same test
+  # constraint as the watchdog/executor: no Ecto sandbox connection in test
+  # env. Tests opt in via Application.put_env or start_supervised.
+  defp backlog_planner_child do
+    if Application.get_env(:cympho, :start_backlog_planner?, true) do
+      Cympho.Orchestrator.BacklogPlanner
+    end
+  end
+
+  # The oversight patrol watches for stalled issues and wakes their
+  # supervisor. Same DB-query / sandbox constraint as the others.
+  defp oversight_patrol_child do
+    if Application.get_env(:cympho, :start_oversight_patrol?, true) do
+      Cympho.Oversight.Patrol
     end
   end
 

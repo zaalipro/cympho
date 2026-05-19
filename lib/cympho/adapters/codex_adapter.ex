@@ -45,7 +45,8 @@ defmodule Cympho.Adapters.CodexAdapter do
     prompt =
       Cympho.AgentPrompt.build(issue, agent_id,
         skills: Keyword.get(opts, :skills, []),
-        runtime_context: Keyword.get(opts, :runtime_context)
+        runtime_context: Keyword.get(opts, :runtime_context),
+        wake_context: Keyword.get(opts, :wake_context)
       )
 
     case run_codex(prompt, config, opts) do

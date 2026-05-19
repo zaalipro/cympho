@@ -45,6 +45,7 @@ defmodule Cympho.AgentPrompt do
     history = load_history(issue)
 
     [
+      wake_context_block(Keyword.get(opts, :wake_context), agent),
       issue_block(issue),
       agent_block(agent_or_id, agent),
       context_block(issue),
@@ -60,6 +61,237 @@ defmodule Cympho.AgentPrompt do
     |> Enum.join("\n\n")
     |> String.trim()
   end
+
+  # Surfaces "why you're being run right now" to the agent. Without this the
+  # agent only sees the issue context and has to infer intent from comments —
+  # which fails for synthetic wakes like `mission_idle` where the issue is a
+  # placeholder. `wake_context` is `{reason :: String.t(), metadata :: map()}`
+  # or nil when the agent runs without a wake (e.g. first dispatch).
+  defp wake_context_block(nil, _agent), do: nil
+
+  defp wake_context_block(%Cympho.Wakes.AgentWake{reason: reason, metadata: metadata}, agent),
+    do: wake_context_block({reason, metadata || %{}}, agent)
+
+  defp wake_context_block({reason, metadata}, agent) when is_binary(reason) do
+    case wake_preamble(reason, metadata, role_of(agent)) do
+      nil ->
+        nil
+
+      preamble ->
+        """
+        ## Why you're running this turn
+        Wake reason: `#{reason}`.
+
+        #{preamble}
+        """
+        |> String.trim()
+    end
+  end
+
+  defp wake_context_block(_other, _agent), do: nil
+
+  defp wake_preamble("mission_idle", metadata, :ceo) do
+    missions = Map.get(metadata, "active_missions", "?")
+
+    """
+    The company has #{missions} active mission goal(s) but **zero in-flight initiatives**. You are being run on the synthetic Mission Planning issue so you can pick the next mission to execute and seed its initiatives.
+
+    Required this turn: emit ONE `seed_mission_issues` action against an active mission goal (find it via the company context above), with 3–5 initiatives covering the most-valuable next slice. Pair it with a `[owner_update]` comment explaining which mission you chose and why. Do NOT spam multiple `create_issue` actions — use `seed_mission_issues` for atomic decomposition.
+
+    If every mission goal has already been delivered, mark the highest-priority mission `status: completed` (via the goals API the company UI surfaces) and emit only a `[owner_update]` comment reporting mission completion — no new issues.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("mission_idle", _metadata, _other_role) do
+    """
+    A `mission_idle` wake fired but you are not the CEO. Forward this to the CEO via a `comment` action; do not seed mission work yourself.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("final_review_required", _metadata, :ceo) do
+    """
+    A subtree under this root issue has finished. This is the **terminal mission review** — emit either `approve_issue` (when the deliverable meets the mission's success criteria) or `request_changes` (when something is missing). Do not just leave a `comment` and exit; the issue will sit in `:in_review` indefinitely.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("final_review_required", _metadata, _other_role) do
+    """
+    A `final_review_required` wake fired but you are not the CEO. If you are this issue's current assignee, hand off to the CEO via `handoff` with `role: "ceo"` so the boss-level review can land.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("agent_handoff", metadata, _role) do
+    from = Map.get(metadata, "from_agent_id") || "another agent"
+
+    """
+    You were just handed this issue from #{from}. Read the most recent `[handoff]` comment for the in-flight context, then either advance the work or hand off again with a clear `[handoff]` comment if it is the wrong role for you.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("issue_blockers_resolved", _metadata, _role) do
+    """
+    All blockers have cleared. This issue was previously `:blocked`; resume the work and either deliver via `submit_review` or post a `[delivery]` comment with current state.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("issue_children_completed", _metadata, _role) do
+    """
+    Every child issue under this one is `:done`. Roll up the children's outcomes into a single `[review]` or `[owner_update]` comment, then `submit_review` (engineer/PM/CTO) or `approve_issue` (CEO) so the parent issue can close.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("escalation_from_subordinate", metadata, _role) do
+    from = Map.get(metadata, "from_agent_id") || "a subordinate"
+    reason = Map.get(metadata, "reason") || "see the most recent [blocked] comment"
+
+    """
+    Your subordinate (#{from}) has escalated this issue: "#{reason}". Read the most recent `[blocked]` comment for their reasoning, then choose: (a) `delegate` to a different agent with context they didn't have, (b) re-decompose with smaller `create_issue` actions, (c) `escalate` further up if even your authority is wrong here, or (d) `block_issue` with a clear external blocker if nothing else applies. Do not just `comment` and exit — the issue is `:blocked` and will sit until you act.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("manager_directive", metadata, _role) do
+    from = Map.get(metadata, "from_agent_id") || "your manager"
+    reason = Map.get(metadata, "reason") || "no reason provided"
+
+    """
+    #{from} delegated this issue to you specifically: "#{reason}". This is a direct directive — execute the work or, if it is genuinely the wrong fit, reply with `[handoff]` and `handoff` to the right role. Do not silently sit on it.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("no_agent_for_role", metadata, :ceo) do
+    role = Map.get(metadata, "missing_role") || "an unknown role"
+
+    """
+    The dispatcher exhausted the fallback chain looking for someone to take an issue requiring role `#{role}`. You must act this turn: either (a) `spawn_agent` to hire someone with that role, (b) `delegate` to an existing agent of higher rank who can absorb the work, (c) `request_changes` or `cancel` (via comment + state change) if the issue is no longer needed. Letting the wake go unanswered will cause the issue to back off exponentially and eventually be abandoned.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("no_agent_for_role", _metadata, _other_role) do
+    """
+    A `no_agent_for_role` wake fired but you are not the CEO. Forward this to the CEO via `comment` — only the CEO can hire new agents.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("issue_stalled_in_progress", metadata, role)
+       when role in [:ceo, :cto] do
+    stuck_status = Map.get(metadata, "stuck_status") || "unknown"
+    stale_minutes = Map.get(metadata, "stale_minutes") || "?"
+    assignee = Map.get(metadata, "assignee_id") || "no current assignee"
+
+    """
+    This issue has been stuck in `:#{stuck_status}` for ~#{stale_minutes} minutes (assignee: #{assignee}). Patrol detected no meaningful movement past the threshold and woke you to act.
+
+    Required this turn: emit one `intervene` action with the right mode:
+      - `reassign` (with `to_agent_id` or `to_role`) — give it to a different agent who has context.
+      - `force_handoff` (with `to_role`) — clear assignee and let the dispatcher route to the least-loaded agent in that role.
+      - `unblock` — only if you are confident the blocker no longer applies.
+      - `cancel` — last resort; the work is no longer needed.
+
+    Pair with a `[handoff]` or `[review]` comment explaining your decision. Do not just `comment` and exit — the issue will continue to sit and Patrol will re-wake you.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("issue_stalled_in_progress", _metadata, _other_role) do
+    """
+    A `issue_stalled_in_progress` wake fired but you are not in a governance role. Comment to alert the CTO/CEO; only governance roles can `intervene`.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("pr_review_changes_requested", metadata, _role) do
+    iteration = Map.get(metadata, "iteration") || "?"
+    reviewer = Map.get(metadata, "reviewer") || Map.get(metadata, "from_agent_id") || "the reviewer"
+
+    """
+    The PR for this issue had **changes requested** by #{reviewer}. Iteration count: #{iteration}.
+
+    Read the most recent `[pr-review]` comment(s) above for the specific feedback. Then:
+      1. Make the requested changes locally and push a new commit.
+      2. Verify your changes (run tests, manual checks).
+      3. Emit `submit_review` again with `[delivery]` notes covering what changed and why.
+
+    The server enforces a head-SHA gate — if you `submit_review` without pushing a new commit, it will be rejected. Pass `"force_resubmit": true` only if the prior reviewer agreed offline.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("pr_line_comments_added", metadata, _role) do
+    count = Map.get(metadata, "comment_count") || "?"
+
+    """
+    #{count} new line-level review comment(s) landed on your PR. Read the `[pr-review]` comments above, address each inline, push a fresh commit, and `submit_review` again.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("pr_review_commented", _metadata, _role) do
+    """
+    A non-blocking `[pr-review]` comment was added to your PR. Skim the comment, post a `[delivery]` reply if a clarification is needed, then continue any in-flight work — this wake does NOT require a new commit unless you choose to act on the feedback.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("ci_failed", metadata, _role) do
+    name = Map.get(metadata, "name") || "the CI run"
+    url = Map.get(metadata, "check_run_url") || "(no url)"
+
+    """
+    CI failed: `#{name}` — see #{url}. Either fix the underlying cause and push, or if it's a flake, comment `[blocked] CI flake` and re-run. Do NOT `submit_review` until CI is green; the CEO will reject approval otherwise.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("merge_conflict_detected", metadata, role)
+       when role in [:release_engineer, :engineer, :cto] do
+    base = Map.get(metadata, "base_branch") || "main"
+
+    """
+    The PR has merge conflicts against `#{base}`. Resolve them: `git rebase #{base}` (or merge), fix the conflicts in your editor, push the rebased branch, then emit `resolve_conflict` to ack the work. The webhook will refresh the mergeable state once the new commits land.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("merge_conflict_detected", _metadata, _other_role) do
+    """
+    Merge conflict on this PR's branch. You may not be the right role to fix this — comment to alert the release engineer / original engineer if needed.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("pr_ready_to_merge", _metadata, :release_engineer) do
+    """
+    PR is approved + green + mergeable. Confirm one more time (CI status, no fresh `changes_requested` reviews, mergeable=true), then emit `merge_pr` with a clear `commit_title` and `commit_message`. The merge will trigger the merged-PR webhook → CEO sign-off.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("pr_ready_to_merge", _metadata, role) when role in [:cto, :ceo] do
+    """
+    A PR is ready to merge but no release engineer is available to drive it. You can either: (a) emit `spawn_agent` with `role: "release_engineer"` and let them merge, or (b) emit `merge_pr` yourself if the merge is low-risk.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("pr_ready_to_merge", _metadata, _other_role) do
+    """
+    PR is ready to merge. You don't have merge authority — comment to alert the release engineer or CTO.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble(_other, _metadata, _role), do: nil
 
   defp issue_block(issue) do
     """
@@ -376,10 +608,23 @@ defmodule Cympho.AgentPrompt do
   defp role_action_guidance(:ceo) do
     """
     ### Allowed actions for your role (CEO)
-    - `create_issue`, `approve_issue`, `request_changes`, `block_issue`, `comment`, `attach_work_product`, `set_pr_url`, `handoff`
+    - `create_issue`, `approve_issue`, `request_changes`, `block_issue`, `comment`, `attach_work_product`, `set_pr_url`, `handoff`, `seed_mission_issues`, `spawn_agent`, `delegate`, `intervene`, `merge_pr`, `force_fix_pr`
 
     ### MUST NOT emit
     - `submit_review` — you have no supervisor; use `approve_issue` to close work. The server will reject `submit_review` from the CEO with `:no_supervisor_to_review`.
+    - `escalate` — you are the top of the org chart; the server rejects this with `:no_supervisor_to_escalate`.
+
+    ### When to use `seed_mission_issues`
+    Use this action when a `mission_idle` wake fires or when a fresh mission goal needs decomposition. Required fields: `goal_id` (a mission-type Goal id) and `initiatives` (a list of `{title, description, role, priority?}` objects, max 8). Each initiative becomes a sibling issue under the mission goal and routes immediately to its `role`. Prefer this over emitting many `create_issue` actions: it captures the full plan atomically and the company can run autonomously from one batch.
+
+    ### When to use `spawn_agent`
+    Hire a new agent when a `no_agent_for_role` wake fires (the dispatcher could not find anyone for an issue's role) or when the team status block above shows a role at zero capacity for upcoming work. Required fields: `name` (display name), `role` (one of: ceo, cto, engineer, product_manager, designer). Optional: `title`, `adapter`, `instructions`. The new agent starts polling immediately. Do not spawn duplicates — if a role already has 1+ idle agents, delegate or wait instead.
+
+    ### When to use `delegate`
+    Use `delegate` (not `handoff`) when you specifically know which subordinate should pick up the work. Required fields: `to_agent_id` and `reason`. `handoff` clears the assignee and lets the dispatcher route by role; `delegate` pins the issue to the named agent and wakes them with a `manager_directive`. You must outrank the target — the server rejects equal-or-higher rank delegations.
+
+    ### When to use `intervene`
+    Emit on `issue_stalled_in_progress` wakes when a subordinate's issue has been sitting without movement. Required: `mode` (`reassign` | `force_handoff` | `unblock` | `cancel`) and `reason`. `reassign` requires `to_agent_id` or `to_role`. Pick the cheapest recovery: `unblock` if the blocker no longer applies, `force_handoff` to put it back in the role pool, `reassign` to pin to a specific agent, `cancel` only when the work is no longer wanted.
     """
     |> String.trim()
   end
@@ -387,9 +632,37 @@ defmodule Cympho.AgentPrompt do
   defp role_action_guidance(:cto) do
     """
     ### Allowed actions for your role (CTO)
-    - `create_issue`, `submit_review`, `approve_issue`, `request_changes`, `block_issue`, `comment`, `attach_work_product`, `set_pr_url`, `handoff`
+    - `create_issue`, `submit_review`, `approve_issue`, `request_changes`, `block_issue`, `comment`, `attach_work_product`, `set_pr_url`, `handoff`, `spawn_agent`, `delegate`, `escalate`, `intervene`, `merge_pr`, `force_fix_pr`
 
-    All actions available. Use `submit_review` (routes to CEO) when you've personally produced a small piece of work; use `approve_issue`/`request_changes` to gate engineering submissions you receive.
+    Use `submit_review` (routes to CEO) when you've personally produced a small piece of work; use `approve_issue`/`request_changes` to gate engineering submissions you receive.
+
+    ### When to use `spawn_agent`
+    Hire an engineer (or another CTO peer) when engineering capacity is exhausted or when a `no_agent_for_role` wake fires for an `engineer` role. Required: `name`, `role`. You may only spawn agents of equal or lower rank.
+
+    ### When to use `delegate`
+    Push a specific issue to a named engineer (`to_agent_id`) — useful when one engineer has context on a related change. Caller must outrank target.
+
+    ### When to use `escalate`
+    Use this when you cannot make progress *and* a higher authority (CEO) needs to make a strategic call. Distinct from `block_issue` (external dependency) — `escalate` actively asks the boss to redirect the work or cancel.
+
+    ### When to use `intervene`
+    Emit on `issue_stalled_in_progress` wakes for engineering work below you. Same modes as the CEO: `reassign`, `force_handoff`, `unblock`, `cancel`. Pair with a clear `[handoff]` or `[review]` comment so the next owner has context.
+    """
+    |> String.trim()
+  end
+
+  defp role_action_guidance(:release_engineer) do
+    """
+    ### Allowed actions for your role (release engineer)
+    - `comment`, `attach_work_product`, `set_pr_url`, `submit_review`, `escalate`, `merge_pr`, `force_fix_pr`, `resolve_conflict`
+
+    Your job is to make merges and deploys safe — you don't write features. Wake reasons that should drive your turn:
+      - `pr_ready_to_merge` → emit `merge_pr` once you've confirmed CI is green and approvals are in.
+      - `merge_conflict_detected` → resolve the conflict on the branch, push, then emit `resolve_conflict` to ack the work.
+      - `ci_failed` → comment with the failure cause and `force_fix_pr` back to the original engineer.
+
+    ### MUST NOT emit
+    - `approve_issue`, `request_changes`, `block_issue` — those are governance roles' (CEO/CTO) job.
     """
     |> String.trim()
   end
@@ -397,11 +670,14 @@ defmodule Cympho.AgentPrompt do
   defp role_action_guidance(:engineer) do
     """
     ### Allowed actions for your role (engineer)
-    - `comment`, `attach_work_product`, `set_pr_url`, `submit_review`, `create_issue` (rare — only for genuine follow-up)
+    - `comment`, `attach_work_product`, `set_pr_url`, `submit_review`, `create_issue` (rare — only for genuine follow-up), `escalate`, `resolve_conflict`
 
     ### MUST NOT emit
     - `approve_issue`, `request_changes`, `block_issue` — governance actions reserved for CEO/CTO. The server will reject with `:unauthorized_action`.
     - `handoff` — only when an issue is genuinely the wrong role for you; otherwise complete the work or `submit_review` with a blocked note.
+
+    ### When to use `escalate`
+    Use this when you've genuinely tried and the issue is unsolvable as scoped (ambiguous requirements, missing dependencies you cannot resolve, scope larger than this issue can hold). Optional `to_role` defaults to your supervisor's role. The server marks the issue `:blocked`, assigns it to your supervisor, and wakes them with `escalation_from_subordinate`. Do not escalate routine bugs — fix or `submit_review` with a clear blocker note.
     """
     |> String.trim()
   end

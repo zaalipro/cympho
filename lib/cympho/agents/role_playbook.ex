@@ -90,6 +90,7 @@ defmodule Cympho.Agents.RolePlaybook do
   defp role_title(:ceo), do: "Chief Executive Officer"
   defp role_title(:cto), do: "Chief Technology Officer"
   defp role_title(:engineer), do: "Software Engineer"
+  defp role_title(:release_engineer), do: "Release Engineer"
   defp role_title(:product_manager), do: "Product Manager"
   defp role_title(:designer), do: "Designer"
   defp role_title(other), do: other |> to_string() |> String.capitalize()
@@ -106,6 +107,10 @@ defmodule Cympho.Agents.RolePlaybook do
 
   defp mandate(:engineer) do
     "Implement the issue you've been assigned, end-to-end. Write the code, write the tests, attach the PR, and submit for review. Surface blockers explicitly rather than silently stalling."
+  end
+
+  defp mandate(:release_engineer) do
+    "Own the merge and deploy mechanics for the company. Resolve conflicts, drive PRs to a clean merge once they're approved, cut releases, and act on `merge_conflict_detected`, `ci_failed`, and `pr_ready_to_merge` wakes. You don't write the feature work — you make sure the feature work ships safely."
   end
 
   defp mandate(:product_manager) do

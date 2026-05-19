@@ -162,10 +162,18 @@ defmodule Cympho.Orchestrator do
     case prepare_runtime(session) do
       {:ok, module, config, runtime_context} ->
         start_engine_run(session)
+        # Snapshot the most-recent pending wake before consuming so we can
+        # surface it to the agent's prompt as wake_context. Without this the
+        # agent only sees the issue and has to infer "why am I being run."
+        wake_context = peek_pending_wake(session.agent_id, session.issue.id)
         consume_pending_wakes(session.agent_id, session.issue.id)
         schedule_heartbeat_tick()
 
-        opts = run_opts(session, config, runtime_context)
+        opts =
+          session
+          |> run_opts(config, runtime_context)
+          |> Keyword.put(:wake_context, wake_context)
+
         session_id = module.run(session.issue, session.agent_id, self(), opts)
 
         {:noreply, %{session | session_id: session_id, runtime_context: runtime_context}}
@@ -465,6 +473,32 @@ defmodule Cympho.Orchestrator do
     Cympho.HeartbeatEngine.WakeupQueue.consume_for(agent_id, issue_id)
   rescue
     _ -> :ok
+  end
+
+  # Returns the most-recent pending wake for this agent+issue pair, or nil if
+  # the agent was dispatched without an explicit wake (e.g. first poll). The
+  # value is shaped as `{reason, metadata}` and consumed by AgentPrompt's
+  # wake_context_block to render a "why you're running this turn" preamble.
+  defp peek_pending_wake(agent_id, issue_id) do
+    import Ecto.Query, only: [from: 2]
+    alias Cympho.Wakes.AgentWake
+
+    query =
+      from(w in AgentWake,
+        where:
+          w.agent_id == ^agent_id and
+            w.issue_id == ^issue_id and
+            w.status == "pending",
+        order_by: [desc: w.inserted_at],
+        limit: 1
+      )
+
+    case Cympho.Repo.one(query) do
+      nil -> nil
+      %AgentWake{reason: reason, metadata: metadata} -> {reason, metadata || %{}}
+    end
+  rescue
+    _ -> nil
   end
 
   defp handle_preflight_error(session, reason) do

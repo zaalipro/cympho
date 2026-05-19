@@ -223,7 +223,7 @@ defmodule CymphoWeb.GithubControllerTest do
       assert length(Issues.get_issue!(issue.id).comments) == first_count
     end
 
-    test "PR merged (closed with merged=true) transitions issue to done", %{
+    test "PR merged transitions issue to :in_review for CEO sign-off (not :done)", %{
       conn: conn,
       issue: issue,
       project: project
@@ -233,9 +233,11 @@ defmodule CymphoWeb.GithubControllerTest do
 
       assert response(conn, :ok) == ""
 
-      # Verify issue was transitioned to done
+      # New behavior: merged PRs go to :in_review, not :done. The CEO must
+      # explicitly emit `approve_issue` to close the work — this preserves
+      # the ensure_approval_quality gate that the auto-:done path bypassed.
       updated_issue = Issues.get_issue!(issue.id)
-      assert updated_issue.status == :done
+      assert updated_issue.status == :in_review
     end
 
     test "PR closed without merge transitions issue to blocked", %{

@@ -198,6 +198,247 @@ defmodule Cympho.Github do
 
   def pull_request_metadata(_pr), do: %{}
 
+  @doc """
+  Fetches the list of reviews on a pull request. Returns
+  `{:ok, [%{state, body, user, submitted_at, id, ...}]}` on success.
+
+  Used by the webhook handler to enrich a `pull_request_review` event with
+  the full review payload, and by the CTO agent to read prior review state
+  before deciding whether to `force_fix_pr` again.
+  """
+  @spec fetch_pull_request_reviews(String.t(), keyword()) ::
+          {:ok, list(map())} | {:error, term()}
+  def fetch_pull_request_reviews(url, opts \\ [])
+
+  def fetch_pull_request_reviews(url, opts) when is_binary(url) do
+    with {:ok, {owner, repo, number}} <- parse_pull_request_url(url) do
+      do_get_json(
+        "https://api.github.com/repos/#{owner}/#{repo}/pulls/#{number}/reviews",
+        opts
+      )
+    end
+  end
+
+  @doc """
+  Fetches line-level review comments on a pull request.
+  Returns `{:ok, [%{path, line, body, user, ...}]}` on success.
+  """
+  @spec fetch_pull_request_review_comments(String.t(), keyword()) ::
+          {:ok, list(map())} | {:error, term()}
+  def fetch_pull_request_review_comments(url, opts \\ [])
+
+  def fetch_pull_request_review_comments(url, opts) when is_binary(url) do
+    with {:ok, {owner, repo, number}} <- parse_pull_request_url(url) do
+      do_get_json(
+        "https://api.github.com/repos/#{owner}/#{repo}/pulls/#{number}/comments",
+        opts
+      )
+    end
+  end
+
+  @doc """
+  Fetches the list of file changes for a pull request. Used by the CTO
+  agent's PR-review preamble to surface "since last review, files X/Y/Z
+  changed."
+  """
+  @spec fetch_pull_request_files(String.t(), keyword()) ::
+          {:ok, list(map())} | {:error, term()}
+  def fetch_pull_request_files(url, opts \\ [])
+
+  def fetch_pull_request_files(url, opts) when is_binary(url) do
+    with {:ok, {owner, repo, number}} <- parse_pull_request_url(url) do
+      do_get_json(
+        "https://api.github.com/repos/#{owner}/#{repo}/pulls/#{number}/files",
+        opts
+      )
+    end
+  end
+
+  @doc """
+  Merges a pull request via GitHub's merge API. Caller is responsible for
+  verifying the PR is approved + green + mergeable before calling.
+
+  Options:
+    * `:method` — `"merge" | "squash" | "rebase"` (default `"squash"`)
+    * `:commit_title` — optional commit title
+    * `:commit_message` — optional commit message
+    * `:sha` — optional head SHA to require for the merge
+
+  Returns `{:ok, %{sha, merged: true}}` on success or
+  `{:error, {:not_mergeable, body}}` / `{:error, {:unexpected_status, status, body}}`.
+  """
+  @spec merge_pr(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def merge_pr(url, opts \\ [])
+
+  def merge_pr(url, opts) when is_binary(url) do
+    with {:ok, {owner, repo, number}} <- parse_pull_request_url(url) do
+      api_url = "https://api.github.com/repos/#{owner}/#{repo}/pulls/#{number}/merge"
+
+      payload =
+        %{}
+        |> maybe_put("commit_title", Keyword.get(opts, :commit_title))
+        |> maybe_put("commit_message", Keyword.get(opts, :commit_message))
+        |> maybe_put("sha", Keyword.get(opts, :sha))
+        |> Map.put("merge_method", Keyword.get(opts, :method, "squash"))
+
+      case do_request(:put, api_url, payload, opts) do
+        {:ok, %Finch.Response{status: 200, body: body}} ->
+          parse_merge_response(body)
+
+        {:ok, %Finch.Response{status: 405, body: body}} ->
+          {:error, {:not_mergeable, body}}
+
+        {:ok, %Finch.Response{status: 409, body: body}} ->
+          {:error, {:merge_conflict, body}}
+
+        {:ok, %Finch.Response{status: status, body: body}} ->
+          {:error, {:unexpected_status, status, body}}
+
+        {:error, reason} ->
+          {:error, {:request_failed, reason}}
+      end
+    end
+  end
+
+  @doc """
+  Creates a pull request review (approve, comment, request_changes) with
+  optional inline comments.
+
+  Required:
+    * `:event` — `"APPROVE" | "REQUEST_CHANGES" | "COMMENT"`
+    * `:body` — review body markdown
+
+  Optional:
+    * `:comments` — list of `%{path, line, body}` line-level comments
+    * `:commit_id` — pin the review to a specific commit
+  """
+  @spec create_review(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def create_review(url, opts) when is_binary(url) do
+    with :ok <- ensure_event(opts[:event]),
+         {:ok, {owner, repo, number}} <- parse_pull_request_url(url) do
+      api_url = "https://api.github.com/repos/#{owner}/#{repo}/pulls/#{number}/reviews"
+
+      payload =
+        %{
+          "event" => opts[:event],
+          "body" => opts[:body] || ""
+        }
+        |> maybe_put("comments", normalize_review_comments(opts[:comments]))
+        |> maybe_put("commit_id", opts[:commit_id])
+
+      case do_request(:post, api_url, payload, opts) do
+        {:ok, %Finch.Response{status: status, body: body}} when status in 200..299 ->
+          Jason.decode(body)
+
+        {:ok, %Finch.Response{status: status, body: body}} ->
+          {:error, {:unexpected_status, status, body}}
+
+        {:error, reason} ->
+          {:error, {:request_failed, reason}}
+      end
+    end
+  end
+
+  @doc """
+  Updates a PR's branch with the latest base. GitHub's
+  POST /repos/.../pulls/N/update-branch endpoint. Used to reduce conflict
+  surface before attempting a merge.
+  """
+  @spec update_branch(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def update_branch(url, opts \\ []) when is_binary(url) do
+    with {:ok, {owner, repo, number}} <- parse_pull_request_url(url) do
+      api_url = "https://api.github.com/repos/#{owner}/#{repo}/pulls/#{number}/update-branch"
+      payload = maybe_put(%{}, "expected_head_sha", opts[:expected_head_sha])
+
+      case do_request(:put, api_url, payload, opts) do
+        {:ok, %Finch.Response{status: status, body: body}} when status in 200..299 ->
+          Jason.decode(body)
+
+        {:ok, %Finch.Response{status: status, body: body}} ->
+          {:error, {:unexpected_status, status, body}}
+
+        {:error, reason} ->
+          {:error, {:request_failed, reason}}
+      end
+    end
+  end
+
+  defp ensure_event(event) when event in ["APPROVE", "REQUEST_CHANGES", "COMMENT"], do: :ok
+  defp ensure_event(_), do: {:error, :invalid_review_event}
+
+  defp normalize_review_comments(nil), do: nil
+
+  defp normalize_review_comments(comments) when is_list(comments) do
+    Enum.map(comments, fn c ->
+      c
+      |> Map.take(["path", "line", "body", "side", "start_line"])
+      |> Map.merge(%{
+        "path" => c["path"] || c[:path],
+        "line" => c["line"] || c[:line],
+        "body" => c["body"] || c[:body]
+      })
+    end)
+  end
+
+  defp parse_merge_response(body) do
+    case Jason.decode(body) do
+      {:ok, decoded} -> {:ok, %{sha: decoded["sha"], merged: decoded["merged"] == true}}
+      {:error, error} -> {:error, {:invalid_json, Exception.message(error)}}
+    end
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  # Generic GET helper that returns the decoded JSON list/map.
+  defp do_get_json(url, opts) do
+    case do_request(:get, url, nil, opts) do
+      {:ok, %Finch.Response{status: 200, body: body}} ->
+        Jason.decode(body)
+
+      {:ok, %Finch.Response{status: 404}} ->
+        {:error, :not_found}
+
+      {:ok, %Finch.Response{status: status, body: body}} ->
+        {:error, {:unexpected_status, status, body}}
+
+      {:error, reason} ->
+        {:error, {:request_failed, reason}}
+    end
+  end
+
+  # Single dispatch for both reads and writes. `body` is `nil` for GETs;
+  # otherwise it's a map encoded as JSON. Tests pass `:http_fn` to inject a
+  # mock that returns a `Finch.Response`-shaped struct.
+  defp do_request(method, url, body, opts) do
+    finch = Keyword.get(opts, :finch, @finch_name)
+    token = Keyword.get(opts, :token) || github_token()
+
+    if token in [nil, ""] do
+      {:error, :missing_token}
+    else
+      headers = [
+        {"authorization", "Bearer #{token}"},
+        {"accept", "application/vnd.github+json"},
+        {"content-type", "application/json"},
+        {"user-agent", "cympho"}
+      ]
+
+      case Keyword.get(opts, :http_fn) do
+        nil -> default_http_mutation(method, url, headers, body, finch)
+        fun -> fun.(method, url, headers, body, finch)
+      end
+    end
+  end
+
+  defp default_http_mutation(method, url, headers, nil, finch) do
+    Finch.build(method, url, headers) |> Finch.request(finch)
+  end
+
+  defp default_http_mutation(method, url, headers, body, finch) when is_map(body) do
+    Finch.build(method, url, headers, Jason.encode!(body)) |> Finch.request(finch)
+  end
+
   defp parse_pull_request_body(body) do
     with {:ok, decoded} <- Jason.decode(body) do
       {:ok,

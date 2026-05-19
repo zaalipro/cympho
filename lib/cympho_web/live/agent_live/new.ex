@@ -412,6 +412,7 @@ defmodule CymphoWeb.AgentLive.New do
   defp role_label(:cto), do: "CTO"
   defp role_label(:product_manager), do: "Product Manager"
   defp role_label(:engineer), do: "Engineer"
+  defp role_label(:release_engineer), do: "Release Engineer"
   defp role_label(:designer), do: "Designer"
 
   defp adapter_label(:claude_code), do: "Claude Code"

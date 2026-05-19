@@ -11,7 +11,14 @@ config :cympho, Cympho.Repo,
   database:
     System.get_env("TEST_DB_NAME") || "cympho_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: 10,
+  # Bumped from 10 → 24. ExUnit's `max_cases` defaults to System.schedulers_online
+  # (16 in the typical CI / dev environment), so a 10-slot pool starves even
+  # without the new fire-and-forget test fixtures (which create a company + 6
+  # agents + 5 issues per setup). Keep `queue_target` and `queue_interval`
+  # generous so a transient burst doesn't drop sandbox checkouts.
+  pool_size: 24,
+  queue_target: 1_000,
+  queue_interval: 5_000,
   template: "template0",
   ssl: false
 
@@ -36,6 +43,8 @@ config :cympho, :start_heartbeat_watchdog?, false
 config :cympho, :start_health_checker?, false
 config :cympho, :start_scheduler?, false
 config :cympho, :schedule_routine_triggers?, false
+config :cympho, :start_backlog_planner?, false
+config :cympho, :start_oversight_patrol?, false
 
 # Auto-ignition fans out assign + wake under Task.Supervisor on every
 # `Issues.create_issue`. Tests create issues by the thousand and expect

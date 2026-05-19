@@ -2,7 +2,7 @@ defmodule Cympho.Agents.Agent do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @delivery_roles [:engineer, :product_manager, :designer]
+  @delivery_roles [:engineer, :product_manager, :designer, :release_engineer]
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -10,7 +10,8 @@ defmodule Cympho.Agents.Agent do
     field :name, :string
     field :url_key, :string
     field :title, :string
-    field :role, Ecto.Enum, values: [:engineer, :product_manager, :designer, :ceo, :cto]
+    field :role, Ecto.Enum,
+      values: [:engineer, :product_manager, :designer, :ceo, :cto, :release_engineer]
 
     field :status, Ecto.Enum,
       values: [
@@ -117,7 +118,7 @@ defmodule Cympho.Agents.Agent do
       :adapter_failure_count
     ])
     |> validate_required([:name, :role])
-    |> validate_inclusion(:role, [:engineer, :product_manager, :designer, :ceo, :cto])
+    |> validate_inclusion(:role, [:engineer, :product_manager, :designer, :ceo, :cto, :release_engineer])
     |> validate_inclusion(:status, status_options())
     |> validate_inclusion(:health_status, [:healthy, :degraded, :unavailable])
     |> validate_inclusion(:context_mode, ["company", "project", "issue"])
@@ -144,7 +145,7 @@ defmodule Cympho.Agents.Agent do
       :terminated
     ]
 
-  def role_options, do: [:engineer, :product_manager, :designer, :ceo, :cto]
+  def role_options, do: [:engineer, :product_manager, :designer, :ceo, :cto, :release_engineer]
   def adapter_options, do: [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting]
   def health_status_options, do: [:healthy, :degraded, :unavailable]
 

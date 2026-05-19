@@ -333,10 +333,12 @@ defmodule Cympho.Agents do
   Role hierarchy rank: higher rank = more authority.
   Order: designer(1) < product_manager(2) < engineer(3) < cto(4) < ceo(5)
   """
-  @spec role_rank(:designer | :product_manager | :engineer | :cto | :ceo) :: non_neg_integer()
+  @spec role_rank(:designer | :product_manager | :engineer | :release_engineer | :cto | :ceo) ::
+          non_neg_integer()
   def role_rank(:designer), do: 1
   def role_rank(:product_manager), do: 2
   def role_rank(:engineer), do: 3
+  def role_rank(:release_engineer), do: 3
   def role_rank(:cto), do: 4
   def role_rank(:ceo), do: 5
 
