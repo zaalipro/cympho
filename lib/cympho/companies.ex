@@ -89,6 +89,36 @@ defmodule Cympho.Companies do
   def active?(%Company{status: "active"}), do: true
   def active?(_company), do: false
 
+  @doc """
+  Reads a runtime limit for a company from its `governance_config["limits"]`
+  map, falling back to the supplied default. Used by the dispatcher and
+  agent_actions to respect per-company concurrency / depth caps without
+  needing a schema migration.
+
+  Recognised keys (in `governance_config["limits"]`):
+    * `"max_concurrent_runs"` — dispatcher concurrent agent dispatches
+    * `"max_request_depth"` — sub-issue depth for agent decomposition
+    * `"max_active_child_issues_per_parent"` — fan-out cap
+  """
+  @spec runtime_limit(Company.t() | binary() | nil, String.t(), term()) :: term()
+  def runtime_limit(nil, _key, default), do: default
+
+  def runtime_limit(%Company{governance_config: config}, key, default) do
+    case config do
+      %{"limits" => %{^key => value}} when is_integer(value) and value > 0 -> value
+      _ -> default
+    end
+  end
+
+  def runtime_limit(company_id, key, default) when is_binary(company_id) do
+    case Repo.get(Company, company_id) do
+      nil -> default
+      company -> runtime_limit(company, key, default)
+    end
+  end
+
+  def runtime_limit(_, _, default), do: default
+
   defp pause_company_agents(company_id) do
     from(a in Agent, where: a.company_id == ^company_id)
     |> Repo.update_all(set: [governance_status: "paused"])

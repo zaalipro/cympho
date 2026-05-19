@@ -311,16 +311,46 @@ defmodule Cympho.Orchestrator.Dispatcher do
       candidates = fetch_candidate_issues(available_slots * 4, company_id)
       now = :os.system_time(:millisecond)
 
+      # Per-company cap: count how many running issues belong to each
+      # company, then drop candidates whose company has hit its
+      # `max_concurrent_runs` limit. Companies without a configured limit
+      # use the global default (`@max_concurrent`).
+      running_by_company = running_issues_by_company(running)
+
       ready_candidates =
         candidates
         |> Enum.reject(fn issue ->
           MapSet.member?(running, issue.id) ||
-            (retries[issue.id] && retries[issue.id].next_retry_at > now)
+            (retries[issue.id] && retries[issue.id].next_retry_at > now) ||
+            company_at_capacity?(issue, running_by_company)
         end)
         |> Enum.take(available_slots)
 
       Enum.reduce(ready_candidates, state, &dispatch_issue/2)
     end
+  end
+
+  defp running_issues_by_company(running_set) do
+    case MapSet.to_list(running_set) do
+      [] ->
+        %{}
+
+      ids ->
+        Cympho.Repo.all(
+          from i in Cympho.Issues.Issue,
+            where: i.id in ^ids and not is_nil(i.company_id),
+            group_by: i.company_id,
+            select: {i.company_id, count(i.id)}
+        )
+        |> Map.new()
+    end
+  end
+
+  defp company_at_capacity?(%Cympho.Issues.Issue{company_id: nil}, _by_co), do: false
+
+  defp company_at_capacity?(%Cympho.Issues.Issue{company_id: company_id}, by_co) do
+    cap = Cympho.Companies.runtime_limit(company_id, "max_concurrent_runs", @max_concurrent)
+    Map.get(by_co, company_id, 0) >= cap
   end
 
   defp fetch_candidate_issues(limit, company_id) do

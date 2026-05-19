@@ -669,19 +669,35 @@ defmodule Cympho.AgentActions do
   defp execute_action(issue, agent, %{"type" => "create_issue"} = action) do
     current_depth = issue.request_depth || 0
     active_children = active_child_issue_count(issue)
+    max_depth = company_limit(issue, "max_request_depth", @max_request_depth)
+
+    max_children =
+      company_limit(
+        issue,
+        "max_active_child_issues_per_parent",
+        @max_active_child_issues_per_parent
+      )
 
     cond do
-      current_depth >= @max_request_depth ->
-        {:error, {:request_depth_exceeded, current_depth, @max_request_depth}}
+      current_depth >= max_depth ->
+        {:error, {:request_depth_exceeded, current_depth, max_depth}}
 
-      active_children >= @max_active_child_issues_per_parent ->
-        {:error,
-         {:child_issue_limit_exceeded, active_children, @max_active_child_issues_per_parent}}
+      active_children >= max_children ->
+        {:error, {:child_issue_limit_exceeded, active_children, max_children}}
 
       true ->
         do_create_issue(issue, agent, action)
     end
   end
+
+  # Reads a company-scoped runtime limit (from `governance_config["limits"]`)
+  # falling back to the compile-time default. Centralises the lookup so
+  # every guard in agent_actions uses the same semantics.
+  defp company_limit(%Issue{company_id: company_id}, key, default) do
+    Cympho.Companies.runtime_limit(company_id, key, default)
+  end
+
+  defp company_limit(_, _, default), do: default
 
   # CEO has no supervisor — submit_review would set assignee_id to nil and
   # the dispatcher would re-route the issue right back to the CEO. Reject
@@ -1145,9 +1161,10 @@ defmodule Cympho.AgentActions do
 
   defp seed_initiatives(issue, agent, goal, initiatives) do
     base_depth = (issue.request_depth || 0) + 1
+    max_depth = company_limit(issue, "max_request_depth", @max_request_depth)
 
-    if base_depth > @max_request_depth do
-      {:error, {:request_depth_exceeded, base_depth, @max_request_depth}}
+    if base_depth > max_depth do
+      {:error, {:request_depth_exceeded, base_depth, max_depth}}
     else
       results =
         Enum.map(initiatives, fn raw ->
