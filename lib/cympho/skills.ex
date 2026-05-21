@@ -4,6 +4,7 @@ defmodule Cympho.Skills do
   """
 
   import Ecto.Query
+  require Logger
   alias Cympho.{Repo, Skills.Skill, Skills.Plugin, Skills.AgentSkill}
 
   def list_skills(opts \\ []) do
@@ -184,7 +185,7 @@ defmodule Cympho.Skills do
       end)
     rescue
       e ->
-        :logger.debug("[Skills] Failed to load skills for agent #{agent_id}: #{inspect(e)}")
+        Logger.debug("[Skills] Failed to load skills for agent #{agent_id}: #{inspect(e)}")
         []
     end
   end

@@ -6,6 +6,7 @@ defmodule Cympho.Notifications.RetryWorker do
   """
 
   use GenServer
+  require Logger
 
   alias Cympho.Notifications.Dispatcher
   alias Cympho.Notifications.Message
@@ -102,7 +103,7 @@ defmodule Cympho.Notifications.RetryWorker do
 
   defp maybe_schedule_next_retry(message, attempt) do
     if attempt >= max_attempts(message) do
-      :logger.debug("RetryWorker: max retries exceeded")
+      Logger.debug("RetryWorker: max retries exceeded")
     else
       delay = calculate_delay(attempt + 1)
       Process.send_after(self(), {:retry_notification, message, attempt + 1}, delay)

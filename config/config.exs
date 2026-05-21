@@ -43,6 +43,13 @@ config :logger, :console, format: "[$level] $message\n"
 
 config :phoenix, :json_library, Jason
 
+# Sentry SDK base config. DSN is loaded from SENTRY_DSN in runtime.exs and
+# is `nil` by default, which makes Sentry a no-op (no events are sent).
+config :sentry,
+  environment_name: config_env(),
+  enable_source_code_context: true,
+  root_source_code_paths: [File.cwd!()]
+
 config :cympho, Cympho.Scheduler,
   jobs: [
     # Daily retention sweep at 03:17 UTC. `:overlap, false` ensures concurrent

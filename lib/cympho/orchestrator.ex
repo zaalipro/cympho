@@ -34,6 +34,7 @@ defmodule Cympho.Orchestrator do
   ]
 
   use GenServer
+  require Logger
 
   import Ecto.Query, only: [from: 2]
 
@@ -258,7 +259,7 @@ defmodule Cympho.Orchestrator do
     issue = session.issue
     agent_id = session.agent_id
 
-    :logger.warning(
+    Logger.warning(
       "[Orchestrator] Session ended with error for issue #{issue.id}, agent #{agent_id}: #{inspect(reason)}"
     )
 
@@ -294,7 +295,7 @@ defmodule Cympho.Orchestrator do
         {:noreply, session}
 
       {:stop, :company_paused} ->
-        :logger.warning(
+        Logger.warning(
           "[Orchestrator] Company paused during active session for issue #{session.issue.id}, stopping gracefully"
         )
 
@@ -321,7 +322,7 @@ defmodule Cympho.Orchestrator do
         _ -> nil
       end
 
-    :logger.warning(
+    Logger.warning(
       "[Orchestrator] Unexpected message (issue_id=#{inspect(issue_id)}): #{inspect(msg)}"
     )
 
@@ -336,7 +337,7 @@ defmodule Cympho.Orchestrator do
         _ -> nil
       end
 
-    :logger.warning(
+    Logger.warning(
       "[Orchestrator] Unexpected cast (issue_id=#{inspect(issue_id)}): #{inspect(msg)}"
     )
 
@@ -363,7 +364,7 @@ defmodule Cympho.Orchestrator do
     end
 
     _ =
-      :logger.info(
+      Logger.info(
         "[Orchestrator] terminated for issue #{session.issue.id}, agent #{session.agent_id}, reason: #{inspect(reason)}"
       )
 
@@ -393,12 +394,12 @@ defmodule Cympho.Orchestrator do
           %{session | run_id: run.id}
 
         {:error, reason} ->
-          :logger.warning("[Orchestrator] Failed to create engine run: #{inspect(reason)}")
+          Logger.warning("[Orchestrator] Failed to create engine run: #{inspect(reason)}")
           session
       end
     rescue
       e ->
-        :logger.warning("[Orchestrator] Failed to create engine run: #{inspect(e)}")
+        Logger.warning("[Orchestrator] Failed to create engine run: #{inspect(e)}")
         session
     end
   end
@@ -534,7 +535,7 @@ defmodule Cympho.Orchestrator do
     issue = session.issue
     agent_id = session.agent_id
 
-    :logger.warning(
+    Logger.warning(
       "[Orchestrator] Runtime preflight failed for issue #{issue.id}: #{inspect(reason)}"
     )
 
@@ -624,7 +625,7 @@ defmodule Cympho.Orchestrator do
       HeartbeatEngine.start_run(run)
     rescue
       e ->
-        :logger.warning("[Orchestrator] Failed to start engine run: #{inspect(e)}")
+        Logger.warning("[Orchestrator] Failed to start engine run: #{inspect(e)}")
     end
   end
 
@@ -637,7 +638,7 @@ defmodule Cympho.Orchestrator do
       HeartbeatEngine.complete_run(run, attrs)
     rescue
       e ->
-        :logger.warning("[Orchestrator] Failed to complete engine run: #{inspect(e)}")
+        Logger.warning("[Orchestrator] Failed to complete engine run: #{inspect(e)}")
     end
   end
 
@@ -649,7 +650,7 @@ defmodule Cympho.Orchestrator do
       HeartbeatEngine.fail_run(run, reason)
     rescue
       e ->
-        :logger.warning("[Orchestrator] Failed to fail engine run: #{inspect(e)}")
+        Logger.warning("[Orchestrator] Failed to fail engine run: #{inspect(e)}")
     end
   end
 
@@ -777,7 +778,7 @@ defmodule Cympho.Orchestrator do
               :ok
 
             {:error, reason} ->
-              :logger.warning(
+              Logger.warning(
                 "[Orchestrator] Completion contract nudge failed for issue #{issue.id}: #{inspect(reason)}"
               )
 
@@ -789,7 +790,7 @@ defmodule Cympho.Orchestrator do
     end
   rescue
     exception ->
-      :logger.warning(
+      Logger.warning(
         "[Orchestrator] Completion contract guard failed for issue #{issue.id}: #{Exception.message(exception)}"
       )
 
@@ -894,7 +895,7 @@ defmodule Cympho.Orchestrator do
         :ok
 
       {:error, reason} ->
-        :logger.warning("[Orchestrator] Failed to create agent comment: #{inspect(reason)}")
+        Logger.warning("[Orchestrator] Failed to create agent comment: #{inspect(reason)}")
     end
   end
 
@@ -966,7 +967,7 @@ defmodule Cympho.Orchestrator do
     issue = session.issue
     agent_id = session.agent_id
 
-    :logger.error(
+    Logger.error(
       "[Orchestrator] Adapter resolution failed for issue #{issue.id}: #{inspect(reason)}"
     )
 
@@ -991,7 +992,7 @@ defmodule Cympho.Orchestrator do
         :ok
 
       {:error, reason} ->
-        :logger.warning(
+        Logger.warning(
           "[Orchestrator] Failed to release issue after adapter error: #{inspect(reason)}"
         )
     end
@@ -1013,7 +1014,7 @@ defmodule Cympho.Orchestrator do
         # Find and update the corresponding trace
         case Map.get(acc_traces, tool_use_id) do
           nil ->
-            :logger.warning("[Orchestrator] No trace found for tool_result: #{tool_use_id}")
+            Logger.warning("[Orchestrator] No trace found for tool_result: #{tool_use_id}")
             acc_traces
 
           trace_id ->
@@ -1034,7 +1035,7 @@ defmodule Cympho.Orchestrator do
 
         case Cympho.ToolCallTraces.update_tool_call_trace_status(trace, status, result_content) do
           {:ok, _updated_trace} ->
-            :logger.info(
+            Logger.info(
               "[Orchestrator] Updated tool call trace: #{trace_id} with status: #{status}"
             )
 
@@ -1057,12 +1058,12 @@ defmodule Cympho.Orchestrator do
             Map.delete(tool_traces, tool_use_id)
 
           {:error, reason} ->
-            :logger.warning("[Orchestrator] Failed to update tool call trace: #{inspect(reason)}")
+            Logger.warning("[Orchestrator] Failed to update tool call trace: #{inspect(reason)}")
             tool_traces
         end
 
       {:error, :not_found} ->
-        :logger.warning("[Orchestrator] Trace not found: #{trace_id}")
+        Logger.warning("[Orchestrator] Trace not found: #{trace_id}")
         tool_traces
     end
   end
@@ -1076,18 +1077,18 @@ defmodule Cympho.Orchestrator do
 
           case Cympho.ToolCallTraces.update_tool_call_trace_status(trace, status, error_message) do
             {:ok, _updated_trace} ->
-              :logger.info(
+              Logger.info(
                 "[Orchestrator] Marked pending tool call trace as errored: #{trace_id}"
               )
 
             {:error, update_reason} ->
-              :logger.warning(
+              Logger.warning(
                 "[Orchestrator] Failed to update errored tool call trace: #{inspect(update_reason)}"
               )
           end
 
         {:error, :not_found} ->
-          :logger.warning("[Orchestrator] Trace not found for error marking: #{trace_id}")
+          Logger.warning("[Orchestrator] Trace not found for error marking: #{trace_id}")
       end
     end)
   end
@@ -1109,7 +1110,7 @@ defmodule Cympho.Orchestrator do
 
       case Cympho.ToolCallTraces.create_tool_call_trace(attrs) do
         {:ok, trace} ->
-          :logger.info("[Orchestrator] Captured tool call trace: #{trace.tool_name}")
+          Logger.info("[Orchestrator] Captured tool call trace: #{trace.tool_name}")
 
           :telemetry.execute(
             [:cympho, :tool, :call],
@@ -1129,12 +1130,12 @@ defmodule Cympho.Orchestrator do
           {updated_tool_traces, trace.id}
 
         {:error, reason} ->
-          :logger.warning("[Orchestrator] Failed to capture tool call trace: #{inspect(reason)}")
+          Logger.warning("[Orchestrator] Failed to capture tool call trace: #{inspect(reason)}")
           {tool_traces, nil}
       end
     rescue
       e ->
-        :logger.error("[Orchestrator] Error capturing tool call: #{inspect(e)}")
+        Logger.error("[Orchestrator] Error capturing tool call: #{inspect(e)}")
         {tool_traces, nil}
     end
   end

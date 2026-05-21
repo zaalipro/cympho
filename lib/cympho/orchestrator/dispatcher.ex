@@ -17,6 +17,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
   # issues back to :todo before the supervisor brutally kills the process.
   # Default 5s was too tight under load.
   use GenServer, restart: :permanent, shutdown: 10_000
+  require Logger
   import Ecto.Query
   alias Cympho.Orchestrator.Dispatcher.State
   alias Cympho.Orchestrator.Dispatcher.Router
@@ -157,12 +158,12 @@ defmodule Cympho.Orchestrator.Dispatcher do
           {:ok, issue} ->
             case Cympho.Issues.force_release_issue(issue, :todo) do
               {:ok, _} ->
-                :logger.warning(
+                Logger.warning(
                   "[Dispatcher] recovered orphaned issue #{issue_id} (assignee=#{assignee_id || "none"}) → :todo"
                 )
 
               {:error, reason} ->
-                :logger.error(
+                Logger.error(
                   "[Dispatcher] failed to release orphaned issue #{issue_id}: #{inspect(reason)}"
                 )
             end
@@ -175,7 +176,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
   rescue
     # Recovery is best-effort; never let a transient DB issue block boot.
     error ->
-      :logger.error("[Dispatcher] orphan recovery failed: #{inspect(error)}")
+      Logger.error("[Dispatcher] orphan recovery failed: #{inspect(error)}")
       :ok
   end
 
@@ -233,7 +234,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
   # window where an issue is "owned" by a dead process.
   @impl true
   def terminate(reason, %State{running_issue_ids: running}) do
-    :logger.info(
+    Logger.info(
       "[Dispatcher] terminating (reason=#{inspect(reason)}); releasing #{MapSet.size(running)} in-flight issues"
     )
 
@@ -403,7 +404,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
               checkout_and_start(issue, agent, required_role, state)
 
             {:error, reason} ->
-              :logger.warning(
+              Logger.warning(
                 "[Dispatcher] Runtime preflight blocked issue #{issue.id}: #{inspect(reason)}"
               )
 
@@ -411,7 +412,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
           end
 
         {:error, :no_agent_available} ->
-          :logger.info("[Dispatcher] No eligible agent available for issue #{issue.id}")
+          Logger.info("[Dispatcher] No eligible agent available for issue #{issue.id}")
           record_dispatch_failure(issue, state, :no_agent)
       end
     end
@@ -435,7 +436,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
             new_state
 
           {:error, reason} ->
-            :logger.warning(
+            Logger.warning(
               "[Dispatcher] Failed to start orchestrator for issue #{issue.id}: #{inspect(reason)}"
             )
 
@@ -443,14 +444,14 @@ defmodule Cympho.Orchestrator.Dispatcher do
         end
 
       {:error, :already_assigned} ->
-        :logger.info(
+        Logger.info(
           "[Dispatcher] Issue #{issue.id} already assigned by another process (race condition handled)"
         )
 
         state
 
       {:error, reason} ->
-        :logger.warning("[Dispatcher] Failed to checkout issue #{issue.id}: #{inspect(reason)}")
+        Logger.warning("[Dispatcher] Failed to checkout issue #{issue.id}: #{inspect(reason)}")
 
         record_dispatch_failure(issue, state, :checkout_failed)
     end
@@ -478,7 +479,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
         %{issue_id: issue_id, company_id: company_id, role: role}
       )
 
-      :logger.warning(
+      Logger.warning(
         "[Dispatcher] stalled wakeup: issue=#{issue_id} role=#{inspect(role)} age_ms=#{age_ms}"
       )
     end
@@ -508,7 +509,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
     attempts = if current_entry, do: current_entry.attempts, else: 0
 
     if attempts >= @max_retries do
-      :logger.error(
+      Logger.error(
         "[Dispatcher] Issue #{issue.id} exceeded max retries (#{@max_retries}) for #{reason}, will not retry"
       )
 
@@ -523,7 +524,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
       new_retry_entry = %{attempts: next_attempts, next_retry_at: next_retry_at}
       new_retries = Map.put(state.retry_attempts, issue.id, new_retry_entry)
 
-      :logger.info(
+      Logger.info(
         "[Dispatcher] Scheduling retry #{next_attempts}/#{@max_retries} for issue #{issue.id} in #{backoff_ms}ms (reason: #{reason})"
       )
 
@@ -559,7 +560,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
     end
   rescue
     e ->
-      :logger.warning(
+      Logger.warning(
         "[Dispatcher] no_agent escalation failed for issue #{issue_id}: #{Exception.message(e)}"
       )
 

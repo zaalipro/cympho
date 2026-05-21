@@ -11,6 +11,7 @@ defmodule Cympho.AgentHeartbeat do
   """
 
   use GenServer
+  require Logger
 
   alias Cympho.AgentHeartbeat.Supervisor
   alias Cympho.{Orchestrator, Issues, Agents, Activities, Skills}
@@ -307,7 +308,7 @@ defmodule Cympho.AgentHeartbeat do
 
             {:error, reason} ->
               _ =
-                :logger.error("[AgentHeartbeat] failed to start orchestrator: #{inspect(reason)}")
+                Logger.error("[AgentHeartbeat] failed to start orchestrator: #{inspect(reason)}")
 
               Activities.log_heartbeat_event(checked_out_issue.id, :failed, %{
                 agent_id: agent_id,
@@ -406,7 +407,7 @@ defmodule Cympho.AgentHeartbeat do
     if state.timer_ref, do: Process.cancel_timer(state.timer_ref)
 
     _ =
-      :logger.info(
+      Logger.info(
         "[AgentHeartbeat] terminated for agent #{state.agent_id}, reason: #{inspect(reason)}"
       )
 

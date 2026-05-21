@@ -48,9 +48,19 @@ mix phx.server               # Start dev server (port 4000)
 iex -S mix phx.server        # Start server with IEx shell
 mix assets.build             # Build CSS/JS for dev
 mix assets.deploy            # Build + minify assets for production
+mix credo                    # Static analysis (informational; aim for clean over time)
+mix credo --strict           # All checks at full strictness
+mix dialyzer                 # Typecheck (first run builds PLT, ~3min; cached after)
 ```
 
-`mix test` is aliased to `ecto.create --quiet && ecto.migrate --quiet && test` so a fresh checkout works with one command. No credo or dialyzer configured. Test DB credentials: `paperclip/paperclip@localhost/cympho_test`.
+`mix test` is aliased to `ecto.create --quiet && ecto.migrate --quiet && test` so a fresh checkout works with one command. Credo and dialyxir are configured but not yet enforced in CI — treat them as informational tools that catch regressions in new code. Test DB credentials: `paperclip/paperclip@localhost/cympho_test`.
+
+## Logging conventions
+
+- Use Elixir's `Logger` module (not Erlang's `:logger`) in all `lib/` code. Add `require Logger` to any module that emits logs.
+- Prefer keyword metadata over string interpolation: `Logger.warning("budget exhausted", agent_id: id, policy_id: pid)` over `Logger.warning("budget exhausted for agent #{id}")`.
+- Standard metadata keys: `issue_id`, `agent_id`, `company_id`, `component`. Reuse these so downstream filters work consistently.
+- `:logger.add_handler/3` is the correct API for registering loggers (e.g. Sentry's handler in `Cympho.Application.start/2`); only the *emission* sites must use `Logger`.
 
 ## Claude CLI Wrappers
 
@@ -139,7 +149,7 @@ Dark-mode-first UI inspired by Linear. See `DESIGN.md` for the full spec. Tailwi
 - Phoenix Context pattern — each domain has a context module as its public API (e.g., `Cympho.Issues`, `Cympho.Agents`, `Cympho.Decisions`, `Cympho.Inbox`).
 - Test support modules: `ConnCase`, `DataCase`, `ChannelCase`, `LiveCase`. Pool mode: `Ecto.Adapters.SQL.Sandbox` in manual mode.
 - Tool versions pinned in `.tool-versions`: Elixir `1.19.5-otp-28`, Erlang `28.4.3`.
-- Production config via env vars in `config/runtime.exs` (`DATABASE_URL`, `SECRET_KEY_BASE`, `APP_HOST`, `POOL_SIZE`, `LIVE_VIEW_SALT`, `S3_BUCKET`/`S3_HOST`/`S3_SCHEME`/`S3_ENDPOINT`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION`).
+- Production config via env vars in `config/runtime.exs` (`DATABASE_URL`, `SECRET_KEY_BASE`, `APP_HOST`, `POOL_SIZE`, `LIVE_VIEW_SALT`, `S3_BUCKET`/`S3_HOST`/`S3_SCHEME`/`S3_ENDPOINT`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION`, `SENTRY_DSN`, `RELEASE_ENV`).
 - Bandit HTTP server (not Cowboy).
 - Mix aliases: `setup`, `ecto.setup`, `ecto.reset`, `test` (defined in `mix.exs`).
 - **SortableJS is loaded via CDN** (`cdn.jsdelivr.net/npm/sortablejs@1.15.6` in `lib/cympho_web/controllers/layouts/root.html.heex`), not as an npm dependency — don't try to bump it in `package.json`.

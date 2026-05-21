@@ -29,6 +29,9 @@ config :cympho, CymphoWeb.Endpoint,
 
 config :logger, level: :warning
 
+# Sentry: explicitly no-op in test. SDK is loaded but won't ship events.
+config :sentry, dsn: nil
+
 config :cympho, :skill_manifest_dir, "test/support/skill_manifests"
 
 config :cympho, :orchestrator, enabled: false

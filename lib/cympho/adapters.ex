@@ -9,6 +9,7 @@ defmodule Cympho.Adapters do
     - Running agents via their assigned adapter
   """
 
+  require Logger
   alias Cympho.Adapters.Registry
   alias Cympho.Agents.Agent
 
@@ -215,8 +216,6 @@ defmodule Cympho.Adapters do
           case module.validate_config(config) do
             :ok ->
               if config_errors != [] do
-                require Logger
-
                 Logger.debug("""
                 Adapter #{type} resolved successfully, but previous adapters in fallback chain failed config validation:
                 #{format_config_errors(Enum.reverse(config_errors))}
@@ -263,7 +262,7 @@ defmodule Cympho.Adapters do
 
     case fallback do
       {key, module} ->
-        :logger.warning(
+        Logger.warning(
           "[Adapters] Adapter #{failed_key} unavailable, falling back to #{key} for agent #{agent_id}"
         )
 
@@ -271,7 +270,7 @@ defmodule Cympho.Adapters do
         {:ok, session_id}
 
       nil ->
-        :logger.error(
+        Logger.error(
           "[Adapters] No available adapter for agent #{agent_id} (assigned: #{failed_key})"
         )
 

@@ -95,3 +95,11 @@ end
 # Session secret for AgentAuth plug
 config :cympho, :agent_auth,
   secret_key_base: System.get_env("AGENT_AUTH_SECRET") || System.get_env("SECRET_KEY_BASE")
+
+# Sentry crash reporting. When SENTRY_DSN is unset (typical dev/test), the
+# SDK silently no-ops — no network calls, no errors. Production sets the env.
+if sentry_dsn = System.get_env("SENTRY_DSN") do
+  config :sentry,
+    dsn: sentry_dsn,
+    environment_name: System.get_env("RELEASE_ENV", to_string(config_env()))
+end

@@ -5,6 +5,16 @@ defmodule Cympho.Application do
 
   @impl true
   def start(_type, _args) do
+    # Register the Sentry :logger handler before children start so early-boot
+    # crashes are captured. The handler is a no-op when SENTRY_DSN is unset
+    # (default in dev/test), so registration is unconditional.
+    _ =
+      :logger.add_handler(
+        :sentry_handler,
+        Sentry.LoggerHandler,
+        %{config: %{metadata: [:file, :line], level: :error}}
+      )
+
     children = [
       Cympho.Repo,
       {Phoenix.PubSub, name: Cympho.PubSub},

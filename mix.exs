@@ -10,6 +10,10 @@ defmodule Cympho.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      dialyzer: [
+        plt_add_apps: [:mix, :ex_unit],
+        ignore_warnings: ".dialyzer_ignore.exs"
+      ],
       listeners: [Phoenix.CodeReloader]
     ]
   end
@@ -63,7 +67,14 @@ defmodule Cympho.MixProject do
       {:sweet_xml, "~> 0.7"},
       {:file_system, "~> 1.0", only: [:dev, :test]},
       {:mock, "~> 0.3", only: :test},
-      {:earmark, "~> 1.4"}
+      {:earmark, "~> 1.4"},
+      {:sentry, "~> 10.0"},
+      # Hackney is Sentry's default HTTP client at boot. Even with DSN unset
+      # (no events sent), the SDK's Application.start/2 instantiates the
+      # client, so the dep has to be available.
+      {:hackney, "~> 1.20"},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev], runtime: false}
     ]
   end
 
