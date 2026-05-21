@@ -6,6 +6,8 @@ defmodule Cympho.GovernanceAuditLogs.GovernanceAuditLog do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Cympho.Companies.Company
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
   schema "governance_audit_logs" do
@@ -20,6 +22,8 @@ defmodule Cympho.GovernanceAuditLogs.GovernanceAuditLog do
     field :ip_address, :string
     field :user_agent, :string
     field :tool_call_trace_id, :binary_id
+
+    belongs_to :company, Company
 
     timestamps(type: :utc_datetime)
   end
@@ -37,7 +41,8 @@ defmodule Cympho.GovernanceAuditLogs.GovernanceAuditLog do
       :metadata,
       :ip_address,
       :user_agent,
-      :tool_call_trace_id
+      :tool_call_trace_id,
+      :company_id
     ])
     |> validate_required([
       :action_type,

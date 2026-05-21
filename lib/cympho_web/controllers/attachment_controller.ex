@@ -48,15 +48,13 @@ defmodule CymphoWeb.AttachmentController do
   end
 
   def show(conn, %{"id" => id}) do
-    with {:ok, %Attachment{} = attachment} <- Attachments.get_attachment(id),
-         :ok <- enforce_company(conn, attachment) do
+    with {:ok, %Attachment{} = attachment} <- scoped_attachment(conn, id) do
       render(conn, :show, attachment: attachment)
     end
   end
 
   def download(conn, %{"id" => id}) do
-    with {:ok, %Attachment{} = attachment} <- Attachments.get_attachment(id),
-         :ok <- enforce_company(conn, attachment) do
+    with {:ok, %Attachment{} = attachment} <- scoped_attachment(conn, id) do
       case Attachments.read_file(attachment) do
         {:ok, binary} ->
           conn
@@ -77,8 +75,7 @@ defmodule CymphoWeb.AttachmentController do
   end
 
   def delete(conn, %{"id" => id}) do
-    with {:ok, %Attachment{} = attachment} <- Attachments.get_attachment(id),
-         :ok <- enforce_company(conn, attachment),
+    with {:ok, %Attachment{} = attachment} <- scoped_attachment(conn, id),
          {:ok, _} <- Attachments.delete_attachment(attachment) do
       send_resp(conn, :no_content, "")
     end
@@ -90,11 +87,8 @@ defmodule CymphoWeb.AttachmentController do
     Issues.get_company_issue(conn.assigns.current_agent.company_id, issue_id)
   end
 
-  defp enforce_company(conn, %Attachment{issue_id: issue_id}) do
-    case scoped_issue(conn, issue_id) do
-      {:ok, _} -> :ok
-      {:error, :not_found} -> {:error, :not_found}
-    end
+  defp scoped_attachment(conn, id) do
+    Attachments.get_company_attachment(conn.assigns.current_agent.company_id, id)
   end
 
   defp upload_fits?(%Plug.Upload{path: path}) do

@@ -17,6 +17,9 @@ defmodule Cympho.GovernanceAuditLogs do
 
     query =
       Enum.reduce(opts, query, fn
+        {:company_id, id}, q ->
+          where(q, [l], l.company_id == ^id)
+
         {:action_type, type}, q ->
           where(q, [l], l.action_type == ^type)
 
@@ -48,6 +51,17 @@ defmodule Cympho.GovernanceAuditLogs do
   def get_governance_audit_log!(id), do: Repo.get!(GovernanceAuditLog, id)
 
   @doc """
+  Company-scoped getter for an audit log row. Returns nil if the log either
+  doesn't exist or belongs to a different company.
+  """
+  def get_company_governance_audit_log(company_id, id) when is_binary(company_id) do
+    Repo.one(
+      from l in GovernanceAuditLog,
+        where: l.company_id == ^company_id and l.id == ^id
+    )
+  end
+
+  @doc """
   Creates a governance audit log entry.
   """
   def create_governance_audit_log(attrs) do
@@ -63,6 +77,13 @@ defmodule Cympho.GovernanceAuditLogs do
     {actor_type, actor_id} = extract_actor_info(actor)
     {resource_type, resource_id} = extract_resource_info(opts[:resource])
 
+    # Prefer an explicit company_id from the caller; otherwise derive from
+    # the resource (most carry company_id), then the actor as a fallback.
+    company_id =
+      Keyword.get(opts, :company_id) ||
+        extract_company_id(opts[:resource]) ||
+        extract_company_id(actor)
+
     attrs = %{
       action_type: action_type,
       actor_type: actor_type,
@@ -74,7 +95,8 @@ defmodule Cympho.GovernanceAuditLogs do
       metadata: Keyword.get(opts, :metadata, %{}),
       ip_address: Keyword.get(opts, :ip_address),
       user_agent: Keyword.get(opts, :user_agent),
-      tool_call_trace_id: Keyword.get(opts, :tool_call_trace_id)
+      tool_call_trace_id: Keyword.get(opts, :tool_call_trace_id),
+      company_id: company_id
     }
 
     case create_governance_audit_log(attrs) do
@@ -142,4 +164,7 @@ defmodule Cympho.GovernanceAuditLogs do
   defp extract_resource_info({type, id}) when is_binary(type) and is_binary(id) do
     {String.downcase(type), id}
   end
+
+  defp extract_company_id(%{company_id: id}) when is_binary(id), do: id
+  defp extract_company_id(_), do: nil
 end

@@ -22,6 +22,25 @@ defmodule Cympho.Attachments do
     end
   end
 
+  @doc """
+  Company-scoped getter. Joins through the parent issue (which carries the
+  company_id) so an attachment owned by another company looks like a miss.
+  """
+  def get_company_attachment(company_id, id) when is_binary(company_id) do
+    attachment =
+      Repo.one(
+        from a in Attachment,
+          join: i in Cympho.Issues.Issue,
+          on: i.id == a.issue_id,
+          where: a.id == ^id and i.company_id == ^company_id
+      )
+
+    case attachment do
+      nil -> {:error, :not_found}
+      attachment -> {:ok, attachment}
+    end
+  end
+
   def create_attachment(attrs \\ %{}) do
     %Attachment{}
     |> Attachment.changeset(attrs)

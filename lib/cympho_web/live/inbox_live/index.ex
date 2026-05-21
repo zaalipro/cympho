@@ -188,7 +188,7 @@ defmodule CymphoWeb.InboxLive.Index do
   end
 
   defp handle_review_action(socket, issue_id, wake_id, target_status, ok_message) do
-    with {:ok, issue} <- Cympho.Issues.get_issue(issue_id),
+    with {:ok, issue} <- scoped_get_issue(socket, issue_id),
          {:ok, _} <- transition_for_review(issue, target_status),
          :ok <- consume_wake_if_present(wake_id) do
       {:noreply,
@@ -228,6 +228,13 @@ defmodule CymphoWeb.InboxLive.Index do
 
       _ ->
         :ok
+    end
+  end
+
+  defp scoped_get_issue(socket, issue_id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Cympho.Issues.get_company_issue(company_id, issue_id)
+      _ -> Cympho.Issues.get_issue(issue_id)
     end
   end
 

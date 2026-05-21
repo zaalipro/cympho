@@ -19,6 +19,31 @@ defmodule Cympho.Documents do
     |> Repo.preload(revisions: from(r in IssueDocumentRevision, order_by: [desc: r.inserted_at]))
   end
 
+  @doc """
+  Company-scoped getter. Joins through the parent issue (which carries the
+  company_id) so a doc owned by another company looks like a clean miss.
+  """
+  def get_company_document(company_id, id) when is_binary(company_id) do
+    document =
+      Repo.one(
+        from d in IssueDocument,
+          join: i in Cympho.Issues.Issue,
+          on: i.id == d.issue_id,
+          where: d.id == ^id and i.company_id == ^company_id
+      )
+
+    case document do
+      nil ->
+        {:error, :not_found}
+
+      document ->
+        {:ok,
+         Repo.preload(document,
+           revisions: from(r in IssueDocumentRevision, order_by: [desc: r.inserted_at])
+         )}
+    end
+  end
+
   def get_document_by_key!(issue_id, key) do
     IssueDocument
     |> where(issue_id: ^issue_id, key: ^key)

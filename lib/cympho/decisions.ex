@@ -71,6 +71,21 @@ defmodule Cympho.Decisions do
   end
 
   @doc """
+  Company-scoped getter. Returns `{:error, :not_found}` when the decision
+  belongs to a different company so cross-tenant ID guessing returns the same
+  shape as a true miss.
+  """
+  def get_company_decision(company_id, id) when is_binary(company_id) do
+    case Repo.one(from d in Decision, where: d.id == ^id and d.company_id == ^company_id) do
+      nil ->
+        {:error, :not_found}
+
+      decision ->
+        {:ok, Repo.preload(decision, [:company, :child_decisions, :reversals, :parent_decision])}
+    end
+  end
+
+  @doc """
   Gets an active decision by key and parent.
   """
   def get_active_decision(decision_key, parent_decision_id \\ nil, company_id) do
