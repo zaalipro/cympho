@@ -24,7 +24,6 @@ defmodule Cympho.Application do
       Cympho.Adapters.Registry,
       health_checker_child(),
       # Plugin system
-      {Registry, keys: :unique, name: Cympho.PluginRegistry},
       Cympho.Plugins.Registry,
       {Cympho.Plugins.Supervisor, []},
       # Skill hot-reload for development
@@ -45,7 +44,12 @@ defmodule Cympho.Application do
     ]
 
     children = Enum.reject(children, &is_nil/1)
-    opts = [strategy: :one_for_one, name: Cympho.Supervisor]
+    opts = [
+      strategy: :one_for_one,
+      max_restarts: 10,
+      max_seconds: 10,
+      name: Cympho.Supervisor
+    ]
 
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->

@@ -65,6 +65,11 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
     {:noreply, new_state}
   end
 
+  def handle_cast(msg, state) do
+    Logger.warning("Watchdog: unexpected cast #{inspect(msg)}")
+    {:noreply, state}
+  end
+
   @impl true
   def handle_call(:last_results, _from, state) do
     {:reply, state.last_results, state}
@@ -75,6 +80,11 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
     new_state = do_check(state)
     schedule_check()
     {:noreply, new_state}
+  end
+
+  def handle_info(msg, state) do
+    Logger.warning("Watchdog: unexpected message #{inspect(msg)}")
+    {:noreply, state}
   end
 
   # Internal

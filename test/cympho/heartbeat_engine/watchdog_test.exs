@@ -35,4 +35,24 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
       Process.sleep(50)
     end
   end
+
+  describe "unexpected messages" do
+    test "catch-all handle_info and handle_cast keep the watchdog alive" do
+      pid = Process.whereis(Cympho.HeartbeatEngine.Watchdog)
+      assert is_pid(pid)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send(pid, :random_garbage_msg)
+          GenServer.cast(pid, :random_garbage_cast)
+          Process.sleep(50)
+        end)
+
+      assert Process.alive?(pid)
+      assert log =~ "unexpected message"
+      assert log =~ "unexpected cast"
+      assert log =~ "random_garbage_msg"
+      assert log =~ "random_garbage_cast"
+    end
+  end
 end

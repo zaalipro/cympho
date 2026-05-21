@@ -10,7 +10,8 @@ defmodule Cympho.AgentHeartbeat.Supervisor do
 
   @impl true
   def init(_arg) do
-    # Use :one_for_one since each heartbeat process is independent
-    DynamicSupervisor.init(strategy: :one_for_one)
+    # Use :one_for_one since each heartbeat process is independent.
+    # max_children bounds runaway start_for_agent loops to a sane ceiling.
+    DynamicSupervisor.init(strategy: :one_for_one, max_children: 500)
   end
 end

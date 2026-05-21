@@ -13,6 +13,8 @@ defmodule Cympho.Issues.AutoAssignmentReassigner do
   alias Cympho.Agents
   alias Cympho.Issues.AutoAssignment
 
+  @max_concurrent_tasks 5
+
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -25,12 +27,21 @@ defmodule Cympho.Issues.AutoAssignmentReassigner do
 
   @impl true
   def handle_info({:agent_heartbeat_updated, agent_id, hb_state}, state) do
-    if hb_state.status == :idle do
-      task = spawn_reassign_task(agent_id, hb_state[:company_id])
-      tasks = Map.put(state.tasks, task.ref, agent_id)
-      {:noreply, %{state | tasks: tasks}}
-    else
-      {:noreply, state}
+    cond do
+      hb_state.status != :idle ->
+        {:noreply, state}
+
+      map_size(state.tasks) >= @max_concurrent_tasks ->
+        Logger.warning(
+          "[AutoAssignmentReassigner] at max concurrent (#{@max_concurrent_tasks}); skipping reassign for agent #{agent_id}"
+        )
+
+        {:noreply, state}
+
+      true ->
+        task = spawn_reassign_task(agent_id, hb_state[:company_id])
+        tasks = Map.put(state.tasks, task.ref, agent_id)
+        {:noreply, %{state | tasks: tasks}}
     end
   end
 

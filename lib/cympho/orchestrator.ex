@@ -314,6 +314,35 @@ defmodule Cympho.Orchestrator do
     {:noreply, session}
   end
 
+  def handle_info(msg, state) do
+    issue_id =
+      case state do
+        %__MODULE__{issue: %{id: id}} -> id
+        _ -> nil
+      end
+
+    :logger.warning(
+      "[Orchestrator] Unexpected message (issue_id=#{inspect(issue_id)}): #{inspect(msg)}"
+    )
+
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast(msg, state) do
+    issue_id =
+      case state do
+        %__MODULE__{issue: %{id: id}} -> id
+        _ -> nil
+      end
+
+    :logger.warning(
+      "[Orchestrator] Unexpected cast (issue_id=#{inspect(issue_id)}): #{inspect(msg)}"
+    )
+
+    {:noreply, state}
+  end
+
   @impl true
   def handle_call(:get_session_state, _from, %__MODULE__{} = session) do
     {:reply,

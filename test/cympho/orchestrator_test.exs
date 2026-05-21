@@ -424,4 +424,44 @@ defmodule Cympho.OrchestratorTest do
       Phoenix.PubSub.unsubscribe(Cympho.PubSub, topic)
     end
   end
+
+  describe "unexpected messages" do
+    test "catch-all handle_info and handle_cast keep the orchestrator alive", %{
+      issue: issue,
+      agent_id: agent_id,
+      issue_id: issue_id
+    } do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          with_mocks([
+            {Cympho.AgentAdapters, [],
+             [
+               resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+             ]},
+            {Cympho.HeartbeatEngine, [],
+             [
+               create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
+               get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
+               start_run: fn _ -> :ok end
+             ]},
+            {Cympho.AgentRunner, [],
+             [
+               run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+             ]}
+          ]) do
+            {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+            send(pid, :random_garbage_msg)
+            GenServer.cast(pid, :random_garbage_cast)
+            Process.sleep(50)
+            assert Process.alive?(pid)
+            Orchestrator.stop(issue_id)
+          end
+        end)
+
+      assert log =~ "Unexpected message"
+      assert log =~ "Unexpected cast"
+      assert log =~ "random_garbage_msg"
+      assert log =~ "random_garbage_cast"
+    end
+  end
 end
