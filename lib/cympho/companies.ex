@@ -111,9 +111,15 @@ defmodule Cympho.Companies do
   end
 
   def runtime_limit(company_id, key, default) when is_binary(company_id) do
-    case Repo.get(Company, company_id) do
-      nil -> default
-      company -> runtime_limit(company, key, default)
+    case Ecto.UUID.cast(company_id) do
+      {:ok, valid_id} ->
+        case Repo.get(Company, valid_id) do
+          nil -> default
+          company -> runtime_limit(company, key, default)
+        end
+
+      :error ->
+        default
     end
   end
 
