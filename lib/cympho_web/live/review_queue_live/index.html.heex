@@ -1,0 +1,168 @@
+<div class="p-6 lg:p-8 max-w-6xl mx-auto">
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-510 tracking-tight text-text-primary">Review queue</h1>
+      <p class="text-sm text-text-secondary mt-1">
+        Issues awaiting a review decision, kicked back to engineering, or held for CTO spec review.
+      </p>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-3 gap-3 mb-8">
+    <div class="bg-surface border border-border rounded-lg p-4">
+      <div class="text-xs text-text-quaternary uppercase tracking-wide">In flight</div>
+      <div class="text-2xl font-510 text-text-primary mt-1">{@stats.total}</div>
+    </div>
+    <div class="bg-surface border border-border rounded-lg p-4">
+      <div class="text-xs text-text-quaternary uppercase tracking-wide">Oldest age</div>
+      <div class="text-2xl font-510 text-text-primary mt-1">
+        <%= if @stats.oldest_age_hours do %>
+          {@stats.oldest_age_hours}h
+        <% else %>
+          —
+        <% end %>
+      </div>
+    </div>
+    <div class="bg-surface border border-border rounded-lg p-4">
+      <div class="text-xs text-text-quaternary uppercase tracking-wide">Reviewers</div>
+      <div class="text-sm text-text-primary mt-2 space-y-0.5">
+        <%= if Enum.empty?(@stats.by_role) do %>
+          <span class="text-text-quaternary">—</span>
+        <% else %>
+          <div :for={{role, count} <- @stats.by_role}>
+            <span class="text-text-secondary">{role}:</span> {count}
+          </div>
+        <% end %>
+      </div>
+    </div>
+  </div>
+
+  <section class="mb-8">
+    <h2 class="text-lg font-510 text-text-primary mb-3">
+      Awaiting review
+      <span class="text-text-quaternary text-sm font-400 ml-2">{length(@awaiting_review)}</span>
+    </h2>
+
+    <div :if={Enum.empty?(@awaiting_review)} class="bg-surface border border-border rounded-lg p-6 text-center">
+      <p class="text-text-secondary text-sm">No issues awaiting review.</p>
+    </div>
+
+    <div :if={!Enum.empty?(@awaiting_review)} class="space-y-2">
+      <div
+        :for={issue <- @awaiting_review}
+        class="bg-surface border border-border rounded-lg p-4 hover:bg-subtle transition-colors"
+      >
+        <.link navigate={~p"/issues/#{issue.id}"} class="block">
+          <div class="flex items-start gap-3">
+            <span class={"mt-1.5 w-2.5 h-2.5 rounded-full flex-shrink-0 #{status_color(issue.status)}"}></span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span :if={issue.identifier} class="text-xs text-text-quaternary font-mono">
+                  {issue.identifier}
+                </span>
+                <h3 class="font-serif text-sm font-510 text-text-primary truncate">{issue.title}</h3>
+              </div>
+              <div class="flex items-center gap-3 mt-1.5">
+                <span :if={issue.assigned_role} class="text-xs text-text-quaternary">
+                  reviewer role: {issue.assigned_role}
+                </span>
+                <span :if={issue.assignee} class="text-xs text-text-quaternary">
+                  assigned to {issue.assignee.name}
+                </span>
+                <span :if={issue.project} class="text-xs text-text-quaternary">
+                  {issue.project.name}
+                </span>
+              </div>
+            </div>
+            <span class="text-xs text-text-quaternary flex-shrink-0">{format_age(issue.updated_at)}</span>
+          </div>
+        </.link>
+      </div>
+    </div>
+  </section>
+
+  <section class="mb-8">
+    <h2 class="text-lg font-510 text-text-primary mb-3">
+      Kicked back to engineering
+      <span class="text-text-quaternary text-sm font-400 ml-2">{length(@kicked_back)}</span>
+    </h2>
+
+    <div :if={Enum.empty?(@kicked_back)} class="bg-surface border border-border rounded-lg p-6 text-center">
+      <p class="text-text-secondary text-sm">No issues currently kicked back.</p>
+    </div>
+
+    <div :if={!Enum.empty?(@kicked_back)} class="space-y-2">
+      <div
+        :for={issue <- @kicked_back}
+        class="bg-surface border border-border rounded-lg p-4 hover:bg-subtle transition-colors"
+      >
+        <.link navigate={~p"/issues/#{issue.id}"} class="block">
+          <div class="flex items-start gap-3">
+            <span class={"mt-1.5 w-2.5 h-2.5 rounded-full flex-shrink-0 #{status_color(issue.status)}"}></span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span :if={issue.identifier} class="text-xs text-text-quaternary font-mono">
+                  {issue.identifier}
+                </span>
+                <h3 class="font-serif text-sm font-510 text-text-primary truncate">{issue.title}</h3>
+              </div>
+              <div class="flex items-center gap-3 mt-1.5">
+                <span :if={issue.last_reviewer} class="text-xs text-text-quaternary">
+                  last reviewed by {issue.last_reviewer.name || issue.last_reviewer.id}
+                </span>
+                <span :if={issue.assigned_role} class="text-xs text-text-quaternary">
+                  fix role: {issue.assigned_role}
+                </span>
+                <span :if={issue.project} class="text-xs text-text-quaternary">
+                  {issue.project.name}
+                </span>
+              </div>
+            </div>
+            <span class="text-xs text-text-quaternary flex-shrink-0">{format_age(issue.updated_at)}</span>
+          </div>
+        </.link>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="text-lg font-510 text-text-primary mb-3">
+      Spec review (CTO)
+      <span class="text-text-quaternary text-sm font-400 ml-2">{length(@spec_review)}</span>
+    </h2>
+
+    <div :if={Enum.empty?(@spec_review)} class="bg-surface border border-border rounded-lg p-6 text-center">
+      <p class="text-text-secondary text-sm">No initiatives awaiting CTO spec review.</p>
+    </div>
+
+    <div :if={!Enum.empty?(@spec_review)} class="space-y-2">
+      <div
+        :for={issue <- @spec_review}
+        class="bg-surface border border-border rounded-lg p-4 hover:bg-subtle transition-colors"
+      >
+        <.link navigate={~p"/issues/#{issue.id}"} class="block">
+          <div class="flex items-start gap-3">
+            <span class={"mt-1.5 w-2.5 h-2.5 rounded-full flex-shrink-0 #{status_color(issue.status)}"}></span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span :if={issue.identifier} class="text-xs text-text-quaternary font-mono">
+                  {issue.identifier}
+                </span>
+                <h3 class="font-serif text-sm font-510 text-text-primary truncate">{issue.title}</h3>
+              </div>
+              <div class="flex items-center gap-3 mt-1.5">
+                <span class="text-xs text-text-quaternary">
+                  proposed role: {get_in(issue.monitor_state, ["proposed_role"]) || "—"}
+                </span>
+                <span :if={issue.project} class="text-xs text-text-quaternary">
+                  {issue.project.name}
+                </span>
+              </div>
+            </div>
+            <span class="text-xs text-text-quaternary flex-shrink-0">{format_age(issue.inserted_at)}</span>
+          </div>
+        </.link>
+      </div>
+    </div>
+  </section>
+</div>

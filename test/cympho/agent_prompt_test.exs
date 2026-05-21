@@ -357,6 +357,63 @@ defmodule Cympho.AgentPromptTest do
       prompt = AgentPrompt.build(issue, ceo.id)
       refute prompt =~ "Sibling issues"
     end
+
+    test "engineer prompt surfaces `[pr-review]` feedback across many rounds", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      # Drop in a flood of routine + delivery comments so the 10-comment
+      # history window rolls over, then drop the review tag at the end.
+      for n <- 1..12 do
+        {:ok, _} =
+          Comments.create_comment(%{
+            body: "noise comment ##{n}",
+            author_type: "agent",
+            author_id: engineer.id,
+            issue_id: issue.id
+          })
+      end
+
+      # Two `[review]`-tagged comments from across two cycles.
+      {:ok, _} =
+        Comments.create_comment(%{
+          body: "[review] Coverage gap in lib/foo.ex — add tests for the retry path.",
+          author_type: "system",
+          author_id: "00000000-0000-0000-0000-000000000000",
+          issue_id: issue.id
+        })
+
+      {:ok, _} =
+        Comments.create_comment(%{
+          body: "[review] Still needs a null guard on the new caller path.",
+          author_type: "system",
+          author_id: "00000000-0000-0000-0000-000000000000",
+          issue_id: issue.id
+        })
+
+      prompt = AgentPrompt.build(issue, engineer.id)
+
+      assert prompt =~ "Open review feedback"
+      assert prompt =~ "Coverage gap in lib/foo.ex"
+      assert prompt =~ "Still needs a null guard"
+    end
+
+    test "open review feedback block is hidden for CEO/CTO", %{
+      issue: issue,
+      cto: cto,
+      ceo: ceo
+    } do
+      {:ok, _} =
+        Comments.create_comment(%{
+          body: "[review] Some review feedback for the engineer.",
+          author_type: "system",
+          author_id: "00000000-0000-0000-0000-000000000000",
+          issue_id: issue.id
+        })
+
+      refute AgentPrompt.build(issue, ceo.id) =~ "Open review feedback"
+      refute AgentPrompt.build(issue, cto.id) =~ "Open review feedback"
+    end
   end
 
   describe "build/3 — backward compatibility" do

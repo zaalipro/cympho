@@ -12,6 +12,7 @@ defmodule Cympho.AgentActions do
     Activities,
     Agents,
     Comments,
+    Decisions,
     HeartbeatEngine,
     IssueDigest,
     Issues,
@@ -708,7 +709,7 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "submit_review"} = action) do
-    assignee_id = resolve_review_assignee(agent, action["role"])
+    assignee_id = Issues.resolve_reviewer(issue, agent, action["role"])
     note = action["notes"] || "Submitted for #{human_role(action["role"])} review."
 
     with :ok <- ensure_submit_review_quality(issue, agent, action),
@@ -721,6 +722,7 @@ defmodule Cympho.AgentActions do
              checkout_run_id: nil,
              checked_out_at: nil,
              assigned_role: action["role"],
+             last_reviewer_id: assignee_id || transitioned.last_reviewer_id,
              monitor_state: stamp_last_review_sha(transitioned, action)
            }) do
       {:ok, %{type: "submit_review", issue_id: updated.id}}
@@ -728,6 +730,16 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "approve_issue"} = action) do
+    cond do
+      spec_review_pending?(issue) ->
+        execute_spec_review_approval(issue, agent, action)
+
+      true ->
+        execute_delivery_approval(issue, agent, action)
+    end
+  end
+
+  defp execute_delivery_approval(issue, agent, action) do
     case open_children(issue) do
       [] ->
         note =
@@ -739,7 +751,11 @@ defmodule Cympho.AgentActions do
                maybe_agent_comment(issue, agent, tagged_approval_note(agent, note)),
              {:ok, transitioned} <- Issues.transition_issue_with_review_gates(issue, :done),
              {:ok, released} <- Issues.force_release_issue(transitioned, :done),
-             {:ok, released} <- update_workflow_issue(released, agent, %{assigned_role: nil}) do
+             {:ok, released} <-
+               update_workflow_issue(released, agent, %{
+                 assigned_role: nil,
+                 last_reviewer_id: nil
+               }) do
           {:ok, %{type: "approve_issue", issue_id: released.id}}
         end
 
@@ -749,33 +765,115 @@ defmodule Cympho.AgentActions do
     end
   end
 
-  defp execute_action(issue, agent, %{"type" => "request_changes"} = action) do
-    reason = tagged_review_note(action["reason"] || "Changes requested.")
+  # Spec-review approval: the CTO has signed off on a CEO-seeded initiative
+  # and is releasing it into the proposed role's pool. The issue moves from
+  # backlog → todo with `assigned_role: proposed_role`; it does NOT close.
+  # The standard delivery quality gates (work product, runtime verification)
+  # don't apply here — there's no work yet to verify.
+  defp execute_spec_review_approval(issue, agent, action) do
+    proposed_role = get_in(issue.monitor_state, ["proposed_role"]) || "engineer"
 
-    with {:ok, updated} <-
+    note =
+      action["notes"] ||
+        "Spec approved. Releasing this initiative to the #{proposed_role} pool."
+
+    cleared_state =
+      issue.monitor_state
+      |> Map.delete("spec_review_required")
+      |> Map.delete("proposed_role")
+      |> Map.put("spec_approved_by", agent.id)
+      |> Map.put("spec_approved_role_release", proposed_role)
+
+    with {:ok, _comment} <-
+           maybe_agent_comment(issue, agent, "[spec-approved] #{note}"),
+         {:ok, updated} <-
+           update_workflow_issue(issue, agent, %{
+             status: :todo,
+             assignee_id: nil,
+             assigned_role: proposed_role,
+             monitor_state: cleared_state
+           }) do
+      _ =
+        Cympho.Orchestrator.Dispatcher.enqueue_wake(
+          updated.id,
+          "agent_handoff",
+          %{
+            "from_agent_id" => agent.id,
+            "role" => proposed_role,
+            "via" => "spec_approval"
+          }
+        )
+
+      {:ok,
+       %{
+         type: "approve_issue",
+         subtype: "spec_approval",
+         issue_id: updated.id,
+         released_to_role: proposed_role
+       }}
+    end
+  end
+
+  defp spec_review_pending?(%Issue{monitor_state: state}) when is_map(state) do
+    Map.get(state, "spec_review_required") == true
+  end
+
+  defp spec_review_pending?(_issue), do: false
+
+  defp execute_action(issue, agent, %{"type" => "request_changes"} = action) do
+    with :ok <- ensure_governance_quality(action, "request_changes"),
+         reason = tagged_review_note(action["reason"] || "Changes requested."),
+         {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
              assignee_id: nil,
              checkout_run_id: nil,
              checked_out_at: nil,
-             assigned_role: action["role"]
+             assigned_role: action["role"],
+             last_reviewer_id: agent.id
            }),
          {:ok, _comment} <- maybe_agent_comment(issue, agent, reason) do
+      _ =
+        record_governance_decision(
+          updated,
+          agent,
+          action,
+          "review_rejection",
+          "denied",
+          %{role_redirect: action["role"]}
+        )
+
       {:ok, %{type: "request_changes", issue_id: updated.id}}
     end
   end
 
   defp execute_action(issue, agent, %{"type" => "block_issue"} = action) do
-    reason = tagged_blocked_note(action["reason"] || "Agent blocked this issue.")
-
-    with {:ok, updated} <-
+    with :ok <- ensure_governance_quality(action, "block_issue"),
+         reason = tagged_blocked_note(action["reason"] || "Agent blocked this issue."),
+         {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :blocked,
              assignee_id: nil,
              checkout_run_id: nil,
-             checked_out_at: nil
+             checked_out_at: nil,
+             monitor_state:
+               Map.put(
+                 issue.monitor_state || %{},
+                 "block_reason_kind",
+                 Map.get(action, "blocker_kind")
+               )
            }),
          {:ok, _comment} <- maybe_agent_comment(issue, agent, reason) do
+      _ =
+        record_governance_decision(
+          updated,
+          agent,
+          action,
+          "block",
+          "deferred",
+          %{blocker_kind: Map.get(action, "blocker_kind")}
+        )
+
       {:ok, %{type: "block_issue", issue_id: updated.id}}
     end
   end
@@ -1214,11 +1312,18 @@ defmodule Cympho.AgentActions do
          }}
 
       nil ->
+        proposed_role = item["role"]
+
+        # CEO-seeded initiatives are held in :backlog assigned to CTO for spec
+        # review before the engineer pool sees them. The CTO refines acceptance
+        # criteria (request_changes back to CEO, create_issue to split, or
+        # approve_issue to release into the proposed role's pool). See
+        # `approve_issue` branching for the spec-approval path.
         attrs = %{
           title: item["title"],
           description: item["description"] || "",
           priority: item["priority"] || "high",
-          status: :todo,
+          status: :backlog,
           company_id: issue.company_id,
           project_id: issue.project_id,
           goal_id: goal.id,
@@ -1226,7 +1331,13 @@ defmodule Cympho.AgentActions do
           # planning issue — leaving parent_id nil keeps `maybe_complete_parent`
           # from pulling the planning issue into a premature done state.
           parent_id: nil,
-          assigned_role: item["role"],
+          assigned_role: "cto",
+          monitor_state: %{
+            "proposed_role" => proposed_role,
+            "spec_review_required" => true,
+            "seeded_by_agent_id" => agent.id,
+            "seeded_via" => "seed_mission_issues"
+          },
           created_by_agent_id: agent.id,
           origin_type: "agent_action",
           origin_id: issue.id,
@@ -1238,10 +1349,23 @@ defmodule Cympho.AgentActions do
         case Issues.create_issue(attrs) do
           {:ok, created} ->
             _ =
+              system_comment(
+                created,
+                "[needs-tech-spec] CEO proposed this initiative for the `#{proposed_role}` pool. " <>
+                  "Review the brief, refine acceptance criteria if needed, then `approve_issue` to " <>
+                  "release into the role pool, `request_changes` (role: ceo) to kick back, or " <>
+                  "`create_issue` to split into smaller tickets."
+              )
+
+            _ =
               Cympho.Orchestrator.Dispatcher.enqueue_wake(
                 created.id,
-                "child_created",
-                %{goal_id: goal.id, seeded_by_agent: agent.id}
+                "spec_review_required",
+                %{
+                  goal_id: goal.id,
+                  seeded_by_agent: agent.id,
+                  proposed_role: proposed_role
+                }
               )
 
             {:ok,
@@ -1249,7 +1373,8 @@ defmodule Cympho.AgentActions do
                issue_id: created.id,
                identifier: created.identifier || created.id,
                title: created.title,
-               assigned_role: item["role"],
+               assigned_role: "cto",
+               proposed_role: proposed_role,
                status: created.status
              }}
 
@@ -1473,7 +1598,8 @@ defmodule Cympho.AgentActions do
   defp intervene_reassign(issue, agent, action) do
     reason = action["reason"] || "Supervisor reassigned this stalled issue."
 
-    with {:ok, target} <- resolve_intervene_target(agent, action),
+    with :ok <- ensure_governance_quality(action, "intervene"),
+         {:ok, target} <- resolve_intervene_target(agent, action),
          :ok <- ensure_can_delegate(agent, target),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
@@ -1481,7 +1607,8 @@ defmodule Cympho.AgentActions do
              assignee_id: target.id,
              checkout_run_id: nil,
              checked_out_at: nil,
-             assigned_role: to_string(target.role)
+             assigned_role: to_string(target.role),
+             last_reviewer_id: nil
            }),
          {:ok, _comment} <-
            system_comment(
@@ -1494,6 +1621,16 @@ defmodule Cympho.AgentActions do
           "reason" => reason,
           "via" => "intervene"
         })
+
+      _ =
+        record_governance_decision(
+          updated,
+          agent,
+          action,
+          "intervene_reassign",
+          "implemented",
+          %{to_agent_id: target.id, target_role: to_string(target.role)}
+        )
 
       {:ok,
        %{
@@ -1513,13 +1650,15 @@ defmodule Cympho.AgentActions do
     target_role = action["to_role"]
     reason = action["reason"] || "Supervisor forced handoff to #{target_role}."
 
-    with {:ok, updated} <-
+    with :ok <- ensure_governance_quality(action, "intervene"),
+         {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
              assignee_id: nil,
              checkout_run_id: nil,
              checked_out_at: nil,
-             assigned_role: target_role
+             assigned_role: target_role,
+             last_reviewer_id: nil
            }),
          {:ok, _comment} <-
            system_comment(issue, "[intervene force_handoff] #{reason}") do
@@ -1528,6 +1667,16 @@ defmodule Cympho.AgentActions do
           updated.id,
           "agent_handoff",
           %{"forced_by_agent_id" => agent.id, "role" => target_role}
+        )
+
+      _ =
+        record_governance_decision(
+          updated,
+          agent,
+          action,
+          "intervene_force_handoff",
+          "implemented",
+          %{target_role: target_role}
         )
 
       {:ok,
@@ -1546,7 +1695,8 @@ defmodule Cympho.AgentActions do
   defp intervene_unblock(issue, agent, action) do
     reason = action["reason"] || "Supervisor unblocked this issue."
 
-    with {:ok, updated} <-
+    with :ok <- ensure_governance_quality(action, "intervene"),
+         {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
              checkout_run_id: nil,
@@ -1561,6 +1711,9 @@ defmodule Cympho.AgentActions do
           %{"unblocked_by_agent_id" => agent.id}
         )
 
+      _ =
+        record_governance_decision(updated, agent, action, "intervene_unblock", "implemented", %{})
+
       {:ok, %{type: "intervene", mode: "unblock", issue_id: updated.id}}
     end
   end
@@ -1571,13 +1724,17 @@ defmodule Cympho.AgentActions do
   defp intervene_cancel(issue, agent, action) do
     reason = action["reason"] || "Supervisor cancelled this issue."
 
-    with {:ok, updated} <-
+    with :ok <- ensure_governance_quality(action, "intervene"),
+         {:ok, updated} <-
            Issues.transition_issue_with_review_gates(issue, :cancelled),
          {:ok, released} <- Issues.force_release_issue(updated, :cancelled),
          {:ok, _comment} <-
            system_comment(released, "[intervene cancel] #{reason}"),
          {:ok, _} <-
            update_workflow_issue(released, agent, %{assigned_role: nil}) do
+      _ =
+        record_governance_decision(released, agent, action, "intervene_cancel", "implemented", %{})
+
       {:ok, %{type: "intervene", mode: "cancel", issue_id: released.id}}
     end
   end
@@ -1910,47 +2067,6 @@ defmodule Cympho.AgentActions do
     end
   end
 
-  # Pick the agent that should receive a `submit_review`.
-  #
-  # The agent's `parent_id` is the org-chart hop, but it isn't guaranteed to
-  # match the role the review is being submitted to (parent could be a peer,
-  # the wrong role, or missing). When that happens we drop the direct
-  # assignment and let the dispatcher route by `assigned_role` instead — same
-  # path `handoff` uses. This unifies the two routing systems behind one
-  # safe behavior and keeps the autonomous engineer→CTO→CEO chain working
-  # even when org-chart parents are messy.
-  defp resolve_review_assignee(_agent, nil), do: nil
-  defp resolve_review_assignee(%Agent{parent_id: nil}, _role), do: nil
-
-  defp resolve_review_assignee(%Agent{parent_id: parent_id} = agent, requested_role) do
-    case Agents.get_agent(parent_id) do
-      {:ok, %Agent{role: parent_role}} ->
-        if role_matches?(parent_role, requested_role) do
-          parent_id
-        else
-          Logger.warning(
-            "[AgentActions] submit_review parent role mismatch: agent=#{agent.id} parent=#{parent_id} parent_role=#{inspect(parent_role)} requested_role=#{inspect(requested_role)} — falling back to dispatcher routing"
-          )
-
-          nil
-        end
-
-      {:error, _} ->
-        Logger.warning(
-          "[AgentActions] submit_review parent not found: agent=#{agent.id} parent=#{parent_id} — falling back to dispatcher routing"
-        )
-
-        nil
-    end
-  end
-
-  defp role_matches?(parent_role, requested_role) when is_atom(parent_role) do
-    parent_role == requested_role || Atom.to_string(parent_role) == to_string(requested_role)
-  end
-
-  defp role_matches?(parent_role, requested_role),
-    do: to_string(parent_role) == to_string(requested_role)
-
   defp ensure_submit_review_quality(issue, agent, action) do
     gaps =
       issue
@@ -1990,13 +2106,105 @@ defmodule Cympho.AgentActions do
       issue
       |> digest_quality_gaps()
       |> Enum.filter(&(&1.key in [:runtime_verification, :code_reference]))
-      |> Enum.reject(&(&1.key == :runtime_verification and &1.status == :missing))
       |> Enum.map(& &1.key)
 
     if gaps == [] do
       :ok
     else
       {:error, {:quality_gate_failed, "approve_issue", gaps}}
+    end
+  end
+
+  @block_reason_kinds ~w(external_dep ci_failure env_unavailable owner_input_needed conflicting_change other)
+
+  # Governance actions (request_changes, block_issue, intervene) flip an issue
+  # away from forward progress on the authority of a CEO/CTO. We require
+  # enough reasoning that the engineer can act and the audit trail is useful.
+  # The bar is "minimum substance" — actually-actionable specifics are still
+  # the responsibility of the reviewer; we just block empty-string rejections.
+  defp ensure_governance_quality(action, type) do
+    reason = action |> Map.get("reason", "") |> to_string() |> String.trim()
+
+    case type do
+      "request_changes" ->
+        validate_governance_reason(reason, 20, "request_changes")
+
+      "block_issue" ->
+        with :ok <- validate_governance_reason(reason, 10, "block_issue"),
+             :ok <- validate_block_reason_kind(action) do
+          :ok
+        end
+
+      "intervene" ->
+        validate_governance_reason(reason, 15, "intervene")
+    end
+  end
+
+  defp validate_governance_reason(reason, min_length, action_name) do
+    cond do
+      reason == "" ->
+        {:error, {:governance_reason_missing, action_name}}
+
+      String.length(reason) < min_length ->
+        {:error, {:governance_reason_too_short, action_name, min_length}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_block_reason_kind(action) do
+    case Map.get(action, "blocker_kind") do
+      nil ->
+        :ok
+
+      kind when is_binary(kind) ->
+        if kind in @block_reason_kinds do
+          :ok
+        else
+          {:error, {:invalid_blocker_kind, kind, @block_reason_kinds}}
+        end
+
+      _ ->
+        {:error, {:invalid_blocker_kind, "non-string", @block_reason_kinds}}
+    end
+  end
+
+  # Best-effort governance Decision record. Logs and continues on failure —
+  # we never want a Decision-write error to roll back the agent's actual
+  # transition, since that would silently swallow the supervisor's intent.
+  defp record_governance_decision(issue, agent, action, decision_type, outcome, extra_context) do
+    company_id = issue.company_id
+
+    if is_binary(company_id) do
+      attrs = %{
+        decision_type: decision_type,
+        decision_key: "#{decision_type}_#{issue.id}_#{System.unique_integer([:positive])}",
+        outcome: outcome,
+        reasoning: Map.get(action, "reason"),
+        actor_type: "agent",
+        actor_id: agent.id,
+        resource_type: "issue",
+        resource_id: issue.id,
+        company_id: company_id,
+        reversible: true,
+        context: Map.merge(extra_context, %{action_type: action["type"]}),
+        metadata: %{agent_role: to_string(agent.role)}
+      }
+
+      case Decisions.create_decision(attrs, {"agent", agent.id}) do
+        {:ok, decision} ->
+          {:ok, decision}
+
+        {:error, reason} ->
+          Logger.warning(
+            "[AgentActions] governance decision write failed: issue=#{issue.id} type=#{decision_type} reason=#{inspect(reason)}"
+          )
+
+          {:ok, :skipped}
+      end
+    else
+      {:ok, :skipped}
     end
   end
 

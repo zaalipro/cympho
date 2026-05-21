@@ -44,6 +44,63 @@ defmodule Cympho.Issues do
   end
 
   @doc """
+  Look up an issue by its human identifier (e.g. `"LLM-42"`) or by the first
+  eight characters of its UUID. Used by the GitHub webhook to auto-link a PR
+  when the agent forgot to call `set_pr_url` — the branch convention encodes
+  the issue identifier as the leading segment (see `PullRequestContract.branch_name/1`).
+
+  Pass `project_id:` to scope the lookup; without it the function may return
+  `{:error, :ambiguous}` when the same identifier exists in multiple projects.
+  """
+  def get_by_identifier(identifier, opts \\ []) when is_binary(identifier) do
+    case fetch_by_identifier_column(identifier, opts) do
+      {:ok, issue} ->
+        {:ok, issue}
+
+      {:error, :not_found} ->
+        fetch_by_uuid_prefix(identifier, opts)
+
+      other ->
+        other
+    end
+  end
+
+  defp fetch_by_identifier_column(identifier, opts) do
+    query =
+      from(i in Issue, where: i.identifier == ^identifier)
+      |> maybe_scope_to_project(opts)
+
+    case Repo.all(query) do
+      [issue] -> {:ok, issue}
+      [] -> {:error, :not_found}
+      _multiple -> {:error, :ambiguous}
+    end
+  end
+
+  defp fetch_by_uuid_prefix(prefix, opts) when byte_size(prefix) == 8 do
+    query =
+      from(i in Issue,
+        where: fragment("substring(CAST(? AS TEXT), 1, 8) = ?", i.id, ^prefix)
+      )
+      |> maybe_scope_to_project(opts)
+
+    case Repo.all(query) do
+      [issue] -> {:ok, issue}
+      [] -> {:error, :not_found}
+      _multiple -> {:error, :ambiguous}
+    end
+  end
+
+  defp fetch_by_uuid_prefix(_prefix, _opts), do: {:error, :not_found}
+
+  defp maybe_scope_to_project(query, opts) do
+    case Keyword.get(opts, :project_id) do
+      nil -> query
+      project_id -> where(query, [i], i.project_id == ^project_id)
+    end
+  end
+
+  @doc """
   Recent issues touched by an agent (assigned, created, or currently checked
   out by them). Used by the agent show page.
   """
@@ -194,6 +251,8 @@ defmodule Cympho.Issues do
     project_id = Map.get(params, "project_id")
     company_id = Map.get(params, "company_id")
     label_id = Map.get(params, "label_id")
+    assigned_role = Map.get(params, "assigned_role")
+    last_reviewer_id = Map.get(params, "last_reviewer_id")
 
     query =
       Issue
@@ -204,6 +263,8 @@ defmodule Cympho.Issues do
       |> maybe_filter_by_assignee(assignee_id)
       |> maybe_filter_by_project_id_filter(project_id)
       |> maybe_filter_by_label_id(label_id)
+      |> maybe_filter_by_assigned_role(assigned_role)
+      |> maybe_filter_by_last_reviewer_id(last_reviewer_id)
       |> order_by([i], desc: i.updated_at, desc: i.inserted_at, desc: i.id)
 
     total = Repo.aggregate(query, :count)
@@ -230,6 +291,21 @@ defmodule Cympho.Issues do
   defp maybe_filter_by_status(query, nil), do: query
   defp maybe_filter_by_status(query, ""), do: query
   defp maybe_filter_by_status(query, status), do: where(query, status: ^status)
+
+  defp maybe_filter_by_assigned_role(query, nil), do: query
+  defp maybe_filter_by_assigned_role(query, ""), do: query
+
+  defp maybe_filter_by_assigned_role(query, role) when is_atom(role) do
+    where(query, [i], i.assigned_role == ^Atom.to_string(role))
+  end
+
+  defp maybe_filter_by_assigned_role(query, role), do: where(query, [i], i.assigned_role == ^role)
+
+  defp maybe_filter_by_last_reviewer_id(query, nil), do: query
+  defp maybe_filter_by_last_reviewer_id(query, ""), do: query
+
+  defp maybe_filter_by_last_reviewer_id(query, agent_id),
+    do: where(query, [i], i.last_reviewer_id == ^agent_id)
 
   defp maybe_filter_by_company_id(query, nil), do: query
   defp maybe_filter_by_company_id(query, ""), do: query
@@ -1168,6 +1244,67 @@ defmodule Cympho.Issues do
   end
 
   defp resolve_next_assignee(_), do: nil
+
+  @doc """
+  Picks the agent to assign as the next reviewer for `issue`, given the role
+  the submitter wants to review (e.g. `"cto"`).
+
+  Resolution order — first match wins:
+  1. `issue.last_reviewer_id` if that agent is alive, in the same company, and
+     their role matches `requested_role`. Round-2+ reviews stay with the
+     reviewer who saw the first round.
+  2. The submitting `agent`'s `parent_id` if that parent's role matches
+     `requested_role`. The chain-of-command default — engineer ↦ CTO.
+  3. `nil`. Lets the dispatcher load-balance via role pool.
+
+  This function is the single source of truth for picking a reviewer on
+  `submit_review`; if you add a new path that needs a reviewer, route it
+  through here so continuity is preserved.
+  """
+  def resolve_reviewer(_issue, _agent, nil), do: nil
+  def resolve_reviewer(_issue, _agent, ""), do: nil
+
+  def resolve_reviewer(%Issue{} = issue, %Agent{} = agent, requested_role)
+      when is_binary(requested_role) do
+    last_reviewer_match(issue, agent, requested_role) ||
+      parent_match(agent, requested_role)
+  end
+
+  defp last_reviewer_match(%Issue{last_reviewer_id: nil}, _agent, _requested_role), do: nil
+
+  defp last_reviewer_match(%Issue{last_reviewer_id: id, company_id: company_id}, _agent, requested_role)
+       when is_binary(id) do
+    case Agents.get_agent(id) do
+      {:ok, %Agent{status: status} = reviewer}
+      when status != :terminated ->
+        cond do
+          reviewer.company_id != company_id -> nil
+          role_matches?(reviewer.role, requested_role) -> id
+          true -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp parent_match(%Agent{parent_id: nil}, _requested_role), do: nil
+
+  defp parent_match(%Agent{parent_id: parent_id}, requested_role) do
+    case Agents.get_agent(parent_id) do
+      {:ok, %Agent{role: parent_role}} ->
+        if role_matches?(parent_role, requested_role), do: parent_id, else: nil
+
+      _ ->
+        nil
+    end
+  end
+
+  defp role_matches?(role, requested) when is_atom(role) do
+    to_string(role) == to_string(requested)
+  end
+
+  defp role_matches?(role, requested), do: to_string(role) == to_string(requested)
 
   defp cancel_pending_approvals(issue_id) do
     try do

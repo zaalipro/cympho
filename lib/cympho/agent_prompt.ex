@@ -35,6 +35,9 @@ defmodule Cympho.AgentPrompt do
   @recent_decisions_limit 3
   @max_children 25
   @max_siblings 25
+  @open_review_comment_limit 20
+  @open_review_query_limit 60
+  @delivery_role_pool [:engineer, :designer, :product_manager, :release_engineer]
 
   @doc """
   Builds a prompt for an issue and optional agent.
@@ -53,6 +56,7 @@ defmodule Cympho.AgentPrompt do
       team_status_block(issue, role_of(agent)),
       budget_block(issue, agent),
       history_block(history),
+      open_review_feedback_block(issue, role_of(agent)),
       digest_quality_block(issue, history),
       role_completion_contract_block(role_of(agent)),
       pull_request_contract_block(issue, role_of(agent)),
@@ -255,6 +259,28 @@ defmodule Cympho.AgentPrompt do
 
     """
     You were just handed this issue from #{from}. Read the most recent `[handoff]` comment for the in-flight context, then either advance the work or hand off again with a clear `[handoff]` comment if it is the wrong role for you.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("spec_review_required", metadata, :cto) do
+    proposed = Map.get(metadata, "proposed_role") || "engineer"
+
+    """
+    CEO seeded this initiative and routed it to you for **spec review** before any #{proposed} picks it up. Read the `[needs-tech-spec]` comment, then pick one:
+
+      1. **Refine in place + `approve_issue`** — if the brief is clear enough as-is or after a `comment` with refined acceptance criteria. The issue will flip to `:todo` and assign to the #{proposed} pool.
+      2. **`create_issue` to split** — if the initiative is too big for one ticket, decompose into smaller children with `role: "#{proposed}"`. The original initiative still gets `approve_issue` once decomposition is complete.
+      3. **`request_changes` (role: "ceo")** — if the strategy itself doesn't make sense; CEO needs to rethink the initiative before any sub-ticket is worth creating.
+
+    Do NOT leave this issue sitting in `:backlog` — engineers cannot pick it up until you act.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("spec_review_required", _metadata, _other_role) do
+    """
+    A `spec_review_required` wake fired but you are not a CTO. If you are this issue's assignee by accident, hand off to the CTO pool via `handoff` with `role: "cto"`.
     """
     |> String.trim()
   end
@@ -537,6 +563,84 @@ defmodule Cympho.AgentPrompt do
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")
   end
+
+  ## ── open review feedback block ─────────────────────────────────
+  ## The history block caps at 10 comments. In a heavy review loop those 10
+  ## newest entries are dominated by system messages and `[delivery]` posts,
+  ## and earlier `[pr-review]` feedback rolls off — the engineer's next turn
+  ## loses sight of what they were asked to fix two rounds ago. This block
+  ## pulls all `[pr-review]`-tagged comments and surfaces them separately so
+  ## the engineer can scan the open feedback in chronological order, even
+  ## across many rounds.
+
+  defp open_review_feedback_block(issue, role) when role in @delivery_role_pool do
+    case field(issue, :id) do
+      id when is_binary(id) ->
+        render_open_review_block(id)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp open_review_feedback_block(_issue, _role), do: nil
+
+  defp render_open_review_block(issue_id) do
+    comments = load_review_comments(issue_id)
+
+    case comments do
+      [] ->
+        nil
+
+      list ->
+        total = length(list)
+        shown = Enum.take(list, @open_review_comment_limit)
+        truncated = total - length(shown)
+
+        rows =
+          Enum.map(shown, fn c ->
+            "- [#{review_comment_author_label(c)}] #{format_review_body(c.body)}"
+          end)
+
+        footer =
+          if truncated > 0 do
+            ["", "+ #{truncated} earlier review comment(s) — see the issue Activity log."]
+          else
+            []
+          end
+
+        Enum.join(
+          [
+            "## Open review feedback",
+            "Reviewer feedback that landed on this issue, oldest → newest. Address each item before your next `submit_review`, then summarize what changed in your `[delivery]` note."
+            | rows
+          ] ++ footer,
+          "\n"
+        )
+    end
+  end
+
+  defp load_review_comments(issue_id) do
+    Comment
+    |> where([c], c.issue_id == ^issue_id)
+    |> order_by([c], asc: c.inserted_at)
+    |> limit(@open_review_query_limit)
+    |> Repo.all()
+    |> Enum.filter(&(IssueDigest.comment_category(&1) == :review))
+  rescue
+    _ -> []
+  end
+
+  defp review_comment_author_label(%Comment{author_type: "system"}), do: "system"
+  defp review_comment_author_label(%Comment{author_type: "agent", author_id: id}), do: "agent #{short_id(id)}"
+  defp review_comment_author_label(%Comment{author_type: "user", author_id: id}), do: "user #{short_id(id)}"
+  defp review_comment_author_label(_), do: "reviewer"
+
+  defp format_review_body(body) when is_binary(body) do
+    body |> String.split("\n") |> Enum.take(20) |> Enum.join("\n")
+  end
+
+  defp format_review_body(_), do: ""
 
   defp digest_quality_block(issue, history) do
     issue_for_digest = Map.put(issue, :comments, history.comments)

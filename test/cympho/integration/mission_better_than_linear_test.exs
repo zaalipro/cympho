@@ -96,6 +96,25 @@ defmodule Cympho.Integration.MissionBetterThanLinearTest do
 
     assert length(created) == 2
 
+    pending =
+      goal.id
+      |> list_goal_issues()
+      |> Enum.reject(&(&1.status == :cancelled))
+
+    assert length(pending) == 2
+    assert Enum.all?(pending, &(&1.assigned_role == "cto"))
+
+    # CTO spec-approves each initiative, releasing them into the engineer pool.
+    Enum.each(pending, fn pending_issue ->
+      assert {:ok, _} =
+               AgentActions.execute(pending_issue, cto, [
+                 %{
+                   "type" => "approve_issue",
+                   "notes" => "Spec ready; releasing to engineering."
+                 }
+               ])
+    end)
+
     initiatives =
       goal.id
       |> list_goal_issues()

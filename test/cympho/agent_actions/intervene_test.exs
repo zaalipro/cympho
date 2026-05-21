@@ -82,7 +82,11 @@ defmodule Cympho.AgentActions.InterveneTest do
 
     test "rejects when neither to_agent_id nor to_role provided", %{ceo: ceo, issue: issue} do
       actions = [
-        %{"type" => "intervene", "mode" => "reassign", "reason" => "no target"}
+        %{
+          "type" => "intervene",
+          "mode" => "reassign",
+          "reason" => "Need to reassign but no target named yet."
+        }
       ]
 
       assert {:error, :missing_intervene_target} =
@@ -196,6 +200,52 @@ defmodule Cympho.AgentActions.InterveneTest do
 
       assert {:error, {:invalid_intervene_mode, _}} =
                AgentActions.execute(issue, ceo, actions)
+    end
+
+    test "reassign rejects too-short reason", %{
+      ceo: ceo,
+      engineer_two: engineer_two,
+      issue: issue
+    } do
+      actions = [
+        %{
+          "type" => "intervene",
+          "mode" => "reassign",
+          "to_agent_id" => engineer_two.id,
+          "reason" => "short"
+        }
+      ]
+
+      assert {:error, {:governance_reason_too_short, "intervene", 15}} =
+               AgentActions.execute(issue, ceo, actions)
+    end
+
+    test "cancel records a Decision on success", %{
+      ceo: ceo,
+      issue: issue,
+      company: company
+    } do
+      actions = [
+        %{
+          "type" => "intervene",
+          "mode" => "cancel",
+          "reason" => "Mission pivoted, this issue is no longer needed."
+        }
+      ]
+
+      assert {:ok, _} = AgentActions.execute(issue, ceo, actions)
+
+      decisions =
+        Cympho.Decisions.list_decisions(%{
+          company_id: company.id,
+          resource_type: "issue",
+          resource_id: issue.id,
+          decision_type: "intervene_cancel"
+        })
+
+      assert [decision] = decisions
+      assert decision.outcome == "implemented"
+      assert decision.actor_id == ceo.id
     end
   end
 

@@ -27,7 +27,7 @@ defmodule CymphoWeb.GithubController do
     pr_url = pr["html_url"]
     delivery_id = get_req_header(conn, "x-github-delivery") |> List.first()
 
-    with {:ok, issue, project} <- find_issue_and_project(pr_url),
+    with {:ok, issue, project} <- find_issue_and_project(pr_url, pr),
          :ok <- verify_signature(conn, project),
          :fresh <- Cympho.WebhookDedup.check_and_mark(delivery_id) do
       Logger.info("GitHub review webhook: action=#{action}, pr_url=#{pr_url}")
@@ -74,7 +74,7 @@ defmodule CymphoWeb.GithubController do
     pr_url = pr["html_url"]
     delivery_id = get_req_header(conn, "x-github-delivery") |> List.first()
 
-    with {:ok, issue, project} <- find_issue_and_project(pr_url),
+    with {:ok, issue, project} <- find_issue_and_project(pr_url, pr),
          :ok <- verify_signature(conn, project),
          :fresh <- Cympho.WebhookDedup.check_and_mark(delivery_id) do
       Logger.info("GitHub webhook received: action=#{action}, pr_url=#{pr_url}")
@@ -107,7 +107,20 @@ defmodule CymphoWeb.GithubController do
     send_resp(conn, :ok, "")
   end
 
-  defp find_issue_and_project(pr_url) do
+  defp find_issue_and_project(pr_url, pr \\ nil) do
+    case find_by_pr_url(pr_url) do
+      {:ok, _issue, _project} = ok ->
+        ok
+
+      {:error, :no_project} = err ->
+        err
+
+      {:error, :not_found} ->
+        try_auto_link_by_branch(pr_url, pr)
+    end
+  end
+
+  defp find_by_pr_url(pr_url) do
     query =
       from i in Issue,
         where: i.github_pr_url == ^pr_url,
@@ -117,6 +130,98 @@ defmodule CymphoWeb.GithubController do
       [%Issue{project: %Project{} = project} = issue] -> {:ok, issue, project}
       [%Issue{project: nil}] -> {:error, :no_project}
       [] -> {:error, :not_found}
+    end
+  end
+
+  # When the URL lookup misses, fall back to the branch convention encoded in
+  # `PullRequestContract.branch_name(issue)` — `<identifier>/<slug>`. We
+  # match the project first (via `repo_url`) so the identifier lookup is
+  # unambiguous, then auto-link the PR URL onto the issue so subsequent
+  # webhooks find it by URL directly.
+  defp try_auto_link_by_branch(_pr_url, nil), do: {:error, :not_found}
+
+  defp try_auto_link_by_branch(pr_url, pr) do
+    with {:ok, branch} <- extract_branch_ref(pr),
+         {:ok, identifier} <- extract_branch_identifier(branch),
+         {:ok, project} <- find_project_by_pr(pr),
+         {:ok, issue} <- Issues.get_by_identifier(identifier, project_id: project.id),
+         {:ok, linked} <- attach_pr_to_issue(issue, pr_url, branch) do
+      Logger.info(
+        "Auto-linked PR by branch convention: branch=#{branch} identifier=#{identifier} issue=#{linked.id} pr_url=#{pr_url}"
+      )
+
+      {:ok, linked, project}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp extract_branch_ref(pr) do
+    case get_in(pr, ["head", "ref"]) do
+      ref when is_binary(ref) and ref != "" -> {:ok, ref}
+      _ -> :error
+    end
+  end
+
+  defp extract_branch_identifier(branch) do
+    case String.split(branch, "/", parts: 2) do
+      [identifier, _slug] when identifier != "" -> {:ok, identifier}
+      _ -> :error
+    end
+  end
+
+  defp find_project_by_pr(pr) do
+    candidates =
+      [
+        get_in(pr, ["base", "repo", "html_url"]),
+        get_in(pr, ["head", "repo", "html_url"])
+      ]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.map(&String.trim_trailing(&1, "/"))
+      |> Enum.uniq()
+
+    case candidates do
+      [] ->
+        :error
+
+      urls ->
+        case Repo.all(from p in Project, where: p.repo_url in ^urls, limit: 2) do
+          [%Project{} = project] -> {:ok, project}
+          _ -> :error
+        end
+    end
+  end
+
+  defp attach_pr_to_issue(%Issue{github_pr_url: existing} = issue, pr_url, _branch)
+       when is_binary(existing) and existing != "" and existing != pr_url do
+    # A different PR is already linked. Refuse to silently steal the slot.
+    Logger.warning(
+      "Refused branch auto-link: issue #{issue.id} already linked to #{existing}, would not overwrite with #{pr_url}"
+    )
+
+    :error
+  end
+
+  defp attach_pr_to_issue(%Issue{} = issue, pr_url, branch) do
+    case Issues.update_issue(issue, %{github_pr_url: pr_url}) do
+      {:ok, updated} ->
+        _ =
+          Cympho.Comments.create_comment(%{
+            body:
+              "[auto-link] Linked PR to this issue via branch convention `#{branch}` → #{pr_url}",
+            author_type: "system",
+            author_id: "00000000-0000-0000-0000-000000000000",
+            issue_id: updated.id
+          })
+
+        {:ok, Repo.preload(updated, :project)}
+
+      {:error, reason} ->
+        Logger.warning(
+          "Auto-link update failed for issue #{issue.id}: #{inspect(reason)}"
+        )
+
+        :error
     end
   end
 

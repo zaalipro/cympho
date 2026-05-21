@@ -72,6 +72,7 @@ defmodule Cympho.Issues.Issue do
     belongs_to :execution_policy, ExecutionPolicy
     belongs_to :project_workspace, Cympho.Workspaces.ProjectWorkspace
     belongs_to :execution_workspace, Cympho.Workspaces.ExecutionWorkspace
+    belongs_to :last_reviewer, Agent, foreign_key: :last_reviewer_id
 
     has_many :comments, Comment, foreign_key: :issue_id
     has_many :children, __MODULE__, foreign_key: :parent_id
@@ -128,7 +129,8 @@ defmodule Cympho.Issues.Issue do
       :started_at,
       :completed_at,
       :cancelled_at,
-      :hidden_at
+      :hidden_at,
+      :last_reviewer_id
     ])
     |> validate_required([:title])
     |> validate_length(:title, min: 1, max: 255)

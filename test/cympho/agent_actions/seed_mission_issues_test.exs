@@ -72,8 +72,73 @@ defmodule Cympho.AgentActions.SeedMissionIssuesTest do
 
       assert Enum.all?(created, &(&1.goal_id == goal.id))
       assert Enum.all?(created, &is_nil(&1.parent_id))
-      assert Enum.all?(created, &(&1.status == :todo))
-      assert Enum.map(created, & &1.assigned_role) |> Enum.sort() == ["cto", "product_manager"]
+
+      # CEO-seeded children land in :backlog assigned to CTO for spec review,
+      # NOT directly into the proposed role pool. The proposed role survives
+      # in monitor_state for the CTO to honor on approval.
+      assert Enum.all?(created, &(&1.status == :backlog))
+      assert Enum.all?(created, &(&1.assigned_role == "cto"))
+
+      assert Enum.map(created, &get_in(&1.monitor_state, ["proposed_role"])) |> Enum.sort() ==
+               ["cto", "product_manager"]
+
+      assert Enum.all?(
+               created,
+               &(get_in(&1.monitor_state, ["spec_review_required"]) == true)
+             )
+    end
+
+    test "CTO approving a spec-review child releases it into the proposed role pool",
+         %{ceo: ceo, mission_goal: goal, planning_issue: issue} do
+      # Pull the CTO out of the company's agent list.
+      cto = Cympho.Agents.list_agents_by_role(:cto) |> List.first()
+      assert cto != nil
+
+      {:ok, %{results: [%{created: [%{issue_id: child_id} | _]} | _]}} =
+        AgentActions.execute(issue, ceo, [
+          %{
+            "type" => "seed_mission_issues",
+            "goal_id" => goal.id,
+            "initiatives" => [
+              %{
+                "title" => "Build onboarding flow",
+                "description" => "Spec ready for the eng pool.",
+                "role" => "engineer",
+                "priority" => "high"
+              }
+            ]
+          }
+        ])
+
+      child = Issues.get_issue!(child_id)
+      assert child.status == :backlog
+      assert child.assigned_role == "cto"
+
+      # CTO approves the spec.
+      assert {:ok, %{results: [%{type: "approve_issue", subtype: "spec_approval"}]}} =
+               AgentActions.execute(child, cto, [
+                 %{
+                   "type" => "approve_issue",
+                   "notes" => "Spec is clear; releasing to the engineer pool."
+                 }
+               ])
+
+      reloaded = Issues.get_issue!(child_id)
+
+      assert reloaded.status == :todo
+      assert reloaded.assigned_role == "engineer"
+      refute reloaded.status == :done
+
+      assert get_in(reloaded.monitor_state, ["spec_review_required"]) == nil
+      assert get_in(reloaded.monitor_state, ["proposed_role"]) == nil
+      assert get_in(reloaded.monitor_state, ["spec_approved_role_release"]) == "engineer"
+
+      comments = Cympho.Comments.list_comments(child_id)
+
+      assert Enum.any?(comments, fn c ->
+               c.author_type == "agent" and
+                 String.starts_with?(c.body, "[spec-approved]")
+             end)
     end
 
     test "rejects when emitter is not a CEO",

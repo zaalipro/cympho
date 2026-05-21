@@ -275,6 +275,90 @@ defmodule CymphoWeb.GithubControllerTest do
     end
   end
 
+  describe "branch-based auto-link" do
+    setup do
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Autolink Project",
+          prefix: "AL",
+          github_webhook_secret: "autolink-secret",
+          repo_url: "https://github.com/autolink-org/repo"
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Auto-link target",
+          description: "PR opened with no set_pr_url",
+          status: :todo,
+          priority: :medium,
+          project_id: project.id
+        })
+
+      # Sanity: identifier was generated and PR is not linked yet.
+      assert issue.identifier =~ ~r/^AL-\d+$/
+      assert is_nil(issue.github_pr_url)
+
+      %{project: project, issue: issue}
+    end
+
+    test "PR opened on convention branch auto-links the issue", %{
+      conn: conn,
+      project: project,
+      issue: issue
+    } do
+      pr_url = "https://github.com/autolink-org/repo/pull/77"
+      branch = "#{issue.identifier}/some-slug"
+
+      payload =
+        build_autolink_payload(
+          "opened",
+          pr_url,
+          branch,
+          project.repo_url
+        )
+
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
+
+      assert response(conn, :ok) == ""
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.github_pr_url == pr_url
+      assert reloaded.status == :in_review
+
+      comments = Cympho.Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn c ->
+               c.author_type == "system" and
+                 String.contains?(c.body, "[auto-link]") and
+                 String.contains?(c.body, branch)
+             end)
+    end
+
+    test "refuses to overwrite an issue already linked to a different PR", %{
+      conn: conn,
+      project: project,
+      issue: issue
+    } do
+      {:ok, _} =
+        Issues.update_issue(issue, %{
+          github_pr_url: "https://github.com/autolink-org/repo/pull/40"
+        })
+
+      other_pr_url = "https://github.com/autolink-org/repo/pull/77"
+      branch = "#{issue.identifier}/colliding-slug"
+
+      payload =
+        build_autolink_payload("opened", other_pr_url, branch, project.repo_url)
+
+      conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
+
+      assert response(conn, :ok) == ""
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.github_pr_url == "https://github.com/autolink-org/repo/pull/40"
+    end
+  end
+
   # Helper functions
 
   defp build_pr_payload(action, pr_url, extra_pr_attrs \\ %{}) do
@@ -295,6 +379,26 @@ defmodule CymphoWeb.GithubControllerTest do
       "repository" => %{
         "full_name" => "owner/repo"
       }
+    }
+  end
+
+  defp build_autolink_payload(action, pr_url, branch, project_repo_url) do
+    %{
+      "action" => action,
+      "pull_request" => %{
+        "html_url" => pr_url,
+        "title" => "Auto-link Test PR",
+        "merged" => false,
+        "head" => %{
+          "ref" => branch,
+          "repo" => %{"html_url" => project_repo_url}
+        },
+        "base" => %{
+          "ref" => "main",
+          "repo" => %{"html_url" => project_repo_url}
+        }
+      },
+      "repository" => %{"full_name" => "autolink-org/repo"}
     }
   end
 

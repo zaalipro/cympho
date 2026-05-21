@@ -116,19 +116,38 @@ defmodule Cympho.AutonomyLoopTest do
 
     assert length(created) == 2
 
-    # The two newly-seeded initiative issues exist under the mission goal,
-    # routed by role. (We exclude the onboarding seed issues we cancelled
-    # in step 1 — they share the goal but are now :cancelled.)
+    # The two newly-seeded initiatives are held in :backlog assigned to CTO
+    # for spec review — engineers can't pick them up until CTO approves.
     initiatives =
       goal.id
       |> list_goal_issues()
       |> Enum.reject(&(&1.status == :cancelled))
 
     assert length(initiatives) == 2
-    assert Enum.any?(initiatives, &(&1.assigned_role == "engineer"))
-    assert Enum.any?(initiatives, &(&1.assigned_role == "cto"))
+    assert Enum.all?(initiatives, &(&1.assigned_role == "cto"))
+    assert Enum.all?(initiatives, &(&1.status == :backlog))
 
-    eng_issue = Enum.find(initiatives, &(&1.assigned_role == "engineer"))
+    assert Enum.any?(
+             initiatives,
+             &(get_in(&1.monitor_state, ["proposed_role"]) == "engineer")
+           )
+
+    # CTO approves the eng-bound initiative — that releases it into the
+    # engineer pool with the original proposed role.
+    pending_eng_initiative =
+      Enum.find(initiatives, &(get_in(&1.monitor_state, ["proposed_role"]) == "engineer"))
+
+    assert {:ok, _} =
+             AgentActions.execute(pending_eng_initiative, cto, [
+               %{
+                 "type" => "approve_issue",
+                 "notes" => "Spec is clear; engineering can take this on."
+               }
+             ])
+
+    eng_issue = Issues.get_issue!(pending_eng_initiative.id)
+    assert eng_issue.status == :todo
+    assert eng_issue.assigned_role == "engineer"
 
     # ── Step 4: engineer takes the issue (simulate dispatcher checkout) and
     # submits for review.

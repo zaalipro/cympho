@@ -67,6 +67,12 @@ defmodule CymphoWeb.Components.NavRail do
         badge={@inbox_count}
       />
       <.nav_link
+        to={~p"/reviews"}
+        label="Reviews"
+        icon="hero-check-badge-mini"
+        current_path={@current_path}
+      />
+      <.nav_link
         to={~p"/operations"}
         label="Operations"
         icon="hero-command-line-mini"

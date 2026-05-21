@@ -385,6 +385,117 @@ defmodule Cympho.AgentActionsTest do
       assert updated.assigned_role == "cto"
     end
 
+    test "submit_review stamps last_reviewer_id and reuses it on resubmit", %{
+      issue: issue,
+      cto: cto,
+      engineer: engineer,
+      company: company
+    } do
+      # Build a second CTO in the same company so we can prove round-2 sticks
+      # with the same reviewer even after the parent relationship changes.
+      {:ok, cto_two} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "CTO Two",
+          role: :cto,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, issue} = Issues.update_issue(issue, %{assignee_id: engineer.id, status: :in_progress})
+      insert_completed_run(engineer, issue)
+
+      round_one = [
+        %{"type" => "attach_work_product", "kind" => "document", "title" => "round one"},
+        %{
+          "type" => "submit_review",
+          "role" => "cto",
+          "head_sha" => "sha-round-one",
+          "notes" =>
+            "[delivery] What happened: round one ready. Files changed: lib/foo.ex. Verification: tests pass. Risks: none. Current state: ready. Next decision: CTO review."
+        }
+      ]
+
+      assert {:ok, _} = AgentActions.execute(issue, engineer, round_one)
+
+      after_round_one = Issues.get_issue!(issue.id)
+      assert after_round_one.assignee_id == cto.id
+      assert after_round_one.last_reviewer_id == cto.id
+
+      # CTO asks for changes.
+      assert {:ok, _} =
+               AgentActions.execute(after_round_one, cto, [
+                 %{
+                   "type" => "request_changes",
+                   "role" => "engineer",
+                   "reason" =>
+                     "Coverage drop in lib/foo.ex; add tests for the retry branch."
+                 }
+               ])
+
+      mid_loop = Issues.get_issue!(issue.id)
+      assert mid_loop.status == :todo
+      assert mid_loop.last_reviewer_id == cto.id
+
+      # Re-parent the engineer to cto_two so parent-walk WOULD prefer cto_two.
+      # last_reviewer_id should still win and keep this loop with cto.
+      {:ok, engineer} = Agents.update_agent(engineer, %{parent_id: cto_two.id})
+
+      # Engineer pushes a new commit and resubmits.
+      {:ok, mid_loop} = Issues.update_issue(mid_loop, %{status: :in_progress})
+      insert_completed_run(engineer, mid_loop)
+
+      round_two = [
+        %{"type" => "attach_work_product", "kind" => "document", "title" => "round two"},
+        %{
+          "type" => "submit_review",
+          "role" => "cto",
+          "head_sha" => "sha-round-two",
+          "notes" =>
+            "[delivery] What happened: round two addresses the gap. Files changed: lib/foo.ex. Verification: tests pass including new coverage. Risks: none. Current state: ready. Next decision: CTO re-review."
+        }
+      ]
+
+      assert {:ok, _} = AgentActions.execute(mid_loop, engineer, round_two)
+
+      after_round_two = Issues.get_issue!(issue.id)
+      assert after_round_two.assignee_id == cto.id, "round two should stick with the original reviewer"
+      assert after_round_two.last_reviewer_id == cto.id
+    end
+
+    test "approve_issue clears last_reviewer_id", %{issue: issue, cto: cto, engineer: engineer, ceo: ceo} do
+      insert_completed_run(ceo, issue)
+      insert_work_product(issue, ceo)
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body:
+            "[delivery] What happened: delivered the owner-approved work. Files changed: delivery artifact. Verification: completed run passed. Risks: none known. Current state: ready for approval. Next decision: CEO owner update.",
+          author_type: "agent",
+          author_id: ceo.id,
+          issue_id: issue.id
+        })
+
+      # Simulate a prior review round having stamped last_reviewer_id.
+      {:ok, issue} = Issues.update_issue(issue, %{last_reviewer_id: cto.id})
+
+      assert {:ok, _} =
+               AgentActions.execute(issue, ceo, [
+                 %{
+                   "type" => "approve_issue",
+                   "notes" =>
+                     "[owner_update] What happened: approved. Business status: shipped. Current state: closed. Next decision: none. Owner decision needed: none."
+                 }
+               ])
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.status == :done
+      assert reloaded.last_reviewer_id == nil
+
+      _ = engineer
+    end
+
     test "approve_issue marks issue done, clears checkout, and comments", %{
       issue: issue,
       ceo: ceo
@@ -432,6 +543,8 @@ defmodule Cympho.AgentActionsTest do
       ceo: ceo,
       engineer: engineer
     } do
+      insert_completed_run(engineer, issue)
+
       {:ok, _work_product} =
         WorkProducts.create_work_product(%{
           issue_id: issue.id,
@@ -455,8 +568,33 @@ defmodule Cympho.AgentActionsTest do
              end)
     end
 
+    test "approve_issue is rejected when runtime verification is missing", %{
+      issue: issue,
+      ceo: ceo,
+      engineer: engineer
+    } do
+      {:ok, _work_product} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          created_by_agent_id: engineer.id,
+          kind: "code_change",
+          title: "Implementation patch",
+          url: "https://github.com/example/repo/pull/1"
+        })
+
+      assert {:error, {:quality_gate_failed, "approve_issue", gaps}} =
+               AgentActions.execute(issue, ceo, [%{"type" => "approve_issue"}])
+
+      assert :runtime_verification in gaps
+
+      unchanged = Issues.get_issue!(issue.id)
+      refute unchanged.status == :done
+    end
+
     test "request_changes reopens issue for target role", %{issue: issue, cto: cto} do
-      actions = [%{"type" => "request_changes", "role" => "engineer", "reason" => "Needs tests"}]
+      reason = "Needs tests covering the null-guard in lib/foo.ex"
+
+      actions = [%{"type" => "request_changes", "role" => "engineer", "reason" => reason}]
 
       assert {:ok, _} = AgentActions.execute(issue, cto, actions)
 
@@ -469,7 +607,7 @@ defmodule Cympho.AgentActionsTest do
 
       assert Enum.any?(
                comments,
-               &(&1.author_type == "agent" and &1.body == "[review] Needs tests")
+               &(&1.author_type == "agent" and &1.body == "[review] #{reason}")
              )
     end
 
@@ -488,6 +626,103 @@ defmodule Cympho.AgentActionsTest do
                comments,
                &(&1.author_type == "agent" and &1.body == "[blocked] Missing API key")
              )
+    end
+
+    test "request_changes is rejected when reason is empty", %{issue: issue, cto: cto} do
+      actions = [%{"type" => "request_changes", "role" => "engineer", "reason" => ""}]
+
+      assert {:error, {:governance_reason_missing, "request_changes"}} =
+               AgentActions.execute(issue, cto, actions)
+
+      unchanged = Issues.get_issue!(issue.id)
+      refute unchanged.status == :todo and unchanged.assignee_id == nil
+    end
+
+    test "request_changes is rejected when reason is too short", %{issue: issue, cto: cto} do
+      actions = [%{"type" => "request_changes", "role" => "engineer", "reason" => "bad code"}]
+
+      assert {:error, {:governance_reason_too_short, "request_changes", 20}} =
+               AgentActions.execute(issue, cto, actions)
+    end
+
+    test "request_changes records a Decision with reasoning on success", %{
+      issue: issue,
+      cto: cto,
+      company: company
+    } do
+      reason = "Coverage drop in lib/cympho/payments.ex — add tests for the retry path."
+
+      assert {:ok, _} =
+               AgentActions.execute(issue, cto, [
+                 %{"type" => "request_changes", "role" => "engineer", "reason" => reason}
+               ])
+
+      decisions =
+        Cympho.Decisions.list_decisions(%{
+          company_id: company.id,
+          resource_type: "issue",
+          resource_id: issue.id,
+          decision_type: "review_rejection"
+        })
+
+      assert [decision] = decisions
+      assert decision.outcome == "denied"
+      assert decision.reasoning == reason
+      assert decision.actor_type == "agent"
+      assert decision.actor_id == cto.id
+      assert decision.context["role_redirect"] == "engineer"
+    end
+
+    test "block_issue is rejected with empty reason", %{issue: issue, ceo: ceo} do
+      actions = [%{"type" => "block_issue", "reason" => ""}]
+
+      assert {:error, {:governance_reason_missing, "block_issue"}} =
+               AgentActions.execute(issue, ceo, actions)
+    end
+
+    test "block_issue rejects unknown blocker_kind", %{issue: issue, ceo: ceo} do
+      actions = [
+        %{
+          "type" => "block_issue",
+          "reason" => "Waiting on owner answer.",
+          "blocker_kind" => "made_up_kind"
+        }
+      ]
+
+      assert {:error, {:invalid_blocker_kind, "made_up_kind", _}} =
+               AgentActions.execute(issue, ceo, actions)
+    end
+
+    test "block_issue records a Decision and stamps blocker_kind on monitor_state", %{
+      issue: issue,
+      ceo: ceo,
+      company: company
+    } do
+      actions = [
+        %{
+          "type" => "block_issue",
+          "reason" => "Stripe sandbox is down — see status.stripe.com.",
+          "blocker_kind" => "external_dep"
+        }
+      ]
+
+      assert {:ok, _} = AgentActions.execute(issue, ceo, actions)
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.status == :blocked
+      assert reloaded.monitor_state["block_reason_kind"] == "external_dep"
+
+      decisions =
+        Cympho.Decisions.list_decisions(%{
+          company_id: company.id,
+          resource_type: "issue",
+          resource_id: issue.id,
+          decision_type: "block"
+        })
+
+      assert [decision] = decisions
+      assert decision.outcome == "deferred"
+      assert decision.context["blocker_kind"] == "external_dep"
     end
 
     test "attach_work_product records agent output", %{issue: issue, engineer: engineer} do
