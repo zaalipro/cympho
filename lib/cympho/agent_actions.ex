@@ -691,15 +691,6 @@ defmodule Cympho.AgentActions do
     end
   end
 
-  # Reads a company-scoped runtime limit (from `governance_config["limits"]`)
-  # falling back to the compile-time default. Centralises the lookup so
-  # every guard in agent_actions uses the same semantics.
-  defp company_limit(%Issue{company_id: company_id}, key, default) do
-    Cympho.Companies.runtime_limit(company_id, key, default)
-  end
-
-  defp company_limit(_, _, default), do: default
-
   # CEO has no supervisor — submit_review would set assignee_id to nil and
   # the dispatcher would re-route the issue right back to the CEO. Reject
   # explicitly. The rejection system-comment is emitted post-transaction in
@@ -738,87 +729,6 @@ defmodule Cympho.AgentActions do
         execute_delivery_approval(issue, agent, action)
     end
   end
-
-  defp execute_delivery_approval(issue, agent, action) do
-    case open_children(issue) do
-      [] ->
-        note =
-          action["notes"] ||
-            "Approved this issue. Required work is complete and ready for the owner."
-
-        with :ok <- ensure_approval_quality(issue),
-             {:ok, _comment} <-
-               maybe_agent_comment(issue, agent, tagged_approval_note(agent, note)),
-             {:ok, transitioned} <- Issues.transition_issue_with_review_gates(issue, :done),
-             {:ok, released} <- Issues.force_release_issue(transitioned, :done),
-             {:ok, released} <-
-               update_workflow_issue(released, agent, %{
-                 assigned_role: nil,
-                 last_reviewer_id: nil
-               }) do
-          {:ok, %{type: "approve_issue", issue_id: released.id}}
-        end
-
-      open ->
-        # Rejection comment is emitted post-transaction in execute/3.
-        {:error, {:children_not_done, Enum.map(open, & &1.id)}}
-    end
-  end
-
-  # Spec-review approval: the CTO has signed off on a CEO-seeded initiative
-  # and is releasing it into the proposed role's pool. The issue moves from
-  # backlog → todo with `assigned_role: proposed_role`; it does NOT close.
-  # The standard delivery quality gates (work product, runtime verification)
-  # don't apply here — there's no work yet to verify.
-  defp execute_spec_review_approval(issue, agent, action) do
-    proposed_role = get_in(issue.monitor_state, ["proposed_role"]) || "engineer"
-
-    note =
-      action["notes"] ||
-        "Spec approved. Releasing this initiative to the #{proposed_role} pool."
-
-    cleared_state =
-      issue.monitor_state
-      |> Map.delete("spec_review_required")
-      |> Map.delete("proposed_role")
-      |> Map.put("spec_approved_by", agent.id)
-      |> Map.put("spec_approved_role_release", proposed_role)
-
-    with {:ok, _comment} <-
-           maybe_agent_comment(issue, agent, "[spec-approved] #{note}"),
-         {:ok, updated} <-
-           update_workflow_issue(issue, agent, %{
-             status: :todo,
-             assignee_id: nil,
-             assigned_role: proposed_role,
-             monitor_state: cleared_state
-           }) do
-      _ =
-        Cympho.Orchestrator.Dispatcher.enqueue_wake(
-          updated.id,
-          "agent_handoff",
-          %{
-            "from_agent_id" => agent.id,
-            "role" => proposed_role,
-            "via" => "spec_approval"
-          }
-        )
-
-      {:ok,
-       %{
-         type: "approve_issue",
-         subtype: "spec_approval",
-         issue_id: updated.id,
-         released_to_role: proposed_role
-       }}
-    end
-  end
-
-  defp spec_review_pending?(%Issue{monitor_state: state}) when is_map(state) do
-    Map.get(state, "spec_review_required") == true
-  end
-
-  defp spec_review_pending?(_issue), do: false
 
   defp execute_action(issue, agent, %{"type" => "request_changes"} = action) do
     with :ok <- ensure_governance_quality(action, "request_changes"),
@@ -1010,6 +920,96 @@ defmodule Cympho.AgentActions do
       {:ok, %{type: "handoff", issue_id: updated.id, role: action["role"]}}
     end
   end
+
+  # Reads a company-scoped runtime limit (from `governance_config["limits"]`)
+  # falling back to the compile-time default. Centralises the lookup so
+  # every guard in agent_actions uses the same semantics.
+  defp company_limit(%Issue{company_id: company_id}, key, default) do
+    Cympho.Companies.runtime_limit(company_id, key, default)
+  end
+
+  defp company_limit(_, _, default), do: default
+
+  defp execute_delivery_approval(issue, agent, action) do
+    case open_children(issue) do
+      [] ->
+        note =
+          action["notes"] ||
+            "Approved this issue. Required work is complete and ready for the owner."
+
+        with :ok <- ensure_approval_quality(issue),
+             {:ok, _comment} <-
+               maybe_agent_comment(issue, agent, tagged_approval_note(agent, note)),
+             {:ok, transitioned} <- Issues.transition_issue_with_review_gates(issue, :done),
+             {:ok, released} <- Issues.force_release_issue(transitioned, :done),
+             {:ok, released} <-
+               update_workflow_issue(released, agent, %{
+                 assigned_role: nil,
+                 last_reviewer_id: nil
+               }) do
+          {:ok, %{type: "approve_issue", issue_id: released.id}}
+        end
+
+      open ->
+        # Rejection comment is emitted post-transaction in execute/3.
+        {:error, {:children_not_done, Enum.map(open, & &1.id)}}
+    end
+  end
+
+  # Spec-review approval: the CTO has signed off on a CEO-seeded initiative
+  # and is releasing it into the proposed role's pool. The issue moves from
+  # backlog → todo with `assigned_role: proposed_role`; it does NOT close.
+  # The standard delivery quality gates (work product, runtime verification)
+  # don't apply here — there's no work yet to verify.
+  defp execute_spec_review_approval(issue, agent, action) do
+    proposed_role = get_in(issue.monitor_state, ["proposed_role"]) || "engineer"
+
+    note =
+      action["notes"] ||
+        "Spec approved. Releasing this initiative to the #{proposed_role} pool."
+
+    cleared_state =
+      issue.monitor_state
+      |> Map.delete("spec_review_required")
+      |> Map.delete("proposed_role")
+      |> Map.put("spec_approved_by", agent.id)
+      |> Map.put("spec_approved_role_release", proposed_role)
+
+    with {:ok, _comment} <-
+           maybe_agent_comment(issue, agent, "[spec-approved] #{note}"),
+         {:ok, updated} <-
+           update_workflow_issue(issue, agent, %{
+             status: :todo,
+             assignee_id: nil,
+             assigned_role: proposed_role,
+             monitor_state: cleared_state
+           }) do
+      _ =
+        Cympho.Orchestrator.Dispatcher.enqueue_wake(
+          updated.id,
+          "agent_handoff",
+          %{
+            "from_agent_id" => agent.id,
+            "role" => proposed_role,
+            "via" => "spec_approval"
+          }
+        )
+
+      {:ok,
+       %{
+         type: "approve_issue",
+         subtype: "spec_approval",
+         issue_id: updated.id,
+         released_to_role: proposed_role
+       }}
+    end
+  end
+
+  defp spec_review_pending?(%Issue{monitor_state: state}) when is_map(state) do
+    Map.get(state, "spec_review_required") == true
+  end
+
+  defp spec_review_pending?(_issue), do: false
 
   # The autonomous reporting chain (engineer → CTO → CEO) depends on the
   # wakeup queue to nudge the next agent immediately. If the queue is down
