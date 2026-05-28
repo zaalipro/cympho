@@ -20,7 +20,6 @@ defmodule CymphoWeb.TenancyTest do
     Companies,
     Inbox,
     Issues,
-    Plugins,
     Projects,
     Repo,
     Secrets,
@@ -340,7 +339,7 @@ defmodule CymphoWeb.TenancyTest do
       company_b: company_b
     } do
       {:ok, plugin} =
-        Plugins.create_plugin(%{
+        Skills.create_plugin(%{
           name: "B's plugin",
           identifier: "b-plugin-#{System.unique_integer([:positive])}",
           version: "1.0.0",

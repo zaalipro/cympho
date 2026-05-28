@@ -15,7 +15,7 @@ defmodule Cympho.Skills.HotReloader do
   require Logger
   import Ecto.Query
 
-  alias Cympho.{Plugins, Repo, Skills.Plugin}
+  alias Cympho.{Repo, Skills, Skills.Plugin}
 
   @name __MODULE__
   @reload_timeout 2000
@@ -235,7 +235,7 @@ defmodule Cympho.Skills.HotReloader do
         {:error, :no_company}
 
       [company_id] ->
-        Plugins.get_plugin_by_identifier(identifier, company_id)
+        Skills.get_plugin_by_identifier(identifier, company_id)
 
       [_first, _second | _] ->
         Logger.error(
@@ -261,7 +261,7 @@ defmodule Cympho.Skills.HotReloader do
         {:error, :plugin_not_found}
 
       [{_plugin_id, company_id}] ->
-        case Plugins.get_plugin_by_identifier(identifier, company_id) do
+        case Skills.get_plugin_by_identifier(identifier, company_id) do
           {:ok, plugin} -> {:ok, plugin}
           error -> error
         end
@@ -274,14 +274,14 @@ defmodule Cympho.Skills.HotReloader do
 
         # Use the first match
         [{_plugin_id, company_id} | _] = Repo.all(query)
-        Plugins.get_plugin_by_identifier(identifier, company_id)
+        Skills.get_plugin_by_identifier(identifier, company_id)
     end
   end
 
   defp find_plugin_by_identifier(_), do: {:error, :missing_identifier}
 
   defp update_plugin_manifest(plugin, manifest_data) do
-    Plugins.update_plugin(plugin, %{manifest: manifest_data})
+    Skills.update_plugin(plugin, %{manifest: manifest_data})
   end
 
   defp log_reload_failure(file_path, reason) do

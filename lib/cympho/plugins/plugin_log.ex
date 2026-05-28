@@ -14,7 +14,7 @@ defmodule Cympho.Plugins.PluginLog do
     field :metadata, :map, default: %{}
     field :timestamp, :utc_datetime
 
-    belongs_to :plugin, Cympho.Plugins.Plugin
+    belongs_to :plugin, Cympho.Skills.Plugin
     belongs_to :company, Cympho.Companies.Company
 
     timestamps(type: :utc_datetime)

@@ -11,7 +11,6 @@ defmodule CymphoWeb.AgentLive.Show do
   alias Cympho.AgentInstructionStudio
   alias Cympho.HeartbeatEngine
   alias Cympho.Issues
-  alias Cympho.Plugins
   alias Cympho.RuntimeCapacity
   alias Cympho.RuntimeProfiles
   alias Cympho.Secrets
@@ -554,7 +553,7 @@ defmodule CymphoWeb.AgentLive.Show do
 
   defp refresh_skills(socket) do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
-    plugins = if company_id, do: Plugins.list_plugins(company_id: company_id), else: []
+    plugins = if company_id, do: Skills.list_plugins(company_id: company_id), else: []
     assigned = Skills.list_skills_for_agent(socket.assigns.agent.id)
     assigned_ids = MapSet.new(assigned, & &1.id)
 

@@ -1,7 +1,7 @@
 defmodule CymphoWeb.PluginLive.Index do
   use CymphoWeb, :live_view
 
-  alias Cympho.{Plugins, Companies}
+  alias Cympho.{Skills, Companies}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -52,7 +52,7 @@ defmodule CymphoWeb.PluginLive.Index do
   def handle_event("toggle_plugin", %{"id" => id}, socket) do
     case fetch_company_plugin(socket, id) do
       {:ok, plugin} ->
-        case Plugins.toggle_plugin(plugin) do
+        case Skills.toggle_plugin(plugin) do
           {:ok, updated_plugin} ->
             {:noreply,
              socket
@@ -79,7 +79,7 @@ defmodule CymphoWeb.PluginLive.Index do
   def handle_event("delete", %{"id" => id}, socket) do
     case fetch_company_plugin(socket, id) do
       {:ok, plugin} ->
-        case Plugins.delete_plugin(plugin) do
+        case Skills.delete_plugin(plugin) do
           {:ok, _} ->
             {:noreply,
              socket
@@ -99,12 +99,12 @@ defmodule CymphoWeb.PluginLive.Index do
     company_id = company_id || socket.assigns[:selected_company_id]
     status = status || socket.assigns[:selected_status]
 
-    Plugins.list_plugins(company_id: company_id, status: status)
+    Skills.list_plugins(company_id: company_id, status: status)
   end
 
   defp fetch_company_plugin(socket, id) do
     case socket.assigns[:current_company] do
-      %{id: company_id} -> Plugins.get_company_plugin(company_id, id)
+      %{id: company_id} -> Skills.get_company_plugin(company_id, id)
       _ -> {:error, :not_found}
     end
   end

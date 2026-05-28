@@ -1,22 +1,22 @@
 defmodule CymphoWeb.PluginLive.New do
   use CymphoWeb, :live_view
 
-  alias Cympho.Plugins
+  alias Cympho.Skills
 
   @impl true
   def mount(_params, _session, socket) do
-    changeset = Plugins.change_plugin(%Plugins.Plugin{})
+    changeset = Skills.change_plugin(%Skills.Plugin{})
 
     {:ok,
      socket
      |> assign(:page_title, "New Plugin")
-     |> assign(:plugin, %Plugins.Plugin{})
+     |> assign(:plugin, %Skills.Plugin{})
      |> assign_form(changeset)}
   end
 
   @impl true
   def handle_event("save", %{"plugin" => plugin_params}, socket) do
-    case Plugins.create_plugin(normalize_plugin_params(plugin_params)) do
+    case Skills.create_plugin(normalize_plugin_params(plugin_params)) do
       {:ok, plugin} ->
         {:noreply,
          socket
@@ -31,7 +31,7 @@ defmodule CymphoWeb.PluginLive.New do
   def handle_event("validate", %{"plugin" => plugin_params}, socket) do
     changeset =
       socket.assigns.plugin
-      |> Plugins.change_plugin(normalize_plugin_params(plugin_params))
+      |> Skills.change_plugin(normalize_plugin_params(plugin_params))
       |> Map.put(:action, :validate)
 
     {:noreply, assign_form(socket, changeset)}

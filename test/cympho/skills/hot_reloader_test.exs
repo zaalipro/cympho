@@ -2,7 +2,7 @@ defmodule Cympho.Skills.HotReloaderTest do
   use Cympho.DataCase
   use ExUnit.Case, async: false
 
-  alias Cympho.{Companies, Plugins, Skills.HotReloader}
+  alias Cympho.{Companies, Skills, Skills.HotReloader}
 
   @manifest_dir "test/support/skill_manifests"
   @test_manifest Path.join(@manifest_dir, "test_skill.json")
@@ -21,7 +21,7 @@ defmodule Cympho.Skills.HotReloaderTest do
 
     # Create a test plugin
     {:ok, plugin} =
-      Plugins.create_plugin(%{
+      Skills.create_plugin(%{
         identifier: "test_skill",
         name: "Test Skill",
         description: "A test skill",
@@ -108,7 +108,7 @@ defmodule Cympho.Skills.HotReloaderTest do
       assert {:ok, _count} = HotReloader.reload_all()
 
       # Verify the database was updated
-      assert {:ok, plugin} = Plugins.get_plugin_by_identifier("test_skill", company.id)
+      assert {:ok, plugin} = Skills.get_plugin_by_identifier("test_skill", company.id)
       assert plugin.manifest["name"] == "Updated Test Skill"
       assert plugin.manifest["version"] == "1.1.0"
     end
@@ -211,7 +211,7 @@ defmodule Cympho.Skills.HotReloaderTest do
       assert {:error, :invalid_json} = HotReloader.reload_manifest(@test_manifest)
 
       # Database should still have the valid manifest
-      assert {:ok, plugin} = Plugins.get_plugin_by_identifier("test_skill", company.id)
+      assert {:ok, plugin} = Skills.get_plugin_by_identifier("test_skill", company.id)
       assert plugin.manifest["version"] == "1.0.0"
     end
   end

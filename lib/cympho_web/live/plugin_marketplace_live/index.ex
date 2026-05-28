@@ -1,7 +1,7 @@
 defmodule CymphoWeb.PluginMarketplaceLive.Index do
   use CymphoWeb, :live_view
 
-  alias Cympho.Plugins
+  alias Cympho.Skills
 
   @available_plugins [
     %{
@@ -114,7 +114,7 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
   def handle_event("uninstall", %{"id" => id}, socket) do
     case fetch_company_plugin(socket, id) do
       {:ok, plugin} ->
-        case Plugins.delete_plugin(plugin) do
+        case Skills.delete_plugin(plugin) do
           {:ok, _} ->
             {:noreply,
              socket
@@ -142,7 +142,7 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
   end
 
   defp installed_identifiers(company_id) do
-    Plugins.list_plugins(company_id: company_id)
+    Skills.list_plugins(company_id: company_id)
     |> Enum.map(& &1.identifier)
   end
 
@@ -163,7 +163,7 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
       company_id: company_id
     }
 
-    Plugins.create_plugin(attrs)
+    Skills.create_plugin(attrs)
   end
 
   defp extract_error_message(changeset) do
@@ -187,7 +187,7 @@ defmodule CymphoWeb.PluginMarketplaceLive.Index do
 
   defp fetch_company_plugin(socket, id) do
     case socket.assigns[:current_company] do
-      %{id: company_id} -> Plugins.get_company_plugin(company_id, id)
+      %{id: company_id} -> Skills.get_company_plugin(company_id, id)
       _ -> {:error, :not_found}
     end
   end

@@ -1,15 +1,15 @@
 defmodule CymphoWeb.PluginLive.Edit do
   use CymphoWeb, :live_view
 
-  alias Cympho.Plugins
   alias Cympho.Repo
+  alias Cympho.Skills
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     case fetch_company_plugin(socket, id) do
       {:ok, plugin} ->
         plugin = Repo.preload(plugin, [:company, :project])
-        changeset = Plugins.change_plugin(plugin)
+        changeset = Skills.change_plugin(plugin)
 
         {:ok,
          socket
@@ -27,14 +27,14 @@ defmodule CymphoWeb.PluginLive.Edit do
 
   defp fetch_company_plugin(socket, id) do
     case socket.assigns[:current_company] do
-      %{id: company_id} -> Plugins.get_company_plugin(company_id, id)
+      %{id: company_id} -> Skills.get_company_plugin(company_id, id)
       _ -> {:error, :not_found}
     end
   end
 
   @impl true
   def handle_event("save", %{"plugin" => plugin_params}, socket) do
-    case Plugins.update_plugin(socket.assigns.plugin, normalize_plugin_params(plugin_params)) do
+    case Skills.update_plugin(socket.assigns.plugin, normalize_plugin_params(plugin_params)) do
       {:ok, plugin} ->
         {:noreply,
          socket
@@ -49,7 +49,7 @@ defmodule CymphoWeb.PluginLive.Edit do
   def handle_event("validate", %{"plugin" => plugin_params}, socket) do
     changeset =
       socket.assigns.plugin
-      |> Plugins.change_plugin(normalize_plugin_params(plugin_params))
+      |> Skills.change_plugin(normalize_plugin_params(plugin_params))
       |> Map.put(:action, :validate)
 
     {:noreply, assign_form(socket, changeset)}

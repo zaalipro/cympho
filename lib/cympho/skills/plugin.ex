@@ -18,7 +18,7 @@ defmodule Cympho.Skills.Plugin do
     field :name, :string
     field :description, :string
     field :author, :string
-    field :manifest, :map
+    field :manifest, :map, default: %{}
     field :status, :string, default: "installed"
     field :capabilities, {:array, :string}, default: []
     field :enabled, :boolean, default: true
@@ -49,6 +49,7 @@ defmodule Cympho.Skills.Plugin do
       :project_id
     ])
     |> validate_required([:identifier, :version, :name, :manifest])
+    |> validate_inclusion(:status, ["installed", "active", "disabled", "error"])
     |> unique_constraint([:identifier, :company_id])
     |> foreign_key_constraint(:company_id)
     |> foreign_key_constraint(:project_id)

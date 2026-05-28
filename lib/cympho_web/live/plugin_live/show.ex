@@ -1,8 +1,8 @@
 defmodule CymphoWeb.PluginLive.Show do
   use CymphoWeb, :live_view
 
-  alias Cympho.Plugins
   alias Cympho.Repo
+  alias Cympho.Skills
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -30,7 +30,7 @@ defmodule CymphoWeb.PluginLive.Show do
 
   defp fetch_company_plugin(socket, id) do
     case socket.assigns[:current_company] do
-      %{id: company_id} -> Plugins.get_company_plugin(company_id, id)
+      %{id: company_id} -> Skills.get_company_plugin(company_id, id)
       _ -> {:error, :not_found}
     end
   end
@@ -52,7 +52,7 @@ defmodule CymphoWeb.PluginLive.Show do
 
   @impl true
   def handle_event("toggle_plugin", _params, socket) do
-    case Plugins.toggle_plugin(socket.assigns.plugin) do
+    case Skills.toggle_plugin(socket.assigns.plugin) do
       {:ok, updated_plugin} ->
         updated_plugin = Repo.preload(updated_plugin, [:company, :project])
 
@@ -71,7 +71,7 @@ defmodule CymphoWeb.PluginLive.Show do
 
   @impl true
   def handle_event("delete", _params, socket) do
-    case Plugins.delete_plugin(socket.assigns.plugin) do
+    case Skills.delete_plugin(socket.assigns.plugin) do
       {:ok, _} ->
         {:noreply,
          socket

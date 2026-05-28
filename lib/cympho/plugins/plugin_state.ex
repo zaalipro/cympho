@@ -12,7 +12,7 @@ defmodule Cympho.Plugins.PluginState do
     field :key, :string
     field :value, :binary
 
-    belongs_to :plugin, Cympho.Plugins.Plugin
+    belongs_to :plugin, Cympho.Skills.Plugin
     belongs_to :company, Cympho.Companies.Company
 
     timestamps(type: :utc_datetime)

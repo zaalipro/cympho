@@ -1,7 +1,7 @@
 defmodule Cympho.Skills.Sandbox.AuditTest do
   use Cympho.DataCase
   alias Cympho.Skills.Sandbox.Audit
-  alias Cympho.{Agents, Companies, Plugins}
+  alias Cympho.{Agents, Companies, Skills}
 
   test "logs successful authorization" do
     {:ok, company} =
@@ -9,7 +9,7 @@ defmodule Cympho.Skills.Sandbox.AuditTest do
 
     {:ok, agent} = Agents.create_agent(%{name: "Agent", role: :engineer, company_id: company.id})
 
-    Plugins.create_plugin(%{
+    Skills.create_plugin(%{
       identifier: "system.sandbox",
       name: "Sandbox",
       version: "1.0.0",
@@ -28,7 +28,7 @@ defmodule Cympho.Skills.Sandbox.AuditTest do
 
     {:ok, agent} = Agents.create_agent(%{name: "Agent", role: :designer, company_id: company.id})
 
-    Plugins.create_plugin(%{
+    Skills.create_plugin(%{
       identifier: "system.sandbox",
       name: "Sandbox",
       version: "1.0.0",
@@ -53,7 +53,7 @@ defmodule Cympho.Skills.Sandbox.AuditTest do
 
     {:ok, agent} = Agents.create_agent(%{name: "Agent", role: :designer, company_id: company.id})
 
-    Plugins.create_plugin(%{
+    Skills.create_plugin(%{
       identifier: "system.sandbox",
       name: "Sandbox",
       version: "1.0.0",

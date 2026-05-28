@@ -174,8 +174,8 @@ defmodule Cympho.Plugins.HostServices do
   Sets a setting value for the plugin.
   """
   def set_setting(plugin, key, value) do
-    alias Cympho.Plugins
+    alias Cympho.Skills
     settings = Map.put(plugin.settings || %{}, key, value)
-    Plugins.update_plugin(plugin, %{settings: settings})
+    Skills.update_plugin(plugin, %{settings: settings})
   end
 end

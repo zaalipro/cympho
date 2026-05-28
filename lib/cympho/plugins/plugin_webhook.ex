@@ -16,7 +16,7 @@ defmodule Cympho.Plugins.PluginWebhook do
     field :last_triggered_at, :utc_datetime
     field :failure_count, :integer, default: 0
 
-    belongs_to :plugin, Cympho.Plugins.Plugin
+    belongs_to :plugin, Cympho.Skills.Plugin
     belongs_to :company, Cympho.Companies.Company
 
     timestamps(type: :utc_datetime)

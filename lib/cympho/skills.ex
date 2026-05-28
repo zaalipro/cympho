@@ -163,6 +163,99 @@ defmodule Cympho.Skills do
   end
 
   @doc """
+  Lists plugins, optionally filtered by company, project, or status.
+  """
+  def list_plugins(opts \\ []) do
+    company_id = Keyword.get(opts, :company_id)
+    project_id = Keyword.get(opts, :project_id)
+    status = Keyword.get(opts, :status)
+
+    Plugin
+    |> maybe_filter_by_company(company_id)
+    |> maybe_filter_by_project(project_id)
+    |> maybe_filter_by_status(status)
+    |> order_by([p], asc: p.name)
+    |> preload([:company, :project])
+    |> Repo.all()
+  end
+
+  @doc """
+  Gets a plugin by id scoped to a company.
+  """
+  def get_company_plugin(company_id, id) do
+    query = from p in Plugin, where: p.id == ^id and p.company_id == ^company_id
+
+    case Repo.one(query) do
+      nil -> {:error, :not_found}
+      plugin -> {:ok, Repo.preload(plugin, [:company, :project])}
+    end
+  end
+
+  @doc """
+  Gets a plugin by its identifier within a company.
+  """
+  def get_plugin_by_identifier(identifier, company_id) do
+    query =
+      from p in Plugin,
+        where: p.identifier == ^identifier and p.company_id == ^company_id
+
+    case Repo.one(query) do
+      nil -> {:error, :not_found}
+      plugin -> {:ok, plugin}
+    end
+  end
+
+  @doc """
+  Creates a plugin.
+  """
+  def create_plugin(attrs \\ %{}) do
+    %Plugin{}
+    |> Plugin.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Deletes a plugin.
+  """
+  def delete_plugin(%Plugin{} = plugin) do
+    Repo.delete(plugin)
+  end
+
+  @doc """
+  Toggles a plugin's enabled flag and syncs the status ("active" when enabled,
+  "disabled" otherwise).
+  """
+  def toggle_plugin(%Plugin{} = plugin) do
+    new_enabled = not plugin.enabled
+    new_status = if new_enabled, do: "active", else: "disabled"
+
+    update_plugin(plugin, %{enabled: new_enabled, status: new_status})
+  end
+
+  @doc """
+  Merges new settings into a plugin's existing settings map.
+  """
+  def update_plugin_settings(%Plugin{} = plugin, settings) do
+    current_settings = plugin.settings || %{}
+    updated_settings = Map.merge(current_settings, settings)
+
+    update_plugin(plugin, %{settings: updated_settings})
+  end
+
+  @doc """
+  Returns a changeset for a plugin without persisting.
+  """
+  def change_plugin(%Plugin{} = plugin, attrs \\ %{}) do
+    Plugin.changeset(plugin, attrs)
+  end
+
+  defp maybe_filter_by_status(query, nil), do: query
+
+  defp maybe_filter_by_status(query, status) do
+    from p in query, where: p.status == ^status
+  end
+
+  @doc """
   Returns available skills for an agent as a list of maps for LLM prompts.
 
   Gracefully degrades on error - returns empty list and logs error.
