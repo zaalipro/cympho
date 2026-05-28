@@ -1951,10 +1951,6 @@ defmodule CymphoWeb.IssueLive.Show do
     }
   end
 
-  defp child_health_by_id(child_health_cards) do
-    Map.new(child_health_cards, &{&1.issue_id, &1})
-  end
-
   defp delegation_status_class(:complete) do
     "shrink-0 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-emerald-300"
   end
@@ -1981,18 +1977,6 @@ defmodule CymphoWeb.IssueLive.Show do
 
   defp child_health_state_class(:closed) do
     "shrink-0 rounded-full border border-hairline bg-surface-1 px-2 py-0.5 text-[10px] font-510 uppercase text-ink-tertiary"
-  end
-
-  defp child_health_chip_class(:complete) do
-    "rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] uppercase text-emerald-300"
-  end
-
-  defp child_health_chip_class(:blocked) do
-    "rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[10px] uppercase text-red-300"
-  end
-
-  defp child_health_chip_class(:missing) do
-    "rounded-full border border-hairline bg-surface-1 px-2 py-0.5 text-[10px] uppercase text-ink-tertiary"
   end
 
   defp agent_contribution_cards(
