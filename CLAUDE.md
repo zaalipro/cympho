@@ -84,7 +84,7 @@ The Claude Code adapters source `$HOME/.cld` before checking or invoking the com
 - `Cympho.BoardApprovals.BoardApprovalActionExecutor`
 - `Cympho.Scheduler` (Quantum cron jobs)
 - `{Finch, name: Cympho.Finch}` — HTTP client for adapters and notifications
-- `Cympho.Adapters.Registry` + `Cympho.AgentAdapters.HealthChecker`
+- `Cympho.Adapters.Registry` + `Cympho.Adapters.HealthChecker`
 - `Cympho.PluginRegistry` (Registry) + `Cympho.Plugins.Registry` + `Cympho.Plugins.Supervisor`
 - `Cympho.Skills.HotReloader`
 - `Cympho.RateLimiting.BroadcastDedup`, `Cympho.RateLimiting.IpRateLimiter`
@@ -98,7 +98,7 @@ After boot, `Cympho.Adapters.Registry.register_builtin/0` and `Cympho.RoutineTri
 1. **Issues** (`Cympho.Issues`) — managed via `Issues.StateMachine`. Issues carry `lock_version` for optimistic concurrency.
 2. **Agents** (`Cympho.Agents`) — AI agent entities with roles, adapter types, API keys.
 3. **Orchestrator** (`Cympho.Orchestrator`) — GenServer registered by `issue_id`; manages agent sessions, creates comments, transitions issue state, publishes PubSub events.
-4. **Agent Adapters** (`Cympho.AgentAdapters`) — behaviour-based backends: `claude_code`, `codex`, `cursor`, `http`, `openclaw`, `process`. `Cympho.Adapters.Registry` resolves with fallback; `HealthChecker` tracks availability.
+4. **Agent Adapters** (`Cympho.Adapters`) — behaviour-based backends: `claude_code`, `codex`, `cursor`, `http`, `openclaw`, `process`. `Cympho.Adapters.Registry` resolves with fallback; `Cympho.Adapters.HealthChecker` tracks availability.
 5. **Heartbeat Engine** (`Cympho.HeartbeatEngine`) — wakeup queue, watchdog, budget checks, secret injection, run tracking.
 6. **Agent Runner** (`Cympho.AgentRunner`) — executes agent tasks (mock available for tests).
 
