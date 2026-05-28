@@ -1,4 +1,4 @@
-defmodule Cympho.AgentAdapters.HealthChecker do
+defmodule Cympho.Adapters.HealthChecker do
   @moduledoc """
   GenServer that performs periodic health checks on agent adapters.
 
@@ -13,7 +13,8 @@ defmodule Cympho.AgentAdapters.HealthChecker do
   use GenServer
   require Logger
 
-  alias Cympho.{Agents, AgentAdapters}
+  alias Cympho.Adapters
+  alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Repo
   import Ecto.Query
@@ -205,7 +206,7 @@ defmodule Cympho.AgentAdapters.HealthChecker do
   @health_check_timeout_ms 5_000
 
   defp check_adapter_health(%Agent{} = agent) do
-    case AgentAdapters.resolve(%{adapter: agent.adapter, config: agent.config}) do
+    case Adapters.Registry.resolve_agent(%{adapter: agent.adapter, config: agent.config}) do
       {:ok, adapter_module, _config} ->
         run_with_timeout(adapter_module, agent)
 

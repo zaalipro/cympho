@@ -136,8 +136,7 @@ defmodule Cympho.Adapters do
 
   @doc """
   Registers a type atom to an adapter module.
-  The module must implement `Cympho.Adapters.Adapter` (or the legacy
-  `Cympho.AgentAdapters.Adapter` behaviour).
+  The module must implement `Cympho.Adapters.Adapter`.
   """
   @spec register(atom(), module()) :: :ok | {:error, :invalid_module}
   def register(type, module) when is_atom(type) and is_atom(module) do
@@ -146,7 +145,7 @@ defmodule Cympho.Adapters do
       |> Keyword.get_values(:behaviour)
       |> List.flatten()
 
-    if Cympho.Adapters.Adapter in behaviours or Cympho.AgentAdapters.Adapter in behaviours do
+    if Cympho.Adapters.Adapter in behaviours do
       Registry.register(type, module)
     else
       {:error, :invalid_module}

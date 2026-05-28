@@ -10,7 +10,7 @@ defmodule Cympho.Runtime do
   import Ecto.Query, warn: false
 
   alias Cympho.{
-    AgentAdapters,
+    Adapters,
     Agents,
     Companies,
     Finances,
@@ -205,7 +205,7 @@ defmodule Cympho.Runtime do
       |> Map.merge(Keyword.get(opts, :adapter_config, %{}) || %{})
       |> with_secret_backed_api_key(adapter, env)
 
-    case AgentAdapters.resolve(%{adapter: adapter, config: config}) do
+    case Adapters.resolve(%{adapter: adapter, config: config}) do
       {:ok, module, resolved_config} -> {:ok, module, resolved_config}
       {:error, reason} -> {:error, reason}
     end

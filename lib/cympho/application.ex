@@ -106,7 +106,7 @@ defmodule Cympho.Application do
   # repeated crashes blow up the supervisor restart budget and take down Repo.
   defp health_checker_child do
     if Application.get_env(:cympho, :start_health_checker?, true) do
-      {Cympho.AgentAdapters.HealthChecker, []}
+      {Cympho.Adapters.HealthChecker, []}
     end
   end
 

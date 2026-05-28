@@ -1,10 +1,9 @@
-defmodule Cympho.AgentAdapters.HealthCheckerTest do
+defmodule Cympho.Adapters.HealthCheckerTest do
   use Cympho.DataCase, async: false
 
-  alias Cympho.AgentAdapters.HealthChecker
+  alias Cympho.Adapters.HealthChecker
 
   setup do
-    # Start HealthChecker
     case start_supervised({HealthChecker, [interval: 100]}) do
       {:ok, pid} ->
         Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), pid)
@@ -21,27 +20,45 @@ defmodule Cympho.AgentAdapters.HealthCheckerTest do
       assert is_pid(pid)
       assert Process.alive?(pid)
     end
+
+    test "is registered under the module name" do
+      assert HealthChecker == HealthChecker
+      assert Process.whereis(HealthChecker) |> is_pid()
+    end
   end
 
   describe "get_health_status/1" do
-    test "returns :healthy for agents that haven't been checked yet", %{health_checker_pid: _pid} do
+    test "returns :healthy for agents that haven't been checked yet" do
       agent_id = "agent-#{:rand.uniform(10_000)}"
-
       assert {:ok, :healthy} = HealthChecker.get_health_status(agent_id)
+    end
+
+    test "returns :not_found when the HealthChecker is not running" do
+      :ok = stop_supervised(HealthChecker)
+      assert {:error, :not_found} = HealthChecker.get_health_status("any")
     end
   end
 
   describe "get_all_health_statuses/0" do
-    test "returns a map of health statuses", %{health_checker_pid: _pid} do
+    test "returns a map of health statuses" do
       statuses = HealthChecker.get_all_health_statuses()
       assert is_map(statuses)
+    end
+
+    test "returns empty map when the HealthChecker is not running" do
+      :ok = stop_supervised(HealthChecker)
+      assert %{} = HealthChecker.get_all_health_statuses()
     end
   end
 
   describe "check_agent_now/1" do
     test "does not crash when agent does not exist" do
-      # This should not crash
       assert :ok = HealthChecker.check_agent_now("nonexistent-agent-id")
+    end
+
+    test "returns :ok when the HealthChecker is not running" do
+      :ok = stop_supervised(HealthChecker)
+      assert :ok = HealthChecker.check_agent_now("any")
     end
   end
 
@@ -53,7 +70,6 @@ defmodule Cympho.AgentAdapters.HealthCheckerTest do
 
     test "multiple subscriptions are handled correctly" do
       assert :ok = HealthChecker.subscribe()
-      # Subscribe again
       assert :ok = HealthChecker.subscribe()
       assert :ok = HealthChecker.unsubscribe()
     end
@@ -61,7 +77,6 @@ defmodule Cympho.AgentAdapters.HealthCheckerTest do
 
   describe "PubSub broadcasts" do
     test "PubSub topic is accessible" do
-      # Subscribe to the agents topic
       Phoenix.PubSub.subscribe(Cympho.PubSub, "agents")
       :ok = Phoenix.PubSub.unsubscribe(Cympho.PubSub, "agents")
     end
@@ -69,10 +84,7 @@ defmodule Cympho.AgentAdapters.HealthCheckerTest do
 
   describe "health check polling" do
     test "health checker does not crash on periodic checks" do
-      # Wait for a few health check cycles
       Process.sleep(300)
-
-      # Health checker should still be alive
       assert Process.alive?(Process.whereis(HealthChecker))
     end
   end
@@ -85,6 +97,11 @@ defmodule Cympho.AgentAdapters.HealthCheckerTest do
     test "handles multiple calls gracefully" do
       assert :ok = HealthChecker.check_all_now()
       assert :ok = HealthChecker.check_all_now()
+      assert :ok = HealthChecker.check_all_now()
+    end
+
+    test "returns :ok when the HealthChecker is not running" do
+      :ok = stop_supervised(HealthChecker)
       assert :ok = HealthChecker.check_all_now()
     end
   end

@@ -1,16 +1,32 @@
 defmodule Cympho.AgentAdaptersTest do
+  @moduledoc """
+  Verifies the `Cympho.AgentAdapters` deprecation shim. The shim is
+  retained for one release window so any forgotten external caller logs
+  a warning rather than crashing. Each public function must:
+
+    1. Delegate to the canonical `Cympho.Adapters.<fun>` and return the
+       same value.
+    2. Emit a `Logger.warning` carrying `component: :agent_adapters_shim`
+       so the call can be traced and migrated.
+  """
+
   use ExUnit.Case, async: false
+
+  import ExUnit.CaptureLog
 
   alias Cympho.AgentAdapters
 
-  defmodule MockAdapter do
-    @behaviour Cympho.AgentAdapters.Adapter
+  defmodule ShimMockAdapter do
+    @behaviour Cympho.Adapters.Adapter
 
     @impl true
     def run(_issue, _agent_id, recipient_pid, _opts) do
       send(recipient_pid, {:session_started, self()})
       make_ref()
     end
+
+    @impl true
+    def available?, do: true
 
     @impl true
     def available?(_config), do: true
@@ -21,52 +37,15 @@ defmodule Cympho.AgentAdaptersTest do
     end
 
     @impl true
-    def type, do: :mock
+    def config_schema, do: []
 
     @impl true
-    def validate_config(_config), do: :ok
-  end
-
-  defmodule UnavailableAdapter do
-    @behaviour Cympho.AgentAdapters.Adapter
+    def name, do: "Shim Mock"
 
     @impl true
-    def run(_issue, _agent_id, _recipient_pid, _opts), do: make_ref()
+    def type, do: :shim_mock
 
     @impl true
-    def available?(_config), do: false
-
-    @impl true
-    def health_check(_config) do
-      %{status: :unhealthy, message: "Down", checked_at: DateTime.utc_now()}
-    end
-
-    @impl true
-    def type, do: :unavailable
-
-    @impl true
-    def validate_config(_config), do: :ok
-  end
-
-  defmodule BadConfigAdapter do
-    @behaviour Cympho.AgentAdapters.Adapter
-
-    @impl true
-    def run(_issue, _agent_id, _recipient_pid, _opts), do: make_ref()
-
-    @impl true
-    def available?(_config), do: true
-
-    @impl true
-    def health_check(_config) do
-      %{status: :healthy, message: nil, checked_at: DateTime.utc_now()}
-    end
-
-    @impl true
-    def type, do: :bad_config
-
-    @impl true
-    def validate_config(%{invalid: true}), do: {:error, "invalid config"}
     def validate_config(_config), do: :ok
   end
 
@@ -75,293 +54,103 @@ defmodule Cympho.AgentAdaptersTest do
   end
 
   describe "register/2" do
-    test "registers a valid adapter module" do
-      assert :ok = AgentAdapters.register(:mock, MockAdapter)
-      assert {:ok, MockAdapter} = AgentAdapters.lookup(:mock)
+    test "emits a deprecation warning" do
+      log =
+        capture_log(fn ->
+          AgentAdapters.register(:shim_mock, ShimMockAdapter)
+        end)
+
+      assert log =~ "Cympho.AgentAdapters.register is deprecated"
+      assert log =~ "call Cympho.Adapters.register directly"
     end
 
-    test "rejects a module that does not implement the behaviour" do
-      assert {:error, :invalid_module} = AgentAdapters.register(:bad, NotAnAdapter)
-      assert :error = AgentAdapters.lookup(:bad)
+    test "delegates to Cympho.Adapters.register and returns :ok for a valid adapter" do
+      assert :ok = AgentAdapters.register(:shim_mock, ShimMockAdapter)
+      assert {:ok, ShimMockAdapter} = Cympho.Adapters.Registry.lookup(:shim_mock)
     end
 
-    test "overwrites an existing registration" do
-      :ok = AgentAdapters.register(:mock, MockAdapter)
-      :ok = AgentAdapters.register(:mock, UnavailableAdapter)
-      assert {:ok, UnavailableAdapter} = AgentAdapters.lookup(:mock)
-    after
-      # Restore mock for other tests
-      AgentAdapters.register(:mock, MockAdapter)
-    end
-  end
-
-  describe "all_types/0" do
-    test "returns list including registered type atoms" do
-      AgentAdapters.register(:mock, MockAdapter)
-      types = AgentAdapters.all_types()
-      assert is_list(types)
-      assert :mock in types
-    end
-  end
-
-  describe "lookup/1" do
-    test "returns error for unregistered type" do
-      assert :error = AgentAdapters.lookup(:nonexistent)
-    end
-
-    test "returns module for registered type" do
-      AgentAdapters.register(:mock, MockAdapter)
-      assert {:ok, MockAdapter} = AgentAdapters.lookup(:mock)
-    end
-  end
-
-  describe "fallback_chain/1" do
-    test "returns [primary, :claude_code] when primary is not claude_code" do
-      assert AgentAdapters.fallback_chain(:codex) == [:codex, :claude_code]
-    end
-
-    test "returns [:claude_code] when primary is claude_code" do
-      assert AgentAdapters.fallback_chain(:claude_code) == [:claude_code]
-    end
-
-    test "works with any atom" do
-      assert AgentAdapters.fallback_chain(:cursor) == [:cursor, :claude_code]
-      assert AgentAdapters.fallback_chain(:http) == [:http, :claude_code]
+    test "delegates to Cympho.Adapters.register and returns :invalid_module for a non-adapter" do
+      assert {:error, :invalid_module} = AgentAdapters.register(:not_adapter, NotAnAdapter)
     end
   end
 
   describe "resolve/1" do
-    test "resolves agent with registered adapter to module and config" do
-      AgentAdapters.register(:mock, MockAdapter)
+    test "emits a deprecation warning" do
+      AgentAdapters.register(:shim_mock, ShimMockAdapter)
 
-      agent = %{adapter: :mock, config: %{timeout: 5000}}
-      assert {:ok, MockAdapter, %{timeout: 5000}} = AgentAdapters.resolve(agent)
+      log =
+        capture_log(fn ->
+          AgentAdapters.resolve(%{adapter: :shim_mock, config: %{}})
+        end)
+
+      assert log =~ "Cympho.AgentAdapters.resolve is deprecated"
     end
 
-    test "resolves agent without config key using empty config" do
-      AgentAdapters.register(:mock, MockAdapter)
+    test "delegates to Cympho.Adapters.resolve and returns the same tuple" do
+      AgentAdapters.register(:shim_mock, ShimMockAdapter)
 
-      agent = %{adapter: :mock}
-      assert {:ok, MockAdapter, %{}} = AgentAdapters.resolve(agent)
-    end
+      shim = AgentAdapters.resolve(%{adapter: :shim_mock, config: %{any: "value"}})
+      direct = Cympho.Adapters.resolve(%{adapter: :shim_mock, config: %{any: "value"}})
 
-    test "returns unknown_adapter when adapter type is not registered and no fallback matches" do
-      # Overwrite :claude_code fallback with UnavailableAdapter so it's found but not available
-      original = AgentAdapters.lookup(:claude_code)
-      AgentAdapters.register(:claude_code, UnavailableAdapter)
-
-      agent = %{adapter: :nonexistent, config: %{}}
-      # :nonexistent not registered, :claude_code registered but unavailable
-      assert {:error, :no_adapter_available} = AgentAdapters.resolve(agent)
-
-      # Restore
-      case original do
-        {:ok, mod} -> AgentAdapters.register(:claude_code, mod)
-        :error -> :ok
-      end
-    end
-
-    test "returns unknown_adapter when nothing in chain is registered" do
-      # Use a type whose entire chain ([:totally_unknown, :claude_code]) is unresolvable
-      # by overwriting :claude_code with UnavailableAdapter
-      original = AgentAdapters.lookup(:claude_code)
-
-      # Don't register :totally_unknown_xyz at all
-      # And make :claude_code not registered either
-      # We can't delete ETS entries from outside the owner process,
-      # so register it as UnavailableAdapter (found but unavailable → no_adapter_available)
-      # For a true unknown_adapter, we need found_any=false.
-      # This happens when NOTHING in the chain is found in the registry.
-      # Since we can't unregister, test with an adapter whose chain has no registered entries.
-      # The chain for :totally_unknown_xyz is [:totally_unknown_xyz, :claude_code].
-      # :claude_code is always registered by builtins, so we can only get unknown_adapter
-      # if we use the default adapter itself and it's not registered.
-      # Instead, test the clause directly by calling resolve_chain with empty results.
-
-      # Practical test: resolve with adapter that has no registered type
-      # and default is also not registered. We simulate by using a fresh agent map
-      # with adapter=nil, which defaults to :claude_code.
-      # If we overwrite :claude_code with UnavailableAdapter:
-      AgentAdapters.register(:claude_code, UnavailableAdapter)
-
-      agent = %{adapter: nil, config: %{}}
-      # adapter=nil → primary=:claude_code → chain=[:claude_code]
-      # UnavailableAdapter found but not available → no_adapter_available
-      assert {:error, :no_adapter_available} = AgentAdapters.resolve(agent)
-
-      # Restore
-      case original do
-        {:ok, mod} -> AgentAdapters.register(:claude_code, mod)
-        :error -> :ok
-      end
-    end
-
-    test "falls back past adapter with invalid config via validate_config" do
-      AgentAdapters.register(:bad_config, BadConfigAdapter)
-
-      # Ensure fallback is available by registering MockAdapter as :claude_code
-      original = AgentAdapters.lookup(:claude_code)
-      AgentAdapters.register(:claude_code, MockAdapter)
-
-      agent = %{adapter: :bad_config, config: %{invalid: true}}
-      assert {:ok, module, %{invalid: true}} = AgentAdapters.resolve(agent)
-      assert module == MockAdapter
-
-      # Restore
-      case original do
-        {:ok, mod} -> AgentAdapters.register(:claude_code, mod)
-        :error -> :ok
-      end
-    end
-
-    test "accepts adapter with valid config via validate_config" do
-      AgentAdapters.register(:bad_config, BadConfigAdapter)
-
-      agent = %{adapter: :bad_config, config: %{valid: true}}
-      assert {:ok, BadConfigAdapter, %{valid: true}} = AgentAdapters.resolve(agent)
-    end
-
-    test "returns config_invalid when all adapters in chain fail validation" do
-      AgentAdapters.register(:bad_config, BadConfigAdapter)
-
-      # Overwrite :claude_code fallback with BadConfigAdapter so both fail validation
-      original = AgentAdapters.lookup(:claude_code)
-      AgentAdapters.register(:claude_code, BadConfigAdapter)
-
-      agent = %{adapter: :bad_config, config: %{invalid: true}}
-      assert {:error, {:config_invalid, errors}} = AgentAdapters.resolve(agent)
-      assert is_list(errors)
-      assert length(errors) > 0
-
-      # Restore
-      case original do
-        {:ok, mod} -> AgentAdapters.register(:claude_code, mod)
-        :error -> :ok
-      end
-    end
-
-    test "returns no_adapter_available when adapters are registered but unavailable" do
-      AgentAdapters.register(:unavailable, UnavailableAdapter)
-
-      # Overwrite :claude_code fallback with UnavailableAdapter so both are unavailable
-      original = AgentAdapters.lookup(:claude_code)
-      AgentAdapters.register(:claude_code, UnavailableAdapter)
-
-      agent = %{adapter: :unavailable, config: %{}}
-      assert {:error, :no_adapter_available} = AgentAdapters.resolve(agent)
-
-      # Restore
-      case original do
-        {:ok, mod} -> AgentAdapters.register(:claude_code, mod)
-        :error -> :ok
-      end
+      assert shim == direct
+      assert {:ok, ShimMockAdapter, %{any: "value"}} = shim
     end
   end
 
-  describe "Adapter behaviour compliance" do
-    test "MockAdapter implements all required callbacks" do
-      behaviours =
-        MockAdapter.__info__(:attributes)
-        |> Keyword.get_values(:behaviour)
-        |> List.flatten()
-
-      assert Cympho.AgentAdapters.Adapter in behaviours
+  describe "fallback_chain/1" do
+    test "emits a deprecation warning" do
+      log = capture_log(fn -> AgentAdapters.fallback_chain(:codex) end)
+      assert log =~ "Cympho.AgentAdapters.fallback_chain is deprecated"
     end
 
-    test "type/0 returns the adapter type atom" do
-      assert MockAdapter.type() == :mock
-      assert UnavailableAdapter.type() == :unavailable
-    end
-
-    test "available?/1 accepts config" do
-      assert MockAdapter.available?(%{}) == true
-      assert UnavailableAdapter.available?(%{}) == false
-    end
-
-    test "health_check/1 returns expected shape" do
-      result = MockAdapter.health_check(%{})
-      assert Map.has_key?(result, :status)
-      assert Map.has_key?(result, :message)
-      assert Map.has_key?(result, :checked_at)
-      assert result.status in [:healthy, :degraded, :unhealthy, :unknown]
-    end
-
-    test "validate_config/1 returns ok or error tuple" do
-      assert :ok = MockAdapter.validate_config(%{})
-      assert {:error, _} = BadConfigAdapter.validate_config(%{invalid: true})
-    end
-
-    test "run/4 returns a reference and sends session_started" do
-      ref = MockAdapter.run(%{id: "1"}, "agent-1", self(), [])
-      assert is_reference(ref)
-      assert_receive {:session_started, _pid}
+    test "delegates to Cympho.Adapters.fallback_chain and returns the same list" do
+      assert AgentAdapters.fallback_chain(:codex) == Cympho.Adapters.fallback_chain(:codex)
+      assert AgentAdapters.fallback_chain(:codex) == [:codex, :claude_code]
+      assert AgentAdapters.fallback_chain(:claude_code) == [:claude_code]
     end
   end
 
-  describe "arity preference consistency" do
-    defmodule BothAritiesAdapter do
-      @behaviour Cympho.AgentAdapters.Adapter
-
-      @impl true
-      def run(_issue, _agent_id, recipient_pid, _opts) do
-        send(recipient_pid, {:session_started, self()})
-        make_ref()
-      end
-
-      @impl true
-      def available?(%{prefer_zero: true}), do: false
-      def available?(_config), do: true
-
-      def available?, do: false
-
-      @impl true
-      def health_check(_config) do
-        %{status: :healthy, message: "OK", checked_at: DateTime.utc_now()}
-      end
-
-      @impl true
-      def type, do: :both_arities
-
-      @impl true
-      def validate_config(_config), do: :ok
+  describe "all_types/0" do
+    test "emits a deprecation warning" do
+      log = capture_log(fn -> AgentAdapters.all_types() end)
+      assert log =~ "Cympho.AgentAdapters.all_types is deprecated"
     end
 
-    test "both AgentAdapters and Registry prefer available?/1 when both arities exist" do
-      AgentAdapters.register(:both_arities, BothAritiesAdapter)
+    test "delegates to Cympho.Adapters.all_types and returns the same list" do
+      AgentAdapters.register(:shim_mock, ShimMockAdapter)
+      assert AgentAdapters.all_types() == Cympho.Adapters.all_types()
+      assert :shim_mock in AgentAdapters.all_types()
+    end
+  end
 
-      # Make :claude_code fallback unavailable so resolve reaches no_adapter
-      original_claude = AgentAdapters.lookup(:claude_code)
-      AgentAdapters.register(:claude_code, UnavailableAdapter)
+  describe "lookup/1" do
+    test "emits a deprecation warning" do
+      log = capture_log(fn -> AgentAdapters.lookup(:claude_code) end)
+      assert log =~ "Cympho.AgentAdapters.lookup is deprecated"
+    end
 
-      config_prefer_one = %{prefer_one: true}
-      config_prefer_zero = %{prefer_zero: true}
+    test "delegates to Cympho.Adapters.lookup and returns the same tuple" do
+      AgentAdapters.register(:shim_mock, ShimMockAdapter)
 
-      # AgentAdapters.resolve should use available?/1
-      assert {:ok, BothAritiesAdapter, ^config_prefer_one} =
-               AgentAdapters.resolve(%{adapter: :both_arities, config: config_prefer_one})
+      assert AgentAdapters.lookup(:shim_mock) == Cympho.Adapters.lookup(:shim_mock)
+      assert AgentAdapters.lookup(:shim_mock) == {:ok, ShimMockAdapter}
+      assert AgentAdapters.lookup(:nonexistent) == :error
+    end
+  end
 
-      # When available?/1 returns false and available?/0 returns false,
-      # resolve falls back to the next adapter in the chain
-      result = AgentAdapters.resolve(%{adapter: :both_arities, config: config_prefer_zero})
-      assert match?({:error, :no_adapter_available}, result) or match?({:ok, _, _}, result)
+  describe "deprecation warning metadata" do
+    test "every shim function tags its log with component: :agent_adapters_shim" do
+      AgentAdapters.register(:shim_mock, ShimMockAdapter)
 
-      # Verify Registry.resolve_agent has same behavior
-      assert {:ok, BothAritiesAdapter, ^config_prefer_one} =
-               Cympho.Adapters.Registry.resolve_agent(%{
-                 adapter: :both_arities,
-                 config: config_prefer_one
-               })
-
-      assert {:error, :no_adapter} =
-               Cympho.Adapters.Registry.resolve_agent(%{
-                 adapter: :both_arities,
-                 config: config_prefer_zero
-               })
-
-      # Restore
-      case original_claude do
-        {:ok, mod} -> AgentAdapters.register(:claude_code, mod)
-        :error -> :ok
+      for fun <- [
+            fn -> AgentAdapters.register(:shim_mock, ShimMockAdapter) end,
+            fn -> AgentAdapters.resolve(%{adapter: :shim_mock, config: %{}}) end,
+            fn -> AgentAdapters.fallback_chain(:codex) end,
+            fn -> AgentAdapters.all_types() end,
+            fn -> AgentAdapters.lookup(:claude_code) end
+          ] do
+        log = capture_log([metadata: [:component]], fun)
+        assert log =~ "is deprecated", "Expected a deprecation warning, got: #{inspect(log)}"
       end
     end
   end

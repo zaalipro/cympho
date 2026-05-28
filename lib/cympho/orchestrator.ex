@@ -45,7 +45,7 @@ defmodule Cympho.Orchestrator do
     Agents,
     Activities,
     HeartbeatEngine,
-    AgentAdapters,
+    Adapters,
     AgentActions,
     IssueDigest,
     ReviewNudges,
@@ -464,7 +464,7 @@ defmodule Cympho.Orchestrator do
   defp prepare_legacy_runtime(%__MODULE__{} = session) do
     agent_map = build_agent_map(session)
 
-    case AgentAdapters.resolve(agent_map) do
+    case Adapters.resolve(agent_map) do
       {:ok, module, config} -> {:ok, module, config, nil}
       {:error, reason} -> {:error, reason}
     end

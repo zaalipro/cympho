@@ -283,4 +283,55 @@ defmodule Cympho.AdaptersTest do
       assert length(schema) > 0
     end
   end
+
+  describe "Registry.register_builtin/0" do
+    test "registers each of the seven built-in adapter types" do
+      types = Registry.all_types()
+
+      for builtin <- [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting] do
+        assert builtin in types, "expected built-in adapter #{inspect(builtin)} to be registered"
+      end
+    end
+
+    test "registers the :mock adapter under the test environment" do
+      types = Registry.all_types()
+      assert :mock in types
+    end
+
+    test "each built-in adapter resolves to a module implementing Cympho.Adapters.Adapter" do
+      for type <- [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting, :mock] do
+        assert {:ok, module} = Registry.lookup(type)
+        behaviours = module.__info__(:attributes) |> Keyword.get_values(:behaviour) |> List.flatten()
+
+        assert Cympho.Adapters.Adapter in behaviours,
+               "expected #{inspect(module)} for #{inspect(type)} to implement Cympho.Adapters.Adapter"
+      end
+    end
+  end
+
+  describe "Registry.resolve_agent/1" do
+    test "returns {:ok, module, config} for a registered adapter type" do
+      assert {:ok, module, config} =
+               Registry.resolve_agent(%{adapter: :process, config: %{command: "echo"}})
+
+      assert is_atom(module)
+      assert config == %{command: "echo"}
+    end
+
+    test "returns {:error, :no_adapter} when neither the primary nor the fallback resolves" do
+      original = Application.get_env(:cympho, :default_adapter)
+      Application.put_env(:cympho, :default_adapter, :totally_unregistered)
+
+      try do
+        assert {:error, :no_adapter} =
+                 Registry.resolve_agent(%{adapter: :also_unregistered, config: %{}})
+      after
+        if original do
+          Application.put_env(:cympho, :default_adapter, original)
+        else
+          Application.delete_env(:cympho, :default_adapter)
+        end
+      end
+    end
+  end
 end

@@ -12,7 +12,7 @@ defmodule Cympho.RuntimeOperations do
   alias Cympho.Adapters.Error, as: AdapterError
   alias Cympho.AgentInstructionStudio
   alias Cympho.AgentInstructionTuner
-  alias Cympho.AgentAdapters.HealthChecker
+  alias Cympho.Adapters.HealthChecker
   alias Cympho.AgentPromptContract
   alias Cympho.Agents
   alias Cympho.Agents.Agent

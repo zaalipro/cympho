@@ -295,14 +295,16 @@ Cympho is a Phoenix application with LiveView for the primary UI, Ecto/PostgreSQ
 Core domains live under `lib/cympho/`:
 
 - `Issues`, `Agents`, `Companies`, `Projects`, and `Users`
-- `Orchestrator`, `AgentRunner`, `AgentAdapters`, and `Adapters.Registry`
+- `Orchestrator`, `AgentRunner`, and `Adapters` (with `Adapters.Registry`, `Adapters.HealthChecker`, and seven built-in adapters)
 - `IssueDigest`, `IssueMemory`, `ReviewNudges`, and `PullRequestContract`
 - `RuntimeOperations`, `RuntimeCapacity`, and `RuntimeProfiles`
 - `Inbox`, `Comments`, `WorkProducts`, `ToolCallTraces`, and `Activities`
 - `ExecutionPolicies`, `BoardApprovals`, `Decisions`, and governance audit logs
-- `Workspaces`, `Routines`, `Skills`, `Plugins`, `Budgets`, and notifications
+- `Workspaces`, `Routines`, `Skills` (canonical public context for the plugin/skill concept), `Plugins` (internal runtime: registry, supervisor, worker, host services, plugin state, webhooks), `Budgets`, and notifications
 
-The web layer lives under `lib/cympho_web/` and uses Phoenix LiveView, controllers, channels, and shared components.
+`Cympho.AgentAdapters` is kept as a logged-deprecation shim for one release window; all new code should call `Cympho.Adapters` directly.
+
+The web layer lives under `lib/cympho_web/` and uses Phoenix LiveView, controllers, channels, and shared components. Larger LiveViews — `issue_live/show` in particular — are progressively decomposed into focused function components under `lib/cympho_web/live/<feature>/components/`.
 
 ## Useful Commands
 

@@ -62,7 +62,7 @@ defmodule Cympho.OrchestratorTest do
       issue: issue
     } do
       with_mocks([
-        {Cympho.AgentAdapters, [],
+        {Cympho.Adapters, [],
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
@@ -91,7 +91,7 @@ defmodule Cympho.OrchestratorTest do
       issue: issue
     } do
       with_mocks([
-        {Cympho.AgentAdapters, [],
+        {Cympho.Adapters, [],
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
@@ -137,7 +137,7 @@ defmodule Cympho.OrchestratorTest do
       }
 
       with_mocks([
-        {Cympho.AgentAdapters, [],
+        {Cympho.Adapters, [],
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
@@ -206,7 +206,7 @@ defmodule Cympho.OrchestratorTest do
       }
 
       with_mocks([
-        {Cympho.AgentAdapters, [],
+        {Cympho.Adapters, [],
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
@@ -248,7 +248,7 @@ defmodule Cympho.OrchestratorTest do
       issue: issue
     } do
       with_mocks([
-        {Cympho.AgentAdapters, [],
+        {Cympho.Adapters, [],
          [
            resolve: fn _ -> {:error, :no_adapter_available} end
          ]},
@@ -277,7 +277,7 @@ defmodule Cympho.OrchestratorTest do
       company: company
     } do
       with_mocks([
-        {Cympho.AgentAdapters, [],
+        {Cympho.Adapters, [],
          [
            resolve: fn _ -> {:error, :no_adapter_available} end
          ]},
@@ -324,7 +324,7 @@ defmodule Cympho.OrchestratorTest do
       ]
 
       with_mocks([
-        {Cympho.AgentAdapters, [],
+        {Cympho.Adapters, [],
          [
            resolve: fn _ -> {:error, {:config_invalid, errors}} end
          ]},
@@ -358,7 +358,7 @@ defmodule Cympho.OrchestratorTest do
       issue: issue
     } do
       with_mocks([
-        {Cympho.AgentAdapters, [],
+        {Cympho.Adapters, [],
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
@@ -388,7 +388,7 @@ defmodule Cympho.OrchestratorTest do
       issue: issue
     } do
       with_mocks([
-        {Cympho.AgentAdapters, [],
+        {Cympho.Adapters, [],
          [
            resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
          ]},
@@ -434,7 +434,7 @@ defmodule Cympho.OrchestratorTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           with_mocks([
-            {Cympho.AgentAdapters, [],
+            {Cympho.Adapters, [],
              [
                resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
              ]},

@@ -29,7 +29,7 @@ defmodule CymphoWeb.AgentJSON do
     }
 
     # Try to get real-time health status from HealthChecker
-    case Cympho.AgentAdapters.HealthChecker.get_health_status(agent.id) do
+    case Cympho.Adapters.HealthChecker.get_health_status(agent.id) do
       {:ok, live_health_status} ->
         Map.put(base_data, :live_health_status, live_health_status)
 
