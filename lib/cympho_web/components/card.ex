@@ -7,7 +7,7 @@ defmodule CymphoWeb.Components.Card do
   def card(assigns) do
     ~H"""
     <div
-      class="rounded-lg border border-border bg-panel shadow-ring transition-colors hover:bg-surface-hover"
+      class="rounded-lg border border-border bg-panel shadow-card transition-all hover:bg-surface-hover hover:shadow-raised"
       {@rest}
     >
       {render_slot(@inner_block)}

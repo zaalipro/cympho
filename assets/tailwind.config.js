@@ -135,20 +135,23 @@ module.exports = {
         large: "24px",
       },
       boxShadow: {
+        // Refined-dark elevation: each = hairline ring + layered ambient
+        // shadows with real alpha (visible on the lifted #0a0b0e canvas) +
+        // an inset top-highlight (the craft tell). `card` = resting cards/
+        // panels, `raised` = hover-lift/popovers.
         ring: "0px 0px 0px 1px var(--color-border)",
         "ring-hover": "0px 0px 0px 1px var(--color-border-hover)",
-        elevated: "0px 0px 0px 1px var(--color-border), 0px 4px 24px rgba(0,0,0,0.05)",
-        focus: "0px 0px 0px 2px var(--color-primary)",
-        dialog: "0px 0px 0px 1px var(--color-border), 0px 8px 32px rgba(0,0,0,0.08)",
-        subtle: "0px 2px 8px rgba(0,0,0,0.04)",
-        inset: "inset 0px 0px 0px 1px rgba(0,0,0,0.06)",
-        // v2 elevation (additive) — real depth on the lifted dark canvas:
-        // inset top-highlight + hairline ring + layered ambient shadows.
-        // `card` = resting, `raised` = hover-lift. Phase 1 also rebuilds
-        // elevated/dialog/subtle to match.
+        subtle: "0 0 0 1px var(--color-border), 0 1px 2px rgba(0,0,0,0.40)",
         card: "inset 0 1px 0 0 rgba(255,255,255,0.04), 0 0 0 1px var(--color-border), 0 1px 2px rgba(0,0,0,0.35), 0 4px 12px rgba(0,0,0,0.35)",
         raised:
           "inset 0 1px 0 0 rgba(255,255,255,0.05), 0 0 0 1px var(--color-border-hover), 0 2px 4px rgba(0,0,0,0.40), 0 8px 20px rgba(0,0,0,0.45)",
+        elevated:
+          "inset 0 1px 0 0 rgba(255,255,255,0.05), 0 0 0 1px var(--color-border), 0 4px 12px rgba(0,0,0,0.45), 0 12px 28px rgba(0,0,0,0.50)",
+        dialog:
+          "inset 0 1px 0 0 rgba(255,255,255,0.06), 0 0 0 1px var(--color-border), 0 8px 24px rgba(0,0,0,0.55), 0 24px 60px rgba(0,0,0,0.60)",
+        focus:
+          "0 0 0 1px var(--color-canvas), 0 0 0 3px color-mix(in srgb, var(--color-primary) 55%, transparent), 0 0 12px 0 color-mix(in srgb, var(--color-primary) 35%, transparent)",
+        inset: "inset 0px 0px 0px 1px rgba(0,0,0,0.20)",
       },
       letterSpacing: {
         // Negative tracking per DESIGN.md

@@ -51,12 +51,13 @@ defmodule CymphoWeb.DesignShowcaseLive do
             <p class="text-eyebrow uppercase text-text-quaternary">Design preview · refined dark</p>
             <h1 class="mt-1 text-headline text-text-primary">Cympho v2</h1>
             <p class="mt-1 max-w-2xl text-body-sm text-text-tertiary">
-              Lifted canvas, real elevation, an activated type scale and a restrained indigo accent.
-              The rest of the app is unchanged — open any real route in another tab to compare.
+              Lifted canvas, real elevation, an activated type scale and a restrained indigo accent —
+              now live across the app. This page is the living reference for tokens, components and the
+              redesigned hero screens.
             </p>
           </div>
           <span class="inline-flex shrink-0 items-center gap-1.5 self-start rounded-pill border border-brand/30 bg-brand/10 px-2.5 py-1 text-caption font-510 text-brand">
-            <span class="h-1.5 w-1.5 rounded-full bg-brand"></span> data-theme="v2"
+            <span class="h-1.5 w-1.5 rounded-full bg-brand"></span> refined dark · live
           </span>
         </div>
 

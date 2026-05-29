@@ -26,10 +26,10 @@ defmodule CymphoWeb.Components do
     ~H"""
     <header class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between" {@rest}>
       <div class="min-w-0">
-        <h1 :if={@title} class="text-[22px] leading-7 font-590 tracking-tight text-text-primary">
+        <h1 :if={@title} class="text-headline text-text-primary">
           {@title}
         </h1>
-        <p :if={@subtitle} class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
+        <p :if={@subtitle} class="mt-1 max-w-2xl text-body-sm text-text-tertiary">
           {@subtitle}
         </p>
         {render_slot(@inner_block)}
@@ -47,7 +47,7 @@ defmodule CymphoWeb.Components do
 
   def panel(assigns) do
     ~H"""
-    <section class={["rounded-lg border border-border bg-panel shadow-ring", @class]} {@rest}>
+    <section class={["rounded-lg border border-border bg-panel shadow-card", @class]} {@rest}>
       {render_slot(@inner_block)}
     </section>
     """
@@ -62,12 +62,12 @@ defmodule CymphoWeb.Components do
 
   def metric(assigns) do
     ~H"""
-    <div class={["rounded-lg border border-border bg-panel px-4 py-3", @class]} {@rest}>
-      <p class="text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+    <div class={["rounded-lg border border-border bg-panel px-4 py-3 shadow-card", @class]} {@rest}>
+      <p class="text-eyebrow uppercase text-text-quaternary">
         {@label}
       </p>
-      <p class={["mt-1 text-2xl font-590 leading-8", metric_tone(@tone)]}>{@value}</p>
-      <p :if={@hint} class="mt-1 truncate text-xs text-text-quaternary">{@hint}</p>
+      <p class={["mt-1 text-2xl font-590 leading-8 tabular-nums", metric_tone(@tone)]}>{@value}</p>
+      <p :if={@hint} class="mt-1 truncate text-caption text-text-quaternary">{@hint}</p>
     </div>
     """
   end
@@ -450,7 +450,7 @@ defmodule CymphoWeb.Components do
       type={@type}
       disabled={@disabled}
       class={[
-        "inline-flex items-center justify-center gap-2 font-medium transition-colors rounded-lg",
+        "inline-flex items-center justify-center gap-2 font-medium transition-colors rounded-lg btn-press",
         button_variant(@variant),
         button_size(@size),
         @disabled && "cursor-not-allowed opacity-50"
@@ -507,7 +507,9 @@ defmodule CymphoWeb.Components do
     end)
   end
 
-  defp button_variant("primary"), do: "bg-brand text-white hover:bg-accent"
+  defp button_variant("primary"),
+    do:
+      "bg-brand text-white bg-gradient-to-b from-white/[0.10] to-transparent shadow-[inset_0_1px_0_0_rgba(255,255,255,0.18)] hover:bg-accent-hover"
 
   defp button_variant("secondary"),
     do: "bg-button text-text-primary border border-border hover:bg-button-hover"
