@@ -187,7 +187,8 @@ defmodule CymphoWeb.InboxLiveTest do
 
       assert html =~ "Needs review evidence"
       assert html =~ "Review evidence needed"
-      assert html =~ "Queued by review gate"
+      # Review-gate reason is surfaced inline (de-nested from the old bordered
+      # box) with the blocker labels shown as chips.
       assert html =~ "Delivery comment"
     end
   end

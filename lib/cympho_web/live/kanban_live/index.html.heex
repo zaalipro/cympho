@@ -344,7 +344,7 @@
               </div>
             <% else %>
               <div class={"flex min-h-[160px] w-full flex-col rounded-lg border bg-panel/90 lg:h-full lg:w-[260px] xl:w-[276px] " <> if(exceeded, do: "border-red-500/50", else: "border-border")}>
-                <div class="sticky top-0 z-10 flex items-center justify-between rounded-t-lg border-b border-border bg-panel px-3 py-2.5">
+                <div class={"sticky top-0 z-10 flex items-center justify-between rounded-t-lg border-b border-l-2 border-border bg-panel px-3 py-2.5 " <> column_accent_class(status)}>
                   <div class="flex items-center gap-2">
                     <button
                       type="button"

@@ -16,33 +16,41 @@ defmodule CymphoWeb.KanbanLive.Components do
   def issue_card(assigns) do
     ~H"""
     <div
-      class="kanban-card-enter group min-h-[92px] cursor-grab rounded-lg border border-border bg-surface p-3 shadow-ring transition-colors hover:border-border-hover hover:bg-surface-hover active:cursor-grabbing"
+      class="kanban-card-enter group min-h-[72px] cursor-grab rounded-lg border border-border bg-surface p-3 shadow-subtle transition-all hover:border-border-hover hover:bg-surface-hover hover:shadow-elevated active:cursor-grabbing"
       data-issue-id={@issue.id}
     >
-      <div class="mb-2 flex items-center justify-between gap-2">
+      <div class="flex items-center justify-between gap-2">
         <span class="font-mono text-[11px] text-text-quaternary">
           {@issue.identifier || "CYM-" <> String.slice(@issue.id, 0, 4)}
         </span>
-        <span class={"h-1.5 w-1.5 shrink-0 rounded-full " <> status_pin_class(@issue.status)}></span>
+        <span class="flex items-center gap-2">
+          <span class={"rounded-full px-1.5 py-0.5 text-[10px] font-510 " <> priority_class(@issue.priority)}>
+            {String.capitalize(to_string(@issue.priority))}
+          </span>
+          <span class={"h-1.5 w-1.5 shrink-0 rounded-full " <> status_pin_class(@issue.status)}>
+          </span>
+        </span>
       </div>
 
-      <.pending_wake_badge :if={@pending_wake} wake={@pending_wake} class="mb-2" />
+      <.pending_wake_badge :if={@pending_wake} wake={@pending_wake} class="mt-2" />
 
       <.link
         navigate={"/issues/#{@issue.id}"}
-        class="line-clamp-2 block text-sm font-590 leading-5 text-text-primary hover:text-white"
+        class="mt-1.5 line-clamp-2 block text-sm font-590 leading-5 text-text-primary hover:text-white"
         data-no-drag
       >
         {@issue.title}
       </.link>
 
-      <.issue_digest_card issue={@issue} density={@digest_density} class="mt-2" />
+      <.issue_digest_card
+        issue={@issue}
+        density={@digest_density}
+        variant={if @digest_density == "compact", do: "inline", else: "card"}
+        class="mt-2"
+      />
 
-      <div class="mt-3 flex flex-wrap items-center gap-2">
-        <span class={"rounded-full px-2 py-0.5 text-[10px] font-510 " <> priority_class(@issue.priority)}>
-          {String.capitalize(to_string(@issue.priority))}
-        </span>
-        <span class="flex items-center gap-1 text-xs text-text-quaternary">
+      <div class="mt-2.5 flex flex-wrap items-center gap-3 text-[11px] text-text-quaternary">
+        <span class="flex items-center gap-1">
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               stroke-linecap="round"
@@ -55,7 +63,7 @@ defmodule CymphoWeb.KanbanLive.Components do
           <span class="sr-only">{pluralize(length(@issue.comments), "comment")}</span>
         </span>
         <%= if length(@issue.blocked_by || []) > 0 do %>
-          <span class="text-xs text-red-400">
+          <span class="text-red-400">
             {length(@issue.blocked_by)} blockers
           </span>
         <% end %>
@@ -63,7 +71,7 @@ defmodule CymphoWeb.KanbanLive.Components do
           <% hb_state = Index.get_heartbeat_state(@agent_heartbeat_states, @issue.assignee.id) %>
           <span class="flex items-center gap-1">
             <span class={"w-1.5 h-1.5 rounded-full " <> heartbeat_dot_color(hb_state.status)}></span>
-            <span class="max-w-[110px] truncate text-xs text-text-quaternary">
+            <span class="max-w-[110px] truncate">
               {@issue.assignee.name}
             </span>
           </span>
@@ -72,7 +80,7 @@ defmodule CymphoWeb.KanbanLive.Components do
           <a
             href={@issue.github_pr_url}
             target="_blank"
-            class="text-xs text-accent hover:text-accent-hover transition-colors"
+            class="text-accent hover:text-accent-hover transition-colors"
             title="GitHub PR"
           >
             PR
@@ -168,6 +176,16 @@ defmodule CymphoWeb.KanbanLive.Components do
   defp empty_column_message(:done), do: "No completed work yet"
   defp empty_column_message(:blocked), do: "No blockers"
   defp empty_column_message(:cancelled), do: "No cancelled work"
+
+  @doc "2px left-accent color for a column header, keyed to status."
+  def column_accent_class(:backlog), do: "border-l-text-quaternary"
+  def column_accent_class(:todo), do: "border-l-sky-500"
+  def column_accent_class(:in_progress), do: "border-l-brand"
+  def column_accent_class(:in_review), do: "border-l-amber-500"
+  def column_accent_class(:blocked), do: "border-l-red-500"
+  def column_accent_class(:done), do: "border-l-emerald-500"
+  def column_accent_class(:cancelled), do: "border-l-text-tertiary"
+  def column_accent_class(_), do: "border-l-border"
 
   def priority_class(:critical), do: "bg-red-500/20 text-red-300"
   def priority_class(:high), do: "bg-red-500/20 text-red-400"

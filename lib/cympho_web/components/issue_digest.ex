@@ -639,6 +639,7 @@ defmodule CymphoWeb.Components.IssueDigest do
 
   attr :issue, :map, required: true
   attr :density, :string, default: "detailed"
+  attr :variant, :string, default: "card"
   attr :class, :string, default: ""
 
   def issue_digest_card(assigns) do
@@ -646,12 +647,25 @@ defmodule CymphoWeb.Components.IssueDigest do
       assigns
       |> assign(:digest, IssueDigest.build(assigns.issue))
       |> assign(:compact?, assigns.density == "compact")
+      |> assign(:inline?, assigns.variant == "inline")
 
     ~H"""
-    <div class={[
-      "rounded-md border border-border/70 bg-canvas/70 px-2.5 py-2",
-      @class
-    ]}>
+    <%!-- Inline variant: one borderless signal line (pill + headline). Keeps
+         dense surfaces like the board + inbox from nesting a card-in-card. --%>
+    <div :if={@inline?} class={["flex min-w-0 items-center gap-1.5", @class]}>
+      <span class={"shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-510 #{digest_state_class(@digest.state)}"}>
+        {@digest.label}
+      </span>
+      <span class="line-clamp-1 text-[11px] leading-4 text-text-tertiary">{@digest.headline}</span>
+    </div>
+
+    <div
+      :if={!@inline?}
+      class={[
+        "rounded-md border border-border/70 bg-canvas/70 px-2.5 py-2",
+        @class
+      ]}
+    >
       <div class="flex flex-wrap items-center gap-1.5">
         <span class={"rounded-full border px-1.5 py-0.5 text-[10px] font-510 #{digest_state_class(@digest.state)}"}>
           {@digest.label}

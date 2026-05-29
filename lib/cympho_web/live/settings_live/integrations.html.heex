@@ -26,8 +26,13 @@
   </nav>
 
   <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-    <.panel>
-      <div class="border-b border-border p-5">
+    <.panel class="overflow-hidden">
+      <div class={[
+        "h-px bg-gradient-to-r from-transparent to-transparent",
+        if(agrenting_connected?(@agrenting_status), do: "via-success/40", else: "via-border")
+      ]}>
+      </div>
+      <div class="border-b border-border bg-gradient-to-b from-surface-2/40 to-transparent p-5">
         <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div class="flex min-w-0 gap-3">
             <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-brand/25 bg-brand/10 text-brand">
@@ -35,8 +40,9 @@
             </div>
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <h2 class="text-base font-590 text-text-primary">Agrenting</h2>
-                <span class={"rounded-full border px-2 py-0.5 text-xs font-510 #{connection_badge_class(@agrenting_status)}"}>
+                <h2 class="text-card-title text-text-primary">Agrenting</h2>
+                <span class={"inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-510 #{connection_badge_class(@agrenting_status)}"}>
+                  <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
                   {connection_badge_label(@agrenting_status)}
                 </span>
               </div>
@@ -161,7 +167,7 @@
             <button
               type="submit"
               phx-disable-with="Saving..."
-              class="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-accent-hover"
+              class="btn-press inline-flex items-center gap-2 rounded-lg bg-brand bg-gradient-to-b from-white/[0.10] to-transparent px-4 py-2 text-sm font-510 text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.18)] transition-colors hover:bg-accent-hover"
             >
               <.icon name="hero-check" class="h-4 w-4" /> Save connection
             </button>
@@ -177,7 +183,15 @@
           <dl class="mt-4 space-y-3 text-sm">
             <div class="flex items-center justify-between gap-3 border-b border-border pb-3">
               <dt class="text-text-tertiary">API key</dt>
-              <dd class="font-510 text-text-primary">
+              <dd class="flex items-center gap-1.5 font-510 text-text-primary">
+                <span class={[
+                  "h-1.5 w-1.5 rounded-full",
+                  if(api_key_present?(@agrenting_status),
+                    do: "bg-success",
+                    else: "bg-text-quaternary"
+                  )
+                ]}>
+                </span>
                 {present_label(api_key_present?(@agrenting_status))}
               </dd>
             </div>
@@ -195,7 +209,15 @@
             </div>
             <div class="flex items-center justify-between gap-3">
               <dt class="text-text-tertiary">Repo token</dt>
-              <dd class="font-510 text-text-primary">
+              <dd class="flex items-center gap-1.5 font-510 text-text-primary">
+                <span class={[
+                  "h-1.5 w-1.5 rounded-full",
+                  if(repo_token_present?(@agrenting_status),
+                    do: "bg-success",
+                    else: "bg-text-quaternary"
+                  )
+                ]}>
+                </span>
                 {present_label(repo_token_present?(@agrenting_status))}
               </dd>
             </div>

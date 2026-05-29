@@ -112,7 +112,10 @@
   <div :if={!Enum.empty?(@inbox_items)} class="grid gap-3">
     <div
       :for={item <- @inbox_items}
-      class="group rounded-lg border border-border bg-panel transition-colors hover:border-border-hover hover:bg-surface-hover/40"
+      class={[
+        "group rounded-lg border border-border bg-panel shadow-card transition-all hover:border-border-hover hover:shadow-raised",
+        item.status == "unread" && "border-l-2 border-l-brand"
+      ]}
     >
       <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
         <div class="min-w-0">
@@ -151,25 +154,34 @@
 
             <p
               :if={issue_description(item.issue)}
-              class="mt-2 max-w-3xl text-sm text-text-tertiary"
+              class="mt-2 line-clamp-2 max-w-3xl text-sm text-text-tertiary"
             >
               {issue_description(item.issue)}
             </p>
 
-            <div
-              :if={item.review_nudge}
-              class="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2"
-            >
-              <p class="text-xs font-590 text-amber-100">{item.review_nudge.summary}</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Queued by review gate
-                <span :if={!Enum.empty?(item.review_nudge.blocker_labels || [])}>
-                  · {Enum.join(item.review_nudge.blocker_labels, ", ")}
-                </span>
-              </p>
+            <div :if={item.review_nudge} class="mt-2 flex flex-wrap items-center gap-1.5">
+              <span
+                class="line-clamp-1 text-xs text-amber-200/80"
+                title={item.review_nudge.summary}
+              >
+                {item.review_nudge.summary}
+              </span>
+              <span
+                :for={label <- item.review_nudge.blocker_labels || []}
+                class="rounded-full border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-510 text-amber-200"
+              >
+                {label}
+              </span>
             </div>
 
-            <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <.issue_digest_card
+              issue={item.issue}
+              density={@digest_density}
+              variant={if @digest_density == "compact", do: "inline", else: "card"}
+              class="mt-2"
+            />
+
+            <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
               <span class="rounded-full border border-border bg-surface px-2 py-0.5 text-text-secondary">
                 {issue_status_label(item.issue.status)}
               </span>
@@ -183,8 +195,6 @@
                 Role: {item.issue.assigned_role}
               </span>
             </div>
-
-            <.issue_digest_card issue={item.issue} density={@digest_density} class="mt-3" />
           <% else %>
             <p class="text-base font-590 text-text-tertiary">Issue removed</p>
             <p class="mt-2 text-sm text-text-quaternary">

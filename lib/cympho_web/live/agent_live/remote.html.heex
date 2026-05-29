@@ -83,12 +83,18 @@
     <div :if={!@loading? and @remote_agents != []} class="grid gap-4 xl:grid-cols-2">
       <div
         :for={agent <- @remote_agents}
-        class="rounded-lg border border-border bg-panel p-4 shadow-sm"
+        class={[
+          "card-lift rounded-lg border bg-panel p-4 shadow-card hover:shadow-raised",
+          if(hired_remote_agent?(@hired_remote_dids, agent),
+            do: "border-brand/30 bg-brand/[0.04]",
+            else: "border-border"
+          )
+        ]}
       >
-        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-              <h2 class="truncate text-base font-590 text-text-primary">
+              <h2 class="truncate text-card-title text-text-primary">
                 {agent["name"] || agent["did"]}
               </h2>
               <span class={"rounded-full border px-2 py-0.5 text-xs font-510 #{status_badge_class(agent["status"])}"}>
@@ -102,24 +108,24 @@
               </span>
             </div>
             <p class="mt-1 truncate font-mono text-xs text-text-quaternary">{agent["did"]}</p>
-            <div class="mt-3 flex flex-wrap gap-2">
-              <span class="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-secondary">
-                {price_label(agent["base_price"])}
-              </span>
-              <span class="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-secondary">
-                {rating_label(agent["reputation_score"])}
-              </span>
-              <span
-                :if={agent["ai_provider"] || agent["ai_model"]}
-                class="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-secondary"
-              >
-                {provider_model_label(agent)}
-              </span>
-            </div>
+          </div>
+          <div class="shrink-0 text-right">
+            <p class="font-mono text-card-title tabular-nums text-text-primary">
+              {price_label(agent["base_price"])}
+            </p>
+            <p class="text-caption text-text-quaternary">
+              {rating_label(agent["reputation_score"])}
+            </p>
           </div>
         </div>
 
-        <div class="mt-4 flex flex-wrap gap-2">
+        <div class="mt-3 flex flex-wrap gap-2">
+          <span
+            :if={agent["ai_provider"] || agent["ai_model"]}
+            class="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-secondary"
+          >
+            {provider_model_label(agent)}
+          </span>
           <span
             :for={capability <- Enum.take(agent["capabilities"] || [], 8)}
             class="rounded-md border border-brand/20 bg-brand/10 px-2 py-1 text-xs text-brand"
@@ -128,66 +134,72 @@
           </span>
         </div>
 
-        <form
-          phx-submit="hire_agent"
-          class="mt-4 grid gap-3 border-t border-border pt-4 md:grid-cols-2"
-        >
+        <form phx-submit="hire_agent" class="mt-4 border-t border-border pt-4">
           <input type="hidden" name="agent_did" value={agent["did"]} />
+          <div class="flex items-start justify-between gap-3">
+            <details class="min-w-0 flex-1">
+              <summary class="cursor-pointer list-none text-sm font-510 text-text-tertiary hover:text-text-primary">
+                Configure hire ▾
+              </summary>
+              <div class="mt-3 grid gap-3 md:grid-cols-2">
+                <label class="space-y-1.5">
+                  <span class="text-xs font-510 text-text-secondary">Capability</span>
+                  <select
+                    name="capability"
+                    class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  >
+                    <option
+                      :for={{label, value} <- capability_select_options(agent)}
+                      value={value}
+                    >
+                      {label}
+                    </option>
+                  </select>
+                </label>
 
-          <label class="space-y-1.5">
-            <span class="text-xs font-510 text-text-secondary">Capability</span>
-            <select
-              name="capability"
-              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-            >
-              <option
-                :for={{label, value} <- capability_select_options(agent)}
-                value={value}
-              >
-                {label}
-              </option>
-            </select>
-          </label>
+                <label class="space-y-1.5">
+                  <span class="text-xs font-510 text-text-secondary">Cympho role</span>
+                  <select
+                    name="role"
+                    class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  >
+                    <option :for={{label, value} <- role_options()} value={value}>{label}</option>
+                  </select>
+                </label>
 
-          <label class="space-y-1.5">
-            <span class="text-xs font-510 text-text-secondary">Cympho role</span>
-            <select
-              name="role"
-              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-            >
-              <option :for={{label, value} <- role_options()} value={value}>{label}</option>
-            </select>
-          </label>
+                <label class="space-y-1.5">
+                  <span class="text-xs font-510 text-text-secondary">Max price</span>
+                  <input
+                    type="text"
+                    name="max_price"
+                    value={agent["base_price"] || ""}
+                    class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  />
+                </label>
 
-          <label class="space-y-1.5">
-            <span class="text-xs font-510 text-text-secondary">Max price</span>
-            <input
-              type="text"
-              name="max_price"
-              value={agent["base_price"] || ""}
-              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-            />
-          </label>
+                <label class="space-y-1.5">
+                  <span class="text-xs font-510 text-text-secondary">Delivery</span>
+                  <select
+                    name="delivery_mode"
+                    class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  >
+                    <option :for={{label, value} <- delivery_options()} value={value}>
+                      {label}
+                    </option>
+                  </select>
+                </label>
+              </div>
+            </details>
 
-          <label class="space-y-1.5">
-            <span class="text-xs font-510 text-text-secondary">Delivery</span>
-            <select
-              name="delivery_mode"
-              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-            >
-              <option :for={{label, value} <- delivery_options()} value={value}>{label}</option>
-            </select>
-          </label>
-
-          <div class="md:col-span-2 flex items-center justify-end">
             <button
               type="submit"
               disabled={hired_remote_agent?(@hired_remote_dids, agent)}
               class={[
-                "rounded-lg px-4 py-2 text-sm font-510",
+                "btn-press shrink-0 rounded-lg px-4 py-2 text-sm font-510",
                 if(hired_remote_agent?(@hired_remote_dids, agent),
                   do: "cursor-not-allowed border border-border bg-surface text-text-quaternary",
-                  else: "bg-brand text-white hover:bg-accent-hover"
+                  else:
+                    "bg-brand bg-gradient-to-b from-white/[0.10] to-transparent text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.18)] hover:bg-accent-hover"
                 )
               ]}
             >

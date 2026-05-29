@@ -1,4 +1,4 @@
-<.page size="wide" class="cympho-noise cympho-vignette">
+<.page size="wide">
   <div class="relative z-10">
     <%!-- ============================================================
          Hero — title sits over a brand-tinted radial backdrop. The
@@ -141,10 +141,7 @@
         </div>
         <div class="mt-3 flex items-center gap-4">
           <div class={["relative shrink-0", capacity_text_class(@runtime_capacity.level)]}>
-            <svg
-              viewBox="0 0 50 50"
-              class="h-16 w-16 -rotate-90 drop-shadow-[0_0_12px_rgba(94,106,210,0.25)]"
-            >
+            <svg viewBox="0 0 50 50" class="h-16 w-16 -rotate-90">
               <circle
                 cx="25"
                 cy="25"
@@ -209,9 +206,9 @@
         <a
           :for={signal <- @execution_health}
           href={signal.path}
-          class={"group relative overflow-hidden rounded-lg border px-3 py-3 transition hover:-translate-y-0.5 hover:shadow-elevated #{health_signal_class(signal.tone)}"}
+          class={"group relative overflow-hidden rounded-lg border px-3 py-3 transition hover:bg-surface-hover/40 #{health_signal_class(signal.tone)}"}
         >
-          <div class={"pointer-events-none absolute inset-0 bg-gradient-to-br opacity-80 transition group-hover:opacity-100 #{health_tone_glow(signal.tone)}"}>
+          <div class={"pointer-events-none absolute inset-0 bg-gradient-to-br opacity-25 transition group-hover:opacity-40 #{health_tone_glow(signal.tone)}"}>
           </div>
           <div class="relative">
             <div class="flex items-start justify-between gap-2">
