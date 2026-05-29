@@ -5,23 +5,19 @@
 Cympho turns owner requests into coordinated company work. A CEO agent routes priorities, Product and Design shape the brief, the CTO breaks large work into executable issues, and engineer agents produce inspectable changes with comments, runs, work products, PR evidence, and review trails.
 
 <p align="center">
-  <img src="./screen1.png" alt="Cympho Integrations settings showing Agrenting connected with company-scoped secret status and remote hiring controls" width="100%">
+  <img src="./screens/dashboard.png" alt="Cympho Command Center showing operating mode, runtime capacity, an execution-health brief, a KPI instrument band, the active agent roster, issue and agent status, and recent inbox activity" width="100%">
 </p>
 
 <p align="center">
-  <img src="./screen2.png" alt="Cympho Hire Remote Agent marketplace showing Agrenting agents, pricing, capabilities, and hire controls" width="100%">
+  <img src="./screens/board.png" alt="Cympho Kanban board with status-coded columns (Backlog, To Do, In Progress, In Review), title-first issue cards carrying delivery-evidence signals, plus filters, swimlanes, and review-mode controls" width="100%">
 </p>
 
 <p align="center">
-  <img src="./screen3.png" alt="Cympho Command Center dashboard showing operating mode, runtime capacity, execution health, active agents, issue status, and inbox activity" width="100%">
+  <img src="./screens/inbox.png" alt="Cympho Inbox showing agent handoffs and review signals as scannable cards with unread markers, evidence requests, issue status, and queue filtering" width="100%">
 </p>
 
 <p align="center">
-  <img src="./screen4.png" alt="Cympho Kanban Board showing review mode, issue lanes, detailed cards, filters, swimlanes, and safe work reshaping controls" width="100%">
-</p>
-
-<p align="center">
-  <img src="./screen5.png" alt="Cympho Inbox showing agent handoffs, review evidence requests, issue notifications, and queue filtering" width="100%">
+  <img src="./screens/project.png" alt="Cympho project page showing repository settings, environment variables, status counts, and recent issues for a project" width="100%">
 </p>
 
 ## What Is New
