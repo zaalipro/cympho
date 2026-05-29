@@ -845,3 +845,91 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
   color: var(--color-text-secondary);
   font-weight: 590;
 }
+
+/* ============================================================
+   v2 redesign preview — "Refined dark, craft-grade"
+
+   DORMANT in production: these only apply inside a
+   `[data-theme="v2"]` wrapper (the /design showcase route).
+   Phase 1 promotes the chosen values into the `:root` block
+   above and deletes this block.
+
+   We override BOTH the spec-named tokens (surface-1, hairline…)
+   AND their legacy aliases (panel, border…) with literal values.
+   The aliases are declared as `var(--color-surface-1)` on :root,
+   so their computed value is resolved at :root and would NOT pick
+   up a descendant override of the spec token — redeclaring the
+   alias with a literal value is the reliable fix.
+   ============================================================ */
+[data-theme="v2"] {
+  /* Canvas lifted off pure-black so shadows + hairline rings read */
+  --color-canvas: #0a0b0e;
+
+  /* Surface ladder — real, evenly-stepped elevation */
+  --color-surface-1: #14161b;
+  --color-surface-2: #181b22;
+  --color-surface-3: #1c1f26;
+  --color-surface-4: #262b34;
+
+  /* Legacy surface aliases (literal, not var()) */
+  --color-panel: #14161b;
+  --color-surface: #181b22;
+  --color-surface-hover: #1c1f26;
+  --color-button-bg: #181b22;
+  --color-button-hover: #1c1f26;
+
+  /* Ink — only the quaternary tier needs a nudge on lifted surfaces */
+  --color-ink-tertiary: #6b7077;
+  --color-text-quaternary: #6b7077;
+
+  /* Hairlines — separate planes without going harsh */
+  --color-hairline: #23262d;
+  --color-hairline-strong: #33373f;
+  --color-hairline-tertiary: #3d424b;
+  --color-border: #23262d;
+  --color-border-hover: #33373f;
+  --color-border-subtle: #1c1f26;
+
+  /* Accent kept at the approved indigo; selection tracks it */
+  --color-selection: rgba(94, 106, 210, 0.32);
+}
+
+/* Soft brand focus-glow (replaces the hard 2px outline) — the
+   1px canvas gap now reads because canvas is lifted. */
+[data-theme="v2"]
+  :where(button, a, [role="button"], [role="option"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: none;
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 1px var(--color-canvas),
+    0 0 0 3px color-mix(in srgb, var(--color-primary) 55%, transparent),
+    0 0 12px 0 color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+[data-theme="v2"] :where(input, textarea, select):focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+
+/* ------------------------------------------------------------
+   Motion utilities (additive, global — nothing uses them yet).
+   Subtle, fast, GPU-cheap. The global reduced-motion block above
+   already neutralizes these transitions.
+   ------------------------------------------------------------ */
+.card-lift {
+  transition:
+    transform 150ms ease-out,
+    box-shadow 150ms ease-out,
+    border-color 150ms ease-out;
+}
+.card-lift:hover {
+  transform: translateY(-2px);
+}
+.btn-press {
+  transition:
+    transform 120ms ease-out,
+    background-color 120ms ease-out;
+}
+.btn-press:active {
+  transform: scale(0.97);
+}

@@ -124,6 +124,12 @@ defmodule CymphoWeb.Router do
       if Mix.env() == :dev do
         live "/dev/prompt-inspector", PromptInspectorLive
       end
+
+      # Redesign prototype (Phase 0). Dev/test only; removed once production
+      # adopts the redesign. `:test` lets the smoke test assert it mounts.
+      if Mix.env() in [:dev, :test] do
+        live "/design", DesignShowcaseLive
+      end
     end
 
     live_session :board_governed,

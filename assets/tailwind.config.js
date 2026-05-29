@@ -142,6 +142,13 @@ module.exports = {
         dialog: "0px 0px 0px 1px var(--color-border), 0px 8px 32px rgba(0,0,0,0.08)",
         subtle: "0px 2px 8px rgba(0,0,0,0.04)",
         inset: "inset 0px 0px 0px 1px rgba(0,0,0,0.06)",
+        // v2 elevation (additive) — real depth on the lifted dark canvas:
+        // inset top-highlight + hairline ring + layered ambient shadows.
+        // `card` = resting, `raised` = hover-lift. Phase 1 also rebuilds
+        // elevated/dialog/subtle to match.
+        card: "inset 0 1px 0 0 rgba(255,255,255,0.04), 0 0 0 1px var(--color-border), 0 1px 2px rgba(0,0,0,0.35), 0 4px 12px rgba(0,0,0,0.35)",
+        raised:
+          "inset 0 1px 0 0 rgba(255,255,255,0.05), 0 0 0 1px var(--color-border-hover), 0 2px 4px rgba(0,0,0,0.40), 0 8px 20px rgba(0,0,0,0.45)",
       },
       letterSpacing: {
         // Negative tracking per DESIGN.md
