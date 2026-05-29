@@ -188,7 +188,7 @@ defmodule Cympho.Agents do
 
   def do_update_agent(agent, attrs) do
     agent
-    |> Agent.changeset(attrs)
+    |> Agent.update_changeset(attrs)
     |> Repo.update()
     |> case do
       {:ok, updated} ->

@@ -96,4 +96,11 @@ config :cympho, :llm_router_enabled?, true
 config :cympho, :llm_classifier_timeout_ms, 1_500
 config :cympho, :start_execution_policy_advancer?, true
 
+# JWT signing secrets. Dev/test use these fixed, non-secret defaults; production
+# requires CYMPHO_USER_JWT_SECRET / CYMPHO_AGENT_JWT_SECRET (set in runtime.exs),
+# whose absence fails the boot. There is no hardcoded production fallback.
+config :cympho,
+  user_jwt_secret: "dev-only-user-jwt-secret-not-for-production",
+  agent_jwt_secret: "dev-only-agent-jwt-secret-not-for-production"
+
 import_config "#{config_env()}.exs"

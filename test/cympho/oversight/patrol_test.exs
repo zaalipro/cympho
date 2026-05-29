@@ -32,7 +32,8 @@ defmodule Cympho.Oversight.PatrolTest do
       issue: issue,
       engineer: engineer
     } do
-      stale_at = DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
+      stale_at =
+        DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
 
       {:ok, _stale} =
         Issues.update_issue(issue, %{
@@ -63,7 +64,8 @@ defmodule Cympho.Oversight.PatrolTest do
     end
 
     test "excludes synthetic backlog_planner issues", %{company: company} do
-      stale_at = DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
+      stale_at =
+        DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
 
       {:ok, planning} =
         Issues.create_issue(%{
@@ -86,7 +88,8 @@ defmodule Cympho.Oversight.PatrolTest do
       engineer: engineer,
       issue: issue
     } do
-      stale_at = DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
+      stale_at =
+        DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
 
       {:ok, _} =
         Issues.update_issue(issue, %{
@@ -113,7 +116,8 @@ defmodule Cympho.Oversight.PatrolTest do
       engineer: engineer,
       issue: issue
     } do
-      stale_at = DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
+      stale_at =
+        DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
 
       {:ok, _} =
         Issues.update_issue(issue, %{
@@ -184,7 +188,9 @@ defmodule Cympho.Oversight.PatrolTest do
           updated_at: stale_at
         })
 
-      {:ok, _} = Agents.update_agent(ceo, %{governance_status: "terminated"})
+      # governance_status is managed by the governance flow (Ecto.Changeset.change),
+      # not request-driven updates — Agents.update_agent no longer mass-assigns it.
+      {:ok, _} = ceo |> Ecto.Changeset.change(%{governance_status: "terminated"}) |> Repo.update()
 
       counters = Patrol.patrol_company(company.id, in_progress_minutes: 60, cooldown_seconds: 0)
       assert Map.get(counters, :skipped_no_supervisor, 0) >= 1

@@ -10,6 +10,7 @@ defmodule Cympho.Agents.Agent do
     field :name, :string
     field :url_key, :string
     field :title, :string
+
     field :role, Ecto.Enum,
       values: [:engineer, :product_manager, :designer, :ceo, :cto, :release_engineer]
 
@@ -118,7 +119,14 @@ defmodule Cympho.Agents.Agent do
       :adapter_failure_count
     ])
     |> validate_required([:name, :role])
-    |> validate_inclusion(:role, [:engineer, :product_manager, :designer, :ceo, :cto, :release_engineer])
+    |> validate_inclusion(:role, [
+      :engineer,
+      :product_manager,
+      :designer,
+      :ceo,
+      :cto,
+      :release_engineer
+    ])
     |> validate_inclusion(:status, status_options())
     |> validate_inclusion(:health_status, [:healthy, :degraded, :unavailable])
     |> validate_inclusion(:context_mode, ["company", "project", "issue"])
@@ -126,6 +134,68 @@ defmodule Cympho.Agents.Agent do
     |> validate_number(:max_concurrent_jobs, greater_than: 0)
     |> validate_number(:budget_monthly_cents, greater_than_or_equal_to: 0)
     |> validate_number(:spent_monthly_cents, greater_than_or_equal_to: 0)
+    |> foreign_key_constraint(:parent_id)
+    |> foreign_key_constraint(:project_id)
+    |> foreign_key_constraint(:created_by_agent_id)
+    |> foreign_key_constraint(:default_environment_id)
+  end
+
+  @doc """
+  Restricted changeset for request-driven (user-facing) updates.
+
+  Excludes authorization- and ledger-sensitive fields — `:company_id`,
+  `:governance_status`, `:board_approval_id`, `:requires_board_approval`,
+  `:spent_monthly_cents`, `:permissions`, `:capabilities` — so a user-supplied
+  params map cannot mass-assign them. Those are managed only by the governance
+  and billing flows (which write via `Ecto.Changeset.change/2`).
+  """
+  def update_changeset(agent, attrs) do
+    agent
+    |> cast(attrs, [
+      :name,
+      :url_key,
+      :title,
+      :role,
+      :status,
+      :config,
+      :icon,
+      :runtime_config,
+      :context_mode,
+      :budget_monthly_cents,
+      :instructions,
+      :instructions_path,
+      :max_concurrent_jobs,
+      :last_heartbeat_at,
+      :adapter,
+      :health_status,
+      :heartbeat_config,
+      :budget,
+      :project_id,
+      :parent_id,
+      :created_by_agent_id,
+      :default_environment_id,
+      :governance_reasoning,
+      :paused_at,
+      :pause_reason,
+      :paused_by_user_id,
+      :terminated_at,
+      :adapter_failure_count
+    ])
+    |> validate_required([:name, :role])
+    |> validate_inclusion(:role, [
+      :engineer,
+      :product_manager,
+      :designer,
+      :ceo,
+      :cto,
+      :release_engineer
+    ])
+    |> validate_inclusion(:status, status_options())
+    |> validate_inclusion(:health_status, [:healthy, :degraded, :unavailable])
+    |> validate_inclusion(:context_mode, ["company", "project", "issue"])
+    |> unique_constraint(:url_key)
+    |> validate_number(:max_concurrent_jobs, greater_than: 0)
+    |> validate_number(:budget_monthly_cents, greater_than_or_equal_to: 0)
     |> foreign_key_constraint(:parent_id)
     |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:created_by_agent_id)
