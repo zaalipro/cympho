@@ -22,9 +22,7 @@ defmodule Cympho.Workspaces do
     |> Repo.all()
   end
 
-  def list_project_workspaces_for_company(nil) do
-    Repo.all(ProjectWorkspace)
-  end
+  def list_project_workspaces_for_company(nil), do: []
 
   def list_project_workspaces_for_company(company_id) do
     from(pw in ProjectWorkspace, where: pw.company_id == ^company_id)

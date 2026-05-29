@@ -279,10 +279,9 @@ defmodule Cympho.ToolCallTraces do
   end
 
   defp maybe_broadcast_trace(trace) do
-    if trace.issue_id do
-      Phoenix.PubSub.broadcast(
-        Cympho.PubSub,
-        "issues",
+    if trace.issue_id && trace.company_id do
+      Cympho.PubSubGuard.broadcast(
+        "company:#{trace.company_id}:issues",
         {:tool_call_trace_created, trace}
       )
     end

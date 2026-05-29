@@ -4,24 +4,28 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case Workspaces.get_execution_workspace(id) do
-      {:ok, workspace} ->
-        runtime_services = Workspaces.list_runtime_services(id)
-        operations = Workspaces.list_operations(id)
+    with {:ok, workspace} <- Workspaces.get_execution_workspace(id),
+         true <- own_company?(socket, workspace) do
+      runtime_services = Workspaces.list_runtime_services(id)
+      operations = Workspaces.list_operations(id)
 
-        {:ok,
-         socket
-         |> assign(:page_title, "Exec Workspace: #{workspace.name}")
-         |> assign(:workspace, workspace)
-         |> assign(:runtime_services, runtime_services)
-         |> assign(:operations, operations)}
-
-      {:error, :not_found} ->
+      {:ok,
+       socket
+       |> assign(:page_title, "Exec Workspace: #{workspace.name}")
+       |> assign(:workspace, workspace)
+       |> assign(:runtime_services, runtime_services)
+       |> assign(:operations, operations)}
+    else
+      _ ->
         {:ok,
          socket
          |> put_flash(:error, "Execution workspace not found")
          |> push_navigate(to: ~p"/workspaces")}
     end
+  end
+
+  defp own_company?(socket, %{company_id: company_id}) do
+    match?(%{id: ^company_id}, socket.assigns[:current_company])
   end
 
   @impl true

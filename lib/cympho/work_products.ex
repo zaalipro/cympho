@@ -2,6 +2,7 @@ defmodule Cympho.WorkProducts do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.WorkProducts.IssueWorkProduct
+  alias Cympho.Issues.Issue
   alias Cympho.Activities
 
   def list_work_products(issue_id) do
@@ -42,11 +43,7 @@ defmodule Cympho.WorkProducts do
           }
         })
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "issues",
-          {:work_product_created, work_product}
-        )
+        broadcast_work_product({:work_product_created, work_product}, work_product.issue_id)
 
         _ = Cympho.ReviewNudges.reconcile_issue(work_product.issue_id)
 
@@ -64,11 +61,7 @@ defmodule Cympho.WorkProducts do
       {:ok, updated} ->
         updated = Repo.preload(updated, [:created_by_agent, :attachment])
 
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "issues",
-          {:work_product_updated, updated}
-        )
+        broadcast_work_product({:work_product_updated, updated}, updated.issue_id)
 
         {:ok, updated}
 
@@ -80,10 +73,9 @@ defmodule Cympho.WorkProducts do
   def delete_work_product(%IssueWorkProduct{} = work_product) do
     case Repo.delete(work_product) do
       {:ok, _} ->
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "issues",
-          {:work_product_deleted, work_product.issue_id}
+        broadcast_work_product(
+          {:work_product_deleted, work_product.issue_id},
+          work_product.issue_id
         )
 
         :ok
@@ -92,4 +84,21 @@ defmodule Cympho.WorkProducts do
         {:error, changeset}
     end
   end
+
+  # Work-product events are issue-scoped. We broadcast on the issue's
+  # company-scoped topic (consumed by IssueLive.Show) rather than the bare
+  # "issues" topic, which would leak across tenants. IssueWorkProduct has no
+  # company_id column, so we resolve it from the parent issue.
+  defp broadcast_work_product(message, issue_id) do
+    case issue_company_id(issue_id) do
+      nil -> {:error, :no_company}
+      company_id -> Cympho.PubSubGuard.broadcast("company:#{company_id}:issues", message)
+    end
+  end
+
+  defp issue_company_id(issue_id) when is_binary(issue_id) do
+    Repo.one(from i in Issue, where: i.id == ^issue_id, select: i.company_id)
+  end
+
+  defp issue_company_id(_), do: nil
 end

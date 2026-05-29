@@ -4,22 +4,26 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case Workspaces.get_project_workspace(id) do
-      {:ok, workspace} ->
-        execution_workspaces = Workspaces.list_execution_workspaces(id)
+    with {:ok, workspace} <- Workspaces.get_project_workspace(id),
+         true <- own_company?(socket, workspace) do
+      execution_workspaces = Workspaces.list_execution_workspaces(id)
 
-        {:ok,
-         socket
-         |> assign(:page_title, "Workspace: #{workspace.name}")
-         |> assign(:workspace, workspace)
-         |> assign(:execution_workspaces, execution_workspaces)}
-
-      {:error, :not_found} ->
+      {:ok,
+       socket
+       |> assign(:page_title, "Workspace: #{workspace.name}")
+       |> assign(:workspace, workspace)
+       |> assign(:execution_workspaces, execution_workspaces)}
+    else
+      _ ->
         {:ok,
          socket
          |> put_flash(:error, "Workspace not found")
          |> push_navigate(to: ~p"/workspaces")}
     end
+  end
+
+  defp own_company?(socket, %{company_id: company_id}) do
+    match?(%{id: ^company_id}, socket.assigns[:current_company])
   end
 
   @impl true

@@ -85,6 +85,15 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Returns agents with the specified role, scoped to a company.
+  """
+  def list_agents_by_role(role, company_id) when is_atom(role) and is_binary(company_id) do
+    Agent
+    |> where(role: ^role, company_id: ^company_id)
+    |> Repo.all()
+  end
+
+  @doc """
   Returns agents with the specified status.
   """
   def list_agents_by_status(status) when is_atom(status) do
@@ -249,6 +258,16 @@ defmodule Cympho.Agents do
   def get_idle_agent_by_role(role) do
     Agent
     |> where(role: ^role, status: :idle)
+    |> first()
+    |> Repo.one()
+  end
+
+  @doc """
+  Gets an idle agent by role within a company, or nil if none available.
+  """
+  def get_idle_agent_by_role(role, company_id) when is_binary(company_id) do
+    Agent
+    |> where(role: ^role, status: :idle, company_id: ^company_id)
     |> first()
     |> Repo.one()
   end
