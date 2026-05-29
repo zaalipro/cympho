@@ -1,7 +1,11 @@
 defmodule Cympho.Notifications.RetryWorkerTest do
   use Cympho.DataCase, async: false
 
+  import Mock
+  import Ecto.Query, only: [where: 2]
+
   alias Cympho.Notifications.Message
+  alias Cympho.Notifications.NotificationDeliveryFailure
   alias Cympho.Notifications.RetryWorker
 
   describe "max_attempts/1" do
@@ -80,6 +84,30 @@ defmodule Cympho.Notifications.RetryWorkerTest do
         assert min <= max
         assert max > min
       end
+    end
+  end
+
+  describe "async retry exhaustion (handle_info)" do
+    test "records a delivery failure when the timer-driven retry runs out of attempts" do
+      {:ok, user} =
+        Cympho.Users.create_user(%{
+          email: "async-retry@example.com",
+          name: "Async Retry",
+          password: "password1234"
+        })
+
+      message = Message.new("Subject", "Body", user.id)
+
+      with_mock Cympho.Notifications.Dispatcher, dispatch: fn _msg -> {:error, :smtp_down} end do
+        # attempt 3 == default max → the async path must persist a dead-letter row
+        assert {:noreply, _} = RetryWorker.handle_info({:retry_notification, message, 3}, %{})
+      end
+
+      failures = NotificationDeliveryFailure |> where(user_id: ^user.id) |> Repo.all()
+
+      assert [failure] = failures
+      assert failure.attempt == 3
+      assert failure.error_reason =~ "smtp_down"
     end
   end
 end

@@ -92,18 +92,21 @@ defmodule Cympho.Notifications.RetryWorker do
         :ok
 
       {:partial_failure, _} ->
-        maybe_schedule_next_retry(message, attempt)
+        maybe_schedule_next_retry(message, attempt, "partial_delivery_failure")
 
-      {:error, _} ->
-        maybe_schedule_next_retry(message, attempt)
+      {:error, reason} ->
+        maybe_schedule_next_retry(message, attempt, format_reason(reason))
     end
 
     {:noreply, state}
   end
 
-  defp maybe_schedule_next_retry(message, attempt) do
+  # On exhaustion the async (timer-driven) path must persist a dead-letter row
+  # too, not just log — otherwise scheduled retries vanish silently when they
+  # run out of attempts, unlike the synchronous retry/2 path.
+  defp maybe_schedule_next_retry(message, attempt, reason) do
     if attempt >= max_attempts(message) do
-      Logger.debug("RetryWorker: max retries exceeded")
+      record_failure(message, attempt, reason)
     else
       delay = calculate_delay(attempt + 1)
       Process.send_after(self(), {:retry_notification, message, attempt + 1}, delay)
@@ -124,12 +127,18 @@ defmodule Cympho.Notifications.RetryWorker do
       payload: %{subject: message.subject, body: message.body},
       attempt: attempt,
       error_reason: error_reason,
-      failed_at: DateTime.utc_now()
+      failed_at: DateTime.utc_now() |> DateTime.truncate(:second)
     }
 
     %NotificationDeliveryFailure{}
     |> NotificationDeliveryFailure.changeset(attrs)
     |> Cympho.Repo.insert()
+  rescue
+    # Recording a dead-letter row is best-effort: a DB hiccup here must not
+    # crash the retry worker (and trip its supervisor's restart budget).
+    e ->
+      Logger.warning("RetryWorker: could not record delivery failure: #{Exception.message(e)}")
+      {:error, :record_failed}
   end
 
   defp format_reason(reason) when is_binary(reason), do: reason

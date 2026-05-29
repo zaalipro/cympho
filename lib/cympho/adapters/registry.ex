@@ -44,15 +44,27 @@ defmodule Cympho.Adapters.Registry do
 
   @spec lookup(adapter_key()) :: {:ok, adapter_module()} | :error
   def lookup(key) when is_atom(key) do
-    case :ets.lookup(__MODULE__, key) do
-      [{^key, module}] -> {:ok, module}
-      [] -> :error
+    # Tolerate the boot window before init/1 creates the table: a lookup that
+    # races ahead of the GenServer would otherwise raise :badarg on a missing
+    # ETS table and crash the caller. Treat "no table yet" as a clean miss.
+    case :ets.whereis(__MODULE__) do
+      :undefined ->
+        :error
+
+      _tid ->
+        case :ets.lookup(__MODULE__, key) do
+          [{^key, module}] -> {:ok, module}
+          [] -> :error
+        end
     end
   end
 
   @spec all() :: [{adapter_key(), adapter_module()}]
   def all do
-    :ets.tab2list(__MODULE__)
+    case :ets.whereis(__MODULE__) do
+      :undefined -> []
+      _tid -> :ets.tab2list(__MODULE__)
+    end
   end
 
   @spec available() :: [{adapter_key(), adapter_module()}]
