@@ -197,7 +197,6 @@ defmodule Cympho.Orchestrator.Dispatcher do
       schedule_poll()
       {:noreply, state}
     else
-      broadcast_state(state)
       {:noreply, state}
     end
   end
@@ -206,10 +205,8 @@ defmodule Cympho.Orchestrator.Dispatcher do
   def handle_info({:poll_company, company_id}, %State{} = state) do
     if enabled?() do
       state = do_poll(state, company_id)
-      broadcast_state(state)
       {:noreply, state}
     else
-      broadcast_state(state)
       {:noreply, state}
     end
   end
@@ -217,7 +214,6 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @impl true
   def handle_info({:session_ended, issue_id, _reason}, %State{} = state) do
     new_state = %{state | running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id)}
-    broadcast_state(new_state)
     {:noreply, new_state}
   end
 
@@ -306,7 +302,6 @@ defmodule Cympho.Orchestrator.Dispatcher do
     available_slots = @max_concurrent - MapSet.size(running)
 
     if available_slots <= 0 do
-      broadcast_state(state)
       state
     else
       candidates = fetch_candidate_issues(available_slots * 4, company_id)
@@ -432,7 +427,6 @@ defmodule Cympho.Orchestrator.Dispatcher do
                 retry_attempts: new_retries
             }
 
-            broadcast_state(new_state)
             new_state
 
           {:error, reason} ->
@@ -640,9 +634,4 @@ defmodule Cympho.Orchestrator.Dispatcher do
        do: true
 
   defp same_company?(_issue, _agent), do: false
-
-  # Dispatcher state intentionally not broadcast: it would mix running_issue_ids
-  # across all tenants on a global topic. If observability is needed later, add a
-  # per-company topic with a payload filtered to that company's running issues.
-  defp broadcast_state(%State{}), do: :ok
 end

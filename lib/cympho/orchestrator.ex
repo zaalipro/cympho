@@ -77,8 +77,6 @@ defmodule Cympho.Orchestrator do
   """
   @spec start_and_run(map(), String.t()) :: {:ok, pid()} | {:error, atom()}
   def start_and_run(%{id: issue_id} = issue, agent_id, opts \\ []) when is_binary(agent_id) do
-    ensure_adapter_failure_table()
-
     # `GenServer.start_link/3` with a `:name` is itself the atomic gate via the
     # Registry — a redundant `Registry.lookup` before it creates a TOCTOU window
     # where a concurrent caller can win and we incorrectly report a permanent
@@ -612,11 +610,6 @@ defmodule Cympho.Orchestrator do
     new_count
   end
 
-  # Kept as a no-op for callers that previously needed the ETS table — the
-  # counter now lives on the agent row directly. New callers should not need
-  # to call this.
-  defp ensure_adapter_failure_table, do: :ok
-
   defp start_engine_run(%__MODULE__{run_id: nil}), do: :ok
 
   defp start_engine_run(%__MODULE__{run_id: run_id}) do
@@ -1077,9 +1070,7 @@ defmodule Cympho.Orchestrator do
 
           case Cympho.ToolCallTraces.update_tool_call_trace_status(trace, status, error_message) do
             {:ok, _updated_trace} ->
-              Logger.info(
-                "[Orchestrator] Marked pending tool call trace as errored: #{trace_id}"
-              )
+              Logger.info("[Orchestrator] Marked pending tool call trace as errored: #{trace_id}")
 
             {:error, update_reason} ->
               Logger.warning(
