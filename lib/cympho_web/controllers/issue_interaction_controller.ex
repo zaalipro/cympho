@@ -39,11 +39,28 @@ defmodule CymphoWeb.IssueInteractionController do
     user_id = conn.assigns.current_user.id
 
     with {:ok, _issue} <- scoped_issue(conn, issue_id),
+         {:ok, status_atom} <- parse_interaction_status(status),
          {:ok, interaction} <- IssueThreadInteractions.get_interaction(id),
          :ok <- enforce_issue_match(interaction, issue_id),
-         attrs <- build_resolve_attrs(status, user_id, params),
+         attrs <- build_resolve_attrs(status_atom, user_id, params),
          {:ok, updated} <- IssueThreadInteractions.resolve_interaction(interaction, attrs) do
       json(conn, %{data: CymphoWeb.IssueInteractionJSON.interaction_data(updated)})
+    end
+  end
+
+  # Map the user-supplied status string through an explicit whitelist instead
+  # of String.to_existing_atom/1, which raises on unknown input.
+  @interaction_statuses %{
+    "pending" => :pending,
+    "accepted" => :accepted,
+    "rejected" => :rejected,
+    "responded" => :responded
+  }
+
+  defp parse_interaction_status(status) do
+    case Map.fetch(@interaction_statuses, status) do
+      {:ok, atom} -> {:ok, atom}
+      :error -> {:error, :invalid_status}
     end
   end
 
@@ -55,9 +72,9 @@ defmodule CymphoWeb.IssueInteractionController do
     if interaction.issue_id == issue_id, do: :ok, else: {:error, :not_found}
   end
 
-  defp build_resolve_attrs(status, user_id, params) do
+  defp build_resolve_attrs(status_atom, user_id, params) do
     base = %{
-      "status" => String.to_existing_atom(status),
+      "status" => status_atom,
       "resolved_by_user_id" => user_id
     }
 

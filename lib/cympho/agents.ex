@@ -305,6 +305,24 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Returns `%{agent_id => count}` of `:in_progress` assignments for every agent
+  in the company that has at least one, computed in a single grouped query so
+  prompt building doesn't issue one count per agent (N+1).
+  """
+  @spec count_active_assignments_by_company(String.t()) :: %{String.t() => non_neg_integer()}
+  def count_active_assignments_by_company(company_id) when is_binary(company_id) do
+    from(i in Issue,
+      where:
+        i.company_id == ^company_id and i.status == :in_progress and
+          not is_nil(i.assignee_id),
+      group_by: i.assignee_id,
+      select: {i.assignee_id, count(i.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
   Counts the number of running jobs for an agent.
   """
   @spec count_running_jobs(String.t()) :: non_neg_integer()

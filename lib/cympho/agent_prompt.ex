@@ -76,9 +76,13 @@ defmodule Cympho.AgentPrompt do
     company_id = field(issue, :company_id)
 
     if is_binary(company_id) do
+      # Fetch every agent's in-flight assignment count once for the whole
+      # company, then look up per agent — instead of one count query per agent.
+      assignments = Cympho.Agents.count_active_assignments_by_company(company_id)
+
       lines =
         [:engineer, :release_engineer, :product_manager, :designer]
-        |> Enum.map(&team_status_line(&1, company_id))
+        |> Enum.map(&team_status_line(&1, company_id, assignments))
         |> Enum.reject(&is_nil/1)
 
       if lines == [] do
@@ -93,9 +97,7 @@ defmodule Cympho.AgentPrompt do
 
   defp team_status_block(_issue, _role), do: nil
 
-  defp team_status_line(_role, nil), do: nil
-
-  defp team_status_line(role, company_id) do
+  defp team_status_line(role, company_id, assignments) do
     case Cympho.Agents.list_agents_by_role(role, company_id) do
       [] ->
         nil
@@ -106,7 +108,7 @@ defmodule Cympho.AgentPrompt do
 
         total_in_flight =
           scoped
-          |> Enum.map(fn a -> Cympho.Agents.count_active_assignments(a.id) end)
+          |> Enum.map(fn a -> Map.get(assignments, a.id, 0) end)
           |> Enum.sum()
 
         "- #{role}: #{length(scoped)} agents (#{idle} idle, #{working} working) " <>
