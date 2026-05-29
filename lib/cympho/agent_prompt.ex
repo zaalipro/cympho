@@ -76,9 +76,13 @@ defmodule Cympho.AgentPrompt do
     company_id = field(issue, :company_id)
 
     if is_binary(company_id) do
+      # Fetch every agent's in-flight assignment count once for the whole
+      # company, then look up per agent — instead of one count query per agent.
+      assignments = Cympho.Agents.count_active_assignments_by_company(company_id)
+
       lines =
         [:engineer, :release_engineer, :product_manager, :designer]
-        |> Enum.map(&team_status_line(&1, company_id))
+        |> Enum.map(&team_status_line(&1, company_id, assignments))
         |> Enum.reject(&is_nil/1)
 
       if lines == [] do
@@ -93,27 +97,22 @@ defmodule Cympho.AgentPrompt do
 
   defp team_status_block(_issue, _role), do: nil
 
-  defp team_status_line(role, company_id) do
-    case Cympho.Agents.list_agents_by_role(role) do
+  defp team_status_line(role, company_id, assignments) do
+    case Cympho.Agents.list_agents_by_role(role, company_id) do
       [] ->
         nil
 
-      all ->
-        scoped = Enum.filter(all, &(&1.company_id == company_id))
+      scoped ->
+        idle = Enum.count(scoped, &(&1.status == :idle))
+        working = Enum.count(scoped, &(&1.status == :running))
 
-        if scoped == [] do
-          nil
-        else
-          idle = Enum.count(scoped, &(&1.status == :idle))
-          working = Enum.count(scoped, &(&1.status == :running))
-          total_in_flight =
-            scoped
-            |> Enum.map(fn a -> Cympho.Agents.count_active_assignments(a.id) end)
-            |> Enum.sum()
+        total_in_flight =
+          scoped
+          |> Enum.map(fn a -> Map.get(assignments, a.id, 0) end)
+          |> Enum.sum()
 
-          "- #{role}: #{length(scoped)} agents (#{idle} idle, #{working} working) " <>
-            "— #{total_in_flight} active assignments"
-        end
+        "- #{role}: #{length(scoped)} agents (#{idle} idle, #{working} working) " <>
+          "— #{total_in_flight} active assignments"
     end
   end
 
@@ -364,7 +363,9 @@ defmodule Cympho.AgentPrompt do
 
   defp wake_preamble("pr_review_changes_requested", metadata, _role) do
     iteration = Map.get(metadata, "iteration") || "?"
-    reviewer = Map.get(metadata, "reviewer") || Map.get(metadata, "from_agent_id") || "the reviewer"
+
+    reviewer =
+      Map.get(metadata, "reviewer") || Map.get(metadata, "from_agent_id") || "the reviewer"
 
     """
     The PR for this issue had **changes requested** by #{reviewer}. Iteration count: #{iteration}.
@@ -632,8 +633,13 @@ defmodule Cympho.AgentPrompt do
   end
 
   defp review_comment_author_label(%Comment{author_type: "system"}), do: "system"
-  defp review_comment_author_label(%Comment{author_type: "agent", author_id: id}), do: "agent #{short_id(id)}"
-  defp review_comment_author_label(%Comment{author_type: "user", author_id: id}), do: "user #{short_id(id)}"
+
+  defp review_comment_author_label(%Comment{author_type: "agent", author_id: id}),
+    do: "agent #{short_id(id)}"
+
+  defp review_comment_author_label(%Comment{author_type: "user", author_id: id}),
+    do: "user #{short_id(id)}"
+
   defp review_comment_author_label(_), do: "reviewer"
 
   defp format_review_body(body) when is_binary(body) do

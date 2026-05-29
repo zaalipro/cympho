@@ -87,6 +87,28 @@ defmodule Cympho.CompaniesTest do
       assert Companies.has_access?(new_user.id, company.id)
     end
 
+    test "accept_invite/2 rejects a user whose email does not match the invite",
+         %{company: company, user: user} do
+      attrs = %{
+        "company_id" => company.id,
+        "inviter_id" => user.id,
+        "email" => "intended@test.com",
+        "role" => "member"
+      }
+
+      {:ok, invite} = Companies.create_invite(attrs)
+
+      {:ok, attacker} =
+        Cympho.Authentication.register_user(%{
+          email: "attacker@test.com",
+          name: "Attacker",
+          password: "password123"
+        })
+
+      assert {:error, :email_mismatch} = Companies.accept_invite(invite.token, attacker.id)
+      refute Companies.has_access?(attacker.id, company.id)
+    end
+
     test "accept_invite/2 with expired token returns error", %{company: company, user: user} do
       expired = DateTime.utc_now() |> DateTime.add(-1, :second) |> DateTime.truncate(:second)
 

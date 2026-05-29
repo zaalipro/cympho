@@ -85,6 +85,15 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Returns agents with the specified role, scoped to a company.
+  """
+  def list_agents_by_role(role, company_id) when is_atom(role) and is_binary(company_id) do
+    Agent
+    |> where(role: ^role, company_id: ^company_id)
+    |> Repo.all()
+  end
+
+  @doc """
   Returns agents with the specified status.
   """
   def list_agents_by_status(status) when is_atom(status) do
@@ -179,7 +188,7 @@ defmodule Cympho.Agents do
 
   def do_update_agent(agent, attrs) do
     agent
-    |> Agent.changeset(attrs)
+    |> Agent.update_changeset(attrs)
     |> Repo.update()
     |> case do
       {:ok, updated} ->
@@ -254,6 +263,16 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Gets an idle agent by role within a company, or nil if none available.
+  """
+  def get_idle_agent_by_role(role, company_id) when is_binary(company_id) do
+    Agent
+    |> where(role: ^role, status: :idle, company_id: ^company_id)
+    |> first()
+    |> Repo.one()
+  end
+
+  @doc """
   Returns agents eligible for dispatch: matching role, not in :error status,
   and not at max_concurrent_jobs capacity.
   """
@@ -283,6 +302,24 @@ defmodule Cympho.Agents do
         select: count(i.id)
       )
     ) || 0
+  end
+
+  @doc """
+  Returns `%{agent_id => count}` of `:in_progress` assignments for every agent
+  in the company that has at least one, computed in a single grouped query so
+  prompt building doesn't issue one count per agent (N+1).
+  """
+  @spec count_active_assignments_by_company(String.t()) :: %{String.t() => non_neg_integer()}
+  def count_active_assignments_by_company(company_id) when is_binary(company_id) do
+    from(i in Issue,
+      where:
+        i.company_id == ^company_id and i.status == :in_progress and
+          not is_nil(i.assignee_id),
+      group_by: i.assignee_id,
+      select: {i.assignee_id, count(i.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
   end
 
   @doc """

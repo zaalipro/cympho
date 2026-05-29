@@ -24,9 +24,20 @@ defmodule CymphoWeb.GoalLive.Index do
 
   @impl true
   def handle_event("delete_goal", %{"id" => id}, socket) do
-    goal = Goals.get_goal!(id)
-    {:ok, _} = Goals.delete_goal(goal)
-    {:noreply, assign(socket, :goals, list_goals(socket))}
+    case socket.assigns[:current_company] do
+      %{id: company_id} ->
+        case Goals.get_company_goal(company_id, id) do
+          {:ok, goal} ->
+            {:ok, _} = Goals.delete_goal(goal)
+            {:noreply, assign(socket, :goals, list_goals(socket))}
+
+          {:error, :not_found} ->
+            {:noreply, put_flash(socket, :error, "Goal not found")}
+        end
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "No company selected")}
+    end
   end
 
   defp list_goals(socket) do

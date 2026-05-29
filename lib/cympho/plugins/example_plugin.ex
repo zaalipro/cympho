@@ -54,7 +54,7 @@ defmodule Cympho.Plugins.ExamplePlugin do
       "Processing issue #{issue_id}"
     )
 
-    case HostServices.get_issue(issue_id, state.plugin.capabilities) do
+    case HostServices.get_issue(state.company_id, issue_id, state.plugin.capabilities) do
       {:ok, issue} ->
         # Process the issue
         HostServices.log(

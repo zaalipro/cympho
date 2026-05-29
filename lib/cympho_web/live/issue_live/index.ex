@@ -103,6 +103,8 @@ defmodule CymphoWeb.IssueLive.Index do
     end
   end
 
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
   @impl true
   def handle_event("delete_issue", %{"id" => id}, socket) do
     case get_issue(socket, id) do

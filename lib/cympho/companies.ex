@@ -690,6 +690,7 @@ defmodule Cympho.Companies do
 
   def accept_invite(token, user_id) do
     invite = get_invite_by_token(token)
+    user = user_id && Cympho.Users.get_user!(user_id)
 
     cond do
       is_nil(invite) ->
@@ -701,6 +702,9 @@ defmodule Cympho.Companies do
 
       invite.status != "pending" ->
         {:error, :already_used}
+
+      invite_email_mismatch?(invite, user) ->
+        {:error, :email_mismatch}
 
       true ->
         Repo.transaction(fn ->
@@ -716,6 +720,15 @@ defmodule Cympho.Companies do
         end)
     end
   end
+
+  # An invite that names a recipient email may be accepted only by the user
+  # with that email. Invites without an email (open links) stay unrestricted.
+  defp invite_email_mismatch?(%{email: invite_email}, %{email: user_email})
+       when is_binary(invite_email) and is_binary(user_email) do
+    String.downcase(invite_email) != String.downcase(user_email)
+  end
+
+  defp invite_email_mismatch?(_invite, _user), do: false
 
   def create_membership!(attrs) do
     %CompanyMembership{}

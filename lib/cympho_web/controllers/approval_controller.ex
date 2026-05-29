@@ -9,9 +9,7 @@ defmodule CymphoWeb.ApprovalController do
     company_id = conn.assigns.current_company.id
     parsed_status = parse_status(Map.get(params, "status"))
 
-    approvals =
-      Approvals.list_approvals(%{status: parsed_status})
-      |> Enum.filter(fn a -> a.requested_by && a.requested_by.company_id == company_id end)
+    approvals = Approvals.list_approvals(%{status: parsed_status, company_id: company_id})
 
     json(conn, %{data: approvals})
   end

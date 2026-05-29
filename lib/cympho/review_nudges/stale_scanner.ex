@@ -64,22 +64,28 @@ defmodule Cympho.ReviewNudges.StaleScanner do
       )
       |> Repo.all()
 
-    Enum.reduce(nudges, %{reconciled: 0, re_emitted: 0, escalated: 0, abandoned: 0, errors: 0}, fn wake,
-                                                                                                  acc ->
-      try do
-        case handle_nudge(wake, cfg) do
-          {:reconciled, _} -> Map.update!(acc, :reconciled, &(&1 + 1))
-          {:re_emitted, _} -> Map.update!(acc, :re_emitted, &(&1 + 1))
-          {:escalated, _} -> Map.update!(acc, :escalated, &(&1 + 1))
-          {:abandoned, _} -> Map.update!(acc, :abandoned, &(&1 + 1))
-          {:skip, _} -> acc
+    Enum.reduce(
+      nudges,
+      %{reconciled: 0, re_emitted: 0, escalated: 0, abandoned: 0, errors: 0},
+      fn wake, acc ->
+        try do
+          case handle_nudge(wake, cfg) do
+            {:reconciled, _} -> Map.update!(acc, :reconciled, &(&1 + 1))
+            {:re_emitted, _} -> Map.update!(acc, :re_emitted, &(&1 + 1))
+            {:escalated, _} -> Map.update!(acc, :escalated, &(&1 + 1))
+            {:abandoned, _} -> Map.update!(acc, :abandoned, &(&1 + 1))
+            {:skip, _} -> acc
+          end
+        rescue
+          e ->
+            Logger.warning(
+              "[StaleScanner] error handling wake #{wake.id}: #{Exception.message(e)}"
+            )
+
+            Map.update!(acc, :errors, &(&1 + 1))
         end
-      rescue
-        e ->
-          Logger.warning("[StaleScanner] error handling wake #{wake.id}: #{Exception.message(e)}")
-          Map.update!(acc, :errors, &(&1 + 1))
       end
-    end)
+    )
   end
 
   defp handle_nudge(%AgentWake{} = wake, cfg) do
@@ -222,13 +228,10 @@ defmodule Cympho.ReviewNudges.StaleScanner do
     end)
   end
 
-  defp agents_for(nil, role), do: Agents.list_eligible_agents(role)
+  defp agents_for(nil, _role), do: []
 
   defp agents_for(company_id, role) do
-    case Agents.list_eligible_agents(role, company_id) do
-      [] -> Agents.list_eligible_agents(role)
-      agents -> agents
-    end
+    Agents.list_eligible_agents(role, company_id)
   end
 
   defp leave_human_breadcrumb(issue, wake) do

@@ -334,6 +334,7 @@ defmodule Cympho.AgentActions do
   # role allowed to materialize an entire initiative tree from a mission goal
   # in a single batch — every other role decomposes via `create_issue`.
   defp authorize_action(%{"type" => "seed_mission_issues"}, %Agent{role: :ceo}), do: :ok
+
   defp authorize_action(%{"type" => "seed_mission_issues"}, _agent),
     do: {:error, :unauthorized_action}
 
@@ -1121,14 +1122,17 @@ defmodule Cympho.AgentActions do
   end
 
   defp maybe_put_estimate(monitor, nil), do: monitor
+
   defp maybe_put_estimate(monitor, val) when is_integer(val) and val > 0,
     do: Map.put(monitor, "estimated_minutes", val)
+
   defp maybe_put_estimate(monitor, val) when is_binary(val) do
     case Integer.parse(val) do
       {n, ""} when n > 0 -> Map.put(monitor, "estimated_minutes", n)
       _ -> monitor
     end
   end
+
   defp maybe_put_estimate(monitor, _), do: monitor
 
   # Resolve a list of `depends_on` references and add them as blockers.
@@ -1175,11 +1179,11 @@ defmodule Cympho.AgentActions do
 
   defp sibling_pool(_created, _parent_issue), do: []
 
-  defp resolve_blocker_ref(ref, siblings, _company_id) when is_binary(ref) do
+  defp resolve_blocker_ref(ref, siblings, company_id) when is_binary(ref) do
     cond do
       uuid_like?(ref) ->
         case Repo.get(Issue, ref) do
-          %Issue{} = i -> {:ok, i}
+          %Issue{company_id: ^company_id} = i -> {:ok, i}
           _ -> :error
         end
 
@@ -1549,7 +1553,8 @@ defmodule Cympho.AgentActions do
     end
   end
 
-  defp resolve_escalation_target(%Agent{parent_id: parent_id}, _target_role) when is_binary(parent_id) do
+  defp resolve_escalation_target(%Agent{parent_id: parent_id}, _target_role)
+       when is_binary(parent_id) do
     case Agents.get_agent(parent_id) do
       {:ok, %Agent{id: id}} -> id
       _ -> nil
@@ -1712,7 +1717,14 @@ defmodule Cympho.AgentActions do
         )
 
       _ =
-        record_governance_decision(updated, agent, action, "intervene_unblock", "implemented", %{})
+        record_governance_decision(
+          updated,
+          agent,
+          action,
+          "intervene_unblock",
+          "implemented",
+          %{}
+        )
 
       {:ok, %{type: "intervene", mode: "unblock", issue_id: updated.id}}
     end
@@ -1733,7 +1745,14 @@ defmodule Cympho.AgentActions do
          {:ok, _} <-
            update_workflow_issue(released, agent, %{assigned_role: nil}) do
       _ =
-        record_governance_decision(released, agent, action, "intervene_cancel", "implemented", %{})
+        record_governance_decision(
+          released,
+          agent,
+          action,
+          "intervene_cancel",
+          "implemented",
+          %{}
+        )
 
       {:ok, %{type: "intervene", mode: "cancel", issue_id: released.id}}
     end
@@ -1790,8 +1809,7 @@ defmodule Cympho.AgentActions do
             note = "[review] Merged PR (#{method}, sha=#{info[:sha] || "?"})"
             _ = system_comment(issue, note)
 
-            {:ok,
-             %{type: "merge_pr", issue_id: issue.id, sha: info[:sha], method: method}}
+            {:ok, %{type: "merge_pr", issue_id: issue.id, sha: info[:sha], method: method}}
 
           {:ok, info} ->
             {:error, {:merge_did_not_complete, info}}
@@ -1808,7 +1826,12 @@ defmodule Cympho.AgentActions do
                 })
             end
 
-            _ = system_comment(issue, "[blocked] PR has merge conflicts — release engineer notified.")
+            _ =
+              system_comment(
+                issue,
+                "[blocked] PR has merge conflicts — release engineer notified."
+              )
+
             {:error, :merge_conflict}
 
           {:error, reason} ->
@@ -1999,9 +2022,11 @@ defmodule Cympho.AgentActions do
   # original assignee shows up in monitor_state on `set_pr_url`). For now,
   # use issue.assignee_id when it's a delivery role, else fall back to the
   # `created_by_agent_id`.
-  defp pick_force_fix_target(%Issue{assignee_id: assignee_id} = issue) when is_binary(assignee_id) do
+  defp pick_force_fix_target(%Issue{assignee_id: assignee_id} = issue)
+       when is_binary(assignee_id) do
     case Agents.get_agent(assignee_id) do
-      {:ok, %Agent{role: role}} when role in [:engineer, :release_engineer, :designer, :product_manager] ->
+      {:ok, %Agent{role: role}}
+      when role in [:engineer, :release_engineer, :designer, :product_manager] ->
         assignee_id
 
       _ ->

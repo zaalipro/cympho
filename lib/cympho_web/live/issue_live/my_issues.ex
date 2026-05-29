@@ -58,6 +58,7 @@ defmodule CymphoWeb.IssueLive.MyIssues do
   def handle_info({:issue_created, _issue}, socket), do: {:noreply, reload(socket)}
   def handle_info({:issue_updated, _issue}, socket), do: {:noreply, reload(socket)}
   def handle_info({:issue_deleted, _id}, socket), do: {:noreply, reload(socket)}
+  def handle_info(_msg, socket), do: {:noreply, socket}
 
   defp reload(socket) do
     tab = socket.assigns.current_tab

@@ -35,7 +35,9 @@ defmodule Cympho.Agents.AgentApiKey do
     |> Base.encode16(case: :lower)
   end
 
-  def valid_api_key?(api_key, key_hash) do
-    hash_api_key(api_key) == key_hash
+  def valid_api_key?(api_key, key_hash) when is_binary(key_hash) do
+    Plug.Crypto.secure_compare(hash_api_key(api_key), key_hash)
   end
+
+  def valid_api_key?(_api_key, _key_hash), do: false
 end

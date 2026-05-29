@@ -1272,7 +1272,11 @@ defmodule Cympho.Issues do
 
   defp last_reviewer_match(%Issue{last_reviewer_id: nil}, _agent, _requested_role), do: nil
 
-  defp last_reviewer_match(%Issue{last_reviewer_id: id, company_id: company_id}, _agent, requested_role)
+  defp last_reviewer_match(
+         %Issue{last_reviewer_id: id, company_id: company_id},
+         _agent,
+         requested_role
+       )
        when is_binary(id) do
     case Agents.get_agent(id) do
       {:ok, %Agent{status: status} = reviewer}
@@ -1359,17 +1363,18 @@ defmodule Cympho.Issues do
       )
       |> Enum.map(&load_uuid/1)
 
-    Enum.each(dependent_ids, fn dependent_id ->
-      case get_issue(dependent_id) do
-        {:ok, dependent} ->
-          if dependent.status == :blocked and all_blockers_done?(dependent) do
-            {:ok, updated} = update_issue(dependent, %{status: :todo})
-            wake_assignee(updated)
-            add_system_comment(updated, "Auto-unblocked")
-          end
+    # Load every still-blocked dependent (with blockers preloaded) in one query
+    # rather than one get_issue per dependent.
+    dependents =
+      from(i in Issue, where: i.id in ^dependent_ids and i.status == :blocked)
+      |> Repo.all()
+      |> Repo.preload([:blocked_by])
 
-        {:error, _} ->
-          :skip
+    Enum.each(dependents, fn dependent ->
+      if all_blockers_done?(dependent) do
+        {:ok, updated} = update_issue(dependent, %{status: :todo})
+        wake_assignee(updated)
+        add_system_comment(updated, "Auto-unblocked")
       end
     end)
   end

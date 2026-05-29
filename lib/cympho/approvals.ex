@@ -18,6 +18,18 @@ defmodule Cympho.Approvals do
         status -> from(a in query, where: a.status == ^status)
       end
 
+    query =
+      case Map.get(opts, :company_id) do
+        nil ->
+          query
+
+        company_id ->
+          from(a in query,
+            join: agent in assoc(a, :requested_by),
+            where: agent.company_id == ^company_id
+          )
+      end
+
     Repo.all(query)
     |> Repo.preload([:requested_by, :issues])
   end

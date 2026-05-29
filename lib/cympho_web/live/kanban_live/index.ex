@@ -243,6 +243,8 @@ defmodule CymphoWeb.KanbanLive.Index do
     {:noreply, socket}
   end
 
+  def handle_info(_msg, socket), do: {:noreply, socket}
+
   @impl true
   def handle_event("transition_issue", %{"id" => id, "to_status" => to_status_string}, socket) do
     to_status = try_string_to_status(to_status_string)

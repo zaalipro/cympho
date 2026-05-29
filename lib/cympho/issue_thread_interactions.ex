@@ -12,6 +12,7 @@ defmodule Cympho.IssueThreadInteractions do
   require Logger
 
   alias Cympho.Repo
+  alias Cympho.Issues.Issue
   alias Cympho.Issues.IssueThreadInteraction
   alias Cympho.Issues.InteractionStateMachine
   alias Cympho.Wakes
@@ -37,11 +38,7 @@ defmodule Cympho.IssueThreadInteractions do
          |> IssueThreadInteraction.changeset(attrs)
          |> Repo.insert() do
       {:ok, interaction} ->
-        Phoenix.PubSub.broadcast(
-          Cympho.PubSub,
-          "issues",
-          {:interaction_created, interaction}
-        )
+        broadcast_interaction({:interaction_created, interaction}, interaction.issue_id)
 
         {:ok, interaction}
 
@@ -78,15 +75,19 @@ defmodule Cympho.IssueThreadInteractions do
   defp maybe_create_child_issues(%IssueThreadInteraction{
          kind: :suggest_tasks,
          status: :accepted,
+         issue_id: issue_id,
          payload: %{"tasks" => tasks}
        }) do
+    company_id = issue_company_id(issue_id)
+
     Enum.each(tasks, fn task ->
       if Map.get(task, "accepted", false) do
         Cympho.Issues.create_issue(%{
           title: Map.get(task, "title", "Untitled task"),
           description: Map.get(task, "description"),
           parent_id: Map.get(task, "parent_issue_id"),
-          project_id: Map.get(task, "project_id")
+          project_id: Map.get(task, "project_id"),
+          company_id: company_id
         })
       end
     end)
@@ -137,12 +138,24 @@ defmodule Cympho.IssueThreadInteractions do
   end
 
   defp broadcast_interaction_updated(interaction) do
-    Phoenix.PubSub.broadcast(
-      Cympho.PubSub,
-      "issues",
-      {:interaction_updated, interaction}
-    )
+    broadcast_interaction({:interaction_updated, interaction}, interaction.issue_id)
   end
+
+  # Interaction events are issue-scoped; broadcast on the issue's
+  # company-scoped topic (consumed by IssueLive.Show) rather than the bare
+  # "issues" topic, which would leak across tenants.
+  defp broadcast_interaction(message, issue_id) do
+    case issue_company_id(issue_id) do
+      nil -> {:error, :no_company}
+      company_id -> Cympho.PubSubGuard.broadcast("company:#{company_id}:issues", message)
+    end
+  end
+
+  defp issue_company_id(issue_id) when is_binary(issue_id) do
+    Repo.one(from i in Issue, where: i.id == ^issue_id, select: i.company_id)
+  end
+
+  defp issue_company_id(_), do: nil
 
   def pending_interactions(issue_id) do
     IssueThreadInteraction

@@ -150,6 +150,7 @@ Dark-mode-first UI inspired by Linear. See `DESIGN.md` for the full spec. Tailwi
 - Test support modules: `ConnCase`, `DataCase`, `ChannelCase`, `LiveCase`. Pool mode: `Ecto.Adapters.SQL.Sandbox` in manual mode.
 - Tool versions pinned in `.tool-versions`: Elixir `1.19.5-otp-28`, Erlang `28.4.3`.
 - Production config via env vars in `config/runtime.exs` (`DATABASE_URL`, `SECRET_KEY_BASE`, `APP_HOST`, `POOL_SIZE`, `LIVE_VIEW_SALT`, `S3_BUCKET`/`S3_HOST`/`S3_SCHEME`/`S3_ENDPOINT`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION`, `SENTRY_DSN`, `RELEASE_ENV`).
+- **Fail-closed secrets**: in `:prod`, `config/runtime.exs` raises at boot if `CYMPHO_ENCRYPTION_KEY`, `CYMPHO_USER_JWT_SECRET`, or `CYMPHO_AGENT_JWT_SECRET` are unset — there is no hardcoded fallback. Dev/test use fixed non-secret defaults from `config/config.exs`. Set all three in production (see `deploy_example.sh` `required_vars`).
 - Bandit HTTP server (not Cowboy).
 - Mix aliases: `setup`, `ecto.setup`, `ecto.reset`, `test` (defined in `mix.exs`).
 - **SortableJS is loaded via CDN** (`cdn.jsdelivr.net/npm/sortablejs@1.15.6` in `lib/cympho_web/controllers/layouts/root.html.heex`), not as an npm dependency — don't try to bump it in `package.json`.

@@ -29,6 +29,9 @@ defmodule Cympho.Notifications.NotificationDeliveryFailure do
       :failed_at
     ])
     |> validate_required([:user_id, :event_type, :channel_type, :failed_at])
-    |> validate_inclusion(:channel_type, ["email", "telegram", "webhook"])
+    # "unknown" is recorded by the RetryWorker, which retries a whole message
+    # (potentially fanned out to several channels) and may not have a single
+    # channel to attribute the final failure to.
+    |> validate_inclusion(:channel_type, ["email", "telegram", "webhook", "unknown"])
   end
 end

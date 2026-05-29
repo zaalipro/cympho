@@ -46,6 +46,15 @@ if encryption_key not in [nil, ""] do
   config :cympho, :encryption_key, encryption_key
 end
 
+# JWT signing secrets must be provided explicitly in production — no fallback.
+# System.fetch_env!/1 raises at boot if either is unset, so the release refuses
+# to start rather than signing tokens with a publicly-known default.
+if config_env() == :prod do
+  config :cympho,
+    user_jwt_secret: System.fetch_env!("CYMPHO_USER_JWT_SECRET"),
+    agent_jwt_secret: System.fetch_env!("CYMPHO_AGENT_JWT_SECRET")
+end
+
 config :cympho, CymphoWeb.Endpoint,
   live_view: [signing_salt: System.get_env("LIVE_VIEW_SALT") || "cympho_live_view_signing_salt"],
   check_origin: ["//" <> (System.get_env("APP_HOST") || "localhost")]

@@ -72,7 +72,13 @@ defmodule Cympho.EventStore do
     {:ok,
      %{
        table: table,
-       counter: 0,
+       # Seed from wall-clock so event ids stay monotonic across a GenServer
+       # restart. The ETS table is owned by this process, so a crash deletes it
+       # and init recreates it empty; a plain 0-based counter would then reuse
+       # ids that reconnecting clients still hold as their replay watermark,
+       # silently dropping (or mis-serving) events. Wall-clock ms only ever
+       # advances, so post-restart ids never collide with pre-restart ones.
+       counter: System.system_time(:millisecond),
        # topic => [event_id] newest-first
        topic_events: %{},
        max_per_topic: max_per_topic,

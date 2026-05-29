@@ -163,7 +163,7 @@ defmodule Cympho.AgentAuthJWT do
   defp validate_future_token(_), do: {:error, :missing_issued_at}
 
   defp get_secret_key do
-    Application.get_env(:cympho, :agent_jwt_secret, "default-secret-change-in-production")
+    Application.fetch_env!(:cympho, :agent_jwt_secret)
   end
 
   defp base64_url_encode(data) do

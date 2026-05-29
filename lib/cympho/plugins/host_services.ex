@@ -8,10 +8,9 @@ defmodule Cympho.Plugins.HostServices do
   Reads an issue by ID.
   Requires "read:issues" capability.
   """
-  def get_issue(issue_id, capabilities) when is_list(capabilities) do
+  def get_issue(company_id, issue_id, capabilities) when is_list(capabilities) do
     if "read:issues" in capabilities do
-      alias Cympho.Issues
-      Issues.get_issue(issue_id)
+      Cympho.Issues.get_company_issue(company_id, issue_id)
     else
       {:error, :unauthorized}
     end
@@ -21,10 +20,9 @@ defmodule Cympho.Plugins.HostServices do
   Lists issues for a company.
   Requires "read:issues" capability.
   """
-  def list_issues(_company_id, filters, capabilities) when is_list(capabilities) do
+  def list_issues(company_id, filters, capabilities) when is_list(capabilities) do
     if "read:issues" in capabilities do
-      alias Cympho.Issues
-      Issues.list_issues(filters)
+      Cympho.Issues.list_issues(Map.put(filters, :company_id, company_id))
     else
       {:error, :unauthorized}
     end
@@ -73,10 +71,9 @@ defmodule Cympho.Plugins.HostServices do
   Gets an agent by ID.
   Requires "read:agents" capability.
   """
-  def get_agent(agent_id, capabilities) when is_list(capabilities) do
+  def get_agent(company_id, agent_id, capabilities) when is_list(capabilities) do
     if "read:agents" in capabilities do
-      alias Cympho.Agents
-      Agents.get_agent(agent_id)
+      Cympho.Agents.get_company_agent(company_id, agent_id)
     else
       {:error, :unauthorized}
     end
