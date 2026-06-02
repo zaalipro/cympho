@@ -20,6 +20,22 @@ Cympho turns owner requests into coordinated company work. A CEO agent routes pr
   <img src="./screens/project.png" alt="Cympho project page showing repository settings, environment variables, status counts, and recent issues for a project" width="100%">
 </p>
 
+## Installation (Local & VPS)
+
+Cympho includes a robust, automated installation script (`install.sh`) that sets up the entire application on both **macOS (Local)** and **Ubuntu/Linux (VPS)**. 
+
+To install Cympho on an empty VPS or your local machine, run the following command:
+
+```bash
+curl -sL https://raw.githubusercontent.com/zaalipro/cympho/main/install.sh | bash
+```
+*(Or simply execute `./install.sh` if you have already cloned the repository).*
+
+### What the script does:
+1. **Interactive Onboarding:** Prompts for your Admin details and Company setup.
+2. **OS Auto-Detection & Dependencies:** Installs `asdf`, Node.js, PostgreSQL, and other necessary build tools via `apt` or `brew`.
+3. **VPS Production Ready:** If installing on a VPS, it automatically creates a secure Postgres user, provisions a Let's Encrypt SSL certificate via Caddy, generates production secrets (`.env`), and sets up a `systemd` service so Cympho stays running reliably.
+
 ## What Is New
 
 Cympho now has the pieces needed to feel like an operating system for agents, not just an issue tracker with a run button.

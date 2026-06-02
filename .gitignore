@@ -32,3 +32,13 @@ Thumbs.db
 erl_crash.dump
 
 *.png
+
+# Local SQL Databases
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Environment variables
+.env
+.env.*
