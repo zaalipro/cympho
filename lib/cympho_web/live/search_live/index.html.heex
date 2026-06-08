@@ -16,7 +16,7 @@
       </div>
       <button
         type="submit"
-        class="px-6 py-2 bg-brand text-white rounded-lg hover:bg-brand/90 transition-colors"
+        class="px-6 py-2 bg-brand text-on-primary rounded-button hover:bg-brand/90 transition-colors"
       >
         Search
       </button>
@@ -71,73 +71,50 @@
       <!-- Status Filter -->
       <div>
         <label class="block text-xs text-text-secondary mb-1">Issue Status</label>
-        <select
+        <.select_menu
           name="filter[status]"
-          class="w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand/50"
-        >
-          <option value="">All</option>
-          <option value="backlog" selected={@filters["status"] == "backlog"}>Backlog</option>
-          <option value="todo" selected={@filters["status"] == "todo"}>To Do</option>
-          <option value="in_progress" selected={@filters["status"] == "in_progress"}>
-            In Progress
-          </option>
-          <option value="in_review" selected={@filters["status"] == "in_review"}>
-            In Review
-          </option>
-          <option value="done" selected={@filters["status"] == "done"}>Done</option>
-          <option value="blocked" selected={@filters["status"] == "blocked"}>Blocked</option>
-          <option value="cancelled" selected={@filters["status"] == "cancelled"}>
-            Cancelled
-          </option>
-        </select>
+          value={@filters["status"] || ""}
+          options={[
+            {"All", ""},
+            {"Backlog", "backlog"},
+            {"To Do", "todo"},
+            {"In Progress", "in_progress"},
+            {"In Review", "in_review"},
+            {"Done", "done"},
+            {"Blocked", "blocked"},
+            {"Cancelled", "cancelled"}
+          ]}
+        />
       </div>
       
 <!-- Assignee Filter -->
       <div>
         <label class="block text-xs text-text-secondary mb-1">Assignee</label>
-        <select
+        <.select_menu
           name="filter[assignee_id]"
-          class="w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand/50"
-        >
-          <option value="">All</option>
-          <%= for agent <- @agents do %>
-            <option value={agent.id} selected={@filters["assignee_id"] == agent.id}>
-              {agent.name}
-            </option>
-          <% end %>
-        </select>
+          value={@filters["assignee_id"] || ""}
+          options={[{"All", ""} | Enum.map(@agents, &{&1.name, &1.id})]}
+        />
       </div>
       
 <!-- Label Filter -->
       <div>
         <label class="block text-xs text-text-secondary mb-1">Label</label>
-        <select
+        <.select_menu
           name="filter[label_id]"
-          class="w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand/50"
-        >
-          <option value="">All</option>
-          <%= for label <- @labels do %>
-            <option value={label.id} selected={@filters["label_id"] == label.id}>
-              {label.name}
-            </option>
-          <% end %>
-        </select>
+          value={@filters["label_id"] || ""}
+          options={[{"All", ""} | Enum.map(@labels, &{&1.name, &1.id})]}
+        />
       </div>
       
 <!-- Project Filter -->
       <div>
         <label class="block text-xs text-text-secondary mb-1">Project</label>
-        <select
+        <.select_menu
           name="filter[project_id]"
-          class="w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand/50"
-        >
-          <option value="">All</option>
-          <%= for project <- @projects do %>
-            <option value={project.id} selected={@filters["project_id"] == project.id}>
-              {project.name}
-            </option>
-          <% end %>
-        </select>
+          value={@filters["project_id"] || ""}
+          options={[{"All", ""} | Enum.map(@projects, &{&1.name, &1.id})]}
+        />
       </div>
     </form>
   </div>

@@ -44,14 +44,14 @@ defmodule CymphoWeb.AdapterLive.Show do
         {:ok,
          socket
          |> put_flash(:error, "Adapter not found")
-         |> redirect(to: ~p"/adapters")}
+         |> redirect(to: ~p"/settings/adapters")}
     end
   rescue
     ArgumentError ->
       {:ok,
        socket
        |> put_flash(:error, "Invalid adapter key")
-       |> redirect(to: ~p"/adapters")}
+       |> redirect(to: ~p"/settings/adapters")}
   end
 
   @impl true
@@ -150,7 +150,7 @@ defmodule CymphoWeb.AdapterLive.Show do
 
   defp health_status_class(:healthy), do: "bg-success/20 text-success"
   defp health_status_class(:degraded), do: "bg-amber-500/20 text-amber-400"
-  defp health_status_class(:unhealthy), do: "bg-red-500/20 text-red-400"
+  defp health_status_class(:unhealthy), do: "bg-brand/20 text-brand"
   defp health_status_class(_), do: "bg-text-quaternary/20 text-text-quaternary"
 
   defp health_status_label(:healthy), do: "Healthy"

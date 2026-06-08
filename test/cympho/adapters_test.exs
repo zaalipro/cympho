@@ -301,7 +301,9 @@ defmodule Cympho.AdaptersTest do
     test "each built-in adapter resolves to a module implementing Cympho.Adapters.Adapter" do
       for type <- [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting, :mock] do
         assert {:ok, module} = Registry.lookup(type)
-        behaviours = module.__info__(:attributes) |> Keyword.get_values(:behaviour) |> List.flatten()
+
+        behaviours =
+          module.__info__(:attributes) |> Keyword.get_values(:behaviour) |> List.flatten()
 
         assert Cympho.Adapters.Adapter in behaviours,
                "expected #{inspect(module)} for #{inspect(type)} to implement Cympho.Adapters.Adapter"

@@ -173,7 +173,9 @@ defmodule Cympho.SkillsTest do
       assert plugin.identifier == "new-plugin"
     end
 
-    test "returns {:error, %Ecto.Changeset{}} when required fields are missing", %{company: company} do
+    test "returns {:error, %Ecto.Changeset{}} when required fields are missing", %{
+      company: company
+    } do
       assert {:error, %Ecto.Changeset{} = cs} =
                Skills.create_plugin(%{company_id: company.id})
 

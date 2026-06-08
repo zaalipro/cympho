@@ -28,7 +28,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
   def sidebar(assigns) do
     ~H"""
     <aside class="w-full lg:w-[280px] shrink-0 border-t lg:border-t-0 lg:border-l border-hairline bg-surface-1/40">
-      <div class="p-4 lg:p-5 space-y-4">
+      <div class="p-4 lg:p-5 space-y-4 lg:sticky lg:top-0 lg:max-h-screen lg:overflow-y-auto">
         <div class="space-y-3">
           <div class="flex items-center justify-between gap-3">
             <span class="text-eyebrow text-ink-tertiary uppercase">Status</span>
@@ -66,6 +66,12 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
               align="right"
             />
           </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-eyebrow text-ink-tertiary uppercase">Due</span>
+            <span class={["text-caption", (@issue.due_on && "text-ink") || "text-ink-tertiary"]}>
+              {(@issue.due_on && Calendar.strftime(@issue.due_on, "%b %-d, %Y")) || "—"}
+            </span>
+          </div>
         </div>
 
         <hr class="border-hairline" />
@@ -100,16 +106,13 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
               No idle agents available.
             </p>
             <form :if={!Enum.empty?(@agents)} phx-submit="spawn_agent" class="space-y-2">
-              <select
+              <.select_menu
                 name="agent_id"
-                required
-                class="w-full bg-surface-1 border border-hairline rounded-md px-2.5 h-7 text-caption text-ink focus:outline-none focus:border-primary appearance-none"
-              >
-                <option value="">Choose an agent…</option>
-                <option :for={agent <- @agents} value={agent.id}>
-                  {agent.name} ({agent.role})
-                </option>
-              </select>
+                value=""
+                options={[
+                  {"Choose an agent…", ""} | Enum.map(@agents, &{"#{&1.name} (#{&1.role})", &1.id})
+                ]}
+              />
               <.button type="submit" size="sm">Start agent</.button>
             </form>
           </div>

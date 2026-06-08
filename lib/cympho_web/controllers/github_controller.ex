@@ -217,9 +217,7 @@ defmodule CymphoWeb.GithubController do
         {:ok, Repo.preload(updated, :project)}
 
       {:error, reason} ->
-        Logger.warning(
-          "Auto-link update failed for issue #{issue.id}: #{inspect(reason)}"
-        )
+        Logger.warning("Auto-link update failed for issue #{issue.id}: #{inspect(reason)}")
 
         :error
     end
@@ -490,7 +488,11 @@ defmodule CymphoWeb.GithubController do
 
   ## final review wake (used after merge auto-:in_review)
 
-  defp wake_for_final_review(%Issue{assignee_id: assignee_id, id: issue_id, company_id: company_id}) do
+  defp wake_for_final_review(%Issue{
+         assignee_id: assignee_id,
+         id: issue_id,
+         company_id: company_id
+       }) do
     target =
       cond do
         is_binary(assignee_id) -> assignee_id

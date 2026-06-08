@@ -1,4 +1,4 @@
-<div class="p-6 lg:p-8 max-w-6xl mx-auto">
+<.settings_layout active={:adapters}>
   <.header title={@page_title}>
     <:actions>
       <button
@@ -46,7 +46,7 @@
         <div class="text-xs text-text-quaternary mt-1">Healthy</div>
       </div>
       <div class="text-center">
-        <div class="text-2xl font-510 text-red-400">
+        <div class="text-2xl font-510 text-brand">
           {Enum.count(@adapters, fn a -> Map.get(@health, a.key, %{}).status == :unhealthy end)}
         </div>
         <div class="text-xs text-text-quaternary mt-1">Unhealthy</div>
@@ -108,7 +108,7 @@
 
         <div class="flex flex-wrap items-center gap-2 pt-2">
           <.app_link
-            navigate={~p"/adapters/#{adapter.key}"}
+            navigate={~p"/settings/adapters/#{adapter.key}"}
             class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center justify-center"
           >
             Configure
@@ -153,4 +153,4 @@
     </div>
     <p class="text-sm text-text-tertiary">No adapters registered.</p>
   </div>
-</div>
+</.settings_layout>

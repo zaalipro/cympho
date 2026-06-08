@@ -407,7 +407,12 @@ defmodule Cympho.RoutineTriggersTest do
           url_key: "run-agent-#{:rand.uniform(100_000)}"
         })
 
-      {:ok, routine} = Routines.create_routine(%{name: "Run Test", agent_id: agent.id})
+      {:ok, routine} =
+        Routines.create_routine(%{
+          name: "Run Test",
+          agent_id: agent.id,
+          concurrency_policy: :always_enqueue
+        })
 
       {:ok, trigger} =
         RoutineTriggers.create_schedule_trigger(%{

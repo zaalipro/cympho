@@ -96,6 +96,11 @@ defmodule CymphoWeb.RoutineController do
         {:error, :routine_paused} ->
           conn |> put_status(:conflict) |> json(%{error: "routine is paused"})
 
+        {:skip, _policy} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{error: "run skipped — a run is already active for this routine"})
+
         {:error, reason} ->
           conn
           |> put_status(:internal_server_error)

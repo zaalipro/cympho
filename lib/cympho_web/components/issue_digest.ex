@@ -265,15 +265,15 @@ defmodule CymphoWeb.Components.IssueDigest do
               </p>
               <div
                 :if={Map.get(contract, :missing_fields, []) != []}
-                class="mt-2 rounded-md border border-red-500/20 bg-red-500/[0.06] px-2.5 py-2"
+                class="mt-2 rounded-md border border-brand/20 bg-brand/[0.06] px-2.5 py-2"
               >
-                <p class="text-[10px] font-590 uppercase text-red-200">
+                <p class="text-[10px] font-590 uppercase text-brand">
                   Missing fields
                 </p>
                 <div class="mt-1 flex flex-wrap gap-1.5">
                   <span
                     :for={field <- Map.get(contract, :missing_fields, [])}
-                    class="rounded bg-red-500/10 px-1.5 py-0.5 text-[11px] text-red-100"
+                    class="rounded bg-brand/10 px-1.5 py-0.5 text-[11px] text-brand"
                   >
                     {field}
                   </span>
@@ -689,7 +689,7 @@ defmodule CymphoWeb.Components.IssueDigest do
   end
 
   def digest_state_class(:closed), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-  def digest_state_class(:needs_attention), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def digest_state_class(:needs_attention), do: "border-brand/25 bg-brand/10 text-brand"
   def digest_state_class(:running), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
   def digest_state_class(:coordinating), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   def digest_state_class(:ready_for_review), do: "border-brand/30 bg-brand/10 text-brand"
@@ -707,10 +707,10 @@ defmodule CymphoWeb.Components.IssueDigest do
   def digest_bar_class(score) when score >= 80, do: "bg-emerald-400"
   def digest_bar_class(score) when score >= 55, do: "bg-brand"
   def digest_bar_class(score) when score >= 30, do: "bg-amber-300"
-  def digest_bar_class(_), do: "bg-red-400"
+  def digest_bar_class(_), do: "bg-amber-600"
 
   def review_readiness_class(:ok), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-  def review_readiness_class(:attention), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def review_readiness_class(:attention), do: "border-brand/25 bg-brand/10 text-brand"
   def review_readiness_class(:missing), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   def review_readiness_class(_), do: "border-border bg-surface text-text-tertiary"
 
@@ -721,7 +721,7 @@ defmodule CymphoWeb.Components.IssueDigest do
   def review_gate_label(_), do: "Check"
 
   def review_gate_class(:ok), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-  def review_gate_class(:attention), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def review_gate_class(:attention), do: "border-brand/25 bg-brand/10 text-brand"
   def review_gate_class(:missing), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   def review_gate_class(:neutral), do: "border-border bg-surface text-text-tertiary"
   def review_gate_class(_), do: "border-border bg-surface text-text-tertiary"
@@ -772,7 +772,7 @@ defmodule CymphoWeb.Components.IssueDigest do
     do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
 
   def contribution_status_class(:blocked),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
+    do: "border-brand/25 bg-brand/10 text-brand"
 
   def contribution_status_class(:handoff),
     do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
@@ -787,7 +787,7 @@ defmodule CymphoWeb.Components.IssueDigest do
 
   def comment_mix_class(:owner_update), do: "border-brand/25 bg-brand/10 text-brand"
   def comment_mix_class(:decision), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-  def comment_mix_class(:blocked), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def comment_mix_class(:blocked), do: "border-brand/25 bg-brand/10 text-brand"
   def comment_mix_class(:handoff), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
   def comment_mix_class(:review), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   def comment_mix_class(:delivery), do: "border-cyan-500/25 bg-cyan-500/10 text-cyan-300"

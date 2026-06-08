@@ -75,7 +75,8 @@ defmodule Mix.Tasks.Cympho.Compare do
     %{
       slug: "tool_call_tracing",
       paperclip: "Full tool-call tracing and immutable audit log",
-      cympho: "ToolCallTraces context with its own LiveView (Cympho exceeds — exposed as a first-class browsable resource)",
+      cympho:
+        "ToolCallTraces context with its own LiveView (Cympho exceeds — exposed as a first-class browsable resource)",
       check: &__MODULE__.check_tool_traces/0
     },
     %{
@@ -117,14 +118,16 @@ defmodule Mix.Tasks.Cympho.Compare do
     # ---- Cympho-exclusive differentiators (Paperclip README does not mention) ----
     %{
       slug: "decision_reversal",
-      paperclip: "(not mentioned — Paperclip says approval changes can be 'rolled back' but no first-class decision-reversal primitive)",
+      paperclip:
+        "(not mentioned — Paperclip says approval changes can be 'rolled back' but no first-class decision-reversal primitive)",
       cympho: "Decisions context with explicit reversal events, scoped per company",
       check: &__MODULE__.check_decisions/0
     },
     %{
       slug: "mcp_server",
       paperclip: "(not mentioned)",
-      cympho: "Built-in MCP server (Cympho.Mcp.Server) so external AI models can drive Cympho as tools",
+      cympho:
+        "Built-in MCP server (Cympho.Mcp.Server) so external AI models can drive Cympho as tools",
       check: &__MODULE__.check_mcp/0
     },
     %{
@@ -136,7 +139,8 @@ defmodule Mix.Tasks.Cympho.Compare do
     %{
       slug: "realtime_collab",
       paperclip: "React UI (state via fetch/poll)",
-      cympho: "Phoenix LiveView + Channels: diff-pushed UI + dedicated channels for heartbeats/runs/activity/comments/issues with EventStore replay",
+      cympho:
+        "Phoenix LiveView + Channels: diff-pushed UI + dedicated channels for heartbeats/runs/activity/comments/issues with EventStore replay",
       check: &__MODULE__.check_realtime/0
     },
     %{
@@ -148,13 +152,15 @@ defmodule Mix.Tasks.Cympho.Compare do
     %{
       slug: "review_nudges",
       paperclip: "(not mentioned)",
-      cympho: "ReviewNudges — proactive evidence-request tracking with staleness signals on the dashboard",
+      cympho:
+        "ReviewNudges — proactive evidence-request tracking with staleness signals on the dashboard",
       check: &__MODULE__.check_review_nudges/0
     },
     %{
       slug: "rate_limiting",
       paperclip: "(not mentioned)",
-      cympho: "RateLimiting: per-socket token bucket + broadcast dedup + IP throttling (no public ETS handles)",
+      cympho:
+        "RateLimiting: per-socket token bucket + broadcast dedup + IP throttling (no public ETS handles)",
       check: &__MODULE__.check_rate_limiting/0
     }
   ]
@@ -291,8 +297,7 @@ defmodule Mix.Tasks.Cympho.Compare do
          "HeartbeatEngine + Watchdog (env-gated in dev) + per-agent DynamicSupervisor running"}
 
       true ->
-        {:gap,
-         "engine=#{has_engine} watchdog=#{has_watchdog_mod} dynamic_sup=#{has_dynamic_sup}"}
+        {:gap, "engine=#{has_engine} watchdog=#{has_watchdog_mod} dynamic_sup=#{has_dynamic_sup}"}
     end
   end
 
@@ -327,7 +332,9 @@ defmodule Mix.Tasks.Cympho.Compare do
 
     if has_decisions and has_board and has_audit,
       do: {:parity, "BoardApprovals + Decisions + GovernanceAuditLogs"},
-      else: {:gap, "Governance missing: board=#{has_board} decisions=#{has_decisions} audit=#{has_audit}"}
+      else:
+        {:gap,
+         "Governance missing: board=#{has_board} decisions=#{has_decisions} audit=#{has_audit}"}
   end
 
   def check_org_chart do
@@ -351,9 +358,14 @@ defmodule Mix.Tasks.Cympho.Compare do
     running? = Process.whereis(Cympho.Plugins.Supervisor) != nil
 
     cond do
-      has_ctx and has_sup and running? -> {:parity, "Plugins context + supervisor running"}
-      has_ctx and has_sup -> {:parity, "Plugins context + supervisor module (anonymous in some envs)"}
-      true -> {:gap, "Plugins subsystem missing"}
+      has_ctx and has_sup and running? ->
+        {:parity, "Plugins context + supervisor running"}
+
+      has_ctx and has_sup ->
+        {:parity, "Plugins context + supervisor module (anonymous in some envs)"}
+
+      true ->
+        {:gap, "Plugins subsystem missing"}
     end
   end
 
@@ -414,7 +426,9 @@ defmodule Mix.Tasks.Cympho.Compare do
   def check_decisions do
     if module_with_fun?(Cympho.Decisions, :__info__, 1) and
          module_with_fun?(Cympho.Decisions, :reverse_decision, 3),
-       do: {:exceeds, "Cympho.Decisions.reverse_decision/3 — first-class reversible decision events"},
+       do:
+         {:exceeds,
+          "Cympho.Decisions.reverse_decision/3 — first-class reversible decision events"},
        else: {:gap, "Decision reversal primitive missing"}
   end
 
@@ -461,7 +475,9 @@ defmodule Mix.Tasks.Cympho.Compare do
 
   def check_review_nudges do
     if module_with_fun?(Cympho.ReviewNudges, :__info__, 1),
-      do: {:exceeds, "Cympho.ReviewNudges — proactive evidence-request tracker (no Paperclip equivalent)"},
+      do:
+        {:exceeds,
+         "Cympho.ReviewNudges — proactive evidence-request tracker (no Paperclip equivalent)"},
       else: {:gap, "ReviewNudges missing"}
   end
 

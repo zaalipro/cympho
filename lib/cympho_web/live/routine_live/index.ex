@@ -5,7 +5,8 @@ defmodule CymphoWeb.RoutineLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, :routines, Routines.list_routines())}
+    socket = assign(socket, :infinite_scroll, %{})
+    {:ok, init_stream(socket, :routine, &fetch_routines(socket, &1))}
   end
 
   @impl true
@@ -34,10 +35,15 @@ defmodule CymphoWeb.RoutineLive.Index do
   end
 
   @impl true
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :routine, &fetch_routines(socket, &1))}
+  end
+
+  @impl true
   def handle_event("delete_routine", %{"id" => id}, socket) do
     routine = Routines.get_routine!(id)
     {:ok, _} = Routines.archive_routine(routine)
-    {:noreply, assign(socket, :routines, Routines.list_routines())}
+    {:noreply, reset_stream(socket, :routine, &fetch_routines(socket, &1))}
   end
 
   @impl true
@@ -46,7 +52,7 @@ defmodule CymphoWeb.RoutineLive.Index do
 
     case Routines.pause_routine(routine) do
       {:ok, _} ->
-        {:noreply, assign(socket, :routines, Routines.list_routines())}
+        {:noreply, reset_stream(socket, :routine, &fetch_routines(socket, &1))}
 
       {:error, :invalid_transition} ->
         {:noreply, put_flash(socket, :error, "Cannot pause a routine in #{routine.status} state")}
@@ -59,12 +65,16 @@ defmodule CymphoWeb.RoutineLive.Index do
 
     case Routines.resume_routine(routine) do
       {:ok, _} ->
-        {:noreply, assign(socket, :routines, Routines.list_routines())}
+        {:noreply, reset_stream(socket, :routine, &fetch_routines(socket, &1))}
 
       {:error, :invalid_transition} ->
         {:noreply,
          put_flash(socket, :error, "Cannot resume a routine in #{routine.status} state")}
     end
+  end
+
+  defp fetch_routines(_socket, cursor) do
+    Routines.list_routines_page(after: cursor)
   end
 
   def routine_label(nil), do: "Unknown"
@@ -84,7 +94,7 @@ defmodule CymphoWeb.RoutineLive.Index do
 
   def routine_status_class(_), do: "border-border bg-surface text-text-tertiary"
 
-  def routine_priority_class(:critical), do: "border-red-500/25 bg-red-500/10 text-red-400"
+  def routine_priority_class(:critical), do: "border-brand/25 bg-brand/10 text-brand"
   def routine_priority_class(:high), do: "border-amber-500/25 bg-amber-500/10 text-amber-400"
   def routine_priority_class(:medium), do: "border-brand/25 bg-brand/10 text-brand"
 

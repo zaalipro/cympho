@@ -9,10 +9,11 @@ defmodule CymphoWeb.LabelLive.Index do
 
     {:ok,
      socket
-     |> assign(:labels, Labels.list_labels())
+     |> assign(:infinite_scroll, %{})
      |> assign(:label_changeset, changeset)
      |> assign(:form, to_form(changeset))
-     |> assign(:editing_label, nil)}
+     |> assign(:editing_label, nil)
+     |> init_stream(:labels, &fetch_labels(&1))}
   end
 
   @impl true
@@ -31,7 +32,7 @@ defmodule CymphoWeb.LabelLive.Index do
 
         {:noreply,
          socket
-         |> assign(:labels, Labels.list_labels())
+         |> reset_stream(:labels, &fetch_labels(&1))
          |> assign(:label_changeset, changeset)
          |> assign(:form, to_form(changeset))
          |> put_flash(:info, "Label created")}
@@ -59,7 +60,7 @@ defmodule CymphoWeb.LabelLive.Index do
 
         {:noreply,
          socket
-         |> assign(:labels, Labels.list_labels())
+         |> reset_stream(:labels, &fetch_labels(&1))
          |> assign(:editing_label, nil)
          |> assign(:label_changeset, changeset)
          |> assign(:form, to_form(changeset))
@@ -85,7 +86,17 @@ defmodule CymphoWeb.LabelLive.Index do
     {:ok, _} = Labels.delete_label(label)
 
     {:noreply,
-     socket |> assign(:labels, Labels.list_labels()) |> put_flash(:info, "Label deleted")}
+     socket
+     |> reset_stream(:labels, &fetch_labels(&1))
+     |> put_flash(:info, "Label deleted")}
+  end
+
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :labels, &fetch_labels(&1))}
+  end
+
+  defp fetch_labels(cursor) do
+    Labels.list_labels_page(after: cursor)
   end
 
   defp text_color("#" <> hex) do

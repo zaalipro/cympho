@@ -9,7 +9,7 @@ defmodule CymphoWeb.SecretsLive.Index do
       socket
       |> assign(:page_title, "Secrets Management")
       |> assign(:company_id, company_id)
-      |> assign(:secrets, [])
+      |> assign(:infinite_scroll, %{})
       |> assign(:selected_secret, nil)
       |> assign(:show_form, false)
       |> assign(:form_mode, :create)
@@ -27,7 +27,17 @@ defmodule CymphoWeb.SecretsLive.Index do
     if company_id do
       mount(%{"company_id" => company_id}, session, socket)
     else
-      {:ok, assign(socket, :page_title, "Secrets Management")}
+      {:ok,
+       socket
+       |> assign(:page_title, "Secrets Management")
+       |> assign(:company_id, nil)
+       |> assign(:infinite_scroll, %{})
+       |> assign(:selected_secret, nil)
+       |> assign(:show_form, false)
+       |> assign(:form_mode, :create)
+       |> assign(:versions, [])
+       |> assign(:show_versions, false)
+       |> init_stream(:secrets, &fetch_secrets(socket, &1))}
     end
   end
 
@@ -48,6 +58,10 @@ defmodule CymphoWeb.SecretsLive.Index do
   end
 
   @impl true
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :secrets, &fetch_secrets(socket, &1))}
+  end
+
   def handle_event("show_create_form", _, socket) do
     changeset = Secret.changeset(%Secret{}, %{})
 
@@ -179,9 +193,14 @@ defmodule CymphoWeb.SecretsLive.Index do
   end
 
   defp load_secrets(socket) do
-    company_id = socket.assigns.company_id
-    secrets = Secrets.list_secrets(company_id)
-    assign(socket, :secrets, secrets)
+    reset_stream(socket, :secrets, &fetch_secrets(socket, &1))
+  end
+
+  defp fetch_secrets(socket, cursor) do
+    case socket.assigns[:company_id] do
+      nil -> %Cympho.Pagination.Page{entries: [], next_cursor: nil, has_more?: false}
+      company_id -> Secrets.list_secrets_page(company_id, after: cursor)
+    end
   end
 
   defp get_current_company_id(socket) do

@@ -1,0 +1,16 @@
+<.settings_layout active={:profile}>
+  <.header
+    title="Profile"
+    subtitle="Your account details. Shown across Cympho and used as the sender for your notifications."
+  />
+
+  <.panel class="max-w-xl p-5">
+    <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-4">
+      <.input field={@form[:name]} label="Name" required />
+      <.input field={@form[:email]} type="email" label="Email" required />
+      <:actions>
+        <.button type="submit" phx-disable-with="Saving…">Save changes</.button>
+      </:actions>
+    </.simple_form>
+  </.panel>
+</.settings_layout>

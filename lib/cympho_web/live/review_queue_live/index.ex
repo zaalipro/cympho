@@ -116,7 +116,7 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
   def status_color(:in_progress), do: "bg-yellow-400"
   def status_color(:in_review), do: "bg-purple-400"
   def status_color(:done), do: "bg-green-400"
-  def status_color(:blocked), do: "bg-red-400"
+  def status_color(:blocked), do: "bg-brand"
   def status_color(_), do: "bg-gray-400"
 
   def format_age(updated_at) do

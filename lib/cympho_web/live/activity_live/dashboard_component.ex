@@ -76,16 +76,16 @@ defmodule CymphoWeb.ActivityLive.DashboardComponent do
       else: Enum.max_by(by_action, fn {_action, count} -> count end) |> elem(1)
   end
 
-  defp action_color("created"), do: "#4ade80"
-  defp action_color("updated"), do: "#60a5fa"
-  defp action_color("deleted"), do: "#f87171"
-  defp action_color("commented"), do: "#fbbf24"
-  defp action_color("assigned"), do: "#c084fc"
-  defp action_color("unassigned"), do: "#a78bfa"
-  defp action_color(_), do: "#7170ff"
+  defp action_color("created"), do: "#5db872"
+  defp action_color("updated"), do: "#5db8a6"
+  defp action_color("deleted"), do: "#D97757"
+  defp action_color("commented"), do: "#e8a55a"
+  defp action_color("assigned"), do: "#9A7CA8"
+  defp action_color("unassigned"), do: "#B6A1C2"
+  defp action_color(_), do: "#D97757"
 
-  defp actor_color("user"), do: "#60a5fa"
-  defp actor_color("system"), do: "#fbbf24"
-  defp actor_color("agent"), do: "#4ade80"
-  defp actor_color(_), do: "#7170ff"
+  defp actor_color("user"), do: "#5db8a6"
+  defp actor_color("system"), do: "#e8a55a"
+  defp actor_color("agent"), do: "#5db872"
+  defp actor_color(_), do: "#D97757"
 end

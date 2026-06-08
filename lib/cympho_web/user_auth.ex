@@ -19,7 +19,9 @@ defmodule CymphoWeb.UserAuth do
       user_id when is_binary(user_id) ->
         case Users.get_user(user_id) do
           {:ok, user} ->
-            Plug.Conn.assign(conn, :current_user, user)
+            conn
+            |> Plug.Conn.assign(:current_user, user)
+            |> sync_theme(user)
 
           {:error, :not_found} ->
             redirect_to_login(conn)
@@ -28,6 +30,22 @@ defmodule CymphoWeb.UserAuth do
       _ ->
         redirect_to_login(conn)
     end
+  end
+
+  # The DB is the source of truth for an authenticated user's theme. FetchTheme
+  # (in the :browser pipeline) renders the `theme` cookie for the first paint,
+  # before auth runs; once the user is known we override the assign and re-seed
+  # the cookie so a stale or hand-edited cookie can't mask the saved theme.
+  defp sync_theme(conn, user) do
+    theme = Cympho.Themes.normalize(Map.get(user, :theme))
+
+    conn
+    |> Plug.Conn.assign(:theme, theme)
+    |> Plug.Conn.put_resp_cookie("theme", theme,
+      max_age: 60 * 60 * 24 * 365,
+      http_only: false,
+      same_site: "Lax"
+    )
   end
 
   def on_mount(:default, _params, session, socket) do
@@ -122,7 +140,8 @@ defmodule CymphoWeb.UserAuth do
               id: user.id,
               email: user.email,
               name: user.name,
-              company_id: user.company_id
+              company_id: user.company_id,
+              theme: user.theme
             }
 
             assign(socket, :current_user, user_map)

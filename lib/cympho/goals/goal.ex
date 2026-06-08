@@ -11,6 +11,7 @@ defmodule Cympho.Goals.Goal do
     field :status, :string, default: "active"
     field :priority, :string, default: "medium"
     field :goal_type, Ecto.Enum, values: [:mission, :initiative, :milestone], default: :initiative
+    field :target_date, :date
 
     belongs_to :project, Cympho.Projects.Project
     belongs_to :company, Cympho.Companies.Company
@@ -32,6 +33,7 @@ defmodule Cympho.Goals.Goal do
       :status,
       :priority,
       :goal_type,
+      :target_date,
       :project_id,
       :company_id,
       :parent_id

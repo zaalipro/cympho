@@ -75,6 +75,11 @@
   </.panel>
 
   <p class="mt-5 text-caption text-ink-tertiary">
+    <span :if={@goal.target_date}>
+      <span class="hero-flag-mini -mt-0.5 mr-1 inline-block h-3.5 w-3.5 text-ink-tertiary" />
+      Target {Calendar.strftime(@goal.target_date, "%b %-d, %Y")}
+      <span class="mx-1.5">·</span>
+    </span>
     Created {Calendar.strftime(@goal.inserted_at, "%b %-d, %Y")}
   </p>
 </.page>

@@ -41,7 +41,8 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
               aria-hidden="true"
               class="mt-2 inline-block w-2 shrink-0 border-l border-b border-hairline-strong rounded-bl-sm self-stretch"
               style="height: 14px;"
-            ></span>
+            >
+            </span>
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-mono text-caption text-ink-tertiary">
@@ -104,7 +105,7 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
 
   defp state_class(:blocked),
     do:
-      "shrink-0 rounded-full border border-red-500/25 bg-red-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-red-300"
+      "shrink-0 rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[10px] font-510 uppercase text-brand"
 
   defp state_class(:closed),
     do:
@@ -115,8 +116,10 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
       "rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] uppercase text-emerald-300"
 
   defp chip_class(:blocked),
-    do: "rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[10px] uppercase text-red-300"
+    do:
+      "rounded-full border border-brand/20 bg-brand/10 px-2 py-0.5 text-[10px] uppercase text-brand"
 
   defp chip_class(:missing),
-    do: "rounded-full border border-hairline bg-surface-1 px-2 py-0.5 text-[10px] uppercase text-ink-tertiary"
+    do:
+      "rounded-full border border-hairline bg-surface-1 px-2 py-0.5 text-[10px] uppercase text-ink-tertiary"
 end

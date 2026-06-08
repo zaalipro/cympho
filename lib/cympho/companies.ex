@@ -20,6 +20,14 @@ defmodule Cympho.Companies do
     |> Repo.all()
   end
 
+  def list_companies_page(opts \\ []) do
+    Cympho.Pagination.page(Company,
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:inserted_at, :asc}, {:name, :asc}, {:id, :asc}]
+    )
+  end
+
   def get_company!(id), do: Repo.get!(Company, id)
 
   def get_company_by_slug(slug) do
@@ -266,7 +274,7 @@ defmodule Cympho.Companies do
             "autonomy_mode" => "autonomous_default",
             "approval_gates" => ["budget_override", "dangerous_runtime_action"]
           },
-          brand_color: "#5e6ad2"
+          brand_color: "#D97757"
         })
         |> Repo.insert!()
 

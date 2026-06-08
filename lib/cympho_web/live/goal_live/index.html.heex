@@ -3,7 +3,7 @@
     <:actions>
       <.app_link
         navigate={~p"/goals/new"}
-        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
+        class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 rounded-button transition-colors inline-flex items-center gap-2"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -18,8 +18,39 @@
     </:actions>
   </.header>
 
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-    <.card :for={goal <- @goals} id={"goal-#{goal.id}"}>
+  <.infinite_scroll
+    id="goals"
+    has_more={@infinite_scroll[:goals][:has_more?] || false}
+    container_class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+  >
+    <:empty>
+      <div class="flex flex-col items-center justify-center py-20 text-center">
+        <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
+          <svg
+            class="w-6 h-6 text-text-tertiary"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+            />
+          </svg>
+        </div>
+        <p class="text-sm text-text-tertiary mb-4">No goals yet.</p>
+        <.app_link
+          navigate={~p"/goals/new"}
+          class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
+        >
+          Create your first goal
+        </.app_link>
+      </div>
+    </:empty>
+
+    <.card :for={{dom_id, goal} <- @streams.goals} id={dom_id}>
       <div class="p-5 space-y-3">
         <div class="flex items-center justify-between">
           <h3 class="font-serif text-sm font-510 text-text-primary truncate">{goal.title}</h3>
@@ -54,33 +85,5 @@
         </div>
       </div>
     </.card>
-  </div>
-
-  <div
-    :if={Enum.empty?(@goals)}
-    class="flex flex-col items-center justify-center py-20 text-center"
-  >
-    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
-      <svg
-        class="w-6 h-6 text-text-tertiary"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-        />
-      </svg>
-    </div>
-    <p class="text-sm text-text-tertiary mb-4">No goals yet.</p>
-    <.app_link
-      navigate={~p"/goals/new"}
-      class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
-    >
-      Create your first goal
-    </.app_link>
-  </div>
+  </.infinite_scroll>
 </div>

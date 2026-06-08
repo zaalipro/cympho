@@ -7,6 +7,21 @@ defmodule Cympho.Routines do
     Repo.all(from r in Routine, order_by: [desc: r.inserted_at, desc: r.id])
   end
 
+  @doc """
+  Keyset (infinite-scroll) page of routines, newest first.
+
+  Returns a `Cympho.Pagination.Page`; keys on `(inserted_at, id)` to match the
+  display order of `list_routines/0`.
+  """
+  def list_routines_page(opts \\ []) do
+    Routine
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:inserted_at, :desc}, {:id, :desc}]
+    )
+  end
+
   def list_routines_by_status(status) when is_atom(status) do
     Repo.all(
       from r in Routine, where: r.status == ^status, order_by: [desc: r.inserted_at, desc: r.id]

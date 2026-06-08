@@ -52,6 +52,18 @@ defmodule CymphoWeb.SessionController do
     |> configure_session(renew: true)
     |> put_session(:user_id, user.id)
     |> put_session(:company_id, default_company_id(user))
+    |> seed_theme_cookie(user)
+  end
+
+  # Mirror the user's saved theme into a (non-HttpOnly) cookie so the root
+  # layout server-renders the right `data-theme` on the next request and the
+  # ThemeManager JS hook can read/update it client-side. Non-sensitive value.
+  defp seed_theme_cookie(conn, %User{} = user) do
+    put_resp_cookie(conn, "theme", Cympho.Themes.normalize(user.theme),
+      max_age: 60 * 60 * 24 * 365,
+      http_only: false,
+      same_site: "Lax"
+    )
   end
 
   defp default_company_id(%User{company_id: company_id}) when is_binary(company_id),
@@ -83,20 +95,20 @@ defmodule CymphoWeb.SessionController do
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Sign in · Cympho</title>
         <style>
-          :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #08090f; color: #f4f4f5; }
-          body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% -20%, rgba(94, 106, 210, .28), transparent 34%), #08090f; }
-          main { width: min(420px, calc(100vw - 32px)); border: 1px solid rgba(255,255,255,.12); border-radius: 8px; background: rgba(20, 22, 32, .92); box-shadow: 0 24px 80px rgba(0,0,0,.42); }
+          :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #20201E; color: #FAF9F5; }
+          body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% -20%, rgba(217, 119, 87, .22), transparent 34%), #20201E; }
+          main { width: min(420px, calc(100vw - 32px)); border: 1px solid rgba(255,250,245,.10); border-radius: 16px; background: rgba(38, 38, 36, .96); box-shadow: 0 24px 80px rgba(0,0,0,.42); }
           form { display: grid; gap: 14px; padding: 28px; }
-          h1 { margin: 0; font-size: 24px; line-height: 1.15; font-weight: 650; letter-spacing: 0; }
-          p { margin: 0; color: #a1a1aa; font-size: 14px; line-height: 1.5; }
-          label { display: grid; gap: 7px; color: #d4d4d8; font-size: 13px; font-weight: 560; }
-          input { width: 100%; box-sizing: border-box; border: 1px solid rgba(255,255,255,.12); border-radius: 7px; background: #0d0f18; color: #f4f4f5; padding: 10px 11px; font: inherit; }
-          input:focus { outline: 2px solid rgba(94,106,210,.55); outline-offset: 1px; }
-          button { border: 0; border-radius: 7px; background: #5e6ad2; color: white; padding: 10px 12px; font: inherit; font-weight: 620; cursor: pointer; }
-          button:hover { background: #6d78df; }
-          .error { color: #fca5a5; background: rgba(239, 68, 68, .12); border: 1px solid rgba(239, 68, 68, .24); border-radius: 7px; padding: 9px 10px; }
-          .dev { color: #71717a; font-size: 12px; }
-          a { color: #a5b4fc; text-decoration: none; }
+          h1 { margin: 0; font-family: "Source Serif 4", Georgia, "Times New Roman", serif; font-size: 26px; line-height: 1.15; font-weight: 600; letter-spacing: -0.3px; }
+          p { margin: 0; color: #B0A99C; font-size: 14px; line-height: 1.5; }
+          label { display: grid; gap: 7px; color: #E5E1D8; font-size: 13px; font-weight: 560; }
+          input { width: 100%; box-sizing: border-box; border: 1px solid rgba(255,250,245,.12); border-radius: 10px; background: #2D2C2A; color: #FAF9F5; padding: 10px 11px; font: inherit; }
+          input:focus { outline: 2px solid rgba(217,119,87,.55); outline-offset: 1px; }
+          button { border: 0; border-radius: 10px; background: #D97757; color: #20201E; padding: 10px 12px; font: inherit; font-weight: 620; cursor: pointer; }
+          button:hover { background: #E08A6B; }
+          .error { color: #E0AEAE; background: rgba(198, 69, 69, .12); border: 1px solid rgba(198, 69, 69, .26); border-radius: 8px; padding: 9px 10px; }
+          .dev { color: #8C857A; font-size: 12px; }
+          a { color: #E08A6B; text-decoration: none; }
         </style>
       </head>
       <body>

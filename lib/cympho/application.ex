@@ -54,6 +54,7 @@ defmodule Cympho.Application do
     ]
 
     children = Enum.reject(children, &is_nil/1)
+
     opts = [
       strategy: :one_for_one,
       max_restarts: 10,

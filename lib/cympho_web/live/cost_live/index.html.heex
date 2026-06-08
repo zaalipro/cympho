@@ -22,9 +22,9 @@
 <!-- Budget Alerts -->
   <div
     :if={not Enum.empty?(@exceeded_budgets)}
-    class="mb-6 bg-red-500/10 border border-red-500/20 rounded-xl p-4"
+    class="mb-6 bg-brand/10 border border-brand/20 rounded-xl p-4"
   >
-    <h3 class="font-serif text-sm font-510 text-red-400 mb-2">
+    <h3 class="font-serif text-sm font-510 text-brand mb-2">
       <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
           stroke-linecap="round"
@@ -39,7 +39,7 @@
       <%= for budget <- @exceeded_budgets do %>
         <div class="flex items-center justify-between text-sm">
           <span class="text-text-primary">{budget.name}</span>
-          <span class="text-red-400 font-510">{budget_utilization_pct(budget)} used</span>
+          <span class="text-brand font-510">{budget_utilization_pct(budget)} used</span>
         </div>
       <% end %>
     </div>
@@ -181,7 +181,7 @@
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="w-full h-full">
           <polyline
             fill="none"
-            stroke="#5e6ad2"
+            stroke="#D97757"
             stroke-width="2"
             stroke-linejoin="round"
             stroke-linecap="round"
@@ -206,7 +206,7 @@
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="w-full h-full">
           <polyline
             fill="none"
-            stroke="#5e6ad2"
+            stroke="#D97757"
             stroke-width="2"
             stroke-linejoin="round"
             stroke-linecap="round"

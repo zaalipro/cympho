@@ -6,15 +6,17 @@ defmodule CymphoWeb.BudgetLive.Index do
   @impl true
   def mount(_params, _session, socket) do
     current_company = socket.assigns.current_company
-    budgets = Budgets.list_budgets(company_id: current_company.id)
 
     Budgets.subscribe(current_company.id)
 
-    {:ok,
-     socket
-     |> assign(:page_title, "Budgets")
-     |> assign(:budgets, budgets)
-     |> assign(:summary, calculate_summary(budgets))}
+    socket =
+      socket
+      |> assign(:page_title, "Budgets")
+      |> assign(:infinite_scroll, %{})
+      |> recalc_summary()
+      |> init_stream(:budget, &fetch_budgets(socket, &1))
+
+    {:ok, socket}
   end
 
   @impl true
@@ -42,28 +44,39 @@ defmodule CymphoWeb.BudgetLive.Index do
   def handle_info({:budget_created, budget}, socket) do
     {:noreply,
      socket
-     |> update(:budgets, fn budgets -> [budget | budgets] end)
-     |> assign(:summary, calculate_summary([budget | socket.assigns.budgets]))}
+     |> stream_insert(:budget, budget, at: 0)
+     |> recalc_summary()}
   end
 
-  def handle_info({:budget_updated, updated_budget}, socket) do
+  def handle_info({:budget_updated, budget}, socket),
+    do: {:noreply, upsert_budget(socket, budget)}
+
+  def handle_info({:budget_spent, budget}, socket), do: {:noreply, upsert_budget(socket, budget)}
+
+  def handle_info({:budget_threshold_reached, budget}, socket),
+    do: {:noreply, upsert_budget(socket, budget)}
+
+  def handle_info({:budget_hard_stop, budget}, socket),
+    do: {:noreply, upsert_budget(socket, budget)}
+
+  def handle_info({:budget_deleted, deleted}, socket) do
     {:noreply,
      socket
-     |> update(:budgets, fn budgets ->
-       Enum.map(budgets, fn b ->
-         if b.id == updated_budget.id, do: updated_budget, else: b
-       end)
-     end)
-     |> assign(:summary, calculate_summary(socket.assigns.budgets))}
+     |> stream_delete(:budget, deleted)
+     |> recalc_summary()}
   end
 
-  def handle_info({:budget_deleted, _deleted_id}, socket) do
-    budgets = Budgets.list_budgets(company_id: socket.assigns.current_company.id)
+  def handle_info(_msg, socket), do: {:noreply, socket}
 
-    {:noreply,
-     socket
-     |> assign(:budgets, budgets)
-     |> assign(:summary, calculate_summary(budgets))}
+  defp upsert_budget(socket, budget) do
+    socket
+    |> stream_insert(:budget, budget)
+    |> recalc_summary()
+  end
+
+  @impl true
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :budget, &fetch_budgets(socket, &1))}
   end
 
   @impl true
@@ -72,17 +85,20 @@ defmodule CymphoWeb.BudgetLive.Index do
       {:ok, budget} ->
         {:ok, _} = Budgets.delete_budget(budget)
 
-        budgets = Budgets.list_budgets(company_id: socket.assigns.current_company.id)
-
-        {:noreply,
-         socket
-         |> assign(:budgets, budgets)
-         |> assign(:summary, calculate_summary(budgets))
-         |> put_flash(:info, "Budget deleted successfully")}
+        {:noreply, put_flash(socket, :info, "Budget deleted successfully")}
 
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Budget not found")}
     end
+  end
+
+  defp fetch_budgets(socket, cursor) do
+    Budgets.list_budgets_page(company_id: socket.assigns.current_company.id, after: cursor)
+  end
+
+  defp recalc_summary(socket) do
+    budgets = Budgets.list_budgets(company_id: socket.assigns.current_company.id)
+    assign(socket, :summary, calculate_summary(budgets))
   end
 
   defp calculate_summary(budgets) do
@@ -119,7 +135,7 @@ defmodule CymphoWeb.BudgetLive.Index do
   def status_badge(budget) do
     cond do
       budget.status == "exhausted" ->
-        {"bg-red-500/10 text-red-400 border-red-500/20", "Exhausted"}
+        {"bg-brand/10 text-brand border-brand/20", "Exhausted"}
 
       budget.status == "cancelled" ->
         {"bg-gray-500/10 text-gray-400 border-gray-500/20", "Cancelled"}
@@ -147,7 +163,7 @@ defmodule CymphoWeb.BudgetLive.Index do
     pct_value = Decimal.to_float(pct)
 
     cond do
-      pct_value >= 100 -> "bg-red-500"
+      pct_value >= 100 -> "bg-brand"
       pct_value >= budget.threshold_alert_percentage -> "bg-amber-500"
       true -> "bg-green-500"
     end

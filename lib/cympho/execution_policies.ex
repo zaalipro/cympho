@@ -10,6 +10,13 @@ defmodule Cympho.ExecutionPolicies do
     Repo.all(from p in ExecutionPolicy, order_by: [desc: p.inserted_at])
   end
 
+  def list_execution_policies_page(opts \\ []) do
+    Cympho.Pagination.page(ExecutionPolicy,
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after)
+    )
+  end
+
   def get_execution_policy!(id), do: Repo.get!(ExecutionPolicy, id)
 
   def get_execution_policy(id) do

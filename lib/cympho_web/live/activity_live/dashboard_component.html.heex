@@ -91,13 +91,13 @@
             <polyline
               points={Enum.map_join(points, fn {x, y} -> "#{x},#{y}" end, " ")}
               fill="none"
-              stroke="#7170ff"
+              stroke="var(--color-primary)"
               stroke-width="2"
               class="timeline-line"
             />
 
             <%= for {{x, y}, idx} <- Enum.with_index(points) do %>
-              <circle cx={x} cy={y} r="3" fill="#7170ff" class="timeline-point">
+              <circle cx={x} cy={y} r="3" fill="var(--color-primary)" class="timeline-point">
                 <title>
                   {Enum.at(@chart_data.timeline, idx) |> elem(0) |> Calendar.strftime("%b %d")}: {Enum.at(
                     @chart_data.timeline,

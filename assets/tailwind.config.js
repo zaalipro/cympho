@@ -2,6 +2,16 @@ const plugin = require("tailwindcss/plugin")
 const fs = require("fs")
 const path = require("path")
 
+// Status color families collapse to a single semantic CSS-var token (full alpha
+// support via the channel form) so badges/dots stay readable on every theme's
+// canvas — status doesn't need five shades of green. Each theme sets the
+// matching --color-<token>-rgb channels (app.css :root + themes.css).
+const STATUS_SHADES = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]
+const semantic = (token) =>
+  Object.fromEntries(
+    STATUS_SHADES.map((shade) => [shade, `rgb(var(--color-${token}-rgb) / <alpha-value>)`])
+  )
+
 // Cympho is dark-only per DESIGN.md. Tokens map to CSS variables defined in
 // app.css. Spec names (surface-1, ink, hairline, primary…) are the
 // canonical utilities; legacy names (panel, surface, text-primary, border,
@@ -30,6 +40,12 @@ module.exports = {
     "hero-no-symbol-mini",
     "hero-user-group-mini",
     "hero-arrow-right-circle-mini",
+    // Date/time picker glyphs — only ever referenced as literals inside the
+    // DatePicker hook (assets/js/app.js), so the JIT can't see them.
+    "hero-calendar-mini",
+    "hero-clock-mini",
+    "hero-chevron-left-mini",
+    "hero-chevron-right-mini",
   ],
   theme: {
     extend: {
@@ -60,12 +76,14 @@ module.exports = {
         "text-quaternary": "var(--color-text-quaternary)",
 
         // Brand
-        primary: "var(--color-primary)",
+        primary: "rgb(var(--color-primary-rgb) / <alpha-value>)",
         "primary-hover": "var(--color-primary-hover)",
         "primary-focus": "var(--color-primary-focus)",
-        brand: "var(--color-brand)",
-        accent: "var(--color-accent)",
+        brand: "rgb(var(--color-primary-rgb) / <alpha-value>)",
+        accent: "rgb(var(--color-primary-rgb) / <alpha-value>)",
         "accent-hover": "var(--color-accent-hover)",
+        // Text/icon color that sits ON a primary-filled surface (per theme).
+        "on-primary": "var(--color-on-primary)",
 
         // Hairlines
         hairline: "var(--color-hairline)",
@@ -76,82 +94,94 @@ module.exports = {
 
         // Semantic
         success: "var(--color-success)",
+        warning: "var(--color-warning)",
         error: "var(--color-error)",
         overlay: "var(--color-overlay)",
 
         button: "var(--color-button-bg)",
         "button-hover": "var(--color-button-hover)",
+
+        // ── Claude semantic palette (Anthropic official, DESIGN.md) ─────
+        // Anchored on Claude's real tokens — success #5db872, warning
+        // #d4a017, accent-amber #e8a55a, error #c64545, accent-teal #5db8a6.
+        // Claude uses warm TEAL for info/active status, never cool blue, so
+        // blue/sky/cyan are remapped onto the teal anchor. Roles (violet/
+        // purple/fuchsia) have no Claude equivalent; kept muted + warm.
+        // extend deep-merges, so only the shades used in templates are set.
+        // Status families → semantic CSS-var tokens (full alpha support) so
+        // badges/dots read on every theme's canvas. Cool blue/sky/cyan/teal map
+        // to the info token (Claude uses warm teal for info, never cool blue).
+        blue: semantic("info"),
+        sky: semantic("info"),
+        cyan: semantic("info"),
+        teal: semantic("info"),
+        emerald: semantic("success"),
+        green: semantic("success"),
+        amber: semantic("warning"),
+        yellow: semantic("warning"),
+        orange: semantic("warning"),
+        red: semantic("error"),
+        rose: semantic("error"),
+        violet: { 200: "#CFC0D6", 300: "#B6A1C2", 500: "#7F628E" },
+        purple: { 400: "#9A7CA8", 500: "#7F628E" },
+        fuchsia: { 300: "#CB9BAD", 500: "#A96B83" },
+        slate: { 300: "#B4ADA2", 400: "#9A9388", 500: "#807A6F" },
+        gray: { 300: "#C2BBB0", 400: "#9A9388", 500: "#807A6F", 700: "#4A453E" },
+        zinc: { 100: "#E8E3DA", 200: "#D6D0C6", 500: "#807A6F" },
       },
       fontFamily: {
-        sans: [
-          "Inter",
-          "Inter Variable",
-          "SF Pro Display",
-          "-apple-system",
-          "system-ui",
-          "Segoe UI",
-          "Roboto",
-          "Oxygen",
-          "Ubuntu",
-          "Cantarell",
-          "Open Sans",
-          "Helvetica Neue",
-          "sans-serif",
-        ],
-        serif: [
-          "Inter",
-          "Inter Variable",
-          "SF Pro Display",
-          "-apple-system",
-          "system-ui",
-          "Segoe UI",
-          "Roboto",
-          "sans-serif",
-        ],
-        mono: [
-          "Berkeley Mono",
-          "ui-monospace",
-          "SF Mono",
-          "Menlo",
-          "monospace",
-        ],
+        // Theme-driven — the real stacks live in CSS vars (app.css :root +
+        // themes.css) so each theme selects its own display/body/mono faces.
+        sans: ["var(--font-body)"],
+        serif: ["var(--font-display)"],
+        mono: ["var(--font-mono)"],
       },
       fontWeight: {
         510: "510",
         590: "590",
       },
       borderRadius: {
-        // Spec scale (DESIGN.md)
-        xs: "4px",
-        sm: "6px",
-        md: "8px",
-        lg: "12px",
-        xl: "16px",
-        xxl: "24px",
-        pill: "9999px",
+        // Theme-driven radius — values resolve to CSS vars so each theme can
+        // reshape corners (Blocks→pill, Circuit→sharp) with zero template edits.
+        xs: "var(--radius-xs)",
+        sm: "var(--radius-sm)",
+        md: "var(--radius-md)",
+        lg: "var(--radius-lg)",
+        xl: "var(--radius-xl)",
+        "2xl": "var(--radius-2xl)",
+        "3xl": "var(--radius-3xl)",
+        xxl: "var(--radius-xxl)",
+        pill: "var(--radius-pill)",
         // Legacy aliases — `card` was used like spec lg, `panel` like xl.
-        card: "12px",
-        panel: "16px",
-        large: "24px",
+        card: "var(--radius-card)",
+        panel: "var(--radius-panel)",
+        large: "var(--radius-xxl)",
+        // Semantic radii for shared components (button/input/field).
+        button: "var(--radius-button)",
+        input: "var(--radius-input)",
+        field: "var(--radius-field)",
       },
       boxShadow: {
-        // Refined-dark elevation: each = hairline ring + layered ambient
-        // shadows with real alpha (visible on the lifted #0a0b0e canvas) +
-        // an inset top-highlight (the craft tell). `card` = resting cards/
-        // panels, `raised` = hover-lift/popovers.
+        // Elevation: hairline ring + layered ambient shadows + an inset
+        // top-highlight (the craft tell). The ambient black and the inset
+        // highlight are tokens (--shadow-rgb / --shadow-strength /
+        // --shadow-inset-highlight) so light themes soften shadows and drop the
+        // white highlight, and shadow-heavy themes (Nocturne) deepen them.
         ring: "0px 0px 0px 1px var(--color-border)",
         "ring-hover": "0px 0px 0px 1px var(--color-border-hover)",
-        subtle: "0 0 0 1px var(--color-border), 0 1px 2px rgba(0,0,0,0.40)",
-        card: "inset 0 1px 0 0 rgba(255,255,255,0.04), 0 0 0 1px var(--color-border), 0 1px 2px rgba(0,0,0,0.35), 0 4px 12px rgba(0,0,0,0.35)",
+        subtle:
+          "0 0 0 1px var(--color-border), 0 1px 2px rgb(var(--shadow-rgb) / calc(0.20 * var(--shadow-strength)))",
+        card:
+          "inset 0 1px 0 0 var(--shadow-inset-highlight), 0 0 0 1px var(--color-border), 0 1px 2px rgb(var(--shadow-rgb) / calc(0.18 * var(--shadow-strength))), 0 4px 12px rgb(var(--shadow-rgb) / calc(0.20 * var(--shadow-strength)))",
         raised:
-          "inset 0 1px 0 0 rgba(255,255,255,0.05), 0 0 0 1px var(--color-border-hover), 0 2px 4px rgba(0,0,0,0.40), 0 8px 20px rgba(0,0,0,0.45)",
+          "inset 0 1px 0 0 var(--shadow-inset-highlight), 0 0 0 1px var(--color-border-hover), 0 2px 4px rgb(var(--shadow-rgb) / calc(0.22 * var(--shadow-strength))), 0 8px 20px rgb(var(--shadow-rgb) / calc(0.26 * var(--shadow-strength)))",
         elevated:
-          "inset 0 1px 0 0 rgba(255,255,255,0.05), 0 0 0 1px var(--color-border), 0 4px 12px rgba(0,0,0,0.45), 0 12px 28px rgba(0,0,0,0.50)",
+          "inset 0 1px 0 0 var(--shadow-inset-highlight), 0 0 0 1px var(--color-border), 0 4px 12px rgb(var(--shadow-rgb) / calc(0.26 * var(--shadow-strength))), 0 12px 28px rgb(var(--shadow-rgb) / calc(0.30 * var(--shadow-strength)))",
         dialog:
-          "inset 0 1px 0 0 rgba(255,255,255,0.06), 0 0 0 1px var(--color-border), 0 8px 24px rgba(0,0,0,0.55), 0 24px 60px rgba(0,0,0,0.60)",
+          "inset 0 1px 0 0 var(--shadow-inset-highlight), 0 0 0 1px var(--color-border), 0 8px 24px rgb(var(--shadow-rgb) / calc(0.32 * var(--shadow-strength))), 0 24px 60px rgb(var(--shadow-rgb) / calc(0.40 * var(--shadow-strength)))",
         focus:
           "0 0 0 1px var(--color-canvas), 0 0 0 3px color-mix(in srgb, var(--color-primary) 55%, transparent), 0 0 12px 0 color-mix(in srgb, var(--color-primary) 35%, transparent)",
-        inset: "inset 0px 0px 0px 1px rgba(0,0,0,0.20)",
+        inset: "inset 0px 0px 0px 1px rgb(var(--shadow-rgb) / calc(0.20 * var(--shadow-strength)))",
       },
       letterSpacing: {
         // Negative tracking per DESIGN.md
@@ -226,19 +256,24 @@ module.exports = {
 
     plugin(({addUtilities}) => addUtilities({
       ".text-display-xl": {
-        fontSize: "80px", lineHeight: "1.05", letterSpacing: "-3.0px", fontWeight: "600"
+        fontFamily: "var(--font-display)",
+        fontSize: "80px", lineHeight: "1.05", letterSpacing: "-1.5px", fontWeight: "600"
       },
       ".text-display-lg": {
-        fontSize: "56px", lineHeight: "1.10", letterSpacing: "-1.8px", fontWeight: "600"
+        fontFamily: "var(--font-display)",
+        fontSize: "56px", lineHeight: "1.10", letterSpacing: "-1.0px", fontWeight: "600"
       },
       ".text-display-md": {
-        fontSize: "40px", lineHeight: "1.15", letterSpacing: "-1.0px", fontWeight: "600"
+        fontFamily: "var(--font-display)",
+        fontSize: "40px", lineHeight: "1.15", letterSpacing: "-0.5px", fontWeight: "600"
       },
       ".text-headline": {
-        fontSize: "28px", lineHeight: "1.20", letterSpacing: "-0.6px", fontWeight: "600"
+        fontFamily: "var(--font-display)",
+        fontSize: "28px", lineHeight: "1.20", letterSpacing: "-0.3px", fontWeight: "600"
       },
       ".text-card-title": {
-        fontSize: "22px", lineHeight: "1.25", letterSpacing: "-0.4px", fontWeight: "500"
+        fontFamily: "var(--font-display)",
+        fontSize: "22px", lineHeight: "1.25", letterSpacing: "-0.2px", fontWeight: "500"
       },
       ".text-subhead": {
         fontSize: "20px", lineHeight: "1.40", letterSpacing: "-0.2px", fontWeight: "400"
@@ -262,7 +297,7 @@ module.exports = {
         fontSize: "13px", lineHeight: "1.30", letterSpacing: "0.4px", fontWeight: "500"
       },
       ".text-mono": {
-        fontFamily: "Berkeley Mono, ui-monospace, SF Mono, Menlo, monospace",
+        fontFamily: "var(--font-mono)",
         fontSize: "13px", lineHeight: "1.50", letterSpacing: "0", fontWeight: "400"
       },
     })),

@@ -39,6 +39,8 @@ defmodule CymphoWeb do
     quote do
       use Phoenix.LiveView
 
+      import CymphoWeb.InfiniteScroll
+
       unquote(html_helpers())
     end
   end
@@ -73,11 +75,13 @@ defmodule CymphoWeb do
       import CymphoWeb.Components.Card
       import CymphoWeb.Components.Combobox
       import CymphoWeb.Components.ColorSwatchPicker
+      import CymphoWeb.Components.DatePicker
       import CymphoWeb.Components.CompanyRail
       import CymphoWeb.Components.CompanySwitcherStatic
       import CymphoWeb.Components.IssueDigest
       import CymphoWeb.Components.NavRail
       import CymphoWeb.Components.UserMenu
+      import CymphoWeb.Components.SettingsLayout
       import CymphoWeb.Gettext
 
       unquote(verified_routes())

@@ -201,10 +201,10 @@ defmodule Cympho.DashboardTest do
     end
   end
 
-  describe "routine_health/0" do
-    test "returns unavailable status when routines not configured" do
-      health = Dashboard.routine_health()
-      assert health.status == "unavailable"
+  describe "routine_health/1" do
+    test "returns idle when there is no routine activity" do
+      health = Dashboard.routine_health(nil)
+      assert health.status == "idle"
       assert Map.has_key?(health, :message)
     end
   end

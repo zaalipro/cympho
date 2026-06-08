@@ -119,7 +119,7 @@ defmodule CymphoWeb.OrgChartLive do
             </.app_link>
             <.app_link
               navigate={~p"/agents/new"}
-              class="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white hover:bg-accent-hover"
+              class="inline-flex items-center gap-2 rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
             >
               <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
@@ -456,11 +456,11 @@ defmodule CymphoWeb.OrgChartLive do
 
   defp role_avatar_class(role), do: CymphoWeb.Format.role_avatar_class(role)
 
-  def role_color(:ceo), do: "#8B5CF6"
-  def role_color(:cto), do: "#3B82F6"
-  def role_color(:engineer), do: "#10B981"
-  def role_color(:product_manager), do: "#F59E0B"
-  def role_color(:designer), do: "#EC4899"
+  def role_color(:ceo), do: "#9A7CA8"
+  def role_color(:cto), do: "#5db8a6"
+  def role_color(:engineer), do: "#5db872"
+  def role_color(:product_manager), do: "#e8a55a"
+  def role_color(:designer), do: "#A96B83"
 
   def role_label(:engineer), do: "Engineer"
   def role_label(:ceo), do: "CEO"
@@ -472,13 +472,13 @@ defmodule CymphoWeb.OrgChartLive do
     do: other |> to_string() |> String.replace("_", " ") |> String.capitalize()
 
   def status_color(:idle), do: "#6B7280"
-  def status_color(:running), do: "#10B981"
-  def status_color(:error), do: "#EF4444"
-  def status_color(:sleeping), do: "#F59E0B"
-  def status_color(:offline), do: "#374151"
-  def status_color(:active), do: "#10B981"
-  def status_color(:paused), do: "#F59E0B"
-  def status_color(:pending_approval), do: "#5E6AD2"
+  def status_color(:running), do: "#5db872"
+  def status_color(:error), do: "#D97757"
+  def status_color(:sleeping), do: "#e8a55a"
+  def status_color(:offline), do: "#423F3B"
+  def status_color(:active), do: "#5db872"
+  def status_color(:paused), do: "#e8a55a"
+  def status_color(:pending_approval), do: "#D97757"
   def status_color(:terminated), do: "#6B7280"
-  def status_color(_), do: "#62666d"
+  def status_color(_), do: "#5A544C"
 end

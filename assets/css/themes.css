@@ -1,0 +1,624 @@
+/* ============================================================
+   Cympho Themes — per-theme token overrides.
+
+   Each block overrides the :root (Ember) defaults from app.css. Only the SPEC
+   tokens are set here; the legacy aliases (panel, surface, border, brand,
+   text-*) are var() refs in :root and follow automatically.
+
+   Selectors use `:root[data-theme="…"]` (specificity 0,2,0) so they win over
+   the plain `:root` defaults regardless of @import order. Authored from
+   designs/DESIGN-<id>.md; display names live in Cympho.Themes.
+
+   Status colors: each theme sets --color-{success,warning,error,info} AND the
+   matching -rgb channels. The Tailwind config collapses the green/amber/red/
+   blue families onto these channels, so every status badge/dot reads on the
+   theme's canvas (semantics are darkened on light themes for text contrast).
+
+   Light themes: canvas is a soft off-white and cards are white so borderless
+   surfaces stay visible; --color-subtle/--color-scrollbar flip to black alpha;
+   --shadow-strength drops and the inset highlight + vignette + noise turn off;
+   color-scheme: light corrects native controls.
+
+   Font note: proprietary display faces are substituted per each spec's guidance
+   (mostly → Inter; DM Sans for Prism). A sans --font-display yields a sans
+   display look (the display utilities are serif only on Ember).
+   ============================================================ */
+
+/* ════════════════════════════ DARK ════════════════════════════ */
+
+/* ───────────── Voltage · ClickHouse — near-black + electric yellow ───────────── */
+:root[data-theme="clickhouse"] {
+  color-scheme: dark;
+  --color-canvas: #0a0a0a;
+  --color-surface-1: #121212;
+  --color-surface-2: #1a1a1a;
+  --color-surface-3: #242424;
+  --color-surface-4: #2e2e2e;
+  --color-subtle: rgba(255, 255, 255, 0.05);
+
+  --color-ink: #ffffff;
+  --color-ink-muted: #cccccc;
+  --color-ink-subtle: #888888;
+  --color-ink-tertiary: #5a5a5a;
+
+  --color-primary: #faff69;
+  --color-primary-hover: #ffff8a;
+  --color-primary-focus: #faff69;
+  --color-primary-rgb: 250 255 105;
+  --color-on-primary: #0a0a0a;
+
+  --color-hairline: #2a2a2a;
+  --color-hairline-strong: #3a3a3a;
+  --color-hairline-tertiary: #4a4a4a;
+
+  --color-success: #22c55e;  --color-success-rgb: 34 197 94;
+  --color-warning: #f5b014;  --color-warning-rgb: 245 176 20;
+  --color-error: #ef4444;    --color-error-rgb: 239 68 68;
+  --color-info: #3b82f6;     --color-info-rgb: 59 130 246;
+  --color-overlay: rgba(0, 0, 0, 0.65);
+
+  --color-selection: rgba(250, 255, 105, 0.25);
+  --color-scrollbar: rgba(255, 255, 255, 0.12);
+  --color-scrollbar-hover: rgba(255, 255, 255, 0.20);
+
+  --font-display: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-body: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --shadow-strength: 0;
+  --shadow-inset-highlight: rgba(255, 255, 255, 0.03);
+  --vignette-color: transparent;
+  --noise-opacity: 0;
+}
+
+/* ───────────── Nocturne · Spotify — content-first darkness, signal green ───────────── */
+:root[data-theme="spotify"] {
+  color-scheme: dark;
+  --color-canvas: #121212;
+  --color-surface-1: #181818;
+  --color-surface-2: #1f1f1f;
+  --color-surface-3: #252525;
+  --color-surface-4: #2a2a2a;
+  --color-subtle: rgba(255, 255, 255, 0.05);
+
+  --color-ink: #ffffff;
+  --color-ink-muted: #cbcbcb;
+  --color-ink-subtle: #b3b3b3;
+  --color-ink-tertiary: #7c7c7c;
+
+  --color-primary: #1ed760;
+  --color-primary-hover: #3be477;
+  --color-primary-focus: #1ed760;
+  --color-primary-rgb: 30 215 96;
+  --color-on-primary: #000000;
+
+  --color-hairline: #2a2a2a;
+  --color-hairline-strong: #404040;
+  --color-hairline-tertiary: #4d4d4d;
+
+  --color-success: #1ed760;  --color-success-rgb: 30 215 96;
+  --color-warning: #ffa42b;  --color-warning-rgb: 255 164 43;
+  --color-error: #f3727f;    --color-error-rgb: 243 114 127;
+  --color-info: #539df5;     --color-info-rgb: 83 157 245;
+  --color-overlay: rgba(0, 0, 0, 0.70);
+
+  --color-selection: rgba(30, 215, 96, 0.25);
+  --color-scrollbar: rgba(255, 255, 255, 0.12);
+  --color-scrollbar-hover: rgba(255, 255, 255, 0.20);
+
+  --font-display: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-body: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Pill geometry: full-radius buttons/inputs, gently-rounded cards. */
+  --radius-lg: 8px;
+  --radius-card: 8px;
+  --radius-button: 9999px;
+  --radius-input: 9999px;
+
+  --shadow-strength: 2;
+  --shadow-inset-highlight: transparent;
+  --vignette-color: transparent;
+  --noise-opacity: 0;
+}
+
+/* ───────────── Circuit · BMW M — motorsport black, sharp, M-blue accent ───────────── */
+:root[data-theme="bmw-m"] {
+  color-scheme: dark;
+  --color-canvas: #000000;
+  --color-surface-1: #0d0d0d;
+  --color-surface-2: #1a1a1a;
+  --color-surface-3: #262626;
+  --color-surface-4: #2b2b2b;
+  --color-subtle: rgba(255, 255, 255, 0.05);
+
+  --color-ink: #ffffff;
+  --color-ink-muted: #e6e6e6;
+  --color-ink-subtle: #bbbbbb;
+  --color-ink-tertiary: #7e7e7e;
+
+  /* M tricolor blue as the interactive accent (white in the source is the
+     marketing CTA; an app needs a colored accent for links/focus/active). */
+  --color-primary: #1c69d4;
+  --color-primary-hover: #3a82e8;
+  --color-primary-focus: #1c69d4;
+  --color-primary-rgb: 28 105 212;
+  --color-on-primary: #ffffff;
+
+  --color-hairline: #262626;
+  --color-hairline-strong: #3c3c3c;
+  --color-hairline-tertiary: #4a4a4a;
+
+  --color-success: #2fbf57;  --color-success-rgb: 47 191 87;
+  --color-warning: #f4b400;  --color-warning-rgb: 244 180 0;
+  --color-error: #ef3a2b;    --color-error-rgb: 239 58 43;
+  --color-info: #4a90e2;     --color-info-rgb: 74 144 226;
+  --color-overlay: rgba(0, 0, 0, 0.70);
+
+  --color-selection: rgba(28, 105, 212, 0.30);
+  --color-scrollbar: rgba(255, 255, 255, 0.12);
+  --color-scrollbar-hover: rgba(255, 255, 255, 0.20);
+
+  --font-display: "Saira Condensed", "Inter", system-ui, sans-serif;
+  --font-body: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Sharp everywhere (pill kept for avatars/dots via --radius-pill default). */
+  --radius-xs: 0; --radius-sm: 0; --radius-md: 0; --radius-lg: 0; --radius-xl: 0;
+  --radius-2xl: 0; --radius-3xl: 0; --radius-xxl: 0;
+  --radius-card: 0; --radius-panel: 0; --radius-button: 0; --radius-input: 0; --radius-field: 0;
+
+  --shadow-strength: 0;
+  --shadow-inset-highlight: transparent;
+  --vignette-color: transparent;
+  --noise-opacity: 0;
+}
+
+/* ───────────── Monolith · Bugatti — austere monochrome, ice-blue link ───────────── */
+:root[data-theme="bugatti"] {
+  color-scheme: dark;
+  --color-canvas: #000000;
+  --color-surface-1: #0d0d0d;
+  --color-surface-2: #141414;
+  --color-surface-3: #1f1f1f;
+  --color-surface-4: #262626;
+  --color-subtle: rgba(255, 255, 255, 0.04);
+
+  --color-ink: #ffffff;
+  --color-ink-muted: #e6e6e6;
+  --color-ink-subtle: #cccccc;
+  --color-ink-tertiary: #999999;
+
+  /* The single permitted accent — desaturated ice-blue (links only in source). */
+  --color-primary: #c3d9f3;
+  --color-primary-hover: #d8e6f8;
+  --color-primary-focus: #c3d9f3;
+  --color-primary-rgb: 195 217 243;
+  --color-on-primary: #000000;
+
+  --color-hairline: #262626;
+  --color-hairline-strong: #3a3a3a;
+  --color-hairline-tertiary: #4a4a4a;
+
+  --color-success: #5fa657;  --color-success-rgb: 95 166 87;
+  --color-warning: #d4a017;  --color-warning-rgb: 212 160 23;
+  --color-error: #c66b66;    --color-error-rgb: 198 107 102;
+  --color-info: #c3d9f3;     --color-info-rgb: 195 217 243;
+  --color-overlay: rgba(0, 0, 0, 0.75);
+
+  --color-selection: rgba(195, 217, 243, 0.25);
+  --color-scrollbar: rgba(255, 255, 255, 0.10);
+  --color-scrollbar-hover: rgba(255, 255, 255, 0.18);
+
+  --font-display: "Saira Condensed", "Inter", system-ui, sans-serif;
+  --font-body: "EB Garamond", Georgia, "Times New Roman", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Binary radius: 0 surfaces, pill buttons. */
+  --radius-xs: 0; --radius-sm: 0; --radius-md: 0; --radius-lg: 0; --radius-xl: 0;
+  --radius-2xl: 0; --radius-3xl: 0; --radius-xxl: 0;
+  --radius-card: 0; --radius-panel: 0; --radius-input: 0; --radius-field: 0;
+  --radius-button: 9999px;
+
+  --shadow-strength: 0;
+  --shadow-inset-highlight: transparent;
+  --vignette-color: transparent;
+  --noise-opacity: 0;
+}
+
+/* ════════════════════════════ LIGHT ════════════════════════════ */
+
+/* ───────────── Paper · Notion — warm paper calm, confident blue ───────────── */
+:root[data-theme="notion"] {
+  color-scheme: light;
+  --color-canvas: #f6f5f4;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #ffffff;
+  --color-surface-3: #efeeeb;
+  --color-surface-4: #e7e5e1;
+  --color-subtle: rgba(0, 0, 0, 0.045);
+
+  --color-ink: #101010;
+  --color-ink-muted: #31302e;
+  --color-ink-subtle: #615d59;
+  --color-ink-tertiary: #9a948b;
+
+  --color-primary: #0075de;
+  --color-primary-hover: #2589e8;
+  --color-primary-focus: #0075de;
+  --color-primary-rgb: 0 117 222;
+  --color-on-primary: #ffffff;
+
+  --color-hairline: #e6e6e6;
+  --color-hairline-strong: #d6d5d3;
+  --color-hairline-tertiary: #c8c6c3;
+
+  --color-success: #178a36;  --color-success-rgb: 23 138 54;
+  --color-warning: #c2570a;  --color-warning-rgb: 194 87 10;
+  --color-error: #d92d20;    --color-error-rgb: 217 45 32;
+  --color-info: #1a6fd0;     --color-info-rgb: 26 111 208;
+  --color-overlay: rgba(20, 20, 20, 0.40);
+
+  --color-selection: rgba(0, 117, 222, 0.16);
+  --color-scrollbar: rgba(0, 0, 0, 0.20);
+  --color-scrollbar-hover: rgba(0, 0, 0, 0.30);
+
+  --font-display: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-body: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --shadow-strength: 0.4;
+  --shadow-inset-highlight: transparent;
+  --vignette-color: transparent;
+  --noise-opacity: 0;
+}
+
+/* ───────────── Crisp · Cal.com — friendly white SaaS, black CTAs ───────────── */
+:root[data-theme="cal"] {
+  color-scheme: light;
+  --color-canvas: #f7f8fa;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #ffffff;
+  --color-surface-3: #f1f3f5;
+  --color-surface-4: #e7eaee;
+  --color-subtle: rgba(0, 0, 0, 0.045);
+
+  --color-ink: #111111;
+  --color-ink-muted: #374151;
+  --color-ink-subtle: #6b7280;
+  --color-ink-tertiary: #898989;
+
+  --color-primary: #111111;
+  --color-primary-hover: #2b2b2b;
+  --color-primary-focus: #111111;
+  --color-primary-rgb: 17 17 17;
+  --color-on-primary: #ffffff;
+
+  --color-hairline: #e5e7eb;
+  --color-hairline-strong: #d6dae0;
+  --color-hairline-tertiary: #c2c8d0;
+
+  --color-success: #0f9d6e;  --color-success-rgb: 15 157 110;
+  --color-warning: #b45309;  --color-warning-rgb: 180 83 9;
+  --color-error: #dc2626;    --color-error-rgb: 220 38 38;
+  --color-info: #2563eb;     --color-info-rgb: 37 99 235;
+  --color-overlay: rgba(16, 16, 16, 0.40);
+
+  --color-selection: rgba(37, 99, 235, 0.16);
+  --color-scrollbar: rgba(0, 0, 0, 0.20);
+  --color-scrollbar-hover: rgba(0, 0, 0, 0.30);
+
+  --font-display: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-body: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius-button: 8px;
+  --shadow-strength: 0.4;
+  --shadow-inset-highlight: transparent;
+  --vignette-color: transparent;
+  --noise-opacity: 0;
+}
+
+/* ───────────── Cream · Cursor — editorial warm cream, signal orange ───────────── */
+:root[data-theme="cursor"] {
+  color-scheme: light;
+  --color-canvas: #f7f7f4;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #ffffff;
+  --color-surface-3: #efeee8;
+  --color-surface-4: #e6e5e0;
+  --color-subtle: rgba(38, 37, 30, 0.05);
+
+  --color-ink: #26251e;
+  --color-ink-muted: #5a5852;
+  --color-ink-subtle: #807d72;
+  --color-ink-tertiary: #a09c92;
+
+  --color-primary: #f54e00;
+  --color-primary-hover: #ff6a26;
+  --color-primary-focus: #f54e00;
+  --color-primary-rgb: 245 78 0;
+  --color-on-primary: #ffffff;
+
+  --color-hairline: #e6e5e0;
+  --color-hairline-strong: #cfcdc4;
+  --color-hairline-tertiary: #dcdad3;
+
+  --color-success: #1f8a65;  --color-success-rgb: 31 138 101;
+  --color-warning: #9a6a28;  --color-warning-rgb: 154 106 40;
+  --color-error: #cf2d56;    --color-error-rgb: 207 45 86;
+  --color-info: #2f6fd0;     --color-info-rgb: 47 111 208;
+  --color-overlay: rgba(38, 37, 30, 0.40);
+
+  --color-selection: rgba(245, 78, 0, 0.16);
+  --color-scrollbar: rgba(38, 37, 30, 0.20);
+  --color-scrollbar-hover: rgba(38, 37, 30, 0.32);
+
+  --font-display: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-body: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius-button: 8px;
+  --shadow-strength: 0.35;
+  --shadow-inset-highlight: transparent;
+  --vignette-color: transparent;
+  --noise-opacity: 0;
+}
+
+/* ───────────── Blocks · Figma — monochrome frame, pastel blocks, pill CTAs ───────────── */
+:root[data-theme="figma"] {
+  color-scheme: light;
+  --color-canvas: #f7f7f5;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #ffffff;
+  --color-surface-3: #f1f1f1;
+  --color-surface-4: #e6e6e6;
+  --color-subtle: rgba(0, 0, 0, 0.045);
+
+  --color-ink: #000000;
+  --color-ink-muted: #333333;
+  --color-ink-subtle: #666666;
+  --color-ink-tertiary: #999999;
+
+  --color-primary: #000000;
+  --color-primary-hover: #1a1a1a;
+  --color-primary-focus: #000000;
+  --color-primary-rgb: 0 0 0;
+  --color-on-primary: #ffffff;
+
+  --color-hairline: #e6e6e6;
+  --color-hairline-strong: #d4d4d4;
+  --color-hairline-tertiary: #c0c0c0;
+
+  --color-success: #178a3a;  --color-success-rgb: 23 138 58;
+  --color-warning: #b45309;  --color-warning-rgb: 180 83 9;
+  --color-error: #d92d2f;    --color-error-rgb: 217 45 47;
+  --color-info: #2563eb;     --color-info-rgb: 37 99 235;
+  --color-overlay: rgba(0, 0, 0, 0.45);
+
+  --color-selection: rgba(255, 61, 139, 0.18);
+  --color-scrollbar: rgba(0, 0, 0, 0.20);
+  --color-scrollbar-hover: rgba(0, 0, 0, 0.30);
+
+  --font-display: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-body: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Big radius cards + pill CTAs (Figma's signature geometry). */
+  --radius-md: 8px;
+  --radius-lg: 24px;
+  --radius-xl: 24px;
+  --radius-2xl: 24px;
+  --radius-card: 24px;
+  --radius-panel: 24px;
+  --radius-button: 9999px;
+
+  /* Magenta is the signature CTA voltage / hero accent. */
+  --theme-accent-2: #ff3d8b;
+
+  --shadow-strength: 0.35;
+  --shadow-inset-highlight: transparent;
+  --vignette-color: transparent;
+  --noise-opacity: 0;
+}
+
+/* ───────────── Prism · MiniMax — stark white, vibrant products, DM Sans ───────────── */
+:root[data-theme="minimax"] {
+  color-scheme: light;
+  --color-canvas: #f7f8fa;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #ffffff;
+  --color-surface-3: #f2f3f5;
+  --color-surface-4: #eaecf0;
+  --color-subtle: rgba(0, 0, 0, 0.045);
+
+  --color-ink: #0a0a0a;
+  --color-ink-muted: #45515e;
+  --color-ink-subtle: #5f5f5f;
+  --color-ink-tertiary: #8e8e93;
+
+  --color-primary: #0a0a0a;
+  --color-primary-hover: #222222;
+  --color-primary-focus: #0a0a0a;
+  --color-primary-rgb: 10 10 10;
+  --color-on-primary: #ffffff;
+
+  --color-hairline: #e5e7eb;
+  --color-hairline-strong: #d3d6db;
+  --color-hairline-tertiary: #c2c6cc;
+
+  --color-success: #1ba673;  --color-success-rgb: 27 166 115;
+  --color-warning: #b45309;  --color-warning-rgb: 180 83 9;
+  --color-error: #dc2626;    --color-error-rgb: 220 38 38;
+  --color-info: #1456f0;     --color-info-rgb: 20 86 240;
+  --color-overlay: rgba(10, 10, 10, 0.45);
+
+  --color-selection: rgba(255, 85, 48, 0.16);
+  --color-scrollbar: rgba(0, 0, 0, 0.20);
+  --color-scrollbar-hover: rgba(0, 0, 0, 0.30);
+
+  --font-display: "DM Sans", "Inter", system-ui, sans-serif;
+  --font-body: "DM Sans", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Tiered radius: 16 cards, 32 feature cards, pill CTAs. */
+  --radius-lg: 16px;
+  --radius-xl: 16px;
+  --radius-2xl: 16px;
+  --radius-3xl: 32px;
+  --radius-card: 16px;
+  --radius-button: 9999px;
+
+  --theme-accent-2: #ff5530;
+  --theme-accent-3: #1456f0;
+
+  --shadow-strength: 0.35;
+  --shadow-inset-highlight: transparent;
+  --vignette-color: transparent;
+  --noise-opacity: 0;
+}
+
+/* ───────────── Aurora · Stripe — navy ink, indigo CTA, gradient mesh ───────────── */
+:root[data-theme="stripe"] {
+  color-scheme: light;
+  --color-canvas: #f6f9fc;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #ffffff;
+  --color-surface-3: #eef3f8;
+  --color-surface-4: #e3e8ee;
+  --color-subtle: rgba(13, 37, 61, 0.05);
+
+  --color-ink: #0d253d;
+  --color-ink-muted: #273951;
+  --color-ink-subtle: #64748d;
+  --color-ink-tertiary: #8b97a8;
+
+  --color-primary: #533afd;
+  --color-primary-hover: #665efd;
+  --color-primary-focus: #533afd;
+  --color-primary-rgb: 83 58 253;
+  --color-on-primary: #ffffff;
+
+  --color-hairline: #e3e8ee;
+  --color-hairline-strong: #d0d9e3;
+  --color-hairline-tertiary: #b9c6d6;
+
+  --color-success: #1a9d63;  --color-success-rgb: 26 157 99;
+  --color-warning: #b06a00;  --color-warning-rgb: 176 106 0;
+  --color-error: #d4246a;    --color-error-rgb: 212 36 106;
+  --color-info: #4338ca;     --color-info-rgb: 67 56 202;
+  --color-overlay: rgba(13, 37, 61, 0.42);
+
+  --color-selection: rgba(83, 58, 253, 0.16);
+  --color-scrollbar: rgba(13, 37, 61, 0.18);
+  --color-scrollbar-hover: rgba(13, 37, 61, 0.28);
+
+  --font-display: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-body: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius-button: 9999px;
+  --radius-card: 12px;
+  --shadow-strength: 0.35;
+  --shadow-inset-highlight: transparent;
+  --vignette-color: transparent;
+  --noise-opacity: 0;
+}
+
+/* ───────────── Edge · Vercel — stark black-on-near-white, mesh gradient ───────────── */
+:root[data-theme="vercel"] {
+  color-scheme: light;
+  --color-canvas: #fafafa;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #ffffff;
+  --color-surface-3: #f4f4f4;
+  --color-surface-4: #ebebeb;
+  --color-subtle: rgba(0, 0, 0, 0.045);
+
+  --color-ink: #171717;
+  --color-ink-muted: #4d4d4d;
+  --color-ink-subtle: #888888;
+  --color-ink-tertiary: #a1a1a1;
+
+  --color-primary: #171717;
+  --color-primary-hover: #000000;
+  --color-primary-focus: #171717;
+  --color-primary-rgb: 23 23 23;
+  --color-on-primary: #ffffff;
+
+  --color-hairline: #ebebeb;
+  --color-hairline-strong: #d4d4d4;
+  --color-hairline-tertiary: #a1a1a1;
+
+  --color-success: #1a8a4f;  --color-success-rgb: 26 138 79;
+  --color-warning: #ab570a;  --color-warning-rgb: 171 87 10;
+  --color-error: #dc2626;    --color-error-rgb: 220 38 38;
+  --color-info: #0070f3;     --color-info-rgb: 0 112 243;
+  --color-overlay: rgba(0, 0, 0, 0.42);
+
+  --color-selection: rgba(0, 112, 243, 0.16);
+  --color-scrollbar: rgba(0, 0, 0, 0.20);
+  --color-scrollbar-hover: rgba(0, 0, 0, 0.30);
+
+  --font-display: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-body: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius-md: 6px;
+  --radius-button: 8px;
+  --radius-card: 12px;
+  --shadow-strength: 0.45;
+  --shadow-inset-highlight: transparent;
+  --vignette-color: transparent;
+  --noise-opacity: 0;
+}
+
+/* ───────────── Workbook · Airtable — sober editorial, coral & forest bands ───────────── */
+:root[data-theme="airtable"] {
+  color-scheme: light;
+  --color-canvas: #f8fafc;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #ffffff;
+  --color-surface-3: #eef1f4;
+  --color-surface-4: #e0e2e6;
+  --color-subtle: rgba(24, 29, 38, 0.05);
+
+  --color-ink: #181d26;
+  --color-ink-muted: #333840;
+  --color-ink-subtle: #41454d;
+  --color-ink-tertiary: #767b84;
+
+  --color-primary: #181d26;
+  --color-primary-hover: #2a313c;
+  --color-primary-focus: #181d26;
+  --color-primary-rgb: 24 29 38;
+  --color-on-primary: #ffffff;
+
+  --color-hairline: #dddddd;
+  --color-hairline-strong: #c2c5ca;
+  --color-hairline-tertiary: #9297a0;
+
+  --color-success: #1f7a3c;  --color-success-rgb: 31 122 60;
+  --color-warning: #a16207;  --color-warning-rgb: 161 98 7;
+  --color-error: #c0392b;    --color-error-rgb: 192 57 43;
+  --color-info: #254fad;     --color-info-rgb: 37 79 173;
+  --color-overlay: rgba(24, 29, 38, 0.42);
+
+  --color-selection: rgba(27, 97, 201, 0.16);
+  --color-scrollbar: rgba(24, 29, 38, 0.18);
+  --color-scrollbar-hover: rgba(24, 29, 38, 0.28);
+
+  --font-display: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-body: "Inter", "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius-button: 8px;
+  --radius-card: 12px;
+  --theme-accent-2: #aa2d00;
+  --theme-accent-3: #0a2e0e;
+
+  --shadow-strength: 0.4;
+  --shadow-inset-highlight: transparent;
+  --vignette-color: transparent;
+  --noise-opacity: 0;
+}

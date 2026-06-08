@@ -21,7 +21,7 @@ defmodule CymphoWeb.InboxLive.Index do
       |> assign(:subscribed_agent_id, nil)
       |> assign(:current_status, nil)
       |> assign(:digest_density, "detailed")
-      |> assign(:inbox_items, [])
+      |> assign(:infinite_scroll, %{})
       |> assign(:inbox_counts, %{})
       |> assign(:agent_counts, %{})
 
@@ -61,12 +61,12 @@ defmodule CymphoWeb.InboxLive.Index do
   end
 
   @impl true
-  def handle_info({:inbox_updated, _state}, socket) do
-    {:noreply, load_inbox(socket)}
+  def handle_info({:inbox_updated, state}, socket) do
+    {:noreply, apply_inbox_change(socket, state)}
   end
 
-  def handle_info({:inbox_created, _state}, socket) do
-    {:noreply, load_inbox(socket)}
+  def handle_info({:inbox_created, state}, socket) do
+    {:noreply, apply_inbox_change(socket, state, at: 0)}
   end
 
   def handle_info({:run_status_changed, payload}, socket) do
@@ -122,6 +122,10 @@ defmodule CymphoWeb.InboxLive.Index do
     {:noreply, push_patch(socket, to: build_url(socket, %{"status" => status}))}
   end
 
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :inbox_items, &fetch_inbox(socket, &1))}
+  end
+
   def handle_event(
         "approve_review",
         %{"issue_id" => issue_id, "wake_id" => wake_id},
@@ -175,8 +179,8 @@ defmodule CymphoWeb.InboxLive.Index do
     agent_id = Map.get(params, "agent_id") || socket.assigns.selected_agent_id
 
     with {:ok, _agent} <- authorize_agent_access(agent_id, socket),
-         {:ok, _} <- fun.(issue_id, agent_id) do
-      {:noreply, load_inbox(socket)}
+         {:ok, updated} <- fun.(issue_id, agent_id) do
+      {:noreply, apply_inbox_change(socket, updated)}
     else
       {:error, :unauthorized} ->
         {:noreply,
@@ -184,6 +188,33 @@ defmodule CymphoWeb.InboxLive.Index do
 
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Inbox entry not found")}
+    end
+  end
+
+  # Update just the affected row instead of resetting the whole stream (which
+  # discards scrolled-in pages and the scroll position). Recompute counts, then
+  # keep the row (in place, or prepended for new items) when its status still
+  # matches the active filter, otherwise drop it. The bounded "review" feed is
+  # wake-driven, so fall back to a full reload there.
+  defp apply_inbox_change(socket, updated, opts \\ []) do
+    if socket.assigns[:current_status] == "review" do
+      load_inbox(socket)
+    else
+      socket = assign_inbox_counts(socket)
+      item = Inbox.preload_item(updated)
+
+      if inbox_item_visible?(socket, item) do
+        stream_insert(socket, :inbox_items, item, opts)
+      else
+        stream_delete(socket, :inbox_items, item)
+      end
+    end
+  end
+
+  defp inbox_item_visible?(socket, item) do
+    case socket.assigns[:current_status] do
+      nil -> true
+      status -> item.status == status
     end
   end
 
@@ -239,26 +270,41 @@ defmodule CymphoWeb.InboxLive.Index do
   end
 
   defp load_inbox(socket) do
+    socket
+    |> assign_inbox_counts()
+    |> reset_stream(:inbox_items, &fetch_inbox(socket, &1))
+  end
+
+  defp fetch_inbox(socket, cursor) do
     agent_id = socket.assigns[:selected_agent_id]
     status = socket.assigns[:current_status]
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
-    items =
-      cond do
-        status == "review" ->
-          build_review_queue_items(agent_id, company_id)
+    cond do
+      status == "review" ->
+        capped_page(build_review_queue_items(agent_id, company_id))
 
-        agent_id == "all" and company_id ->
-          opts = [limit: 100] ++ if(status, do: [status: status], else: [])
-          Inbox.list_recent_for_company(company_id, opts)
+      agent_id == "all" and company_id ->
+        opts = [limit: 100] ++ if(status, do: [status: status], else: [])
+        capped_page(Inbox.list_recent_for_company(company_id, opts))
 
-        agent_id in [nil, "", "all"] ->
-          []
+      agent_id in [nil, "", "all"] ->
+        capped_page([])
 
-        true ->
-          opts = if status, do: [status: status], else: []
-          Inbox.list_inbox_for_agent(agent_id, opts)
-      end
+      true ->
+        opts = [after: cursor] ++ if(status, do: [status: status], else: [])
+        Inbox.list_inbox_for_agent_page(agent_id, opts)
+    end
+  end
+
+  # The "all" and "review" modes are bounded previews, not paginated feeds.
+  defp capped_page(items) do
+    %Cympho.Pagination.Page{entries: items, next_cursor: nil, has_more?: false}
+  end
+
+  defp assign_inbox_counts(socket) do
+    agent_id = socket.assigns[:selected_agent_id]
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
     counts =
       cond do
@@ -268,12 +314,9 @@ defmodule CymphoWeb.InboxLive.Index do
       end
 
     counts = Map.put(counts, "review", review_queue_count(agent_id, company_id))
-
-    agent_counts =
-      if company_id, do: Inbox.counts_by_agent_for_company(company_id), else: %{}
+    agent_counts = if company_id, do: Inbox.counts_by_agent_for_company(company_id), else: %{}
 
     socket
-    |> assign(:inbox_items, items)
     |> assign(:inbox_counts, normalize_counts(counts))
     |> assign(:agent_counts, agent_counts)
   end
@@ -288,6 +331,7 @@ defmodule CymphoWeb.InboxLive.Index do
     |> Cympho.Wakes.list_review_queue(limit: 100)
     |> Enum.map(fn %{wake: wake, issue: issue} ->
       %{
+        id: wake.id,
         kind: :review_queue,
         wake: wake,
         wake_id: wake.id,
@@ -438,14 +482,14 @@ defmodule CymphoWeb.InboxLive.Index do
   defp status_dot("unread"), do: "bg-blue-400"
   defp status_dot("read"), do: "bg-slate-400"
   defp status_dot("dismissed"), do: "bg-amber-400"
-  defp status_dot("archived"), do: "bg-red-400"
+  defp status_dot("archived"), do: "bg-text-quaternary"
   defp status_dot("review"), do: "bg-brand"
   defp status_dot(_), do: "bg-slate-500"
 
   defp status_badge_class("unread"), do: "bg-blue-500/20 text-blue-400"
   defp status_badge_class("read"), do: "bg-gray-500/20 text-gray-400"
   defp status_badge_class("dismissed"), do: "bg-yellow-500/20 text-yellow-400"
-  defp status_badge_class("archived"), do: "bg-red-500/20 text-red-400"
+  defp status_badge_class("archived"), do: "bg-surface text-text-tertiary"
   defp status_badge_class("review"), do: "bg-brand/20 text-brand"
   defp status_badge_class(_), do: "bg-gray-500/20 text-gray-400"
 
@@ -459,14 +503,14 @@ defmodule CymphoWeb.InboxLive.Index do
 
   defp density_tab_class(current, density) do
     if current == density do
-      "bg-brand text-white"
+      "bg-brand text-on-primary"
     else
       "text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
     end
   end
 
-  defp priority_badge_class(:critical), do: "border-red-500/25 bg-red-500/15 text-red-300"
-  defp priority_badge_class(:high), do: "border-red-500/20 bg-red-500/10 text-red-300"
+  defp priority_badge_class(:critical), do: "border-brand/25 bg-brand/15 text-brand"
+  defp priority_badge_class(:high), do: "border-amber-400/25 bg-amber-400/10 text-amber-300"
   defp priority_badge_class(:medium), do: "border-yellow-500/20 bg-yellow-500/10 text-yellow-300"
   defp priority_badge_class(:low), do: "border-slate-500/20 bg-slate-500/10 text-slate-300"
   defp priority_badge_class(_), do: "border-border bg-surface text-text-quaternary"

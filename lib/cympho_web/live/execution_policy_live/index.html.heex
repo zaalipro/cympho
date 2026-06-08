@@ -1,34 +1,43 @@
-<.header>
-  {@page_title}
-  <:actions>
-    <.link navigate={~p"/execution-policies/new"} class="phx-btn">
-      New Execution Policy
-    </.link>
-  </:actions>
-</.header>
+<.settings_layout active={:policies}>
+  <.header>
+    {@page_title}
+    <:actions>
+      <.link navigate={~p"/settings/policies/new"} class="phx-btn">
+        New Execution Policy
+      </.link>
+    </:actions>
+  </.header>
 
-<div :for={policy <- @execution_policies} class="policy-card" id={"policy-#{policy.id}"}>
-  <h3>{policy.name}</h3>
-  <span class="stages-count">{length(policy.stage_configs)} stages</span>
-  <div class="card-actions">
-    <.link navigate={~p"/execution-policies/#{policy.id}"} class="phx-btn-secondary">
-      View
-    </.link>
-    <.link navigate={~p"/execution-policies/#{policy.id}/edit"} class="phx-btn-secondary">
-      Edit
-    </.link>
-    <button
-      type="button"
-      class="delete-btn"
-      phx-click="delete_execution_policy"
-      phx-value-id={policy.id}
-      data-confirm="Delete this policy?"
-    >
-      Delete
-    </button>
-  </div>
-</div>
+  <.infinite_scroll
+    id="execution_policies"
+    has_more={@infinite_scroll[:execution_policies][:has_more?] || false}
+  >
+    <:empty>
+      <div class="empty-state">
+        <p>No execution policies yet.</p>
+      </div>
+    </:empty>
 
-<div :if={Enum.empty?(@execution_policies)} class="empty-state">
-  <p>No execution policies yet.</p>
-</div>
+    <div :for={{dom_id, policy} <- @streams.execution_policies} class="policy-card" id={dom_id}>
+      <h3>{policy.name}</h3>
+      <span class="stages-count">{length(policy.stage_configs)} stages</span>
+      <div class="card-actions">
+        <.link navigate={~p"/settings/policies/#{policy.id}"} class="phx-btn-secondary">
+          View
+        </.link>
+        <.link navigate={~p"/settings/policies/#{policy.id}/edit"} class="phx-btn-secondary">
+          Edit
+        </.link>
+        <button
+          type="button"
+          class="delete-btn"
+          phx-click="delete_execution_policy"
+          phx-value-id={policy.id}
+          data-confirm="Delete this policy?"
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  </.infinite_scroll>
+</.settings_layout>

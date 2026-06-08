@@ -4,7 +4,10 @@ defmodule CymphoWeb.GoalLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, :goals, list_goals(socket))}
+    {:ok,
+     socket
+     |> assign(:infinite_scroll, %{})
+     |> init_stream(:goals, &fetch_goals(socket, &1))}
   end
 
   @impl true
@@ -29,7 +32,7 @@ defmodule CymphoWeb.GoalLive.Index do
         case Goals.get_company_goal(company_id, id) do
           {:ok, goal} ->
             {:ok, _} = Goals.delete_goal(goal)
-            {:noreply, assign(socket, :goals, list_goals(socket))}
+            {:noreply, reset_stream(socket, :goals, &fetch_goals(socket, &1))}
 
           {:error, :not_found} ->
             {:noreply, put_flash(socket, :error, "Goal not found")}
@@ -40,10 +43,14 @@ defmodule CymphoWeb.GoalLive.Index do
     end
   end
 
-  defp list_goals(socket) do
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :goals, &fetch_goals(socket, &1))}
+  end
+
+  defp fetch_goals(socket, cursor) do
     case socket.assigns[:current_company] do
-      %{id: company_id} -> Goals.list_goals_by_company(company_id)
-      _ -> Goals.list_goals()
+      %{id: company_id} -> Goals.list_goals_by_company_page(company_id, after: cursor)
+      _ -> Goals.list_goals_page(after: cursor)
     end
   end
 end

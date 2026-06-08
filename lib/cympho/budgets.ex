@@ -46,6 +46,38 @@ defmodule Cympho.Budgets do
   end
 
   @doc """
+  Keyset (infinite-scroll) page of budgets, newest first.
+
+  Accepts the same scope/status filters as `list_budgets/1` (sans `order_by`)
+  plus `:after` (a cursor) and `:limit`, and returns a `Cympho.Pagination.Page`.
+  Keys on `(inserted_at, id)` to match the display order of `list_budgets/1`.
+  """
+  def list_budgets_page(opts \\ []) do
+    filters = Keyword.drop(opts, [:after, :limit])
+
+    Budget
+    |> apply_budget_filters(filters)
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:inserted_at, :desc}, {:id, :desc}]
+    )
+  end
+
+  defp apply_budget_filters(query, filters) do
+    Enum.reduce(filters, query, fn
+      {:scope_type, type}, q -> where(q, [b], b.scope_type == ^type)
+      {:scope_id, id}, q -> where(q, [b], b.scope_id == ^id)
+      {:company_id, id}, q -> where(q, [b], b.company_id == ^id)
+      {:project_id, id}, q -> where(q, [b], b.project_id == ^id)
+      {:agent_id, id}, q -> where(q, [b], b.agent_id == ^id)
+      {:status, status}, q -> where(q, [b], b.status == ^status)
+      {:active, true}, q -> where(q, [b], b.status == "active")
+      _, q -> q
+    end)
+  end
+
+  @doc """
   Gets a single budget.
   """
   def get_budget!(id), do: Repo.get!(Budget, id)

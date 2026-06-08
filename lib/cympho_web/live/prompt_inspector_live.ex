@@ -115,22 +115,20 @@ defmodule CymphoWeb.PromptInspectorLive do
       <form phx-change="preview" class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <label class="flex flex-col gap-1">
           <span class="text-xs text-text-secondary uppercase tracking-wide">Agent</span>
-          <select name="agent_id" class="rounded border border-hairline bg-panel p-2 text-sm">
-            <option value="">— No agent (issue context only) —</option>
-            <option :for={{label, id} <- @agents} value={id} selected={@agent_id == id}>
-              {label}
-            </option>
-          </select>
+          <.select_menu
+            name="agent_id"
+            value={@agent_id || ""}
+            options={[{"— No agent (issue context only) —", ""} | @agents]}
+          />
         </label>
 
         <label class="flex flex-col gap-1">
           <span class="text-xs text-text-secondary uppercase tracking-wide">Issue</span>
-          <select name="issue_id" class="rounded border border-hairline bg-panel p-2 text-sm">
-            <option value="">— Pick an issue —</option>
-            <option :for={{label, id} <- @issues} value={id} selected={@issue_id == id}>
-              {label}
-            </option>
-          </select>
+          <.select_menu
+            name="issue_id"
+            value={@issue_id || ""}
+            options={[{"— Pick an issue —", ""} | @issues]}
+          />
         </label>
       </form>
 

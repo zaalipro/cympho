@@ -48,6 +48,7 @@ defmodule Cympho.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.4"},
+      {:yaml_elixir, "~> 2.9"},
       {:dns_cluster, "~> 0.1.1"},
       {:quantum, "~> 3.5"},
       {:bandit, "~> 1.5"},

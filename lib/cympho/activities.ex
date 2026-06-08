@@ -65,6 +65,40 @@ defmodule Cympho.Activities do
     {activities, total || 0}
   end
 
+  @doc """
+  Keyset (infinite-scroll) page of a company's activities, newest first.
+
+  Scopes through the issue join (robust to legacy rows whose `company_id` is
+  null) and returns a `Cympho.Pagination.Page` with `:issue` preloaded.
+  """
+  def list_company_activities_page(company_id, opts \\ []) do
+    from(a in Activity,
+      join: i in Issue,
+      on: a.issue_id == i.id,
+      where: i.company_id == ^company_id
+    )
+    |> maybe_where_action(Keyword.get(opts, :action))
+    |> maybe_where_actor_type(Keyword.get(opts, :actor_type))
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:inserted_at, :desc}, {:id, :desc}]
+    )
+    |> preload_page_issues()
+  end
+
+  defp maybe_where_action(query, action) when action in [nil, ""], do: query
+  defp maybe_where_action(query, action), do: where(query, [a], a.action == ^action)
+
+  defp maybe_where_actor_type(query, actor_type) when actor_type in [nil, ""], do: query
+
+  defp maybe_where_actor_type(query, actor_type),
+    do: where(query, [a], a.actor_type == ^actor_type)
+
+  defp preload_page_issues(%Cympho.Pagination.Page{} = page) do
+    %{page | entries: Repo.preload(page.entries, [:issue])}
+  end
+
   def subscribe(company_id) do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "company:#{company_id}:activities")
   end

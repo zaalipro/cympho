@@ -10,6 +10,18 @@ defmodule Cympho.Goals do
     |> Repo.all()
   end
 
+  @doc """
+  Keyset (infinite-scroll) page of all goals, oldest first.
+  """
+  def list_goals_page(opts \\ []) do
+    Goal
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:inserted_at, :asc}, {:id, :asc}]
+    )
+  end
+
   def list_goals_by_project(project_id) do
     Goal |> where(project_id: ^project_id) |> Repo.all()
   end
@@ -19,6 +31,19 @@ defmodule Cympho.Goals do
     |> where(company_id: ^company_id)
     |> order_by([g], asc: g.inserted_at)
     |> Repo.all()
+  end
+
+  @doc """
+  Keyset (infinite-scroll) page of a company's goals, oldest first.
+  """
+  def list_goals_by_company_page(company_id, opts \\ []) do
+    Goal
+    |> where(company_id: ^company_id)
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:inserted_at, :asc}, {:id, :asc}]
+    )
   end
 
   def list_root_goals_by_project(project_id) do

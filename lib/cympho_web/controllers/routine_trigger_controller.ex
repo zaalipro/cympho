@@ -25,6 +25,11 @@ defmodule CymphoWeb.RoutineTriggerController do
             issue_title: issue.title
           })
 
+        {:skip, _policy} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{message: "run skipped — a run is already active for this routine"})
+
         {:error, :not_found} ->
           conn |> put_status(:not_found) |> json(%{error: "trigger not found"})
 

@@ -17,7 +17,7 @@ defmodule Cympho.Companies.Company do
     field :spent_monthly_cents, :integer, default: 0
     field :attachment_max_bytes, :integer, default: 25_000_000
     field :require_board_approval_for_new_agents, :boolean, default: false
-    field :brand_color, :string, default: "#5e6ad2"
+    field :brand_color, :string, default: "#D97757"
     field :logo_url, :string
     field :governance_config, :map, default: %{}
 

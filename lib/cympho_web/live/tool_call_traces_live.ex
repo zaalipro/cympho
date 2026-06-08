@@ -7,24 +7,25 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   def mount(_params, _session, socket) do
     company_id = socket.assigns[:current_company][:id]
 
-    {:ok,
-     socket
-     |> assign(:page_title, "Tool Call Traces")
-     |> assign(:company_id, company_id)
-     |> assign(:traces, [])
-     |> assign(:filters, %{
-       tool_name: "",
-       status: "",
-       agent_id: "",
-       issue_id: ""
-     })
-     |> assign(:agents, list_agents_scoped(company_id))
-     |> assign(:statistics, nil)
-     |> assign(:integrity_status, :unknown)
-     |> assign(:selected_trace, nil)
-     |> assign(:export_data_json, nil)
-     |> assign(:export_data_csv, nil)
-     |> load_traces()}
+    socket =
+      socket
+      |> assign(:page_title, "Tool Call Traces")
+      |> assign(:company_id, company_id)
+      |> assign(:infinite_scroll, %{})
+      |> assign(:filters, %{
+        tool_name: "",
+        status: "",
+        agent_id: "",
+        issue_id: ""
+      })
+      |> assign(:agents, list_agents_scoped(company_id))
+      |> assign(:integrity_status, :unknown)
+      |> assign(:selected_trace, nil)
+      |> assign(:export_data_json, nil)
+      |> assign(:export_data_csv, nil)
+      |> load_statistics()
+
+    {:ok, init_stream(socket, :traces, &fetch_traces(socket, &1))}
   end
 
   @impl true
@@ -36,33 +37,51 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
       issue_id: Map.get(filter_params, "issue_id", "")
     }
 
-    {:noreply,
-     socket
-     |> assign(:filters, filters)
-     |> assign(:selected_trace, nil)
-     |> load_traces()}
+    socket =
+      socket
+      |> assign(:filters, filters)
+      |> assign(:selected_trace, nil)
+      |> assign(:export_data_json, nil)
+      |> assign(:export_data_csv, nil)
+      |> load_statistics()
+
+    {:noreply, reset_stream(socket, :traces, &fetch_traces(socket, &1))}
   end
 
   @impl true
   def handle_event("clear_filters", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:filters, %{
-       tool_name: "",
-       status: "",
-       agent_id: "",
-       issue_id: ""
-     })
-     |> assign(:selected_trace, nil)
-     |> load_traces()}
+    socket =
+      socket
+      |> assign(:filters, %{tool_name: "", status: "", agent_id: "", issue_id: ""})
+      |> assign(:selected_trace, nil)
+      |> assign(:export_data_json, nil)
+      |> assign(:export_data_csv, nil)
+      |> load_statistics()
+
+    {:noreply, reset_stream(socket, :traces, &fetch_traces(socket, &1))}
+  end
+
+  @impl true
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :traces, &fetch_traces(socket, &1))}
   end
 
   @impl true
   def handle_event("select_trace", %{"id" => id}, socket) do
     case get_scoped_trace(socket.assigns.company_id, id) do
       {:ok, trace} ->
-        {:noreply,
-         assign(socket, :selected_trace, preload_scoped_agent(trace, socket.assigns.company_id))}
+        trace = preload_scoped_agent(trace, socket.assigns.company_id)
+        previous = socket.assigns.selected_trace
+
+        socket =
+          socket
+          |> assign(:selected_trace, trace)
+          |> stream_insert(:traces, trace)
+
+        # Re-render the previously selected row so its highlight clears — streams
+        # don't re-render existing items on an unrelated assign change.
+        socket = if previous, do: stream_insert(socket, :traces, previous), else: socket
+        {:noreply, socket}
 
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Trace not found")}
@@ -71,7 +90,10 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
   @impl true
   def handle_event("close_trace_details", _params, socket) do
-    {:noreply, assign(socket, :selected_trace, nil)}
+    previous = socket.assigns.selected_trace
+    socket = assign(socket, :selected_trace, nil)
+    socket = if previous, do: stream_insert(socket, :traces, previous), else: socket
+    {:noreply, socket}
   end
 
   @impl true
@@ -85,7 +107,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
   @impl true
   def handle_event("export_json", _params, socket) do
-    traces = socket.assigns.traces
+    traces = export_traces(socket)
 
     json_data =
       traces
@@ -117,7 +139,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
   @impl true
   def handle_event("export_csv", _params, socket) do
-    traces = socket.assigns.traces
+    traces = export_traces(socket)
 
     csv_headers = ["Sequence", "Type", "Tool", "Status", "Occurred At", "Agent ID", "Issue ID"]
 
@@ -149,51 +171,37 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   defp list_agents_scoped(nil), do: []
   defp list_agents_scoped(company_id), do: Agents.list_agents_by_company(company_id)
 
-  defp load_traces(socket) do
+  defp fetch_traces(socket, cursor) do
     company_id = socket.assigns.company_id
-    filters = socket.assigns.filters
 
-    opts = [company_id: company_id]
+    page =
+      ([company_id: company_id, after: cursor] ++ filter_opts(socket))
+      |> ToolCallTraces.list_tool_call_traces_page()
 
-    opts =
-      if filters.tool_name != "" do
-        Keyword.put(opts, :tool_name, filters.tool_name)
-      else
-        opts
-      end
+    %{page | entries: Enum.map(page.entries, &preload_scoped_agent(&1, company_id))}
+  end
 
-    opts =
-      if filters.status != "" do
-        Keyword.put(opts, :status, filters.status)
-      else
-        opts
-      end
+  # Export operates on the full filtered set, not just the loaded page.
+  defp export_traces(socket) do
+    ([company_id: socket.assigns.company_id] ++ filter_opts(socket))
+    |> ToolCallTraces.list_tool_call_traces()
+  end
 
-    opts =
-      if filters.agent_id != "" do
-        Keyword.put(opts, :agent_id, filters.agent_id)
-      else
-        opts
-      end
+  defp filter_opts(socket) do
+    f = socket.assigns.filters
 
-    opts =
-      if filters.issue_id != "" do
-        Keyword.put(opts, :issue_id, filters.issue_id)
-      else
-        opts
-      end
+    []
+    |> maybe_put(:tool_name, f.tool_name)
+    |> maybe_put(:status, f.status)
+    |> maybe_put(:agent_id, f.agent_id)
+    |> maybe_put(:issue_id, f.issue_id)
+  end
 
-    traces =
-      ToolCallTraces.list_tool_call_traces(opts)
-      |> Enum.map(&preload_scoped_agent(&1, company_id))
+  defp maybe_put(opts, _key, ""), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
-    statistics = ToolCallTraces.get_statistics(company_id)
-
-    socket
-    |> assign(:traces, traces)
-    |> assign(:statistics, statistics)
-    |> assign(:export_data_json, nil)
-    |> assign(:export_data_csv, nil)
+  defp load_statistics(socket) do
+    assign(socket, :statistics, ToolCallTraces.get_statistics(socket.assigns.company_id))
   end
 
   defp get_scoped_trace(company_id, id) do
@@ -214,7 +222,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   end
 
   def status_color("success"), do: "text-green-400"
-  def status_color("error"), do: "text-red-400"
+  def status_color("error"), do: "text-brand"
   def status_color("pending"), do: "text-yellow-400"
   def status_color("timeout"), do: "text-orange-400"
   def status_color(_), do: "text-gray-400"
@@ -227,7 +235,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
   def integrity_status_color(:ok), do: "text-green-400"
   def integrity_status_color(:unknown), do: "text-gray-400"
-  def integrity_status_color({:error, _}), do: "text-red-400"
+  def integrity_status_color({:error, _}), do: "text-brand"
 
   def integrity_status_label(:ok), do: "Chain integrity verified"
   def integrity_status_label(:unknown), do: "Integrity not checked"
@@ -255,7 +263,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
         <div class="flex gap-2">
           <button
             type="button"
-            class="rounded-lg bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-white transition-colors hover:bg-accent"
+            class="rounded-button bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-on-primary transition-colors hover:bg-accent"
             phx-click="verify_integrity"
           >
             Verify Integrity
@@ -334,31 +342,26 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
           <div>
             <label class="block text-xs font-510 text-text-secondary mb-1.5">Status</label>
-            <select
+            <.select_menu
               name="filter[status]"
-              class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
-            >
-              <option value="">All Statuses</option>
-              <option value="success" selected={@filters.status == "success"}>Success</option>
-              <option value="error" selected={@filters.status == "error"}>Error</option>
-              <option value="pending" selected={@filters.status == "pending"}>Pending</option>
-              <option value="timeout" selected={@filters.status == "timeout"}>Timeout</option>
-            </select>
+              value={@filters.status || ""}
+              options={[
+                {"All Statuses", ""},
+                {"Success", "success"},
+                {"Error", "error"},
+                {"Pending", "pending"},
+                {"Timeout", "timeout"}
+              ]}
+            />
           </div>
 
           <div>
             <label class="block text-xs font-510 text-text-secondary mb-1.5">Agent</label>
-            <select
+            <.select_menu
               name="filter[agent_id]"
-              class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
-            >
-              <option value="">All Agents</option>
-              <%= for agent <- @agents do %>
-                <option value={agent.id} selected={@filters.agent_id == agent.id}>
-                  {agent.name}
-                </option>
-              <% end %>
-            </select>
+              value={@filters.agent_id || ""}
+              options={[{"All Agents", ""} | Enum.map(@agents, &{&1.name, &1.id})]}
+            />
           </div>
 
           <div>
@@ -376,7 +379,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
         <div class="flex gap-2">
           <button
             type="submit"
-            class="rounded-lg bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-white transition-colors hover:bg-accent"
+            class="rounded-button bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-on-primary transition-colors hover:bg-accent"
           >
             Apply Filters
           </button>
@@ -405,7 +408,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
           <div class="bg-surface border border-border rounded-xl p-4">
             <div class="text-text-secondary text-sm mb-1">Errors</div>
-            <div class="text-2xl font-590 text-red-400">{@statistics.error_calls}</div>
+            <div class="text-2xl font-590 text-brand">{@statistics.error_calls}</div>
           </div>
 
           <div class="bg-surface border border-border rounded-xl p-4">
@@ -422,81 +425,84 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
               <h2 class="text-sm font-590 text-text-primary">Traces</h2>
             </div>
 
-            <%= if @traces == [] do %>
-              <div class="p-8 text-center text-text-secondary">
-                <p class="mb-2">No traces found</p>
-                <p class="text-sm">Tool call traces will appear here as agents use tools</p>
-              </div>
-            <% else %>
-              <div class="overflow-x-auto">
-                <table class="w-full">
-                  <thead class="bg-subtle">
-                    <tr>
-                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                        Seq
-                      </th>
-                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                        Tool
-                      </th>
-                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                        Actor
-                      </th>
-                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                        Time
-                      </th>
-                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                        Chain Hash
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-border">
-                    <%= for trace <- @traces do %>
-                      <tr
-                        class={
-                          if @selected_trace && @selected_trace.id == trace.id,
-                            do: "bg-brand/10 cursor-pointer",
-                            else: "hover:bg-subtle cursor-pointer"
-                        }
-                        phx-click="select_trace"
-                        phx-value-id={trace.id}
-                      >
-                        <td class="px-4 py-3 whitespace-nowrap text-sm text-text-primary">
-                          {trace.sequence_number}
-                        </td>
-                        <td class="px-4 py-3 text-sm text-text-primary">
-                          <div class="font-medium">{trace.tool_name}</div>
-                          <div class="text-xs text-text-secondary">{trace.trace_type}</div>
-                        </td>
-                        <td class="px-4 py-3 text-sm text-text-secondary">
-                          <div class="flex items-center gap-1">
-                            <span class="text-xs capitalize">{trace.actor_type}</span>
-                            <%= if trace.actor_type == "agent" && trace.agent do %>
-                              <span class="text-xs text-text-tertiary">({trace.agent.name})</span>
-                            <% end %>
-                          </div>
-                        </td>
-                        <td class={"px-4 py-3 whitespace-nowrap text-sm " <> status_color(trace.status)}>
-                          <span class="inline-flex items-center">
-                            <span class="mr-1">{status_icon(trace.status)}</span>
-                            {String.capitalize(trace.status)}
-                          </span>
-                        </td>
-                        <td class="px-4 py-3 whitespace-nowrap text-sm text-text-secondary">
-                          {format_datetime(trace.occurred_at)}
-                        </td>
-                        <td class="px-4 py-3 text-xs text-text-secondary font-mono">
-                          {String.slice(trace.chain_hash, 0..7)}...
-                        </td>
-                      </tr>
-                    <% end %>
-                  </tbody>
-                </table>
-              </div>
-            <% end %>
+            <div class="overflow-x-auto">
+              <table class="w-full">
+                <thead class="bg-subtle">
+                  <tr>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
+                      Seq
+                    </th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
+                      Tool
+                    </th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
+                      Actor
+                    </th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
+                      Time
+                    </th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
+                      Chain Hash
+                    </th>
+                  </tr>
+                </thead>
+                <tbody id="traces-tbody" phx-update="stream" class="divide-y divide-border">
+                  <tr id="traces-empty" class="only:table-row hidden">
+                    <td colspan="6" class="p-8 text-center text-text-secondary">
+                      <p class="mb-2">No traces found</p>
+                      <p class="text-sm">Tool call traces will appear here as agents use tools</p>
+                    </td>
+                  </tr>
+                  <tr
+                    :for={{dom_id, trace} <- @streams.traces}
+                    id={dom_id}
+                    class={
+                      if @selected_trace && @selected_trace.id == trace.id,
+                        do: "bg-brand/10 cursor-pointer",
+                        else: "hover:bg-subtle cursor-pointer"
+                    }
+                    phx-click="select_trace"
+                    phx-value-id={trace.id}
+                  >
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-text-primary">
+                      {trace.sequence_number}
+                    </td>
+                    <td class="px-4 py-3 text-sm text-text-primary">
+                      <div class="font-medium">{trace.tool_name}</div>
+                      <div class="text-xs text-text-secondary">{trace.trace_type}</div>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-text-secondary">
+                      <div class="flex items-center gap-1">
+                        <span class="text-xs capitalize">{trace.actor_type}</span>
+                        <%= if trace.actor_type == "agent" && trace.agent do %>
+                          <span class="text-xs text-text-tertiary">({trace.agent.name})</span>
+                        <% end %>
+                      </div>
+                    </td>
+                    <td class={"px-4 py-3 whitespace-nowrap text-sm " <> status_color(trace.status)}>
+                      <span class="inline-flex items-center">
+                        <span class="mr-1">{status_icon(trace.status)}</span>
+                        {String.capitalize(trace.status)}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-text-secondary">
+                      {format_datetime(trace.occurred_at)}
+                    </td>
+                    <td class="px-4 py-3 text-xs text-text-secondary font-mono">
+                      {String.slice(trace.chain_hash, 0..7)}...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
+          <.infinite_scroll_footer
+            id="traces"
+            has_more={@infinite_scroll[:traces][:has_more?] || false}
+          />
         </div>
 
         <%= if @selected_trace do %>

@@ -16,6 +16,19 @@ defmodule Cympho.Secrets do
     |> Repo.all()
   end
 
+  def list_secrets_page(company_id, opts \\ []) do
+    Secret
+    |> where(company_id: ^company_id)
+    |> where(is_active: true)
+    |> maybe_filter(:scope, opts[:scope])
+    |> maybe_filter(:scope_id, opts[:scope_id])
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:key, :asc}, {:id, :asc}]
+    )
+  end
+
   def get_secret!(id), do: Repo.get!(Secret, id)
 
   def get_secret(id) do

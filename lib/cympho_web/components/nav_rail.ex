@@ -9,9 +9,10 @@ defmodule CymphoWeb.Components.NavRail do
     4. PROJECTS        — color dot · name · open-issue count, capped at 6
     5. AGENTS          — role icon · name · live status dot, capped at 8
 
-    The "More" section (Org / Approvals / Costs / Activity / Workspaces /
-    Plugins / Skills / Adapters / Tool traces / Settings) lives in the
-    user menu at the bottom of the sidebar — see `UserMenu`.
+    Settings (gear) pins to the top group. The "More" overflow (Org /
+    Approvals / Costs / Activity / Workspaces / Plugins / Skills / Tool
+    traces) lives in the user menu at the bottom of the sidebar — see
+    `UserMenu`.
   """
   use Phoenix.Component
 
@@ -29,17 +30,16 @@ defmodule CymphoWeb.Components.NavRail do
   attr :rest, :global
 
   def nav_rail(assigns) do
-    {visible_projects, hidden_projects_count} =
-      take_with_overflow(assigns.projects, @projects_visible)
-
-    {visible_agents, hidden_agents_count} = take_with_overflow(assigns.agents, @agents_visible)
-
+    # Render every project/agent; rows past the initial cap are marked
+    # `data-nav-overflow` and hidden until the "Show N more" button reveals them
+    # (handled client-side in app.js — the nav lives in the conn-rendered root
+    # layout, so collapse/expand state is JS + localStorage, not LiveView).
     assigns =
       assigns
-      |> assign(:visible_projects, visible_projects)
-      |> assign(:hidden_projects_count, hidden_projects_count)
-      |> assign(:visible_agents, visible_agents)
-      |> assign(:hidden_agents_count, hidden_agents_count)
+      |> assign(:projects_visible, @projects_visible)
+      |> assign(:agents_visible, @agents_visible)
+      |> assign(:hidden_projects_count, max(0, length(assigns.projects) - @projects_visible))
+      |> assign(:hidden_agents_count, max(0, length(assigns.agents) - @agents_visible))
 
     ~H"""
     <nav class="flex-1 overflow-y-auto py-2.5 px-2 space-y-0.5" {@rest}>
@@ -78,6 +78,13 @@ defmodule CymphoWeb.Components.NavRail do
         icon="hero-command-line-mini"
         current_path={@current_path}
       />
+      <.nav_link
+        to={~p"/settings/profile"}
+        match="/settings"
+        label="Settings"
+        icon="hero-cog-6-tooth-mini"
+        current_path={@current_path}
+      />
 
       <.section_header label="Work" />
       <.nav_link
@@ -94,46 +101,48 @@ defmodule CymphoWeb.Components.NavRail do
         current_path={@current_path}
       />
 
-      <.section_header label="Projects" action_to={~p"/projects/new"} action_label="New project" />
-      <p
-        :if={@visible_projects == []}
-        class="px-3 py-1.5 text-xs text-text-quaternary italic"
+      <.nav_section
+        key="projects"
+        label="Projects"
+        action_to={~p"/projects/new"}
+        action_label="New project"
       >
-        No projects yet.
-      </p>
-      <.project_row
-        :for={project <- @visible_projects}
-        project={project}
-        current_path={@current_path}
-      />
-      <.link
-        :if={@hidden_projects_count > 0}
-        navigate={~p"/projects"}
-        class="block px-3 py-1.5 text-[12px] text-text-quaternary hover:text-text-secondary"
-      >
-        Show {@hidden_projects_count} more…
-      </.link>
+        <p
+          :if={@projects == []}
+          class="px-3 py-1.5 text-xs text-text-quaternary italic"
+        >
+          No projects yet.
+        </p>
+        <.project_row
+          :for={{project, idx} <- Enum.with_index(@projects)}
+          project={project}
+          overflow?={idx >= @projects_visible}
+          current_path={@current_path}
+        />
+        <.show_more :if={@hidden_projects_count > 0} key="projects" count={@hidden_projects_count} />
+      </.nav_section>
 
-      <.section_header label="Agents" action_to={~p"/agents/new"} action_label="New agent" />
-      <p
-        :if={@visible_agents == []}
-        class="px-3 py-1.5 text-xs text-text-quaternary italic"
+      <.nav_section
+        key="agents"
+        label="Agents"
+        action_to={~p"/agents/new"}
+        action_label="New agent"
       >
-        No agents yet.
-      </p>
-      <.agent_row
-        :for={agent <- @visible_agents}
-        agent={agent}
-        current_path={@current_path}
-        leadership?={leadership?(agent)}
-      />
-      <.link
-        :if={@hidden_agents_count > 0}
-        navigate={~p"/agents"}
-        class="block px-3 py-1.5 text-[12px] text-text-quaternary hover:text-text-secondary"
-      >
-        Show {@hidden_agents_count} more…
-      </.link>
+        <p
+          :if={@agents == []}
+          class="px-3 py-1.5 text-xs text-text-quaternary italic"
+        >
+          No agents yet.
+        </p>
+        <.agent_row
+          :for={{agent, idx} <- Enum.with_index(@agents)}
+          agent={agent}
+          overflow?={idx >= @agents_visible}
+          current_path={@current_path}
+          leadership?={leadership?(agent)}
+        />
+        <.show_more :if={@hidden_agents_count > 0} key="agents" count={@hidden_agents_count} />
+      </.nav_section>
 
       <div class="h-3"></div>
     </nav>
@@ -148,7 +157,7 @@ defmodule CymphoWeb.Components.NavRail do
       type="button"
       data-quick-create-trigger
       class={[
-        "w-full flex items-center gap-2.5 px-3 py-2 rounded-md",
+        "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl shadow-card",
         "text-[13px] font-510 text-text-primary",
         "bg-brand/15 hover:bg-brand/25 border border-brand/30",
         "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
@@ -168,7 +177,7 @@ defmodule CymphoWeb.Components.NavRail do
   defp section_header(assigns) do
     ~H"""
     <div class="flex items-center justify-between px-3 pt-3 pb-1">
-      <span class="text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+      <span class="text-[11px] font-510 tracking-[0.06em] text-text-quaternary">
         {@label}
       </span>
       <.link
@@ -184,6 +193,64 @@ defmodule CymphoWeb.Components.NavRail do
     """
   end
 
+  ## ── Collapsible section (Projects / Agents) ────────────────────
+
+  attr :key, :string, required: true
+  attr :label, :string, required: true
+  attr :action_to, :string, default: nil
+  attr :action_label, :string, default: nil
+  slot :inner_block, required: true
+
+  defp nav_section(assigns) do
+    ~H"""
+    <div data-nav-section={@key} class="pt-3">
+      <div class="flex items-center justify-between px-3 pb-1">
+        <button
+          type="button"
+          data-nav-toggle={@key}
+          aria-expanded="true"
+          class="group flex items-center gap-1 -ml-0.5 rounded text-[11px] font-510 tracking-[0.06em] text-text-quaternary hover:text-text-secondary transition-colors"
+        >
+          <span
+            data-nav-chevron
+            class="hero-chevron-down-mini w-3 h-3 shrink-0 transition-transform duration-150"
+          >
+          </span>
+          <span>{@label}</span>
+        </button>
+        <.link
+          :if={@action_to}
+          navigate={@action_to}
+          aria-label={@action_label}
+          title={@action_label}
+          class="p-1 -mr-1 rounded text-text-quaternary hover:text-text-primary hover:bg-surface-hover transition-colors"
+        >
+          <span class="hero-plus-mini w-3.5 h-3.5"></span>
+        </.link>
+      </div>
+      <div data-nav-body class="space-y-0.5">
+        {render_slot(@inner_block)}
+      </div>
+    </div>
+    """
+  end
+
+  attr :key, :string, required: true
+  attr :count, :integer, required: true
+
+  defp show_more(assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-nav-show-more={@key}
+      class="block w-full px-3 py-1.5 text-left text-[12px] text-text-quaternary hover:text-text-secondary transition-colors"
+    >
+      <span data-nav-more>Show {@count} more…</span>
+      <span data-nav-less class="hidden">Show less</span>
+    </button>
+    """
+  end
+
   ## ── Top-level link ─────────────────────────────────────────────
 
   attr :to, :string, required: true
@@ -191,16 +258,20 @@ defmodule CymphoWeb.Components.NavRail do
   attr :icon, :string, required: true
   attr :current_path, :string, required: true
   attr :badge, :integer, default: 0
+  # Optional path used for the active-highlight test instead of `to`, so a link
+  # can navigate to one route (e.g. /settings/profile) yet stay highlighted
+  # across a whole section (e.g. any /settings/*).
+  attr :match, :string, default: nil
 
   defp nav_link(assigns) do
-    active? = active?(assigns.to, assigns.current_path)
+    active? = active?(assigns.match || assigns.to, assigns.current_path)
     assigns = assign(assigns, :active?, active?)
 
     ~H"""
     <.link
       navigate={@to}
       class={[
-        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] font-510 transition-colors",
+        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-510 transition-colors",
         "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
       ]}
       data-nav-path={@to}
@@ -211,7 +282,7 @@ defmodule CymphoWeb.Components.NavRail do
       <span class="flex-1 truncate">{@label}</span>
       <span
         :if={@badge && @badge > 0}
-        class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500/90 text-white text-[10px] font-590"
+        class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-brand text-on-primary text-[10px] font-590"
       >
         {@badge}
       </span>
@@ -223,6 +294,7 @@ defmodule CymphoWeb.Components.NavRail do
 
   attr :project, :map, required: true
   attr :current_path, :string, required: true
+  attr :overflow?, :boolean, default: false
 
   defp project_row(assigns) do
     href = ~p"/projects/#{assigns.project.id}"
@@ -233,10 +305,12 @@ defmodule CymphoWeb.Components.NavRail do
     <.link
       navigate={@href}
       class={[
-        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] font-510 transition-colors",
-        "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-510 transition-colors",
+        "text-text-secondary hover:bg-surface-hover hover:text-text-primary",
+        @overflow? && "hidden"
       ]}
       data-nav-path={@href}
+      data-nav-overflow={if @overflow?, do: "true"}
       data-active={if @active?, do: "true", else: "false"}
       aria-current={if @active?, do: "page", else: nil}
     >
@@ -262,6 +336,7 @@ defmodule CymphoWeb.Components.NavRail do
   attr :agent, :map, required: true
   attr :current_path, :string, required: true
   attr :leadership?, :boolean, default: false
+  attr :overflow?, :boolean, default: false
 
   defp agent_row(assigns) do
     href = ~p"/agents/#{assigns.agent.id}"
@@ -272,10 +347,12 @@ defmodule CymphoWeb.Components.NavRail do
     <.link
       navigate={@href}
       class={[
-        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-md text-[13px] font-510 transition-colors",
-        "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-510 transition-colors",
+        "text-text-secondary hover:bg-surface-hover hover:text-text-primary",
+        @overflow? && "hidden"
       ]}
       data-nav-path={@href}
+      data-nav-overflow={if @overflow?, do: "true"}
       data-active={if @active?, do: "true", else: "false"}
       aria-current={if @active?, do: "page", else: nil}
     >
@@ -296,13 +373,6 @@ defmodule CymphoWeb.Components.NavRail do
   defp leadership?(%{role: r}) when r in [:ceo, :cto], do: true
   defp leadership?(_), do: false
 
-  defp take_with_overflow(list, n) when is_list(list) do
-    case length(list) do
-      total when total <= n -> {list, 0}
-      total -> {Enum.take(list, n), total - n}
-    end
-  end
-
   defp active?("/", current_path), do: current_path == "/"
 
   defp active?(path, current_path),
@@ -322,14 +392,14 @@ defmodule CymphoWeb.Components.NavRail do
   defp role_icon_color(:designer), do: "text-fuchsia-300"
   defp role_icon_color(_), do: "text-text-quaternary"
 
-  defp status_color(:running), do: "#10b981"
-  defp status_color(:active), do: "#10b981"
-  defp status_color(:sleeping), do: "#f59e0b"
-  defp status_color(:paused), do: "#f59e0b"
-  defp status_color(:pending_approval), do: "#a855f7"
-  defp status_color(:error), do: "#ef4444"
-  defp status_color(:offline), do: "#3b3d44"
-  defp status_color(:terminated), do: "#3b3d44"
+  defp status_color(:running), do: "#5db872"
+  defp status_color(:active), do: "#5db872"
+  defp status_color(:sleeping), do: "#e8a55a"
+  defp status_color(:paused), do: "#e8a55a"
+  defp status_color(:pending_approval), do: "#9A7CA8"
+  defp status_color(:error), do: "#D97757"
+  defp status_color(:offline), do: "#423F3B"
+  defp status_color(:terminated), do: "#423F3B"
   defp status_color(_), do: "#6b7280"
 
   defp status_label(:running), do: "Running"

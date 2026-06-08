@@ -17,50 +17,57 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
   attr :all_agents, :list, default: []
 
   def activity_timeline(assigns) do
-    assigns = assign(assigns, :visible_timeline, filtered_timeline(assigns.timeline, assigns.timeline_filter))
+    assigns =
+      assign(
+        assigns,
+        :visible_timeline,
+        filtered_timeline(assigns.timeline, assigns.timeline_filter)
+      )
 
     ~H"""
     <div id="issue-activity" class="px-4 lg:px-6 pb-3">
-      <div class="flex flex-col gap-3 border-t border-border/60 pt-5 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 class="text-eyebrow text-ink-tertiary uppercase">Activity</h2>
-          <p class="mt-1 text-caption text-ink-tertiary">
-            {timeline_summary(@timeline, @timeline_filter)}
-          </p>
-          <p
-            :if={@timeline_filter == "signal"}
-            class="mt-1 max-w-[520px] text-[11px] leading-4 text-ink-tertiary"
-          >
-            Signal mode keeps tagged comments, artifacts, failed runs, and completed runs with summaries visible while folding routine chatter into All.
-          </p>
+      <div class="border-t border-border/60 pt-5">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div class="min-w-0">
+            <h2 class="text-eyebrow text-ink-tertiary uppercase">Activity</h2>
+            <p class="mt-1 text-caption text-ink-tertiary">
+              {timeline_summary(@timeline, @timeline_filter)}
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-1 rounded-lg border border-border bg-surface p-1 sm:shrink-0">
+            <button
+              :for={{filter, label, count, title} <- timeline_filter_options(@timeline)}
+              type="button"
+              title={title}
+              phx-click="set_timeline_filter"
+              phx-value-filter={filter}
+              class={[
+                "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-510 transition-colors",
+                if(@timeline_filter == filter,
+                  do: "bg-brand text-on-primary",
+                  else: "text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+                )
+              ]}
+            >
+              <span>{label}</span>
+              <span class={[
+                "rounded-full px-1.5 py-0.5 text-[10px]",
+                if(@timeline_filter == filter,
+                  do: "bg-white/20 text-white",
+                  else: "bg-canvas text-text-quaternary"
+                )
+              ]}>
+                {count}
+              </span>
+            </button>
+          </div>
         </div>
-        <div class="flex max-w-full gap-1 overflow-x-auto rounded-lg border border-border bg-surface p-1">
-          <button
-            :for={{filter, label, count, title} <- timeline_filter_options(@timeline)}
-            type="button"
-            title={title}
-            phx-click="set_timeline_filter"
-            phx-value-filter={filter}
-            class={[
-              "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-510 transition-colors",
-              if(@timeline_filter == filter,
-                do: "bg-brand text-white",
-                else: "text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-              )
-            ]}
-          >
-            <span>{label}</span>
-            <span class={[
-              "rounded-full px-1.5 py-0.5 text-[10px]",
-              if(@timeline_filter == filter,
-                do: "bg-white/20 text-white",
-                else: "bg-canvas text-text-quaternary"
-              )
-            ]}>
-              {count}
-            </span>
-          </button>
-        </div>
+        <p
+          :if={@timeline_filter == "signal"}
+          class="mt-3 max-w-[520px] text-[11px] leading-4 text-ink-tertiary"
+        >
+          Signal mode keeps tagged comments, artifacts, failed runs, and completed runs with summaries visible while folding routine chatter into All.
+        </p>
       </div>
     </div>
     <div
@@ -209,8 +216,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
             <% adapter_error = adapter_error_for_run(entry.data) %>
             <div class="mb-2 flex items-center justify-between">
               <div class="flex items-center gap-2">
-                <span class={"h-2 w-2 rounded-full #{run_status_color(entry.data.status)}"}>
-                </span>
+                <span class={"h-2 w-2 rounded-full #{run_status_color(entry.data.status)}"}></span>
                 <span class="text-xs font-510 text-text-primary">
                   {run_status_label(entry.data.status)}
                 </span>
@@ -245,7 +251,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
             </p>
             <div
               :if={adapter_error}
-              class="mt-3 rounded-lg border border-red-500/20 bg-red-500/[0.06] p-3"
+              class="mt-3 rounded-lg border border-brand/20 bg-brand/[0.06] p-3"
             >
               <div class="flex flex-wrap items-center gap-2">
                 <span class={"inline-flex rounded-full border px-2 py-0.5 text-[11px] font-510 #{adapter_error_badge_class(adapter_error.category)}"}>
@@ -467,7 +473,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
             </div>
             <p
               :if={entry.data.error_message not in [nil, ""]}
-              class="text-xs text-red-300"
+              class="text-xs text-brand"
             >
               {entry.data.error_message}
             </p>
@@ -481,9 +487,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
           </div>
 
           <div
-            :if={
-              entry.type not in [:comment, :run, :interaction, :work_product, :tool_call_trace]
-            }
+            :if={entry.type not in [:comment, :run, :interaction, :work_product, :tool_call_trace]}
             class="text-xs text-text-quaternary"
           >
             Unknown entry type

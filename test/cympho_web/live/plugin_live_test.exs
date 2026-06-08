@@ -24,7 +24,10 @@ defmodule CymphoWeb.PluginLiveTest do
   end
 
   describe "PluginLive.Index" do
-    test "mounts and lists plugins for the current company", %{conn: conn, current_company: company} do
+    test "mounts and lists plugins for the current company", %{
+      conn: conn,
+      current_company: company
+    } do
       plugin = insert_plugin(company.id, %{name: "Listed Plugin"})
 
       {:ok, _view, html} = live(conn, "/plugins")

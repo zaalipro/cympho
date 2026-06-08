@@ -9,10 +9,10 @@ defmodule CymphoWeb.PluginLive.Index do
 
     {:ok,
      socket
-     |> assign(:plugins, [])
      |> assign(:companies, companies)
      |> assign(:selected_company_id, nil)
      |> assign(:selected_status, nil)
+     |> assign(:infinite_scroll, %{})
      |> assign(:page_title, "Plugins")}
   end
 
@@ -22,12 +22,10 @@ defmodule CymphoWeb.PluginLive.Index do
   end
 
   defp apply_action(socket, :index, _params) do
-    plugins = list_plugins_for_filters(socket)
-
     socket
     |> assign(:page_title, "Plugins")
     |> assign(:plugin, nil)
-    |> assign(:plugins, plugins)
+    |> init_stream(:plugins, &fetch_plugins(socket, &1))
   end
 
   defp apply_action(socket, nil, params) do
@@ -39,13 +37,17 @@ defmodule CymphoWeb.PluginLive.Index do
     company_id = if company_id == "", do: nil, else: company_id
     status = if status == "", do: nil, else: status
 
-    plugins = list_plugins_for_filters(socket, company_id, status)
+    socket =
+      socket
+      |> assign(:selected_company_id, company_id)
+      |> assign(:selected_status, status)
 
-    {:noreply,
-     socket
-     |> assign(:selected_company_id, company_id)
-     |> assign(:selected_status, status)
-     |> assign(:plugins, plugins)}
+    {:noreply, reset_stream(socket, :plugins, &fetch_plugins(socket, &1))}
+  end
+
+  @impl true
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :plugins, &fetch_plugins(socket, &1))}
   end
 
   @impl true
@@ -56,11 +58,7 @@ defmodule CymphoWeb.PluginLive.Index do
           {:ok, updated_plugin} ->
             {:noreply,
              socket
-             |> update(:plugins, fn plugins ->
-               Enum.map(plugins, fn p ->
-                 if p.id == updated_plugin.id, do: updated_plugin, else: p
-               end)
-             end)
+             |> stream_insert(:plugins, updated_plugin)
              |> put_flash(
                :info,
                "Plugin #{if updated_plugin.enabled, do: "enabled", else: "disabled"}"
@@ -80,10 +78,10 @@ defmodule CymphoWeb.PluginLive.Index do
     case fetch_company_plugin(socket, id) do
       {:ok, plugin} ->
         case Skills.delete_plugin(plugin) do
-          {:ok, _} ->
+          {:ok, deleted} ->
             {:noreply,
              socket
-             |> update(:plugins, fn plugins -> Enum.filter(plugins, &(&1.id != id)) end)
+             |> stream_delete(:plugins, deleted)
              |> put_flash(:info, "Plugin deleted successfully")}
 
           {:error, _} ->
@@ -95,11 +93,12 @@ defmodule CymphoWeb.PluginLive.Index do
     end
   end
 
-  defp list_plugins_for_filters(socket, company_id \\ nil, status \\ nil) do
-    company_id = company_id || socket.assigns[:selected_company_id]
-    status = status || socket.assigns[:selected_status]
-
-    Skills.list_plugins(company_id: company_id, status: status)
+  defp fetch_plugins(socket, cursor) do
+    Skills.list_plugins_page(
+      company_id: socket.assigns[:selected_company_id],
+      status: socket.assigns[:selected_status],
+      after: cursor
+    )
   end
 
   defp fetch_company_plugin(socket, id) do
@@ -115,7 +114,7 @@ defmodule CymphoWeb.PluginLive.Index do
   def status_class("disabled"),
     do: "border-text-quaternary/20 bg-text-quaternary/10 text-text-tertiary"
 
-  def status_class("error"), do: "border-red-500/20 bg-red-500/10 text-red-400"
+  def status_class("error"), do: "border-brand/20 bg-brand/10 text-brand"
   def status_class(_), do: "border-border bg-surface text-text-tertiary"
 
   def status_label(nil), do: "Unknown"

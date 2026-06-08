@@ -393,17 +393,17 @@ defmodule CymphoWeb.DashboardLive.Index do
 
   def capacity_badge_class(:safe), do: "border-green-500/25 bg-green-500/10 text-green-400"
   def capacity_badge_class(:watch), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-300"
-  def capacity_badge_class(:high), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def capacity_badge_class(:high), do: "border-brand/25 bg-brand/10 text-brand"
   def capacity_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
   def capacity_bar_class(:safe), do: "bg-green-400"
   def capacity_bar_class(:watch), do: "bg-yellow-300"
-  def capacity_bar_class(:high), do: "bg-red-400"
+  def capacity_bar_class(:high), do: "bg-brand"
   def capacity_bar_class(_), do: "bg-text-quaternary"
 
   def capacity_text_class(:safe), do: "text-green-400"
   def capacity_text_class(:watch), do: "text-yellow-300"
-  def capacity_text_class(:high), do: "text-red-400"
+  def capacity_text_class(:high), do: "text-brand"
   def capacity_text_class(_), do: "text-text-quaternary"
 
   def autonomy_text_class(:active), do: "text-green-300"
@@ -415,10 +415,14 @@ defmodule CymphoWeb.DashboardLive.Index do
   def mode_text_class(:paused), do: "text-yellow-300"
   def mode_text_class(_), do: "text-text-tertiary"
 
-  def health_signal_class(:danger), do: "border-red-500/25 bg-red-500/10"
-  def health_signal_class(:attention), do: "border-yellow-500/25 bg-yellow-500/10"
-  def health_signal_class(:brand), do: "border-brand/35 bg-brand/10"
-  def health_signal_class(:ok), do: "border-green-500/20 bg-green-500/5"
+  # Status tones use Claude's warm accent trinity (DESIGN.md): coral for
+  # attention/alert, accent-amber for warnings, accent-teal for active work.
+  # No alarm-red and no green section washes (error red is reserved for
+  # validation only); all-clear states stay calm/neutral.
+  def health_signal_class(:danger), do: "border-brand/40 bg-brand/[0.07]"
+  def health_signal_class(:attention), do: "border-amber-400/25 bg-amber-400/[0.06]"
+  def health_signal_class(:brand), do: "border-teal-500/25 bg-teal-500/[0.06]"
+  def health_signal_class(:ok), do: "border-border bg-surface/40"
   def health_signal_class(_), do: "border-border bg-surface/40"
 
   def capacity_percent(%{local_slots: local_slots, total_slots: total_slots})
@@ -466,7 +470,7 @@ defmodule CymphoWeb.DashboardLive.Index do
   def status_dot_color(:in_progress), do: "bg-yellow-400"
   def status_dot_color(:in_review), do: "bg-purple-400"
   def status_dot_color(:done), do: "bg-green-400"
-  def status_dot_color(:blocked), do: "bg-red-400"
+  def status_dot_color(:blocked), do: "bg-brand"
   def status_dot_color(:cancelled), do: "bg-gray-500"
   def status_dot_color(_), do: "bg-gray-400"
 
@@ -475,20 +479,20 @@ defmodule CymphoWeb.DashboardLive.Index do
   def status_bar_color(:in_progress), do: "bg-yellow-400"
   def status_bar_color(:in_review), do: "bg-purple-400"
   def status_bar_color(:done), do: "bg-green-400"
-  def status_bar_color(:blocked), do: "bg-red-400"
+  def status_bar_color(:blocked), do: "bg-brand"
   def status_bar_color(:cancelled), do: "bg-gray-500"
   def status_bar_color(_), do: "bg-gray-400"
 
   def agent_status_dot(:idle), do: "bg-green-400"
   def agent_status_dot(:running), do: "bg-blue-400"
-  def agent_status_dot(:error), do: "bg-red-400"
+  def agent_status_dot(:error), do: "bg-brand"
   def agent_status_dot(:paused), do: "bg-gray-500"
   def agent_status_dot(:terminated), do: "bg-gray-700"
   def agent_status_dot(_), do: "bg-gray-400"
 
   def agent_status_bar(:idle), do: "bg-green-400"
   def agent_status_bar(:running), do: "bg-blue-400"
-  def agent_status_bar(:error), do: "bg-red-400"
+  def agent_status_bar(:error), do: "bg-brand"
   def agent_status_bar(:paused), do: "bg-gray-500"
   def agent_status_bar(:terminated), do: "bg-gray-700"
   def agent_status_bar(_), do: "bg-gray-400"
@@ -522,7 +526,7 @@ defmodule CymphoWeb.DashboardLive.Index do
   def activity_icon("status_changed"), do: "bg-blue-400"
   def activity_icon("assigned"), do: "bg-purple-400"
   def activity_icon("comment_added"), do: "bg-yellow-400"
-  def activity_icon("blocker_added"), do: "bg-red-400"
+  def activity_icon("blocker_added"), do: "bg-brand"
   def activity_icon("blocker_removed"), do: "bg-orange-400"
   def activity_icon("heartbeat"), do: "bg-gray-400"
   def activity_icon("agent_action"), do: "bg-brand"
@@ -531,7 +535,7 @@ defmodule CymphoWeb.DashboardLive.Index do
   def inbox_dot("unread"), do: "bg-blue-400"
   def inbox_dot("read"), do: "bg-gray-500"
   def inbox_dot("dismissed"), do: "bg-yellow-500"
-  def inbox_dot("archived"), do: "bg-red-500"
+  def inbox_dot("archived"), do: "bg-text-quaternary"
   def inbox_dot(_), do: "bg-gray-400"
 
   def inbox_item_link(%{issue: %{id: id}}) when is_binary(id), do: ~p"/issues/#{id}"
@@ -564,32 +568,32 @@ defmodule CymphoWeb.DashboardLive.Index do
   # Hex stroke color for an issue status in the SVG donut. Mirrors the
   # tailwind classes from status_bar_color/1 but as a literal — SVG stroke
   # can't take tailwind utility classes.
-  def status_stroke(:backlog), do: "#9ca3af"
-  def status_stroke(:todo), do: "#60a5fa"
-  def status_stroke(:in_progress), do: "#facc15"
-  def status_stroke(:in_review), do: "#c084fc"
-  def status_stroke(:done), do: "#4ade80"
-  def status_stroke(:blocked), do: "#f87171"
+  def status_stroke(:backlog), do: "#8C857A"
+  def status_stroke(:todo), do: "#5db8a6"
+  def status_stroke(:in_progress), do: "#e8a55a"
+  def status_stroke(:in_review), do: "#9A7CA8"
+  def status_stroke(:done), do: "#5db872"
+  def status_stroke(:blocked), do: "#D97757"
   def status_stroke(:cancelled), do: "#6b7280"
-  def status_stroke(_), do: "#9ca3af"
+  def status_stroke(_), do: "#8C857A"
 
-  def agent_stroke(:idle), do: "#4ade80"
-  def agent_stroke(:running), do: "#60a5fa"
-  def agent_stroke(:error), do: "#f87171"
+  def agent_stroke(:idle), do: "#5db872"
+  def agent_stroke(:running), do: "#5db8a6"
+  def agent_stroke(:error), do: "#D97757"
   def agent_stroke(:paused), do: "#6b7280"
-  def agent_stroke(:terminated), do: "#374151"
-  def agent_stroke(_), do: "#9ca3af"
+  def agent_stroke(:terminated), do: "#423F3B"
+  def agent_stroke(_), do: "#8C857A"
 
-  def health_tone_text(:danger), do: "text-red-300"
-  def health_tone_text(:attention), do: "text-yellow-300"
-  def health_tone_text(:brand), do: "text-brand"
-  def health_tone_text(:ok), do: "text-green-300"
+  def health_tone_text(:danger), do: "text-brand"
+  def health_tone_text(:attention), do: "text-amber-400"
+  def health_tone_text(:brand), do: "text-teal-300"
+  def health_tone_text(:ok), do: "text-text-tertiary"
   def health_tone_text(_), do: "text-text-quaternary"
 
-  def health_tone_glow(:danger), do: "from-red-500/[0.10] to-transparent"
-  def health_tone_glow(:attention), do: "from-yellow-500/[0.10] to-transparent"
-  def health_tone_glow(:brand), do: "from-brand/[0.12] to-transparent"
-  def health_tone_glow(:ok), do: "from-green-500/[0.06] to-transparent"
+  def health_tone_glow(:danger), do: "from-brand/[0.12] to-transparent"
+  def health_tone_glow(:attention), do: "from-amber-400/[0.10] to-transparent"
+  def health_tone_glow(:brand), do: "from-teal-500/[0.10] to-transparent"
+  def health_tone_glow(:ok), do: "from-transparent to-transparent"
   def health_tone_glow(_), do: "from-transparent to-transparent"
 
   def health_tone_icon(:danger), do: "exclamation-triangle"
@@ -606,6 +610,18 @@ defmodule CymphoWeb.DashboardLive.Index do
   def autonomy_dot_color(:active), do: "bg-green-400"
   def autonomy_dot_color(:paused), do: "bg-yellow-400"
   def autonomy_dot_color(_), do: "bg-gray-500"
+
+  def routine_health_dot_class(%{status: "healthy"}),
+    do: "bg-green-300 shadow-[0_0_8px_rgba(134,239,172,0.6)]"
+
+  def routine_health_dot_class(%{status: "degraded"}),
+    do: "bg-amber-300 shadow-[0_0_8px_rgba(252,211,77,0.6)]"
+
+  def routine_health_dot_class(_), do: "bg-gray-400"
+
+  def routine_health_bg_class(%{status: "healthy"}), do: "bg-green-500/[0.06]"
+  def routine_health_bg_class(%{status: "degraded"}), do: "bg-amber-500/[0.06]"
+  def routine_health_bg_class(_), do: "bg-white/[0.03]"
 
   # Convert a 0..100 percentage into the (length, gap) values for a
   # stroke-dasharray on a 56-pixel SVG donut. Circumference for r=20

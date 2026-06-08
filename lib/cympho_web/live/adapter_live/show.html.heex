@@ -1,7 +1,7 @@
-<div class="p-6 lg:p-8 max-w-6xl mx-auto">
+<.settings_layout active={:adapters}>
   <div class="flex items-center gap-3 mb-6">
     <.app_link
-      navigate={~p"/adapters"}
+      navigate={~p"/settings/adapters"}
       class="text-text-tertiary hover:text-text-secondary transition-colors"
     >
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -90,7 +90,7 @@
           </div>
           <div class="flex items-center justify-between text-xs">
             <span class="text-text-tertiary">Available</span>
-            <span class={"text-xs #{if @adapter.available, do: "text-success", else: "text-red-400"}"}>
+            <span class={"text-xs #{if @adapter.available, do: "text-success", else: "text-brand"}"}>
               {if @adapter.available, do: "Yes", else: "No"}
             </span>
           </div>
@@ -139,7 +139,7 @@
           <div class="pt-2 border-t border-border">
             <button
               type="submit"
-              class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 min-h-[44px] rounded-lg transition-colors"
+              class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-button transition-colors"
             >
               Save Configuration
             </button>
@@ -188,4 +188,4 @@
       </div>
     </div>
   </div>
-</div>
+</.settings_layout>

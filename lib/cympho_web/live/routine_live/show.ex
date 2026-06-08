@@ -51,6 +51,9 @@ defmodule CymphoWeb.RoutineLive.Show do
       {:error, :routine_paused} ->
         {:noreply, put_flash(socket, :error, "Cannot run a paused routine")}
 
+      {:skip, _policy} ->
+        {:noreply, put_flash(socket, :info, "A run is already active — skipped")}
+
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "Failed to start run")}
     end
@@ -98,7 +101,7 @@ defmodule CymphoWeb.RoutineLive.Show do
   def run_status_class("completed"), do: "border-success/20 bg-success/10 text-success"
   def run_status_class("running"), do: "border-brand/20 bg-brand/10 text-brand"
   def run_status_class("pending"), do: "border-amber-500/20 bg-amber-500/10 text-amber-400"
-  def run_status_class("failed"), do: "border-red-500/20 bg-red-500/10 text-red-400"
+  def run_status_class("failed"), do: "border-brand/20 bg-brand/10 text-brand"
   def run_status_class(_), do: "border-border bg-panel text-text-tertiary"
 
   def format_datetime(nil), do: "-"

@@ -80,7 +80,8 @@ defmodule CymphoWeb.RoutineRunControllerTest do
         Routines.create_routine(%{
           name: "Runs List Test",
           agent_id: agent.id,
-          company_id: company.id
+          company_id: company.id,
+          concurrency_policy: :always_enqueue
         })
 
       %{conn: conn, routine: routine, agent: agent, company: company}

@@ -216,7 +216,7 @@ defmodule CymphoWeb.CompanyImportLive do
           <div class="text-text-primary mb-2">Drag and drop your export file here</div>
           <div class="text-text-tertiary text-sm mb-4">or</div>
 
-          <label class="bg-brand hover:bg-accent text-white font-510 text-sm px-6 py-3 rounded-lg transition-colors inline-flex items-center gap-2 cursor-pointer">
+          <label class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-6 py-3 rounded-button transition-colors inline-flex items-center gap-2 cursor-pointer">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 stroke-linecap="round"
@@ -267,7 +267,7 @@ defmodule CymphoWeb.CompanyImportLive do
 
           <button
             phx-click="proceed_to_preview"
-            class="mt-4 w-full bg-brand hover:bg-accent text-white font-510 text-sm px-6 py-3 rounded-lg transition-colors"
+            class="mt-4 w-full bg-brand hover:bg-accent text-on-primary font-510 text-sm px-6 py-3 rounded-button transition-colors"
           >
             Continue to Preview
           </button>
@@ -379,7 +379,7 @@ defmodule CymphoWeb.CompanyImportLive do
         <div class="flex gap-3">
           <button
             phx-click="start_import"
-            class="bg-brand hover:bg-accent text-white font-510 text-sm px-6 py-3 rounded-lg transition-colors inline-flex items-center gap-2"
+            class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-6 py-3 rounded-button transition-colors inline-flex items-center gap-2"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -485,7 +485,7 @@ defmodule CymphoWeb.CompanyImportLive do
       <div class="flex gap-3 justify-center">
         <button
           phx-click="reset"
-          class="bg-brand hover:bg-accent text-white font-510 text-sm px-6 py-3 rounded-lg transition-colors"
+          class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-6 py-3 rounded-button transition-colors"
         >
           Import Another
         </button>
@@ -517,10 +517,10 @@ defmodule CymphoWeb.CompanyImportLive do
     do: "w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center bg-success/10"
 
   defp result_icon_class({:error, _}),
-    do: "w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center bg-red-500/10"
+    do: "w-20 h-20 mx-auto mb-6 rounded-full flex items-center justify-center bg-brand/10"
 
   defp result_svg_class({:ok, _}), do: "w-10 h-10 text-success"
-  defp result_svg_class({:error, _}), do: "w-10 h-10 text-red-400"
+  defp result_svg_class({:error, _}), do: "w-10 h-10 text-brand"
 
   defp result_icon_path({:ok, _}), do: "M5 13l4 4L19 7"
   defp result_icon_path({:error, _}), do: "M6 18L18 6M6 6l12 12"

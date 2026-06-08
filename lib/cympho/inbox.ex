@@ -24,6 +24,14 @@ defmodule Cympho.Inbox do
   end
 
   @doc """
+  Preload a single inbox state into the same shape `list_inbox_for_agent_page/2`
+  returns — used for targeted stream updates in the inbox LiveView.
+  """
+  def preload_item(%InboxState{} = state) do
+    [state] |> preload_inbox_items() |> List.first()
+  end
+
+  @doc """
   Total unread inbox items across all agents in the given company.
   Used by the sidebar badge.
   """
@@ -113,6 +121,25 @@ defmodule Cympho.Inbox do
 
     query = if status, do: where(query, status: ^status), else: query
     query |> Repo.all() |> preload_inbox_items()
+  end
+
+  @doc """
+  Keyset (infinite-scroll) page of an agent's inbox, newest first. Returns a
+  `Cympho.Pagination.Page` with the same preloads as `list_inbox_for_agent/2`.
+  """
+  def list_inbox_for_agent_page(agent_id, opts \\ []) do
+    status = Keyword.get(opts, :status)
+
+    base = from(s in InboxState, where: s.agent_id == ^agent_id)
+    base = if status, do: where(base, [s], s.status == ^status), else: base
+
+    base
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 100),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:inserted_at, :desc}, {:id, :desc}]
+    )
+    |> then(fn page -> %{page | entries: preload_inbox_items(page.entries)} end)
   end
 
   defp preload_inbox_items(items) do

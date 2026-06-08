@@ -9,7 +9,7 @@
       </.app_link>
       <.app_link
         navigate={~p"/plugins/new"}
-        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 min-h-[40px] rounded-lg transition-colors inline-flex items-center gap-2"
+        class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 min-h-[40px] rounded-button transition-colors inline-flex items-center gap-2"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -51,10 +51,33 @@
     />
   </form>
 
-  <div class="grid grid-cols-1 gap-3">
+  <.infinite_scroll
+    id="plugins"
+    has_more={@infinite_scroll[:plugins][:has_more?] || false}
+    container_class="grid grid-cols-1 gap-3"
+  >
+    <:empty>
+      <div class="rounded-xl border border-border bg-surface px-6 py-16 text-center">
+        <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-subtle text-text-tertiary">
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M8 9h8M8 15h8M9 3h6a2 2 0 012 2v1h1a2 2 0 012 2v8a2 2 0 01-2 2h-1v1a2 2 0 01-2 2H9a2 2 0 01-2-2v-1H6a2 2 0 01-2-2V8a2 2 0 012-2h1V5a2 2 0 012-2z"
+            />
+          </svg>
+        </div>
+        <h2 class="text-sm font-590 text-text-primary">No plugins found</h2>
+        <p class="mt-1 text-sm text-text-tertiary">
+          Add a plugin or adjust the filters to inspect installed extensions.
+        </p>
+      </div>
+    </:empty>
+
     <div
-      :for={plugin <- @plugins}
-      id={"plugin-#{plugin.id}"}
+      :for={{dom_id, plugin} <- @streams.plugins}
+      id={dom_id}
       class="group rounded-xl border border-border bg-surface p-4 transition-colors hover:border-border-hover hover:bg-surface-hover"
     >
       <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -121,25 +144,5 @@
         </div>
       </div>
     </div>
-  </div>
-
-  <div
-    :if={Enum.empty?(@plugins)}
-    class="rounded-xl border border-border bg-surface px-6 py-16 text-center"
-  >
-    <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-subtle text-text-tertiary">
-      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M8 9h8M8 15h8M9 3h6a2 2 0 012 2v1h1a2 2 0 012 2v8a2 2 0 01-2 2h-1v1a2 2 0 01-2 2H9a2 2 0 01-2-2v-1H6a2 2 0 01-2-2V8a2 2 0 012-2h1V5a2 2 0 012-2z"
-        />
-      </svg>
-    </div>
-    <h2 class="text-sm font-590 text-text-primary">No plugins found</h2>
-    <p class="mt-1 text-sm text-text-tertiary">
-      Add a plugin or adjust the filters to inspect installed extensions.
-    </p>
-  </div>
+  </.infinite_scroll>
 </div>

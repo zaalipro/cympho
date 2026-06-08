@@ -14,10 +14,30 @@
     </.app_link>
   </div>
 
-  <div :if={!Enum.empty?(@projects)} class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+  <.infinite_scroll
+    id="projects"
+    has_more={@infinite_scroll[:projects][:has_more?] || false}
+    container_class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"
+  >
+    <:empty>
+      <div class="flex flex-col items-center justify-center py-20 text-center border border-dashed border-hairline rounded-md">
+        <span class="hero-folder-mini text-ink-tertiary w-8 h-8 mb-3" />
+        <p class="text-body text-ink-muted mb-1">No projects yet</p>
+        <p class="text-caption text-ink-tertiary mb-4">
+          Group issues into projects to track scope and link to a repo.
+        </p>
+        <.app_link
+          navigate={~p"/projects/new"}
+          class="inline-flex items-center gap-1.5 px-3 h-8 rounded-md bg-primary hover:bg-primary-hover text-white text-button font-510 transition-colors"
+        >
+          <.icon name="hero-plus-mini" class="w-4 h-4" /> Create your first project
+        </.app_link>
+      </div>
+    </:empty>
+
     <div
-      :for={project <- @projects}
-      id={"project-#{project.id}"}
+      :for={{dom_id, project} <- @streams.projects}
+      id={dom_id}
       class="group relative bg-surface-1 border border-hairline rounded-md hover:border-hairline-strong hover:bg-surface-2/40 transition-colors duration-100"
     >
       <.app_link navigate={~p"/projects/#{project.id}"} class="block p-4 space-y-2">
@@ -61,22 +81,5 @@
         </button>
       </div>
     </div>
-  </div>
-
-  <div
-    :if={Enum.empty?(@projects)}
-    class="flex flex-col items-center justify-center py-20 text-center border border-dashed border-hairline rounded-md"
-  >
-    <span class="hero-folder-mini text-ink-tertiary w-8 h-8 mb-3" />
-    <p class="text-body text-ink-muted mb-1">No projects yet</p>
-    <p class="text-caption text-ink-tertiary mb-4">
-      Group issues into projects to track scope and link to a repo.
-    </p>
-    <.app_link
-      navigate={~p"/projects/new"}
-      class="inline-flex items-center gap-1.5 px-3 h-8 rounded-md bg-primary hover:bg-primary-hover text-white text-button font-510 transition-colors"
-    >
-      <.icon name="hero-plus-mini" class="w-4 h-4" /> Create your first project
-    </.app_link>
-  </div>
+  </.infinite_scroll>
 </div>

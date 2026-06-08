@@ -197,7 +197,7 @@ defmodule CymphoWeb.SettingsLive.Index do
   end
 
   def handle_event("select_user", %{"user_id" => user_id}, socket) do
-    {:noreply, push_navigate(socket, to: ~p"/settings?user_id=#{user_id}")}
+    {:noreply, push_navigate(socket, to: ~p"/settings/notifications?user_id=#{user_id}")}
   end
 
   defp mount_user_picker(socket) do
@@ -270,5 +270,6 @@ defmodule CymphoWeb.SettingsLive.Index do
   defp format_event("issue_assigned"), do: "Issue Assigned"
   defp format_event("comment"), do: "Comment"
   defp format_event("status_change"), do: "Status Change"
+  defp format_event("human_approval_required"), do: "Human Approval Required"
   defp format_event(other), do: String.capitalize(String.replace(other, "_", " "))
 end

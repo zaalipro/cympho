@@ -27,8 +27,18 @@
   </.simple_form>
 </div>
 
-<div class="label-list">
-  <div :for={label <- @labels} class="label-card" id={"label-#{label.id}"}>
+<.infinite_scroll
+  id="labels"
+  has_more={@infinite_scroll[:labels][:has_more?] || false}
+  container_class="label-list"
+>
+  <:empty>
+    <div class="empty-state">
+      <p>No labels yet. Create your first label above.</p>
+    </div>
+  </:empty>
+
+  <div :for={{dom_id, label} <- @streams.labels} class="label-card" id={dom_id}>
     <div class="label-info">
       <span
         class="label-badge"
@@ -58,7 +68,4 @@
       </button>
     </div>
   </div>
-  <div :if={Enum.empty?(@labels)} class="empty-state">
-    <p>No labels yet. Create your first label above.</p>
-  </div>
-</div>
+</.infinite_scroll>

@@ -25,7 +25,8 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
   def execution_brief(assigns) do
     assigns =
       assigns
-      |> assign(:metrics,
+      |> assign(
+        :metrics,
         execution_metrics(
           assigns.issue,
           assigns.runs,
@@ -34,13 +35,21 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
           assigns.tool_call_traces
         )
       )
-      |> assign(:brief_lines,
-        owner_brief_lines(assigns.issue, assigns.runs, assigns.work_products, assigns.child_issues)
+      |> assign(
+        :brief_lines,
+        owner_brief_lines(
+          assigns.issue,
+          assigns.runs,
+          assigns.work_products,
+          assigns.child_issues
+        )
       )
-      |> assign(:gaps,
+      |> assign(
+        :gaps,
         evidence_gaps(assigns.issue, assigns.runs, assigns.work_products, assigns.child_issues)
       )
-      |> assign(:narrative_cards,
+      |> assign(
+        :narrative_cards,
         work_narrative_cards(
           assigns.issue,
           assigns.runs,
@@ -49,7 +58,8 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
           assigns.all_agents
         )
       )
-      |> assign(:contribution_cards,
+      |> assign(
+        :contribution_cards,
         agent_contribution_cards(
           assigns.issue,
           assigns.runs,
@@ -59,11 +69,13 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
           assigns.all_agents
         )
       )
-      |> assign(:delegation_cards,
+      |> assign(
+        :delegation_cards,
         delegation_map_cards(assigns.child_health_cards, assigns.all_agents)
       )
       |> assign(:review_queue, cto_review_queue(assigns.child_health_cards))
-      |> assign(:owner_update,
+      |> assign(
+        :owner_update,
         ceo_owner_update_status(assigns.issue, assigns.child_health_cards)
       )
 
@@ -96,7 +108,7 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
             <p class="text-eyebrow text-ink-tertiary uppercase">Runs</p>
             <p class="mt-1 text-xl font-510 text-ink">
               {@metrics.runs}
-              <span :if={@metrics.failed_runs > 0} class="text-sm text-red-300">
+              <span :if={@metrics.failed_runs > 0} class="text-sm text-brand">
                 {@metrics.failed_runs} failed
               </span>
             </p>
@@ -258,7 +270,7 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
               </div>
               <div class="rounded-md bg-canvas px-3 py-2">
                 <p class="text-[10px] uppercase text-ink-tertiary">Blocked</p>
-                <p class="mt-1 text-lg font-510 text-red-300">{length(@review_queue.blocked)}</p>
+                <p class="mt-1 text-lg font-510 text-brand">{length(@review_queue.blocked)}</p>
               </div>
               <div class="rounded-md bg-canvas px-3 py-2">
                 <p class="text-[10px] uppercase text-ink-tertiary">Closed</p>

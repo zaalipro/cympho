@@ -1,4 +1,4 @@
-<.page size="wide">
+<.settings_layout active={:integrations}>
   <.header
     title="Integrations"
     subtitle="Connect company-level services that extend how Cympho agents work."
@@ -12,18 +12,6 @@
       </.app_link>
     </:actions>
   </.header>
-
-  <nav class="mb-5 flex flex-wrap items-center gap-2">
-    <.app_link
-      navigate={~p"/settings"}
-      class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-    >
-      Notifications
-    </.app_link>
-    <span class="rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-sm font-510 text-brand">
-      Integrations
-    </span>
-  </nav>
 
   <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
     <.panel class="overflow-hidden">
@@ -117,7 +105,7 @@
                 "inline-flex items-center gap-2",
                 if(match?({:ok, _}, @agrenting_test_result),
                   do: "text-success",
-                  else: "text-red-400"
+                  else: "text-brand"
                 )
               ]}
             >
@@ -167,7 +155,7 @@
             <button
               type="submit"
               phx-disable-with="Saving..."
-              class="btn-press inline-flex items-center gap-2 rounded-lg bg-brand bg-gradient-to-b from-white/[0.10] to-transparent px-4 py-2 text-sm font-510 text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.18)] transition-colors hover:bg-accent-hover"
+              class="btn-press inline-flex items-center gap-2 rounded-button bg-brand bg-gradient-to-b from-white/[0.10] to-transparent px-4 py-2 text-sm font-510 text-on-primary shadow-[inset_0_1px_0_0_rgba(255,255,255,0.18)] transition-colors hover:bg-accent-hover"
             >
               <.icon name="hero-check" class="h-4 w-4" /> Save connection
             </button>
@@ -241,4 +229,4 @@
       </.panel>
     </div>
   </div>
-</.page>
+</.settings_layout>

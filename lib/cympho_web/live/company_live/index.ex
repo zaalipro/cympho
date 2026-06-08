@@ -8,7 +8,8 @@ defmodule CymphoWeb.CompanyLive.Index do
     {:ok,
      socket
      |> assign(:page_title, "Companies")
-     |> assign(:companies, Companies.list_companies())}
+     |> assign(:infinite_scroll, %{})
+     |> init_stream(:companies, &fetch_companies/1)}
   end
 
   @impl true
@@ -47,8 +48,16 @@ defmodule CymphoWeb.CompanyLive.Index do
 
     {:noreply,
      socket
-     |> assign(:companies, Companies.list_companies())
+     |> reset_stream(:companies, &fetch_companies/1)
      |> put_flash(:info, "Company deleted successfully")}
+  end
+
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :companies, &fetch_companies/1)}
+  end
+
+  defp fetch_companies(cursor) do
+    Companies.list_companies_page(after: cursor)
   end
 
   def format_inserted_at(company) do

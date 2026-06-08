@@ -113,7 +113,7 @@ defmodule Cympho.Dashboard do
         closed: issues_closed_per_day(7, company_id)
       },
       bottlenecks: Enum.map(bottleneck_issues(7, company_id), &bottle_neck_to_map/1),
-      routine_health: routine_health(),
+      routine_health: routine_health(company_id),
       recent_activities: Enum.map(recent_activities(10, company_id), &activity_to_map/1),
       recent_inbox: Enum.map(recent_inbox(company_id, 6), &inbox_to_map/1),
       cost_summary: cost_summary(company_id),
@@ -130,7 +130,7 @@ defmodule Cympho.Dashboard do
       issue_status_counts: [],
       throughput: %{created: [], closed: []},
       bottlenecks: [],
-      routine_health: routine_health(),
+      routine_health: routine_health(nil),
       recent_activities: [],
       recent_inbox: [],
       cost_summary: %{total_cost: Decimal.new(0), run_count: 0},
@@ -226,8 +226,63 @@ defmodule Cympho.Dashboard do
     end
   end
 
-  def routine_health do
-    %{status: "unavailable", message: "Routine execution tracking not yet configured"}
+  def routine_health(nil),
+    do: %{status: "idle", message: "No routine activity", total: 0, failed: 0, running: 0}
+
+  def routine_health(company_id) do
+    since = DateTime.add(DateTime.utc_now(), -7 * 86_400, :second)
+
+    counts =
+      Cympho.RoutineTriggers.RoutineRun
+      |> join(:inner, [r], ro in Cympho.Routines.Routine, on: ro.id == r.routine_id)
+      |> join(:inner, [r, ro], ag in Agent, on: ag.id == ro.agent_id)
+      |> where([r, ro, ag], ag.company_id == ^company_id and r.triggered_at >= ^since)
+      |> group_by([r], r.status)
+      |> select([r], {r.status, count(r.id)})
+      |> Repo.all()
+      |> Map.new()
+
+    total = counts |> Map.values() |> Enum.sum()
+    failed = Map.get(counts, "failed", 0)
+    running = Map.get(counts, "running", 0) + Map.get(counts, "pending", 0)
+
+    cond do
+      total == 0 ->
+        %{
+          status: "idle",
+          message: "No routine runs in the last 7 days",
+          total: 0,
+          failed: 0,
+          running: running
+        }
+
+      failed > 0 ->
+        %{
+          status: "degraded",
+          message: "#{failed} of #{total} routine runs failed in the last 7 days",
+          total: total,
+          failed: failed,
+          running: running
+        }
+
+      true ->
+        %{
+          status: "healthy",
+          message: "#{total} routine runs in the last 7 days, no failures",
+          total: total,
+          failed: 0,
+          running: running
+        }
+    end
+  rescue
+    _ ->
+      %{
+        status: "unavailable",
+        message: "Routine execution tracking unavailable",
+        total: 0,
+        failed: 0,
+        running: 0
+      }
   end
 
   defp scoped(query, nil), do: query

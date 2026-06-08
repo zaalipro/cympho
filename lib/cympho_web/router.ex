@@ -5,6 +5,7 @@ defmodule CymphoWeb.Router do
     plug :accepts, ["html"]
     plug :fetch_session
     plug :fetch_live_flash
+    plug CymphoWeb.Plugs.FetchTheme
     plug :put_root_layout, html: {CymphoWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
@@ -82,24 +83,31 @@ defmodule CymphoWeb.Router do
       live "/agents/new", AgentLive.New
       live "/agents/remote", AgentLive.Remote
       live "/agents/:id", AgentLive.Show
-      live "/adapters", AdapterLive.Index
-      live "/adapters/:key", AdapterLive.Show
       live "/org-chart", OrgChartLive
       live "/routines", RoutineLive.Index
       live "/routines/new", RoutineLive.New
       live "/routines/:id", RoutineLive.Show
       live "/routines/:id/edit", RoutineLive.Edit
       live "/onboarding", OnboardingLive.Index
-      live "/settings", SettingsLive.Index
+      # Settings hub — one tabbed shell; each tab is its own LiveView in this
+      # session (see CymphoWeb.Components.SettingsLayout). Pre-hub paths
+      # (/adapters, /execution-policies, /audit-trail, /companies/:id/secrets,
+      # bare /settings) redirect in via LegacyRedirectController below.
+      live "/settings/profile", SettingsLive.Profile
+      live "/settings/notifications", SettingsLive.Index
+      live "/settings/appearance", SettingsLive.Appearance
       live "/settings/integrations", SettingsLive.Integrations
-      live "/execution-policies", ExecutionPolicyLive.Index
-      live "/execution-policies/new", ExecutionPolicyLive.New
-      live "/execution-policies/:id", ExecutionPolicyLive.Show
-      live "/execution-policies/:id/edit", ExecutionPolicyLive.Edit
+      live "/settings/adapters", AdapterLive.Index
+      live "/settings/adapters/:key", AdapterLive.Show
+      live "/settings/secrets", SecretsLive.Index
+      live "/settings/policies", ExecutionPolicyLive.Index
+      live "/settings/policies/new", ExecutionPolicyLive.New
+      live "/settings/policies/:id", ExecutionPolicyLive.Show
+      live "/settings/policies/:id/edit", ExecutionPolicyLive.Edit
+      live "/settings/audit", AuditTrailLive.Index
       live "/companies", CompanyLive.Index
       live "/companies/new", CompanyLive.Index, :new
       live "/companies/:id", CompanyLive.Show
-      live "/companies/:id/secrets", SecretsLive.Index
       live "/costs", CostLive.Index
       live "/skills", SkillLive.Index
       live "/skills/new", SkillLive.New
@@ -117,7 +125,6 @@ defmodule CymphoWeb.Router do
       live "/workspaces/:id", WorkspaceLive.ShowWorkspace
       live "/workspaces/:id/exec/:exec_id", WorkspaceLive.ExecWorkspace
       live "/tool-call-traces", ToolCallTracesLive.Index
-      live "/audit-trail", AuditTrailLive.Index
       live "/profile/:id", ProfileLive.Show
       live "/profile/:id/edit", ProfileLive.Edit
 
@@ -137,6 +144,17 @@ defmodule CymphoWeb.Router do
       live "/companies/:id/export", CompanyExportLive
       live "/companies/import", CompanyImportLive
     end
+
+    # Legacy URLs → Settings hub (kept so old bookmarks/deep-links resolve).
+    get "/settings", LegacyRedirectController, :settings
+    get "/adapters", LegacyRedirectController, :adapters
+    get "/adapters/:key", LegacyRedirectController, :adapter
+    get "/execution-policies", LegacyRedirectController, :policies
+    get "/execution-policies/new", LegacyRedirectController, :policy_new
+    get "/execution-policies/:id/edit", LegacyRedirectController, :policy_edit
+    get "/execution-policies/:id", LegacyRedirectController, :policy
+    get "/audit-trail", LegacyRedirectController, :audit
+    get "/companies/:id/secrets", LegacyRedirectController, :secrets
   end
 
   defp require_authenticated_user(conn, opts) do

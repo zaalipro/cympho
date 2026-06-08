@@ -18,12 +18,13 @@ defmodule CymphoWeb.GithubPrLifecycleTest do
         engineer_count: 1
       })
 
-    {:ok, project} = Cympho.Projects.create_project(%{
-      name: "PRL Project",
-      prefix: "PRLX",
-      company_id: company.id,
-      github_webhook_secret: "lifecycle-test-secret"
-    })
+    {:ok, project} =
+      Cympho.Projects.create_project(%{
+        name: "PRL Project",
+        prefix: "PRLX",
+        company_id: company.id,
+        github_webhook_secret: "lifecycle-test-secret"
+      })
 
     {:ok, issue} =
       Issues.update_issue(seed, %{
@@ -113,7 +114,12 @@ defmodule CymphoWeb.GithubPrLifecycleTest do
            issue: issue,
            engineer: engineer
          } do
-      payload = review_payload("submitted", "commented", pr_url: issue.github_pr_url, body: "nit on style")
+      payload =
+        review_payload("submitted", "commented",
+          pr_url: issue.github_pr_url,
+          body: "nit on style"
+        )
+
       conn = post_signed_webhook(conn, payload, project.github_webhook_secret)
       assert response(conn, :ok) == ""
 

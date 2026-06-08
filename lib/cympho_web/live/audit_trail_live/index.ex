@@ -10,8 +10,7 @@ defmodule CymphoWeb.AuditTrailLive.Index do
       socket
       |> assign(:page_title, "Audit Trail")
       |> assign(:company_id, company_id)
-      |> assign(:events, [])
-      |> assign(:pagination, %{total: 0, limit: 50, offset: 0, page: 1, total_pages: 1})
+      |> assign(:infinite_scroll, %{})
       |> assign(:filter_event_type, "")
       |> assign(:filter_actor_type, "")
       |> assign(:filter_actor_id, "")
@@ -26,53 +25,31 @@ defmodule CymphoWeb.AuditTrailLive.Index do
 
   @impl true
   def handle_params(params, _url, socket) do
-    filter_event_type = params["filter_event_type"] || ""
-    filter_actor_type = params["filter_actor_type"] || ""
-    filter_actor_id = params["filter_actor_id"] || ""
-    filter_resource_type = params["filter_resource_type"] || ""
-    filter_resource_id = params["filter_resource_id"] || ""
-    filter_date_from = params["filter_date_from"] || ""
-    filter_date_to = params["filter_date_to"] || ""
-    page = String.to_integer(params["page"] || "1")
-
     socket =
       socket
-      |> assign(:filter_event_type, filter_event_type)
-      |> assign(:filter_actor_type, filter_actor_type)
-      |> assign(:filter_actor_id, filter_actor_id)
-      |> assign(:filter_resource_type, filter_resource_type)
-      |> assign(:filter_resource_id, filter_resource_id)
-      |> assign(:filter_date_from, filter_date_from)
-      |> assign(:filter_date_to, filter_date_to)
-      |> assign(:page, page)
-      |> load_events()
+      |> assign(:filter_event_type, params["filter_event_type"] || "")
+      |> assign(:filter_actor_type, params["filter_actor_type"] || "")
+      |> assign(:filter_actor_id, params["filter_actor_id"] || "")
+      |> assign(:filter_resource_type, params["filter_resource_type"] || "")
+      |> assign(:filter_resource_id, params["filter_resource_id"] || "")
+      |> assign(:filter_date_from, params["filter_date_from"] || "")
+      |> assign(:filter_date_to, params["filter_date_to"] || "")
       |> load_event_types()
 
-    {:noreply, socket}
+    {:noreply, init_stream(socket, :events, &fetch_events(socket, &1))}
   end
 
   @impl true
   def handle_event("filter", attrs, socket) do
-    filter_event_type = attrs["filter_event_type"] || ""
-    filter_actor_type = attrs["filter_actor_type"] || ""
-    filter_actor_id = attrs["filter_actor_id"] || ""
-    filter_resource_type = attrs["filter_resource_type"] || ""
-    filter_resource_id = attrs["filter_resource_id"] || ""
-    filter_date_from = attrs["filter_date_from"] || ""
-    filter_date_to = attrs["filter_date_to"] || ""
-
     socket =
       socket
-      |> assign(:filter_event_type, filter_event_type)
-      |> assign(:filter_actor_type, filter_actor_type)
-      |> assign(:filter_actor_id, filter_actor_id)
-      |> assign(:filter_resource_type, filter_resource_type)
-      |> assign(:filter_resource_id, filter_resource_id)
-      |> assign(:filter_date_from, filter_date_from)
-      |> assign(:filter_date_to, filter_date_to)
-      |> assign(:page, 1)
-      |> load_events()
-      |> load_event_types()
+      |> assign(:filter_event_type, attrs["filter_event_type"] || "")
+      |> assign(:filter_actor_type, attrs["filter_actor_type"] || "")
+      |> assign(:filter_actor_id, attrs["filter_actor_id"] || "")
+      |> assign(:filter_resource_type, attrs["filter_resource_type"] || "")
+      |> assign(:filter_resource_id, attrs["filter_resource_id"] || "")
+      |> assign(:filter_date_from, attrs["filter_date_from"] || "")
+      |> assign(:filter_date_to, attrs["filter_date_to"] || "")
 
     {:noreply, push_patch(socket, to: build_url(socket))}
   end
@@ -87,151 +64,73 @@ defmodule CymphoWeb.AuditTrailLive.Index do
       |> assign(:filter_resource_id, "")
       |> assign(:filter_date_from, "")
       |> assign(:filter_date_to, "")
-      |> assign(:page, 1)
-      |> load_events()
-      |> load_event_types()
+      |> push_event("datepicker:reset", %{})
 
-    {:noreply, push_patch(socket, to: ~p"/audit-trail")}
+    {:noreply, push_patch(socket, to: ~p"/settings/audit")}
   end
 
-  def handle_event("load_more", _, socket) do
-    socket =
-      socket
-      |> update(:page, &(&1 + 1))
-      |> load_events()
-
-    {:noreply, push_patch(socket, to: build_url(socket))}
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :events, &fetch_events(socket, &1))}
   end
 
-  def handle_event("load_prev", _, socket) do
-    socket =
-      socket
-      |> update(:page, &max(1, &1 - 1))
-      |> load_events()
+  # Filter forms filter live via phx-change; phx-submit="prevent" only suppresses
+  # a full-page submit on Enter, so this is intentionally a no-op.
+  def handle_event("prevent", _params, socket), do: {:noreply, socket}
 
-    {:noreply, push_patch(socket, to: build_url(socket))}
+  defp fetch_events(socket, cursor) do
+    AuditTrail.list_company_events_page(
+      socket.assigns.company_id,
+      [after: cursor] ++ filter_opts(socket)
+    )
   end
 
-  defp load_events(socket) do
-    company_id = socket.assigns.company_id
-    filter_event_type = socket.assigns.filter_event_type
-    filter_actor_type = socket.assigns.filter_actor_type
-    filter_actor_id = socket.assigns.filter_actor_id
-    filter_resource_type = socket.assigns.filter_resource_type
-    filter_resource_id = socket.assigns.filter_resource_id
-    filter_date_from = socket.assigns.filter_date_from
-    filter_date_to = socket.assigns.filter_date_to
-    page = socket.assigns.page
-    limit = 50
-    offset = (page - 1) * limit
+  defp filter_opts(socket) do
+    a = socket.assigns
 
-    opts = [limit: limit, offset: offset]
+    []
+    |> maybe_opt(:event_type, a.filter_event_type)
+    |> maybe_opt(:actor_type, a.filter_actor_type)
+    |> maybe_opt(:actor_id, a.filter_actor_id)
+    |> maybe_opt(:resource_type, a.filter_resource_type)
+    |> maybe_opt(:resource_id, a.filter_resource_id)
+    |> maybe_date_opt(:start_date, a.filter_date_from, ~T[00:00:00])
+    |> maybe_date_opt(:end_date, a.filter_date_to, ~T[23:59:59])
+  end
 
-    opts =
-      if filter_event_type != "" do
-        Keyword.put(opts, :event_type, filter_event_type)
-      else
-        opts
-      end
+  defp maybe_opt(opts, _key, value) when value in [nil, ""], do: opts
+  defp maybe_opt(opts, key, value), do: Keyword.put(opts, key, value)
 
-    opts =
-      if filter_actor_type != "" do
-        Keyword.put(opts, :actor_type, filter_actor_type)
-      else
-        opts
-      end
+  defp maybe_date_opt(opts, _key, value, _time) when value in [nil, ""], do: opts
 
-    opts =
-      if filter_actor_id != "" do
-        Keyword.put(opts, :actor_id, filter_actor_id)
-      else
-        opts
-      end
-
-    opts =
-      if filter_resource_type != "" do
-        Keyword.put(opts, :resource_type, filter_resource_type)
-      else
-        opts
-      end
-
-    opts =
-      if filter_resource_id != "" do
-        Keyword.put(opts, :resource_id, filter_resource_id)
-      else
-        opts
-      end
-
-    opts =
-      if filter_date_from != "" do
-        case Date.from_iso8601(filter_date_from) do
-          {:ok, date} ->
-            Keyword.put(opts, :start_date, DateTime.new!(date, ~T[00:00:00]))
-
-          _ ->
-            opts
-        end
-      else
-        opts
-      end
-
-    opts =
-      if filter_date_to != "" do
-        case Date.from_iso8601(filter_date_to) do
-          {:ok, date} ->
-            Keyword.put(opts, :end_date, DateTime.new!(date, ~T[23:59:59]))
-
-          _ ->
-            opts
-        end
-      else
-        opts
-      end
-
-    {events, total} = AuditTrail.list_company_events(company_id, opts)
-
-    socket
-    |> assign(:events, events)
-    |> assign(:pagination, %{
-      total: total,
-      limit: limit,
-      offset: offset,
-      page: page,
-      total_pages: ceil(max(1, total) / limit)
-    })
+  defp maybe_date_opt(opts, key, value, time) do
+    case Date.from_iso8601(value) do
+      {:ok, date} -> Keyword.put(opts, key, DateTime.new!(date, time))
+      _ -> opts
+    end
   end
 
   defp load_event_types(socket) do
-    company_id = socket.assigns.company_id
-    event_types = AuditTrail.list_event_types(company_id)
+    event_types = AuditTrail.list_event_types(socket.assigns.company_id)
     assign(socket, :event_types, event_types)
   end
 
   defp build_url(socket) do
-    filter_event_type = socket.assigns.filter_event_type
-    filter_actor_type = socket.assigns.filter_actor_type
-    filter_actor_id = socket.assigns.filter_actor_id
-    filter_resource_type = socket.assigns.filter_resource_type
-    filter_resource_id = socket.assigns.filter_resource_id
-    filter_date_from = socket.assigns.filter_date_from
-    filter_date_to = socket.assigns.filter_date_to
-    page = socket.assigns.page
+    a = socket.assigns
 
     query =
       %{
-        filter_event_type: filter_event_type,
-        filter_actor_type: filter_actor_type,
-        filter_actor_id: filter_actor_id,
-        filter_resource_type: filter_resource_type,
-        filter_resource_id: filter_resource_id,
-        filter_date_from: filter_date_from,
-        filter_date_to: filter_date_to,
-        page: page
+        filter_event_type: a.filter_event_type,
+        filter_actor_type: a.filter_actor_type,
+        filter_actor_id: a.filter_actor_id,
+        filter_resource_type: a.filter_resource_type,
+        filter_resource_id: a.filter_resource_id,
+        filter_date_from: a.filter_date_from,
+        filter_date_to: a.filter_date_to
       }
       |> Enum.reject(fn {_k, v} -> v in ["", nil] end)
       |> Enum.into(%{})
 
-    ~p"/audit-trail?#{query}"
+    ~p"/settings/audit?#{query}"
   end
 
   defp get_current_company_id(socket) do

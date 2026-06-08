@@ -83,6 +83,15 @@ defmodule Cympho.Users do
   end
 
   @doc """
+  Updates the user's UI theme (validated against `Cympho.Themes`).
+  """
+  def update_theme(%User{} = user, theme) do
+    user
+    |> User.theme_changeset(%{theme: theme})
+    |> Repo.update()
+  end
+
+  @doc """
   Deletes a user.
   """
   def delete_user(%User{} = user) do
@@ -167,11 +176,7 @@ defmodule Cympho.Users do
   end
 
   def default_event_config do
-    %{
-      "issue_assigned" => true,
-      "comment" => true,
-      "status_change" => true
-    }
+    %{"human_approval_required" => true}
   end
 
   def update_pref_events(pref_id, events) do

@@ -152,17 +152,20 @@ defmodule Cympho.AutonomyLoopTest do
     # ── Step 4: engineer takes the issue (simulate dispatcher checkout) and
     # submits for review.
     {:ok, eng_issue} = Issues.checkout_issue(eng_issue, engineer, :engineer)
-    {:ok, _} = Issues.update_issue(eng_issue, %{
-      github_pr_url: "https://github.com/owner/repo/pull/100"
-    })
+
+    {:ok, _} =
+      Issues.update_issue(eng_issue, %{
+        github_pr_url: "https://github.com/owner/repo/pull/100"
+      })
 
     eng_issue = Issues.get_issue!(eng_issue.id)
 
     submit_action = [
       %{
         "type" => "comment",
-        "body" => "[delivery] Built the flow. Files changed: lib/x.ex. " <>
-          "Verification: ran tests. Risks: none. Current state: ready. Next decision: review PR."
+        "body" =>
+          "[delivery] Built the flow. Files changed: lib/x.ex. " <>
+            "Verification: ran tests. Risks: none. Current state: ready. Next decision: review PR."
       },
       %{
         "type" => "attach_work_product",

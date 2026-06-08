@@ -173,7 +173,7 @@ defmodule CymphoWeb.WorkspaceLive.ExecWorkspace do
   end
 
   defp service_status_classes("running"), do: "bg-green-500/10 text-green-400"
-  defp service_status_classes("stopped"), do: "bg-red-500/10 text-red-400"
-  defp service_status_classes("error"), do: "bg-red-500/10 text-red-400"
+  defp service_status_classes("stopped"), do: "bg-amber-400/10 text-amber-300"
+  defp service_status_classes("error"), do: "bg-brand/10 text-brand"
   defp service_status_classes(_), do: "bg-surface text-text-tertiary"
 end

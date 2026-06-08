@@ -2,8 +2,7 @@ defmodule CymphoWeb.Components.UserMenu do
   @moduledoc """
   Bottom-of-sidebar user pill that opens a popover menu with the
   overflow nav (Org / Approvals / Costs / Activity / Workspaces /
-  Plugins / Skills / Adapters / Tool traces), search, shortcuts,
-  settings.
+  Plugins / Skills / Tool traces), search, shortcuts, settings.
 
   Pairs with the `UserMenu` JS hook in app.js for click-outside
   dismissal and escape handling.
@@ -49,7 +48,7 @@ defmodule CymphoWeb.Components.UserMenu do
         role="menu"
         class={[
           "hidden absolute bottom-full left-0 right-0 mb-2 z-50 rounded-xl",
-          "bg-surface-2 border border-hairline shadow-elevated overflow-hidden"
+          "bg-surface-2 border border-hairline shadow-dialog overflow-hidden"
         ]}
       >
         <div :if={!@user} class="px-3 py-2.5 border-b border-hairline">
@@ -132,12 +131,6 @@ defmodule CymphoWeb.Components.UserMenu do
             label="Skills"
           />
           <.menu_link
-            to={~p"/adapters"}
-            icon="hero-cog-6-tooth-mini"
-            current={@current_path}
-            label="Adapters"
-          />
-          <.menu_link
             to={~p"/tool-call-traces"}
             icon="hero-magnifying-glass-mini"
             current={@current_path}
@@ -169,7 +162,7 @@ defmodule CymphoWeb.Components.UserMenu do
             <kbd class="kbd">?</kbd>
           </button>
           <.menu_link
-            to={~p"/settings"}
+            to={~p"/settings/profile"}
             icon="hero-cog-6-tooth-mini"
             current={@current_path}
             label="Settings"

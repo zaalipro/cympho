@@ -21,6 +21,19 @@ defmodule Cympho.Projects do
   end
 
   @doc """
+  Keyset (infinite-scroll) page of a company's projects, ordered by name ascending.
+  """
+  def list_projects_by_company_page(company_id, opts \\ []) do
+    Project
+    |> where(company_id: ^company_id)
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:name, :asc}, {:id, :asc}]
+    )
+  end
+
+  @doc """
   Sidebar projection: id, name, color, open_issue_count.
   Active projects only. Sorted: most-recently-touched first.
   """

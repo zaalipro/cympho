@@ -3,7 +3,7 @@
     <h1 class="text-2xl font-510 tracking-tight text-text-primary">My Issues</h1>
     <.app_link
       navigate={~p"/issues/new"}
-      class="bg-brand hover:bg-brand/90 text-white font-510 text-sm px-4 py-2 rounded-lg transition-colors"
+      class="bg-brand hover:bg-brand/90 text-on-primary font-510 text-sm px-4 py-2 rounded-button transition-colors"
     >
       New Issue
     </.app_link>
@@ -33,13 +33,20 @@
     </button>
   </div>
 
-  <div :if={Enum.empty?(@issues)} class="text-center py-12">
-    <p class="text-text-secondary text-sm">No issues found.</p>
-  </div>
+  <.infinite_scroll
+    id="issues"
+    has_more={@infinite_scroll[:issues][:has_more?] || false}
+    container_class="space-y-2"
+  >
+    <:empty>
+      <div class="text-center py-12">
+        <p class="text-text-secondary text-sm">No issues found.</p>
+      </div>
+    </:empty>
 
-  <div :if={!Enum.empty?(@issues)} class="space-y-2">
     <div
-      :for={issue <- @issues}
+      :for={{dom_id, issue} <- @streams.issues}
+      id={dom_id}
       class="bg-surface border border-border rounded-lg p-4 hover:bg-subtle transition-colors"
     >
       <.link navigate={~p"/issues/#{issue.id}"} class="block">
@@ -76,5 +83,5 @@
         </div>
       </.link>
     </div>
-  </div>
+  </.infinite_scroll>
 </div>

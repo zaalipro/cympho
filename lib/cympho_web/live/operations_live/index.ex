@@ -326,22 +326,22 @@ defmodule CymphoWeb.OperationsLive.Index do
     do: "border-border bg-surface text-text-tertiary"
 
   defp status_badge_class(:not_running),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
+    do: "border-brand/25 bg-brand/10 text-brand"
 
   defp status_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
   defp capacity_badge_class(:safe), do: "border-green-500/25 bg-green-500/10 text-green-400"
   defp capacity_badge_class(:watch), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-300"
-  defp capacity_badge_class(:high), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  defp capacity_badge_class(:high), do: "border-brand/25 bg-brand/10 text-brand"
   defp capacity_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
-  defp action_class(:ok), do: "border-emerald-500/20 bg-emerald-500/[0.08]"
-  defp action_class(:attention), do: "border-amber-500/20 bg-amber-500/[0.08]"
-  defp action_class(:danger), do: "border-red-500/20 bg-red-500/[0.08]"
+  defp action_class(:ok), do: "border-border bg-surface"
+  defp action_class(:attention), do: "border-border bg-surface"
+  defp action_class(:danger), do: "border-border bg-surface"
   defp action_class(_), do: "border-border bg-surface"
 
   defp doctor_badge_class(:critical),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
+    do: "border-brand/25 bg-brand/10 text-brand"
 
   defp doctor_badge_class(:warning),
     do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
@@ -354,15 +354,18 @@ defmodule CymphoWeb.OperationsLive.Index do
 
   defp doctor_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
-  defp doctor_card_class(:critical), do: "border-red-500/20 bg-red-500/[0.07]"
-  defp doctor_card_class(:warning), do: "border-amber-500/20 bg-amber-500/[0.07]"
-  defp doctor_card_class(:info), do: "border-blue-500/20 bg-blue-500/[0.07]"
-  defp doctor_card_class(:ok), do: "border-emerald-500/20 bg-emerald-500/[0.07]"
+  defp doctor_card_class(:critical), do: "border-border border-l-2 border-l-brand/70 bg-surface"
+
+  defp doctor_card_class(:warning),
+    do: "border-border border-l-2 border-l-amber-500/70 bg-surface"
+
+  defp doctor_card_class(:info), do: "border-border border-l-2 border-l-blue-500/70 bg-surface"
+  defp doctor_card_class(:ok), do: "border-border border-l-2 border-l-emerald-500/70 bg-surface"
   defp doctor_card_class(_), do: "border-border bg-surface"
 
   defp action_left_bar(:ok), do: "border-l-emerald-500/70"
   defp action_left_bar(:attention), do: "border-l-amber-500/70"
-  defp action_left_bar(:danger), do: "border-l-red-500/70"
+  defp action_left_bar(:danger), do: "border-l-brand/70"
   defp action_left_bar(_), do: "border-l-brand/70"
 
   defp mode_text_class(:autonomous), do: "text-green-300"
@@ -375,19 +378,19 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp mode_dot_class(:degraded), do: "bg-amber-400"
   defp mode_dot_class(_), do: "bg-gray-500"
 
-  defp mode_pulse_color(:autonomous), do: "rgba(74, 222, 128, 0.55)"
-  defp mode_pulse_color(:review), do: "rgba(56, 189, 248, 0.55)"
-  defp mode_pulse_color(:degraded), do: "rgba(252, 211, 77, 0.55)"
-  defp mode_pulse_color(_), do: "rgba(148, 163, 184, 0.45)"
+  defp mode_pulse_color(:autonomous), do: "rgba(93, 184, 114, 0.55)"
+  defp mode_pulse_color(:review), do: "rgba(93, 184, 166, 0.55)"
+  defp mode_pulse_color(:degraded), do: "rgba(232, 165, 90, 0.55)"
+  defp mode_pulse_color(_), do: "rgba(176, 169, 156, 0.45)"
 
   defp nudge_badge_class(:queued), do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
   defp nudge_badge_class(:running), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
-  defp nudge_badge_class(:stale), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  defp nudge_badge_class(:stale), do: "border-brand/25 bg-brand/10 text-brand"
   defp nudge_badge_class(:cleared), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
   defp nudge_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
   defp contract_badge_class(:missing),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
+    do: "border-brand/25 bg-brand/10 text-brand"
 
   defp contract_badge_class(:attention),
     do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
@@ -401,29 +404,38 @@ defmodule CymphoWeb.OperationsLive.Index do
     do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
 
   defp prompt_status_badge_class(:guardrail_risk),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
+    do: "border-brand/25 bg-brand/10 text-brand"
 
   defp prompt_status_badge_class(:eval_gap),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
+    do: "border-brand/25 bg-brand/10 text-brand"
 
   defp prompt_status_badge_class(:regressed),
     do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
 
   defp prompt_status_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
-  defp prompt_card_class(:guardrail_risk), do: "border-red-500/25 bg-red-500/[0.06]"
-  defp prompt_card_class(:eval_gap), do: "border-red-500/25 bg-red-500/[0.06]"
-  defp prompt_card_class(:regressed), do: "border-blue-500/25 bg-blue-500/[0.06]"
-  defp prompt_card_class(:needs_tuning), do: "border-amber-500/25 bg-amber-500/[0.06]"
-  defp prompt_card_class(:ready), do: "border-emerald-500/20 bg-emerald-500/[0.05]"
+  defp prompt_card_class(:guardrail_risk),
+    do: "border-border border-l-2 border-l-brand/70 bg-surface"
+
+  defp prompt_card_class(:eval_gap), do: "border-border border-l-2 border-l-brand/70 bg-surface"
+
+  defp prompt_card_class(:regressed),
+    do: "border-border border-l-2 border-l-blue-500/70 bg-surface"
+
+  defp prompt_card_class(:needs_tuning),
+    do: "border-border border-l-2 border-l-amber-500/70 bg-surface"
+
+  defp prompt_card_class(:ready),
+    do: "border-border border-l-2 border-l-emerald-500/70 bg-surface"
+
   defp prompt_card_class(_), do: "border-border bg-surface"
 
-  defp prompt_gap_class(:attention), do: "bg-red-500/10 text-red-200"
+  defp prompt_gap_class(:attention), do: "bg-brand/10 text-brand"
   defp prompt_gap_class(:weak), do: "bg-amber-500/10 text-amber-200"
   defp prompt_gap_class(_), do: "bg-canvas text-text-tertiary"
 
   defp prompt_patch_class(:primary), do: "bg-brand/15 text-brand"
-  defp prompt_patch_class(:danger), do: "bg-red-500/10 text-red-200"
+  defp prompt_patch_class(:danger), do: "bg-brand/10 text-brand"
   defp prompt_patch_class(_), do: "bg-surface text-text-tertiary"
 
   defp anchor_path?(path) when is_binary(path), do: String.starts_with?(path, "#")
@@ -436,7 +448,7 @@ defmodule CymphoWeb.OperationsLive.Index do
     do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
 
   defp health_status_badge_class(:unavailable),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
+    do: "border-brand/25 bg-brand/10 text-brand"
 
   defp health_status_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 

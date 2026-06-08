@@ -19,6 +19,26 @@ defmodule Cympho.Skills do
     |> Repo.all()
   end
 
+  @doc """
+  Keyset (infinite-scroll) page of skills, ordered by name.
+
+  Accepts the same `:company_id`/`:project_id` filters as `list_skills/1` plus
+  `:after` (a cursor) and `:limit`, returns a `Cympho.Pagination.Page` with
+  `:company` and `:project` preloaded. Keys on `(name, id)` to match the display
+  order of `list_skills/1`.
+  """
+  def list_skills_page(opts \\ []) do
+    Skill
+    |> maybe_filter_by_company(Keyword.get(opts, :company_id))
+    |> maybe_filter_by_project(Keyword.get(opts, :project_id))
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:name, :asc}, {:id, :asc}]
+    )
+    |> then(fn page -> %{page | entries: Repo.preload(page.entries, [:company, :project])} end)
+  end
+
   def get_skill(id) do
     case Repo.get(Skill, id) do
       nil -> {:error, :not_found}
@@ -177,6 +197,26 @@ defmodule Cympho.Skills do
     |> order_by([p], asc: p.name)
     |> preload([:company, :project])
     |> Repo.all()
+  end
+
+  @doc """
+  Keyset (infinite-scroll) page of plugins, ordered by name.
+
+  Accepts the same filter options as `list_plugins/1` plus `:after` (a cursor)
+  and `:limit`, and returns a `Cympho.Pagination.Page` with `:company` and
+  `:project` preloaded. Keys on `(name, id)`.
+  """
+  def list_plugins_page(opts \\ []) do
+    Plugin
+    |> maybe_filter_by_company(Keyword.get(opts, :company_id))
+    |> maybe_filter_by_project(Keyword.get(opts, :project_id))
+    |> maybe_filter_by_status(Keyword.get(opts, :status))
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:name, :asc}, {:id, :asc}]
+    )
+    |> then(fn page -> %{page | entries: Repo.preload(page.entries, [:company, :project])} end)
   end
 
   @doc """

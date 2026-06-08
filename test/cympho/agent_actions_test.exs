@@ -429,8 +429,7 @@ defmodule Cympho.AgentActionsTest do
                  %{
                    "type" => "request_changes",
                    "role" => "engineer",
-                   "reason" =>
-                     "Coverage drop in lib/foo.ex; add tests for the retry branch."
+                   "reason" => "Coverage drop in lib/foo.ex; add tests for the retry branch."
                  }
                ])
 
@@ -460,11 +459,19 @@ defmodule Cympho.AgentActionsTest do
       assert {:ok, _} = AgentActions.execute(mid_loop, engineer, round_two)
 
       after_round_two = Issues.get_issue!(issue.id)
-      assert after_round_two.assignee_id == cto.id, "round two should stick with the original reviewer"
+
+      assert after_round_two.assignee_id == cto.id,
+             "round two should stick with the original reviewer"
+
       assert after_round_two.last_reviewer_id == cto.id
     end
 
-    test "approve_issue clears last_reviewer_id", %{issue: issue, cto: cto, engineer: engineer, ceo: ceo} do
+    test "approve_issue clears last_reviewer_id", %{
+      issue: issue,
+      cto: cto,
+      engineer: engineer,
+      ceo: ceo
+    } do
       insert_completed_run(ceo, issue)
       insert_work_product(issue, ceo)
 

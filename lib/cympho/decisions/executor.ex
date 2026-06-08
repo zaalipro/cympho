@@ -54,9 +54,7 @@ defmodule Cympho.Decisions.Executor do
         cancel_issue(issue_id, decision)
 
       key ->
-        Logger.debug(
-          "[Decisions.Executor] no recipe for decision_key=#{inspect(key)}; ignoring"
-        )
+        Logger.debug("[Decisions.Executor] no recipe for decision_key=#{inspect(key)}; ignoring")
 
         :ok
     end

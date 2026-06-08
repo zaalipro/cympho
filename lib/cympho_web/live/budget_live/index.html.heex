@@ -3,7 +3,7 @@
     <:actions>
       <.app_link
         navigate={~p"/budgets/new"}
-        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
+        class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 rounded-button transition-colors inline-flex items-center gap-2"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -87,10 +87,17 @@
             </th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-border">
-          <%= for budget <- @budgets do %>
+        <tbody id="budget-tbody" phx-update="stream" class="divide-y divide-border">
+          <tr id="budget-empty" class="only:table-row hidden">
+            <td colspan="7" class="text-center py-12">
+              <div class="text-text-tertiary text-sm">
+                No budgets yet. Create your first budget!
+              </div>
+            </td>
+          </tr>
+          <%= for {dom_id, budget} <- @streams.budget do %>
             <% {status_class, status_label} = status_badge(budget) %>
-            <tr class="hover:bg-subtle transition-colors">
+            <tr id={dom_id} class="hover:bg-subtle transition-colors">
               <td class="px-6 py-4">
                 <.app_link
                   navigate={~p"/budgets/#{budget.id}"}
@@ -148,11 +155,9 @@
         </tbody>
       </table>
     </div>
-
-    <div :if={Enum.empty?(@budgets)} class="text-center py-12">
-      <div class="text-text-tertiary text-sm">No budgets yet. Create your first budget!</div>
-    </div>
   </div>
+
+  <.infinite_scroll_footer id="budget" has_more={@infinite_scroll[:budget][:has_more?] || false} />
 
   <.live_component
     :if={@live_action in [:new, :edit]}

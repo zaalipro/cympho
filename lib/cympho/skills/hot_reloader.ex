@@ -214,10 +214,12 @@ defmodule Cympho.Skills.HotReloader do
     end
   end
 
-  defp parse_yaml(_content) do
-    # Use a simple YAML parser or add :yamerl dependency
-    # For now, return error and expect JSON in dev
-    {:error, :yaml_not_supported}
+  defp parse_yaml(content) do
+    case YamlElixir.read_from_string(content) do
+      {:ok, data} when is_map(data) -> {:ok, data}
+      {:ok, _other} -> {:error, :invalid_yaml}
+      {:error, _reason} -> {:error, :invalid_yaml}
+    end
   end
 
   defp find_plugin_by_identifier(%{"identifier" => identifier, "company_slug" => company_slug}) do

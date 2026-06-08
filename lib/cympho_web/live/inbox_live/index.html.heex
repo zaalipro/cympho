@@ -1,18 +1,16 @@
 <.page size="wide">
-  <div class="mb-5 overflow-visible rounded-lg border border-border bg-panel">
-    <div class="grid gap-4 p-4 xl:grid-cols-[minmax(260px,1fr)_minmax(560px,auto)] xl:items-center">
+  <div class="mb-5 rounded-2xl border border-hairline bg-surface-1 p-4 sm:p-5">
+    <%!-- Row 1: identity (left) + agent scope & density (right) --%>
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2.5">
-          <h1 class="text-2xl font-590 tracking-[-0.01em] text-text-primary">Inbox</h1>
-          <span class="rounded-full border border-border bg-surface px-2.5 py-1 text-xs text-text-quaternary">
-            {length(@inbox_items)} shown
-          </span>
-          <span class="rounded-full border border-border bg-surface px-2.5 py-1 text-xs text-text-quaternary">
+          <h1 class="font-serif text-2xl text-text-primary">Inbox</h1>
+          <span class="rounded-full border border-hairline bg-surface px-2.5 py-1 text-xs text-text-quaternary">
             {total_count(@inbox_counts)} total
           </span>
         </div>
 
-        <p class="mt-1 text-sm text-text-tertiary">
+        <p class="mt-1.5 text-sm text-text-tertiary">
           Agent handoffs, review signals, and issue notifications across the company.
         </p>
         <p class="mt-2 truncate text-sm text-text-secondary">
@@ -25,59 +23,20 @@
         </p>
       </div>
 
-      <div class="grid gap-3 lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)_auto] lg:items-center">
+      <div class="flex flex-wrap items-center gap-2 lg:shrink-0">
         <form phx-change="select_agent">
-          <select
+          <.select_menu
             name="agent_id"
-            class="h-10 min-w-[220px] rounded-lg border border-border bg-surface px-3 text-sm text-text-secondary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-          >
-            <option value="all" selected={@selected_agent_id == "all"}>All agents</option>
-            <%= for agent <- @agents do %>
-              <option value={agent.id} selected={@selected_agent_id == agent.id}>
-                {agent_option_label(agent, @agent_counts)}
-              </option>
-            <% end %>
-          </select>
+            value={@selected_agent_id}
+            class="min-w-[200px]"
+            options={[
+              {"All agents", "all"}
+              | Enum.map(@agents, &{agent_option_label(&1, @agent_counts), &1.id})
+            ]}
+          />
         </form>
 
-        <div class="grid grid-cols-2 gap-2 sm:grid-cols-5">
-          <.link
-            patch={
-              inbox_url(@selected_agent_id, @current_status, @digest_density, %{status: nil})
-            }
-            class={[
-              "min-h-10 rounded-lg border px-3 py-2 text-xs font-510 transition-colors",
-              status_tab_class(@current_status, nil)
-            ]}
-          >
-            <span class="flex items-center justify-between gap-2">
-              <span>All</span>
-              <span class="text-text-quaternary">{total_count(@inbox_counts)}</span>
-            </span>
-          </.link>
-          <.link
-            :for={status <- ["unread", "read", "dismissed", "archived", "review"]}
-            patch={
-              inbox_url(@selected_agent_id, @current_status, @digest_density, %{status: status})
-            }
-            class={[
-              "min-h-10 rounded-lg border px-3 py-2 text-xs font-510 transition-colors",
-              status_tab_class(@current_status, status)
-            ]}
-          >
-            <span class="flex items-center justify-between gap-2">
-              <span class="flex min-w-0 items-center gap-1.5">
-                <span class={["h-1.5 w-1.5 shrink-0 rounded-full", status_dot(status)]}></span>
-                <span class="truncate">
-                  {if status == "review", do: "Awaiting review", else: String.capitalize(status)}
-                </span>
-              </span>
-              <span class="text-text-quaternary">{count_for(@inbox_counts, status)}</span>
-            </span>
-          </.link>
-        </div>
-
-        <div class="inline-flex rounded-lg border border-border bg-surface p-1">
+        <div class="inline-flex rounded-xl border border-hairline bg-surface p-1">
           <.link
             patch={
               inbox_url(@selected_agent_id, @current_status, @digest_density, %{
@@ -85,7 +44,7 @@
               })
             }
             class={[
-              "rounded-md px-2.5 py-1.5 text-xs font-510 transition-colors",
+              "rounded-lg px-2.5 py-1.5 text-xs font-510 transition-colors",
               density_tab_class(@digest_density, "compact")
             ]}
           >
@@ -98,7 +57,7 @@
               })
             }
             class={[
-              "rounded-md px-2.5 py-1.5 text-xs font-510 transition-colors",
+              "rounded-lg px-2.5 py-1.5 text-xs font-510 transition-colors",
               density_tab_class(@digest_density, "detailed")
             ]}
           >
@@ -107,13 +66,62 @@
         </div>
       </div>
     </div>
+
+    <%!-- Row 2: status filters — wrap freely to multiple rows, full labels --%>
+    <div class="mt-4 flex flex-wrap gap-2 border-t border-hairline/70 pt-4">
+      <.link
+        patch={inbox_url(@selected_agent_id, @current_status, @digest_density, %{status: nil})}
+        class={[
+          "inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-510 transition-colors",
+          status_tab_class(@current_status, nil)
+        ]}
+      >
+        <span>All</span>
+        <span class="font-mono text-[11px] tabular-nums opacity-70">
+          {total_count(@inbox_counts)}
+        </span>
+      </.link>
+      <.link
+        :for={status <- ["unread", "read", "dismissed", "archived", "review"]}
+        patch={inbox_url(@selected_agent_id, @current_status, @digest_density, %{status: status})}
+        class={[
+          "inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-510 transition-colors",
+          status_tab_class(@current_status, status)
+        ]}
+      >
+        <span class={["h-1.5 w-1.5 shrink-0 rounded-full", status_dot(status)]}></span>
+        <span>
+          {if status == "review", do: "Awaiting review", else: String.capitalize(status)}
+        </span>
+        <span class="font-mono text-[11px] tabular-nums opacity-70">
+          {count_for(@inbox_counts, status)}
+        </span>
+      </.link>
+    </div>
   </div>
 
-  <div :if={!Enum.empty?(@inbox_items)} class="grid gap-3">
+  <.infinite_scroll
+    id="inbox"
+    has_more={@infinite_scroll[:inbox_items][:has_more?] || false}
+    container_class="grid gap-3"
+  >
+    <:empty>
+      <div class="rounded-lg border border-dashed border-border bg-panel px-6 py-16 text-center">
+        <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-lg border border-border bg-surface">
+          <span class="hero-inbox-mini h-6 w-6 text-text-tertiary"></span>
+        </div>
+        <p class="mt-4 text-sm font-590 text-text-secondary">No inbox items match this view.</p>
+        <p class="mx-auto mt-1 max-w-md text-sm text-text-quaternary">
+          Agent handoffs, review requests, and issue updates will appear here as the autonomous
+          workflow runs.
+        </p>
+      </div>
+    </:empty>
     <div
-      :for={item <- @inbox_items}
+      :for={{dom_id, item} <- @streams.inbox_items}
+      id={dom_id}
       class={[
-        "group rounded-lg border border-border bg-panel shadow-card transition-all hover:border-border-hover hover:shadow-raised",
+        "group rounded-2xl border border-hairline bg-surface-1 shadow-card transition-all hover:border-border-hover hover:shadow-raised",
         item.status == "unread" && "border-l-2 border-l-brand"
       ]}
     >
@@ -275,19 +283,5 @@
         </div>
       </div>
     </div>
-  </div>
-
-  <div
-    :if={Enum.empty?(@inbox_items)}
-    class="rounded-lg border border-dashed border-border bg-panel px-6 py-16 text-center"
-  >
-    <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-lg border border-border bg-surface">
-      <span class="hero-inbox-mini h-6 w-6 text-text-tertiary"></span>
-    </div>
-    <p class="mt-4 text-sm font-590 text-text-secondary">No inbox items match this view.</p>
-    <p class="mx-auto mt-1 max-w-md text-sm text-text-quaternary">
-      Agent handoffs, review requests, and issue updates will appear here as the autonomous
-      workflow runs.
-    </p>
-  </div>
+  </.infinite_scroll>
 </.page>

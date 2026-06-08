@@ -2,12 +2,17 @@
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=JetBrains+Mono:wght@400;500;700&family=Saira+Condensed:wght@300;400;600;700&display=swap');
+
+/* Per-theme [data-theme] token overrides (uses :root[data-theme] specificity). */
+@import "themes.css";
 
 /* ============================================
    Cympho Design Tokens — sourced from DESIGN.md (Linear spec)
 
-   The product ships dark-only per the spec; do not add a light theme.
+   These :root values are the default "Ember" theme (warm dark). Per-theme
+   overrides live in themes.css under [data-theme="…"]; flipping that attr
+   on <html> recolors the whole app.
    Both spec-named tokens (surface-1, ink, hairline, primary…) and the
    legacy names (panel, surface, text-primary, border, brand…) resolve
    to the same values so old templates keep working while new code uses
@@ -15,26 +20,29 @@
    ============================================ */
 
 :root {
-  /* Canvas + surface ladder — refined-dark: canvas lifted off pure-black
-     so shadows + hairline rings read; ladder evenly stepped for real
-     elevation. (Legacy aliases below are var() refs and follow these.) */
-  --color-canvas:        #0a0b0e;
-  --color-surface-1:     #14161b;
-  --color-surface-2:     #181b22;
-  --color-surface-3:     #1c1f26;
-  --color-surface-4:     #262b34;
+  color-scheme: dark;
+
+  /* Canvas + surface ladder — warm "Claude" charcoal: canvas lifted to a
+     paper-like warm tone; ladder steps up in warm lightness so elevation
+     reads on the lighter canvas. (Legacy aliases below are var() refs and
+     follow these.) */
+  --color-canvas:        #20201E;
+  --color-surface-1:     #262624;
+  --color-surface-2:     #2D2C2A;
+  --color-surface-3:     #353330;
+  --color-surface-4:     #423F3B;
 
   /* Legacy aliases */
   --color-panel:         var(--color-surface-1);
   --color-surface:       var(--color-surface-2);
   --color-surface-hover: var(--color-surface-3);
-  --color-subtle:        rgba(255, 255, 255, 0.05);
+  --color-subtle:        rgba(255, 250, 245, 0.05);
 
-  /* Ink */
-  --color-ink:           #f7f8f8;
-  --color-ink-muted:     #d0d6e0;
-  --color-ink-subtle:    #8a8f98;
-  --color-ink-tertiary:  #6b7077;
+  /* Ink — warm off-white down to warm taupe */
+  --color-ink:           #FAF9F5;
+  --color-ink-muted:     #E5E1D8;
+  --color-ink-subtle:    #B0A99C;
+  --color-ink-tertiary:  #8C857A;
 
   /* Legacy aliases */
   --color-text-primary:    var(--color-ink);
@@ -42,39 +50,84 @@
   --color-text-tertiary:   var(--color-ink-subtle);
   --color-text-quaternary: var(--color-ink-tertiary);
 
-  /* Brand */
-  --color-primary:       #5e6ad2;
-  --color-primary-hover: #828fff;
-  --color-primary-focus: #5e69d1;
+  /* Brand — terracotta */
+  --color-primary:       #D97757;
+  --color-primary-hover: #E08A6B;
+  --color-primary-focus: #D97757;
+  --color-primary-rgb:   217 119 87;   /* channels so Tailwind can apply alpha (bg-brand/10 …) */
 
   /* Legacy aliases */
   --color-brand:        var(--color-primary);
   --color-accent:       var(--color-primary);
   --color-accent-hover: var(--color-primary-hover);
 
-  /* Hairlines */
-  --color-hairline:           #23262d;
-  --color-hairline-strong:    #33373f;
-  --color-hairline-tertiary:  #3d424b;
+  /* Hairlines — warm, low-contrast on the lifted canvas */
+  --color-hairline:           #3A3733;
+  --color-hairline-strong:    #4A453F;
+  --color-hairline-tertiary:  #5A544C;
 
   /* Legacy aliases */
   --color-border:        var(--color-hairline);
   --color-border-subtle: var(--color-surface-3);
   --color-border-hover:  var(--color-hairline-strong);
 
-  /* Semantic */
-  --color-success:      #27a644;
-  --color-error:        #ef4444;
-  --color-overlay:      rgba(0, 0, 0, 0.6);
+  /* Semantic — Anthropic's official Claude tokens (DESIGN.md):
+     success #5db872 · warning #d4a017 · error #c64545. */
+  --color-success:      #5db872;
+  --color-success-rgb:  93 184 114;
+  --color-warning:      #d4a017;
+  --color-warning-rgb:  212 160 23;
+  --color-error:        #c64545;
+  --color-error-rgb:    198 69 69;
+  --color-info:         #5db8a6;   /* warm teal — info/active status (DESIGN.md) */
+  --color-info-rgb:     93 184 166;
+  --color-overlay:      rgba(20, 20, 18, 0.6);
 
   /* Buttons */
   --color-button-bg:    var(--color-surface-2);
   --color-button-hover: var(--color-surface-3);
 
-  /* Selection + scrollbars */
-  --color-selection:        rgba(94, 106, 210, 0.32);
-  --color-scrollbar:        rgba(255, 255, 255, 0.1);
-  --color-scrollbar-hover:  rgba(255, 255, 255, 0.15);
+  /* Selection + scrollbars (terracotta-tied) */
+  --color-selection:        rgba(217, 119, 87, 0.30);
+  --color-scrollbar:        rgba(255, 250, 245, 0.12);
+  --color-scrollbar-hover:  rgba(255, 250, 245, 0.18);
+
+  /* ── Multi-theme contract — overridden per [data-theme] in themes.css.
+     Defaults below are the Ember (warm-dark) theme, so no attr == today. ── */
+
+  /* Text/icon color on a primary-filled button (Ember: dark on terracotta) */
+  --color-on-primary: #20201E;
+
+  /* Typography families — display vs body vs mono */
+  --font-display: "Source Serif 4", ui-serif, "Iowan Old Style", Georgia, Cambria, "Times New Roman", serif;
+  --font-body:    "Inter", "Inter Variable", "SF Pro Display", -apple-system, system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono:    "Berkeley Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Radius scale + semantic radii (themes shift these: Blocks→pill, Circuit→0) */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 16px;
+  --radius-3xl: 24px;
+  --radius-xxl: 24px;
+  --radius-pill: 9999px;
+  --radius-panel: 16px;
+  --radius-card: 12px;
+  --radius-button: 12px;
+  --radius-input: 8px;
+  --radius-field: 8px;
+
+  /* Elevation — ambient shadow color, per-theme strength, inset top highlight */
+  --shadow-rgb: 0 0 0;
+  --shadow-strength: 1;
+  --shadow-inset-highlight: rgba(255, 250, 245, 0.05);
+
+  /* Decorative effects — softened/disabled on light themes */
+  --vignette-color: rgba(0, 0, 0, 0.35);
+  --noise-opacity: 0.035;
+  --theme-hero-bg: transparent;
 }
 
 /* Respect reduced motion preference */
@@ -123,7 +176,7 @@
   }
 
   body {
-    font-family: "Inter", "Inter Variable", "SF Pro Display", -apple-system, system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+    font-family: var(--font-body);
     background-color: var(--color-canvas);
     color: var(--color-text-primary);
     font-feature-settings: "cv01", "ss03";
@@ -213,11 +266,11 @@
   height: auto;
   padding: 8px 16px;
   background: var(--color-brand);
-  color: white;
+  color: var(--color-on-primary);
   font-weight: 500;
   border-radius: 0 0 4px 4px;
   outline: none;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px rgb(var(--shadow-rgb) / calc(0.3 * var(--shadow-strength)));
 }
 
 /* Active navigation highlight */
@@ -266,8 +319,8 @@
 }
 
 .linear-field:focus {
-  border-color: rgba(94, 106, 210, 0.75);
-  box-shadow: 0 0 0 2px rgba(94, 106, 210, 0.22);
+  border-color: rgb(var(--color-primary-rgb) / 0.75);
+  box-shadow: 0 0 0 2px rgb(var(--color-primary-rgb) / 0.22);
 }
 
 #kanban-board[data-drag-unavailable="true"] .kanban-card-actions {
@@ -424,9 +477,9 @@ button, a, select, input[type="submit"] {
 /* Mission-control status pulse — used on the dashboard hero status dot
    and on the running-agent avatar ring. Halo grows + fades. */
 @keyframes cympho-pulse {
-  0%   { box-shadow: 0 0 0 0 var(--cympho-pulse-color, rgba(94,106,210,0.55)); }
-  70%  { box-shadow: 0 0 0 8px rgba(94,106,210,0); }
-  100% { box-shadow: 0 0 0 0 rgba(94,106,210,0); }
+  0%   { box-shadow: 0 0 0 0 var(--cympho-pulse-color, rgb(var(--color-primary-rgb) / 0.55)); }
+  70%  { box-shadow: 0 0 0 8px rgb(var(--color-primary-rgb) / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(var(--color-primary-rgb) / 0); }
 }
 
 .cympho-pulse-dot {
@@ -436,7 +489,7 @@ button, a, select, input[type="submit"] {
 /* Activity-feed flash: subtle backdrop highlight applied to the newest
    ticker entry for ~800 ms when it arrives via PubSub. */
 @keyframes cympho-activity-flash {
-  0%   { background-color: rgba(94, 106, 210, 0.18); }
+  0%   { background-color: rgb(var(--color-primary-rgb) / 0.18); }
   100% { background-color: transparent; }
 }
 
@@ -452,7 +505,7 @@ button, a, select, input[type="submit"] {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  opacity: 0.035;
+  opacity: var(--noise-opacity);
   mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.6'/></svg>");
 }
@@ -464,7 +517,7 @@ button, a, select, input[type="submit"] {
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.35) 100%);
+  background: radial-gradient(ellipse at center, transparent 55%, var(--vignette-color) 100%);
 }
 
 /* ============================================

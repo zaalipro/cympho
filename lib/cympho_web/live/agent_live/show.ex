@@ -1182,7 +1182,7 @@ defmodule CymphoWeb.AgentLive.Show do
   def issue_status_class(:done), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
   def issue_status_class(:in_progress), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   def issue_status_class(:in_review), do: "border-violet-500/25 bg-violet-500/10 text-violet-300"
-  def issue_status_class(:blocked), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def issue_status_class(:blocked), do: "border-brand/25 bg-brand/10 text-brand"
   def issue_status_class(:cancelled), do: "border-border bg-surface text-text-quaternary"
   def issue_status_class(_), do: "border-border bg-surface text-text-secondary"
 
@@ -1192,7 +1192,7 @@ defmodule CymphoWeb.AgentLive.Show do
   def run_status_class("completed"),
     do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
 
-  def run_status_class("failed"), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def run_status_class("failed"), do: "border-brand/25 bg-brand/10 text-brand"
   def run_status_class("cancelled"), do: "border-border bg-surface text-text-quaternary"
   def run_status_class("running"), do: "border-brand/30 bg-brand/10 text-brand"
   def run_status_class("pending"), do: "border-border bg-surface text-text-secondary"
@@ -1201,7 +1201,7 @@ defmodule CymphoWeb.AgentLive.Show do
 
   def run_dot_class("succeeded"), do: "bg-emerald-400"
   def run_dot_class("completed"), do: "bg-emerald-400"
-  def run_dot_class("failed"), do: "bg-red-400"
+  def run_dot_class("failed"), do: "bg-brand"
   def run_dot_class("cancelled"), do: "bg-gray-500"
   def run_dot_class("running"), do: "bg-brand"
   def run_dot_class("pending"), do: "bg-amber-300"
@@ -1280,7 +1280,7 @@ defmodule CymphoWeb.AgentLive.Show do
     do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
 
   defp health_check_badge_class(:unavailable),
-    do: "border-red-500/25 bg-red-500/10 text-red-300"
+    do: "border-brand/25 bg-brand/10 text-brand"
 
   defp health_check_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
@@ -1300,7 +1300,7 @@ defmodule CymphoWeb.AgentLive.Show do
     do: "border-amber-500/30 bg-amber-500/10 text-amber-200"
 
   defp adapter_error_badge_class(:auth_failed),
-    do: "border-red-500/30 bg-red-500/10 text-red-200"
+    do: "border-brand/30 bg-brand/10 text-brand"
 
   defp adapter_error_badge_class(:timeout),
     do: "border-yellow-500/30 bg-yellow-500/10 text-yellow-200"
@@ -1312,7 +1312,7 @@ defmodule CymphoWeb.AgentLive.Show do
     do: "border-border bg-surface text-text-tertiary"
 
   defp adapter_error_badge_class(:nonzero_exit),
-    do: "border-red-500/30 bg-red-500/10 text-red-200"
+    do: "border-brand/30 bg-brand/10 text-brand"
 
   defp adapter_error_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
@@ -1348,7 +1348,7 @@ defmodule CymphoWeb.AgentLive.Show do
 
   def health_pill_class(:healthy), do: "border-success/25 bg-success/10 text-success"
   def health_pill_class(:degraded), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  def health_pill_class(:unhealthy), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def health_pill_class(:unhealthy), do: "border-brand/25 bg-brand/10 text-brand"
   def health_pill_class(:unavailable), do: "border-border bg-surface text-text-quaternary"
   def health_pill_class(_), do: "border-border bg-surface text-text-secondary"
 
@@ -1363,12 +1363,12 @@ defmodule CymphoWeb.AgentLive.Show do
 
   defp capacity_badge_class(:safe), do: "border-green-500/25 bg-green-500/10 text-green-400"
   defp capacity_badge_class(:watch), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-300"
-  defp capacity_badge_class(:high), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  defp capacity_badge_class(:high), do: "border-brand/25 bg-brand/10 text-brand"
   defp capacity_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
   defp capacity_dot_class(:safe), do: "bg-green-400"
   defp capacity_dot_class(:watch), do: "bg-yellow-300"
-  defp capacity_dot_class(:high), do: "bg-red-400"
+  defp capacity_dot_class(:high), do: "bg-brand"
   defp capacity_dot_class(_), do: "bg-text-quaternary"
 
   def adapter_label(nil), do: "No adapter"
@@ -1559,7 +1559,7 @@ defmodule CymphoWeb.AgentLive.Show do
 
     [
       credentials_item(runtime, ["AGRENTING_API_KEY"], "Agrenting API key",
-        target_path: "/companies/#{runtime.agent.company_id}/secrets",
+        target_path: "/settings/secrets",
         target_label: "Open secrets"
       ),
       required_config_item(config, "agent_did", "Remote agent DID"),
@@ -1705,13 +1705,13 @@ defmodule CymphoWeb.AgentLive.Show do
   end
 
   defp readiness_badge_class(:command_not_found) do
-    "rounded-full border border-red-500/25 bg-red-500/10 px-2.5 py-1 text-xs font-510 text-red-300"
+    "rounded-full border border-brand/25 bg-brand/10 px-2.5 py-1 text-xs font-510 text-brand"
   end
 
   defp readiness_dot_class(:ok), do: "h-2 w-2 rounded-full bg-emerald-400"
   defp readiness_dot_class(:info), do: "h-2 w-2 rounded-full bg-sky-400"
   defp readiness_dot_class(:attention), do: "h-2 w-2 rounded-full bg-amber-400"
-  defp readiness_dot_class(:blocked), do: "h-2 w-2 rounded-full bg-red-400"
+  defp readiness_dot_class(:blocked), do: "h-2 w-2 rounded-full bg-brand"
 
   defp instruction_studio(role, instructions, adapter, runtime) do
     AgentInstructionStudio.analyze(role, instructions,
@@ -1731,7 +1731,7 @@ defmodule CymphoWeb.AgentLive.Show do
   end
 
   defp studio_badge_class(:attention) do
-    "rounded-full border border-red-500/25 bg-red-500/10 px-2.5 py-1 text-xs font-510 text-red-300"
+    "rounded-full border border-brand/25 bg-brand/10 px-2.5 py-1 text-xs font-510 text-brand"
   end
 
   defp studio_badge_class(_status) do
@@ -1773,15 +1773,15 @@ defmodule CymphoWeb.AgentLive.Show do
   defp studio_status_dot_class(:ok), do: "h-2 w-2 rounded-full bg-emerald-400"
   defp studio_status_dot_class(:good), do: "h-2 w-2 rounded-full bg-emerald-400"
   defp studio_status_dot_class(:weak), do: "h-2 w-2 rounded-full bg-amber-400"
-  defp studio_status_dot_class(:attention), do: "h-2 w-2 rounded-full bg-red-400"
+  defp studio_status_dot_class(:attention), do: "h-2 w-2 rounded-full bg-brand"
   defp studio_status_dot_class(_status), do: "h-2 w-2 rounded-full bg-text-quaternary"
 
-  defp studio_card_class(:attention), do: "border-red-500/25 bg-red-500/[0.06]"
+  defp studio_card_class(:attention), do: "border-brand/25 bg-brand/[0.06]"
   defp studio_card_class(:weak), do: "border-amber-500/25 bg-amber-500/[0.06]"
   defp studio_card_class(_status), do: "border-border bg-surface"
 
   defp instruction_patch_class(:primary), do: "border-brand/30 bg-brand/10"
-  defp instruction_patch_class(:danger), do: "border-red-500/25 bg-red-500/[0.06]"
+  defp instruction_patch_class(:danger), do: "border-brand/25 bg-brand/[0.06]"
   defp instruction_patch_class(_tone), do: "border-border bg-surface"
 
   defp instruction_save_guardrails(studio, latest_revision) do
@@ -1863,7 +1863,7 @@ defmodule CymphoWeb.AgentLive.Show do
     end
   end
 
-  defp instruction_guardrail_class(:attention), do: "border-red-500/25 bg-red-500/[0.06]"
+  defp instruction_guardrail_class(:attention), do: "border-brand/25 bg-brand/[0.06]"
   defp instruction_guardrail_class(:weak), do: "border-amber-500/25 bg-amber-500/[0.06]"
   defp instruction_guardrail_class(_status), do: "border-border bg-surface"
 

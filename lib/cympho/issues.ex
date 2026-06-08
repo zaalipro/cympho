@@ -44,6 +44,27 @@ defmodule Cympho.Issues do
   end
 
   @doc """
+  Keyset (infinite-scroll) page for a pre-filtered issue query.
+
+  Callers (e.g. the My Issues tabs) pass an `Issue` query carrying only their
+  `where` filters — no `order_by`/`limit` — plus `:after` (a cursor) and
+  optional `:limit`. Returns a `Cympho.Pagination.Page` ordered newest-updated
+  first, with `[:assignee, :project, :labels]` preloaded. Keys on
+  `(updated_at, id)`.
+  """
+  def paginate_issues_query(queryable, opts \\ []) do
+    queryable
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:updated_at, :desc}, {:id, :desc}]
+    )
+    |> then(fn page ->
+      %{page | entries: Repo.preload(page.entries, [:assignee, :project, :labels])}
+    end)
+  end
+
+  @doc """
   Look up an issue by its human identifier (e.g. `"LLM-42"`) or by the first
   eight characters of its UUID. Used by the GitHub webhook to auto-link a PR
   when the agent forgot to call `set_pr_url` — the branch convention encodes

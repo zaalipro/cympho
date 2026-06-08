@@ -109,12 +109,11 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   - `:cto` → [:ceo]
   - `:engineer` → [:cto, :ceo]
   """
-  @spec fallback_chain(
-          :ceo | :cto | :product_manager | :designer | :engineer | :release_engineer
-        ) :: [
-          :product_manager | :cto | :ceo | :engineer,
-          ...
-        ]
+  @spec fallback_chain(:ceo | :cto | :product_manager | :designer | :engineer | :release_engineer) ::
+          [
+            :product_manager | :cto | :ceo | :engineer,
+            ...
+          ]
   def fallback_chain(:ceo), do: []
   def fallback_chain(:product_manager), do: [:ceo]
   def fallback_chain(:designer), do: [:product_manager, :ceo]

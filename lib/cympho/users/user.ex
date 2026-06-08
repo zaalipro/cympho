@@ -13,6 +13,7 @@ defmodule Cympho.Users.User do
     field :email_enabled, :boolean, default: true
     field :webhook_enabled, :boolean, default: false
     field :webhook_url, :string
+    field :theme, :string, default: "claude"
 
     belongs_to :company, Cympho.Companies.Company
     has_many :memberships, Cympho.Companies.CompanyMembership
@@ -66,6 +67,16 @@ defmodule Cympho.Users.User do
       :webhook_url
     ])
     |> validate_webhook_url()
+  end
+
+  @doc """
+  Changeset for the user's UI theme only. Validates against the known theme
+  registry so an unknown id can never reach `<html data-theme>`.
+  """
+  def theme_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:theme])
+    |> validate_inclusion(:theme, Cympho.Themes.ids())
   end
 
   defp validate_email(changeset) do

@@ -9,10 +9,10 @@ defmodule CymphoWeb.SkillLive.Index do
 
     {:ok,
      socket
-     |> assign(:skills, [])
      |> assign(:companies, companies)
      |> assign(:selected_company_id, nil)
      |> assign(:selected_project_id, nil)
+     |> assign(:infinite_scroll, %{})
      |> assign(:page_title, "Skills")}
   end
 
@@ -22,12 +22,10 @@ defmodule CymphoWeb.SkillLive.Index do
   end
 
   defp apply_action(socket, :index, _params) do
-    skills = list_skills_for_filters(socket)
-
     socket
     |> assign(:page_title, "Skills")
     |> assign(:skill, nil)
-    |> assign(:skills, skills)
+    |> init_stream(:skill, &fetch_skills(socket, &1))
   end
 
   defp apply_action(socket, nil, params) do
@@ -38,13 +36,17 @@ defmodule CymphoWeb.SkillLive.Index do
   def handle_event("filter_company", %{"company_id" => company_id}, socket) do
     company_id = if company_id == "", do: nil, else: company_id
 
-    skills = list_skills_for_filters(socket, company_id, nil)
+    socket =
+      socket
+      |> assign(:selected_company_id, company_id)
+      |> assign(:selected_project_id, nil)
 
-    {:noreply,
-     socket
-     |> assign(:selected_company_id, company_id)
-     |> assign(:selected_project_id, nil)
-     |> assign(:skills, skills)}
+    {:noreply, reset_stream(socket, :skill, &fetch_skills(socket, &1))}
+  end
+
+  @impl true
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :skill, &fetch_skills(socket, &1))}
   end
 
   @impl true
@@ -53,13 +55,11 @@ defmodule CymphoWeb.SkillLive.Index do
       {:ok, skill} ->
         case Skills.toggle_skill(skill) do
           {:ok, updated_skill} ->
+            updated_skill = Cympho.Repo.preload(updated_skill, [:company, :project])
+
             {:noreply,
              socket
-             |> update(:skills, fn skills ->
-               Enum.map(skills, fn s ->
-                 if s.id == updated_skill.id, do: updated_skill, else: s
-               end)
-             end)
+             |> stream_insert(:skill, updated_skill)
              |> put_flash(
                :info,
                "Skill #{if updated_skill.enabled, do: "enabled", else: "disabled"}"
@@ -82,7 +82,7 @@ defmodule CymphoWeb.SkillLive.Index do
           {:ok, _} ->
             {:noreply,
              socket
-             |> update(:skills, fn skills -> Enum.filter(skills, &(&1.id != id)) end)
+             |> stream_delete(:skill, skill)
              |> put_flash(:info, "Skill deleted successfully")}
 
           {:error, _} ->
@@ -94,10 +94,12 @@ defmodule CymphoWeb.SkillLive.Index do
     end
   end
 
-  defp list_skills_for_filters(socket, company_id \\ nil, project_id \\ nil) do
-    company_id = company_id || socket.assigns[:selected_company_id]
-
-    Skills.list_skills(company_id: company_id, project_id: project_id)
+  defp fetch_skills(socket, cursor) do
+    Skills.list_skills_page(
+      company_id: socket.assigns[:selected_company_id],
+      project_id: socket.assigns[:selected_project_id],
+      after: cursor
+    )
   end
 
   defp fetch_company_skill(socket, id) do

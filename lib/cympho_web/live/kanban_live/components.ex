@@ -16,7 +16,7 @@ defmodule CymphoWeb.KanbanLive.Components do
   def issue_card(assigns) do
     ~H"""
     <div
-      class="kanban-card-enter group min-h-[72px] cursor-grab rounded-lg border border-border bg-surface p-3 shadow-subtle transition-all hover:border-border-hover hover:bg-surface-hover hover:shadow-elevated active:cursor-grabbing"
+      class="kanban-card-enter group min-h-[72px] cursor-grab rounded-xl border border-hairline bg-surface-2 p-3 shadow-card transition-all hover:border-border-hover hover:bg-surface-hover hover:shadow-raised active:cursor-grabbing"
       data-issue-id={@issue.id}
     >
       <div class="flex items-center justify-between gap-2">
@@ -63,7 +63,7 @@ defmodule CymphoWeb.KanbanLive.Components do
           <span class="sr-only">{pluralize(length(@issue.comments), "comment")}</span>
         </span>
         <%= if length(@issue.blocked_by || []) > 0 do %>
-          <span class="text-red-400">
+          <span class="text-brand">
             {length(@issue.blocked_by)} blockers
           </span>
         <% end %>
@@ -118,8 +118,8 @@ defmodule CymphoWeb.KanbanLive.Components do
 
   def empty_column_state(assigns) do
     ~H"""
-    <div class="flex min-h-[108px] flex-col items-center justify-center rounded-lg border border-dashed border-border bg-canvas/40 px-4 py-6 text-center">
-      <div class="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-subtle">
+    <div class="flex min-h-[108px] flex-col items-center justify-center rounded-xl border border-dashed border-hairline bg-canvas/40 px-4 py-6 text-center">
+      <div class="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-subtle">
         {empty_column_icon(@status)}
       </div>
       <p class="text-xs text-text-quaternary">{empty_column_message(@status)}</p>
@@ -182,13 +182,13 @@ defmodule CymphoWeb.KanbanLive.Components do
   def column_accent_class(:todo), do: "border-l-sky-500"
   def column_accent_class(:in_progress), do: "border-l-brand"
   def column_accent_class(:in_review), do: "border-l-amber-500"
-  def column_accent_class(:blocked), do: "border-l-red-500"
+  def column_accent_class(:blocked), do: "border-l-brand"
   def column_accent_class(:done), do: "border-l-emerald-500"
   def column_accent_class(:cancelled), do: "border-l-text-tertiary"
   def column_accent_class(_), do: "border-l-border"
 
-  def priority_class(:critical), do: "bg-red-500/20 text-red-300"
-  def priority_class(:high), do: "bg-red-500/20 text-red-400"
+  def priority_class(:critical), do: "bg-brand/20 text-brand"
+  def priority_class(:high), do: "bg-amber-400/20 text-amber-300"
   def priority_class(:medium), do: "bg-yellow-500/20 text-yellow-400"
   def priority_class(:low), do: "bg-emerald-500/20 text-emerald-400"
   def priority_class(_), do: "bg-surface text-text-quaternary"
@@ -196,13 +196,13 @@ defmodule CymphoWeb.KanbanLive.Components do
   defp heartbeat_dot_color(:idle), do: "bg-emerald-400"
   defp heartbeat_dot_color(:running), do: "bg-yellow-400 animate-pulse"
   defp heartbeat_dot_color(:working), do: "bg-yellow-400 animate-pulse"
-  defp heartbeat_dot_color(:error), do: "bg-red-400"
+  defp heartbeat_dot_color(:error), do: "bg-brand"
   defp heartbeat_dot_color(:paused), do: "bg-text-tertiary"
   defp heartbeat_dot_color(:offline), do: "bg-text-quaternary"
   defp heartbeat_dot_color(_), do: "bg-text-quaternary"
 
   defp status_pin_class(:in_progress), do: "bg-yellow-400 animate-pulse"
-  defp status_pin_class(:blocked), do: "bg-red-400"
+  defp status_pin_class(:blocked), do: "bg-brand"
   defp status_pin_class(:done), do: "bg-emerald-400"
   defp status_pin_class(:cancelled), do: "bg-text-tertiary"
   defp status_pin_class(_), do: "bg-text-quaternary"

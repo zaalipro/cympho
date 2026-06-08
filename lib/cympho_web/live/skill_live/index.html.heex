@@ -3,7 +3,7 @@
     <:actions>
       <.app_link
         navigate={~p"/skills/new"}
-        class="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-accent"
+        class="inline-flex items-center gap-2 rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
       >
         <.icon name="hero-plus" class="h-4 w-4" /> New Skill
       </.app_link>
@@ -14,45 +14,44 @@
     <form phx-change="filter_company" class="grid gap-4 sm:grid-cols-2">
       <div>
         <label class="mb-1.5 block text-xs font-510 text-text-secondary">Company</label>
-        <select
+        <.select_menu
           name="company_id"
-          class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
-        >
-          <option value="">All companies</option>
-          <option
-            :for={company <- @companies}
-            value={company.id}
-            selected={@selected_company_id == company.id}
-          >
-            {company.name}
-          </option>
-        </select>
+          value={@selected_company_id || ""}
+          options={[{"All companies", ""} | Enum.map(@companies, &{&1.name, &1.id})]}
+        />
       </div>
     </form>
   </.panel>
 
   <.panel class="overflow-hidden">
-    <div :if={Enum.empty?(@skills)} class="p-8">
-      <.empty_state
-        title="No skills found"
-        message="Create a skill to expose repeatable capabilities to autonomous agents."
-      >
-        <:icon_slot>
-          <.icon name="hero-sparkles" class="h-5 w-5" />
-        </:icon_slot>
-      </.empty_state>
+    <div class="grid grid-cols-[1fr_140px_120px_48px] gap-4 border-b border-border px-5 py-3 text-xs font-510 uppercase tracking-wide text-text-quaternary">
+      <span>Skill</span>
+      <span>Scope</span>
+      <span>Status</span>
+      <span class="text-right">Actions</span>
     </div>
 
-    <div :if={!Enum.empty?(@skills)} class="divide-y divide-border">
-      <div class="grid grid-cols-[1fr_140px_120px_48px] gap-4 px-5 py-3 text-xs font-510 uppercase tracking-wide text-text-quaternary">
-        <span>Skill</span>
-        <span>Scope</span>
-        <span>Status</span>
-        <span class="text-right">Actions</span>
-      </div>
+    <.infinite_scroll
+      id="skill"
+      has_more={@infinite_scroll[:skill][:has_more?] || false}
+      container_class="divide-y divide-border"
+    >
+      <:empty>
+        <div class="p-8">
+          <.empty_state
+            title="No skills found"
+            message="Create a skill to expose repeatable capabilities to autonomous agents."
+          >
+            <:icon_slot>
+              <.icon name="hero-sparkles" class="h-5 w-5" />
+            </:icon_slot>
+          </.empty_state>
+        </div>
+      </:empty>
 
       <div
-        :for={skill <- @skills}
+        :for={{dom_id, skill} <- @streams.skill}
+        id={dom_id}
         class="grid grid-cols-[1fr_140px_120px_48px] items-center gap-4 px-5 py-4 transition-colors hover:bg-surface-hover/60"
       >
         <.app_link navigate={~p"/skills/#{skill.id}"} class="min-w-0">
@@ -92,6 +91,6 @@
           </.menu_item>
         </.overflow_menu>
       </div>
-    </div>
+    </.infinite_scroll>
   </.panel>
 </.page>

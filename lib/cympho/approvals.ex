@@ -34,6 +34,31 @@ defmodule Cympho.Approvals do
     |> Repo.preload([:requested_by, :issues])
   end
 
+  def list_approvals_page(opts \\ %{}) do
+    query = from(a in Approval)
+
+    query =
+      case Map.get(opts, :status) do
+        nil -> query
+        status -> from(a in query, where: a.status == ^status)
+      end
+
+    query =
+      case Map.get(opts, :company_id) do
+        nil ->
+          query
+
+        company_id ->
+          from(a in query,
+            join: agent in assoc(a, :requested_by),
+            where: agent.company_id == ^company_id
+          )
+      end
+
+    Cympho.Pagination.page(query, after: Map.get(opts, :after))
+    |> then(fn p -> %{p | entries: Repo.preload(p.entries, [:requested_by, :issues])} end)
+  end
+
   def get_approval!(id) do
     Repo.get!(Approval, id)
     |> Repo.preload([:requested_by, :resolved_by, :issues])

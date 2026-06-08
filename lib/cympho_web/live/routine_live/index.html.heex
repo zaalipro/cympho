@@ -3,7 +3,7 @@
     <:actions>
       <.app_link
         navigate={~p"/routines/new"}
-        class="bg-brand hover:bg-accent text-white font-510 text-sm px-4 py-2 min-h-[40px] rounded-lg transition-colors inline-flex items-center gap-2"
+        class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 min-h-[40px] rounded-button transition-colors inline-flex items-center gap-2"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -18,10 +18,33 @@
     </:actions>
   </.header>
 
-  <div class="grid grid-cols-1 gap-3">
+  <.infinite_scroll
+    id="routine"
+    has_more={@infinite_scroll[:routine][:has_more?] || false}
+    container_class="grid grid-cols-1 gap-3"
+  >
+    <:empty>
+      <div class="rounded-xl border border-border bg-surface px-6 py-16 text-center">
+        <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-subtle text-text-tertiary">
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 006.34 4.36M4 15a8 8 0 0013.66 4.64"
+            />
+          </svg>
+        </div>
+        <h2 class="text-sm font-590 text-text-primary">No routines yet</h2>
+        <p class="mt-1 text-sm text-text-tertiary">
+          Create the first routine to schedule autonomous work.
+        </p>
+      </div>
+    </:empty>
+
     <div
-      :for={routine <- @routines}
-      id={"routine-#{routine.id}"}
+      :for={{dom_id, routine} <- @streams.routine}
+      id={dom_id}
       class="rounded-xl border border-border bg-surface p-4 transition-colors hover:border-border-hover hover:bg-surface-hover"
     >
       <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -102,25 +125,5 @@
         </div>
       </div>
     </div>
-  </div>
-
-  <div
-    :if={Enum.empty?(@routines)}
-    class="rounded-xl border border-border bg-surface px-6 py-16 text-center"
-  >
-    <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-subtle text-text-tertiary">
-      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 006.34 4.36M4 15a8 8 0 0013.66 4.64"
-        />
-      </svg>
-    </div>
-    <h2 class="text-sm font-590 text-text-primary">No routines yet</h2>
-    <p class="mt-1 text-sm text-text-tertiary">
-      Create the first routine to schedule autonomous work.
-    </p>
-  </div>
+  </.infinite_scroll>
 </div>

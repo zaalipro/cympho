@@ -578,7 +578,7 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   def density_tab_class(current, density) do
     if current == density do
-      "bg-brand text-white"
+      "bg-brand text-on-primary"
     else
       "text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
     end

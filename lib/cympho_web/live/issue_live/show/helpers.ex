@@ -178,7 +178,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
 
   def run_status_color("completed"), do: "bg-green-400"
   def run_status_color("running"), do: "bg-blue-400 animate-pulse"
-  def run_status_color("failed"), do: "bg-red-400"
+  def run_status_color("failed"), do: "bg-brand"
   def run_status_color("pending"), do: "bg-yellow-400"
   def run_status_color("cancelled"), do: "bg-gray-400"
   def run_status_color(_), do: "bg-gray-400"
@@ -193,8 +193,8 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
   def run_status_tone("completed"), do: "text-green-300"
   def run_status_tone("succeeded"), do: "text-green-300"
   def run_status_tone("running"), do: "text-blue-300"
-  def run_status_tone("failed"), do: "text-red-300"
-  def run_status_tone("timed_out"), do: "text-red-300"
+  def run_status_tone("failed"), do: "text-brand"
+  def run_status_tone("timed_out"), do: "text-brand"
   def run_status_tone("pending"), do: "text-yellow-300"
   def run_status_tone("queued"), do: "text-yellow-300"
   def run_status_tone(_), do: "text-text-tertiary"
@@ -208,7 +208,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
   end
 
   def trace_status_color("success"), do: "bg-green-400"
-  def trace_status_color("error"), do: "bg-red-400"
+  def trace_status_color("error"), do: "bg-brand"
   def trace_status_color("timeout"), do: "bg-amber-400"
   def trace_status_color("pending"), do: "bg-yellow-400"
   def trace_status_color(_), do: "bg-gray-400"
@@ -235,7 +235,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     do: "border-amber-500/30 bg-amber-500/10 text-amber-200"
 
   def adapter_error_badge_class(:auth_failed),
-    do: "border-red-500/30 bg-red-500/10 text-red-200"
+    do: "border-brand/30 bg-brand/10 text-brand"
 
   def adapter_error_badge_class(:timeout),
     do: "border-yellow-500/30 bg-yellow-500/10 text-yellow-200"
@@ -247,7 +247,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     do: "border-border bg-surface text-text-tertiary"
 
   def adapter_error_badge_class(:nonzero_exit),
-    do: "border-red-500/30 bg-red-500/10 text-red-200"
+    do: "border-brand/30 bg-brand/10 text-brand"
 
   def adapter_error_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
@@ -274,8 +274,8 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     end)
   end
 
-  def priority_dot(:critical), do: "bg-red-500"
-  def priority_dot(:high), do: "bg-red-500"
+  def priority_dot(:critical), do: "bg-brand"
+  def priority_dot(:high), do: "bg-amber-400"
   def priority_dot(:medium), do: "bg-amber-500"
   def priority_dot(:low), do: "bg-ink-tertiary"
   def priority_dot(_), do: "bg-ink-tertiary"
@@ -910,7 +910,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
   end
 
   def child_health_state_class(:blocked) do
-    "shrink-0 rounded-full border border-red-500/25 bg-red-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-red-300"
+    "shrink-0 rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[10px] font-510 uppercase text-brand"
   end
 
   def child_health_state_class(:closed) do
@@ -1351,7 +1351,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     case IssueDigest.comment_category(comment) do
       :owner_update -> "border-brand/25 bg-brand/10 text-brand"
       :decision -> "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-      :blocked -> "border-red-500/25 bg-red-500/10 text-red-300"
+      :blocked -> "border-brand/25 bg-brand/10 text-brand"
       :handoff -> "border-blue-500/25 bg-blue-500/10 text-blue-300"
       :review -> "border-amber-500/25 bg-amber-500/10 text-amber-300"
       :delivery -> "border-cyan-500/25 bg-cyan-500/10 text-cyan-300"
@@ -1671,7 +1671,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
   end
 
   def next_owner_status_class(:blocked) do
-    "rounded-full border border-red-500/25 bg-red-500/10 px-2 py-0.5 text-[11px] font-510 text-red-300"
+    "rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[11px] font-510 text-brand"
   end
 
   def next_owner_status_class(:ready) do

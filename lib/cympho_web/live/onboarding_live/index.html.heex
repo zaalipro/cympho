@@ -160,7 +160,7 @@
         </div>
         <button
           type="submit"
-          class="w-full rounded-lg bg-brand px-4 py-2.5 text-sm font-510 text-white hover:bg-accent-hover transition-colors"
+          class="w-full rounded-button bg-brand px-4 py-2.5 text-sm font-510 text-on-primary hover:bg-accent-hover transition-colors"
         >
           Create autonomous company
         </button>
@@ -283,7 +283,7 @@
           </.app_link>
           <.app_link
             navigate={~p"/issues"}
-            class="flex-1 text-center bg-brand hover:bg-accent text-white font-590 text-sm px-4 py-2.5 rounded-lg transition-colors"
+            class="flex-1 text-center bg-brand hover:bg-accent text-on-primary font-590 text-sm px-4 py-2.5 rounded-button transition-colors"
           >
             Go to Issues
           </.app_link>
@@ -314,7 +314,7 @@
         <button
           type="button"
           phx-click="next_step"
-          class="bg-brand hover:bg-accent text-white font-510 text-sm px-5 py-2.5 rounded-lg transition-colors min-h-[44px]"
+          class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-5 py-2.5 rounded-button transition-colors min-h-[44px]"
         >
           {if @current_step == length(@steps) - 1 do
             "Get Started"

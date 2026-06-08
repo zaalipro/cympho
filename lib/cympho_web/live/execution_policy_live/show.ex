@@ -9,7 +9,7 @@ defmodule CymphoWeb.ExecutionPolicyLive.Show do
         {:ok, assign(socket, execution_policy: policy)}
 
       {:error, :not_found} ->
-        {:ok, push_navigate(socket, to: ~p"/execution-policies")}
+        {:ok, push_navigate(socket, to: ~p"/settings/policies")}
     end
   end
 
@@ -26,7 +26,7 @@ defmodule CymphoWeb.ExecutionPolicyLive.Show do
         {:noreply,
          socket
          |> put_flash(:error, "Execution policy not found")
-         |> push_navigate(to: ~p"/execution-policies")}
+         |> push_navigate(to: ~p"/settings/policies")}
     end
   end
 end

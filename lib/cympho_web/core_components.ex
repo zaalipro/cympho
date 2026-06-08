@@ -16,7 +16,7 @@ defmodule CymphoWeb.CoreComponents do
       class={"fixed inset-0 z-50 flex items-center justify-center #{if @show, do: "", else: "hidden"}"}
     >
       <div class="fixed inset-0 bg-black/30" phx-click={@on_cancel} />
-      <div class="relative bg-panel border border-border rounded-lg shadow-dialog p-6 max-w-lg w-full mx-4 z-10">
+      <div class="relative bg-panel border border-border rounded-2xl shadow-dialog p-6 max-w-lg w-full mx-4 z-10">
         <h2 :if={@title} class="text-card-title text-text-primary mb-4">{@title}</h2>
         {render_slot(@inner_block)}
         <div :if={@footer != []} class="mt-4">

@@ -1,68 +1,44 @@
 <div class="p-6 lg:p-8 max-w-6xl mx-auto">
-  <.header title={@page_title}>
-    <:actions>
-      <span class="text-xs text-text-quaternary">{@pagination.total} event(s)</span>
-    </:actions>
-  </.header>
+  <.header title={@page_title} />
   
 <!-- Filters -->
   <div class="space-y-3 mb-4">
     <div class="flex items-center gap-3 flex-wrap">
       <form phx-change="filter" phx-submit="prevent">
-        <select
+        <.select_menu
           name="filter_action"
-          class="bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-1.5"
-        >
-          <option value="">All Actions</option>
-          <option value="created" selected={@filter_action == "created"}>Created</option>
-          <option value="title_changed" selected={@filter_action == "title_changed"}>
-            Title Changed
-          </option>
-          <option value="description_changed" selected={@filter_action == "description_changed"}>
-            Description Changed
-          </option>
-          <option value="status_changed" selected={@filter_action == "status_changed"}>
-            Status Changed
-          </option>
-          <option value="assigned" selected={@filter_action == "assigned"}>Assigned</option>
-          <option value="unassigned" selected={@filter_action == "unassigned"}>Unassigned</option>
-          <option value="blocker_added" selected={@filter_action == "blocker_added"}>
-            Blocker Added
-          </option>
-          <option value="blocker_removed" selected={@filter_action == "blocker_removed"}>
-            Blocker Removed
-          </option>
-          <option value="comment_added" selected={@filter_action == "comment_added"}>
-            Comment Added
-          </option>
-          <option value="approval_created" selected={@filter_action == "approval_created"}>
-            Approval Created
-          </option>
-          <option value="approval_resolved" selected={@filter_action == "approval_resolved"}>
-            Approval Resolved
-          </option>
-          <option value="heartbeat_started" selected={@filter_action == "heartbeat_started"}>
-            Heartbeat Started
-          </option>
-          <option value="heartbeat_completed" selected={@filter_action == "heartbeat_completed"}>
-            Heartbeat Completed
-          </option>
-          <option value="heartbeat_failed" selected={@filter_action == "heartbeat_failed"}>
-            Heartbeat Failed
-          </option>
-        </select>
+          value={@filter_action || ""}
+          options={[
+            {"All Actions", ""},
+            {"Created", "created"},
+            {"Title Changed", "title_changed"},
+            {"Description Changed", "description_changed"},
+            {"Status Changed", "status_changed"},
+            {"Assigned", "assigned"},
+            {"Unassigned", "unassigned"},
+            {"Blocker Added", "blocker_added"},
+            {"Blocker Removed", "blocker_removed"},
+            {"Comment Added", "comment_added"},
+            {"Approval Created", "approval_created"},
+            {"Approval Resolved", "approval_resolved"},
+            {"Heartbeat Started", "heartbeat_started"},
+            {"Heartbeat Completed", "heartbeat_completed"},
+            {"Heartbeat Failed", "heartbeat_failed"}
+          ]}
+        />
       </form>
 
       <form phx-change="filter" phx-submit="prevent">
-        <select
+        <.select_menu
           name="filter_actor_type"
-          class="bg-surface border border-border text-text-secondary text-sm rounded-lg px-3 py-1.5"
-        >
-          <option value="">All Actors</option>
-          <option value="agent" selected={@filter_actor_type == "agent"}>Agents</option>
-          <option value="user" selected={@filter_actor_type == "user"}>Users</option>
-          <option value="system" selected={@filter_actor_type == "system"}>System</option>
-        </select>
+          value={@filter_actor_type || ""}
+          options={[
+            {"All Actors", ""},
+            {"Agents", "agent"},
+            {"Users", "user"},
+            {"System", "system"}
+          ]}
+        />
       </form>
 
       <button
@@ -77,28 +53,35 @@
   </div>
   
 <!-- Activities List -->
-  <div :if={@activities == []} class="flex flex-col items-center justify-center py-20 text-center">
-    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
-      <svg
-        class="w-6 h-6 text-text-tertiary"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-        />
-      </svg>
-    </div>
-    <p class="text-sm text-text-tertiary">No activity found.</p>
-  </div>
+  <.infinite_scroll
+    id="activity"
+    has_more={@infinite_scroll[:activities][:has_more?] || false}
+    container_class="space-y-2"
+  >
+    <:empty>
+      <div class="flex flex-col items-center justify-center py-20 text-center">
+        <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
+          <svg
+            class="w-6 h-6 text-text-tertiary"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+            />
+          </svg>
+        </div>
+        <p class="text-sm text-text-tertiary">No activity found.</p>
+      </div>
+    </:empty>
 
-  <div :if={@activities != []} class="space-y-2">
     <div
-      :for={activity <- @activities}
+      :for={{dom_id, activity} <- @streams.activities}
+      id={dom_id}
       class="group flex items-start gap-4 p-3 rounded-lg hover:bg-surface-hover transition-colors border border-transparent hover:border-border"
     >
       <!-- Icon -->
@@ -144,42 +127,5 @@
         </div>
       </div>
     </div>
-  </div>
-  
-<!-- Pagination -->
-  <div
-    :if={@pagination.total > 0}
-    class="flex items-center justify-between mt-6 pt-4 border-t border-border"
-  >
-    <div class="text-xs text-text-quaternary">
-      Showing {@pagination.offset + 1}-{min(
-        @pagination.offset + @pagination.limit,
-        @pagination.total
-      )} of {@pagination.total}
-    </div>
-
-    <div class="flex items-center gap-2">
-      <button
-        type="button"
-        phx-click="load_prev"
-        disabled={!has_prev_pages?(@pagination)}
-        class="px-3 py-1.5 text-xs rounded-lg bg-surface text-text-secondary disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-hover transition-colors"
-      >
-        Previous
-      </button>
-
-      <span class="text-xs text-text-quaternary">
-        Page {@pagination.page} of {@pagination.total_pages}
-      </span>
-
-      <button
-        type="button"
-        phx-click="load_more"
-        disabled={!has_more_pages?(@pagination)}
-        class="px-3 py-1.5 text-xs rounded-lg bg-surface text-text-secondary disabled:opacity-50 disabled:cursor-not-allowed hover:bg-surface-hover transition-colors"
-      >
-        Next
-      </button>
-    </div>
-  </div>
+  </.infinite_scroll>
 </div>

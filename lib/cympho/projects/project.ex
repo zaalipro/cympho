@@ -55,7 +55,7 @@ defmodule Cympho.Projects.Project do
         if String.match?(hex, ~r/^#[0-9a-fA-F]{6}$/) do
           put_change(changeset, :color, String.downcase(hex))
         else
-          add_error(changeset, :color, "must be a 6-digit hex like #5e6ad2")
+          add_error(changeset, :color, "must be a 6-digit hex like #D97757")
         end
     end
   end

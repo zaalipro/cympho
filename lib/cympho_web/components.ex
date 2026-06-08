@@ -1,6 +1,10 @@
 defmodule CymphoWeb.Components do
   use Phoenix.Component
 
+  # date_picker/time_picker/datetime_picker live in their own module; input/1
+  # delegates to them, so they must be in scope here (not just in templates).
+  import CymphoWeb.Components.DatePicker
+
   attr :size, :string, default: "wide"
   attr :class, :any, default: nil
   attr :rest, :global
@@ -18,6 +22,7 @@ defmodule CymphoWeb.Components do
 
   attr :title, :string, default: nil
   attr :subtitle, :string, default: nil
+  attr :spark, :boolean, default: false
   attr :rest, :global
   slot :inner_block
   slot :actions
@@ -26,8 +31,9 @@ defmodule CymphoWeb.Components do
     ~H"""
     <header class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between" {@rest}>
       <div class="min-w-0">
-        <h1 :if={@title} class="text-headline text-text-primary">
-          {@title}
+        <h1 :if={@title} class="flex items-center gap-2 text-headline text-text-primary">
+          <.spark :if={@spark} class="h-[0.85em] w-[0.85em] text-brand" />
+          <span class="min-w-0 truncate">{@title}</span>
         </h1>
         <p :if={@subtitle} class="mt-1 max-w-2xl text-body-sm text-text-tertiary">
           {@subtitle}
@@ -41,13 +47,119 @@ defmodule CymphoWeb.Components do
     """
   end
 
+  @doc """
+  A small 4-point terracotta "spark" glyph — Cympho's nod to Claude's warm
+  accent motif. Decorative only (`aria-hidden`); deliberately a plain
+  sparkle, not Claude's multi-spoke sunburst, and never used as the product
+  logo. Pass size/color via `class` (defaults to `h-4 w-4 text-brand`).
+  """
+  attr :class, :any, default: "h-4 w-4 text-brand"
+
+  def spark(assigns) do
+    ~H"""
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      class={["shrink-0", @class]}
+      aria-hidden="true"
+    >
+      <path d="M12 2 L13.8 10.2 L22 12 L13.8 13.8 L12 22 L10.2 13.8 L2 12 L10.2 10.2 Z" />
+    </svg>
+    """
+  end
+
+  @doc """
+  A streamed, infinite-scrolling list wrapper.
+
+  The caller renders each item in the default slot by iterating `@streams.<key>`
+  and setting `id={dom_id}` — this component never templates the items. Pairs with
+  the `InfiniteScroll` JS hook and the `CymphoWeb.InfiniteScroll` helpers.
+
+      <.infinite_scroll id="activity" has_more={@infinite_scroll[:activities].has_more?}>
+        <:empty>Nothing here yet.</:empty>
+        <div :for={{dom_id, a} <- @streams.activities} id={dom_id}>...</div>
+      </.infinite_scroll>
+
+  For `<table>` lists put `phx-update="stream"` on the `<tbody>` yourself and use
+  `infinite_scroll_footer/1` after the table instead.
+  """
+  attr :id, :string, required: true, doc: "stable DOM id prefix for the container + sentinel"
+  attr :has_more, :boolean, required: true
+  attr :event, :string, default: "next-page"
+  attr :target, :any, default: nil, doc: "optional phx-target for the next-page event"
+  attr :root_margin, :string, default: "500px 0px"
+  attr :end_label, :string, default: nil, doc: "optional caption shown once the list is exhausted"
+  attr :container_class, :any, default: nil
+  attr :rest, :global
+  slot :inner_block, required: true
+  slot :empty
+
+  def infinite_scroll(assigns) do
+    ~H"""
+    <div id={"#{@id}-list"} phx-update="stream" class={@container_class} {@rest}>
+      <div :if={@empty != []} id={"#{@id}-empty"} class="only:block hidden">
+        {render_slot(@empty)}
+      </div>
+      {render_slot(@inner_block)}
+    </div>
+    <.infinite_scroll_footer
+      id={@id}
+      has_more={@has_more}
+      event={@event}
+      target={@target}
+      root_margin={@root_margin}
+      end_label={@end_label}
+    />
+    """
+  end
+
+  @doc """
+  The sentinel + loading spinner (and optional end caption) for an infinite list.
+
+  Use directly after a `<table>` whose `<tbody>` carries `phx-update="stream"`;
+  `infinite_scroll/1` renders it for the non-table case.
+  """
+  attr :id, :string, required: true
+  attr :has_more, :boolean, required: true
+  attr :event, :string, default: "next-page"
+  attr :target, :any, default: nil
+  attr :root_margin, :string, default: "500px 0px"
+  attr :end_label, :string, default: nil
+
+  def infinite_scroll_footer(assigns) do
+    ~H"""
+    <div
+      :if={@has_more}
+      id={"#{@id}-sentinel"}
+      phx-hook="InfiniteScroll"
+      data-event={@event}
+      data-has-more="true"
+      data-root-margin={@root_margin}
+      data-target={@target}
+      class="flex items-center justify-center py-6 text-text-tertiary"
+    >
+      <svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
+      </svg>
+      <span class="sr-only">Loading more…</span>
+    </div>
+    <p
+      :if={not @has_more and @end_label}
+      class="py-6 text-center text-xs text-text-tertiary"
+    >
+      {@end_label}
+    </p>
+    """
+  end
+
   attr :class, :any, default: nil
   attr :rest, :global
   slot :inner_block, required: true
 
   def panel(assigns) do
     ~H"""
-    <section class={["rounded-lg border border-border bg-panel shadow-card", @class]} {@rest}>
+    <section class={["rounded-xl border border-border bg-panel shadow-card", @class]} {@rest}>
       {render_slot(@inner_block)}
     </section>
     """
@@ -62,7 +174,7 @@ defmodule CymphoWeb.Components do
 
   def metric(assigns) do
     ~H"""
-    <div class={["rounded-lg border border-border bg-panel px-4 py-3 shadow-card", @class]} {@rest}>
+    <div class={["rounded-xl border border-border bg-panel px-4 py-3 shadow-card", @class]} {@rest}>
       <p class="text-eyebrow uppercase text-text-quaternary">
         {@label}
       </p>
@@ -82,11 +194,11 @@ defmodule CymphoWeb.Components do
   def empty_state(assigns) do
     ~H"""
     <div class={["flex flex-col items-center justify-center px-6 py-16 text-center", @class]}>
-      <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface text-text-tertiary">
+      <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-surface text-text-tertiary">
         <%= if @icon_slot != [] || @icon do %>
           {render_slot(@icon_slot)}
         <% else %>
-          <.empty_state_icon icon="default" />
+          <.spark class="h-5 w-5 text-brand" />
         <% end %>
       </div>
       <p class="text-sm font-590 text-text-primary">{@title}</p>
@@ -194,7 +306,7 @@ defmodule CymphoWeb.Components do
         </svg>
       </summary>
       <div class={[
-        "linear-menu-panel absolute z-30 mt-2 min-w-44 rounded-lg border border-border bg-panel p-1 shadow-dialog",
+        "linear-menu-panel absolute z-30 mt-2 min-w-44 rounded-xl border border-border bg-panel p-1 shadow-dialog",
         menu_align(@align)
       ]}>
         {render_slot(@inner_block)}
@@ -291,7 +403,7 @@ defmodule CymphoWeb.Components do
 
   defp pending_wake_tone(age) do
     cond do
-      age >= 600 -> "border-red-500/35 bg-red-500/10 text-red-300"
+      age >= 600 -> "border-brand/35 bg-brand/10 text-brand"
       age >= 120 -> "border-amber-500/35 bg-amber-500/10 text-amber-300"
       true -> "border-border bg-surface/60 text-text-tertiary"
     end
@@ -387,35 +499,57 @@ defmodule CymphoWeb.Components do
         aria-describedby={@has_errors && @error_id}
         aria-invalid={@has_errors}
         class={[
-          "w-full bg-surface border rounded-lg px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors",
+          "w-full bg-surface border rounded-xl px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors",
           input_border_class(@errors)
         ]}
         {@rest}
       ><%= input_value(@field, @value) %></textarea>
-      <select
+      <.select_menu
         :if={@type == "select"}
         id={input_id(@field, @id)}
         name={input_name(@field, @name)}
-        required={@required}
+        value={input_value(@field, @value)}
+        options={select_options(@options)}
         disabled={@disabled}
-        aria-describedby={@has_errors && @error_id}
-        aria-invalid={@has_errors}
-        class={[
-          "w-full bg-surface border rounded-lg px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors",
-          input_border_class(@errors)
-        ]}
+        invalid={@has_errors}
         {@rest}
-      >
-        <option
-          :for={{label, value} <- select_options(@options)}
-          value={value}
-          selected={to_string(input_value(@field, @value)) == to_string(value)}
-        >
-          {label}
-        </option>
-      </select>
+      />
+      <.date_picker
+        :if={@type == "date"}
+        id={input_id(@field, @id)}
+        name={input_name(@field, @name)}
+        value={input_value(@field, @value)}
+        disabled={@disabled}
+        required={@required}
+        invalid={@has_errors}
+        min={@min}
+        max={@max}
+        {@rest}
+      />
+      <.time_picker
+        :if={@type == "time"}
+        id={input_id(@field, @id)}
+        name={input_name(@field, @name)}
+        value={input_value(@field, @value)}
+        disabled={@disabled}
+        required={@required}
+        invalid={@has_errors}
+        {@rest}
+      />
+      <.datetime_picker
+        :if={@type == "datetime-local"}
+        id={input_id(@field, @id)}
+        name={input_name(@field, @name)}
+        value={input_value(@field, @value)}
+        disabled={@disabled}
+        required={@required}
+        invalid={@has_errors}
+        min={@min}
+        max={@max}
+        {@rest}
+      />
       <input
-        :if={@type not in ["textarea", "select"]}
+        :if={@type not in ["textarea", "select", "date", "time", "datetime-local"]}
         id={input_id(@field, @id)}
         type={@type}
         name={input_name(@field, @name)}
@@ -425,7 +559,7 @@ defmodule CymphoWeb.Components do
         aria-describedby={@has_errors && @error_id}
         aria-invalid={@has_errors}
         class={[
-          "w-full bg-surface border rounded-lg px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors",
+          "w-full bg-surface border rounded-xl px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors",
           input_border_class(@errors)
         ]}
         {@rest}
@@ -450,7 +584,7 @@ defmodule CymphoWeb.Components do
       type={@type}
       disabled={@disabled}
       class={[
-        "inline-flex items-center justify-center gap-2 font-medium transition-colors rounded-lg btn-press",
+        "inline-flex items-center justify-center gap-2 font-medium transition-colors rounded-button btn-press",
         button_variant(@variant),
         button_size(@size),
         @disabled && "cursor-not-allowed opacity-50"
@@ -469,25 +603,135 @@ defmodule CymphoWeb.Components do
   attr :required, :boolean, default: false
   attr :rest, :global
 
+  @doc """
+  Labeled form select — a thin wrapper around `select_menu/1` so existing
+  call sites keep working while gaining the styled, theme-matched dropdown.
+  """
   def select(assigns) do
     ~H"""
     <div class="space-y-1.5">
       <label class="block text-xs font-510 text-text-secondary">{@label}</label>
-      <select
-        name={@name}
-        class="w-full bg-surface border border-border rounded-lg px-3.5 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors appearance-none"
-        {@rest}
-      >
-        <option
-          :for={{label, value} <- Enum.map(@options, fn {k, v} -> {to_string(k), v} end)}
-          value={value}
-          selected={@value == value}
-        >
-          {label}
-        </option>
-      </select>
+      <.select_menu name={@name} value={@value} options={@options} {@rest} />
     </div>
     """
+  end
+
+  attr :name, :string, required: true
+  attr :value, :any, default: nil
+  attr :options, :list, required: true, doc: "[{label, value}] | [%{label, value|id}] | [value]"
+  attr :placeholder, :string, default: "Select…"
+  attr :id, :string, default: nil
+  attr :disabled, :boolean, default: false
+  attr :invalid, :boolean, default: false
+  attr :class, :any, default: nil
+  attr :rest, :global
+
+  @doc """
+  Styled, theme-matched replacement for a native `<select>`. Backed by a hidden
+  input (so it posts with plain forms) and a document-delegated JS controller
+  (assets/js/app.js) that handles open/close, keyboard nav and type-ahead, and
+  dispatches native `input`/`change` events so LiveView `phx-change` forms react.
+  """
+  def select_menu(assigns) do
+    options = normalize_select_options(assigns.options)
+    value = if is_nil(assigns.value), do: nil, else: to_string(assigns.value)
+
+    assigns =
+      assigns
+      |> assign(:options, options)
+      |> assign(:value, value)
+      |> assign(:selected_label, select_menu_label(options, value))
+
+    ~H"""
+    <div data-select-menu data-disabled={to_string(@disabled)} class={["relative", @class]}>
+      <%!-- Real <select> is the value vehicle: it posts with the form, is keyboard/
+            screen-reader and LiveViewTest drivable, and the document-delegated JS in
+            app.js mirrors picks from the styled popover below back onto it. --%>
+      <select
+        id={@id}
+        name={@name}
+        data-select-native
+        disabled={@disabled}
+        tabindex="-1"
+        aria-hidden="true"
+        class="sr-only"
+        {@rest}
+      >
+        <option :for={{label, val} <- @options} value={val} selected={val == @value}>{label}</option>
+      </select>
+      <button
+        type="button"
+        data-select-trigger
+        disabled={@disabled}
+        aria-haspopup="listbox"
+        aria-expanded="false"
+        class={[
+          "flex w-full items-center gap-2 h-9 px-2.5 rounded-input text-left",
+          "bg-surface border text-caption text-ink transition-colors duration-100",
+          "focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed",
+          (@invalid && "border-error focus:ring-error/40 focus:border-error") ||
+            "border-hairline hover:border-hairline-strong focus:ring-primary/40 focus:border-primary"
+        ]}
+      >
+        <span
+          data-select-display
+          class={["min-w-0 flex-1 truncate", is_nil(@selected_label) && "text-ink-tertiary"]}
+        >
+          {@selected_label || @placeholder}
+        </span>
+        <span class="hero-chevron-down-mini w-3.5 h-3.5 shrink-0 text-ink-tertiary" />
+      </button>
+
+      <div
+        data-select-popover
+        role="listbox"
+        class={[
+          "hidden absolute left-0 top-full z-50 w-full min-w-[9rem]",
+          "rounded-lg bg-surface-2 border border-hairline shadow-elevated overflow-hidden"
+        ]}
+      >
+        <ul data-select-list class="max-h-60 overflow-y-auto py-1">
+          <li
+            :for={{label, val} <- @options}
+            data-select-option
+            data-select-option-value={val}
+            data-select-option-label={label}
+            data-select-selected={to_string(val == @value)}
+            role="option"
+            aria-selected={to_string(val == @value)}
+            class={[
+              "flex items-center gap-2 mx-1 px-2.5 h-8 rounded-sm cursor-pointer select-none",
+              "text-caption text-ink hover:bg-surface-3 data-[select-active=true]:bg-surface-3"
+            ]}
+          >
+            <span class="min-w-0 flex-1 truncate">{label}</span>
+            <span
+              data-select-check
+              class={["hero-check-mini w-4 h-4 shrink-0 text-primary", val != @value && "invisible"]}
+            />
+          </li>
+        </ul>
+      </div>
+    </div>
+    """
+  end
+
+  defp normalize_select_options(options) do
+    Enum.map(options, fn
+      {label, value} -> {to_string(label), to_string(value)}
+      %{label: label, value: value} -> {to_string(label), to_string(value)}
+      %{label: label, id: id} -> {to_string(label), to_string(id)}
+      value -> {to_string(value), to_string(value)}
+    end)
+  end
+
+  defp select_menu_label(_options, nil), do: nil
+
+  defp select_menu_label(options, value) do
+    case Enum.find(options, fn {_label, val} -> val == value end) do
+      {label, _val} -> label
+      _ -> nil
+    end
   end
 
   defp input_name(_field, name) when is_binary(name), do: name
@@ -508,14 +752,13 @@ defmodule CymphoWeb.Components do
   end
 
   defp button_variant("primary"),
-    do:
-      "bg-brand text-white bg-gradient-to-b from-white/[0.10] to-transparent shadow-[inset_0_1px_0_0_rgba(255,255,255,0.18)] hover:bg-accent-hover"
+    do: "bg-brand text-on-primary font-590 hover:bg-accent-hover"
 
   defp button_variant("secondary"),
     do: "bg-button text-text-primary border border-border hover:bg-button-hover"
 
   defp button_variant("ghost"), do: "text-text-secondary hover:bg-surface-hover"
-  defp button_variant("danger"), do: "bg-error text-white hover:bg-red-600"
+  defp button_variant("danger"), do: "bg-error text-canvas hover:bg-red-600"
 
   defp button_variant(_),
     do: "bg-button text-text-primary border border-border hover:bg-button-hover"
@@ -572,7 +815,7 @@ defmodule CymphoWeb.Components do
   defp metric_tone("brand"), do: "text-brand"
   defp metric_tone("success"), do: "text-success"
   defp metric_tone("warning"), do: "text-amber-300"
-  defp metric_tone("danger"), do: "text-red-300"
+  defp metric_tone("danger"), do: "text-brand"
   defp metric_tone(_), do: "text-text-primary"
 
   defp menu_align("left"), do: "left-0"

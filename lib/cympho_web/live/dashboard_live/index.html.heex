@@ -1,69 +1,61 @@
 <.page size="wide">
   <div class="relative z-10">
     <%!-- ============================================================
-         Hero — title sits over a brand-tinted radial backdrop. The
-         status line replaces the original pair of pill badges with a
-         mission-control rhythm: animated pulse dot · mode · operating.
+         Hero — calm flat greeting on the warm canvas (Claude-style).
+         The status line keeps the mission-control rhythm: animated
+         pulse dot · autonomy · operating mode.
          ============================================================ --%>
-    <div class="relative mb-5 overflow-hidden rounded-xl border border-border bg-panel/40">
-      <div
-        class="pointer-events-none absolute inset-0"
-        style="background: radial-gradient(ellipse 720px 280px at 0% 0%, rgba(94,106,210,0.12), transparent 55%), radial-gradient(ellipse 480px 240px at 100% 100%, rgba(94,106,210,0.06), transparent 60%);"
-      >
-      </div>
-      <div class="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand/50 to-transparent">
-      </div>
-
-      <div class="relative px-5 py-5 sm:px-6">
-        <.header>
-          <div class="min-w-0">
-            <div class="flex items-center gap-2 text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-              <span
-                class={[
-                  "cympho-pulse-dot inline-block h-2 w-2 rounded-full",
-                  autonomy_dot_color(@autonomy_status)
-                ]}
-                style={"--cympho-pulse-color: #{autonomy_pulse_color(@autonomy_status)};"}
-              >
-              </span>
-              <span class="text-text-tertiary">Autonomous company</span>
-              <span class="text-text-quaternary/60">·</span>
-              <span class={[autonomy_text_class(@autonomy_status)]}>
-                {status_label(@autonomy_status)}
-              </span>
-              <span class="text-text-quaternary/60">·</span>
-              <span class={[mode_text_class(@operating_mode)]}>
-                {status_label(@operating_mode)}
-              </span>
-            </div>
-            <h1 class="mt-2 text-headline text-text-primary">Command Center</h1>
-            <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
-              Decide what the company should do next, then watch agents execute it.
-            </p>
-          </div>
-          <:actions>
-            <.overflow_menu label="Company controls">
-              <.menu_item
-                :if={@company && @autonomy_status == :active}
-                phx-click="pause_company"
-                data-confirm="Pause autonomous execution for this company?"
-              >
-                Pause autonomy
-              </.menu_item>
-              <.menu_item :if={@company && @autonomy_status == :paused} phx-click="resume_company">
-                Resume autonomy
-              </.menu_item>
-              <.menu_item navigate={~p"/onboarding"}>Start company setup</.menu_item>
-            </.overflow_menu>
-            <.app_link
-              navigate={~p"/kanban"}
-              class="rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white shadow-[0_8px_24px_-12px_rgba(94,106,210,0.7)] hover:bg-accent-hover"
+    <div class="mb-8 px-1">
+      <.header>
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 text-[11px] font-510 tracking-[0.08em] text-text-quaternary">
+            <span
+              class={[
+                "cympho-pulse-dot inline-block h-2 w-2 rounded-full",
+                autonomy_dot_color(@autonomy_status)
+              ]}
+              style={"--cympho-pulse-color: #{autonomy_pulse_color(@autonomy_status)};"}
             >
-              Open board
-            </.app_link>
-          </:actions>
-        </.header>
-      </div>
+            </span>
+            <span class="text-text-tertiary">Autonomous company</span>
+            <span class="text-text-quaternary/60">·</span>
+            <span class={[autonomy_text_class(@autonomy_status)]}>
+              {status_label(@autonomy_status)}
+            </span>
+            <span class="text-text-quaternary/60">·</span>
+            <span class={[mode_text_class(@operating_mode)]}>
+              {status_label(@operating_mode)}
+            </span>
+          </div>
+          <h1 class="mt-3 flex items-center gap-2.5 font-serif text-headline text-text-primary">
+            <.spark class="h-[0.8em] w-[0.8em] text-brand" /> What's up next?
+          </h1>
+          <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
+            Decide what the company should do next, then watch agents execute it.
+          </p>
+        </div>
+        <:actions>
+          <.overflow_menu label="Company controls">
+            <.menu_item
+              :if={@company && @autonomy_status == :active}
+              phx-click="pause_company"
+              data-confirm="Pause autonomous execution for this company?"
+            >
+              Pause autonomy
+            </.menu_item>
+            <.menu_item :if={@company && @autonomy_status == :paused} phx-click="resume_company">
+              Resume autonomy
+            </.menu_item>
+            <.menu_item navigate={~p"/onboarding"}>Start company setup</.menu_item>
+          </.overflow_menu>
+          <.app_link
+            navigate={~p"/kanban"}
+            class="rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary shadow-card hover:bg-accent-hover"
+          >
+            Open board
+          </.app_link>
+        </:actions>
+      </.header>
     </div>
 
     <%!-- ============================================================
@@ -71,7 +63,7 @@
          so descriptions stop truncating. Right column hosts the
          radial pressure gauge (replaces the old 1.5px flat bar).
          ============================================================ --%>
-    <div class="mb-4 grid grid-cols-1 gap-3 rounded-xl border border-border bg-panel p-5 shadow-elevated xl:grid-cols-[minmax(220px,0.85fr)_minmax(0,1.75fr)_minmax(280px,0.95fr)] xl:gap-5">
+    <div class="mb-4 grid grid-cols-1 gap-3 rounded-2xl border border-hairline bg-surface-1 p-5 shadow-card xl:grid-cols-[minmax(220px,0.85fr)_minmax(0,1.75fr)_minmax(280px,0.95fr)] xl:gap-5">
       <section class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
           <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
@@ -189,7 +181,7 @@
          Execution Health — tone-keyed tiles with gradient atmosphere,
          monospace display-md numbers, hero-icon accents.
          ============================================================ --%>
-    <div class="mb-5 rounded-xl border border-border bg-panel/60 p-4 shadow-elevated">
+    <div class="mb-5 rounded-2xl border border-hairline bg-surface-1 p-4 shadow-card">
       <div class="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
@@ -235,7 +227,7 @@
          Work Metrics — single instrument band. Five inline columns
          with vertical dividers. Monospace numerals + sparklines.
          ============================================================ --%>
-    <div class="mb-5 grid grid-cols-2 divide-y divide-border overflow-hidden rounded-xl border border-border bg-panel sm:grid-cols-3 sm:divide-y-0 sm:divide-x lg:grid-cols-5">
+    <div class="mb-5 grid grid-cols-2 divide-y divide-border overflow-hidden rounded-2xl border border-hairline bg-surface-1 sm:grid-cols-3 sm:divide-y-0 sm:divide-x lg:grid-cols-5">
       <%!-- Queued --%>
       <div class="px-4 py-3.5 sm:border-r sm:border-border">
         <div class="flex items-center justify-between">
@@ -285,11 +277,11 @@
           <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
             Blocked
           </p>
-          <span class="hero-no-symbol-mini text-red-400/70"></span>
+          <span class="hero-no-symbol-mini text-brand/70"></span>
         </div>
         <p class={[
           "mt-1.5 font-mono text-[28px] font-590 leading-none tabular-nums",
-          if(@blocked_work > 0, do: "text-red-300", else: "text-text-primary")
+          if(@blocked_work > 0, do: "text-brand", else: "text-text-primary")
         ]}>
           {@blocked_work}
         </p>
@@ -377,7 +369,7 @@
                   agent.status == :running && "cympho-pulse-dot"
                 ]}
                 style={
-                  if agent.status == :running, do: "--cympho-pulse-color: rgba(96,165,250,0.6);"
+                  if agent.status == :running, do: "--cympho-pulse-color: rgba(93,184,166,0.6);"
                 }
               >
               </span>
@@ -620,7 +612,7 @@
             <h2 class="text-sm font-590 text-text-primary">Bottlenecks</h2>
             <span
               :if={Enum.any?(@bottlenecks)}
-              class="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 font-mono text-[10px] tabular-nums text-red-300"
+              class="rounded-full border border-brand/30 bg-brand/10 px-2 py-0.5 font-mono text-[10px] tabular-nums text-brand"
             >
               {length(@bottlenecks)} stuck
             </span>
@@ -640,7 +632,7 @@
                 <p class="min-w-0 flex-1 truncate text-sm font-510 text-text-primary">
                   {issue.title}
                 </p>
-                <span class="shrink-0 rounded-md bg-red-500/15 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-red-300">
+                <span class="shrink-0 rounded-md bg-brand/15 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-brand">
                   {stuck_for(issue.updated_at)}
                 </span>
               </div>
@@ -653,12 +645,44 @@
 
         <.panel class="p-4">
           <h2 class="mb-3 text-sm font-590 text-text-primary">Routine Health</h2>
-          <div class="flex items-center gap-3 rounded-md bg-amber-500/[0.06] px-3 py-2">
-            <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-300 shadow-[0_0_8px_rgba(252,211,77,0.6)]">
+          <div class={"flex items-center gap-3 rounded-md px-3 py-2 " <> routine_health_bg_class(@routine_health)}>
+            <span class={"h-2.5 w-2.5 shrink-0 rounded-full " <> routine_health_dot_class(@routine_health)}>
             </span>
             <span class="text-sm text-text-tertiary">{@routine_health.message}</span>
           </div>
         </.panel>
+      </div>
+    </div>
+    <%!-- ============================================================
+         Prompt bar — Claude-style task entry. Reuses the quick-create
+         modal (click / Enter → new issue) and the command palette
+         (inner search button, a sibling so the two delegated
+         data-* handlers never collide). No new backend.
+         ============================================================ --%>
+    <div class="mt-8">
+      <div class="flex items-center gap-2 rounded-2xl border border-hairline bg-surface-1 px-4 py-3 shadow-card transition-colors focus-within:border-hairline-strong hover:border-hairline-strong">
+        <div
+          role="button"
+          tabindex="0"
+          data-quick-create-trigger
+          aria-label="Describe a task — create a new issue"
+          class="group flex flex-1 items-center gap-3 min-w-0 cursor-text rounded-xl focus:outline-none"
+        >
+          <.spark class="h-5 w-5 shrink-0 text-brand" />
+          <span class="flex-1 truncate text-left text-[15px] text-text-tertiary">
+            Describe a task or ask a question…
+          </span>
+          <kbd class="kbd shrink-0">C</kbd>
+        </div>
+        <button
+          type="button"
+          data-action="open-command-palette"
+          aria-label="Open command palette"
+          class="ml-1 hidden sm:inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-text-quaternary hover:bg-surface-hover hover:text-text-primary transition-colors shrink-0"
+        >
+          <span class="hero-magnifying-glass-mini w-4 h-4"></span>
+          <kbd class="kbd">⌘K</kbd>
+        </button>
       </div>
     </div>
   </div>

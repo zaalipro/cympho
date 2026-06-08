@@ -175,7 +175,11 @@ defmodule Cympho.Oversight.Patrol do
   #   :in_progress → walk the parent chain from the assignee
   #   :blocked     → walk the parent chain from the assignee
   # In every case, fall back to the company CEO if the chain breaks.
-  defp resolve_supervisor(%Issue{status: :in_review, assignee_id: assignee_id, company_id: company_id})
+  defp resolve_supervisor(%Issue{
+         status: :in_review,
+         assignee_id: assignee_id,
+         company_id: company_id
+       })
        when is_binary(assignee_id) do
     case Agents.get_agent(assignee_id) do
       {:ok, %Agent{} = agent} -> agent

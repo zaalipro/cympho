@@ -60,7 +60,7 @@ defmodule CymphoWeb.ApprovalLive.Show do
 
   def status_badge_class(:pending), do: "bg-yellow-500/20 text-yellow-400"
   def status_badge_class(:approved), do: "bg-green-500/20 text-green-400"
-  def status_badge_class(:denied), do: "bg-red-500/20 text-red-400"
+  def status_badge_class(:denied), do: "bg-brand/20 text-brand"
   def status_badge_class(:cancelled), do: "bg-gray-500/20 text-gray-400"
   def status_badge_class(_), do: "bg-white/5 text-text-quaternary"
 end

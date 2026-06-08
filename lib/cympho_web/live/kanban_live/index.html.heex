@@ -81,7 +81,7 @@
 
         <.app_link
           navigate={~p"/issues/new"}
-          class="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-510 text-white transition-colors hover:bg-accent-hover"
+          class="inline-flex items-center gap-2 rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary transition-colors hover:bg-accent-hover"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
@@ -194,8 +194,8 @@
       placeholder="Any priority"
       searchable?={false}
       options={[
-        %{id: "critical", label: "Critical", color: "bg-red-500"},
-        %{id: "high", label: "High", color: "bg-red-500"},
+        %{id: "critical", label: "Critical", color: "bg-brand"},
+        %{id: "high", label: "High", color: "bg-amber-400"},
         %{id: "medium", label: "Medium", color: "bg-amber-500"},
         %{id: "low", label: "Low", color: "bg-ink-tertiary"}
       ]}
@@ -318,7 +318,7 @@
         </div>
       </div>
     <% else %>
-      <div class="flex-1 overflow-y-auto rounded-lg border border-border bg-panel/30 p-2 lg:overflow-x-auto lg:overflow-y-hidden">
+      <div class="flex-1 overflow-y-auto rounded-2xl border border-hairline bg-panel/30 p-2 lg:overflow-x-auto lg:overflow-y-hidden">
         <div class="flex flex-col gap-2 pb-2 lg:h-full lg:min-w-max lg:flex-row">
           <%= for status <- status_columns() do %>
             <% issues = issues_for_status(computed, status) %>
@@ -343,8 +343,8 @@
                 <span class="text-xs text-text-quaternary mt-2">{count}</span>
               </div>
             <% else %>
-              <div class={"flex min-h-[160px] w-full flex-col rounded-lg border bg-panel/90 lg:h-full lg:w-[260px] xl:w-[276px] " <> if(exceeded, do: "border-red-500/50", else: "border-border")}>
-                <div class={"sticky top-0 z-10 flex items-center justify-between rounded-t-lg border-b border-l-2 border-border bg-panel px-3 py-2.5 " <> column_accent_class(status)}>
+              <div class={"flex min-h-[160px] w-full flex-col rounded-2xl border bg-surface-1 lg:h-full lg:w-[260px] xl:w-[276px] " <> if(exceeded, do: "border-brand/50", else: "border-hairline")}>
+                <div class={"sticky top-0 z-10 flex items-center justify-between rounded-t-2xl border-b border-l-2 border-hairline bg-surface-1 px-3 py-2.5 " <> column_accent_class(status)}>
                   <div class="flex items-center gap-2">
                     <button
                       type="button"
@@ -369,7 +369,7 @@
                     </button>
                     <h2 class="text-sm font-510 text-text-primary">{status_label(status)}</h2>
                   </div>
-                  <span class={"text-xs px-2 py-0.5 rounded-full font-510 " <> if(exceeded, do: "bg-red-500/20 text-red-400", else: "bg-surface text-text-quaternary")}>
+                  <span class={"text-xs px-2 py-0.5 rounded-full font-510 " <> if(exceeded, do: "bg-brand/20 text-brand", else: "bg-surface text-text-quaternary")}>
                     {count}{if limit, do: "/#{limit}", else: ""}
                   </span>
                 </div>
@@ -385,7 +385,7 @@
                         </div>
                         <%= for issue <- group_issues do %>
                           <div
-                            class="bg-surface-1 border border-hairline rounded-md p-2.5 space-y-1.5 hover:bg-surface-2 transition-colors duration-100 cursor-grab active:cursor-grabbing mb-2 min-h-[64px]"
+                            class="bg-surface-2 border border-hairline rounded-lg p-2.5 space-y-1.5 hover:bg-surface-3 transition-colors duration-100 cursor-grab active:cursor-grabbing mb-2 min-h-[64px]"
                             data-issue-id={issue.id}
                           >
                             <div class="text-sm font-510 text-text-primary leading-snug line-clamp-2 sm:line-clamp-1">
@@ -459,7 +459,7 @@
     phx-click="cancel_comment"
   >
     <div
-      class="bg-panel border border-border rounded-lg shadow-dialog w-full max-w-md mx-4 p-4"
+      class="bg-surface-2 border border-hairline rounded-2xl shadow-dialog w-full max-w-md mx-4 p-4"
       phx-click-away="cancel_comment"
     >
       <h3 class="font-serif text-sm font-510 text-text-primary mb-3">Add comment</h3>
@@ -480,7 +480,7 @@
           </button>
           <button
             type="submit"
-            class="text-sm px-3 py-1.5 rounded-lg bg-accent text-white font-510 hover:bg-accent/80 transition-colors"
+            class="text-sm px-3 py-1.5 rounded-lg bg-accent text-canvas font-590 hover:bg-accent/80 transition-colors"
           >
             Submit
           </button>

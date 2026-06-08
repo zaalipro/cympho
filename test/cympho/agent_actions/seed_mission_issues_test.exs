@@ -159,9 +159,7 @@ defmodule Cympho.AgentActions.SeedMissionIssuesTest do
       assert {:error, _reason} = AgentActions.execute(issue, engineer, actions)
 
       # No initiative issues created.
-      refute Repo.exists?(
-               from i in Issue, where: i.goal_id == ^goal.id and i.title == "Sneaky"
-             )
+      refute Repo.exists?(from i in Issue, where: i.goal_id == ^goal.id and i.title == "Sneaky")
     end
 
     test "rejects when goal is not a mission",

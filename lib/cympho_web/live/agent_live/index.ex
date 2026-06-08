@@ -222,7 +222,7 @@ defmodule CymphoWeb.AgentLive.Index do
 
   def health_pill_class(:healthy), do: "border-success/25 bg-success/10 text-success"
   def health_pill_class(:degraded), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  def health_pill_class(:unavailable), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def health_pill_class(:unavailable), do: "border-brand/25 bg-brand/10 text-brand"
   def health_pill_class(_), do: "border-border bg-surface text-text-secondary"
 
   def format_heartbeat(%{last_heartbeat_at: nil}), do: "Never"

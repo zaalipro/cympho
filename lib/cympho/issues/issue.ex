@@ -58,6 +58,7 @@ defmodule Cympho.Issues.Issue do
     field :completed_at, :utc_datetime
     field :cancelled_at, :utc_datetime
     field :hidden_at, :utc_datetime
+    field :due_on, :date
     field :lineage, :map
 
     belongs_to :project, Project
@@ -130,6 +131,7 @@ defmodule Cympho.Issues.Issue do
       :completed_at,
       :cancelled_at,
       :hidden_at,
+      :due_on,
       :last_reviewer_id
     ])
     |> validate_required([:title])

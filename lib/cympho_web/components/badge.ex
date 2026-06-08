@@ -7,7 +7,7 @@ defmodule CymphoWeb.Components.Badge do
     "in_progress" => "bg-brand/20 text-brand",
     "in_review" => "bg-text-secondary/20 text-text-secondary",
     "done" => "bg-success/20 text-success",
-    "blocked" => "bg-red-500/20 text-red-400",
+    "blocked" => "bg-brand/20 text-brand",
     "open" => "bg-accent/20 text-accent",
     "closed" => "bg-success/20 text-success",
     "active" => "bg-success/20 text-success",
@@ -17,13 +17,13 @@ defmodule CymphoWeb.Components.Badge do
   @priority_colors %{
     "low" => "bg-text-tertiary",
     "medium" => "bg-amber-500",
-    "high" => "bg-red-500"
+    "high" => "bg-amber-400"
   }
 
   @agent_colors %{
     "idle" => "bg-text-tertiary/20 text-text-tertiary",
     "running" => "bg-brand/20 text-brand",
-    "error" => "bg-red-500/20 text-red-400",
+    "error" => "bg-brand/20 text-brand",
     "offline" => "bg-text-quaternary/20 text-text-quaternary"
   }
 

@@ -485,6 +485,24 @@ defmodule Cympho.RoutineTriggers do
 
   defp tap_ok(error, _fun), do: error
 
-  # Concurrency policy stub - returns :ok to allow all runs
-  defp apply_concurrency_policy(_routine), do: {:ok, :enqueue}
+  # Honors the routine's concurrency_policy against in-flight runs. :always_enqueue
+  # always allows; :skip_if_active / :coalesce_if_active suppress a new run while one
+  # is already pending or running (callers receive {:skip, policy} via the `with`).
+  defp apply_concurrency_policy(routine) do
+    case routine.concurrency_policy do
+      policy when policy in [:skip_if_active, :coalesce_if_active] ->
+        if active_run?(routine.id), do: {:skip, policy}, else: {:ok, :enqueue}
+
+      _ ->
+        {:ok, :enqueue}
+    end
+  end
+
+  defp active_run?(routine_id) do
+    Repo.exists?(
+      from(r in RoutineRun,
+        where: r.routine_id == ^routine_id and r.status in ["pending", "running"]
+      )
+    )
+  end
 end

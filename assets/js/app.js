@@ -32,6 +32,48 @@ const TimelineScroll = {
   }
 };
 
+// Infinite scroll: a sentinel rendered after a streamed list. When it nears the
+// scroll viewport (rootMargin prefetch) it fires a LiveView event ("next-page"
+// by default). The scroll container is `#main-content` (the window itself does
+// not scroll), so we observe against it rather than the viewport. A `pending`
+// guard, cleared when the server replies, keeps it to one fire per round-trip.
+// At the end of the feed the server stops rendering the sentinel, which
+// disconnects the observer.
+const InfiniteScroll = {
+  mounted() {
+    this.pending = false;
+    const eventName = this.el.dataset.event || "next-page";
+    const rootMargin = this.el.dataset.rootMargin || "500px 0px";
+    const root =
+      this.el.closest("[data-infinite-scroll-root]") ||
+      document.getElementById("main-content") ||
+      null;
+
+    this.observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0] || !entries[0].isIntersecting) return;
+        if (this.el.dataset.hasMore === "false" || this.pending) return;
+        this.pending = true;
+        const done = () => { this.pending = false; };
+        const target = this.el.dataset.target;
+        if (target) {
+          this.pushEventTo(target, eventName, {}, done);
+        } else {
+          this.pushEvent(eventName, {}, done);
+        }
+      },
+      {root, rootMargin, threshold: 0}
+    );
+
+    this.observer.observe(this.el);
+  },
+
+  destroyed() {
+    if (this.observer) this.observer.disconnect();
+    this.observer = null;
+  }
+};
+
 // Toast notification hook
 const Toast = {
   _queue: [],
@@ -235,7 +277,7 @@ const GOTO_KEYS = {
   'a': '/agents',
   'g': '/goals',
   'd': '/dashboard',
-  's': '/settings',
+  's': '/settings/profile',
 };
 
 let gotoBuffer = '';
@@ -982,6 +1024,229 @@ window.addEventListener('phx:issue:replace_url', (e) => {
   window.history.replaceState(window.history.state, '', cleanUrl);
 });
 
+// Theme switch — the Appearance picker / user menu push `set-theme` after
+// persisting the choice to the DB. Flip <html data-theme> live (no reload) and
+// mirror it into the `theme` cookie so the next full load server-renders it
+// (the FetchTheme plug reads this cookie), keeping first paint flash-free.
+window.addEventListener('phx:set-theme', (e) => {
+  const theme = e.detail?.theme;
+  if (!theme) return;
+  document.documentElement.setAttribute('data-theme', theme);
+  document.cookie = `theme=${theme}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax`;
+});
+
+// ---------------------------------------------------------------------------
+// SelectMenu — styled, theme-matched replacement for native <select>.
+//
+// Document-delegated (NOT a phx-hook) so the same controller drives selects
+// inside LiveViews and in the plain-JS root layout (the quick-create modal).
+// Markup comes from CymphoWeb.Components.select_menu/1: a visually-hidden real
+// <select data-select-native> (the value vehicle — posts with the form, is
+// LiveViewTest/keyboard/screen-reader drivable), a <button data-select-trigger>
+// showing the current label, and a <div data-select-popover> listbox of
+// <li data-select-option>. Picking an option mirrors the value onto the native
+// <select> and dispatches input/change so LiveView `phx-change` forms react
+// exactly as they would to a real <select>; the server stays the source of
+// truth via the bound `value`.
+// ---------------------------------------------------------------------------
+let openSelectEl = null;
+let selectReposition = null;
+
+// Shared: position `pop` as `position: fixed` anchored to `trigger` so it
+// escapes any `overflow: hidden` ancestor (modals, cards, table cells) — e.g.
+// the quick-create modal clips its rounded corners, which would otherwise hide
+// the popover. Flips upward when there isn't room below. With `matchWidth` the
+// popover takes the trigger's width (selects); otherwise it keeps its own width
+// (date/time pickers). An optional `listEl` is height-capped to the space.
+function positionPopover(trigger, pop, {matchWidth = false, listEl = null, flipThreshold = 200} = {}) {
+  if (!trigger || !pop) return;
+  const r = trigger.getBoundingClientRect();
+  const gap = 4;
+  const margin = 8;
+  const below = window.innerHeight - r.bottom - margin;
+  const above = r.top - margin;
+  const openUp = below < flipThreshold && above > below;
+  pop.style.position = 'fixed';
+  pop.style.left = `${Math.round(r.left)}px`;
+  if (matchWidth) {
+    pop.style.width = `${Math.round(r.width)}px`;
+    pop.style.minWidth = `${Math.round(r.width)}px`;
+  }
+  if (openUp) {
+    pop.style.top = 'auto';
+    pop.style.bottom = `${Math.round(window.innerHeight - r.top + gap)}px`;
+  } else {
+    pop.style.bottom = 'auto';
+    pop.style.top = `${Math.round(r.bottom + gap)}px`;
+  }
+  if (listEl) listEl.style.maxHeight = `${Math.round(Math.max(120, (openUp ? above : below) - gap))}px`;
+}
+
+function positionSelectPopover(menu) {
+  const trigger = menu.querySelector('[data-select-trigger]');
+  const pop = menu.querySelector('[data-select-popover]');
+  const list = menu.querySelector('[data-select-list]');
+  positionPopover(trigger, pop, {matchWidth: true, listEl: list});
+}
+
+function closeSelectMenu(menu) {
+  if (!menu) return;
+  menu.querySelector('[data-select-popover]')?.classList.add('hidden');
+  menu.querySelector('[data-select-trigger]')?.setAttribute('aria-expanded', 'false');
+  menu.querySelectorAll('[data-select-active]').forEach((el) => el.removeAttribute('data-select-active'));
+  if (openSelectEl === menu) openSelectEl = null;
+  if (selectReposition) {
+    window.removeEventListener('scroll', selectReposition, true);
+    window.removeEventListener('resize', selectReposition);
+    selectReposition = null;
+  }
+}
+
+// A LiveView navigation/patch can remove an open select's DOM without an
+// outside click; release its scroll/resize listeners on page-loading-stop.
+window.addEventListener('phx:page-loading-stop', () => {
+  if (openSelectEl && !openSelectEl.isConnected) closeSelectMenu(openSelectEl);
+});
+
+function openSelectMenu(menu) {
+  if (!menu || menu.dataset.disabled === 'true') return;
+  if (openSelectEl && openSelectEl !== menu) closeSelectMenu(openSelectEl);
+  const pop = menu.querySelector('[data-select-popover]');
+  if (!pop) return;
+  pop.classList.remove('hidden');
+  menu.querySelector('[data-select-trigger]')?.setAttribute('aria-expanded', 'true');
+  openSelectEl = menu;
+  positionSelectPopover(menu);
+  // Keep the popover glued to its trigger while the page scrolls/resizes; if a
+  // LiveView patch removed the menu's DOM, close it so the listeners don't leak.
+  selectReposition = () => {
+    if (!menu.isConnected) return closeSelectMenu(menu);
+    positionSelectPopover(menu);
+  };
+  window.addEventListener('scroll', selectReposition, true);
+  window.addEventListener('resize', selectReposition);
+  // Highlight the selected option (or the first) for keyboard nav.
+  const active = pop.querySelector('[data-select-selected="true"]') || pop.querySelector('[data-select-option]');
+  if (active) {
+    active.setAttribute('data-select-active', 'true');
+    active.scrollIntoView({block: 'nearest'});
+  }
+}
+
+function selectMenuOption(menu, option) {
+  const native = menu.querySelector('[data-select-native]');
+  const display = menu.querySelector('[data-select-display]');
+  const value = option.dataset.selectOptionValue ?? '';
+  const label = option.dataset.selectOptionLabel ?? '';
+
+  if (native) {
+    const changed = native.value !== value;
+    native.value = value;
+    if (changed) {
+      // Bubble to the form so LiveView `phx-change` reacts as it would to a
+      // real <select> pick — the native element is the source of truth.
+      native.dispatchEvent(new Event('input', {bubbles: true}));
+      native.dispatchEvent(new Event('change', {bubbles: true}));
+    }
+  }
+  if (display) {
+    display.textContent = label;
+    display.classList.remove('text-ink-tertiary');
+  }
+  menu.querySelectorAll('[data-select-option]').forEach((opt) => {
+    const isSel = opt === option;
+    opt.setAttribute('data-select-selected', String(isSel));
+    opt.setAttribute('aria-selected', String(isSel));
+    opt.querySelector('[data-select-check]')?.classList.toggle('invisible', !isSel);
+  });
+  closeSelectMenu(menu);
+  menu.querySelector('[data-select-trigger]')?.focus();
+}
+
+function moveSelectActive(menu, dir) {
+  const opts = Array.from(menu.querySelectorAll('[data-select-option]'));
+  if (!opts.length) return;
+  let idx = opts.findIndex((o) => o.getAttribute('data-select-active') === 'true');
+  idx =
+    dir === 'home' ? 0
+    : dir === 'end' ? opts.length - 1
+    : idx < 0 ? (dir === 1 ? 0 : opts.length - 1)
+    : Math.min(Math.max(idx + dir, 0), opts.length - 1);
+  opts.forEach((o) => o.removeAttribute('data-select-active'));
+  opts[idx].setAttribute('data-select-active', 'true');
+  opts[idx].scrollIntoView({block: 'nearest'});
+}
+
+// One delegated click handler: toggle a trigger, pick an option, or close on
+// any outside click. Survives LiveView DOM patches (no per-element listeners).
+document.addEventListener('click', (e) => {
+  const trigger = e.target.closest('[data-select-trigger]');
+  if (trigger) {
+    const menu = trigger.closest('[data-select-menu]');
+    e.preventDefault();
+    if (openSelectEl === menu) {
+      closeSelectMenu(menu);
+    } else {
+      openSelectMenu(menu);
+      trigger.focus(); // Safari doesn't focus <button> on click; needed for keys.
+    }
+    return;
+  }
+  const option = e.target.closest('[data-select-option]');
+  if (option) {
+    e.preventDefault();
+    selectMenuOption(option.closest('[data-select-menu]'), option);
+    return;
+  }
+  if (openSelectEl && !openSelectEl.contains(e.target)) closeSelectMenu(openSelectEl);
+});
+
+// Keyboard: open from a focused trigger, then arrows / enter / esc / home / end
+// / type-ahead while open.
+document.addEventListener('keydown', (e) => {
+  const trigger = e.target.closest?.('[data-select-trigger]');
+  if (trigger && openSelectEl !== trigger.closest('[data-select-menu]')) {
+    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openSelectMenu(trigger.closest('[data-select-menu]'));
+    }
+    return;
+  }
+  const menu = openSelectEl;
+  if (!menu) return;
+  switch (e.key) {
+    case 'Escape':
+      e.preventDefault();
+      closeSelectMenu(menu);
+      menu.querySelector('[data-select-trigger]')?.focus();
+      break;
+    case 'ArrowDown': e.preventDefault(); moveSelectActive(menu, 1); break;
+    case 'ArrowUp': e.preventDefault(); moveSelectActive(menu, -1); break;
+    case 'Home': e.preventDefault(); moveSelectActive(menu, 'home'); break;
+    case 'End': e.preventDefault(); moveSelectActive(menu, 'end'); break;
+    case 'Tab': closeSelectMenu(menu); break;
+    case 'Enter':
+    case ' ': {
+      e.preventDefault();
+      const active = menu.querySelector('[data-select-option][data-select-active="true"]');
+      if (active) selectMenuOption(menu, active);
+      break;
+    }
+    default:
+      // Type-ahead: jump to the next option whose label starts with the key.
+      if (e.key.length === 1 && /\S/.test(e.key)) {
+        const opts = Array.from(menu.querySelectorAll('[data-select-option]'));
+        const ch = e.key.toLowerCase();
+        const match = opts.find((o) => (o.dataset.selectOptionLabel || '').toLowerCase().startsWith(ch));
+        if (match) {
+          opts.forEach((o) => o.removeAttribute('data-select-active'));
+          match.setAttribute('data-select-active', 'true');
+          match.scrollIntoView({block: 'nearest'});
+        }
+      }
+  }
+});
+
 // Backward-compatible cleanup hook for older issue-page diffs. The current
 // issue page uses a pushed event, but keeping this hook registered prevents
 // stale browser DOM from logging unknown-hook errors during hot reloads.
@@ -993,6 +1258,344 @@ const IssueGateCleanup = {
     const target = new URL(cleanUrl, window.location.origin);
     if (window.location.href !== target.href) {
       window.history.replaceState(window.history.state, '', cleanUrl);
+    }
+  }
+};
+
+// ---------------------------------------------------------------------------
+// DatePicker — theme-matched calendar / time / datetime picker (phx-hook).
+//
+// Builds the popover UI into the shells rendered by
+// CymphoWeb.Components.DatePicker. The hook OWNS the popover DOM (root is
+// phx-update="ignore"); the visually-hidden real <input data-picker-native> is
+// the source of truth — on pick we set its value and dispatch bubbling
+// input/change so phx-change forms react like a native control. Modes: "date"
+// (calendar), "time" (HH:MM columns, 24h), "datetime" (calendar + time row).
+// Values are naive wall-clock strings; parse with parseYMD, NEVER new Date(str)
+// (which is UTC and shifts a day in negative-offset zones).
+// ---------------------------------------------------------------------------
+const PICKER_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const PICKER_DOW = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+
+function pickerParseYMD(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || "");
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; // local midnight, no TZ shift
+}
+function pickerFmtYMD(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function pickerPad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+const DatePicker = {
+  mounted() {
+    this.mode = this.el.dataset.pickerMode || "date";
+    this.minuteStep = Math.max(1, parseInt(this.el.dataset.minuteStep || "5", 10));
+    this.native = this.el.querySelector("[data-picker-native]");
+    this.trigger = this.el.querySelector("[data-picker-trigger]");
+    this.pop = this.el.querySelector("[data-picker-popover]");
+    this.calEl = this.el.querySelector("[data-picker-calendar]");
+    this.timeEl = this.el.querySelector("[data-picker-time]");
+    this._syncFromNative();
+
+    this._onTriggerClick = (e) => { e.preventDefault(); this._toggle(); };
+    this._onTriggerKey = (e) => this._onTriggerKeydown(e);
+    this._onPopKey = (e) => this._onPopoverKeydown(e);
+    this._docClick = (e) => { if (!this.el.contains(e.target)) this._close(); };
+    this.trigger.addEventListener("click", this._onTriggerClick);
+    this.trigger.addEventListener("keydown", this._onTriggerKey);
+    this.pop.addEventListener("keydown", this._onPopKey);
+    document.addEventListener("click", this._docClick);
+
+    // Escape hatch for the root being phx-update="ignore": a server can clear
+    // the picker after mount (e.g. audit-trail "Clear filters") by pushing
+    // "datepicker:reset". Without this the native value would stay stale.
+    this._resetRef = this.handleEvent("datepicker:reset", () => this._reset());
+
+    this._renderLabel();
+  },
+  updated() {
+    // Root is phx-update="ignore", but re-read the native value as the source of
+    // truth in case a server patch reached the attribute.
+    this._syncFromNative();
+    this._renderLabel();
+    if (!this.pop.classList.contains("hidden")) this._renderBody();
+  },
+  destroyed() {
+    document.removeEventListener("click", this._docClick);
+    if (this._resetRef) this.removeHandleEvent(this._resetRef);
+    this._teardownRepos();
+  },
+
+  _reset() {
+    this.native.value = "";
+    this._syncFromNative();
+    if (!this.pop.classList.contains("hidden")) this._renderBody();
+    this._renderLabel();
+  },
+
+  _syncFromNative() {
+    const v = this.native.value || "";
+    if (this.mode === "date") { this.date = v || null; this.time = null; }
+    else if (this.mode === "time") { this.date = null; this.time = v || null; }
+    else {
+      const [d, t] = v.split("T");
+      this.date = d || null;
+      this.time = t ? t.slice(0, 5) : null;
+    }
+    const base = pickerParseYMD(this.date) || new Date();
+    this.viewYear = base.getFullYear();
+    this.viewMonth = base.getMonth();
+  },
+
+  _toggle() {
+    this.pop.classList.contains("hidden") ? this._open() : this._close();
+  },
+  _open() {
+    if (this.el.dataset.disabled === "true") return;
+    if (this.mode === "datetime" && !this.date) this.date = pickerFmtYMD(new Date());
+    this._renderBody();
+    this.pop.classList.remove("hidden");
+    this.trigger.setAttribute("aria-expanded", "true");
+    const flip = this.mode === "time" ? 200 : 320;
+    const reposition = () => positionPopover(this.trigger, this.pop, {flipThreshold: flip});
+    reposition();
+    this._repos = reposition;
+    window.addEventListener("scroll", this._repos, true);
+    window.addEventListener("resize", this._repos);
+    requestAnimationFrame(() => this._focusInitial());
+  },
+  _close() {
+    this.pop.classList.add("hidden");
+    this.trigger.setAttribute("aria-expanded", "false");
+    this._teardownRepos();
+  },
+  _teardownRepos() {
+    if (this._repos) {
+      window.removeEventListener("scroll", this._repos, true);
+      window.removeEventListener("resize", this._repos);
+      this._repos = null;
+    }
+  },
+  _renderBody() {
+    if (this.mode !== "time") this._renderCalendar();
+    if (this.mode !== "date") this._renderTime();
+  },
+
+  // ── Calendar ──────────────────────────────────────────────────────────────
+  _renderCalendar() {
+    const sel = pickerParseYMD(this.date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const minD = pickerParseYMD(this.el.dataset.min);
+    const maxD = pickerParseYMD(this.el.dataset.max);
+    const y = this.viewYear, m = this.viewMonth;
+    const first = new Date(y, m, 1);
+    const lead = (first.getDay() + 6) % 7; // Monday = 0
+    const start = new Date(y, m, 1 - lead);
+
+    let html =
+      `<div class="flex items-center justify-between px-1 pb-2">` +
+      `<button type="button" data-picker-prev aria-label="Previous month" class="h-7 w-7 flex items-center justify-center rounded-sm text-ink-tertiary hover:bg-surface-3 hover:text-ink"><span class="hero-chevron-left-mini w-4 h-4"></span></button>` +
+      `<span class="text-caption font-590 text-ink">${PICKER_MONTHS[m]} ${y}</span>` +
+      `<button type="button" data-picker-next aria-label="Next month" class="h-7 w-7 flex items-center justify-center rounded-sm text-ink-tertiary hover:bg-surface-3 hover:text-ink"><span class="hero-chevron-right-mini w-4 h-4"></span></button>` +
+      `</div>` +
+      `<div class="grid grid-cols-7 gap-0.5 mb-1">` +
+      PICKER_DOW.map((d) => `<div class="h-6 flex items-center justify-center text-[11px] text-ink-tertiary">${d}</div>`).join("") +
+      `</div><div class="grid grid-cols-7 gap-0.5">`;
+
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+      const inMonth = d.getMonth() === m;
+      const isToday = d.getTime() === today.getTime();
+      const isSel = sel && d.getTime() === sel.getTime();
+      const disabled = (minD && d < minD) || (maxD && d > maxD);
+      let cls = "h-8 w-full flex items-center justify-center rounded-sm text-caption tabular-nums select-none ";
+      if (disabled) cls += "text-ink-tertiary opacity-40 cursor-not-allowed pointer-events-none";
+      else if (isSel) cls += "bg-primary text-on-primary cursor-pointer";
+      else if (isToday) cls += (inMonth ? "text-ink " : "text-ink-tertiary ") + "ring-1 ring-primary cursor-pointer hover:bg-surface-3";
+      else cls += (inMonth ? "text-ink " : "text-ink-tertiary ") + "cursor-pointer hover:bg-surface-3";
+      const tab = isSel || (!sel && isToday) ? "0" : "-1";
+      html += `<button type="button" data-picker-day data-date="${pickerFmtYMD(d)}" role="gridcell" tabindex="${tab}"${disabled ? " disabled" : ""} class="${cls}">${d.getDate()}</button>`;
+    }
+    html += `</div>`;
+    this.calEl.innerHTML = html;
+
+    this.calEl.querySelector("[data-picker-prev]").addEventListener("click", (e) => { e.preventDefault(); this._shiftMonth(-1); });
+    this.calEl.querySelector("[data-picker-next]").addEventListener("click", (e) => { e.preventDefault(); this._shiftMonth(1); });
+    this.calEl.querySelectorAll("[data-picker-day]").forEach((btn) =>
+      btn.addEventListener("click", (e) => { e.preventDefault(); this._pickDay(btn.dataset.date); })
+    );
+  },
+  _shiftMonth(delta) {
+    this.viewMonth += delta;
+    if (this.viewMonth < 0) { this.viewMonth = 11; this.viewYear--; }
+    else if (this.viewMonth > 11) { this.viewMonth = 0; this.viewYear++; }
+    this._renderCalendar();
+  },
+  _pickDay(ymd) {
+    this.date = ymd;
+    const d = pickerParseYMD(ymd);
+    this.viewYear = d.getFullYear();
+    this.viewMonth = d.getMonth();
+    this._commit();
+    if (this.mode === "date") { this._close(); this.trigger.focus(); }
+    else { this._renderCalendar(); this._focusDate(d); }
+  },
+
+  // ── Time ──────────────────────────────────────────────────────────────────
+  _renderTime() {
+    const [selH, selM] = (this.time || "").split(":");
+    const hours = Array.from({length: 24}, (_, h) => pickerPad2(h));
+    const mins = [];
+    for (let mm = 0; mm < 60; mm += this.minuteStep) mins.push(pickerPad2(mm));
+    if (selM && !mins.includes(selM)) { mins.push(selM); mins.sort(); } // round-trip off-step
+
+    const col = (items, sel, kind) =>
+      `<div class="flex-1 max-h-[11rem] overflow-y-auto" data-picker-col="${kind}">` +
+      items
+        .map((v) => {
+          const on = v === sel;
+          const cls = "h-8 w-full flex items-center justify-center rounded-sm text-caption tabular-nums cursor-pointer " + (on ? "bg-primary text-on-primary" : "text-ink hover:bg-surface-3");
+          return `<button type="button" data-picker-${kind} data-val="${v}" tabindex="${on ? "0" : "-1"}" class="${cls}">${v}</button>`;
+        })
+        .join("") +
+      `</div>`;
+
+    this.timeEl.innerHTML =
+      `<div class="flex gap-2">` +
+      `<div class="flex-1"><div class="text-[11px] text-ink-tertiary text-center pb-1">Hour</div>${col(hours, selH, "hour")}</div>` +
+      `<div class="flex-1"><div class="text-[11px] text-ink-tertiary text-center pb-1">Min</div>${col(mins, selM, "min")}</div>` +
+      `</div>`;
+
+    this.timeEl.querySelectorAll("[data-picker-hour]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); this._pickTime(b.dataset.val, null); }));
+    this.timeEl.querySelectorAll("[data-picker-min]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); this._pickTime(null, b.dataset.val); }));
+    this.timeEl.querySelectorAll('[tabindex="0"]').forEach((b) => b.scrollIntoView({block: "center"}));
+  },
+  _pickTime(h, mm) {
+    const [curH, curM] = (this.time || "00:00").split(":");
+    this.time = `${h != null ? h : curH || "00"}:${mm != null ? mm : curM || "00"}`;
+    this._commit();
+    this._highlightTime();
+  },
+  _highlightTime() {
+    const [selH, selM] = (this.time || "").split(":");
+    this.timeEl.querySelectorAll("[data-picker-hour]").forEach((b) => this._setTimeOn(b, b.dataset.val === selH));
+    this.timeEl.querySelectorAll("[data-picker-min]").forEach((b) => this._setTimeOn(b, b.dataset.val === selM));
+  },
+  _setTimeOn(btn, on) {
+    btn.classList.toggle("bg-primary", on);
+    btn.classList.toggle("text-on-primary", on);
+    btn.classList.toggle("text-ink", !on);
+    btn.classList.toggle("hover:bg-surface-3", !on);
+  },
+
+  // ── Commit / label ─────────────────────────────────────────────────────────
+  _commit() {
+    let v = "";
+    if (this.mode === "date") v = this.date || "";
+    else if (this.mode === "time") v = this.time || "";
+    else if (this.date) v = `${this.date}T${this.time || "00:00"}`;
+    if (this.native.value !== v) {
+      this.native.value = v;
+      this.native.dispatchEvent(new Event("input", {bubbles: true}));
+      this.native.dispatchEvent(new Event("change", {bubbles: true}));
+    }
+    this._renderLabel();
+  },
+  _renderLabel() {
+    const disp = this.el.querySelector("[data-picker-display]");
+    const v = this.native.value;
+    if (!v) {
+      disp.textContent = this.el.dataset.placeholder || "…";
+      disp.classList.add("text-ink-tertiary");
+      return;
+    }
+    let text;
+    if (this.mode === "date") {
+      const d = pickerParseYMD(v);
+      text = d ? `${PICKER_MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}` : v;
+    } else if (this.mode === "time") {
+      text = v;
+    } else {
+      const [dp, tp] = v.split("T");
+      const d = pickerParseYMD(dp);
+      text = d ? `${PICKER_MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} · ${tp || "00:00"}` : v;
+    }
+    disp.textContent = text;
+    disp.classList.remove("text-ink-tertiary");
+  },
+
+  // ── Keyboard ────────────────────────────────────────────────────────────────
+  _onTriggerKeydown(e) {
+    if (this.pop.classList.contains("hidden")) {
+      if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") { e.preventDefault(); this._open(); }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      this._close();
+    }
+  },
+  _onPopoverKeydown(e) {
+    if (e.key === "Escape") { e.preventDefault(); this._close(); this.trigger.focus(); return; }
+    if (e.key === "Tab") { this._close(); return; }
+    const timeBtn = e.target.closest && e.target.closest("[data-picker-hour], [data-picker-min]");
+    if (timeBtn) return this._onTimeKeydown(e, timeBtn);
+    const day = e.target.closest && e.target.closest("[data-picker-day]");
+    if (!day) return;
+    let delta = 0;
+    if (e.key === "ArrowLeft") delta = -1;
+    else if (e.key === "ArrowRight") delta = 1;
+    else if (e.key === "ArrowUp") delta = -7;
+    else if (e.key === "ArrowDown") delta = 7;
+    else if (e.key === "PageUp") { e.preventDefault(); this._shiftMonth(-1); this._focusDayFallback(); return; }
+    else if (e.key === "PageDown") { e.preventDefault(); this._shiftMonth(1); this._focusDayFallback(); return; }
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (!day.disabled) this._pickDay(day.dataset.date); return; }
+    else return;
+    e.preventDefault();
+    const base = pickerParseYMD(day.dataset.date);
+    this._focusDate(new Date(base.getFullYear(), base.getMonth(), base.getDate() + delta));
+  },
+  _onTimeKeydown(e, btn) {
+    const col = btn.closest("[data-picker-col]");
+    const items = Array.from(col.querySelectorAll("button"));
+    const idx = items.indexOf(btn);
+    if (e.key === "ArrowDown") { e.preventDefault(); (items[idx + 1] || items[0]).focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); (items[idx - 1] || items[items.length - 1]).focus(); }
+    else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      const other = this.timeEl.querySelector(col.dataset.pickerCol === "hour" ? "[data-picker-min]" : "[data-picker-hour]");
+      if (other) (this.timeEl.querySelector(`[data-picker-${col.dataset.pickerCol === "hour" ? "min" : "hour"}][tabindex="0"]`) || other).focus();
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      if (col.dataset.pickerCol === "hour") this._pickTime(btn.dataset.val, null);
+      else this._pickTime(null, btn.dataset.val);
+      btn.focus();
+    }
+  },
+  _focusDate(target) {
+    if (target.getMonth() !== this.viewMonth || target.getFullYear() !== this.viewYear) {
+      this.viewYear = target.getFullYear();
+      this.viewMonth = target.getMonth();
+      this._renderCalendar();
+    }
+    const cell = this.calEl.querySelector(`[data-picker-day][data-date="${pickerFmtYMD(target)}"]`);
+    if (cell) {
+      this.calEl.querySelectorAll("[data-picker-day]").forEach((b) => (b.tabIndex = -1));
+      cell.tabIndex = 0;
+      cell.focus();
+    }
+  },
+  _focusDayFallback() {
+    const cell = this.calEl.querySelector('[data-picker-day][tabindex="0"]') || this.calEl.querySelector("[data-picker-day]:not([disabled])");
+    if (cell) cell.focus();
+  },
+  _focusInitial() {
+    if (this.mode === "time") {
+      const sel = this.timeEl.querySelector('[data-picker-hour][tabindex="0"]') || this.timeEl.querySelector("[data-picker-hour]");
+      if (sel) sel.focus();
+    } else {
+      this._focusDayFallback();
     }
   }
 };
@@ -1010,7 +1613,9 @@ const liveSocket = new LiveSocket("/live", Socket, {
     UserMenu,
     ColorSwatchPicker,
     AdapterConfigFields,
-    IssueGateCleanup
+    DatePicker,
+    IssueGateCleanup,
+    InfiniteScroll
   }
 });
 
@@ -1046,9 +1651,88 @@ function initQuickCreate() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Sidebar collapsible sections (Projects / Agents) + inline "Show N more".
+//
+// The nav rail lives in the conn-rendered root layout, so state is client-side:
+// collapse + show-more toggles persist in localStorage and are re-applied on
+// load. LiveView live-nav keeps the layout mounted, so in-session toggles also
+// survive navigation without touching storage. Markup: a <div data-nav-section>
+// wraps a <button data-nav-toggle> (with a <span data-nav-chevron>) + a
+// <div data-nav-body> of rows; overflow rows carry data-nav-overflow + `hidden`
+// and a <button data-nav-show-more> reveals them.
+// ---------------------------------------------------------------------------
+const NAV_COLLAPSE_KEY = 'cympho.nav.collapsed';
+const NAV_EXPAND_KEY = 'cympho.nav.expanded';
+
+function readNavState(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || '{}') || {};
+  } catch (_e) {
+    return {};
+  }
+}
+
+function writeNavState(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (_e) {
+    /* storage disabled — in-session DOM state still works */
+  }
+}
+
+function setNavCollapsed(section, collapsed) {
+  section.querySelector('[data-nav-body]')?.classList.toggle('hidden', collapsed);
+  section.querySelector('[data-nav-chevron]')?.classList.toggle('-rotate-90', collapsed);
+  section.querySelector('[data-nav-toggle]')?.setAttribute('aria-expanded', String(!collapsed));
+}
+
+function setNavExpanded(section, expanded) {
+  section.querySelectorAll('[data-nav-overflow]').forEach((row) => {
+    row.classList.toggle('hidden', !expanded);
+  });
+  section.querySelector('[data-nav-more]')?.classList.toggle('hidden', expanded);
+  section.querySelector('[data-nav-less]')?.classList.toggle('hidden', !expanded);
+}
+
+function applyNavSectionState() {
+  const collapsed = readNavState(NAV_COLLAPSE_KEY);
+  const expanded = readNavState(NAV_EXPAND_KEY);
+  document.querySelectorAll('[data-nav-section]').forEach((section) => {
+    const key = section.dataset.navSection;
+    setNavCollapsed(section, collapsed[key] === true);
+    setNavExpanded(section, expanded[key] === true);
+  });
+}
+
+document.addEventListener('click', (e) => {
+  const toggle = e.target.closest('[data-nav-toggle]');
+  if (toggle) {
+    const section = toggle.closest('[data-nav-section]');
+    const key = section?.dataset.navSection;
+    if (!key) return;
+    const state = readNavState(NAV_COLLAPSE_KEY);
+    state[key] = !(state[key] === true);
+    writeNavState(NAV_COLLAPSE_KEY, state);
+    setNavCollapsed(section, state[key]);
+    return;
+  }
+  const more = e.target.closest('[data-nav-show-more]');
+  if (more) {
+    const section = more.closest('[data-nav-section]');
+    const key = section?.dataset.navSection;
+    if (!key) return;
+    const state = readNavState(NAV_EXPAND_KEY);
+    state[key] = !(state[key] === true);
+    writeNavState(NAV_EXPAND_KEY, state);
+    setNavExpanded(section, state[key]);
+  }
+});
+
 // Initialize after DOM ready
 document.addEventListener('DOMContentLoaded', () => {
   highlightActiveNav();
+  applyNavSectionState();
   initCommandPalette();
   initCompanySwitcher();
   initSidebarMobile();
@@ -1064,6 +1748,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('phx:page-loading-stop', () => {
     window.requestAnimationFrame(() => {
       highlightActiveNav();
+      applyNavSectionState();
       initCompanySwitcher();
       initQuickCreate();
     });

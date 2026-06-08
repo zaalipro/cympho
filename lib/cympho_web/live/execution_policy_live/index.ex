@@ -5,7 +5,10 @@ defmodule CymphoWeb.ExecutionPolicyLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, :execution_policies, ExecutionPolicies.list_execution_policies())}
+    {:ok,
+     socket
+     |> assign(:infinite_scroll, %{})
+     |> init_stream(:execution_policies, &fetch_execution_policies/1)}
   end
 
   @impl true
@@ -37,6 +40,14 @@ defmodule CymphoWeb.ExecutionPolicyLive.Index do
   def handle_event("delete_execution_policy", %{"id" => id}, socket) do
     policy = ExecutionPolicies.get_execution_policy!(id)
     {:ok, _} = ExecutionPolicies.delete_execution_policy(policy)
-    {:noreply, assign(socket, :execution_policies, ExecutionPolicies.list_execution_policies())}
+    {:noreply, reset_stream(socket, :execution_policies, &fetch_execution_policies/1)}
+  end
+
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :execution_policies, &fetch_execution_policies/1)}
+  end
+
+  defp fetch_execution_policies(cursor) do
+    ExecutionPolicies.list_execution_policies_page(after: cursor)
   end
 end

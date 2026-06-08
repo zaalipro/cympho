@@ -2,65 +2,72 @@
   <.header title="Approvals">
     <:actions>
       <form phx-change="filter_status">
-        <select
+        <.select_menu
           name="status"
-          class="bg-surface border border-border rounded-lg px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
-        >
-          <option value="" selected={is_nil(@status_filter)}>All Statuses</option>
-          <option value="pending" selected={@status_filter == :pending}>Pending</option>
-          <option value="approved" selected={@status_filter == :approved}>Approved</option>
-          <option value="denied" selected={@status_filter == :denied}>Denied</option>
-          <option value="cancelled" selected={@status_filter == :cancelled}>Cancelled</option>
-        </select>
+          value={if @status_filter, do: to_string(@status_filter), else: ""}
+          options={[
+            {"All Statuses", ""},
+            {"Pending", "pending"},
+            {"Approved", "approved"},
+            {"Denied", "denied"},
+            {"Cancelled", "cancelled"}
+          ]}
+        />
       </form>
     </:actions>
   </.header>
 
-  <%= if Enum.empty?(@approvals) do %>
-    <div class="flex flex-col items-center justify-center py-20 text-center">
-      <p class="text-sm text-text-tertiary">No approvals yet.</p>
-    </div>
-  <% else %>
-    <div class="mt-6 overflow-hidden border border-border rounded-xl">
-      <table class="w-full">
-        <thead>
-          <tr class="bg-panel">
-            <th class="px-4 py-3 text-left text-xs font-510 text-text-secondary">Type</th>
-            <th class="px-4 py-3 text-left text-xs font-510 text-text-secondary">Status</th>
-            <th class="px-4 py-3 text-left text-xs font-510 text-text-secondary">Requested By</th>
-            <th class="px-4 py-3 text-left text-xs font-510 text-text-secondary">Issues</th>
-            <th class="px-4 py-3 text-left text-xs font-510 text-text-secondary">Created</th>
-            <th class="px-4 py-3 text-right text-xs font-510 text-text-secondary"></th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-border">
-          <%= for approval <- @approvals do %>
-            <tr class="hover:bg-subtle transition-colors">
-              <td class="px-4 py-3 text-sm text-text-primary">{approval.type}</td>
-              <td class="px-4 py-3">
-                <span class={"text-xs font-510 px-2 py-0.5 rounded-full " <> status_badge_class(approval.status)}>
-                  {approval.status}
-                </span>
-              </td>
-              <td class="px-4 py-3 text-sm text-text-secondary">
-                {if approval.requested_by, do: approval.requested_by.name, else: "-"}
-              </td>
-              <td class="px-4 py-3 text-sm text-text-quaternary">{length(approval.issues)}</td>
-              <td class="px-4 py-3 text-xs text-text-quaternary">
-                {Calendar.strftime(approval.inserted_at, "%b %d, %H:%M")}
-              </td>
-              <td class="px-4 py-3 text-right">
-                <.link
-                  navigate={~p"/approvals/#{approval.id}"}
-                  class="text-xs text-accent hover:text-accent-hover"
-                >
-                  View
-                </.link>
-              </td>
-            </tr>
-          <% end %>
-        </tbody>
-      </table>
-    </div>
-  <% end %>
+  <div class="mt-6 overflow-hidden border border-border rounded-xl">
+    <table class="w-full">
+      <thead>
+        <tr class="bg-panel">
+          <th class="px-4 py-3 text-left text-xs font-510 text-text-secondary">Type</th>
+          <th class="px-4 py-3 text-left text-xs font-510 text-text-secondary">Status</th>
+          <th class="px-4 py-3 text-left text-xs font-510 text-text-secondary">Requested By</th>
+          <th class="px-4 py-3 text-left text-xs font-510 text-text-secondary">Issues</th>
+          <th class="px-4 py-3 text-left text-xs font-510 text-text-secondary">Created</th>
+          <th class="px-4 py-3 text-right text-xs font-510 text-text-secondary"></th>
+        </tr>
+      </thead>
+      <tbody id="approvals-tbody" phx-update="stream" class="divide-y divide-border">
+        <tr id="approvals-empty" class="only:table-row hidden">
+          <td colspan="6" class="px-4 py-12 text-center text-sm text-text-tertiary">
+            No approvals yet.
+          </td>
+        </tr>
+        <tr
+          :for={{dom_id, approval} <- @streams.approvals}
+          id={dom_id}
+          class="hover:bg-subtle transition-colors"
+        >
+          <td class="px-4 py-3 text-sm text-text-primary">{approval.type}</td>
+          <td class="px-4 py-3">
+            <span class={"text-xs font-510 px-2 py-0.5 rounded-full " <> status_badge_class(approval.status)}>
+              {approval.status}
+            </span>
+          </td>
+          <td class="px-4 py-3 text-sm text-text-secondary">
+            {if approval.requested_by, do: approval.requested_by.name, else: "-"}
+          </td>
+          <td class="px-4 py-3 text-sm text-text-quaternary">{length(approval.issues)}</td>
+          <td class="px-4 py-3 text-xs text-text-quaternary">
+            {Calendar.strftime(approval.inserted_at, "%b %d, %H:%M")}
+          </td>
+          <td class="px-4 py-3 text-right">
+            <.link
+              navigate={~p"/approvals/#{approval.id}"}
+              class="text-xs text-accent hover:text-accent-hover"
+            >
+              View
+            </.link>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <.infinite_scroll_footer
+    id="approvals"
+    has_more={@infinite_scroll[:approvals][:has_more?] || false}
+  />
 </div>

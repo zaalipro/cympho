@@ -17,7 +17,7 @@ defmodule CymphoWeb.Format do
   def status_pill_class(:idle), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   def status_pill_class(:sleeping), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   def status_pill_class(:paused), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  def status_pill_class(:error), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def status_pill_class(:error), do: "border-brand/25 bg-brand/10 text-brand"
   def status_pill_class(:active), do: "border-success/25 bg-success/10 text-success"
   def status_pill_class(:terminated), do: "border-border bg-surface text-text-quaternary"
   def status_pill_class(:offline), do: "border-border bg-surface text-text-quaternary"

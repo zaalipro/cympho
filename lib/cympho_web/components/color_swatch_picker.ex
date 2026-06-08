@@ -7,14 +7,14 @@ defmodule CymphoWeb.Components.ColorSwatchPicker do
   use Phoenix.Component
 
   @presets [
-    {"Indigo", "#5e6ad2"},
-    {"Pink", "#ec4899"},
-    {"Blue", "#3b82f6"},
-    {"Emerald", "#10b981"},
-    {"Amber", "#f59e0b"},
-    {"Red", "#ef4444"},
-    {"Cyan", "#06b6d4"},
-    {"Fuchsia", "#a855f7"}
+    {"Terracotta", "#D97757"},
+    {"Amber", "#e8a55a"},
+    {"Sage", "#5db872"},
+    {"Teal", "#5db8a6"},
+    {"Plum", "#9A7CA8"},
+    {"Rose", "#A96B83"},
+    {"Red", "#c64545"},
+    {"Slate", "#807A6F"}
   ]
 
   def presets, do: @presets
@@ -53,7 +53,7 @@ defmodule CymphoWeb.Components.ColorSwatchPicker do
           <span
             data-color-preview
             class="h-5 w-5 rounded-full border border-white/15 shrink-0"
-            style={"background-color: #{@field.value || "#3b3d44"}"}
+            style={"background-color: #{@field.value || "#423F3B"}"}
           >
           </span>
           <input
@@ -62,9 +62,9 @@ defmodule CymphoWeb.Components.ColorSwatchPicker do
             id={@field.id}
             data-hex-input
             value={@field.value}
-            placeholder="#5e6ad2"
+            placeholder="#D97757"
             maxlength="7"
-            class="w-28 bg-surface border border-border rounded-lg px-2.5 py-1.5 text-xs font-mono text-text-primary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
+            class="w-28 bg-surface border border-border rounded-xl px-2.5 py-1.5 text-xs font-mono text-text-primary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
           />
         </div>
       </div>

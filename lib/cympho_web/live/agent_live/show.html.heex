@@ -379,7 +379,7 @@
             </div>
             <button
               type="submit"
-              class="rounded-lg bg-brand px-3 py-1.5 text-xs font-510 text-white hover:bg-accent-hover"
+              class="rounded-button bg-brand px-3 py-1.5 text-xs font-510 text-on-primary hover:bg-accent-hover"
             >
               Save
             </button>
@@ -606,7 +606,7 @@
                     </span>
                     <span
                       :for={field <- result.gap_fields}
-                      class="rounded bg-red-500/10 px-1.5 py-0.5 font-mono text-[10px] text-red-300"
+                      class="rounded bg-brand/10 px-1.5 py-0.5 font-mono text-[10px] text-brand"
                     >
                       {field}
                     </span>
@@ -1723,7 +1723,7 @@
 
         <div
           :if={selected_adapter_error}
-          class="mt-4 rounded-lg border border-red-500/20 bg-red-500/[0.06] p-4"
+          class="mt-4 rounded-lg border border-brand/20 bg-brand/[0.06] p-4"
         >
           <div class="flex flex-wrap items-center gap-2">
             <span class={"inline-flex rounded-full border px-2 py-0.5 text-[11px] font-510 #{adapter_error_badge_class(selected_adapter_error.category)}"}>

@@ -86,7 +86,12 @@ defmodule Cympho.Notifications.Dispatcher do
   end
 
   defp dispatch_to_user(%Message{} = message, user) do
-    channel_configs = lookup_preferences(user.id) |> Enum.filter(& &1.enabled)
+    event = resolve_event(message)
+
+    channel_configs =
+      lookup_preferences(user.id)
+      |> Enum.filter(& &1.enabled)
+      |> Enum.filter(&event_allowed?(&1, event))
 
     tasks =
       Enum.map(channel_configs, fn pref ->
@@ -117,6 +122,21 @@ defmodule Cympho.Notifications.Dispatcher do
     else
       {:partial_failure, results}
     end
+  end
+
+  # Per-event channel preferences live in pref.config["events"]; gate delivery on
+  # the message's event (event_type, else metadata :type). Unknown/absent ⇒ deliver.
+  defp resolve_event(%Message{event_type: type}) when is_binary(type) and type != "", do: type
+  defp resolve_event(%Message{metadata: %{type: type}}) when is_binary(type), do: type
+  defp resolve_event(%Message{metadata: %{"type" => type}}) when is_binary(type), do: type
+  defp resolve_event(_message), do: nil
+
+  defp event_allowed?(_pref, nil), do: true
+
+  defp event_allowed?(pref, event) do
+    (pref.config || %{})
+    |> Map.get("events", %{})
+    |> Map.get(event, true)
   end
 
   defp deliver_via(channel_module, message, config) do

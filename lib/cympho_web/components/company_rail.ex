@@ -6,12 +6,13 @@ defmodule CymphoWeb.Components.CompanyRail do
 
   def company_rail(assigns) do
     ~H"""
-    <div class="h-14 flex items-center justify-between px-3 border-b border-border" {@rest}>
+    <div class="h-14 flex items-center justify-between px-3 border-b border-hairline" {@rest}>
       <button
         type="button"
-        class="flex items-center gap-2 hover:bg-surface-hover px-2 py-1.5 transition-colors rounded-md flex-1 min-w-0"
+        class="flex items-center gap-2 hover:bg-surface-hover px-2 py-1.5 transition-colors rounded-lg flex-1 min-w-0"
         onclick="window.openCompanySwitcher && window.openCompanySwitcher()"
       >
+        <CymphoWeb.Components.spark class="h-4 w-4 text-brand shrink-0" />
         <.company_display company={@company} />
         <svg
           class="w-4 h-4 text-text-quaternary ml-auto"
@@ -39,12 +40,12 @@ defmodule CymphoWeb.Components.CompanyRail do
 
     ~H"""
     <div class="flex items-center gap-3">
-      <div :if={@company.logo_url} class="w-6 h-6 rounded-md overflow-hidden">
+      <div :if={@company.logo_url} class="w-6 h-6 rounded-lg overflow-hidden">
         <img src={@company.logo_url} alt={@company.name} class="w-full h-full object-cover" />
       </div>
       <div
         :if={!@company.logo_url}
-        class="w-6 h-6 rounded-md bg-brand/12 flex items-center justify-center"
+        class="w-6 h-6 rounded-lg bg-brand/12 flex items-center justify-center"
       >
         <span class="text-[11px] font-590 text-brand">{company_initials(@company.name)}</span>
       </div>

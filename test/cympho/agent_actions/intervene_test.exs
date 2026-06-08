@@ -110,7 +110,8 @@ defmodule Cympho.AgentActions.InterveneTest do
 
   describe "intervene unblock" do
     setup %{issue: issue, engineer: engineer} do
-      stale_at = DateTime.utc_now() |> DateTime.add(-2 * 3600, :second) |> DateTime.truncate(:second)
+      stale_at =
+        DateTime.utc_now() |> DateTime.add(-2 * 3600, :second) |> DateTime.truncate(:second)
 
       {:ok, blocked} =
         Issues.update_issue(issue, %{

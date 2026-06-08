@@ -37,7 +37,7 @@ defmodule CymphoWeb.BoardApprovalLive.Show do
 
   def status_badge("pending"), do: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
   def status_badge("approved"), do: "bg-green-500/10 text-green-500 border-green-500/20"
-  def status_badge("denied"), do: "bg-red-500/10 text-red-500 border-red-500/20"
+  def status_badge("denied"), do: "bg-brand/10 text-brand border-brand/20"
   def status_badge("cancelled"), do: "bg-gray-500/10 text-gray-500 border-gray-500/20"
   def status_badge("expired"), do: "bg-gray-500/10 text-gray-500 border-gray-500/20"
 

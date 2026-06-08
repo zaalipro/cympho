@@ -22,9 +22,7 @@ defmodule Cympho.AgentPromptWakeContextTest do
 
   test "renders mission_idle preamble for CEO", %{ceo: ceo, issue: issue} do
     prompt =
-      AgentPrompt.build(issue, ceo,
-        wake_context: {"mission_idle", %{"active_missions" => 1}}
-      )
+      AgentPrompt.build(issue, ceo, wake_context: {"mission_idle", %{"active_missions" => 1}})
 
     assert prompt =~ "Why you're running this turn"
     assert prompt =~ "mission_idle"
@@ -55,6 +53,7 @@ defmodule Cympho.AgentPromptWakeContextTest do
   test "final_review_required preamble routes by role",
        %{ceo: ceo, engineer: engineer, issue: issue} do
     ceo_prompt = AgentPrompt.build(issue, ceo, wake_context: {"final_review_required", %{}})
+
     eng_prompt =
       AgentPrompt.build(issue, engineer, wake_context: {"final_review_required", %{}})
 

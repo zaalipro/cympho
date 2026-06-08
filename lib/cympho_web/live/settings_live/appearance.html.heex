@@ -1,0 +1,78 @@
+<.settings_layout active={:appearance}>
+  <.header
+    title="Appearance"
+    subtitle="Pick a theme. It applies instantly and is saved to your account, so it follows you across devices."
+  />
+
+  <section :for={{group, themes} <- @grouped} class="mb-10">
+    <h2 class="mb-3 text-eyebrow uppercase text-text-tertiary">{group}</h2>
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <button
+        :for={theme <- themes}
+        type="button"
+        phx-click="set_theme"
+        phx-value-theme={theme.id}
+        aria-pressed={theme.id == @current_theme}
+        class={[
+          "group relative rounded-2xl border p-3 text-left transition-all focus:outline-none focus-ring",
+          if(theme.id == @current_theme,
+            do: "border-brand shadow-card",
+            else: "border-hairline hover:border-hairline-strong hover:shadow-card"
+          )
+        ]}
+      >
+        <div
+          class="aspect-[16/10] w-full overflow-hidden rounded-xl border border-black/10"
+          style={"background-color: #{theme.swatch.bg};"}
+        >
+          <div class="flex h-full w-full flex-col gap-2 p-3">
+            <div class="flex items-center gap-1.5">
+              <span
+                class="h-2.5 w-2.5 shrink-0 rounded-full"
+                style={"background-color: #{theme.swatch.accent};"}
+              >
+              </span>
+              <span
+                class="h-1.5 w-16 rounded-full"
+                style={"background-color: #{theme.swatch.ink}; opacity:.85;"}
+              >
+              </span>
+            </div>
+            <div
+              class="h-9 w-full rounded-lg"
+              style={"background-color: #{theme.swatch.surface};"}
+            >
+            </div>
+            <div class="mt-auto flex items-center gap-2">
+              <span
+                class="inline-block h-6 w-16 rounded-md"
+                style={"background-color: #{theme.swatch.accent};"}
+              >
+              </span>
+              <span
+                class="h-1.5 w-12 rounded-full"
+                style={"background-color: #{theme.swatch.ink}; opacity:.5;"}
+              >
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-3 flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-590 text-text-primary">{theme.name}</span>
+              <span
+                :if={theme.id == @current_theme}
+                class="rounded-full bg-brand/15 px-2 py-0.5 text-[10px] font-590 text-brand"
+              >
+                Active
+              </span>
+            </div>
+            <p class="truncate text-caption text-text-tertiary">{theme.blurb}</p>
+          </div>
+        </div>
+      </button>
+    </div>
+  </section>
+</.settings_layout>

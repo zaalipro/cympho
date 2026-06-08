@@ -27,6 +27,7 @@
           options={[Critical: "critical", High: "high", Medium: "medium", Low: "low"]}
           value={@goal.priority}
         />
+        <.input field={@form[:target_date]} type="date" label="Target date" />
       </div>
 
       <:actions>

@@ -9,7 +9,10 @@ defmodule CymphoWeb.ProjectLive.Index do
       Projects.subscribe(socket.assigns.current_company.id)
     end
 
-    {:ok, assign(socket, :projects, list_projects(socket))}
+    {:ok,
+     socket
+     |> assign(:infinite_scroll, %{})
+     |> init_stream(:projects, &fetch_projects(socket, &1))}
   end
 
   @impl true
@@ -41,23 +44,15 @@ defmodule CymphoWeb.ProjectLive.Index do
 
   @impl true
   def handle_info({:project_created, project}, socket) do
-    {:noreply, update(socket, :projects, fn projects -> [project | projects] end)}
+    {:noreply, prepend(socket, :projects, project)}
   end
 
   def handle_info({:project_updated, updated_project}, socket) do
-    {:noreply,
-     update(socket, :projects, fn projects ->
-       Enum.map(projects, fn project ->
-         if project.id == updated_project.id, do: updated_project, else: project
-       end)
-     end)}
+    {:noreply, stream_insert(socket, :projects, updated_project)}
   end
 
   def handle_info({:project_deleted, deleted_id}, socket) do
-    {:noreply,
-     update(socket, :projects, fn projects ->
-       Enum.filter(projects, fn project -> project.id != deleted_id end)
-     end)}
+    {:noreply, stream_delete_by_dom_id(socket, :projects, "projects-#{deleted_id}")}
   end
 
   @impl true
@@ -65,6 +60,10 @@ defmodule CymphoWeb.ProjectLive.Index do
     project = Projects.get_project!(id)
     {:ok, _} = Projects.archive_project(project)
     {:noreply, socket}
+  end
+
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :projects, &fetch_projects(socket, &1))}
   end
 
   def strip_protocol(nil), do: ""
@@ -75,10 +74,13 @@ defmodule CymphoWeb.ProjectLive.Index do
     |> String.trim_trailing("/")
   end
 
-  defp list_projects(socket) do
+  defp fetch_projects(socket, cursor) do
     case socket.assigns[:current_company] do
-      %{id: company_id} -> Projects.list_projects_by_company(company_id)
-      _ -> []
+      %{id: company_id} ->
+        Projects.list_projects_by_company_page(company_id, after: cursor)
+
+      _ ->
+        %Cympho.Pagination.Page{entries: [], next_cursor: nil, has_more?: false}
     end
   end
 end

@@ -14,7 +14,11 @@ defmodule Cympho.RoutineManualRunTest do
         })
 
       {:ok, routine} =
-        Routines.create_routine(%{name: "Manual Test", agent_id: agent.id})
+        Routines.create_routine(%{
+          name: "Manual Test",
+          agent_id: agent.id,
+          concurrency_policy: :always_enqueue
+        })
 
       %{routine: routine, agent: agent}
     end
@@ -49,6 +53,18 @@ defmodule Cympho.RoutineManualRunTest do
       assert {:ok, %{run: run1}} = RoutineTriggers.manual_run(routine)
       assert {:ok, %{run: run2}} = RoutineTriggers.manual_run(routine.id)
       assert run1.id != run2.id
+    end
+
+    test "skips a concurrent run when concurrency_policy is :skip_if_active", %{agent: agent} do
+      {:ok, routine} =
+        Routines.create_routine(%{
+          name: "Skip Test",
+          agent_id: agent.id,
+          concurrency_policy: :skip_if_active
+        })
+
+      assert {:ok, %{run: _}} = RoutineTriggers.manual_run(routine)
+      assert {:skip, :skip_if_active} = RoutineTriggers.manual_run(routine)
     end
 
     test "returns error for non-existent routine id" do

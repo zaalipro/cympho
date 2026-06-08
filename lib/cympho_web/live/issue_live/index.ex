@@ -296,11 +296,11 @@ defmodule CymphoWeb.IssueLive.Index do
   defp status_badge_class(:in_progress), do: "bg-amber-500/15 text-amber-300"
   defp status_badge_class(:in_review), do: "bg-sky-500/15 text-sky-300"
   defp status_badge_class(:done), do: "bg-success/15 text-success"
-  defp status_badge_class(:blocked), do: "bg-red-500/15 text-red-300"
+  defp status_badge_class(:blocked), do: "bg-brand/15 text-brand"
   defp status_badge_class(:cancelled), do: "bg-text-quaternary/15 text-text-tertiary"
   defp status_badge_class(_), do: "bg-subtle text-text-secondary"
 
-  defp priority_badge_class(:critical), do: "bg-red-500/15 text-red-300"
+  defp priority_badge_class(:critical), do: "bg-brand/15 text-brand"
   defp priority_badge_class(:high), do: "bg-orange-500/15 text-orange-300"
   defp priority_badge_class(:medium), do: "bg-amber-500/15 text-amber-300"
   defp priority_badge_class(:low), do: "bg-text-quaternary/15 text-text-tertiary"

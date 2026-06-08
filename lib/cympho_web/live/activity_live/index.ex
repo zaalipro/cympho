@@ -11,114 +11,55 @@ defmodule CymphoWeb.ActivityLive.Index do
       socket
       |> assign(:page_title, "Activity Feed")
       |> assign(:company_id, company_id)
-      |> assign(:activities, [])
-      |> assign(:pagination, %{total: 0, limit: 50, offset: 0})
       |> assign(:filter_action, "")
       |> assign(:filter_actor_type, "")
-      |> assign(:filter_date_from, nil)
-      |> assign(:filter_date_to, nil)
+      |> assign(:infinite_scroll, %{})
 
     {:ok, socket}
   end
 
   @impl true
   def handle_params(params, _url, socket) do
-    filter_action = params["filter_action"] || ""
-    filter_actor_type = params["filter_actor_type"] || ""
-    page = String.to_integer(params["page"] || "1")
-
     socket =
       socket
-      |> assign(:filter_action, filter_action)
-      |> assign(:filter_actor_type, filter_actor_type)
-      |> assign(:page, page)
-      |> load_activities()
+      |> assign(:filter_action, params["filter_action"] || "")
+      |> assign(:filter_actor_type, params["filter_actor_type"] || "")
 
-    {:noreply, socket}
+    {:noreply, init_stream(socket, :activities, &fetch_activities(socket, &1))}
   end
 
   @impl true
-  def handle_event(
-        "filter",
-        %{"filter_action" => action, "filter_actor_type" => actor_type},
-        socket
-      ) do
-    socket =
-      socket
-      |> assign(:filter_action, action)
-      |> assign(:filter_actor_type, actor_type)
-      |> assign(:page, 1)
-      |> load_activities()
-
-    {:noreply, push_patch(socket, to: build_url(socket))}
+  def handle_event("filter", params, socket) do
+    action = Map.get(params, "filter_action", socket.assigns.filter_action)
+    actor_type = Map.get(params, "filter_actor_type", socket.assigns.filter_actor_type)
+    {:noreply, push_patch(socket, to: build_url(action, actor_type))}
   end
 
   def handle_event("clear_filters", _, socket) do
-    socket =
-      socket
-      |> assign(:filter_action, "")
-      |> assign(:filter_actor_type, "")
-      |> assign(:page, 1)
-      |> load_activities()
-
     {:noreply, push_patch(socket, to: ~p"/activity")}
   end
 
-  def handle_event("load_more", _, socket) do
-    socket =
-      socket
-      |> update(:page, &(&1 + 1))
-      |> load_activities()
-
-    {:noreply, push_patch(socket, to: build_url(socket))}
+  def handle_event("next-page", _params, socket) do
+    {:reply, %{}, load_next(socket, :activities, &fetch_activities(socket, &1))}
   end
 
-  def handle_event("load_prev", _, socket) do
-    socket =
-      socket
-      |> update(:page, &max(1, &1 - 1))
-      |> load_activities()
+  # Filter forms filter live via phx-change; phx-submit="prevent" only suppresses
+  # a full-page submit on Enter, so this is intentionally a no-op.
+  def handle_event("prevent", _params, socket), do: {:noreply, socket}
 
-    {:noreply, push_patch(socket, to: build_url(socket))}
+  defp fetch_activities(socket, cursor) do
+    Activities.list_company_activities_page(socket.assigns.company_id,
+      action: socket.assigns.filter_action,
+      actor_type: socket.assigns.filter_actor_type,
+      after: cursor
+    )
   end
 
-  defp load_activities(socket) do
-    company_id = socket.assigns.company_id
-    filter_action = socket.assigns.filter_action
-    filter_actor_type = socket.assigns.filter_actor_type
-    page = socket.assigns.page
-    limit = 50
-    offset = (page - 1) * limit
-
-    {activities, total} =
-      Activities.list_company_activities(company_id,
-        action: filter_action,
-        actor_type: filter_actor_type,
-        limit: limit,
-        offset: offset
-      )
-
-    socket
-    |> assign(:activities, activities)
-    |> assign(:pagination, %{
-      total: total,
-      limit: limit,
-      offset: offset,
-      page: page,
-      total_pages: ceil(total / limit)
-    })
-  end
-
-  defp build_url(socket) do
-    filter_action = socket.assigns.filter_action
-    filter_actor_type = socket.assigns.filter_actor_type
-    page = socket.assigns.page
-
+  defp build_url(filter_action, filter_actor_type) do
     query =
       %{
         filter_action: filter_action,
-        filter_actor_type: filter_actor_type,
-        page: page
+        filter_actor_type: filter_actor_type
       }
       |> Enum.reject(fn {_k, v} -> v in ["", nil] end)
       |> Enum.into(%{})
@@ -179,12 +120,6 @@ defmodule CymphoWeb.ActivityLive.Index do
   defp actor_name(%{actor_type: "agent", metadata: %{agent_name: name}}), do: name
   defp actor_name(%{actor_type: "user", metadata: %{user_name: name}}), do: name
   defp actor_name(%{actor_type: type, actor_id: id}), do: "#{type}: #{id}"
-
-  defp has_more_pages?(%{page: page, total_pages: total}) when page < total, do: true
-  defp has_more_pages?(_), do: false
-
-  defp has_prev_pages?(%{page: page}) when page > 1, do: true
-  defp has_prev_pages?(_), do: false
 
   defp render_metadata(assigns) do
     ~H"""

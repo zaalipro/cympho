@@ -72,7 +72,7 @@ defmodule CymphoWeb.AdapterLive.Index do
 
   defp health_status_class(:healthy), do: "bg-success/20 text-success"
   defp health_status_class(:degraded), do: "bg-amber-500/20 text-amber-400"
-  defp health_status_class(:unhealthy), do: "bg-red-500/20 text-red-400"
+  defp health_status_class(:unhealthy), do: "bg-brand/20 text-brand"
   defp health_status_class(_), do: "bg-text-quaternary/20 text-text-quaternary"
 
   defp health_status_label(:healthy), do: "Healthy"
@@ -81,7 +81,7 @@ defmodule CymphoWeb.AdapterLive.Index do
   defp health_status_label(_), do: "Unknown"
 
   defp availability_class(true), do: "text-success"
-  defp availability_class(false), do: "text-red-400"
+  defp availability_class(false), do: "text-brand"
 
   defp availability_label(true), do: "Available"
   defp availability_label(false), do: "Unavailable"

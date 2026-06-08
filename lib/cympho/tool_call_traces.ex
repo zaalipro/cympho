@@ -27,6 +27,30 @@ defmodule Cympho.ToolCallTraces do
     |> Repo.all()
   end
 
+  @doc """
+  Keyset (infinite-scroll) page of tool-call traces, newest first.
+
+  Accepts the same filter options as `list_tool_call_traces/1` plus `:after`
+  (a cursor) and `:limit`, and returns a `Cympho.Pagination.Page`. Keys on
+  `(occurred_at, id)` so it stays correct across any filter combination,
+  including the cross-company (unscoped) case.
+  """
+  def list_tool_call_traces_page(opts \\ []) do
+    ToolCallTrace
+    |> maybe_filter_by_company(Keyword.get(opts, :company_id))
+    |> maybe_filter_by_issue(Keyword.get(opts, :issue_id))
+    |> maybe_filter_by_agent(Keyword.get(opts, :agent_id))
+    |> maybe_filter_by_actor_type(Keyword.get(opts, :actor_type))
+    |> maybe_filter_by_actor_id(Keyword.get(opts, :actor_id))
+    |> maybe_filter_by_tool_name(Keyword.get(opts, :tool_name))
+    |> maybe_filter_by_status(Keyword.get(opts, :status))
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:occurred_at, :desc}, {:id, :desc}]
+    )
+  end
+
   def get_tool_call_trace(id) do
     case Repo.get(ToolCallTrace, id) do
       nil -> {:error, :not_found}

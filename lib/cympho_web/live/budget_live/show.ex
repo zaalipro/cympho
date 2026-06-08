@@ -76,7 +76,7 @@ defmodule CymphoWeb.BudgetLive.Show do
     pct_value = Decimal.to_float(pct)
 
     cond do
-      pct_value >= 100 -> "bg-red-500"
+      pct_value >= 100 -> "bg-brand"
       pct_value >= budget.threshold_alert_percentage -> "bg-amber-500"
       true -> "bg-green-500"
     end
@@ -85,7 +85,7 @@ defmodule CymphoWeb.BudgetLive.Show do
   def status_badge(budget) do
     cond do
       budget.status == "exhausted" ->
-        {"bg-red-500/10 text-red-400 border-red-500/20", "Exhausted"}
+        {"bg-brand/10 text-brand border-brand/20", "Exhausted"}
 
       budget.status == "cancelled" ->
         {"bg-gray-500/10 text-gray-400 border-gray-500/20", "Cancelled"}

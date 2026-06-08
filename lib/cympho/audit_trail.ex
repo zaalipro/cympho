@@ -130,6 +130,38 @@ defmodule Cympho.AuditTrail do
   end
 
   @doc """
+  Keyset (infinite-scroll) page of a company's audit events, newest first.
+
+  Accepts the same filter options as `list_company_events/2` (minus
+  `:limit`/`:offset`) plus `:after` (a cursor) and `:limit`, and returns a
+  `Cympho.Pagination.Page`.
+  """
+  def list_company_events_page(company_id, opts \\ []) do
+    from(e in AuditEvent, where: e.company_id == ^company_id)
+    |> maybe_eq(:event_type, Keyword.get(opts, :event_type))
+    |> maybe_eq(:actor_type, Keyword.get(opts, :actor_type))
+    |> maybe_eq(:actor_id, Keyword.get(opts, :actor_id))
+    |> maybe_eq(:resource_type, Keyword.get(opts, :resource_type))
+    |> maybe_eq(:resource_id, Keyword.get(opts, :resource_id))
+    |> maybe_after_date(Keyword.get(opts, :start_date))
+    |> maybe_before_date(Keyword.get(opts, :end_date))
+    |> Cympho.Pagination.page(
+      limit: Keyword.get(opts, :limit, 50),
+      after: Keyword.get(opts, :after),
+      cursor_fields: [{:inserted_at, :desc}, {:id, :desc}]
+    )
+  end
+
+  defp maybe_eq(query, _field, value) when value in [nil, ""], do: query
+  defp maybe_eq(query, field, value), do: where(query, [e], field(e, ^field) == ^value)
+
+  defp maybe_after_date(query, nil), do: query
+  defp maybe_after_date(query, dt), do: where(query, [e], e.inserted_at >= ^dt)
+
+  defp maybe_before_date(query, nil), do: query
+  defp maybe_before_date(query, dt), do: where(query, [e], e.inserted_at <= ^dt)
+
+  @doc """
   Lists audit events for a specific resource.
 
   ## Examples

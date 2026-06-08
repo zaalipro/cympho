@@ -453,7 +453,11 @@ defmodule Cympho.AutonomousLoopTest do
 
       # Parent should have a `child_status_changed` wake for the CEO.
       parent_wakes = Wakes.list_issue_wakes(root.id)
-      assert Enum.any?(parent_wakes, &(&1.reason == "child_status_changed" and &1.agent_id == ceo.id))
+
+      assert Enum.any?(
+               parent_wakes,
+               &(&1.reason == "child_status_changed" and &1.agent_id == ceo.id)
+             )
 
       # Engineer "wraps up" — child :done. Root flips to :in_review.
       {:ok, _} = Issues.transition_issue(Issues.get_issue!(child_id), :done)
@@ -461,7 +465,11 @@ defmodule Cympho.AutonomousLoopTest do
       assert Issues.get_issue!(root.id).status == :in_review
 
       final_wakes = Wakes.list_issue_wakes(root.id)
-      assert Enum.any?(final_wakes, &(&1.reason == "final_review_required" and &1.agent_id == ceo.id))
+
+      assert Enum.any?(
+               final_wakes,
+               &(&1.reason == "final_review_required" and &1.agent_id == ceo.id)
+             )
     end
   end
 
@@ -471,8 +479,12 @@ defmodule Cympho.AutonomousLoopTest do
 
   defp wait_until(fun, attempts \\ 30) when is_function(fun, 0) do
     cond do
-      fun.() -> :ok
-      attempts <= 0 -> {:error, :timeout}
+      fun.() ->
+        :ok
+
+      attempts <= 0 ->
+        {:error, :timeout}
+
       true ->
         Process.sleep(50)
         wait_until(fun, attempts - 1)
@@ -483,7 +495,9 @@ defmodule Cympho.AutonomousLoopTest do
   defp restore(key, value), do: Application.put_env(:cympho, key, value)
 
   defp backdate_wake!(wake_id, seconds_offset) do
-    cutoff = DateTime.utc_now() |> DateTime.add(seconds_offset, :second) |> DateTime.truncate(:second)
+    cutoff =
+      DateTime.utc_now() |> DateTime.add(seconds_offset, :second) |> DateTime.truncate(:second)
+
     from(w in AgentWake, where: w.id == ^wake_id) |> Repo.update_all(set: [inserted_at: cutoff])
   end
 end

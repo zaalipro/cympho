@@ -87,7 +87,7 @@ defmodule CymphoWeb.CompanyExportLive do
           <button
             :if={!@loading && !@download_ready}
             phx-click="generate_export"
-            class="bg-brand hover:bg-accent text-white font-510 text-sm px-6 py-3 rounded-lg transition-colors inline-flex items-center gap-2"
+            class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-6 py-3 rounded-button transition-colors inline-flex items-center gap-2"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
