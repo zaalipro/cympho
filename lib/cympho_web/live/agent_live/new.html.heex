@@ -27,6 +27,45 @@
     </:actions>
   </.header>
 
+  <div
+    :if={@hire_context}
+    data-testid="hire-demand-context"
+    class="mb-5 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3"
+  >
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <p class="text-xs font-590 uppercase tracking-[0.12em] text-amber-200">
+            Demand-backed hire
+          </p>
+          <span class="rounded-full border border-amber-500/25 bg-canvas/40 px-2 py-0.5 text-[11px] font-510 text-amber-100">
+            {@hire_context.open_issues} open {plural_noun(@hire_context.open_issues, "issue")}
+          </span>
+        </div>
+        <p class="mt-1 text-sm leading-5 text-amber-50">
+          Queued work needs a {@hire_context.label}. This form is prefilled with the matching
+          role, playbook, and reporting line.
+        </p>
+        <div :if={@hire_context.examples != []} class="mt-2 flex flex-wrap gap-1.5">
+          <.app_link
+            :for={example <- @hire_context.examples}
+            navigate={~p"/issues/#{example.id}"}
+            class="max-w-full truncate rounded-md border border-amber-500/20 bg-panel px-2 py-1 text-[11px] text-text-tertiary transition hover:border-amber-400/40 hover:text-amber-100"
+            title={issue_example_label(example)}
+          >
+            {issue_example_label(example)}
+          </.app_link>
+        </div>
+      </div>
+      <p
+        :if={@hire_context.suggested_parent}
+        class="shrink-0 rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs text-text-secondary"
+      >
+        Reports to {@hire_context.suggested_parent.name}
+      </p>
+    </div>
+  </div>
+
   <.panel>
     <div id="new-agent-config-fields" phx-hook="AdapterConfigFields">
       <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-5 p-5">
@@ -230,6 +269,46 @@
               />
             </div>
           </div>
+        </div>
+
+        <div
+          data-adapter-panel="openai_chat"
+          hidden={@selected_adapter != "openai_chat"}
+          class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
+        >
+          <div class="space-y-1.5">
+            <label
+              for="new-agent-openai-chat-model"
+              class="block text-xs font-510 text-text-secondary"
+            >
+              Chat model
+            </label>
+            <input
+              id="new-agent-openai-chat-model"
+              name="agent[model]"
+              value={@runtime_model}
+              placeholder="qwen3.7-plus"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+          <div class="space-y-1.5">
+            <label
+              for="new-agent-openai-chat-endpoint"
+              class="block text-xs font-510 text-text-secondary"
+            >
+              Chat completions URL
+            </label>
+            <input
+              id="new-agent-openai-chat-endpoint"
+              name="agent[openai_chat_endpoint]"
+              value={@openai_chat_endpoint}
+              placeholder="https://example.com/v1/chat/completions"
+              class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            />
+          </div>
+          <p class="text-xs leading-5 text-text-quaternary sm:col-span-2">
+            Calls an OpenAI-compatible chat completions provider. Keep API keys in Secrets.
+          </p>
         </div>
 
         <div

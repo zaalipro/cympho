@@ -5,6 +5,7 @@ defmodule CymphoWeb.AgentLive.New do
   alias Cympho.Agents.RolePlaybook
   alias Cympho.Agents.RuntimeEnv
   alias Cympho.Adapters.RuntimeOptions
+  alias Cympho.OrgHealth
 
   @default_role "engineer"
 
@@ -16,9 +17,11 @@ defmodule CymphoWeb.AgentLive.New do
   }
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(params, _session, socket) do
     company = socket.assigns[:current_company]
-    attrs = maybe_put_company_id(@default_attrs, company)
+    role = prefill_role(params)
+    attrs = initial_attrs(params, company)
+    selected_adapter = selected_adapter_from_params(attrs)
     changeset = Agents.change_agent(%Agent{}, attrs)
 
     {:ok,
@@ -26,8 +29,9 @@ defmodule CymphoWeb.AgentLive.New do
      |> assign(:page_title, "New Agent")
      |> assign(:pending_approval_id, nil)
      |> assign(:env_text, "")
-     |> assign(:selected_adapter, "claude_code")
-     |> assign_runtime_form(default_runtime_form("claude_code"))
+     |> assign(:hire_context, hire_context(params, company, role))
+     |> assign(:selected_adapter, selected_adapter)
+     |> assign_runtime_form(default_runtime_form(selected_adapter))
      |> assign(:reports_to_options, reports_to_options(company, nil))
      |> assign(:form, to_form(changeset))}
   end
@@ -121,6 +125,81 @@ defmodule CymphoWeb.AgentLive.New do
 
   defp maybe_put_company_id(params, _), do: params
 
+  defp initial_attrs(params, company) do
+    role = prefill_role(params)
+
+    @default_attrs
+    |> Map.put("role", to_string(role))
+    |> Map.put("instructions", RolePlaybook.default_overrides_template(role))
+    |> maybe_put_prefill_name(params, role)
+    |> maybe_put_prefill_parent(params, company)
+    |> maybe_put_company_id(company)
+  end
+
+  defp prefill_role(%{"role" => role}) do
+    Agent.normalize_role(role) || Agent.normalize_role(@default_role)
+  end
+
+  defp prefill_role(_params), do: Agent.normalize_role(@default_role)
+
+  defp maybe_put_prefill_name(attrs, params, role) do
+    case clean_prefill_string(Map.get(params, "name")) do
+      nil ->
+        if Map.has_key?(params, "role"),
+          do: Map.put(attrs, "name", Agent.role_label(role)),
+          else: attrs
+
+      name ->
+        Map.put(attrs, "name", name)
+    end
+  end
+
+  defp maybe_put_prefill_parent(attrs, params, company) do
+    parent_id = clean_prefill_string(Map.get(params, "parent_id"))
+
+    if valid_parent_id?(company, parent_id),
+      do: Map.put(attrs, "parent_id", parent_id),
+      else: attrs
+  end
+
+  defp valid_parent_id?(_company, nil), do: false
+
+  defp valid_parent_id?(%{id: company_id}, parent_id) do
+    company_id
+    |> Agents.list_agents_by_company()
+    |> Enum.any?(&(&1.id == parent_id))
+  end
+
+  defp valid_parent_id?(_company, _parent_id), do: false
+
+  defp clean_prefill_string(value) when is_binary(value) do
+    value = value |> String.trim() |> String.slice(0, 120)
+    if value == "", do: nil, else: value
+  end
+
+  defp clean_prefill_string(_value), do: nil
+
+  defp hire_context(%{"role" => _role}, %{id: company_id}, role) when is_atom(role) do
+    company_id
+    |> OrgHealth.snapshot()
+    |> Map.get(:role_demand_gaps, [])
+    |> Enum.find(&(&1.role == role))
+    |> case do
+      nil ->
+        nil
+
+      gap ->
+        %{
+          label: gap.label,
+          open_issues: gap.open_issues,
+          examples: gap.examples,
+          suggested_parent: gap.suggested_parent
+        }
+    end
+  end
+
+  defp hire_context(_params, _company, _role), do: nil
+
   defp normalize_agent_params(params) do
     params
     |> Map.update("adapter", "claude_code", &normalize_adapter/1)
@@ -131,6 +210,7 @@ defmodule CymphoWeb.AgentLive.New do
       "process_preset",
       "process_args",
       "runtime_cwd",
+      "openai_chat_endpoint",
       "openclaw_endpoint",
       "openclaw_runtime",
       "openclaw_harness_id"
@@ -175,6 +255,12 @@ defmodule CymphoWeb.AgentLive.New do
     |> put_clean("harness_id", runtime.openclaw_harness_id)
   end
 
+  defp build_adapter_config(config, "openai_chat", runtime) do
+    config
+    |> put_clean("model", runtime.model)
+    |> put_clean("endpoint", runtime.openai_chat_endpoint)
+  end
+
   defp build_adapter_config(config, "process", runtime) do
     preset_defaults = RuntimeOptions.process_defaults(runtime.process_preset)
 
@@ -201,6 +287,7 @@ defmodule CymphoWeb.AgentLive.New do
     |> assign(:process_preset, runtime.process_preset)
     |> assign(:process_args, runtime.process_args)
     |> assign(:runtime_cwd, runtime.cwd)
+    |> assign(:openai_chat_endpoint, runtime.openai_chat_endpoint)
     |> assign(:openclaw_endpoint, runtime.openclaw_endpoint)
     |> assign(:openclaw_runtime, runtime.openclaw_runtime)
     |> assign(:openclaw_harness_id, runtime.openclaw_harness_id)
@@ -223,6 +310,8 @@ defmodule CymphoWeb.AgentLive.New do
       process_preset: process_preset,
       process_args: param_string(params, "process_args", fallback.process_args),
       cwd: param_string(params, "runtime_cwd", fallback.cwd),
+      openai_chat_endpoint:
+        param_string(params, "openai_chat_endpoint", fallback.openai_chat_endpoint),
       openclaw_endpoint: param_string(params, "openclaw_endpoint", fallback.openclaw_endpoint),
       openclaw_runtime: param_string(params, "openclaw_runtime", fallback.openclaw_runtime),
       openclaw_harness_id:
@@ -242,6 +331,7 @@ defmodule CymphoWeb.AgentLive.New do
       process_preset: process_preset,
       process_args: "",
       cwd: "",
+      openai_chat_endpoint: "",
       openclaw_endpoint: "",
       openclaw_runtime: "subagent",
       openclaw_harness_id: ""
@@ -271,6 +361,8 @@ defmodule CymphoWeb.AgentLive.New do
   defp runtime_model_options("openclaw", provider, _preset),
     do: RuntimeOptions.openclaw_model_options(provider)
 
+  defp runtime_model_options("openai_chat", _provider, _preset), do: []
+
   defp runtime_model_options("process", provider, _preset),
     do: RuntimeOptions.process_model_options(provider)
 
@@ -290,6 +382,8 @@ defmodule CymphoWeb.AgentLive.New do
     do: Cympho.Adapters.CodexAdapter.default_model()
 
   defp default_model("cursor", _provider, _preset), do: RuntimeOptions.cursor_default_model()
+
+  defp default_model("openai_chat", _provider, _preset), do: "qwen3.7-plus"
 
   defp default_model("openclaw", provider, _preset),
     do: RuntimeOptions.openclaw_default_model(provider)
@@ -367,14 +461,7 @@ defmodule CymphoWeb.AgentLive.New do
   defp maybe_refresh_instructions_for_role(params), do: params
 
   defp parse_role(role) when is_binary(role) do
-    case role do
-      "ceo" -> :ceo
-      "cto" -> :cto
-      "engineer" -> :engineer
-      "product_manager" -> :product_manager
-      "designer" -> :designer
-      _ -> nil
-    end
+    Agent.normalize_role(role)
   end
 
   defp parse_role(_), do: nil
@@ -382,7 +469,7 @@ defmodule CymphoWeb.AgentLive.New do
   defp looks_like_default_template?(""), do: true
 
   defp looks_like_default_template?(text) when is_binary(text) do
-    Enum.any?([:ceo, :cto, :engineer, :product_manager, :designer], fn role ->
+    Enum.any?(Agent.role_options(), fn role ->
       RolePlaybook.default_overrides_template(role) == text
     end)
   end
@@ -408,18 +495,24 @@ defmodule CymphoWeb.AgentLive.New do
   defp normalize_adapter("claude"), do: "claude_code"
   defp normalize_adapter(value), do: value
 
-  defp role_label(:ceo), do: "CEO"
-  defp role_label(:cto), do: "CTO"
-  defp role_label(:product_manager), do: "Product Manager"
-  defp role_label(:engineer), do: "Engineer"
-  defp role_label(:release_engineer), do: "Release Engineer"
-  defp role_label(:designer), do: "Designer"
+  defp role_label(role), do: Agent.role_label(role)
 
   defp adapter_label(:claude_code), do: "Claude Code"
   defp adapter_label(:codex), do: "Codex"
   defp adapter_label(:cursor), do: "Cursor"
   defp adapter_label(:http), do: "HTTP"
+  defp adapter_label(:openai_chat), do: "OpenAI Chat"
   defp adapter_label(:openclaw), do: "OpenClaw"
   defp adapter_label(:process), do: "Process"
   defp adapter_label(:agrenting), do: "Agrenting"
+
+  defp issue_example_label(%{identifier: identifier, title: title})
+       when is_binary(identifier) and identifier != "" do
+    "#{identifier} · #{title}"
+  end
+
+  defp issue_example_label(%{title: title}), do: title || "Untitled issue"
+
+  defp plural_noun(1, singular), do: singular
+  defp plural_noun(_count, singular), do: singular <> "s"
 end

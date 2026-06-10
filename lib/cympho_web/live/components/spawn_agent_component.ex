@@ -52,6 +52,15 @@ defmodule CymphoWeb.SpawnAgentComponent do
               <% :http -> %>
                 <.input field={@form[:webhook_url]} label="Webhook URL" type="url" />
                 <.input field={@form[:secret]} label="Secret" type="password" />
+              <% :openai_chat -> %>
+                <.input field={@form[:api_key]} label="API Key" type="password" />
+                <.input
+                  field={@form[:endpoint]}
+                  label="Chat Completions URL"
+                  type="url"
+                  placeholder="https://example.com/v1/chat/completions"
+                />
+                <.input field={@form[:model]} label="Model" placeholder="qwen3.7-plus" />
               <% :openclaw -> %>
                 <.input field={@form[:invite_code]} label="Invite Code" />
               <% :process -> %>
@@ -150,16 +159,13 @@ defmodule CymphoWeb.SpawnAgentComponent do
   defp prefilled_role(:ceo), do: :cto
   defp prefilled_role(role), do: role
 
-  defp role_label(:engineer), do: "Engineer"
-  defp role_label(:product_manager), do: "Product Manager"
-  defp role_label(:designer), do: "Designer"
-  defp role_label(:cto), do: "CTO"
-  defp role_label(:ceo), do: "CEO"
+  defp role_label(role), do: Agent.role_label(role)
 
   defp adapter_label(:claude_code), do: "Claude Code"
   defp adapter_label(:codex), do: "Codex"
   defp adapter_label(:cursor), do: "Cursor"
   defp adapter_label(:http), do: "HTTP"
+  defp adapter_label(:openai_chat), do: "OpenAI Chat"
   defp adapter_label(:openclaw), do: "OpenClaw"
   defp adapter_label(:process), do: "Process"
 
@@ -172,7 +178,10 @@ defmodule CymphoWeb.SpawnAgentComponent do
   defp normalize_adapter_param(params), do: params
 
   defp normalize_role_param(%{"role" => role} = params) when is_binary(role) do
-    Map.put(params, "role", String.to_existing_atom(role))
+    case Agent.normalize_role(role) do
+      nil -> params
+      role -> Map.put(params, "role", role)
+    end
   end
 
   defp normalize_role_param(params), do: params
@@ -192,6 +201,7 @@ defmodule CymphoWeb.SpawnAgentComponent do
   defp adapter_config_keys(:codex), do: [:api_key, :model]
   defp adapter_config_keys(:cursor), do: [:api_key]
   defp adapter_config_keys(:http), do: [:webhook_url, :secret]
+  defp adapter_config_keys(:openai_chat), do: [:api_key, :endpoint, :model]
   defp adapter_config_keys(:openclaw), do: [:invite_code]
   defp adapter_config_keys(:process), do: [:command, :args]
   defp adapter_config_keys(_), do: []

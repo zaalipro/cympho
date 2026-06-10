@@ -93,7 +93,10 @@ defmodule Cympho.AgentPromptContract do
     You are accountable for the owner-visible business update.
 
     - When you delegate or split work, include a `[handoff]` or `[owner_update]` comment explaining the plan, current state, and who owns each next decision.
+    - Tie every delegation to the active mission/goal when one exists. If the request is floating, say which mission or goal should be created or selected before large work starts.
     - When CTO/product/design/engineering evidence is clear, add `[owner_update] What happened: ... Business status: shipped/not shipped. Current state: ... Next decision: ... Owner decision needed: ...` before closing parent work.
+    - When no agent work remains but owner acceptance is required, pair the `[owner_update]` with `block_issue` using a `[blocked]` note that says the owner must verify the CEO update before closure.
+    - When the owner requests a revision, do not repeat the prior update. Address the review gap with a revised `[owner_update]`, delegate missing work, or explain the new blocker.
     - Parent issues with child work must not close silently. The owner should understand the final status without reading raw runs.
     - If the work is blocked, add `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ...`.
     """
@@ -106,6 +109,7 @@ defmodule Cympho.AgentPromptContract do
     You are accountable for technical decomposition and review.
 
     - When you split work, leave `[handoff]` with the child issue plan, dependencies, acceptance criteria, and review order.
+    - Preserve project and goal context on child issues. If a parent has no goal link, call that out before dispatching a broad implementation queue.
     - When engineers submit work, leave `[review] Verdict: accepted/request changes/blocked. What happened: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ...` before approving or requesting changes.
     - If evidence is missing, use `[blocked]` or `[review]` to say exactly which child issue, artifact, PR, or test is missing.
     - If the work is blocked, add `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ...`.
@@ -119,6 +123,14 @@ defmodule Cympho.AgentPromptContract do
         :engineer -> "implementation"
         :product_manager -> "product/spec"
         :designer -> "design"
+        :qa_engineer -> "QA"
+        :release_engineer -> "release"
+        :researcher -> "research"
+        :marketer -> "marketing"
+        :content_strategist -> "content"
+        :sales_development -> "sales development"
+        :customer_support -> "customer support"
+        _ -> Agent.role_label(role)
       end
 
     """
@@ -126,6 +138,7 @@ defmodule Cympho.AgentPromptContract do
     You are accountable for #{label} delivery evidence.
 
     - Before `submit_review`, add `[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ...`.
+    - Name the goal, mission, or business outcome the delivery advances; if no goal is linked, say so in the final comment.
     - Attach a work product or PR/reference when the work creates anything reviewable.
     - If you cannot finish, add `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ...`.
     """
@@ -330,14 +343,9 @@ defmodule Cympho.AgentPromptContract do
 
   defp role_label(:ceo), do: "CEO"
   defp role_label(:cto), do: "CTO"
-  defp role_label(:engineer), do: "Engineer"
-  defp role_label(:product_manager), do: "Product"
-  defp role_label(:designer), do: "Design"
+  defp role_label(role), do: Agent.role_label(role)
 
-  defp role_label(role),
-    do: role |> to_string() |> String.replace("_", " ") |> String.capitalize()
-
-  defp normalize_role(role) when is_atom(role), do: role
+  defp normalize_role(role) when is_atom(role), do: Agent.normalize_role(role) || :agent
 
   defp normalize_role(role) when is_binary(role) do
     role
@@ -347,12 +355,7 @@ defmodule Cympho.AgentPromptContract do
     |> case do
       "ceo" -> :ceo
       "cto" -> :cto
-      "engineer" -> :engineer
-      "product_manager" -> :product_manager
-      "product" -> :product_manager
-      "designer" -> :designer
-      "design" -> :designer
-      _ -> :agent
+      role -> Agent.normalize_role(role) || :agent
     end
   end
 

@@ -8,11 +8,22 @@ defmodule CymphoWeb.RoutineLiveTest do
     test "renders the routines page", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/routines")
       assert html =~ "Routines"
+      assert html =~ "Routine Health"
     end
 
     test "shows empty state when no routines exist", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/routines")
       assert html =~ "No routines yet"
+    end
+
+    test "shows routine health diagnostics", %{conn: conn} do
+      {:ok, _routine} = Routines.create_routine(%{name: "Triggerless Routine"})
+
+      {:ok, view, html} = live(conn, "/routines")
+      assert has_element?(view, "[data-testid='routine-health']")
+      assert html =~ "Needs attention"
+      assert html =~ "Trigger gaps"
+      assert html =~ "Add triggers"
     end
 
     test "lists routines with status badges", %{conn: conn} do

@@ -1,89 +1,232 @@
-<div class="p-6 lg:p-8 max-w-6xl mx-auto">
-  <.header title={@page_title}>
+<.page size="wide">
+  <.header
+    title={@page_title}
+    subtitle="Connect company goals to live work, spot floating issues, and keep agents aimed at the right outcome."
+  >
     <:actions>
       <.app_link
         navigate={~p"/goals/new"}
-        class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 rounded-button transition-colors inline-flex items-center gap-2"
+        class="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
       >
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M12 4v16m8-8H4"
-          />
-        </svg>
-        New Goal
+        <.icon name="hero-plus-mini" class="h-4 w-4" /> New Goal
       </.app_link>
     </:actions>
   </.header>
 
+  <div class="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+    <.panel class="overflow-hidden">
+      <div class="border-b border-border px-5 py-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p class="text-eyebrow uppercase text-text-quaternary">Mission alignment</p>
+            <h2 class="mt-1 text-card-title text-text-primary">
+              {@alignment_summary.aligned_percent}% of open work is goal-linked
+            </h2>
+          </div>
+          <span class={[
+            "rounded-full border px-2.5 py-1 text-xs font-510",
+            alignment_status_class(@alignment_summary.status)
+          ]}>
+            {alignment_status_label(@alignment_summary.status)}
+          </span>
+        </div>
+        <p class="mt-2 max-w-3xl text-body-sm text-text-tertiary">
+          {alignment_status_detail(@alignment_summary.status)}
+        </p>
+      </div>
+
+      <div class="grid gap-5 px-5 py-5 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <div>
+          <div class="flex items-end gap-2">
+            <span class="text-5xl font-650 leading-none text-text-primary">
+              {@alignment_summary.aligned_percent}
+            </span>
+            <span class="pb-1 text-sm font-510 text-text-tertiary">percent aligned</span>
+          </div>
+          <div class="mt-4 h-2 overflow-hidden rounded-full bg-surface-2">
+            <div
+              class="h-full rounded-full bg-primary"
+              style={progress_width(@alignment_summary.aligned_percent)}
+            >
+            </div>
+          </div>
+          <p class="mt-3 text-caption text-text-tertiary">
+            {@alignment_summary.mission_aligned} goal-linked of {@alignment_summary.total_open} open issues.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div class="rounded-lg border border-border bg-surface-1 px-3 py-3">
+            <p class="text-eyebrow uppercase text-text-quaternary">Missions</p>
+            <p class="mt-1 text-card-title text-text-primary">
+              {@alignment_summary.active_missions}
+            </p>
+          </div>
+          <div class="rounded-lg border border-border bg-surface-1 px-3 py-3">
+            <p class="text-eyebrow uppercase text-text-quaternary">Active Goals</p>
+            <p class="mt-1 text-card-title text-text-primary">
+              {@alignment_summary.active_goals}
+            </p>
+          </div>
+          <div class="rounded-lg border border-border bg-surface-1 px-3 py-3">
+            <p class="text-eyebrow uppercase text-text-quaternary">Idle Goals</p>
+            <p class="mt-1 text-card-title text-amber-300">
+              {@alignment_summary.goals_without_work}
+            </p>
+          </div>
+          <div class="rounded-lg border border-border bg-surface-1 px-3 py-3">
+            <p class="text-eyebrow uppercase text-text-quaternary">Floating</p>
+            <p class="mt-1 text-card-title text-red-300">{@alignment_summary.floating}</p>
+          </div>
+        </div>
+      </div>
+    </.panel>
+
+    <.panel class="overflow-hidden">
+      <div class="border-b border-border px-5 py-4">
+        <p class="text-eyebrow uppercase text-text-quaternary">Needs links</p>
+        <h2 class="mt-1 text-card-title text-text-primary">Highest-risk floating work</h2>
+      </div>
+      <div class="p-5">
+        <div
+          :if={Enum.empty?(@alignment_summary.risk_issues)}
+          class="rounded-lg border border-dashed border-border px-4 py-6 text-center text-body-sm text-text-tertiary"
+        >
+          No open unlinked issues in this company.
+        </div>
+
+        <ul :if={!Enum.empty?(@alignment_summary.risk_issues)} class="space-y-2">
+          <li :for={issue <- @alignment_summary.risk_issues}>
+            <.app_link
+              navigate={~p"/issues/#{issue.id}"}
+              class="block rounded-lg border border-border bg-surface-1 px-3 py-3 transition-colors hover:bg-surface-2"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-510 text-text-primary">{issue.title}</p>
+                  <p class="mt-1 truncate text-xs text-text-tertiary">
+                    {issue.project_name || "No project"} · {issue.assignee_name || "Unassigned"}
+                  </p>
+                </div>
+                <.badge variant="priority" value={to_string(issue.priority)} />
+              </div>
+            </.app_link>
+          </li>
+        </ul>
+      </div>
+    </.panel>
+  </div>
+
   <.infinite_scroll
     id="goals"
     has_more={@infinite_scroll[:goals][:has_more?] || false}
-    container_class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+    container_class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
+    end_label="All goals loaded"
   >
     <:empty>
-      <div class="flex flex-col items-center justify-center py-20 text-center">
-        <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
-          <svg
-            class="w-6 h-6 text-text-tertiary"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-            />
-          </svg>
+      <div class="rounded-xl border border-dashed border-border bg-panel px-6 py-14 text-center">
+        <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-surface-1 text-text-tertiary">
+          <.icon name="hero-flag-mini" class="h-6 w-6" />
         </div>
-        <p class="text-sm text-text-tertiary mb-4">No goals yet.</p>
+        <p class="text-sm font-510 text-text-primary">No goals yet.</p>
+        <p class="mt-1 text-sm text-text-tertiary">
+          Create a mission so owner requests and agent work can attach to a business outcome.
+        </p>
         <.app_link
           navigate={~p"/goals/new"}
-          class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 rounded-lg transition-colors"
+          class="mt-4 inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
         >
-          Create your first goal
+          <.icon name="hero-plus-mini" class="h-4 w-4" /> Create your first goal
         </.app_link>
       </div>
     </:empty>
 
     <.card :for={{dom_id, goal} <- @streams.goals} id={dom_id}>
-      <div class="p-5 space-y-3">
-        <div class="flex items-center justify-between">
-          <h3 class="font-serif text-sm font-510 text-text-primary truncate">{goal.title}</h3>
-          <.badge variant="status" value={goal.status} />
+      <% health = goal_health(@goal_work_health, goal.id) %>
+      <div class="flex h-full flex-col p-5">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-eyebrow uppercase text-text-quaternary">
+              {goal_type_label(goal.goal_type)}
+            </p>
+            <h3 class="mt-1 truncate text-base font-650 text-text-primary">{goal.title}</h3>
+          </div>
+          <div class="flex shrink-0 flex-col items-end gap-1.5">
+            <.badge variant="status" value={goal.status} />
+            <.badge variant="priority" value={goal.priority} />
+          </div>
         </div>
-        <p class="text-xs text-text-tertiary line-clamp-2">{goal.description}</p>
-        <div class="flex items-center gap-2">
-          <.badge variant="priority" value={goal.priority} />
+
+        <p
+          :if={goal.description not in [nil, ""]}
+          class="mt-3 min-h-10 text-sm leading-5 text-text-tertiary line-clamp-2"
+        >
+          {goal.description}
+        </p>
+        <p
+          :if={goal.description in [nil, ""]}
+          class="mt-3 min-h-10 text-sm leading-5 text-text-quaternary"
+        >
+          No description yet.
+        </p>
+
+        <div class="mt-5 grid grid-cols-4 gap-2">
+          <div class="rounded-lg border border-border bg-surface-1 px-2.5 py-2">
+            <p class="text-[10px] font-650 uppercase text-text-quaternary">Open</p>
+            <p class="mt-1 text-lg font-650 text-text-primary">{health.open}</p>
+          </div>
+          <div class="rounded-lg border border-border bg-surface-1 px-2.5 py-2">
+            <p class="text-[10px] font-650 uppercase text-text-quaternary">Review</p>
+            <p class="mt-1 text-lg font-650 text-cyan-300">{health.in_review}</p>
+          </div>
+          <div class="rounded-lg border border-border bg-surface-1 px-2.5 py-2">
+            <p class="text-[10px] font-650 uppercase text-text-quaternary">Blocked</p>
+            <p class="mt-1 text-lg font-650 text-red-300">{health.blocked}</p>
+          </div>
+          <div class="rounded-lg border border-border bg-surface-1 px-2.5 py-2">
+            <p class="text-[10px] font-650 uppercase text-text-quaternary">Done</p>
+            <p class="mt-1 text-lg font-650 text-emerald-300">{health.done}</p>
+          </div>
         </div>
-        <div class="flex items-center gap-2 pt-2">
+
+        <div class="mt-4">
+          <div class="mb-2 flex items-center justify-between gap-3 text-xs text-text-tertiary">
+            <span>{health.progress_percent}% complete</span>
+            <span>{health.done}/{health.total} linked issues</span>
+          </div>
+          <div class="h-2 overflow-hidden rounded-full bg-surface-2">
+            <div
+              class="h-full rounded-full bg-emerald-400"
+              style={progress_width(health.progress_percent)}
+            >
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-5 flex flex-wrap items-center gap-2">
           <.app_link
             navigate={~p"/goals/#{goal.id}"}
-            class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
           >
-            View
+            <.icon name="hero-arrow-right-mini" class="h-3.5 w-3.5" /> Open
           </.app_link>
           <.app_link
             navigate={~p"/goals/#{goal.id}/edit"}
-            class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
           >
-            Edit
+            <.icon name="hero-pencil-square-mini" class="h-3.5 w-3.5" /> Edit
           </.app_link>
           <button
             type="button"
-            class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-510 text-xs px-3 py-1.5 rounded-lg transition-colors"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs font-510 text-red-300 transition-colors hover:bg-red-500/20"
             phx-click="delete_goal"
             phx-value-id={goal.id}
             data-confirm="Delete this goal?"
           >
-            Delete
+            <.icon name="hero-trash-mini" class="h-3.5 w-3.5" /> Delete
           </button>
         </div>
       </div>
     </.card>
   </.infinite_scroll>
-</div>
+</.page>

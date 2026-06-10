@@ -83,6 +83,64 @@ defmodule Cympho.IssueMemoryTest do
     assert memory.quality.score == 100
   end
 
+  test "renders a markdown handoff packet from issue memory" do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    engineer = %Agent{id: "agent-1", name: "Engineer 1", role: :engineer}
+
+    issue = %Issue{
+      identifier: "CYM-42",
+      title: "Launch checkout",
+      description: "Owner wants a guided checkout flow.",
+      status: :in_review,
+      comments: [
+        %Comment{
+          author_type: "agent",
+          author_id: engineer.id,
+          body:
+            "[delivery] What happened: implemented checkout. Files changed: checkout_live.ex. Verification: focused tests passed. Risks: payments need production smoke. Current state: ready for CTO review. Next decision: CTO review.",
+          inserted_at: now
+        }
+      ]
+    }
+
+    packet =
+      IssueMemory.handoff_packet(
+        issue,
+        [
+          %Run{
+            status: "completed",
+            adapter: "codex",
+            continuation_summary: "Focused tests passed.",
+            completed_at: now
+          }
+        ],
+        [
+          %IssueWorkProduct{
+            kind: "code_change",
+            title: "Checkout PR",
+            created_by_agent_id: engineer.id,
+            inserted_at: now
+          }
+        ],
+        [],
+        [engineer]
+      )
+
+    assert packet =~ "# Issue handoff: CYM-42 - Launch checkout"
+    assert packet =~ "Status: In review"
+    assert packet =~ "Memory: Owner-readable (100/100)"
+    assert packet =~ "## Current memory"
+    assert packet =~ "- Actions taken: implemented checkout."
+    assert packet =~ "- Validation: focused tests passed."
+    assert packet =~ "- Risks / gaps: payments need production smoke."
+    assert packet =~ "- Next decision: CTO review."
+    assert packet =~ "## Role stages"
+    assert packet =~ "Engineer delivery"
+    assert packet =~ "## Latest signal"
+    assert packet =~ "Delivery:"
+    assert packet =~ "## Memory health"
+  end
+
   test "scores noisy issue memory and exposes a summary contract gap" do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
     engineer = %Agent{id: "agent-1", name: "Engineer 1", role: :engineer}

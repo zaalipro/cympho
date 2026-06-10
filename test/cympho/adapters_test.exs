@@ -33,6 +33,7 @@ defmodule Cympho.AdaptersTest do
       assert :codex in adapter_keys
       assert :cursor in adapter_keys
       assert :http in adapter_keys
+      assert :openai_chat in adapter_keys
       assert :openclaw in adapter_keys
       assert :process in adapter_keys
     end
@@ -141,6 +142,25 @@ defmodule Cympho.AdaptersTest do
 
     test "validates openclaw adapter config with invalid endpoint" do
       assert {:error, _} = Adapters.validate_config(:openclaw, %{endpoint: "not-a-url"})
+    end
+
+    test "validates openai_chat adapter config with valid data" do
+      assert :ok =
+               Adapters.validate_config(:openai_chat, %{
+                 endpoint: "https://example.com/v1/chat/completions",
+                 api_key: "test-key",
+                 model: "qwen3.7-plus"
+               })
+    end
+
+    test "validates openai_chat adapter config with missing API key" do
+      assert {:error, error} =
+               Adapters.validate_config(:openai_chat, %{
+                 endpoint: "https://example.com/v1/chat/completions",
+                 model: "qwen3.7-plus"
+               })
+
+      assert error =~ "api_key"
     end
   end
 
@@ -285,10 +305,19 @@ defmodule Cympho.AdaptersTest do
   end
 
   describe "Registry.register_builtin/0" do
-    test "registers each of the seven built-in adapter types" do
+    test "registers each of the eight built-in adapter types" do
       types = Registry.all_types()
 
-      for builtin <- [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting] do
+      for builtin <- [
+            :claude_code,
+            :codex,
+            :cursor,
+            :http,
+            :openai_chat,
+            :openclaw,
+            :process,
+            :agrenting
+          ] do
         assert builtin in types, "expected built-in adapter #{inspect(builtin)} to be registered"
       end
     end
@@ -299,7 +328,17 @@ defmodule Cympho.AdaptersTest do
     end
 
     test "each built-in adapter resolves to a module implementing Cympho.Adapters.Adapter" do
-      for type <- [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting, :mock] do
+      for type <- [
+            :claude_code,
+            :codex,
+            :cursor,
+            :http,
+            :openai_chat,
+            :openclaw,
+            :process,
+            :agrenting,
+            :mock
+          ] do
         assert {:ok, module} = Registry.lookup(type)
 
         behaviours =

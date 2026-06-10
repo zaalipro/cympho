@@ -5,7 +5,11 @@ defmodule CymphoWeb.RoutineLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    socket = assign(socket, :infinite_scroll, %{})
+    socket =
+      socket
+      |> assign(:infinite_scroll, %{})
+      |> assign(:routine_health, load_routine_health(socket))
+
     {:ok, init_stream(socket, :routine, &fetch_routines(socket, &1))}
   end
 
@@ -43,7 +47,7 @@ defmodule CymphoWeb.RoutineLive.Index do
   def handle_event("delete_routine", %{"id" => id}, socket) do
     routine = Routines.get_routine!(id)
     {:ok, _} = Routines.archive_routine(routine)
-    {:noreply, reset_stream(socket, :routine, &fetch_routines(socket, &1))}
+    {:noreply, refresh_routines(socket)}
   end
 
   @impl true
@@ -52,7 +56,7 @@ defmodule CymphoWeb.RoutineLive.Index do
 
     case Routines.pause_routine(routine) do
       {:ok, _} ->
-        {:noreply, reset_stream(socket, :routine, &fetch_routines(socket, &1))}
+        {:noreply, refresh_routines(socket)}
 
       {:error, :invalid_transition} ->
         {:noreply, put_flash(socket, :error, "Cannot pause a routine in #{routine.status} state")}
@@ -65,7 +69,7 @@ defmodule CymphoWeb.RoutineLive.Index do
 
     case Routines.resume_routine(routine) do
       {:ok, _} ->
-        {:noreply, reset_stream(socket, :routine, &fetch_routines(socket, &1))}
+        {:noreply, refresh_routines(socket)}
 
       {:error, :invalid_transition} ->
         {:noreply,
@@ -76,6 +80,14 @@ defmodule CymphoWeb.RoutineLive.Index do
   defp fetch_routines(_socket, cursor) do
     Routines.list_routines_page(after: cursor)
   end
+
+  defp refresh_routines(socket) do
+    socket
+    |> assign(:routine_health, load_routine_health(socket))
+    |> reset_stream(:routine, &fetch_routines(socket, &1))
+  end
+
+  defp load_routine_health(_socket), do: Routines.health_summary()
 
   def routine_label(nil), do: "Unknown"
 
@@ -102,4 +114,42 @@ defmodule CymphoWeb.RoutineLive.Index do
     do: "border-text-quaternary/20 bg-text-quaternary/10 text-text-tertiary"
 
   def routine_priority_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  attr :label, :string, required: true
+  attr :value, :integer, required: true
+  attr :tone, :atom, default: :neutral
+
+  def routine_health_metric(assigns) do
+    ~H"""
+    <div class="bg-surface/70 px-3 py-2 text-center">
+      <p class={"font-mono text-[18px] font-590 leading-none #{routine_metric_text(@tone)}"}>
+        {@value}
+      </p>
+      <p class="mt-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
+        {@label}
+      </p>
+    </div>
+    """
+  end
+
+  def routine_health_badge(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def routine_health_badge(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  def routine_health_badge(:healthy),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  def routine_health_badge(:empty), do: "border-border bg-surface text-text-tertiary"
+  def routine_health_badge(_), do: "border-border bg-surface text-text-tertiary"
+
+  def routine_metric_text(:critical), do: "text-red-300"
+  def routine_metric_text(:warning), do: "text-amber-300"
+  def routine_metric_text(:ok), do: "text-emerald-300"
+  def routine_metric_text(_), do: "text-text-primary"
+
+  def routine_recommendation_class(:critical), do: "border-red-500/20 bg-red-500/10 text-red-100"
+
+  def routine_recommendation_class(:warning),
+    do: "border-amber-500/20 bg-amber-500/10 text-amber-100"
+
+  def routine_recommendation_class(_), do: "border-border bg-surface text-text-secondary"
 end

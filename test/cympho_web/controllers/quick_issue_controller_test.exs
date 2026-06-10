@@ -46,14 +46,43 @@ defmodule CymphoWeb.QuickIssueControllerTest do
           "status" => "todo"
         })
 
-      assert redirected_to(conn) =~ "/issues/"
-
       issue = Repo.one!(from i in Issue, where: i.title == ^title)
+      assert redirected_to(conn) == ~p"/issues/#{issue.id}"
       assert issue.company_id == company.id
       assert issue.project_id == project.id
       assert issue.assignee_id == agent.id
       assert issue.assigned_role == "ceo"
       assert issue.status == :todo
+    end
+
+    test "defaults a blank assignee to the company CEO and opens the issue", %{conn: conn} do
+      {conn, _user, company} = register_and_log_in_user(conn)
+      unique = System.unique_integer([:positive])
+
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "Default Quick CEO #{unique}",
+          role: :ceo,
+          status: :idle,
+          company_id: company.id
+        })
+
+      title = "Quick prompt owner handoff #{unique}"
+
+      conn =
+        post(conn, "/issues/quick-create", %{
+          "title" => title,
+          "assignee_id" => "",
+          "status" => "todo"
+        })
+
+      issue = Repo.one!(from i in Issue, where: i.title == ^title)
+      assert redirected_to(conn) == ~p"/issues/#{issue.id}"
+      assert issue.company_id == company.id
+      assert issue.assignee_id == ceo.id
+      assert issue.assigned_role == "ceo"
+      assert issue.status == :todo
+      assert issue.priority == :medium
     end
 
     test "rejects cross-company quick-create references", %{conn: conn} do

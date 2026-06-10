@@ -84,6 +84,7 @@ defmodule CymphoWeb.AgentLive.Show do
     env_rows = env_rows_from_params(params, socket.assigns.env_rows)
     permissions = permissions_from_params(params, socket.assigns.permissions)
     selected_profile_id = selected_profile_from_params(agent_params, socket.assigns.agent)
+    env_rows = env_rows_with_profile_defaults(selected_profile_id, env_rows)
 
     selected_adapter =
       selected_adapter_from_params(agent_params, socket.assigns.agent, selected_profile_id)
@@ -125,6 +126,7 @@ defmodule CymphoWeb.AgentLive.Show do
     env_rows = env_rows_from_params(params, socket.assigns.env_rows)
     permissions = permissions_from_params(params, socket.assigns.permissions)
     selected_profile_id = selected_profile_from_params(agent_params, socket.assigns.agent)
+    env_rows = env_rows_with_profile_defaults(selected_profile_id, env_rows)
 
     selected_adapter =
       selected_adapter_from_params(agent_params, socket.assigns.agent, selected_profile_id)
@@ -297,6 +299,7 @@ defmodule CymphoWeb.AgentLive.Show do
      socket
      |> assign(:selected_adapter, selected_adapter)
      |> assign_runtime_profile(profile_id)
+     |> assign_env_rows_for_profile(profile_id)
      |> assign_runtime_form(runtime)
      |> assign(:adapter_health_check_result, nil)}
   end
@@ -331,6 +334,7 @@ defmodule CymphoWeb.AgentLive.Show do
          |> put_flash(:info, "#{preset.name} preset applied. Save to persist it.")
          |> assign(:selected_adapter, selected_adapter)
          |> assign_runtime_profile(profile_id)
+         |> assign_env_rows_for_profile(profile_id)
          |> assign_runtime_form(runtime)
          |> assign(:adapter_health_check_result, nil)
          |> assign(:form, to_form(changeset))}
@@ -350,7 +354,7 @@ defmodule CymphoWeb.AgentLive.Show do
       |> preflight_config(
         selected_adapter,
         socket.assigns[:env_vars] || %{},
-        socket.assigns[:secret_count] || 0
+        socket.assigns[:secret_keys] || []
       )
 
     {:noreply,
@@ -520,7 +524,9 @@ defmodule CymphoWeb.AgentLive.Show do
     runs = HeartbeatEngine.list_runs_for_agent(agent.id, limit: 30)
     recent_issues = Issues.list_recent_for_agent(agent.id, 10)
     env_vars = RuntimeEnv.from_agent(agent)
-    secret_count = Secrets.list_secrets_for_agent(agent.id) |> length()
+    secrets = Secrets.list_secrets_for_agent(agent.id)
+    secret_count = length(secrets)
+    secret_keys = Enum.map(secrets, & &1.key)
     changeset = Agents.change_agent(agent)
     selected_profile_id = RuntimeProfiles.from_agent(agent)
     config_revisions = Agents.list_config_revisions(agent.id, limit: 8)
@@ -534,6 +540,7 @@ defmodule CymphoWeb.AgentLive.Show do
     |> assign(:recent_issues, recent_issues)
     |> assign(:env_vars, env_vars)
     |> assign(:secret_count, secret_count)
+    |> assign(:secret_keys, secret_keys)
     |> assign(:env_rows, env_rows_from(agent))
     |> assign(:selected_adapter, selected_adapter_from_agent(agent))
     |> assign_runtime_profile(selected_profile_id)
@@ -613,6 +620,7 @@ defmodule CymphoWeb.AgentLive.Show do
       "process_preset",
       "process_args",
       "runtime_cwd",
+      "openai_chat_endpoint",
       "openclaw_endpoint",
       "openclaw_runtime",
       "openclaw_harness_id",
@@ -724,6 +732,50 @@ defmodule CymphoWeb.AgentLive.Show do
   defp safe_to_int(s) when is_binary(s), do: String.to_integer(s)
   defp safe_to_int(s), do: s
 
+  defp assign_env_rows_for_profile(socket, profile_id) do
+    env_rows = env_rows_with_profile_defaults(profile_id, socket.assigns.env_rows)
+
+    socket
+    |> assign(:env_rows, env_rows)
+    |> assign(:env_vars, env_map_from_rows(env_rows))
+  end
+
+  defp env_rows_with_profile_defaults(profile_id, rows) do
+    profile_env =
+      profile_id
+      |> RuntimeProfiles.runtime_config()
+      |> Map.get("env", %{})
+
+    rows = normalize_env_rows(rows)
+
+    case profile_env do
+      env when is_map(env) and map_size(env) > 0 ->
+        present_keys =
+          rows
+          |> Enum.map(&String.trim(to_string(&1.key || "")))
+          |> Enum.reject(&(&1 == ""))
+          |> MapSet.new()
+
+        profile_rows =
+          env
+          |> Enum.reject(fn {key, _value} -> MapSet.member?(present_keys, key) end)
+          |> Enum.sort_by(fn {key, _value} -> key end)
+          |> Enum.map(fn {key, value} -> %{key: key, value: value} end)
+
+        profile_rows ++ rows
+
+      _ ->
+        rows
+    end
+  end
+
+  defp normalize_env_rows(rows) do
+    case List.wrap(rows) do
+      [] -> [%{key: "", value: ""}]
+      rows -> rows
+    end
+  end
+
   defp build_runtime_config(%Agent{runtime_config: existing}, rows, profile_id) do
     profile_runtime_config = RuntimeProfiles.runtime_config(profile_id)
     profile_env = Map.get(profile_runtime_config, "env", %{})
@@ -788,6 +840,12 @@ defmodule CymphoWeb.AgentLive.Show do
     |> put_clean("harness_id", runtime.openclaw_harness_id)
   end
 
+  defp do_build_adapter_config(config, "openai_chat", runtime) do
+    config
+    |> put_clean("model", runtime.model)
+    |> put_clean("endpoint", runtime.openai_chat_endpoint)
+  end
+
   defp do_build_adapter_config(config, "process", runtime) do
     preset_defaults = RuntimeOptions.process_defaults(runtime.process_preset)
 
@@ -803,46 +861,56 @@ defmodule CymphoWeb.AgentLive.Show do
 
   defp do_build_adapter_config(config, _adapter, _runtime), do: config
 
-  defp preflight_config(config, adapter, env_vars, secret_count) do
+  defp preflight_config(config, adapter, env_vars, secret_keys) do
     config
-    |> put_preflight_api_key(adapter, env_vars, secret_count)
+    |> put_preflight_api_key(adapter, env_vars, secret_keys)
   end
 
-  defp put_preflight_api_key(config, "codex", env_vars, secret_count) do
+  defp put_preflight_api_key(config, "codex", env_vars, secret_keys) do
     config
     |> put_preflight_key("api_key", env_first(env_vars, ["OPENAI_API_KEY", "CODEX_API_KEY"]))
-    |> maybe_mark_secret_key("api_key", secret_count)
+    |> maybe_mark_secret_key("api_key", secret_keys, ["OPENAI_API_KEY", "CODEX_API_KEY"])
   end
 
-  defp put_preflight_api_key(config, "claude_code", env_vars, secret_count) do
+  defp put_preflight_api_key(config, "claude_code", env_vars, secret_keys) do
     config
     |> put_preflight_key("api_key", env_first(env_vars, ["ANTHROPIC_API_KEY"]))
-    |> maybe_mark_secret_key("api_key", secret_count)
+    |> maybe_mark_secret_key("api_key", secret_keys, ["ANTHROPIC_API_KEY"])
   end
 
-  defp put_preflight_api_key(config, "openclaw", env_vars, secret_count) do
+  defp put_preflight_api_key(config, "openclaw", env_vars, secret_keys) do
     config
     |> put_preflight_key("api_key", env_first(env_vars, ["OPENCLAW_API_KEY"]))
-    |> maybe_mark_secret_key("api_key", secret_count)
+    |> maybe_mark_secret_key("api_key", secret_keys, ["OPENCLAW_API_KEY"])
   end
 
-  defp put_preflight_api_key(config, "agrenting", env_vars, secret_count) do
+  defp put_preflight_api_key(config, "openai_chat", env_vars, secret_keys) do
+    keys = ["OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY"]
+
+    config
+    |> put_preflight_key("api_key", env_first(env_vars, keys))
+    |> maybe_mark_secret_key("api_key", secret_keys, keys)
+  end
+
+  defp put_preflight_api_key(config, "agrenting", env_vars, secret_keys) do
     config
     |> put_preflight_key("api_key", env_first(env_vars, ["AGRENTING_API_KEY"]))
     |> put_preflight_key("base_url", env_first(env_vars, ["AGRENTING_URL"]))
-    |> maybe_mark_secret_key("api_key", secret_count)
+    |> maybe_mark_secret_key("api_key", secret_keys, ["AGRENTING_API_KEY"])
   end
 
-  defp put_preflight_api_key(config, _adapter, _env_vars, _secret_count), do: config
+  defp put_preflight_api_key(config, _adapter, _env_vars, _secret_keys), do: config
 
   defp put_preflight_key(config, _key, value) when value in [nil, ""], do: config
   defp put_preflight_key(config, key, value), do: Map.put(config, key, value)
 
-  defp maybe_mark_secret_key(config, key, secret_count) when secret_count > 0 do
-    Map.put_new(config, key, "__encrypted_secret_available__")
+  defp maybe_mark_secret_key(config, key, secret_keys, required_keys) do
+    if Enum.any?(required_keys, &(&1 in normalize_secret_keys(secret_keys))) do
+      Map.put_new(config, key, "__encrypted_secret_available__")
+    else
+      config
+    end
   end
-
-  defp maybe_mark_secret_key(config, _key, _secret_count), do: config
 
   defp env_first(env_vars, keys) do
     Enum.find_value(keys, fn key ->
@@ -890,6 +958,7 @@ defmodule CymphoWeb.AgentLive.Show do
     |> assign(:process_preset, runtime.process_preset)
     |> assign(:process_args, runtime.process_args)
     |> assign(:runtime_cwd, runtime.cwd)
+    |> assign(:openai_chat_endpoint, runtime.openai_chat_endpoint)
     |> assign(:openclaw_endpoint, runtime.openclaw_endpoint)
     |> assign(:openclaw_runtime, runtime.openclaw_runtime)
     |> assign(:openclaw_harness_id, runtime.openclaw_harness_id)
@@ -923,6 +992,8 @@ defmodule CymphoWeb.AgentLive.Show do
         process_preset: process_preset,
         process_args: param_string(params, "process_args", fallback.process_args),
         cwd: param_string(params, "runtime_cwd", fallback.cwd),
+        openai_chat_endpoint:
+          param_string(params, "openai_chat_endpoint", fallback.openai_chat_endpoint),
         openclaw_endpoint: param_string(params, "openclaw_endpoint", fallback.openclaw_endpoint),
         openclaw_runtime: param_string(params, "openclaw_runtime", fallback.openclaw_runtime),
         openclaw_harness_id:
@@ -951,6 +1022,7 @@ defmodule CymphoWeb.AgentLive.Show do
       process_preset: assigns[:process_preset] || RuntimeOptions.process_default_preset(),
       process_args: assigns[:process_args] || "",
       cwd: assigns[:runtime_cwd] || "",
+      openai_chat_endpoint: assigns[:openai_chat_endpoint] || "",
       openclaw_endpoint: assigns[:openclaw_endpoint] || "",
       openclaw_runtime: assigns[:openclaw_runtime] || "subagent",
       openclaw_harness_id: assigns[:openclaw_harness_id] || ""
@@ -975,7 +1047,8 @@ defmodule CymphoWeb.AgentLive.Show do
       process_preset: process_preset,
       process_args: args_to_text(config["args"]),
       cwd: config["cwd"] || "",
-      openclaw_endpoint: config["endpoint"] || "",
+      openai_chat_endpoint: if(adapter == "openai_chat", do: config["endpoint"] || "", else: ""),
+      openclaw_endpoint: if(adapter == "openclaw", do: config["endpoint"] || "", else: ""),
       openclaw_runtime: config["agent_runtime"] || "subagent",
       openclaw_harness_id: config["harness_id"] || ""
     }
@@ -1004,6 +1077,8 @@ defmodule CymphoWeb.AgentLive.Show do
   defp runtime_model_options("openclaw", provider, _preset),
     do: RuntimeOptions.openclaw_model_options(provider)
 
+  defp runtime_model_options("openai_chat", _provider, _preset), do: []
+
   defp runtime_model_options("process", provider, _preset),
     do: RuntimeOptions.process_model_options(provider)
 
@@ -1021,6 +1096,7 @@ defmodule CymphoWeb.AgentLive.Show do
 
   defp default_model("codex", _provider), do: Cympho.Adapters.CodexAdapter.default_model()
   defp default_model("cursor", _provider), do: RuntimeOptions.cursor_default_model()
+  defp default_model("openai_chat", _provider), do: "qwen3.7-plus"
   defp default_model("openclaw", provider), do: RuntimeOptions.openclaw_default_model(provider)
   defp default_model("process", provider), do: default_model("process", provider, nil)
   defp default_model(_, _provider), do: ""
@@ -1143,13 +1219,7 @@ defmodule CymphoWeb.AgentLive.Show do
   def status_label(:paused), do: "paused"
   def status_label(other), do: other |> to_string()
 
-  def role_label(:engineer), do: "Engineer"
-  def role_label(:release_engineer), do: "Release Engineer"
-  def role_label(:ceo), do: "CEO"
-  def role_label(:cto), do: "CTO"
-  def role_label(:product_manager), do: "Product Manager"
-  def role_label(:designer), do: "Designer"
-  def role_label(role), do: role |> to_string() |> String.replace("_", " ") |> String.capitalize()
+  def role_label(role), do: Agent.role_label(role)
 
   def wake_reason_label("issue_commented"), do: "Comment received"
   def wake_reason_label("issue_comment_mentioned"), do: "Mentioned in comment"
@@ -1471,11 +1541,8 @@ defmodule CymphoWeb.AgentLive.Show do
         target_label: "Change profile"
       ),
       claude_credentials_item(command, runtime),
-      readiness_item(
-        :ok,
-        "Model routing",
-        "Set ANTHROPIC_MODEL, ANTHROPIC_BASE_URL, or wrapper defaults when using custom providers."
-      )
+      claude_model_item(runtime),
+      claude_endpoint_item(runtime)
     ]
   end
 
@@ -1532,6 +1599,33 @@ defmodule CymphoWeb.AgentLive.Show do
             target_label: "Set endpoint"
           ),
         else: readiness_item(:ok, "Gateway endpoint", runtime.endpoint)
+      )
+    ]
+  end
+
+  defp readiness_items("openai_chat", runtime) do
+    [
+      credentials_item(
+        runtime,
+        ["OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY"],
+        "Chat completion key",
+        target_path: "/settings/secrets",
+        target_label: "Open secrets"
+      ),
+      model_item("Chat model", runtime.model,
+        target_id: "agent-openai-chat-model",
+        target_label: "Set model"
+      ),
+      if(runtime.endpoint in [nil, ""],
+        do:
+          readiness_item(
+            :attention,
+            "Chat endpoint",
+            "Add the OpenAI-compatible chat completions URL before autonomous runs.",
+            target_id: "agent-openai-chat-endpoint",
+            target_label: "Set endpoint"
+          ),
+        else: readiness_item(:ok, "Chat endpoint", runtime.endpoint)
       )
     ]
   end
@@ -1620,9 +1714,19 @@ defmodule CymphoWeb.AgentLive.Show do
   end
 
   defp credentials_present?(runtime, keys) do
-    runtime.secret_count > 0 ||
+    secret_keys = normalize_secret_keys(Map.get(runtime, :secret_keys, []))
+
+    Enum.any?(keys, &(&1 in secret_keys)) ||
       Enum.any?(keys, fn key -> Map.get(runtime.env_vars || %{}, key) not in [nil, ""] end)
   end
+
+  defp normalize_secret_keys(keys) when is_list(keys) do
+    keys
+    |> Enum.filter(&is_binary/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp normalize_secret_keys(_keys), do: []
 
   defp command_item(label, command, opts) when command in [nil, ""] do
     readiness_item(:attention, label, "Choose the command Cympho should execute.", opts)
@@ -1646,6 +1750,36 @@ defmodule CymphoWeb.AgentLive.Show do
   end
 
   defp model_item(label, model, _opts), do: readiness_item(:ok, label, model)
+
+  defp claude_model_item(runtime) do
+    case runtime.model ||
+           env_first(runtime.env_vars, ["ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL"]) do
+      model when model in [nil, ""] ->
+        readiness_item(
+          :ok,
+          "Provider model",
+          "Default from Claude, ANTHROPIC_MODEL, or wrapper routing."
+        )
+
+      model ->
+        readiness_item(:ok, "Provider model", model)
+    end
+  end
+
+  defp claude_endpoint_item(runtime) do
+    case runtime.endpoint ||
+           env_first(runtime.env_vars, [
+             "ANTHROPIC_BASE_URL",
+             "ANTHROPIC_API_BASE",
+             "OPENAI_BASE_URL"
+           ]) do
+      endpoint when endpoint in [nil, ""] ->
+        readiness_item(:ok, "Gateway endpoint", "Default Anthropic endpoint or wrapper routing.")
+
+      endpoint ->
+        readiness_item(:ok, "Gateway endpoint", endpoint)
+    end
+  end
 
   defp required_config_item(config, key, label) do
     case Map.get(config, key) do
@@ -1924,6 +2058,7 @@ defmodule CymphoWeb.AgentLive.Show do
   defp adapter_label_human("codex"), do: "Codex"
   defp adapter_label_human("cursor"), do: "Cursor"
   defp adapter_label_human("http"), do: "HTTP"
+  defp adapter_label_human("openai_chat"), do: "OpenAI Chat"
   defp adapter_label_human("openclaw"), do: "OpenClaw"
   defp adapter_label_human("process"), do: "Process"
   defp adapter_label_human("agrenting"), do: "Agrenting"
@@ -1931,6 +2066,7 @@ defmodule CymphoWeb.AgentLive.Show do
   defp adapter_label_human(:codex), do: "Codex"
   defp adapter_label_human(:cursor), do: "Cursor"
   defp adapter_label_human(:http), do: "HTTP"
+  defp adapter_label_human(:openai_chat), do: "OpenAI Chat"
   defp adapter_label_human(:openclaw), do: "OpenClaw"
   defp adapter_label_human(:process), do: "Process"
   defp adapter_label_human(:agrenting), do: "Agrenting"

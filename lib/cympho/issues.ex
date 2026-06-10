@@ -30,6 +30,8 @@ defmodule Cympho.Issues do
   # a 100k-issue company would load the entire table into memory on each
   # mount. Override with `%{limit: n}` if a caller genuinely needs more.
   @list_issues_safety_cap 5_000
+  @owner_acceptance_success_statuses ~w(completed succeeded)
+  @terminal_issue_statuses [:done, :cancelled]
 
   def list_issues(opts \\ %{}) do
     cap = Map.get(opts, :limit, @list_issues_safety_cap)
@@ -41,6 +43,29 @@ defmodule Cympho.Issues do
     |> limit(^cap)
     |> Repo.all()
     |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
+  end
+
+  @doc """
+  Applies the shared dispatcher queue ordering to an issue query.
+  """
+  def order_for_dispatch(queryable) do
+    queryable
+    |> order_by([i],
+      asc:
+        fragment(
+          "CASE WHEN ?->'dispatch'->>'pinned_at' IS NULL THEN 1 ELSE 0 END",
+          i.monitor_state
+        )
+    )
+    |> order_by([i], desc: fragment("?->'dispatch'->>'pinned_at'", i.monitor_state))
+    |> order_by([i],
+      asc:
+        fragment(
+          "CASE ? WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END",
+          i.priority
+        )
+    )
+    |> order_by([i], asc: i.inserted_at)
   end
 
   @doc """
@@ -262,6 +287,39 @@ defmodule Cympho.Issues do
 
   @default_page_size 25
 
+  def triage_counts(company_id) when is_binary(company_id) do
+    %{
+      "open" => triage_count(company_id, "open"),
+      "ceo" => triage_count(company_id, "ceo"),
+      "ready" => triage_count(company_id, "ready"),
+      "active" => triage_count(company_id, "active"),
+      "review" => triage_count(company_id, "review"),
+      "blocked" => triage_count(company_id, "blocked"),
+      "unassigned" => triage_count(company_id, "unassigned")
+    }
+  end
+
+  def triage_counts(_company_id), do: empty_triage_counts()
+
+  def empty_triage_counts do
+    %{
+      "open" => 0,
+      "ceo" => 0,
+      "ready" => 0,
+      "active" => 0,
+      "review" => 0,
+      "blocked" => 0,
+      "unassigned" => 0
+    }
+  end
+
+  defp triage_count(company_id, lane) do
+    Issue
+    |> maybe_filter_by_company_id(company_id)
+    |> maybe_filter_by_triage(lane)
+    |> Repo.aggregate(:count)
+  end
+
   def list_issues_paginated(params \\ %{}) do
     page = Map.get(params, "page", "1") |> to_int_max(1, 1000)
     per_page = Map.get(params, "per_page", "#{@default_page_size}") |> to_int_max(1, 100)
@@ -274,10 +332,12 @@ defmodule Cympho.Issues do
     label_id = Map.get(params, "label_id")
     assigned_role = Map.get(params, "assigned_role")
     last_reviewer_id = Map.get(params, "last_reviewer_id")
+    triage = Map.get(params, "triage")
 
     query =
       Issue
       |> maybe_filter_by_company_id(company_id)
+      |> maybe_filter_by_triage(triage)
       |> maybe_filter_by_status(status)
       |> maybe_filter_by_priority(priority)
       |> maybe_filter_by_search(search)
@@ -312,6 +372,37 @@ defmodule Cympho.Issues do
   defp maybe_filter_by_status(query, nil), do: query
   defp maybe_filter_by_status(query, ""), do: query
   defp maybe_filter_by_status(query, status), do: where(query, status: ^status)
+
+  defp maybe_filter_by_triage(query, nil), do: query
+  defp maybe_filter_by_triage(query, ""), do: query
+
+  defp maybe_filter_by_triage(query, "open") do
+    where(query, [i], i.status not in ^@terminal_issue_statuses)
+  end
+
+  defp maybe_filter_by_triage(query, "ceo") do
+    where(
+      query,
+      [i],
+      i.assigned_role == "ceo" and i.status not in ^@terminal_issue_statuses
+    )
+  end
+
+  defp maybe_filter_by_triage(query, "ready"), do: where(query, [i], i.status == :todo)
+  defp maybe_filter_by_triage(query, "active"), do: where(query, [i], i.status == :in_progress)
+  defp maybe_filter_by_triage(query, "review"), do: where(query, [i], i.status == :in_review)
+  defp maybe_filter_by_triage(query, "blocked"), do: where(query, [i], i.status == :blocked)
+
+  defp maybe_filter_by_triage(query, "unassigned") do
+    where(
+      query,
+      [i],
+      is_nil(i.assignee_id) and (is_nil(i.assigned_role) or i.assigned_role == "") and
+        i.status not in ^@terminal_issue_statuses
+    )
+  end
+
+  defp maybe_filter_by_triage(query, _unknown), do: query
 
   defp maybe_filter_by_assigned_role(query, nil), do: query
   defp maybe_filter_by_assigned_role(query, ""), do: query
@@ -566,6 +657,250 @@ defmodule Cympho.Issues do
     |> Map.delete("pr_quality")
   end
 
+  @doc """
+  Marks an issue for the front of the next autonomous dispatch scan.
+  """
+  def prioritize_for_dispatch(%Issue{} = issue, opts \\ []) do
+    actor_id =
+      opts
+      |> Keyword.get(:actor)
+      |> dispatch_actor_id()
+
+    actor_id = actor_id || Keyword.get(opts, :pinned_by_user_id)
+    pinned_at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
+    dispatch_state =
+      issue.monitor_state
+      |> normalize_monitor_state()
+      |> Map.get("dispatch", %{})
+      |> normalize_monitor_state()
+      |> Map.put("pinned_at", pinned_at)
+      |> maybe_put_dispatch_actor(actor_id)
+
+    monitor_state =
+      issue.monitor_state
+      |> normalize_monitor_state()
+      |> Map.put("dispatch", dispatch_state)
+
+    update_issue(issue, %{monitor_state: monitor_state})
+  end
+
+  def clear_dispatch_focus(%Issue{} = issue) do
+    monitor_state = normalize_monitor_state(issue.monitor_state)
+
+    dispatch_state =
+      monitor_state
+      |> Map.get("dispatch", Map.get(monitor_state, :dispatch, %{}))
+      |> normalize_monitor_state()
+      |> Map.drop(["pinned_at", :pinned_at, "pinned_by_user_id", :pinned_by_user_id])
+
+    monitor_state =
+      monitor_state
+      |> Map.delete("dispatch")
+      |> Map.delete(:dispatch)
+      |> maybe_put_dispatch_state(dispatch_state)
+
+    update_issue(issue, %{monitor_state: monitor_state})
+  end
+
+  @doc """
+  Returns true when a blocked issue is waiting on owner verification of a CEO
+  owner update and can be closed by an explicit owner acceptance.
+  """
+  def owner_verification_closeable?(%Issue{} = issue) do
+    issue = Repo.preload(issue, [:comments], force: true)
+    runs = HeartbeatEngine.list_runs_for_issue(issue.id)
+    child_issues = list_child_issues(issue.id)
+
+    owner_verification_closeable?(issue, runs, child_issues)
+  end
+
+  @doc """
+  Records an owner acceptance comment and closes a CEO owner-verification blocker.
+
+  This is deliberately narrower than a generic blocked-to-done transition. It
+  only applies when a CEO/runtime turn produced an owner update, the blocker is
+  explicitly waiting on owner verification, and no child work is still open.
+  """
+  def accept_owner_verification(%Issue{} = issue, opts \\ []) do
+    issue =
+      issue
+      |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels, :project],
+        force: true
+      )
+
+    cond do
+      not owner_verification_closeable?(issue) ->
+        {:error, :not_owner_verification}
+
+      is_blocked?(issue) ->
+        {:error, :blocked_by_active_issues}
+
+      true ->
+        with {:ok, _comment} <-
+               Comments.create_comment(owner_acceptance_comment_attrs(issue, opts)),
+             {:ok, review_issue} <- owner_acceptance_review_issue(issue),
+             {:ok, done_issue} <- transition_issue(review_issue, :done),
+             {:ok, done_issue} <- update_issue(done_issue, %{assignee_id: nil}) do
+          {:ok,
+           Repo.preload(
+             done_issue,
+             [:comments, :blocked_by, :blocks, :assignee, :labels, :project],
+             force: true
+           )}
+        end
+    end
+  end
+
+  @doc """
+  Reopens a CEO owner-verification blocker for a focused CEO revision.
+
+  This is the counterpart to `accept_owner_verification/2`: the owner has
+  reviewed the CEO update and decided it needs another CEO pass instead of
+  closure. The issue is moved back to `:todo`, a tagged review comment records
+  the decision, and dispatch focus is queued for the next runtime pass.
+  """
+  def request_owner_verification_revision(%Issue{} = issue, opts \\ []) do
+    issue =
+      issue
+      |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels, :project],
+        force: true
+      )
+
+    cond do
+      not owner_verification_closeable?(issue) ->
+        {:error, :not_owner_verification}
+
+      is_blocked?(issue) ->
+        {:error, :blocked_by_active_issues}
+
+      true ->
+        with {:ok, _comment} <-
+               Comments.create_comment(owner_revision_comment_attrs(issue, opts)),
+             {:ok, reopened_issue} <- transition_issue(issue, :todo),
+             {:ok, routed_issue} <-
+               update_issue(reopened_issue, owner_revision_routing_attrs(issue)),
+             {:ok, focused_issue} <- prioritize_for_dispatch(routed_issue, opts) do
+          {:ok,
+           Repo.preload(
+             focused_issue,
+             [:comments, :blocked_by, :blocks, :assignee, :labels, :project],
+             force: true
+           )}
+        end
+    end
+  end
+
+  def dispatch_pinned?(issue_or_monitor_state),
+    do: not is_nil(dispatch_pinned_at(issue_or_monitor_state))
+
+  def dispatch_pinned_at(%Issue{monitor_state: monitor_state}),
+    do: dispatch_pinned_at(monitor_state)
+
+  def dispatch_pinned_at(%{"dispatch" => %{"pinned_at" => pinned_at}})
+      when is_binary(pinned_at) and pinned_at != "",
+      do: pinned_at
+
+  def dispatch_pinned_at(%{dispatch: %{pinned_at: pinned_at}})
+      when is_binary(pinned_at) and pinned_at != "",
+      do: pinned_at
+
+  def dispatch_pinned_at(_), do: nil
+
+  defp owner_verification_closeable?(%Issue{} = issue, runs, child_issues) do
+    issue.status in [:blocked, "blocked"] and
+      Enum.any?(runs, &(&1.status in @owner_acceptance_success_statuses)) and
+      no_open_children?(child_issues) and
+      has_owner_update_comment?(issue.comments) and
+      has_owner_verification_blocker?(issue.comments)
+  end
+
+  defp no_open_children?(child_issues) do
+    Enum.all?(child_issues, &(&1.status in [:done, :cancelled, "done", "cancelled"]))
+  end
+
+  defp has_owner_update_comment?(comments) do
+    comments
+    |> List.wrap()
+    |> Enum.any?(&(IssueDigest.comment_category(&1) == :owner_update))
+  end
+
+  defp has_owner_verification_blocker?(comments) do
+    comments
+    |> List.wrap()
+    |> Enum.any?(fn comment ->
+      IssueDigest.comment_category(comment) == :blocked and
+        owner_verification_text?(Map.get(comment, :body, ""))
+    end)
+  end
+
+  defp owner_verification_text?(body) when is_binary(body) do
+    normalized = String.downcase(body)
+
+    String.contains?(normalized, "owner") and
+      Enum.any?(["verify", "verification", "accept", "approval", "decision"], fn token ->
+        String.contains?(normalized, token)
+      end)
+  end
+
+  defp owner_verification_text?(_body), do: false
+
+  defp owner_acceptance_comment_attrs(%Issue{} = issue, opts) do
+    {author_type, author_id} = owner_acceptance_author(Keyword.get(opts, :actor))
+
+    %{
+      issue_id: issue.id,
+      author_type: author_type,
+      author_id: author_id,
+      body:
+        "[review] Verdict: accepted. What happened: owner accepted the CEO verification update. Verification: CEO runtime completed and posted an owner update. Gaps: none for this owner-verification handoff. Follow-up issues: none. Next decision: close."
+    }
+  end
+
+  defp owner_acceptance_author(%{id: id}) when not is_nil(id), do: {"user", id}
+  defp owner_acceptance_author(id) when is_binary(id), do: {"user", id}
+  defp owner_acceptance_author(_actor), do: {"user", "owner"}
+
+  defp owner_revision_comment_attrs(%Issue{} = issue, opts) do
+    {author_type, author_id} = owner_acceptance_author(Keyword.get(opts, :actor))
+
+    %{
+      issue_id: issue.id,
+      author_type: author_type,
+      author_id: author_id,
+      body:
+        "[review] Verdict: changes requested. What happened: owner reopened the CEO verification update for revision. Verification: owner did not accept the current CEO update. Gaps: revised CEO owner update required. Follow-up issues: none. Next decision: CEO revises the owner update, delegates missing work, or explains the blocker."
+    }
+  end
+
+  defp owner_revision_routing_attrs(%Issue{} = issue) do
+    attrs = %{assigned_role: "ceo"}
+
+    case owner_revision_ceo_id(issue) do
+      nil -> attrs
+      ceo_id -> Map.put(attrs, :assignee_id, ceo_id)
+    end
+  end
+
+  defp owner_revision_ceo_id(%Issue{assignee: %Agent{id: id, role: role}})
+       when role in [:ceo, "ceo"] and not is_nil(id),
+       do: id
+
+  defp owner_revision_ceo_id(%Issue{company_id: company_id}) when is_binary(company_id) do
+    case Agents.get_company_ceo(company_id) do
+      {:ok, %Agent{id: id}} -> id
+      {:error, :not_found} -> nil
+    end
+  end
+
+  defp owner_revision_ceo_id(_issue), do: nil
+
+  defp owner_acceptance_review_issue(%Issue{status: status} = issue)
+       when status in [:in_review, "in_review"],
+       do: {:ok, issue}
+
+  defp owner_acceptance_review_issue(%Issue{} = issue), do: transition_issue(issue, :in_review)
+
   def create_issue(attrs \\ %{}) do
     attrs = normalize_attrs(attrs)
     attrs = maybe_generate_identifier(attrs)
@@ -724,8 +1059,12 @@ defmodule Cympho.Issues do
       attrs =
         if get_param(attrs, :issue_number) do
           attrs
+          |> get_param(:issue_number)
+          |> maybe_sync_issue_counter(company)
+
+          attrs
         else
-          next_number = company.issue_counter + 1
+          next_number = next_company_issue_number(company)
           prefix = company.issue_prefix || "CYM"
 
           company
@@ -752,6 +1091,39 @@ defmodule Cympho.Issues do
     end
   end
 
+  defp next_company_issue_number(%Company{} = company) do
+    max_issue_number =
+      Repo.one(
+        from i in Issue,
+          where: i.company_id == ^company.id,
+          select: max(i.issue_number)
+      ) || 0
+
+    max(company.issue_counter || 0, max_issue_number) + 1
+  end
+
+  defp maybe_sync_issue_counter(issue_number, %Company{} = company) do
+    with {:ok, issue_number} <- normalize_issue_number(issue_number),
+         true <- issue_number > (company.issue_counter || 0) do
+      company
+      |> Company.changeset(%{issue_counter: issue_number})
+      |> Repo.update!()
+    else
+      _ -> company
+    end
+  end
+
+  defp normalize_issue_number(issue_number) when is_integer(issue_number), do: {:ok, issue_number}
+
+  defp normalize_issue_number(issue_number) when is_binary(issue_number) do
+    case Integer.parse(issue_number) do
+      {parsed, ""} -> {:ok, parsed}
+      _ -> :error
+    end
+  end
+
+  defp normalize_issue_number(_issue_number), do: :error
+
   defp normalize_attrs(attrs) when is_map(attrs), do: attrs
 
   defp persist_pr_quality(%Issue{} = issue, pr_quality) do
@@ -774,6 +1146,24 @@ defmodule Cympho.Issues do
 
   defp normalize_monitor_state(%{} = monitor_state), do: monitor_state
   defp normalize_monitor_state(_), do: %{}
+
+  defp dispatch_actor_id(%{id: id}) when is_binary(id), do: id
+  defp dispatch_actor_id(id) when is_binary(id), do: id
+  defp dispatch_actor_id(_), do: nil
+
+  defp maybe_put_dispatch_actor(dispatch_state, actor_id)
+       when is_binary(actor_id) and actor_id != "" do
+    Map.put(dispatch_state, "pinned_by_user_id", actor_id)
+  end
+
+  defp maybe_put_dispatch_actor(dispatch_state, _actor_id), do: dispatch_state
+
+  defp maybe_put_dispatch_state(monitor_state, dispatch_state)
+       when map_size(dispatch_state) == 0,
+       do: monitor_state
+
+  defp maybe_put_dispatch_state(monitor_state, dispatch_state),
+    do: Map.put(monitor_state, "dispatch", dispatch_state)
 
   defp blank?(value), do: value in [nil, ""]
 
@@ -803,7 +1193,8 @@ defmodule Cympho.Issues do
     end
   end
 
-  defp maybe_generate_identifier(%{"project_id" => project_id} = attrs) do
+  defp maybe_generate_identifier(%{"project_id" => project_id} = attrs)
+       when is_binary(project_id) and project_id != "" do
     if Map.has_key?(attrs, "identifier") do
       attrs
     else
@@ -821,7 +1212,8 @@ defmodule Cympho.Issues do
     end
   end
 
-  defp maybe_generate_identifier(%{project_id: project_id} = attrs) do
+  defp maybe_generate_identifier(%{project_id: project_id} = attrs)
+       when is_binary(project_id) and project_id != "" do
     if Map.has_key?(attrs, :identifier) or Map.has_key?(attrs, "identifier") do
       attrs
     else

@@ -12,6 +12,7 @@ defmodule Cympho.AgentPromptContractEval do
   alias Cympho.PullRequestContract
 
   @delivery_roles Agent.delivery_roles()
+  @pr_roles Agent.pr_delivery_roles()
   @roles [:ceo, :cto | @delivery_roles]
   @blocked_fields [
     "[blocked]",
@@ -240,7 +241,7 @@ defmodule Cympho.AgentPromptContractEval do
     ]
   end
 
-  defp pr_examples(role) when role in [:cto | @delivery_roles] do
+  defp pr_examples(role) when role in [:cto | @pr_roles] do
     [
       example(
         :"#{role}_pr_good",
@@ -322,33 +323,7 @@ defmodule Cympho.AgentPromptContractEval do
     |> String.contains?(field |> to_string() |> String.downcase())
   end
 
-  defp normalize_role(role) when is_atom(role), do: role
+  defp normalize_role(role), do: Agent.normalize_role(role) || :engineer
 
-  defp normalize_role(role) when is_binary(role) do
-    role
-    |> String.trim()
-    |> String.downcase()
-    |> String.replace("-", "_")
-    |> case do
-      "ceo" -> :ceo
-      "cto" -> :cto
-      "engineer" -> :engineer
-      "product_manager" -> :product_manager
-      "product" -> :product_manager
-      "designer" -> :designer
-      "design" -> :designer
-      _ -> :engineer
-    end
-  end
-
-  defp normalize_role(_role), do: :engineer
-
-  defp role_label(:ceo), do: "CEO"
-  defp role_label(:cto), do: "CTO"
-  defp role_label(:engineer), do: "Engineer"
-  defp role_label(:product_manager), do: "Product"
-  defp role_label(:designer), do: "Design"
-
-  defp role_label(role),
-    do: role |> to_string() |> String.replace("_", " ") |> String.capitalize()
+  defp role_label(role), do: Agent.role_label(role)
 end

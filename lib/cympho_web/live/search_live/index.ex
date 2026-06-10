@@ -3,6 +3,8 @@ defmodule CymphoWeb.SearchLive.Index do
   alias Cympho.Search
   alias Cympho.RecentSearches
   alias Cympho.Agents
+  alias Cympho.Agents.Agent
+  alias Cympho.Goals
   alias Cympho.Projects
   alias Cympho.Labels
 
@@ -18,7 +20,9 @@ defmodule CymphoWeb.SearchLive.Index do
       |> assign(:results, %{issues: [], agents: [], projects: [], goals: []})
       |> assign(:recent_searches, recent_searches_for_user(current_user))
       |> assign(:agents, list_agents_scoped(company_id))
-      |> assign(:projects, Projects.list_projects())
+      |> assign(:projects, list_projects_scoped(company_id))
+      |> assign(:goals, list_goals_scoped(company_id))
+      |> assign(:role_options, role_options())
       |> assign(:labels, Labels.list_labels())
       |> assign(:filters, %{
         "status" => "",
@@ -148,7 +152,8 @@ defmodule CymphoWeb.SearchLive.Index do
       |> assign(:results, %{issues: [], agents: [], projects: [], goals: []})
       |> assign(:total_count, 0)
     else
-      results = Search.search_all(query, filters, limit: 20)
+      company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+      results = Search.search_all(query, filters, limit: 20, company_id: company_id)
 
       total_count =
         length(results.issues) + length(results.agents) + length(results.projects) +
@@ -198,71 +203,48 @@ defmodule CymphoWeb.SearchLive.Index do
     end
   end
 
+  defp result_heading(_results, _total_count, _active_tab, ""), do: "Ready when you are"
+
+  defp result_heading(results, total_count, active_tab, query) do
+    count = active_result_count(results, total_count, active_tab)
+    label = active_result_label(active_tab, count)
+
+    ~s(#{count} #{label} for "#{query}")
+  end
+
+  defp active_result_count(_results, total_count, :all), do: total_count
+
+  defp active_result_count(results, _total_count, active_tab),
+    do: tab_count(results, active_tab) || 0
+
+  defp active_result_label(:all, 1), do: "match"
+  defp active_result_label(:all, _count), do: "matches"
+  defp active_result_label(:issues, 1), do: "issue match"
+  defp active_result_label(:issues, _count), do: "issue matches"
+  defp active_result_label(:agents, 1), do: "agent match"
+  defp active_result_label(:agents, _count), do: "agent matches"
+  defp active_result_label(:projects, 1), do: "project match"
+  defp active_result_label(:projects, _count), do: "project matches"
+  defp active_result_label(:goals, 1), do: "goal match"
+  defp active_result_label(:goals, _count), do: "goal matches"
+
   defp parse_tab(tab) when tab in ~w(all issues agents projects goals),
     do: String.to_existing_atom(tab)
 
   defp parse_tab(_), do: :all
 
-  defp status_label(:backlog), do: "Backlog"
-  defp status_label(:todo), do: "To Do"
-  defp status_label(:in_progress), do: "In Progress"
-  defp status_label(:in_review), do: "In Review"
-  defp status_label(:done), do: "Done"
-  defp status_label(:blocked), do: "Blocked"
-  defp status_label(:cancelled), do: "Cancelled"
-  defp status_label(:active), do: "Active"
-  defp status_label(:archived), do: "Archived"
-  defp status_label(:completed), do: "Completed"
-  defp status_label(:idle), do: "Idle"
-  defp status_label(:running), do: "Running"
-  defp status_label(:error), do: "Error"
-  defp status_label(:sleeping), do: "Sleeping"
-  defp status_label(:offline), do: "Offline"
-  defp status_label(other), do: String.capitalize(to_string(other))
-
-  defp status_color(:backlog), do: "bg-text-tertiary/20 text-text-tertiary"
-  defp status_color(:todo), do: "bg-accent/20 text-accent"
-  defp status_color(:in_progress), do: "bg-brand/20 text-brand"
-  defp status_color(:in_review), do: "bg-text-secondary/20 text-text-secondary"
-  defp status_color(:done), do: "bg-success/20 text-success"
-  defp status_color(:blocked), do: "bg-brand/20 text-brand"
-  defp status_color(:cancelled), do: "bg-text-quaternary/20 text-text-quaternary"
-  defp status_color(:active), do: "bg-success/20 text-success"
-  defp status_color(:archived), do: "bg-text-quaternary/20 text-text-quaternary"
-  defp status_color(:completed), do: "bg-success/20 text-success"
-  defp status_color(:idle), do: "bg-text-quaternary/20 text-text-quaternary"
-  defp status_color(:running), do: "bg-brand/20 text-brand"
-  defp status_color(:error), do: "bg-brand/20 text-brand"
-  defp status_color(:sleeping), do: "bg-yellow-500/20 text-yellow-400"
-  defp status_color(:offline), do: "bg-text-quaternary/20 text-text-quaternary"
-  defp status_color(_), do: "bg-text-quaternary/20 text-text-quaternary"
-
-  defp priority_label(:low), do: "Low"
-  defp priority_label(:medium), do: "Medium"
-  defp priority_label(:high), do: "High"
-  defp priority_label(:critical), do: "Critical"
-  defp priority_label(other), do: String.capitalize(to_string(other))
-
-  defp priority_color(:low), do: "text-text-tertiary"
-  defp priority_color(:medium), do: "text-accent"
-  defp priority_color(:high), do: "text-orange-400"
-  defp priority_color(:critical), do: "text-brand"
-  defp priority_color(_), do: "text-text-tertiary"
-
-  defp agent_status_color(:idle), do: "bg-text-tertiary"
-  defp agent_status_color(:running), do: "bg-success"
-  defp agent_status_color(:error), do: "bg-error"
-  defp agent_status_color(:sleeping), do: "bg-yellow-500"
-  defp agent_status_color(:offline), do: "bg-text-quaternary"
-  defp agent_status_color(_), do: "bg-text-tertiary"
+  defp agent_status_dot_class(:running), do: "bg-emerald-400"
+  defp agent_status_dot_class(:error), do: "bg-red-400"
+  defp agent_status_dot_class(:sleeping), do: "bg-amber-400"
+  defp agent_status_dot_class(:offline), do: "bg-text-quaternary"
+  defp agent_status_dot_class(_status), do: "bg-text-tertiary"
 
   defp filters_active?(filters) do
-    filters["status"] != "" or
-      filters["assignee_id"] != "" or
-      filters["label_id"] != "" or
-      filters["project_id"] != "" or
-      filters["date_from"] != "" or
-      filters["date_to"] != ""
+    Enum.any?(filters, fn {_key, value} -> value not in ["", nil] end)
+  end
+
+  defp filter_count(filters) do
+    Enum.count(filters, fn {_key, value} -> value not in ["", nil] end)
   end
 
   defp recent_searches_for_user(nil), do: []
@@ -271,43 +253,56 @@ defmodule CymphoWeb.SearchLive.Index do
   defp list_agents_scoped(nil), do: []
   defp list_agents_scoped(company_id), do: Agents.list_agents_by_company(company_id)
 
+  defp list_projects_scoped(nil), do: []
+  defp list_projects_scoped(company_id), do: Projects.list_projects_by_company(company_id)
+
+  defp list_goals_scoped(nil), do: []
+  defp list_goals_scoped(company_id), do: Goals.list_goals_by_company(company_id)
+
+  defp role_options do
+    Agent.role_options()
+    |> Enum.map(&{Agent.role_label(&1), Atom.to_string(&1)})
+  end
+
   defp render_issues(assigns, issues, title) do
     assigns = assign(assigns, issues: issues, section_title: title)
 
     ~H"""
     <div :if={@issues != []} class="space-y-2">
-      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">
+      <h2 :if={@section_title} class="mb-3 text-card-title text-text-primary">
         {@section_title}
       </h2>
       <div class="space-y-2">
-        <.link
+        <.app_link
           :for={issue <- @issues}
           navigate={~p"/issues/#{issue.id}"}
-          class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+          class="block rounded-lg border border-border bg-surface-1 px-4 py-3 transition-colors hover:bg-surface-2"
         >
-          <div class="flex items-start justify-between">
-            <div class="flex-1">
-              <div class="flex items-center gap-2 mb-1">
-                <span class="text-sm font-medium text-text-primary">{issue.identifier}</span>
-                <span class={["px-2 py-0.5 text-xs rounded-full", status_color(issue.status)]}>
-                  {status_label(issue.status)}
-                </span>
-                <span class={["text-xs font-medium", priority_color(issue.priority)]}>
-                  {priority_label(issue.priority)} priority
-                </span>
-              </div>
-              <h3 class="font-serif text-base font-medium text-text-primary mb-1">{issue.title}</h3>
-              <p class="text-sm text-text-secondary line-clamp-2">{issue.description}</p>
-              <div class="flex items-center gap-4 mt-2 text-xs text-text-tertiary">
-                <span :if={issue.assignee}>Assignee: {issue.assignee.name}</span>
-                <span :if={issue.project}>Project: {issue.project.name}</span>
-                <span :if={issue.labels != []}>
-                  Labels: {Enum.map_join(issue.labels, ", ", & &1.name)}
-                </span>
-              </div>
+          <div class="flex min-w-0 flex-col gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <span
+                :if={issue.identifier}
+                class="font-mono text-xs font-510 text-text-tertiary"
+              >
+                {issue.identifier}
+              </span>
+              <.badge variant="status" value={to_string(issue.status)} />
+              <.badge variant="priority" value={to_string(issue.priority)} />
+            </div>
+            <div class="min-w-0">
+              <h3 class="truncate text-base font-590 text-text-primary">{issue.title}</h3>
+              <p class="mt-1 text-sm text-text-tertiary line-clamp-2">{issue.description}</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
+              <span :if={issue.assignee}>Assignee: {issue.assignee.name}</span>
+              <span :if={issue.project}>Project: {issue.project.name}</span>
+              <span :if={issue.goal}>Goal: {issue.goal.title}</span>
+              <span :if={issue.labels != []}>
+                Labels: {Enum.map_join(issue.labels, ", ", & &1.name)}
+              </span>
             </div>
           </div>
-        </.link>
+        </.app_link>
       </div>
     </div>
     """
@@ -318,30 +313,34 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@agents != []} class="space-y-2">
-      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">
+      <h2 :if={@section_title} class="mb-3 text-card-title text-text-primary">
         {@section_title}
       </h2>
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <.link
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <.app_link
           :for={agent <- @agents}
           navigate={~p"/agents/#{agent.id}"}
-          class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+          class="block rounded-lg border border-border bg-surface-1 px-4 py-3 transition-colors hover:bg-surface-2"
         >
-          <div class="flex items-center justify-between mb-2">
-            <h3 class="font-serif text-base font-medium text-text-primary">{agent.name}</h3>
-            <span
-              class="w-2 h-2 rounded-full"
-              style={"background-color: " <> agent_status_color(agent.status)}
-            >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <h3 class="truncate text-base font-590 text-text-primary">{agent.name}</h3>
+              <p :if={agent.title not in [nil, ""]} class="mt-1 text-sm text-text-tertiary">
+                {agent.title}
+              </p>
+              <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-quaternary">
+                <span>{Agent.role_label(agent.role)}</span>
+                <span>/</span>
+                <span class="capitalize">{agent.status}</span>
+              </div>
+            </div>
+            <span class={[
+              "mt-1 h-2.5 w-2.5 shrink-0 rounded-full",
+              agent_status_dot_class(agent.status)
+            ]}>
             </span>
           </div>
-          <p class="text-sm text-text-secondary mb-2">{agent.title}</p>
-          <div class="flex items-center gap-2 text-xs text-text-tertiary">
-            <span class="capitalize">{agent.role}</span>
-            <span>•</span>
-            <span class="capitalize">{agent.status}</span>
-          </div>
-        </.link>
+        </.app_link>
       </div>
     </div>
     """
@@ -352,23 +351,22 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@projects != []} class="space-y-2">
-      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">
+      <h2 :if={@section_title} class="mb-3 text-card-title text-text-primary">
         {@section_title}
       </h2>
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <.link
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <.app_link
           :for={project <- @projects}
           navigate={~p"/projects/#{project.id}"}
-          class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+          class="block rounded-lg border border-border bg-surface-1 px-4 py-3 transition-colors hover:bg-surface-2"
         >
-          <h3 class="font-serif text-base font-medium text-text-primary mb-1">{project.name}</h3>
-          <p class="text-sm text-text-secondary line-clamp-2 mb-2">{project.description}</p>
-          <div class="flex items-center gap-2 text-xs text-text-tertiary">
-            <span class="capitalize">{project.status}</span>
-            <span>•</span>
-            <span>{project.prefix}</span>
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <.badge variant="pill" value={project.prefix} />
+            <.badge variant="status" value={to_string(project.status)} />
           </div>
-        </.link>
+          <h3 class="truncate text-base font-590 text-text-primary">{project.name}</h3>
+          <p class="mt-1 text-sm text-text-tertiary line-clamp-2">{project.description}</p>
+        </.app_link>
       </div>
     </div>
     """
@@ -379,34 +377,32 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@goals != []} class="space-y-2">
-      <h2 :if={@section_title} class="text-lg font-medium text-text-primary mb-3">
+      <h2 :if={@section_title} class="mb-3 text-card-title text-text-primary">
         {@section_title}
       </h2>
       <div class="space-y-2">
-        <.link
+        <.app_link
           :for={goal <- @goals}
           navigate={~p"/goals/#{goal.id}"}
-          class="block p-4 bg-surface border border-border rounded-lg hover:border-brand/50 transition-colors"
+          class="block rounded-lg border border-border bg-surface-1 px-4 py-3 transition-colors hover:bg-surface-2"
         >
-          <div class="flex items-start justify-between">
-            <div class="flex-1">
-              <div class="flex items-center gap-2 mb-1">
-                <h3 class="font-serif text-base font-medium text-text-primary">{goal.title}</h3>
-                <span class={[
-                  "text-xs font-medium",
-                  priority_color(String.to_existing_atom(goal.priority))
-                ]}>
-                  {String.capitalize(goal.priority)} priority
-                </span>
-              </div>
-              <p class="text-sm text-text-secondary line-clamp-2">{goal.description}</p>
-              <div class="flex items-center gap-4 mt-2 text-xs text-text-tertiary">
-                <span class="capitalize">{goal.status}</span>
-                <span :if={goal.project}>Project: {goal.project.name}</span>
-              </div>
+          <div class="flex min-w-0 flex-col gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <.badge variant="status" value={goal.status} />
+              <.badge variant="priority" value={goal.priority} />
+              <span class="text-xs text-text-quaternary">
+                {goal.goal_type |> to_string() |> String.capitalize()}
+              </span>
+            </div>
+            <div class="min-w-0">
+              <h3 class="truncate text-base font-590 text-text-primary">{goal.title}</h3>
+              <p class="mt-1 text-sm text-text-tertiary line-clamp-2">{goal.description}</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
+              <span :if={goal.project}>Project: {goal.project.name}</span>
             </div>
           </div>
-        </.link>
+        </.app_link>
       </div>
     </div>
     """

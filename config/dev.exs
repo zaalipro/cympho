@@ -11,7 +11,7 @@ config :cympho, Cympho.Repo,
   ssl: false
 
 config :cympho, CymphoWeb.Endpoint,
-  http: [ip: {127, 0, 0, 1}, port: 4000],
+  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "4329")],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,
@@ -35,7 +35,8 @@ config :cympho, :skill_manifest_dir, "priv/skill_manifests"
 config :cympho, :claude_code_command, System.get_env("CYMPHO_CLAUDE_COMMAND") || "cz"
 
 config :cympho, :orchestrator,
-  enabled: System.get_env("CYMPHO_ORCHESTRATOR_ENABLED") in ["1", "true", "TRUE", "yes"]
+  enabled: System.get_env("CYMPHO_ORCHESTRATOR_ENABLED") in ["1", "true", "TRUE", "yes"],
+  only_issue_id: System.get_env("CYMPHO_DISPATCH_ONLY_ISSUE_ID")
 
 config :cympho,
        :start_board_approval_executor?,
@@ -56,6 +57,14 @@ config :cympho,
 config :cympho,
        :schedule_routine_triggers?,
        System.get_env("CYMPHO_SCHEDULE_ROUTINE_TRIGGERS") in ["1", "true", "TRUE", "yes"]
+
+config :cympho,
+       :start_backlog_planner?,
+       System.get_env("CYMPHO_START_BACKLOG_PLANNER") in ["1", "true", "TRUE", "yes"]
+
+config :cympho,
+       :start_oversight_patrol?,
+       System.get_env("CYMPHO_START_OVERSIGHT_PATROL") in ["1", "true", "TRUE", "yes"]
 
 config :phoenix, :stacktrace_depth, 20
 

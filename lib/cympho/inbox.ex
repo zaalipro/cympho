@@ -1,6 +1,7 @@
 defmodule Cympho.Inbox do
   import Ecto.Query, warn: false
   alias Cympho.Repo
+  alias Cympho.HeartbeatEngine.Run
   alias Cympho.Inbox.InboxState
   alias Cympho.Wakes
 
@@ -165,6 +166,56 @@ defmodule Cympho.Inbox do
     end
   end
 
+  def mark_unread_read_for_agent(agent_id) when is_binary(agent_id) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {count, _} =
+      from(s in InboxState,
+        where: s.agent_id == ^agent_id and s.status == "unread"
+      )
+      |> Repo.update_all(set: [status: "read", read_at: now, updated_at: now])
+
+    if count > 0 do
+      broadcast_change(agent_id, {:inbox_bulk_updated, agent_id})
+    end
+
+    {:ok, count}
+  end
+
+  def mark_unread_read_for_agent(_agent_id), do: {:error, :invalid_agent}
+
+  def mark_unread_read_for_company(company_id) when is_binary(company_id) do
+    unread_agent_ids =
+      from(s in InboxState,
+        join: a in Cympho.Agents.Agent,
+        on: a.id == s.agent_id,
+        where: a.company_id == ^company_id and s.status == "unread",
+        distinct: true,
+        select: s.agent_id
+      )
+      |> Repo.all()
+
+    if unread_agent_ids == [] do
+      {:ok, 0}
+    else
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {count, _} =
+        from(s in InboxState,
+          where: s.agent_id in ^unread_agent_ids and s.status == "unread"
+        )
+        |> Repo.update_all(set: [status: "read", read_at: now, updated_at: now])
+
+      Enum.each(unread_agent_ids, fn agent_id ->
+        broadcast_change(agent_id, {:inbox_bulk_updated, agent_id})
+      end)
+
+      {:ok, count}
+    end
+  end
+
+  def mark_unread_read_for_company(_company_id), do: {:error, :invalid_company}
+
   def dismiss(issue_id, agent_id) do
     case get_inbox_state(issue_id, agent_id) do
       nil ->
@@ -272,28 +323,78 @@ defmodule Cympho.Inbox do
 
   defp attach_review_nudges(items) do
     issue_ids = items |> Enum.map(& &1.issue_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+    items_by_pair = Map.new(items, &{{&1.issue_id, &1.agent_id}, &1})
+    run_counts = run_counts_by_issue(issue_ids)
 
     nudges_by_pair =
       issue_ids
       |> Wakes.list_review_nudges()
       |> Enum.group_by(&{&1.issue_id, &1.agent_id})
-      |> Map.new(fn {pair, [wake | _]} -> {pair, review_nudge_map(wake)} end)
+      |> Map.new(fn {pair, [wake | _]} ->
+        item = Map.get(items_by_pair, pair)
+        issue = item && item.issue
+        run_count = Map.get(run_counts, wake.issue_id, 0)
+
+        {pair, review_nudge_map(wake, issue, run_count)}
+      end)
 
     Enum.map(items, fn item ->
       %{item | review_nudge: Map.get(nudges_by_pair, {item.issue_id, item.agent_id})}
     end)
   end
 
-  defp review_nudge_map(wake) do
+  defp run_counts_by_issue([]), do: %{}
+
+  defp run_counts_by_issue(issue_ids) do
+    Run
+    |> where([r], r.issue_id in ^issue_ids)
+    |> group_by([r], r.issue_id)
+    |> select([r], {r.issue_id, count(r.id)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  defp review_nudge_map(wake, issue, run_count) do
     metadata = wake.metadata || %{}
+    pre_runtime? = pre_runtime_review_nudge?(issue, metadata, run_count)
 
     %{
       wake_id: wake.id,
       status: wake.status,
-      summary: metadata["summary"] || "Review evidence needed",
+      label: review_nudge_label(pre_runtime?),
+      summary: review_nudge_summary(metadata, pre_runtime?),
       blocker_labels: List.wrap(metadata["blocker_labels"]),
       prompt: metadata["prompt"],
+      target_path: review_nudge_target_path(pre_runtime?),
+      target_label: review_nudge_target_label(pre_runtime?),
       queued_at: wake.inserted_at
     }
   end
+
+  defp pre_runtime_review_nudge?(%{status: status}, metadata, 0)
+       when status in [:todo, "todo"] do
+    metadata
+    |> Map.get("blocker_keys", metadata["blocker_key"])
+    |> List.wrap()
+    |> Enum.any?(fn key ->
+      to_string(key) in ["runtime_verification", "agent_note", "work_product"]
+    end)
+  end
+
+  defp pre_runtime_review_nudge?(_issue, _metadata, _run_count), do: false
+
+  defp review_nudge_label(true), do: "Runtime launch needed"
+  defp review_nudge_label(false), do: "Review evidence needed"
+
+  defp review_nudge_summary(_metadata, true) do
+    "Runtime has not produced evidence yet. Open the launch checklist or issue preflight before asking for delivery notes."
+  end
+
+  defp review_nudge_summary(metadata, false), do: metadata["summary"] || "Review evidence needed"
+
+  defp review_nudge_target_path(true), do: "/operations#runtime-launch-checklist"
+  defp review_nudge_target_path(false), do: nil
+
+  defp review_nudge_target_label(true), do: "Open launch checklist"
+  defp review_nudge_target_label(false), do: nil
 end

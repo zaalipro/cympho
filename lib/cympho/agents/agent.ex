@@ -2,7 +2,19 @@ defmodule Cympho.Agents.Agent do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @delivery_roles [:engineer, :product_manager, :designer, :release_engineer]
+  @leadership_roles [:ceo, :cto]
+  @product_delivery_roles [:product_manager, :designer]
+  @technical_delivery_roles [:engineer, :release_engineer, :qa_engineer]
+  @business_delivery_roles [
+    :researcher,
+    :marketer,
+    :content_strategist,
+    :sales_development,
+    :customer_support
+  ]
+  @delivery_roles @product_delivery_roles ++ @technical_delivery_roles ++ @business_delivery_roles
+  @all_roles @leadership_roles ++ @delivery_roles
+  @pr_delivery_roles [:engineer, :release_engineer, :qa_engineer]
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -11,8 +23,7 @@ defmodule Cympho.Agents.Agent do
     field :url_key, :string
     field :title, :string
 
-    field :role, Ecto.Enum,
-      values: [:engineer, :product_manager, :designer, :ceo, :cto, :release_engineer]
+    field :role, Ecto.Enum, values: @all_roles
 
     field :status, Ecto.Enum,
       values: [
@@ -41,7 +52,16 @@ defmodule Cympho.Agents.Agent do
     field :last_heartbeat_at, :utc_datetime
 
     field :adapter, Ecto.Enum,
-      values: [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting]
+      values: [
+        :claude_code,
+        :codex,
+        :cursor,
+        :http,
+        :openai_chat,
+        :openclaw,
+        :process,
+        :agrenting
+      ]
 
     field :health_status, Ecto.Enum,
       values: [:healthy, :degraded, :unavailable],
@@ -77,6 +97,8 @@ defmodule Cympho.Agents.Agent do
   end
 
   def delivery_roles, do: @delivery_roles
+  def business_delivery_roles, do: @business_delivery_roles
+  def pr_delivery_roles, do: @pr_delivery_roles
 
   @doc false
   def changeset(agent, attrs) do
@@ -119,14 +141,7 @@ defmodule Cympho.Agents.Agent do
       :adapter_failure_count
     ])
     |> validate_required([:name, :role])
-    |> validate_inclusion(:role, [
-      :engineer,
-      :product_manager,
-      :designer,
-      :ceo,
-      :cto,
-      :release_engineer
-    ])
+    |> validate_inclusion(:role, @all_roles)
     |> validate_inclusion(:status, status_options())
     |> validate_inclusion(:health_status, [:healthy, :degraded, :unavailable])
     |> validate_inclusion(:context_mode, ["company", "project", "issue"])
@@ -182,14 +197,7 @@ defmodule Cympho.Agents.Agent do
       :adapter_failure_count
     ])
     |> validate_required([:name, :role])
-    |> validate_inclusion(:role, [
-      :engineer,
-      :product_manager,
-      :designer,
-      :ceo,
-      :cto,
-      :release_engineer
-    ])
+    |> validate_inclusion(:role, @all_roles)
     |> validate_inclusion(:status, status_options())
     |> validate_inclusion(:health_status, [:healthy, :degraded, :unavailable])
     |> validate_inclusion(:context_mode, ["company", "project", "issue"])
@@ -215,8 +223,68 @@ defmodule Cympho.Agents.Agent do
       :terminated
     ]
 
-  def role_options, do: [:engineer, :product_manager, :designer, :ceo, :cto, :release_engineer]
-  def adapter_options, do: [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting]
+  def role_options, do: @all_roles
+
+  def role_strings, do: Enum.map(@all_roles, &Atom.to_string/1)
+
+  def normalize_role(role) when is_atom(role) and role in @all_roles, do: role
+
+  def normalize_role(role) when is_binary(role) do
+    normalized =
+      role
+      |> String.trim()
+      |> String.downcase()
+      |> String.replace("-", "_")
+
+    alias_role =
+      case normalized do
+        "product" -> "product_manager"
+        "pm" -> "product_manager"
+        "design" -> "designer"
+        "qa" -> "qa_engineer"
+        "quality_assurance" -> "qa_engineer"
+        "marketing" -> "marketer"
+        "growth" -> "marketer"
+        "content" -> "content_strategist"
+        "social" -> "content_strategist"
+        "sales" -> "sales_development"
+        "outreach" -> "sales_development"
+        "support" -> "customer_support"
+        "research" -> "researcher"
+        other -> other
+      end
+
+    if alias_role in role_strings() do
+      String.to_existing_atom(alias_role)
+    end
+  end
+
+  def normalize_role(_), do: nil
+
+  def role_label(:ceo), do: "CEO"
+  def role_label(:cto), do: "CTO"
+  def role_label(:qa_engineer), do: "QA Engineer"
+  def role_label(:product_manager), do: "Product Manager"
+  def role_label(:content_strategist), do: "Content Strategist"
+  def role_label(:sales_development), do: "Sales Development"
+  def role_label(:customer_support), do: "Customer Support"
+
+  def role_label(role) do
+    role
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.split()
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  def role_title(:ceo), do: "Chief Executive Officer"
+  def role_title(:cto), do: "Chief Technology Officer"
+  def role_title(:engineer), do: "Software Engineer"
+  def role_title(role), do: role_label(role)
+
+  def adapter_options,
+    do: [:claude_code, :codex, :cursor, :http, :openai_chat, :openclaw, :process, :agrenting]
+
   def health_status_options, do: [:healthy, :degraded, :unavailable]
 
   def status_changeset(agent, attrs) do

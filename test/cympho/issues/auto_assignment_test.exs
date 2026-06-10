@@ -222,6 +222,34 @@ defmodule Cympho.Issues.AutoAssignmentTest do
     end
   end
 
+  describe "assign_owner_for_dispatch/1" do
+    test "assigns a matching owner without checking out the issue" do
+      {:ok, product_owner} =
+        Agents.create_agent(%{
+          name: "Dispatch Product Owner",
+          role: :product_manager,
+          status: :idle,
+          max_concurrent_jobs: 3,
+          company_id: test_company_id()
+        })
+
+      issue =
+        create_issue_direct(%{
+          title: "Define launch success metrics",
+          status: :todo,
+          assigned_role: "product_manager"
+        })
+
+      assert is_nil(issue.assignee_id)
+
+      {:ok, assigned} = AutoAssignment.assign_owner_for_dispatch(issue)
+
+      assert assigned.assignee_id == product_owner.id
+      assert assigned.status == :todo
+      assert assigned.assigned_role == "product_manager"
+    end
+  end
+
   describe "reassign_backlog/0" do
     test "assigns backlog issues with no assignee" do
       {:ok, _agent} =

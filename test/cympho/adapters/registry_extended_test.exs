@@ -16,6 +16,7 @@ defmodule Cympho.Adapters.RegistryExtendedTest do
       assert :codex in types
       assert :cursor in types
       assert :http in types
+      assert :openai_chat in types
       assert :openclaw in types
       assert :process in types
     end
@@ -66,10 +67,21 @@ defmodule Cympho.Adapters.RegistryExtendedTest do
     end
 
     test "walks fallback chain when primary is unavailable" do
-      # :codex is the primary, :claude_code is the fallback
-      {:ok, module, _config} = Registry.resolve_agent(%{adapter: :codex, config: %{}})
-      # At least one adapter in the chain must be available
-      assert is_atom(module)
+      original = Application.get_env(:cympho, :claude_code_command)
+      Application.put_env(:cympho, :claude_code_command, "echo")
+
+      try do
+        # :codex is unavailable without an API key, so resolution should walk
+        # to the configured Claude-compatible wrapper fallback.
+        {:ok, module, _config} = Registry.resolve_agent(%{adapter: :codex, config: %{}})
+        assert module == Cympho.Adapters.ClaudeCodeAdapter
+      after
+        if original do
+          Application.put_env(:cympho, :claude_code_command, original)
+        else
+          Application.delete_env(:cympho, :claude_code_command)
+        end
+      end
     end
 
     test "returns error for unregistered adapter type" do
@@ -85,6 +97,7 @@ defmodule Cympho.Adapters.RegistryExtendedTest do
       CodexAdapter,
       CursorAdapter,
       HttpAdapter,
+      OpenAIChatAdapter,
       OpenClawAdapter,
       ProcessAdapter
     }
@@ -103,6 +116,10 @@ defmodule Cympho.Adapters.RegistryExtendedTest do
 
     test "HttpAdapter.type/0 returns :http" do
       assert HttpAdapter.type() == :http
+    end
+
+    test "OpenAIChatAdapter.type/0 returns :openai_chat" do
+      assert OpenAIChatAdapter.type() == :openai_chat
     end
 
     test "OpenClawAdapter.type/0 returns :openclaw" do

@@ -2,6 +2,7 @@ defmodule CymphoWeb.AgentLive.Remote do
   use CymphoWeb, :live_view
 
   alias Cympho.Agents
+  alias Cympho.Agents.Agent
   alias Cympho.Agrenting
 
   @default_role "engineer"
@@ -254,7 +255,13 @@ defmodule CymphoWeb.AgentLive.Remote do
   defp normalize_price(value, fallback) when value in [nil, ""], do: fallback || "0"
   defp normalize_price(value, _fallback), do: value
 
-  defp normalize_role(role) when role in ~w(engineer product_manager designer ceo cto), do: role
+  defp normalize_role(role) when is_binary(role) do
+    case Agent.normalize_role(role) do
+      nil -> @default_role
+      role -> Atom.to_string(role)
+    end
+  end
+
   defp normalize_role(_), do: @default_role
 
   defp remote_title(remote_agent, capability) do
@@ -319,13 +326,7 @@ defmodule CymphoWeb.AgentLive.Remote do
   end
 
   def role_options do
-    [
-      {"Engineer", "engineer"},
-      {"Product Manager", "product_manager"},
-      {"Designer", "designer"},
-      {"CTO", "cto"},
-      {"CEO", "ceo"}
-    ]
+    Enum.map(Agent.role_options(), &{Agent.role_label(&1), Atom.to_string(&1)})
   end
 
   def capability_select_options(agent) do

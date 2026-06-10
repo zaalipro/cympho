@@ -51,11 +51,13 @@
     <CymphoWeb.IssueLive.Show.ExecutionBrief.execution_brief
       issue={@issue}
       runs={@runs}
+      pending_wake={@pending_wake}
       work_products={@work_products}
       child_issues={@child_issues}
       tool_call_traces={@tool_call_traces}
       all_agents={@all_agents}
       child_health_cards={@child_health_cards}
+      orchestrator_enabled?={@orchestrator_enabled?}
     />
 
     <CymphoWeb.IssueLive.Show.ChildIssues.child_issues
@@ -77,6 +79,7 @@
 
   <CymphoWeb.IssueLive.Show.Sidebar.sidebar
     issue={@issue}
+    runs={@runs}
     all_agents={@all_agents}
     orchestrator_enabled?={@orchestrator_enabled?}
     show_agent_panel={@show_agent_panel}

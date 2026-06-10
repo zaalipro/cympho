@@ -24,6 +24,77 @@
     </:actions>
   </.header>
 
+  <section
+    data-testid="plugin-health"
+    class="mb-5 rounded-lg border border-border bg-panel px-5 py-4"
+  >
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="text-sm font-590 text-text-primary">Plugin Health</h2>
+          <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{plugin_health_badge(@plugin_health.level)}"}>
+            {@plugin_health.label}
+          </span>
+        </div>
+        <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
+          {@plugin_health.summary}
+        </p>
+      </div>
+
+      <div class="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:min-w-[440px] sm:grid-cols-5">
+        <.plugin_health_metric
+          label="Enabled"
+          value={@plugin_health.metrics.enabled_plugins}
+          tone={if @plugin_health.metrics.enabled_plugins > 0, do: :ok, else: :neutral}
+        />
+        <.plugin_health_metric
+          label="Errors"
+          value={
+            @plugin_health.metrics.status_error_plugins +
+              @plugin_health.metrics.manifest_error_plugins
+          }
+          tone={
+            if @plugin_health.metrics.status_error_plugins +
+                 @plugin_health.metrics.manifest_error_plugins > 0,
+               do: :critical,
+               else: :ok
+          }
+        />
+        <.plugin_health_metric
+          label="Cap gaps"
+          value={@plugin_health.metrics.capabilityless_enabled_plugins}
+          tone={
+            if @plugin_health.metrics.capabilityless_enabled_plugins > 0,
+              do: :warning,
+              else: :ok
+          }
+        />
+        <.plugin_health_metric
+          label="Logs"
+          value={@plugin_health.metrics.recent_error_logs}
+          tone={if @plugin_health.metrics.recent_error_logs > 0, do: :critical, else: :ok}
+        />
+        <.plugin_health_metric
+          label="Webhooks"
+          value={@plugin_health.metrics.failing_webhooks}
+          tone={if @plugin_health.metrics.failing_webhooks > 0, do: :warning, else: :ok}
+        />
+      </div>
+    </div>
+
+    <div :if={@plugin_health.recommendations != []} class="mt-4 grid gap-2 lg:grid-cols-2">
+      <div
+        :for={recommendation <- @plugin_health.recommendations}
+        class={"rounded-md border px-3 py-2 #{plugin_recommendation_class(recommendation.severity)}"}
+      >
+        <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
+          {recommendation.label}
+        </p>
+        <p class="mt-1 text-xs leading-5 opacity-85">{recommendation.detail}</p>
+      </div>
+    </div>
+  </section>
+
   <form
     phx-change="filter"
     phx-submit="filter"

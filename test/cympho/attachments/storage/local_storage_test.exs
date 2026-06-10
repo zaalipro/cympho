@@ -1,22 +1,27 @@
 defmodule Cympho.Attachments.Storage.LocalStorageTest do
-  use Cympho.DataCase, async: true
+  use Cympho.DataCase, async: false
 
   alias Cympho.Attachments.Storage.LocalStorage
 
-  @upload_dir "test_uploads"
-
   setup do
-    Application.put_env(:cympho, :uploads_dir, @upload_dir)
+    previous_upload_dir = Application.get_env(:cympho, :uploads_dir)
+
+    upload_dir =
+      System.tmp_dir!()
+      |> Path.join("cympho_local_storage_test_#{System.unique_integer([:positive])}")
+
+    Application.put_env(:cympho, :uploads_dir, upload_dir)
 
     on_exit(fn ->
-      File.rm_rf!(@upload_dir)
+      restore_upload_dir(previous_upload_dir)
+      File.rm_rf!(upload_dir)
     end)
 
-    :ok
+    {:ok, upload_dir: upload_dir}
   end
 
   describe "store_file/2" do
-    test "stores a file and returns the relative path" do
+    test "stores a file and returns the relative path", %{upload_dir: upload_dir} do
       issue_id = Ecto.UUID.generate()
 
       tmp_path =
@@ -35,7 +40,7 @@ defmodule Cympho.Attachments.Storage.LocalStorageTest do
       assert relative_path =~ issue_id
       assert relative_path =~ ".txt"
 
-      full_path = Path.join([@upload_dir, relative_path])
+      full_path = Path.join([upload_dir, relative_path])
       assert File.exists?(full_path)
 
       assert {:ok, content} = File.read(full_path)
@@ -44,7 +49,7 @@ defmodule Cympho.Attachments.Storage.LocalStorageTest do
       File.rm!(tmp_path)
     end
 
-    test "creates nested directory structure" do
+    test "creates nested directory structure", %{upload_dir: upload_dir} do
       issue_id = Ecto.UUID.generate()
 
       tmp_path =
@@ -61,7 +66,7 @@ defmodule Cympho.Attachments.Storage.LocalStorageTest do
 
       assert {:ok, relative_path} = LocalStorage.store_file(upload, issue_id)
 
-      full_path = Path.join([@upload_dir, relative_path])
+      full_path = Path.join([upload_dir, relative_path])
       assert File.exists?(full_path)
 
       File.rm!(tmp_path)
@@ -118,7 +123,7 @@ defmodule Cympho.Attachments.Storage.LocalStorageTest do
   end
 
   describe "delete_file/1" do
-    test "deletes a stored file" do
+    test "deletes a stored file", %{upload_dir: upload_dir} do
       issue_id = Ecto.UUID.generate()
 
       tmp_path =
@@ -135,7 +140,7 @@ defmodule Cympho.Attachments.Storage.LocalStorageTest do
 
       {:ok, relative_path} = LocalStorage.store_file(upload, issue_id)
 
-      full_path = Path.join([@upload_dir, relative_path])
+      full_path = Path.join([upload_dir, relative_path])
       assert File.exists?(full_path)
 
       assert :ok = LocalStorage.delete_file(relative_path)
@@ -157,4 +162,7 @@ defmodule Cympho.Attachments.Storage.LocalStorageTest do
                "/uploads/#{relative_path}"
     end
   end
+
+  defp restore_upload_dir(nil), do: Application.delete_env(:cympho, :uploads_dir)
+  defp restore_upload_dir(upload_dir), do: Application.put_env(:cympho, :uploads_dir, upload_dir)
 end

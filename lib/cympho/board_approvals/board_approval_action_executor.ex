@@ -310,21 +310,17 @@ defmodule Cympho.BoardApprovals.BoardApprovalActionExecutor do
 
   # Safe atom conversion - returns error tuple instead of crashing
   defp parse_role_safe(role) when is_atom(role) do
-    if role in [:engineer, :product_manager, :designer, :ceo, :cto] do
-      {:ok, role}
-    else
-      {:error, :invalid_role}
-    end
+    role
+    |> Cympho.Agents.Agent.normalize_role()
+    |> role_result()
   end
 
   defp parse_role_safe(role) when is_binary(role) do
-    case role do
-      "engineer" -> {:ok, :engineer}
-      "product_manager" -> {:ok, :product_manager}
-      "designer" -> {:ok, :designer}
-      "ceo" -> {:ok, :ceo}
-      "cto" -> {:ok, :cto}
-      _ -> {:error, :invalid_role}
-    end
+    role
+    |> Cympho.Agents.Agent.normalize_role()
+    |> role_result()
   end
+
+  defp role_result(nil), do: {:error, :invalid_role}
+  defp role_result(role), do: {:ok, role}
 end

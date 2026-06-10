@@ -21,26 +21,31 @@ defmodule CymphoWeb.Components.IssueDigest do
         assigns.agents
       )
 
+    memory =
+      IssueMemory.build(
+        assigns.issue,
+        assigns.runs,
+        assigns.work_products,
+        assigns.child_issues,
+        assigns.agents
+      )
+
     assigns =
       assigns
       |> assign(:digest, digest)
-      |> assign(
-        :memory,
-        IssueMemory.build(
-          assigns.issue,
-          assigns.runs,
-          assigns.work_products,
-          assigns.child_issues,
-          assigns.agents
-        )
-      )
+      |> assign(:digest_action, digest_primary_action(digest))
+      |> assign(:memory, memory)
       |> assign(
         :contract_rows,
         completion_contract_rows(digest.completion_contract, assigns.review_nudges)
       )
       |> assign(
         :quick_actions,
-        digest_quick_actions(assigns.review_gate_actions, assigns.review_nudges)
+        digest_quick_actions(
+          assigns.review_gate_actions,
+          assigns.review_nudges,
+          IssueMemory.handoff_packet(assigns.issue, memory)
+        )
       )
 
     ~H"""
@@ -69,6 +74,14 @@ defmodule CymphoWeb.Components.IssueDigest do
             <div class="rounded-md border border-hairline bg-canvas px-3 py-2.5">
               <p class="text-eyebrow uppercase text-ink-tertiary">Next action</p>
               <p class="mt-1 text-sm leading-5 text-ink-muted">{@digest.next_action}</p>
+              <a
+                :if={@digest_action}
+                href={@digest_action.path}
+                class="mt-2 inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-510 text-amber-100 transition-colors hover:bg-amber-500/15"
+              >
+                <span class="hero-arrow-up-right-mini h-3.5 w-3.5"></span>
+                {@digest_action.label}
+              </a>
             </div>
             <div class="rounded-md border border-hairline bg-canvas px-3 py-2.5">
               <p class="text-eyebrow uppercase text-ink-tertiary">Latest signal</p>
@@ -85,7 +98,11 @@ defmodule CymphoWeb.Components.IssueDigest do
                 Resolve the highest-signal gaps from here without hunting through the full timeline.
               </p>
             </div>
-            <div class="flex flex-wrap gap-2 lg:justify-end">
+            <div
+              id="issue-digest-actions"
+              phx-hook="CopyToClipboard"
+              class="flex flex-wrap gap-2 lg:justify-end"
+            >
               <%= for action <- @quick_actions do %>
                 <div class="inline-flex items-center gap-1">
                   <button
@@ -94,7 +111,18 @@ defmodule CymphoWeb.Components.IssueDigest do
                     title={action.detail}
                     phx-click="resolve_review_gate"
                     phx-value-action={action.action}
-                    class={quick_action_class(action.tone)}
+                    disabled={!action.enabled?}
+                    class={quick_action_class(action.tone, action.enabled?)}
+                  >
+                    {action.label}
+                  </button>
+                  <button
+                    :if={action.type == :event}
+                    type="button"
+                    title={action.detail}
+                    phx-click={action.event}
+                    disabled={!action.enabled?}
+                    class={quick_action_class(action.tone, action.enabled?)}
                   >
                     {action.label}
                   </button>
@@ -127,6 +155,17 @@ defmodule CymphoWeb.Components.IssueDigest do
                   >
                     {action.label}
                   </a>
+                  <button
+                    :if={action.type == :copy}
+                    type="button"
+                    title={action.detail}
+                    data-copy-text={action.copy_text}
+                    data-copy-label={action.label}
+                    data-copy-success-label={action.success_label}
+                    class={quick_action_class(action.tone)}
+                  >
+                    {action.label}
+                  </button>
                   <.action_help action={action} />
                 </div>
               <% end %>
@@ -495,17 +534,19 @@ defmodule CymphoWeb.Components.IssueDigest do
               >
                 <a
                   :for={artifact <- contribution.artifacts}
-                  href={artifact.url || "#"}
-                  class={[
-                    "rounded-md border border-hairline bg-surface-1 px-2 py-1 text-[11px] text-ink-muted",
-                    if(artifact.url not in [nil, ""],
-                      do: "hover:border-brand/40 hover:text-brand",
-                      else: "pointer-events-none"
-                    )
-                  ]}
+                  :if={artifact.url not in [nil, ""]}
+                  href={artifact.url}
+                  class="rounded-md border border-hairline bg-surface-1 px-2 py-1 text-[11px] text-ink-muted hover:border-brand/40 hover:text-brand"
                 >
                   {artifact.title} · {artifact.kind}
                 </a>
+                <span
+                  :for={artifact <- contribution.artifacts}
+                  :if={artifact.url in [nil, ""]}
+                  class="rounded-md border border-hairline bg-surface-1 px-2 py-1 text-[11px] text-ink-muted"
+                >
+                  {artifact.title} · {artifact.kind}
+                </span>
               </div>
             </div>
           </div>
@@ -648,6 +689,9 @@ defmodule CymphoWeb.Components.IssueDigest do
       |> assign(:digest, IssueDigest.build(assigns.issue))
       |> assign(:compact?, assigns.density == "compact")
       |> assign(:inline?, assigns.variant == "inline")
+      |> then(fn assigns ->
+        assign(assigns, :digest_action, digest_primary_action(assigns.digest))
+      end)
 
     ~H"""
     <%!-- Inline variant: one borderless signal line (pill + headline). Keeps
@@ -684,9 +728,27 @@ defmodule CymphoWeb.Components.IssueDigest do
       <p :if={!@compact?} class="mt-1 line-clamp-2 text-[11px] leading-4 text-text-quaternary">
         <span class="font-590 text-text-tertiary">Next action:</span> {@digest.next_action}
       </p>
+      <a
+        :if={!@compact? && @digest_action}
+        href={@digest_action.path}
+        data-no-drag
+        class="mt-2 inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] font-510 text-amber-100 transition hover:bg-amber-500/15"
+      >
+        <span class="hero-arrow-up-right-mini h-3 w-3"></span>
+        {@digest_action.label}
+      </a>
     </div>
     """
   end
+
+  defp digest_primary_action(%{state: :pre_runtime}) do
+    %{
+      label: "Open launch checklist",
+      path: "/operations#runtime-launch-checklist"
+    }
+  end
+
+  defp digest_primary_action(_digest), do: nil
 
   def digest_state_class(:closed), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
   def digest_state_class(:needs_attention), do: "border-brand/25 bg-brand/10 text-brand"
@@ -694,6 +756,7 @@ defmodule CymphoWeb.Components.IssueDigest do
   def digest_state_class(:coordinating), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   def digest_state_class(:ready_for_review), do: "border-brand/30 bg-brand/10 text-brand"
   def digest_state_class(:in_progress), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
+  def digest_state_class(:pre_runtime), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   def digest_state_class(:assigned), do: "border-border bg-surface text-text-secondary"
   def digest_state_class(:not_started), do: "border-border bg-surface text-text-tertiary"
   def digest_state_class(_), do: "border-border bg-surface text-text-tertiary"
@@ -794,7 +857,7 @@ defmodule CymphoWeb.Components.IssueDigest do
   def comment_mix_class(:owner_input), do: "border-violet-500/25 bg-violet-500/10 text-violet-300"
   def comment_mix_class(_), do: "border-border bg-surface text-text-tertiary"
 
-  defp digest_quick_actions(review_gate_actions, review_nudges) do
+  defp digest_quick_actions(review_gate_actions, review_nudges, handoff_packet) do
     gate_actions =
       review_gate_actions
       |> Enum.map(&normalize_gate_action/1)
@@ -805,9 +868,17 @@ defmodule CymphoWeb.Components.IssueDigest do
       |> Enum.take(2)
       |> Enum.map(&normalize_nudge_action/1)
 
-    (gate_actions ++ nudge_actions ++ [raw_timeline_action()])
-    |> Enum.uniq_by(&quick_action_key/1)
-    |> Enum.take(7)
+    gate_actions =
+      gate_actions
+      |> Enum.uniq_by(&quick_action_key/1)
+
+    nudge_actions =
+      nudge_actions
+      |> Enum.uniq_by(&quick_action_key/1)
+      |> Enum.take(2)
+
+    gate_actions ++
+      nudge_actions ++ [handoff_packet_action(handoff_packet), raw_timeline_action()]
   end
 
   defp completion_contract_rows(contracts, review_nudges) do
@@ -866,10 +937,31 @@ defmodule CymphoWeb.Components.IssueDigest do
       label: label,
       detail: Map.get(gate_action, :detail) || "Resolve this digest gap.",
       tone: gate_action_tone(gate_action),
+      enabled?: Map.get(gate_action, :enabled?, true),
       resolves: gate_label,
       reason_body: "Shown because the #{gate_label} gate is blocking this issue.",
       evidence_prompt: gate_prompt,
-      disabled_reason: nil
+      disabled_reason: Map.get(gate_action, :disabled_reason)
+    }
+  end
+
+  defp normalize_gate_action(%{type: :live_event, event: event, label: label} = action) do
+    gate_label = Map.get(action, :gate_label) || "Issue action"
+    gate_prompt = Map.get(action, :gate_prompt)
+
+    %{
+      type: :event,
+      event: event,
+      label: label,
+      detail: Map.get(action, :detail) || "Run this issue action.",
+      tone: Map.get(action, :tone, :primary),
+      enabled?: Map.get(action, :enabled?, true),
+      resolves: gate_label,
+      reason_body:
+        Map.get(action, :reason_body) ||
+          "Shown because this issue can be advanced from the current digest state.",
+      evidence_prompt: gate_prompt,
+      disabled_reason: Map.get(action, :disabled_reason)
     }
   end
 
@@ -882,10 +974,31 @@ defmodule CymphoWeb.Components.IssueDigest do
       href: href,
       label: label,
       detail: Map.get(action, :detail) || "Open the related issue section.",
-      tone: :neutral,
+      tone: Map.get(action, :tone, :neutral),
       resolves: gate_label,
       reason_body:
-        "Shown because this issue has related work that needs inspection before approval.",
+        Map.get(action, :reason_body) ||
+          "Shown because this issue has related work that needs inspection before approval.",
+      evidence_prompt: gate_prompt,
+      disabled_reason: nil
+    }
+  end
+
+  defp normalize_gate_action(%{type: :copy, copy_text: copy_text, label: label} = action) do
+    gate_label = Map.get(action, :gate_label) || "Runtime launch"
+    gate_prompt = Map.get(action, :gate_prompt)
+
+    %{
+      type: :copy,
+      copy_text: copy_text,
+      label: label,
+      success_label: Map.get(action, :success_label) || "Copied",
+      detail: Map.get(action, :detail) || "Copy the focused runtime command.",
+      tone: Map.get(action, :tone, :primary),
+      resolves: gate_label,
+      reason_body:
+        Map.get(action, :reason_body) ||
+          "Shown because this issue needs its first focused runtime pass before evidence can be trusted.",
       evidence_prompt: gate_prompt,
       disabled_reason: nil
     }
@@ -930,6 +1043,23 @@ defmodule CymphoWeb.Components.IssueDigest do
     }
   end
 
+  defp handoff_packet_action(handoff_packet) do
+    %{
+      type: :copy,
+      copy_text: handoff_packet,
+      label: "Copy handoff",
+      success_label: "Handoff copied",
+      detail: "Copy the distilled issue memory for an owner or next agent.",
+      tone: :neutral,
+      resolves: "Issue handoff context",
+      reason_body:
+        "Shown so a CEO, owner, or next agent can pick up the issue without reading every comment and run.",
+      evidence_prompt:
+        "The packet is generated from the issue memory fields, role stages, latest tagged signals, and memory-health score.",
+      disabled_reason: nil
+    }
+  end
+
   defp disabled_nudge_reason(true, _queued?, _nudge), do: nil
 
   defp disabled_nudge_reason(_enabled?, true, nudge) do
@@ -950,8 +1080,10 @@ defmodule CymphoWeb.Components.IssueDigest do
   end
 
   defp quick_action_key(%{type: :gate_event, action: action}), do: {:gate_event, action}
+  defp quick_action_key(%{type: :event, event: event}), do: {:event, event}
   defp quick_action_key(%{type: :nudge, key: key}), do: {:nudge, key}
   defp quick_action_key(%{type: :anchor, href: href}), do: {:anchor, href}
+  defp quick_action_key(%{type: :copy, copy_text: copy_text}), do: {:copy, copy_text}
   defp quick_action_key(%{type: :timeline}), do: :timeline
   defp quick_action_key(action), do: action
 

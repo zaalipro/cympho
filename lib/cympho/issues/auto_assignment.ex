@@ -36,6 +36,36 @@ defmodule Cympho.Issues.AutoAssignment do
     end
   end
 
+  @doc """
+  Assigns the best matching owner without checking the issue out.
+
+  Review-mode workflows use this before pinning focused dispatch: the owner can
+  see who will pick up a delegated child issue, while the issue stays in its
+  current queue state until runtime is explicitly started.
+  """
+  @spec assign_owner_for_dispatch(Issue.t()) ::
+          {:ok, Issue.t()} | {:error, :no_eligible_agent, Issue.t()}
+  def assign_owner_for_dispatch(%Issue{assignee_id: assignee_id} = issue)
+      when not is_nil(assignee_id),
+      do: {:ok, issue}
+
+  def assign_owner_for_dispatch(%Issue{} = issue) do
+    primary_role = Router.infer_role(issue)
+    fallback_roles = Router.fallback_chain(primary_role)
+    all_roles = [primary_role | fallback_roles]
+
+    case find_agent_for_roles(all_roles, issue.company_id) do
+      {:ok, agent} ->
+        Cympho.Issues.update_issue(issue, %{
+          assignee_id: agent.id,
+          assigned_role: to_string(primary_role)
+        })
+
+      {:error, :no_agent_available} ->
+        {:error, :no_eligible_agent, issue}
+    end
+  end
+
   defp do_assign_issue(%Issue{} = issue) do
     primary_role = Router.infer_role(issue)
     fallback_roles = Router.fallback_chain(primary_role)

@@ -1,6 +1,7 @@
 defmodule CymphoWeb.AgentLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Agents
+  alias Cympho.Agents.Agent
   alias Cympho.Agents.RuntimeEnv
 
   import CymphoWeb.Format, only: [status_pill_class: 1]
@@ -182,16 +183,8 @@ defmodule CymphoWeb.AgentLive.Index do
   def status_label(:pending_approval), do: "Pending Approval"
   def status_label(:terminated), do: "Terminated"
 
-  def role_label(:engineer), do: "Engineer"
-  def role_label(:release_engineer), do: "Release Engineer"
-  def role_label(:ceo), do: "CEO"
-  def role_label(:cto), do: "CTO"
-  def role_label(:product_manager), do: "Product Manager"
-  def role_label(:designer), do: "Designer"
   def role_label(:other), do: "Other"
-
-  def role_label(other),
-    do: other |> to_string() |> String.replace("_", " ") |> String.capitalize()
+  def role_label(role), do: Agent.role_label(role)
 
   def agent_groups(agents) do
     agents
@@ -211,6 +204,8 @@ defmodule CymphoWeb.AgentLive.Index do
   def agent_initials(_), do: "?"
 
   def adapter_label(nil), do: "No adapter"
+  def adapter_label(:openai_chat), do: "OpenAI Chat"
+  def adapter_label("openai_chat"), do: "OpenAI Chat"
 
   def adapter_label(adapter) do
     adapter
@@ -269,6 +264,8 @@ defmodule CymphoWeb.AgentLive.Index do
              "codex",
              :cursor,
              "cursor",
+             :openai_chat,
+             "openai_chat",
              :openclaw,
              "openclaw",
              :process,
@@ -295,6 +292,9 @@ defmodule CymphoWeb.AgentLive.Index do
 
   defp default_runtime_model(adapter, _agent) when adapter in [:cursor, "cursor"],
     do: Cympho.Adapters.RuntimeOptions.cursor_default_model()
+
+  defp default_runtime_model(adapter, _agent) when adapter in [:openai_chat, "openai_chat"],
+    do: "qwen3.7-plus"
 
   defp default_runtime_model(adapter, agent) when adapter in [:openclaw, "openclaw"] do
     provider =
@@ -363,15 +363,13 @@ defmodule CymphoWeb.AgentLive.Index do
       Map.get(config || %{}, String.to_atom(key))
   end
 
-  defp group_key(%{role: role}) when role in [:ceo, :cto, :product_manager, :designer, :engineer],
-    do: role
+  defp group_key(%{role: role}) do
+    if role in Agent.role_options(), do: role, else: :other
+  end
 
   defp group_key(_), do: :other
 
-  defp group_rank(:ceo), do: 0
-  defp group_rank(:cto), do: 1
-  defp group_rank(:product_manager), do: 2
-  defp group_rank(:designer), do: 3
-  defp group_rank(:engineer), do: 4
-  defp group_rank(_), do: 5
+  defp group_rank(role) do
+    Enum.find_index(Agent.role_options(), &(&1 == role)) || length(Agent.role_options())
+  end
 end

@@ -18,6 +18,7 @@ defmodule CymphoWeb.IssueLive.New do
      socket
      |> assign(:page_title, "New Issue")
      |> assign(:projects, projects)
+     |> assign(:description_placeholder, description_placeholder())
      |> assign(:issue_scope, scope)
      |> assign(:intake_route, intake_route(scope, socket.assigns[:current_company]))
      |> assign(:runtime_enabled?, Dispatcher.enabled?())
@@ -51,8 +52,8 @@ defmodule CymphoWeb.IssueLive.New do
     params = @default_attrs |> Map.merge(socket.assigns.issue_scope) |> Map.merge(issue_params)
 
     case Issues.create_issue(params) do
-      {:ok, _issue} ->
-        {:noreply, push_navigate(socket, to: ~p"/issues")}
+      {:ok, issue} ->
+        {:noreply, push_navigate(socket, to: ~p"/issues/#{issue.id}")}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(Map.put(changeset, :action, :insert)))}
@@ -67,6 +68,19 @@ defmodule CymphoWeb.IssueLive.New do
   def priority_options do
     Issue.priority_options()
     |> Enum.map(fn priority -> {priority_label(priority), to_string(priority)} end)
+  end
+
+  defp description_placeholder do
+    Enum.join(
+      [
+        "Goal:",
+        "Context:",
+        "Constraints:",
+        "Definition of done:",
+        "Signals the CEO should produce:"
+      ],
+      "\n"
+    )
   end
 
   def project_options(projects) do
@@ -125,8 +139,10 @@ defmodule CymphoWeb.IssueLive.New do
   defp selected_project_id(_project_id, []), do: nil
 
   defp route_owner_request_to_ceo(attrs, company_id) do
+    attrs = Map.put(attrs, "assigned_role", "ceo")
+
     case Agents.get_company_ceo(company_id) do
-      {:ok, ceo} -> Map.merge(attrs, %{"assignee_id" => ceo.id, "assigned_role" => "ceo"})
+      {:ok, ceo} -> Map.put(attrs, "assignee_id", ceo.id)
       {:error, :not_found} -> attrs
     end
   end
@@ -136,6 +152,10 @@ defmodule CymphoWeb.IssueLive.New do
       {:ok, agent} -> %{agent: agent, role: role}
       {:error, _} -> nil
     end
+  end
+
+  defp intake_route(%{"assigned_role" => "ceo"}, %{id: _company_id}) do
+    %{agent: nil, role: "ceo", missing?: true}
   end
 
   defp intake_route(_scope, _company), do: nil

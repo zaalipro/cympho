@@ -3,7 +3,8 @@ defmodule CymphoWeb.QuickIssueController do
   Browser-pipeline endpoint for the global "press C, type title, hit
   Enter" inline issue creation modal. Pulls the current company from
   the session (set by the company switcher) and creates a scoped issue
-  with the selected project, assignee, and status.
+  with the selected project, assignee, and status. When no assignee is
+  selected, the company CEO is used as the first owner when available.
   """
   use CymphoWeb, :controller
 
@@ -69,7 +70,7 @@ defmodule CymphoWeb.QuickIssueController do
     with {:ok, status} <- validate_status(Map.get(params, "status", "todo")),
          {:ok, priority} <- validate_priority(Map.get(params, "priority", "medium")),
          {:ok, project_id} <- validate_project(company_id, Map.get(params, "project_id")),
-         {:ok, assignee} <- validate_assignee(company_id, Map.get(params, "assignee_id")) do
+         {:ok, assignee} <- resolve_assignee(company_id, Map.get(params, "assignee_id")) do
       attrs =
         %{
           "title" => String.trim(title),
@@ -114,7 +115,14 @@ defmodule CymphoWeb.QuickIssueController do
     end
   end
 
-  defp validate_assignee(_company_id, assignee_id) when assignee_id in [nil, ""], do: {:ok, nil}
+  defp resolve_assignee(company_id, assignee_id) when assignee_id in [nil, ""] do
+    case Agents.get_company_ceo(company_id) do
+      {:ok, ceo} -> {:ok, ceo}
+      {:error, :not_found} -> {:ok, nil}
+    end
+  end
+
+  defp resolve_assignee(company_id, assignee_id), do: validate_assignee(company_id, assignee_id)
 
   defp validate_assignee(company_id, assignee_id) do
     case Agents.get_company_agent(company_id, assignee_id) do

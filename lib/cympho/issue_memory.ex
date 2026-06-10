@@ -91,6 +91,48 @@ defmodule Cympho.IssueMemory do
     end
   end
 
+  def handoff_packet(issue, memory) when is_map(memory) do
+    issue_label = issue_label(issue)
+
+    sections =
+      [
+        "# Issue handoff: #{issue_label}",
+        "Status: #{status_label(Map.get(issue, :status))}",
+        "Memory: #{memory.quality.label} (#{memory.quality.score}/100)",
+        "",
+        "## Objective",
+        memory.objective,
+        "",
+        "## Current memory",
+        "- Actions taken: #{memory.what_happened}",
+        "- Files / artifacts: #{memory.files_changed}",
+        "- Validation: #{memory.validation}",
+        "- Risks / gaps: #{memory.risks}",
+        "- Current state: #{memory.current_state}",
+        "- Next decision: #{memory.next_decision}",
+        "",
+        "## Role stages",
+        role_stage_lines(memory.stages),
+        "",
+        "## Latest signal",
+        latest_moment_lines(memory.latest_moments),
+        "",
+        "## Memory health",
+        memory.quality.summary
+      ]
+
+    sections
+    |> List.flatten()
+    |> Enum.reject(&blank?/1)
+    |> Enum.join("\n")
+  end
+
+  def handoff_packet(issue, runs, work_products, child_issues, agents) do
+    issue
+    |> build(runs, work_products, child_issues, agents)
+    |> then(&handoff_packet(issue, &1))
+  end
+
   def extract_fields(body) when is_binary(body) do
     Map.new(@field_labels, fn label -> {label, extract_field(body, label)} end)
     |> Enum.reject(fn {_label, value} -> value in [nil, ""] end)
@@ -377,6 +419,49 @@ defmodule Cympho.IssueMemory do
     Collapse routine/system noise into signal. Do not paste raw logs; explain what changed, how it was verified, what remains risky, and exactly who decides next.
     """
     |> String.trim()
+  end
+
+  defp issue_label(%{identifier: identifier, title: title})
+       when is_binary(identifier) and identifier != "" and is_binary(title) and title != "" do
+    "#{identifier} - #{title}"
+  end
+
+  defp issue_label(%{title: title}) when is_binary(title) and title != "", do: title
+  defp issue_label(_issue), do: "Untitled issue"
+
+  defp status_label(nil), do: "Unknown"
+
+  defp status_label(status) do
+    status
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
+
+  defp role_stage_lines(stages) do
+    stages
+    |> List.wrap()
+    |> Enum.take(4)
+    |> Enum.map(fn stage ->
+      "- #{stage.title}: #{stage.status_label} - #{stage.summary} Next: #{stage.next_action}"
+    end)
+    |> case do
+      [] -> ["- No role stage signal yet."]
+      lines -> lines
+    end
+  end
+
+  defp latest_moment_lines(moments) do
+    moments
+    |> List.wrap()
+    |> Enum.take(3)
+    |> Enum.map(fn moment ->
+      "- #{moment.label}: #{moment.body}"
+    end)
+    |> case do
+      [] -> ["- No tagged owner-readable moment yet."]
+      lines -> lines
+    end
   end
 
   defp blank?(value), do: value in [nil, ""]

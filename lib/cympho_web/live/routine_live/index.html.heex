@@ -18,6 +18,60 @@
     </:actions>
   </.header>
 
+  <section
+    data-testid="routine-health"
+    class="mb-5 rounded-lg border border-border bg-panel px-5 py-4"
+  >
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="text-sm font-590 text-text-primary">Routine Health</h2>
+          <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{routine_health_badge(@routine_health.level)}"}>
+            {@routine_health.label}
+          </span>
+        </div>
+        <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
+          {@routine_health.summary}
+        </p>
+      </div>
+
+      <div class="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:min-w-[360px] sm:grid-cols-4">
+        <.routine_health_metric
+          label="Active"
+          value={@routine_health.metrics.active_routines}
+          tone={if @routine_health.metrics.active_routines > 0, do: :ok, else: :neutral}
+        />
+        <.routine_health_metric
+          label="Trigger gaps"
+          value={@routine_health.metrics.active_without_triggers}
+          tone={if @routine_health.metrics.active_without_triggers > 0, do: :critical, else: :ok}
+        />
+        <.routine_health_metric
+          label="Stale runs"
+          value={@routine_health.metrics.stale_runs}
+          tone={if @routine_health.metrics.stale_runs > 0, do: :critical, else: :ok}
+        />
+        <.routine_health_metric
+          label="Failures"
+          value={@routine_health.metrics.recent_failures}
+          tone={if @routine_health.metrics.recent_failures > 0, do: :warning, else: :ok}
+        />
+      </div>
+    </div>
+
+    <div :if={@routine_health.recommendations != []} class="mt-4 grid gap-2 lg:grid-cols-2">
+      <div
+        :for={recommendation <- @routine_health.recommendations}
+        class={"rounded-md border px-3 py-2 #{routine_recommendation_class(recommendation.severity)}"}
+      >
+        <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
+          {recommendation.label}
+        </p>
+        <p class="mt-1 text-xs leading-5 opacity-85">{recommendation.detail}</p>
+      </div>
+    </div>
+  </section>
+
   <.infinite_scroll
     id="routine"
     has_more={@infinite_scroll[:routine][:has_more?] || false}

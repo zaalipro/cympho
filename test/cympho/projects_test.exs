@@ -1,6 +1,9 @@
 defmodule Cympho.ProjectsTest do
   use Cympho.DataCase, async: true
 
+  alias Cympho.Companies
+  alias Cympho.Goals
+  alias Cympho.Issues
   alias Cympho.Projects
   alias Cympho.Projects.Project
 
@@ -187,6 +190,106 @@ defmodule Cympho.ProjectsTest do
 
       changeset = Projects.change_project(project, %{name: "New Name"})
       assert changeset.changes[:name] == "New Name"
+    end
+  end
+
+  describe "project_operating_snapshot/1" do
+    test "summarizes project issue health, goals, and owner attention signals" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Project Health Corp",
+          slug: "project-health-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Other Project Health Corp",
+          slug: "other-project-health-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Core Platform",
+          prefix: "PHA",
+          company_id: company.id
+        })
+
+      {:ok, idle_project} =
+        Projects.create_project(%{
+          name: "Idle Project",
+          prefix: "PHB",
+          repo_url: "https://github.com/example/idle",
+          company_id: company.id
+        })
+
+      {:ok, foreign_project} =
+        Projects.create_project(%{
+          name: "Foreign Project",
+          prefix: "PHC",
+          company_id: other_company.id
+        })
+
+      {:ok, _active_goal} =
+        Goals.create_goal(%{
+          title: "Ship core platform",
+          company_id: company.id,
+          project_id: project.id,
+          goal_type: :mission
+        })
+
+      {:ok, _completed_goal} =
+        Goals.create_goal(%{
+          title: "Old goal",
+          company_id: company.id,
+          project_id: project.id,
+          goal_type: :mission,
+          status: "completed"
+        })
+
+      for status <- [:todo, :in_review, :blocked, :done, :cancelled] do
+        {:ok, _issue} =
+          Issues.create_issue(%{
+            title: "Project health #{status}",
+            company_id: company.id,
+            project_id: project.id,
+            status: status
+          })
+      end
+
+      {:ok, _foreign_issue} =
+        Issues.create_issue(%{
+          title: "Foreign project issue",
+          company_id: other_company.id,
+          project_id: foreign_project.id,
+          status: :blocked
+        })
+
+      snapshot = Projects.project_operating_snapshot(company.id)
+      health = snapshot.health[project.id]
+
+      assert snapshot.overview.total_projects == 2
+      assert snapshot.overview.active_projects == 2
+      assert snapshot.overview.open_issues == 3
+      assert snapshot.overview.blocked_projects == 1
+      assert snapshot.overview.review_projects == 1
+      assert snapshot.overview.idle_projects == 1
+      assert snapshot.overview.missing_repo_projects == 1
+      assert snapshot.overview.active_goals == 1
+      assert snapshot.overview.status == :blocked
+
+      assert health.total == 5
+      assert health.open == 3
+      assert health.in_review == 1
+      assert health.blocked == 1
+      assert health.done == 1
+      assert health.cancelled == 1
+      assert health.goals == 2
+      assert health.active_goals == 1
+      assert health.progress_percent == 20
+      assert %DateTime{} = health.last_activity_at
+
+      refute Map.has_key?(snapshot.health, idle_project.id)
+      assert Projects.project_operating_snapshot(nil).overview.status == :empty
     end
   end
 end

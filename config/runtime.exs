@@ -1,7 +1,7 @@
 import Config
 
 port =
-  if config_env() == :prod, do: 443, else: String.to_integer(System.get_env("PORT") || "4000")
+  if config_env() == :prod, do: 443, else: String.to_integer(System.get_env("PORT") || "4329")
 
 config :cympho, env: config_env()
 

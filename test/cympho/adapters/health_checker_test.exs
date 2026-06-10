@@ -1,10 +1,14 @@
 defmodule Cympho.Adapters.HealthCheckerTest do
   use Cympho.DataCase, async: false
 
+  alias Cympho.Agents
   alias Cympho.Adapters.HealthChecker
+  alias Cympho.Companies
+  alias Cympho.Repo
+  alias Cympho.Secrets
 
   setup do
-    case start_supervised({HealthChecker, [interval: 100]}) do
+    case start_supervised({HealthChecker, [interval: 60_000]}) do
       {:ok, pid} ->
         Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, self(), pid)
         %{health_checker_pid: pid}
@@ -103,6 +107,63 @@ defmodule Cympho.Adapters.HealthCheckerTest do
     test "returns :ok when the HealthChecker is not running" do
       :ok = stop_supervised(HealthChecker)
       assert :ok = HealthChecker.check_all_now()
+    end
+  end
+
+  test "manual checks retain health status and use secret-backed runtime config" do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Health Secret Corp",
+        slug: "health-secret-#{System.unique_integer([:positive])}"
+      })
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Secret Backed CEO",
+        role: :ceo,
+        adapter: :openai_chat,
+        status: :idle,
+        company_id: company.id,
+        config: %{
+          "endpoint" => "https://dashscope.example.com/compatible-mode/v1/chat/completions",
+          "model" => "qwen3.7-plus"
+        }
+      })
+
+    try do
+      HealthChecker.subscribe()
+      assert :ok = HealthChecker.check_agent_now(agent.id)
+
+      assert_receive {:health_status_changed,
+                      %{agent_id: agent_id, old_status: :healthy, new_status: :degraded}},
+                     1_000
+
+      assert agent_id == agent.id
+      assert {:ok, :degraded} = HealthChecker.get_health_status(agent.id)
+      assert Repo.reload!(agent).health_status == :degraded
+
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "DASHSCOPE_API_KEY",
+          value: "test-secret-key",
+          description: "OpenAI-compatible health check credential"
+        })
+
+      assert :ok = HealthChecker.check_agent_now(agent.id)
+
+      assert_receive {:health_status_changed,
+                      %{agent_id: agent_id, old_status: :degraded, new_status: :healthy}},
+                     1_000
+
+      assert agent_id == agent.id
+      assert {:ok, :healthy} = HealthChecker.get_health_status(agent.id)
+      assert Repo.reload!(agent).health_status == :healthy
+
+      refute inspect(HealthChecker.get_all_health_statuses()) =~ "test-secret-key"
+    after
+      HealthChecker.unsubscribe()
     end
   end
 end

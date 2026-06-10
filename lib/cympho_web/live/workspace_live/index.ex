@@ -4,8 +4,13 @@ defmodule CymphoWeb.WorkspaceLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    workspaces = Workspaces.list_project_workspaces_for_company(current_company_id(socket))
-    {:ok, assign(socket, :workspaces, workspaces)}
+    company_id = current_company_id(socket)
+    workspaces = Workspaces.list_project_workspaces_for_company(company_id)
+
+    {:ok,
+     socket
+     |> assign(:workspaces, workspaces)
+     |> assign(:workspace_health, Workspaces.health_summary(company_id))}
   end
 
   @impl true
@@ -36,6 +41,69 @@ defmodule CymphoWeb.WorkspaceLive.Index do
         title="Workspaces"
         subtitle="Execution directories and repositories available to autonomous agents."
       />
+
+      <section
+        data-testid="workspace-health"
+        class="mb-5 rounded-lg border border-border bg-panel px-5 py-4"
+      >
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="text-sm font-590 text-text-primary">Workspace Health</h2>
+              <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{workspace_health_badge(@workspace_health.level)}"}>
+                {@workspace_health.label}
+              </span>
+            </div>
+            <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
+              {@workspace_health.summary}
+            </p>
+          </div>
+
+          <div class="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:min-w-[440px] sm:grid-cols-5">
+            <.workspace_health_metric
+              label="Open"
+              value={@workspace_health.metrics.open_execution_workspaces}
+              tone={
+                if @workspace_health.metrics.open_execution_workspaces > 0,
+                  do: :ok,
+                  else: :neutral
+              }
+            />
+            <.workspace_health_metric
+              label="Services"
+              value={@workspace_health.metrics.running_services}
+              tone={if @workspace_health.metrics.running_services > 0, do: :ok, else: :neutral}
+            />
+            <.workspace_health_metric
+              label="Preview gaps"
+              value={@workspace_health.metrics.previewless_services}
+              tone={if @workspace_health.metrics.previewless_services > 0, do: :warning, else: :ok}
+            />
+            <.workspace_health_metric
+              label="Unhealthy"
+              value={@workspace_health.metrics.unhealthy_services}
+              tone={if @workspace_health.metrics.unhealthy_services > 0, do: :critical, else: :ok}
+            />
+            <.workspace_health_metric
+              label="Probes"
+              value={@workspace_health.metrics.failed_probes}
+              tone={if @workspace_health.metrics.failed_probes > 0, do: :critical, else: :ok}
+            />
+          </div>
+        </div>
+
+        <div :if={@workspace_health.recommendations != []} class="mt-4 grid gap-2 lg:grid-cols-2">
+          <div
+            :for={recommendation <- @workspace_health.recommendations}
+            class={"rounded-md border px-3 py-2 #{workspace_recommendation_class(recommendation.severity)}"}
+          >
+            <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
+              {recommendation.label}
+            </p>
+            <p class="mt-1 text-xs leading-5 opacity-85">{recommendation.detail}</p>
+          </div>
+        </div>
+      </section>
 
       <div
         :if={!Enum.empty?(@workspaces)}
@@ -94,4 +162,43 @@ defmodule CymphoWeb.WorkspaceLive.Index do
     </.page>
     """
   end
+
+  attr :label, :string, required: true
+  attr :value, :integer, required: true
+  attr :tone, :atom, default: :neutral
+
+  def workspace_health_metric(assigns) do
+    ~H"""
+    <div class="bg-surface/70 px-3 py-2 text-center">
+      <p class={"font-mono text-[18px] font-590 leading-none #{workspace_metric_text(@tone)}"}>
+        {@value}
+      </p>
+      <p class="mt-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
+        {@label}
+      </p>
+    </div>
+    """
+  end
+
+  defp workspace_health_badge(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  defp workspace_health_badge(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  defp workspace_health_badge(:healthy),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp workspace_health_badge(:empty), do: "border-border bg-surface text-text-tertiary"
+  defp workspace_health_badge(_), do: "border-border bg-surface text-text-tertiary"
+
+  defp workspace_metric_text(:critical), do: "text-red-300"
+  defp workspace_metric_text(:warning), do: "text-amber-300"
+  defp workspace_metric_text(:ok), do: "text-emerald-300"
+  defp workspace_metric_text(_), do: "text-text-primary"
+
+  defp workspace_recommendation_class(:critical),
+    do: "border-red-500/20 bg-red-500/10 text-red-100"
+
+  defp workspace_recommendation_class(:warning),
+    do: "border-amber-500/20 bg-amber-500/10 text-amber-100"
+
+  defp workspace_recommendation_class(_), do: "border-border bg-surface text-text-secondary"
 end

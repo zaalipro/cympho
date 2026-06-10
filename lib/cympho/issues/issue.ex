@@ -167,12 +167,22 @@ defmodule Cympho.Issues.Issue do
     role_rank(agent_role) >= role_rank(required_role)
   end
 
-  def role_rank(:ceo), do: 3
-  def role_rank(:cto), do: 2
-  def role_rank(:engineer), do: 1
-  def role_rank(:release_engineer), do: 1
-  def role_rank(:product_manager), do: 1
-  def role_rank(:designer), do: 1
+  def role_rank(:ceo), do: 5
+  def role_rank(:cto), do: 4
+  def role_rank(role) when role in [:engineer, :release_engineer, :qa_engineer], do: 3
+  def role_rank(:product_manager), do: 2
+
+  def role_rank(role)
+      when role in [
+             :designer,
+             :researcher,
+             :marketer,
+             :content_strategist,
+             :sales_development,
+             :customer_support
+           ],
+      do: 1
+
   def role_rank(_), do: 0
 end
 

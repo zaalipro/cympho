@@ -60,6 +60,35 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert html =~ "Start with the CEO"
     end
 
+    test "renders launch checklist action for assigned todo digest cards" do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Launch CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, _issue} =
+        create_issue(%{
+          title: "Assigned launch card",
+          description: "Needs a first runtime pass.",
+          status: :todo,
+          priority: :high,
+          assignee_id: agent.id,
+          assigned_role: "ceo"
+        })
+
+      {:ok, _view, html} = live(conn(), "/kanban")
+
+      assert html =~ "Assigned launch card"
+      assert html =~ "Launch needed"
+      assert html =~ "Assigned, but runtime has not started yet."
+      assert html =~ "Open launch checklist"
+      assert html =~ ~s(href="/operations#runtime-launch-checklist")
+    end
+
     test "supports compact digest density" do
       {:ok, _view, html} = live(conn(), "/kanban?density=compact")
 
@@ -113,6 +142,30 @@ defmodule CymphoWeb.KanbanLiveTest do
       |> render_hook("transition_issue", %{"id" => blocked.id, "to_status" => "done"})
 
       assert render(view) =~ "issue is blocked"
+    end
+
+    test "todo review gate blocker points to runtime launch before evidence actions", %{
+      issue_todo: issue
+    } do
+      {:ok, view, _html} = live(conn(), "/kanban")
+
+      view
+      |> element("#kanban-board")
+      |> render_hook("transition_issue", %{"id" => issue.id, "to_status" => "in_review"})
+
+      html = render(view)
+      assert html =~ "Move blocked"
+      assert html =~ "Todo Issue"
+      assert html =~ "Review gates blocking status change"
+      assert html =~ "Runtime verification"
+      assert html =~ "Open launch checklist"
+      assert html =~ "Open issue preflight"
+      assert html =~ ~s(href="/operations#runtime-launch-checklist")
+      assert html =~ ~s(href="/issues/#{issue.id}#issue-agent-panel")
+      refute html =~ "Start verification"
+      refute html =~ "Add completion note"
+      refute html =~ "Attach work product"
+      assert Issues.get_issue!(issue.id).status == :todo
     end
 
     test "review gates block moving to review without delivery evidence" do

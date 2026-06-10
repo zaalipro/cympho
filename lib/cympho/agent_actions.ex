@@ -68,9 +68,23 @@ defmodule Cympho.AgentActions do
     resolve_conflict
     cancel_issue
   )
-  @roles ~w(ceo cto product_manager designer engineer release_engineer)
+  @roles Agent.role_strings()
   @priorities ~w(low medium high critical)
   @work_product_kinds ~w(code_change document url artifact other)
+  @work_product_kind_aliases %{
+    "code" => "code_change",
+    "code_changes" => "code_change",
+    "implementation" => "code_change",
+    "plan" => "document",
+    "planning" => "document",
+    "spec" => "document",
+    "strategy" => "document",
+    "strategy_doc" => "document",
+    "strategy_document" => "document",
+    "design" => "artifact",
+    "mockup" => "artifact",
+    "prototype" => "artifact"
+  }
   @delivery_roles Agent.delivery_roles()
 
   # Actions that change governance state require the agent's role to be in this
@@ -441,6 +455,66 @@ defmodule Cympho.AgentActions do
 
   defp validate_action(_), do: {:error, :invalid_action}
 
+  defp normalize_work_product_action(action) do
+    action
+    |> copy_string_alias("name", "title")
+    |> copy_string_alias("content", "description")
+    |> normalize_work_product_kind_alias()
+    |> normalize_work_product_payload()
+  end
+
+  defp copy_string_alias(action, from, to) do
+    case Map.get(action, from) do
+      value when is_binary(value) ->
+        if blank?(Map.get(action, to)) and not blank?(value) do
+          Map.put(action, to, value)
+        else
+          action
+        end
+
+      _ ->
+        action
+    end
+  end
+
+  defp normalize_work_product_kind_alias(action) do
+    case Map.get(action, "kind") do
+      kind when is_binary(kind) ->
+        normalized =
+          kind
+          |> String.trim()
+          |> String.downcase()
+          |> String.replace(~r/[\s-]+/, "_")
+
+        canonical = Map.get(@work_product_kind_aliases, normalized, normalized)
+
+        if canonical in @work_product_kinds do
+          Map.put(action, "kind", canonical)
+        else
+          action
+        end
+
+      _ ->
+        action
+    end
+  end
+
+  defp normalize_work_product_payload(action) do
+    case Map.get(action, "payload") do
+      nil ->
+        action
+
+      payload when is_map(payload) ->
+        action
+
+      payload when is_binary(payload) ->
+        Map.put(action, "payload", %{"text" => payload})
+
+      payload ->
+        Map.put(action, "payload", %{"value" => payload})
+    end
+  end
+
   defp validate_supported_action(type, action) do
     case type do
       "create_issue" ->
@@ -478,6 +552,8 @@ defmodule Cympho.AgentActions do
         end
 
       "attach_work_product" ->
+        action = normalize_work_product_action(action)
+
         with :ok <- require_string(action, "title"),
              :ok <- validate_work_product_kind(Map.get(action, "kind", "other")),
              :ok <- validate_optional_map(action, "payload"),
@@ -1436,29 +1512,9 @@ defmodule Cympho.AgentActions do
     end
   end
 
-  defp role_to_atom(role) when is_atom(role), do: role
+  defp role_to_atom(role), do: Agent.normalize_role(role)
 
-  defp role_to_atom(role) when is_binary(role) do
-    case role do
-      "ceo" -> :ceo
-      "cto" -> :cto
-      "engineer" -> :engineer
-      "release_engineer" -> :release_engineer
-      "product_manager" -> :product_manager
-      "designer" -> :designer
-      _ -> nil
-    end
-  end
-
-  defp role_to_atom(_), do: nil
-
-  defp default_title_for_role(:ceo), do: "Chief Executive Officer"
-  defp default_title_for_role(:cto), do: "Chief Technology Officer"
-  defp default_title_for_role(:engineer), do: "Software Engineer"
-  defp default_title_for_role(:release_engineer), do: "Release Engineer"
-  defp default_title_for_role(:product_manager), do: "Product Manager"
-  defp default_title_for_role(:designer), do: "Designer"
-  defp default_title_for_role(_), do: nil
+  defp default_title_for_role(role), do: Agent.role_title(role)
 
   # Direct-assign an issue to a specific subordinate agent. The caller must
   # outrank the target (role_rank-wise) — without this guard a peer agent
@@ -2025,8 +2081,7 @@ defmodule Cympho.AgentActions do
   defp pick_force_fix_target(%Issue{assignee_id: assignee_id} = issue)
        when is_binary(assignee_id) do
     case Agents.get_agent(assignee_id) do
-      {:ok, %Agent{role: role}}
-      when role in [:engineer, :release_engineer, :designer, :product_manager] ->
+      {:ok, %Agent{role: role}} when role in @delivery_roles ->
         assignee_id
 
       _ ->

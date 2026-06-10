@@ -19,6 +19,19 @@ defmodule Cympho.RuntimeProfilesTest do
       assert RuntimeProfiles.summary_value(profile) == "Model gpt-5.5"
     end
 
+    test "exposes non-secret DashScope Qwen defaults" do
+      profile = RuntimeProfiles.get!("openai-chat-qwen-dashscope")
+
+      assert profile.adapter == "openai_chat"
+      assert profile.config["model"] == "qwen3.7-plus"
+
+      assert profile.config["endpoint"] ==
+               "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+      refute Map.has_key?(profile.config, "api_key")
+      assert RuntimeProfiles.summary_value(profile) == "Model qwen3.7-plus"
+    end
+
     test "resolves selected agent profile from runtime_config" do
       agent = %{
         runtime_config: %{"profile_id" => "claude-cm"},
@@ -36,6 +49,9 @@ defmodule Cympho.RuntimeProfilesTest do
     test "quick presets map to profiles and safe concurrency" do
       assert %{profile_id: "codex-mini", max_concurrent_jobs: 1} =
                RuntimeProfiles.quick_preset("low_ram")
+
+      assert %{profile_id: "openai-chat-qwen-dashscope", max_concurrent_jobs: 1} =
+               RuntimeProfiles.quick_preset("qwen_dashscope")
 
       assert %{profile_id: "process-codex", max_concurrent_jobs: 1} =
                RuntimeProfiles.quick_preset("provider_test")

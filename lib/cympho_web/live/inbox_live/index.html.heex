@@ -24,6 +24,8 @@
       </div>
 
       <div class="flex flex-wrap items-center gap-2 lg:shrink-0">
+        <% unread_count = count_for(@inbox_counts, "unread") %>
+
         <form phx-change="select_agent">
           <.select_menu
             name="agent_id"
@@ -35,6 +37,28 @@
             ]}
           />
         </form>
+
+        <button
+          type="button"
+          phx-click="mark_unread_read"
+          disabled={unread_count == 0}
+          class={[
+            "inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-510 transition-colors",
+            unread_count > 0 &&
+              "border-blue-500/25 bg-blue-500/10 text-blue-200 hover:bg-blue-500/15 hover:text-blue-100",
+            unread_count == 0 &&
+              "cursor-not-allowed border-border bg-surface text-text-quaternary opacity-60"
+          ]}
+        >
+          <span class="hero-check-circle-mini h-4 w-4"></span>
+          <span>Mark unread as read</span>
+          <span
+            :if={unread_count > 0}
+            class="rounded-full bg-blue-400/15 px-1.5 py-0.5 font-mono text-[11px] tabular-nums"
+          >
+            {unread_count}
+          </span>
+        </button>
 
         <div class="inline-flex rounded-xl border border-hairline bg-surface p-1">
           <.link
@@ -142,7 +166,7 @@
               :if={item.review_nudge}
               class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-xs font-510 text-amber-200"
             >
-              Review evidence needed
+              {item.review_nudge.label || "Review evidence needed"}
             </span>
             <span class="text-xs text-text-quaternary">·</span>
             <span class="text-xs text-text-quaternary">{format_timestamp(item.inserted_at)}</span>
@@ -212,6 +236,13 @@
         </div>
 
         <div class="flex flex-wrap gap-2 lg:justify-end">
+          <.app_link
+            :if={item.review_nudge && item.review_nudge.target_path}
+            navigate={item.review_nudge.target_path}
+            class="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs font-510 text-amber-200 hover:bg-amber-500/15 hover:text-amber-100"
+          >
+            {item.review_nudge.target_label || "Open review queue"}
+          </.app_link>
           <.app_link
             :if={item.issue}
             navigate={issue_link(item.issue)}

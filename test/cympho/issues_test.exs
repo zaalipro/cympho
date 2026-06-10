@@ -4,6 +4,7 @@ defmodule Cympho.IssuesTest do
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.Issues.StateMachine
+  alias Cympho.Companies
   alias Cympho.Projects
   alias Cympho.Agents
   alias Cympho.Comments
@@ -57,6 +58,87 @@ defmodule Cympho.IssuesTest do
     end
   end
 
+  describe "triage_counts/1" do
+    test "counts owner queue lanes by company" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Triage Count Co",
+          slug: "triage-count-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Triage Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, _ceo} =
+        Issues.create_issue(%{
+          title: "CEO lane work",
+          status: :todo,
+          assigned_role: "ceo",
+          company_id: company.id
+        })
+
+      {:ok, _ready} =
+        Issues.create_issue(%{
+          title: "Ready engineer work",
+          status: :todo,
+          assigned_role: "engineer",
+          company_id: company.id
+        })
+
+      {:ok, _active} =
+        Issues.create_issue(%{
+          title: "Active work",
+          status: :in_progress,
+          assignee_id: agent.id,
+          company_id: company.id
+        })
+
+      {:ok, _review} =
+        Issues.create_issue(%{
+          title: "Review work",
+          status: :in_review,
+          company_id: company.id
+        })
+
+      {:ok, _blocked} =
+        Issues.create_issue(%{
+          title: "Blocked work",
+          status: :blocked,
+          company_id: company.id
+        })
+
+      {:ok, _unassigned} =
+        Issues.create_issue(%{
+          title: "Unassigned work",
+          status: :backlog,
+          company_id: company.id
+        })
+
+      {:ok, _closed_ceo} =
+        Issues.create_issue(%{
+          title: "Closed CEO work",
+          status: :done,
+          assigned_role: "ceo",
+          company_id: company.id
+        })
+
+      counts = Issues.triage_counts(company.id)
+
+      assert counts["open"] == 6
+      assert counts["ceo"] == 1
+      assert counts["ready"] == 2
+      assert counts["active"] == 1
+      assert counts["review"] == 1
+      assert counts["blocked"] == 1
+      assert counts["unassigned"] == 3
+    end
+  end
+
   describe "list_child_issues/1" do
     test "returns ordered child issues without preloading unused comments", %{issue: parent} do
       {:ok, assignee} =
@@ -89,6 +171,54 @@ defmodule Cympho.IssuesTest do
       assert Enum.map(children, & &1.id) == [critical.id, low.id]
       assert Enum.all?(children, &match?(%Cympho.Agents.Agent{}, &1.assignee))
       assert Enum.all?(children, &match?(%Ecto.Association.NotLoaded{}, &1.comments))
+    end
+  end
+
+  describe "prioritize_for_dispatch/2" do
+    test "records an operator dispatch pin without dropping existing monitor state", %{
+      issue: issue
+    } do
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          status: :todo,
+          monitor_state: %{
+            "pr_quality" => %{"status" => "ready"},
+            "dispatch" => %{"note" => "keep me"}
+          }
+        })
+
+      {:ok, updated} = Issues.prioritize_for_dispatch(issue, pinned_by_user_id: "user-123")
+
+      assert Issues.dispatch_pinned?(updated)
+      assert updated.monitor_state["dispatch"]["pinned_at"]
+      assert updated.monitor_state["dispatch"]["pinned_by_user_id"] == "user-123"
+      assert updated.monitor_state["dispatch"]["note"] == "keep me"
+      assert updated.monitor_state["pr_quality"]["status"] == "ready"
+    end
+
+    test "clears dispatch pin fields without dropping unrelated monitor state", %{issue: issue} do
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          status: :todo,
+          monitor_state: %{
+            "pr_quality" => %{"status" => "ready"},
+            "dispatch" => %{
+              "pinned_at" => "2026-06-09T00:00:00Z",
+              "pinned_by_user_id" => "user-123",
+              "note" => "keep me"
+            }
+          }
+        })
+
+      assert Issues.dispatch_pinned?(issue)
+
+      {:ok, updated} = Issues.clear_dispatch_focus(issue)
+
+      refute Issues.dispatch_pinned?(updated)
+      assert updated.monitor_state["dispatch"]["note"] == "keep me"
+      refute Map.has_key?(updated.monitor_state["dispatch"], "pinned_at")
+      refute Map.has_key?(updated.monitor_state["dispatch"], "pinned_by_user_id")
+      assert updated.monitor_state["pr_quality"]["status"] == "ready"
     end
   end
 
@@ -302,6 +432,87 @@ defmodule Cympho.IssuesTest do
       assert {:ok, %Issue{} = issue} = Issues.create_issue(attrs)
       assert issue.assignee_id == agent.id
     end
+
+    test "creates company-scoped child issue when project_id is nil" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Company Child Co",
+          slug: "company-child-#{System.unique_integer([:positive])}",
+          issue_prefix: "CCC"
+        })
+
+      {:ok, parent} =
+        Issues.create_issue(%{
+          company_id: company.id,
+          title: "Parent without project",
+          description: "Company-scoped parent",
+          status: :todo,
+          priority: :high
+        })
+
+      assert {:ok, %Issue{} = child} =
+               Issues.create_issue(%{
+                 company_id: company.id,
+                 project_id: nil,
+                 parent_id: parent.id,
+                 title: "Child without project",
+                 description: "Company-scoped child",
+                 status: :todo,
+                 priority: :medium,
+                 assigned_role: "cto"
+               })
+
+      assert child.parent_id == parent.id
+      assert child.project_id == nil
+      assert child.issue_number == parent.issue_number + 1
+      assert child.identifier == "CCC-#{child.issue_number}"
+    end
+
+    test "recovers from stale company issue counters" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Stale Counter Co",
+          slug: "stale-counter-#{System.unique_integer([:positive])}",
+          issue_counter: 1
+        })
+
+      {:ok, project} =
+        Projects.create_project(%{
+          company_id: company.id,
+          name: "Stale Counter Project",
+          prefix: "SCP"
+        })
+
+      {:ok, _existing} =
+        Issues.create_issue(%{
+          company_id: company.id,
+          project_id: project.id,
+          issue_number: 5,
+          identifier: "SCP-5",
+          title: "Existing high number",
+          description: "Imported or seeded issue",
+          status: :todo,
+          priority: :medium
+        })
+
+      company
+      |> Ecto.Changeset.change(issue_counter: 1)
+      |> Repo.update!()
+
+      assert {:ok, %Issue{} = issue} =
+               Issues.create_issue(%{
+                 company_id: company.id,
+                 project_id: project.id,
+                 title: "Next issue",
+                 description: "Should not collide",
+                 status: :todo,
+                 priority: :medium
+               })
+
+      assert issue.issue_number == 6
+      assert issue.identifier == "SCP-6"
+      assert Repo.get!(Companies.Company, company.id).issue_counter == 6
+    end
   end
 
   describe "update_issue/2" do
@@ -364,6 +575,150 @@ defmodule Cympho.IssuesTest do
       assert length(project_issues) >= 1
       assert Enum.any?(project_issues, fn i -> i.id == project_issue.id end)
       refute Enum.any?(project_issues, fn i -> i.id == orphan_issue.id end)
+    end
+  end
+
+  describe "accept_owner_verification/2" do
+    test "records owner acceptance and closes verified CEO handbacks" do
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "Owner Verification CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Accept CEO verification",
+          description: "Owner needs to verify CEO output.",
+          status: :blocked,
+          priority: :medium,
+          assignee_id: ceo.id,
+          assigned_role: "ceo"
+        })
+
+      Repo.insert!(%Run{
+        agent_id: ceo.id,
+        issue_id: issue.id,
+        company_id: issue.company_id,
+        status: "completed",
+        adapter: "openai_chat",
+        continuation_summary: "CEO owner update produced."
+      })
+
+      {:ok, _owner_update} =
+        Comments.create_comment(%{
+          body:
+            "[owner_update] What happened: CEO produced the smoke-test status. Business status: not shipped. Current state: waiting on owner verification. Next decision: owner verifies and closes. Owner decision needed: verify.",
+          author_type: "agent",
+          author_id: ceo.id,
+          issue_id: issue.id
+        })
+
+      {:ok, _blocked} =
+        Comments.create_comment(%{
+          body:
+            "[blocked] Cause: Waiting for owner to verify the smoke test output. Current state: blocked on owner verification. Next decision: owner closes after verification.",
+          author_type: "agent",
+          author_id: ceo.id,
+          issue_id: issue.id
+        })
+
+      issue = Issues.get_issue!(issue.id)
+
+      assert Issues.owner_verification_closeable?(issue)
+      assert {:ok, closed} = Issues.accept_owner_verification(issue, actor: "owner-user")
+      assert closed.status == :done
+      assert closed.assignee_id == nil
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(
+               comments,
+               &String.contains?(&1.body, "owner accepted the CEO verification update")
+             )
+    end
+
+    test "records owner revision requests and queues focused CEO dispatch" do
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "Owner Revision CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Revise CEO verification",
+          description: "Owner needs another CEO pass.",
+          status: :blocked,
+          priority: :medium,
+          assignee_id: ceo.id,
+          assigned_role: "ceo"
+        })
+
+      Repo.insert!(%Run{
+        agent_id: ceo.id,
+        issue_id: issue.id,
+        company_id: issue.company_id,
+        status: "completed",
+        adapter: "openai_chat",
+        continuation_summary: "CEO owner update produced."
+      })
+
+      {:ok, _owner_update} =
+        Comments.create_comment(%{
+          body:
+            "[owner_update] What happened: CEO produced the smoke-test status. Business status: not shipped. Current state: waiting on owner verification. Next decision: owner verifies or requests revision. Owner decision needed: verify.",
+          author_type: "agent",
+          author_id: ceo.id,
+          issue_id: issue.id
+        })
+
+      {:ok, _blocked} =
+        Comments.create_comment(%{
+          body:
+            "[blocked] Cause: Waiting for owner to verify the smoke test output. Current state: blocked on owner verification. Next decision: owner closes after verification.",
+          author_type: "agent",
+          author_id: ceo.id,
+          issue_id: issue.id
+        })
+
+      issue = Issues.get_issue!(issue.id)
+
+      assert Issues.owner_verification_closeable?(issue)
+
+      assert {:ok, reopened} =
+               Issues.request_owner_verification_revision(issue, actor: "owner-user")
+
+      assert reopened.status == :todo
+      assert reopened.assignee_id == ceo.id
+      assert Issues.dispatch_pinned?(reopened)
+      refute Issues.owner_verification_closeable?(reopened)
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(
+               comments,
+               &String.contains?(&1.body, "owner reopened the CEO verification update")
+             )
+    end
+
+    test "rejects ordinary blocked issues" do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Regular blocker",
+          description: "Blocked for a real dependency.",
+          status: :blocked
+        })
+
+      refute Issues.owner_verification_closeable?(issue)
+      assert {:error, :not_owner_verification} = Issues.accept_owner_verification(issue)
+      assert Issues.get_issue!(issue.id).status == :blocked
     end
   end
 

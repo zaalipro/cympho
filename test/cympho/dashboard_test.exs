@@ -4,6 +4,8 @@ defmodule Cympho.DashboardTest do
   alias Cympho.Dashboard
   alias Cympho.Agents
   alias Cympho.Companies
+  alias Cympho.Finances.BudgetPolicy
+  alias Cympho.HeartbeatEngine.Run
   alias Cympho.Inbox
   alias Cympho.Issues
   alias Cympho.Projects
@@ -163,6 +165,45 @@ defmodule Cympho.DashboardTest do
       assert summary.runtime_capacity.local_slots == 6
     end
 
+    test "includes budget posture from current-period completed runs" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Dashboard Budget Co",
+          slug: "dashboard-budget-#{System.unique_integer([:positive])}"
+        })
+
+      %BudgetPolicy{}
+      |> BudgetPolicy.changeset(%{
+        company_id: company.id,
+        scope: "company",
+        period: "monthly",
+        budget_limit_usd: Decimal.new("100.00"),
+        warning_threshold_pct: Decimal.new("80.0")
+      })
+      |> Repo.insert!()
+
+      _current = insert_completed_run(company, Decimal.new("85.00"))
+      old = insert_completed_run(company, Decimal.new("15.00"))
+
+      old_time =
+        DateTime.utc_now()
+        |> DateTime.add(-35 * 86_400, :second)
+        |> DateTime.truncate(:second)
+
+      Repo.update_all(from(r in Run, where: r.id == ^old.id),
+        set: [inserted_at: old_time, completed_at: old_time]
+      )
+
+      cost = Dashboard.cost_summary(company.id)
+
+      assert Decimal.eq?(cost.total_cost, Decimal.new("100.00"))
+      assert Decimal.eq?(cost.period_cost, Decimal.new("85.00"))
+      assert cost.period_runs == 1
+      assert cost.budget_status == :watch
+      assert cost.budget_used_percent == 85
+      assert Decimal.eq?(cost.budget_remaining, Decimal.new("15.00"))
+    end
+
     test "includes recent inbox items without requiring aggregate fields" do
       {:ok, company} =
         Companies.create_company(%{
@@ -207,5 +248,19 @@ defmodule Cympho.DashboardTest do
       assert health.status == "idle"
       assert Map.has_key?(health, :message)
     end
+  end
+
+  defp insert_completed_run(company, cost_usd) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Repo.insert!(%Run{
+      company_id: company.id,
+      status: "completed",
+      adapter: "codex",
+      cost_usd: cost_usd,
+      input_tokens: 100,
+      output_tokens: 50,
+      completed_at: now
+    })
   end
 end

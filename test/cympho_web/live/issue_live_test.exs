@@ -13,6 +13,7 @@ defmodule CymphoWeb.IssueLiveTest do
   alias Cympho.Repo
   alias Cympho.Users
   alias Cympho.Wakes
+  alias Cympho.Wakes.AgentWake
   alias Cympho.WorkProducts
 
   defp create_agent(attrs), do: Agents.create_agent(scoped_attrs(attrs))
@@ -51,9 +52,88 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert html =~ "0 comments"
     end
+
+    test "shows compact owner-flow digest on CEO-owned rows" do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "List CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, _issue} =
+        create_issue(%{
+          title: "List owner request",
+          description: "CEO should produce the first owner signal.",
+          status: :todo,
+          priority: :high,
+          assignee_id: ceo.id,
+          assigned_role: "ceo"
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues")
+
+      assert html =~ "List owner request"
+      assert html =~ "List CEO"
+      assert html =~ "Launch needed"
+      assert html =~ "Assigned, but runtime has not started yet."
+    end
+
+    test "shows owner triage lanes and filters the CEO lane", %{current_company: company} do
+      {:ok, _ceo_issue} =
+        create_issue(%{
+          title: "CEO triage lane request",
+          description: "Owner work should stay easy to find.",
+          status: :todo,
+          priority: :high,
+          assigned_role: "ceo",
+          company_id: company.id
+        })
+
+      {:ok, _engineer_issue} =
+        create_issue(%{
+          title: "Engineer triage lane request",
+          description: "Implementation work should not appear in the CEO lane.",
+          status: :todo,
+          priority: :medium,
+          assigned_role: "engineer",
+          company_id: company.id
+        })
+
+      {:ok, view, html} = live(conn(), "/issues")
+
+      assert html =~ "Owner triage"
+      assert html =~ "Jump straight to the queue that needs the next decision."
+      assert html =~ "CEO lane"
+      assert html =~ "Ready"
+      assert html =~ "Blocked"
+      assert html =~ "Unassigned"
+
+      view
+      |> element("a[href='/issues?triage=ceo']", "CEO lane")
+      |> render_click()
+
+      assert_patch(view, "/issues?triage=ceo")
+
+      html = render(view)
+      assert html =~ "CEO triage lane request"
+      refute html =~ "Engineer triage lane request"
+      assert html =~ "Show all issues"
+    end
   end
 
   describe "New - Owner request routing" do
+    test "renders a live-updating document title on first load" do
+      html =
+        conn()
+        |> get("/issues/new")
+        |> html_response(200)
+
+      assert html =~ ~s(<title data-suffix=" · Cympho">New Issue · Cympho</title>)
+    end
+
     test "creates authenticated company issues as CEO-owned todo work" do
       {:ok, company} =
         Companies.create_company(%{
@@ -109,19 +189,30 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Owner intake"
       assert html =~ "First stop:"
       assert html =~ "CEO"
+      assert html =~ "CEO first turn must return"
+      assert html =~ "[owner_update]"
+      assert html =~ "[handoff]"
+      assert html =~ "2-5 scoped issues"
+      assert html =~ "Owner request -&gt; CEO lane"
+      assert html =~ "Creates a To Do issue; no provider call."
+      assert html =~ "Opens the issue with CEO flow status."
+      assert html =~ "Signals the CEO should produce:"
+      assert html =~ "Goal:\nContext:"
+      refute html =~ "Goal:\\nContext:"
       assert html =~ "Project"
       assert html =~ "Operating Project"
       assert html =~ "Launch Project"
 
-      view
-      |> form("form", %{
-        "issue" => %{
-          "title" => "Owner asks for onboarding",
-          "description" => "CEO should decompose this.",
-          "project_id" => launch_project.id
-        }
-      })
-      |> render_submit()
+      result =
+        view
+        |> form("form", %{
+          "issue" => %{
+            "title" => "Owner asks for onboarding",
+            "description" => "CEO should decompose this.",
+            "project_id" => launch_project.id
+          }
+        })
+        |> render_submit()
 
       [created] = Issues.list_issues(%{company_id: company.id})
       assert created.title == "Owner asks for onboarding"
@@ -130,6 +221,77 @@ defmodule CymphoWeb.IssueLiveTest do
       assert created.assigned_role == "ceo"
       assert created.project_id == launch_project.id
       assert created.created_by_user_id == user.id
+
+      expected_path = "/issues/#{created.id}"
+      assert {:error, {:live_redirect, %{to: ^expected_path}}} = result
+    end
+
+    test "keeps owner-created issues in CEO lane when no CEO agent exists" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Owner Route No CEO Co",
+          slug: "owner-route-no-ceo-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, project} =
+        create_project(%{
+          name: "No CEO Project",
+          prefix: "NC",
+          company_id: company.id
+        })
+
+      {:ok, user} =
+        Users.create_user(%{
+          email: "owner-route-no-ceo-#{System.unique_integer([:positive])}@example.com",
+          name: "Owner"
+        })
+
+      {:ok, _membership} =
+        Companies.create_membership(%{
+          user_id: user.id,
+          company_id: company.id,
+          role: "owner",
+          is_board_member: true
+        })
+
+      conn =
+        conn()
+        |> Plug.Test.init_test_session(%{})
+        |> Plug.Conn.put_session("user_id", user.id)
+        |> Plug.Conn.put_session("company_id", company.id)
+
+      {:ok, view, html} = live(conn, "/issues/new")
+
+      assert html =~ "Owner intake"
+      assert html =~ "CEO lane"
+      assert html =~ "CEO agent missing"
+      assert html =~ "Add CEO agent"
+      assert html =~ ~s(href="/agents/new")
+      assert html =~ "Creates a CEO-role To Do issue; no provider call."
+      assert html =~ "Opens the issue with the CEO setup blocker visible."
+      assert html =~ "will stay in the CEO lane"
+
+      result =
+        view
+        |> form("form", %{
+          "issue" => %{
+            "title" => "Owner asks without CEO",
+            "description" => "CEO should still own this request.",
+            "project_id" => project.id
+          }
+        })
+        |> render_submit()
+
+      [created] = Issues.list_issues(%{company_id: company.id})
+      assert created.title == "Owner asks without CEO"
+      assert created.status == :todo
+      assert is_nil(created.assignee_id)
+      assert created.assigned_role == "ceo"
+      assert created.project_id == project.id
+      assert created.created_by_user_id == user.id
+
+      expected_path = "/issues/#{created.id}"
+      assert {:error, {:live_redirect, %{to: ^expected_path}}} = result
     end
   end
 
@@ -141,6 +303,690 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ issue.description
       assert html =~ "backlog"
       assert html =~ "high"
+    end
+
+    test "shows focused runtime command for dispatchable issues in review mode" do
+      {:ok, issue} =
+        create_issue(%{
+          title: "Run only this CEO issue",
+          status: :todo,
+          priority: :high
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Focus this issue"
+      assert html =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue.id}"
+      assert html =~ "CYMPHO_ORCHESTRATOR_ENABLED=1"
+      assert html =~ ~s(id="issue-focused-runtime-command-#{issue.id}")
+      assert html =~ ~s(phx-hook="CopyToClipboard")
+      assert html =~ "Copy command"
+    end
+
+    test "prioritizes a dispatchable issue from the sidebar" do
+      {:ok, issue} =
+        create_issue(%{
+          title: "Operator focus issue",
+          status: :todo,
+          priority: :high
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Dispatch focus"
+      assert html =~ "Prioritize for next dispatch"
+
+      html =
+        view
+        |> element("#issue-agent-panel button", "Prioritize for next dispatch")
+        |> render_click()
+
+      assert html =~
+               "Issue prioritized for next dispatch. Copy the focused command from the digest or sidebar and start runtime."
+
+      assert html =~ "Operator focus active"
+      assert html =~ "Focus queued"
+      assert html =~ "Dispatch focus is pinned, but autonomous dispatch is disabled."
+      assert html =~ "Start the focused runtime command from the digest or sidebar"
+
+      updated = Issues.get_issue!(issue.id)
+      assert Issues.dispatch_pinned?(updated)
+    end
+
+    test "queues open delegated sub-issues from the parent review gate" do
+      {:ok, product_owner} =
+        create_agent(%{
+          name: "Delegated Product Owner",
+          role: :product_manager,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, cto_owner} =
+        create_agent(%{
+          name: "Delegated CTO Owner",
+          role: :cto,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, parent} =
+        create_issue(%{
+          title: "Delegated parent issue",
+          status: :blocked,
+          priority: :high,
+          assigned_role: "ceo"
+        })
+
+      {:ok, product_child} =
+        create_issue(%{
+          title: "Define delegated success metrics",
+          status: :todo,
+          priority: :high,
+          parent_id: parent.id,
+          assigned_role: "product_manager"
+        })
+
+      {:ok, cto_child} =
+        create_issue(%{
+          title: "Verify delegated runtime path",
+          status: :todo,
+          priority: :high,
+          parent_id: parent.id,
+          assignee_id: cto_owner.id,
+          assigned_role: "cto"
+        })
+
+      {:ok, blocked_child} =
+        create_issue(%{
+          title: "Wait for blocked dependency",
+          status: :todo,
+          priority: :critical,
+          parent_id: parent.id,
+          assigned_role: "cto"
+        })
+
+      {:ok, closed_child} =
+        create_issue(%{
+          title: "Already closed child",
+          status: :done,
+          priority: :medium,
+          parent_id: parent.id,
+          assigned_role: "engineer"
+        })
+
+      {:ok, dependency} =
+        create_issue(%{
+          title: "Dependency still active",
+          status: :todo,
+          priority: :medium
+        })
+
+      assert {:ok, _blocked_child} = Issues.add_blocker(blocked_child, dependency)
+      assert {:ok, _cto_child} = Issues.prioritize_for_dispatch(cto_child)
+
+      {:ok, view, html} = live(conn(), "/issues/#{parent.id}")
+
+      assert html =~ "Queue runnable sub-issues"
+      assert html =~ "Open sub-issues"
+      assert html =~ "Open delegated queue"
+      assert html =~ ~s(href="/operations?parent_issue_id=#{parent.id}#delegated-work-queue")
+
+      html =
+        view
+        |> element("#issue-digest-actions button", "Queue runnable sub-issues")
+        |> render_click()
+
+      assert html =~
+               "Queued 1 runnable sub-issue for focused dispatch. Start runtime from Operations to continue delegated work."
+
+      assert html =~ ~s(id="child-dispatch-focus-#{product_child.id}")
+      assert html =~ ~s(id="child-dispatch-focus-#{cto_child.id}")
+      refute html =~ ~s(id="child-dispatch-focus-#{blocked_child.id}")
+      refute html =~ ~s(id="child-dispatch-focus-#{closed_child.id}")
+      assert html =~ ~s(id="child-copy-focused-command-#{product_child.id}")
+      assert html =~ ~s(id="child-copy-focused-command-#{cto_child.id}")
+      refute html =~ ~s(id="child-copy-focused-command-#{blocked_child.id}")
+      refute html =~ ~s(id="child-copy-focused-command-#{closed_child.id}")
+      assert html =~ ~s(id="child-clear-dispatch-focus-#{product_child.id}")
+      assert html =~ ~s(id="child-clear-dispatch-focus-#{cto_child.id}")
+      refute html =~ ~s(id="child-clear-dispatch-focus-#{blocked_child.id}")
+      refute html =~ ~s(id="child-clear-dispatch-focus-#{closed_child.id}")
+      assert html =~ ~s(id="child-focused-command-text-#{product_child.id}")
+      assert html =~ ~s(id="child-focused-command-text-#{cto_child.id}")
+      refute html =~ ~s(id="child-focused-command-text-#{blocked_child.id}")
+      refute html =~ ~s(id="child-focused-command-text-#{closed_child.id}")
+      assert html =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{product_child.id}"
+      assert html =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{cto_child.id}"
+      refute html =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{blocked_child.id}"
+      refute html =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{closed_child.id}"
+      assert html =~ "Delegated Product Owner"
+      assert html =~ "Delegated CTO Owner"
+
+      product_child = Issues.get_issue!(product_child.id)
+      cto_child = Issues.get_issue!(cto_child.id)
+      blocked_child = Issues.get_issue!(blocked_child.id)
+
+      assert product_child.assignee_id == product_owner.id
+      assert product_child.status == :todo
+      assert cto_child.assignee_id == cto_owner.id
+      assert cto_child.status == :todo
+      assert blocked_child.assignee_id == nil
+      assert blocked_child.status == :todo
+      assert Issues.dispatch_pinned?(product_child)
+      assert Issues.dispatch_pinned?(cto_child)
+      refute Issues.dispatch_pinned?(blocked_child)
+      refute closed_child.id |> Issues.get_issue!() |> Issues.dispatch_pinned?()
+
+      html =
+        view
+        |> element("#child-clear-dispatch-focus-#{product_child.id}", "Clear focus")
+        |> render_click()
+
+      assert html =~ "Dispatch focus cleared for child issue."
+      refute html =~ ~s(id="child-dispatch-focus-#{product_child.id}")
+      refute html =~ ~s(id="child-copy-focused-command-#{product_child.id}")
+      refute html =~ ~s(id="child-clear-dispatch-focus-#{product_child.id}")
+      assert html =~ ~s(id="child-dispatch-focus-#{cto_child.id}")
+      assert html =~ "Queue runnable sub-issues"
+
+      refute product_child.id |> Issues.get_issue!() |> Issues.dispatch_pinned?()
+      assert cto_child.id |> Issues.get_issue!() |> Issues.dispatch_pinned?()
+
+      html =
+        view
+        |> element("#issue-digest-actions button", "Queue runnable sub-issues")
+        |> render_click()
+
+      assert html =~ "Queued 1 runnable sub-issue for focused dispatch."
+      assert html =~ "No runnable sub-issues"
+      assert html =~ "Open child work is already focused or blocked by active dependencies."
+
+      assert has_element?(
+               view,
+               "#issue-digest-actions button[disabled]",
+               "No runnable sub-issues"
+             )
+    end
+
+    test "shows assigned agent runtime readiness on issue detail" do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :claude_code,
+          health_status: :degraded,
+          config: %{"command" => "cz"},
+          runtime_config: %{
+            "profile_id" => "claude-cz",
+            "env" => %{"ANTHROPIC_MODEL" => "cheap-ceo-model"}
+          },
+          max_concurrent_jobs: 2,
+          adapter_failure_count: 3
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "CEO runtime readiness",
+          status: :todo,
+          priority: :high,
+          assignee_id: ceo.id
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Agent readiness"
+      assert html =~ "CEO"
+      assert html =~ "Review mode"
+      assert html =~ "Claude Code · 2 local CLI slots"
+      assert html =~ "Claude-compatible via cz"
+      assert html =~ "cz"
+      assert html =~ "cheap-ceo-model"
+      assert html =~ "ANTHROPIC_API_KEY"
+      assert html =~ "Prior adapter health: Degraded"
+      assert html =~ "Recent adapter failures: 3"
+      assert html =~ "Open agent config"
+    end
+
+    test "shows a local CEO launch preview before provider dispatch" do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "CEO Preview",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Preview CEO handoff",
+          status: :todo,
+          priority: :high,
+          assignee_id: ceo.id,
+          assigned_role: "ceo"
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "CEO flow"
+      assert html =~ "Owner request loop"
+      assert html =~ "Owner request captured"
+      assert html =~ "Routed to CEO Preview in the CEO lane."
+      assert html =~ "Launch CEO turn"
+      assert html =~ "Launch needed"
+      assert html =~ "Waiting for owner signal"
+      assert html =~ "Decision pending"
+      assert html =~ "CEO launch preview"
+      assert html =~ "Local dry-run"
+      assert html =~ "CEO Preview · Process"
+      assert html =~ "Review mode"
+      assert html =~ "Review mode is active; copy the focused command"
+      assert html =~ "Next setup action"
+      assert html =~ "Execution mode"
+      assert html =~ "Open service gates"
+      assert html =~ ~s(href="/operations#runtime-services")
+      assert html =~ "[owner_update]"
+      assert html =~ "[handoff]"
+      assert html =~ "2-5 scoped sub-issues"
+      assert html =~ "No provider call"
+      assert html =~ ~s(phx-hook="CopyToClipboard")
+      assert html =~ "Copy CEO brief"
+      assert html =~ "CEO launch brief"
+      assert html =~ "Focused command:"
+      assert html =~ "No description supplied."
+      assert html =~ "Draft owner update"
+      assert html =~ "Draft handoff"
+
+      html =
+        view
+        |> element("#issue-ceo-launch-preview button[phx-value-template='owner_update']")
+        |> render_click()
+
+      assert html =~ "[owner_update] What happened:"
+      assert html =~ "Business status:"
+      assert html =~ "Owner decision needed:"
+
+      html =
+        view
+        |> element("#issue-ceo-launch-preview button[phx-value-template='handoff']")
+        |> render_click()
+
+      assert html =~ "[handoff] What happened:"
+      assert html =~ "Next owner:"
+    end
+
+    test "shows CEO setup blocker on issue detail when no CEO agent exists" do
+      {:ok, issue} =
+        create_issue(%{
+          title: "Owner request without CEO agent",
+          status: :todo,
+          priority: :high,
+          assigned_role: "ceo"
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "CEO flow"
+      assert html =~ "Routed to the CEO lane"
+      assert html =~ "CEO launch preview"
+      assert html =~ "No agent"
+      assert html =~ "No idle eligible CEO is available"
+      assert html =~ "Next setup action"
+      assert html =~ "Dispatch eligibility"
+      assert html =~ "eligible CEO"
+      assert html =~ "Add CEO agent"
+      assert html =~ ~s(href="/agents/new")
+      assert html =~ "Waiting for first CEO turn"
+    end
+
+    test "shows CEO outcome card from the latest owner update" do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "CEO Outcome",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "CEO outcome issue",
+          status: :in_progress,
+          priority: :high,
+          assignee_id: ceo.id,
+          assigned_role: "ceo"
+        })
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body:
+            "[owner_update] What happened: strategy is framed. Business status: not shipped. Current state: ready to delegate. Next decision: hand off implementation. Owner decision needed: none.",
+          author_type: "agent",
+          author_id: ceo.id,
+          issue_id: issue.id
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "CEO flow"
+      assert html =~ "CEO turn completed"
+      assert html =~ "Owner update captured"
+      assert html =~ "Owner decision ready"
+      assert html =~ "CEO outcome"
+      assert html =~ "Owner update"
+      assert html =~ "CEO left an owner-facing status update"
+      assert html =~ "strategy is framed"
+      assert html =~ "Use this update as the current business status"
+      assert html =~ "Open Operations monitor"
+      assert html =~ ~s(href="/operations#ceo-outcome-monitor")
+    end
+
+    test "accepts and closes CEO owner-verification handbacks from the digest" do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "CEO Owner Verifier",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Close owner verification",
+          description: "Owner should verify the CEO first turn.",
+          status: :blocked,
+          priority: :high,
+          assignee_id: ceo.id,
+          assigned_role: "ceo"
+        })
+
+      Repo.insert!(%Run{
+        agent_id: ceo.id,
+        issue_id: issue.id,
+        company_id: issue.company_id,
+        status: "completed",
+        adapter: "openai_chat",
+        continuation_summary: "CEO owner update produced."
+      })
+
+      {:ok, _owner_update} =
+        Comments.create_comment(%{
+          body:
+            "[owner_update] What happened: CEO produced the first turn. Business status: not shipped. Current state: waiting on owner verification. Next decision: owner accepts and closes. Owner decision needed: verify.",
+          author_type: "agent",
+          author_id: ceo.id,
+          issue_id: issue.id
+        })
+
+      {:ok, _blocked} =
+        Comments.create_comment(%{
+          body:
+            "[blocked] Cause: Waiting for owner to verify the smoke test output. Current state: blocked on owner verification. Next decision: owner closes after verification.",
+          author_type: "agent",
+          author_id: ceo.id,
+          issue_id: issue.id
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Accept and close"
+      assert html =~ "owner verification"
+
+      html =
+        view
+        |> element("#issue-digest-actions button", "Accept and close")
+        |> render_click()
+
+      assert html =~ "Owner verification accepted and issue closed."
+      assert Issues.get_issue!(issue.id).status == :done
+      assert html =~ "Closed"
+      assert html =~ "owner accepted the CEO verification update"
+    end
+
+    test "shows CEO outcome card when the latest CEO run needs attention" do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "CEO Needs Attention",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "CEO failed runtime issue",
+          status: :blocked,
+          priority: :critical,
+          assigned_role: "ceo"
+        })
+
+      Repo.insert!(%Run{
+        agent_id: ceo.id,
+        issue_id: issue.id,
+        company_id: issue.company_id,
+        status: "failed",
+        adapter: "process",
+        error_reason: "OPENAI_API_KEY not set"
+      })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "CEO flow"
+      assert html =~ "Runtime needs attention"
+      assert html =~ "Owner signal blocked"
+      assert html =~ "Decision blocked"
+      assert html =~ "CEO outcome"
+      assert html =~ "Needs attention"
+      assert html =~ "CEO runtime needs attention"
+      assert html =~ "Failed · OPENAI_API_KEY not set"
+      assert html =~ "Fix the runtime/provider issue, then relaunch from the focused command."
+      assert html =~ "Focused relaunch command"
+      assert html =~ "Fix the feedback above, then restart runtime focused on this issue."
+      assert html =~ "Setup still needs"
+      assert html =~ "Execution mode"
+      assert html =~ "Open service gates"
+      assert html =~ ~s(href="/operations#runtime-services")
+      assert html =~ "Reopen and prioritize relaunch"
+      assert html =~ ~s(id="issue-ceo-outcome-focused-command-#{issue.id}")
+      assert html =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue.id}"
+      assert html =~ "Open Operations monitor"
+
+      html =
+        view
+        |> element(
+          "#issue-ceo-outcome-focused-command-#{issue.id} button",
+          "Reopen and prioritize relaunch"
+        )
+        |> render_click()
+
+      assert html =~
+               "Issue queued for focused relaunch. Copy the focused command from this issue page and start runtime."
+
+      assert html =~ "Relaunch focus queued"
+      assert html =~ "Setup still needs"
+      assert html =~ "Execution mode"
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.status == :todo
+      assert Issues.dispatch_pinned?(updated)
+    end
+
+    test "points todo issues without runs at runtime launch before evidence actions" do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "CEO needs first runtime pass",
+          description: "Owner asks CEO to define the execution plan.",
+          status: :todo,
+          priority: :high,
+          assignee_id: ceo.id,
+          assigned_role: "ceo"
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Start runtime first"
+      assert html =~ "Launch needed"
+      assert html =~ "Assigned, but runtime has not started yet."
+      assert html =~ "Open the Operations launch checklist"
+      assert html =~ "first output must be `[owner_update]` or `[handoff]`"
+      assert html =~ ~s(id="issue-digest-actions")
+      assert html =~ ~s(phx-hook="CopyToClipboard")
+      assert html =~ "Queue focused dispatch"
+      assert html =~ ~s(phx-click="prioritize_dispatch")
+      assert html =~ "Copy focused command"
+      assert html =~ ~s(data-copy-label="Copy focused command")
+      assert html =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue.id}"
+      assert html =~ "Open launch checklist"
+      assert html =~ ~s(href="/operations#runtime-launch-checklist")
+      assert html =~ "CEO first turn"
+      assert html =~ "CEO has not produced the first owner-facing signal yet."
+      assert html =~ "Start the CEO turn before assigning delivery."
+      assert html =~ "no runtime evidence yet"
+      assert html =~ "Runtime launch needed"
+
+      assert html =~
+               "Start runtime from the digest, sidebar, or Operations before adding delivery notes or artifacts."
+
+      refute html =~
+               "Start focused dispatch from Operations before adding delivery notes or artifacts."
+
+      refute html =~ "Auto-nudges"
+      refute html =~ "Add completion note"
+      refute html =~ "Nudge delivery owner"
+
+      html =
+        view
+        |> element("#issue-digest-actions button[phx-click='prioritize_dispatch']")
+        |> render_click()
+
+      assert html =~
+               "Issue prioritized for next dispatch. Copy the focused command from the digest or sidebar and start runtime."
+
+      assert html =~ "Operator focus active"
+      assert html =~ "Focus queued"
+      assert html =~ "Focused dispatch is queued. Copy the focused command or start runtime"
+      assert html =~ "Focused dispatch is already queued for this issue."
+      assert html =~ "Focused dispatch is already queued; copy the command or start runtime."
+      assert has_element?(view, "#issue-digest-actions button[disabled]", "Focus queued")
+      assert html =~ "Clear focus"
+
+      updated = Issues.get_issue!(issue.id)
+      assert Issues.dispatch_pinned?(updated)
+
+      html =
+        view
+        |> element("button[phx-click='clear_dispatch_focus']", "Clear focus")
+        |> render_click()
+
+      assert html =~ "Dispatch focus cleared."
+      assert html =~ "Queue focused dispatch"
+      refute html =~ "Operator focus active"
+
+      updated = Issues.get_issue!(issue.id)
+      refute Issues.dispatch_pinned?(updated)
+    end
+
+    test "shows CEO launch setup action for missing provider credentials" do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Remote CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :agrenting,
+          config: %{}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Preview remote CEO credential setup",
+          status: :todo,
+          priority: :high,
+          assignee_id: ceo.id,
+          assigned_role: "ceo"
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "CEO launch preview"
+      assert html =~ "Next setup action"
+      assert html =~ "Agrenting API key"
+      assert html =~ "AGRENTING_API_KEY"
+      assert html =~ "Add secret"
+      assert html =~ "/settings/secrets?key=AGRENTING_API_KEY"
+      refute html =~ "test-api-key"
+    end
+
+    test "shows assigned agent preflight blockers on issue detail" do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Missing Runtime Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "__missing_cympho_test_command__", "model" => "custom"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Runtime preflight blocker",
+          status: :todo,
+          priority: :high,
+          assignee_id: agent.id
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Agent preflight"
+      assert html =~ "Blocked"
+      assert html =~ "Command"
+      assert html =~ "__missing_cympho_test_command__ was not found"
+      assert html =~ "Execution mode"
+      assert html =~ "Edit command"
+      assert html =~ "/agents/#{agent.id}#agent-process-command"
+    end
+
+    test "shows dispatch eligibility blocker for busy assigned agent on issue detail" do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Busy Runtime Agent",
+          role: :engineer,
+          status: :running,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Busy agent preflight blocker",
+          status: :todo,
+          priority: :high,
+          assignee_id: agent.id,
+          assigned_role: "engineer"
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Agent preflight"
+      assert html =~ "No agent"
+      assert html =~ "Dispatch eligibility"
+      assert html =~ "Busy Runtime Agent is running"
+      assert html =~ "return idle"
     end
 
     test "renders comments section", %{issue: issue} do
@@ -284,6 +1130,10 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Satisfied by Runtime Agent"
       assert html =~ "Evidence coverage"
       assert html =~ "Execution brief"
+      assert html =~ "Handoff lane"
+      assert html =~ "Current signal"
+      assert html =~ "Runtime complete"
+      assert html =~ "Runtime run ledger"
       assert html =~ "Owner update"
       assert html =~ "Work narrative"
       assert html =~ "Owner request"
@@ -301,6 +1151,104 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Delegated"
       assert html =~ "Follow-up smoke subtask"
       assert html =~ "Code work exists but no PR link is set."
+    end
+
+    test "shows runtime run ledger with latest run status and detail", %{issue: issue} do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "CEO Runtime",
+          role: :ceo,
+          status: :idle,
+          adapter: :claude_code
+        })
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      completed =
+        Repo.insert!(%Run{
+          agent_id: ceo.id,
+          issue_id: issue.id,
+          company_id: issue.company_id,
+          status: "completed",
+          adapter: "claude_code",
+          continuation_summary: "CEO summarized the operating plan.",
+          started_at: DateTime.add(now, -180, :second),
+          completed_at: DateTime.add(now, -120, :second),
+          input_tokens: 12_000,
+          output_tokens: 1_500
+        })
+
+      failed =
+        Repo.insert!(%Run{
+          agent_id: ceo.id,
+          issue_id: issue.id,
+          company_id: issue.company_id,
+          status: "failed",
+          adapter: "claude_code",
+          error_reason: "Provider rejected the request.",
+          log_excerpt: "HTTP 401",
+          started_at: DateTime.add(now, -90, :second),
+          completed_at: DateTime.add(now, -80, :second)
+        })
+
+      running =
+        Repo.insert!(%Run{
+          agent_id: ceo.id,
+          issue_id: issue.id,
+          company_id: issue.company_id,
+          status: "running",
+          adapter: "claude_code",
+          workspace_path: "/tmp/cympho-ceo-run",
+          started_at: DateTime.add(now, -30, :second)
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Runtime run ledger"
+      assert html =~ ~s(id="runtime-run-ledger-#{running.id}")
+      assert html =~ ~s(id="runtime-run-ledger-#{failed.id}")
+      assert html =~ ~s(id="runtime-run-ledger-#{completed.id}")
+      assert html =~ "Running"
+      assert html =~ "Failed"
+      assert html =~ "Completed"
+      assert html =~ "CEO Runtime"
+      assert html =~ "claude code"
+      assert html =~ "Runtime is still in flight."
+      assert html =~ "Provider rejected the request."
+      assert html =~ "CEO summarized the operating plan."
+      assert html =~ "/tmp/cympho-ceo-run"
+      assert html =~ "12,000 in"
+      assert html =~ "1,500 out"
+
+      assert html =~ "1m 0s"
+      assert html =~ "10s"
+    end
+
+    test "shows pending agent wake in the handoff lane", %{issue: issue} do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "CEO",
+          role: :ceo,
+          status: :idle
+        })
+
+      {:ok, issue} = Issues.update_issue(issue, %{status: :todo, assignee_id: ceo.id})
+
+      Repo.insert!(%AgentWake{
+        agent_id: ceo.id,
+        issue_id: issue.id,
+        reason: "manual_dispatch",
+        status: "pending",
+        triggered_by_type: "system",
+        triggered_by_id: "test"
+      })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Handoff lane"
+      assert html =~ "Waiting on agent"
+      assert html =~ "Wake queued for CEO"
+      assert html =~ "Manual dispatch"
     end
 
     test "shows direct sub-issues", %{issue: issue} do

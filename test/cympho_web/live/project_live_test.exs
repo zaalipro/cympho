@@ -3,10 +3,64 @@ defmodule CymphoWeb.ProjectLiveTest do
 
   import Phoenix.LiveViewTest
 
+  alias Cympho.Goals
+  alias Cympho.Issues
   alias Cympho.Projects
   alias Cympho.Repo
   alias Cympho.Secrets
   alias CymphoWeb.ConnCase
+
+  describe "Project index" do
+    test "renders operating health for project workstreams", %{conn: conn} do
+      {_conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Flow Project",
+          description: "Owns the delivery flow.",
+          prefix: "FLW",
+          company_id: company.id
+        })
+
+      {:ok, _idle_project} =
+        Projects.create_project(%{
+          name: "Idle Project",
+          prefix: "IDL",
+          repo_url: "https://github.com/example/idle",
+          company_id: company.id
+        })
+
+      {:ok, _goal} =
+        Goals.create_goal(%{
+          title: "Flow mission",
+          company_id: company.id,
+          project_id: project.id,
+          goal_type: :mission
+        })
+
+      for status <- [:todo, :in_review, :blocked, :done] do
+        {:ok, _issue} =
+          Issues.create_issue(%{
+            title: "Flow #{status}",
+            company_id: company.id,
+            project_id: project.id,
+            status: status
+          })
+      end
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, _view, html} = live(conn, "/projects")
+
+      assert html =~ "Workstream health"
+      assert html =~ "3 open issues across 2 active projects"
+      assert html =~ "Project queue signals"
+      assert html =~ "Flow Project"
+      assert html =~ "No repository configured"
+      assert html =~ "1 active goals"
+      assert html =~ "25% complete"
+      assert html =~ ~s(href="/issues?project_id=#{project.id}")
+    end
+  end
 
   describe "New project" do
     test "creates projects inside the current company", %{conn: conn} do

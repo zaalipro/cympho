@@ -1,10 +1,13 @@
 defmodule Cympho.AgentPromptTest do
   use Cympho.DataCase, async: false
 
+  import Ecto.Query
+
   alias Cympho.{
     AgentPrompt,
     AgentActions,
     AgentPromptContract,
+    Agents,
     Companies,
     Issues,
     Repo,
@@ -12,6 +15,7 @@ defmodule Cympho.AgentPromptTest do
   }
 
   alias Cympho.Comments
+  alias Cympho.Comments.Comment
   alias Cympho.HeartbeatEngine.Run
 
   setup do
@@ -67,6 +71,33 @@ defmodule Cympho.AgentPromptTest do
       # Engineer must be told governance actions are forbidden
       assert prompt =~ "approve_issue"
       assert prompt =~ "unauthorized_action"
+    end
+
+    test "business-function prompt has real playbook and artifact delivery contract", %{
+      issue: issue,
+      ceo: ceo
+    } do
+      {:ok, marketer} =
+        Agents.create_agent(%{
+          name: "Growth Marketer",
+          role: :marketer,
+          status: :idle,
+          parent_id: ceo.id,
+          company_id: ceo.company_id
+        })
+
+      prompt = AgentPrompt.build(issue, marketer.id)
+
+      assert prompt =~ "Your role: Marketer (marketer)"
+      assert prompt =~ "Own demand generation and market positioning"
+      assert prompt =~ "campaign plans"
+      assert prompt =~ "Allowed actions for your role (Marketer)"
+      assert prompt =~ "Produce reviewable business artifacts"
+      assert prompt =~ "Marketer artifact"
+      assert prompt =~ "attach_work_product"
+      assert prompt =~ "[delivery] What happened:"
+      refute prompt =~ "Pull request contract"
+      refute prompt =~ "Branch name must include the issue id"
     end
 
     test "CTO prompt lists direct reports", %{issue: issue, cto: cto, engineer: engineer} do
@@ -128,6 +159,17 @@ defmodule Cympho.AgentPromptTest do
       assert prompt =~ "code_change"
       assert prompt =~ "Treat your final response summary as run memory"
       assert prompt =~ "Avoid vague endings"
+      assert prompt =~ "`attach_work_product` has a strict schema"
+
+      assert prompt =~
+               "Valid `kind` values are `code_change`, `document`, `url`, `artifact`, or `other`"
+
+      assert prompt =~ "for strategy plans/specs, use `document`"
+      assert prompt =~ "If you include `payload`, it must be a JSON object"
+      assert prompt =~ "payload.text"
+      assert prompt =~ "Do not use `name` or `content` keys for work products"
+      assert prompt =~ "A run is incomplete if the current issue remains `in_progress`"
+      assert prompt =~ "Waiting for delegated sub-issues"
     end
 
     test "CEO and CTO prompts spell out their completion contracts", %{
@@ -142,11 +184,68 @@ defmodule Cympho.AgentPromptTest do
       assert ceo_prompt =~ "add `[owner_update] What happened:"
       assert ceo_prompt =~ "Business status: shipped/not shipped"
       assert ceo_prompt =~ "Owner decision needed"
+      assert ceo_prompt =~ "owner acceptance is required"
+      assert ceo_prompt =~ "owner requests a revision"
+      assert ceo_prompt =~ "do not repeat the prior update"
       assert cto_prompt =~ "technical decomposition and review"
       assert cto_prompt =~ "leave `[review] Verdict:"
       assert cto_prompt =~ "Gaps"
       assert cto_prompt =~ "Follow-up issues"
       assert cto_prompt =~ "Verification"
+    end
+
+    test "CEO prompt surfaces owner revision requests from the latest comments", %{
+      issue: issue,
+      ceo: ceo
+    } do
+      base_time =
+        DateTime.utc_now()
+        |> DateTime.add(-120, :second)
+        |> DateTime.truncate(:second)
+
+      for index <- 1..12 do
+        padded_index = index |> Integer.to_string() |> String.pad_leading(2, "0")
+
+        {:ok, comment} =
+          Comments.create_comment(%{
+            body: "[delivery] filler #{padded_index}",
+            author_type: "agent",
+            author_id: ceo.id,
+            issue_id: issue.id
+          })
+
+        timestamp = DateTime.add(base_time, index, :second)
+
+        Repo.update_all(
+          from(c in Comment, where: c.id == ^comment.id),
+          set: [inserted_at: timestamp, updated_at: timestamp]
+        )
+      end
+
+      {:ok, revision} =
+        Comments.create_comment(%{
+          body:
+            "[review] Verdict: changes requested. What happened: owner reopened the CEO verification update for revision. Verification: owner spotted a missing business decision. Gaps: revised CEO owner update required. Follow-up issues: none. Next decision: CEO revises the owner update.",
+          author_type: "user",
+          author_id: "owner-user",
+          issue_id: issue.id
+        })
+
+      revision_time = DateTime.add(base_time, 120, :second)
+
+      Repo.update_all(
+        from(c in Comment, where: c.id == ^revision.id),
+        set: [inserted_at: revision_time, updated_at: revision_time]
+      )
+
+      prompt = AgentPrompt.build(Issues.get_issue!(issue.id), ceo.id)
+
+      assert prompt =~ "Owner revision request"
+      assert prompt =~ "focused CEO revision"
+      assert prompt =~ "Do not repeat the previous owner update unchanged"
+      assert prompt =~ "owner reopened the CEO verification update for revision"
+      assert prompt =~ "[delivery] filler 12"
+      refute prompt =~ "[delivery] filler 01"
     end
 
     test "per-role examples produce summary fields consumed by the issue digest", %{
@@ -200,6 +299,8 @@ defmodule Cympho.AgentPromptTest do
       refute example =~ ~s("type": "submit_review")
       assert example =~ ~s("role": "product_manager")
       assert example =~ ~s("role": "cto")
+      assert example =~ ~s("type": "block_issue")
+      assert example =~ "waiting for delegated product and CTO sub-issues"
       assert example =~ "[owner_update]"
     end
 

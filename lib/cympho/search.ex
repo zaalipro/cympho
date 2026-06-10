@@ -55,13 +55,15 @@ defmodule Cympho.Search do
 
   def search_issues(query, opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
+    company_id = Keyword.get(opts, :company_id)
 
     from(i in Issue,
       where: fragment("search_vector @@ plainto_tsquery('english', ?)", ^query),
       order_by: fragment("ts_rank(search_vector, plainto_tsquery('english', ?)) DESC", ^query),
-      limit: ^limit,
       preload: [:comments, :blocked_by, :blocks, :assignee]
     )
+    |> maybe_scope_company(company_id)
+    |> limit(^limit)
     |> Repo.all()
   end
 
@@ -72,18 +74,21 @@ defmodule Cympho.Search do
   def search_all(query, filters \\ %{}, opts \\ []) do
     limit = Keyword.get(opts, :limit, 20)
     offset = Keyword.get(opts, :offset, 0)
+    company_id = Keyword.get(opts, :company_id)
+    opts = [limit: limit, offset: offset, company_id: company_id]
 
     %{
-      issues: search_issues_with_filters(query, filters, limit: limit, offset: offset),
-      agents: search_agents_with_filters(query, filters, limit: limit, offset: offset),
-      projects: search_projects_with_filters(query, filters, limit: limit, offset: offset),
-      goals: search_goals_with_filters(query, filters, limit: limit, offset: offset)
+      issues: search_issues_with_filters(query, filters, opts),
+      agents: search_agents_with_filters(query, filters, opts),
+      projects: search_projects_with_filters(query, filters, opts),
+      goals: search_goals_with_filters(query, filters, opts)
     }
   end
 
   defp search_issues_with_filters(query, filters, opts) do
     limit = Keyword.get(opts, :limit, 20)
     offset = Keyword.get(opts, :offset, 0)
+    company_id = Keyword.get(opts, :company_id)
 
     base_query =
       from(i in Issue,
@@ -93,6 +98,7 @@ defmodule Cympho.Search do
       )
 
     base_query
+    |> maybe_scope_company(company_id)
     |> apply_status_filter(filters["status"])
     |> apply_assignee_filter(filters["assignee_id"])
     |> apply_label_filter(filters["label_id"])
@@ -107,6 +113,7 @@ defmodule Cympho.Search do
   defp search_agents_with_filters(query, filters, opts) do
     limit = Keyword.get(opts, :limit, 20)
     offset = Keyword.get(opts, :offset, 0)
+    company_id = Keyword.get(opts, :company_id)
 
     base_query =
       from(a in Agent,
@@ -115,6 +122,7 @@ defmodule Cympho.Search do
       )
 
     base_query
+    |> maybe_scope_company(company_id)
     |> apply_agent_status_filter(filters["agent_status"])
     |> apply_role_filter(filters["role"])
     |> limit(^limit)
@@ -125,6 +133,7 @@ defmodule Cympho.Search do
   defp search_projects_with_filters(query, filters, opts) do
     limit = Keyword.get(opts, :limit, 20)
     offset = Keyword.get(opts, :offset, 0)
+    company_id = Keyword.get(opts, :company_id)
 
     base_query =
       from(p in Project,
@@ -133,6 +142,7 @@ defmodule Cympho.Search do
       )
 
     base_query
+    |> maybe_scope_company(company_id)
     |> apply_project_status_filter(filters["project_status"])
     |> limit(^limit)
     |> offset(^offset)
@@ -142,6 +152,7 @@ defmodule Cympho.Search do
   defp search_goals_with_filters(query, filters, opts) do
     limit = Keyword.get(opts, :limit, 20)
     offset = Keyword.get(opts, :offset, 0)
+    company_id = Keyword.get(opts, :company_id)
 
     base_query =
       from(g in Goal,
@@ -151,6 +162,7 @@ defmodule Cympho.Search do
       )
 
     base_query
+    |> maybe_scope_company(company_id)
     |> apply_goal_status_filter(filters["goal_status"])
     |> apply_goal_priority_filter(filters["goal_priority"])
     |> limit(^limit)
@@ -159,6 +171,13 @@ defmodule Cympho.Search do
   end
 
   # Filter functions
+
+  defp maybe_scope_company(query, nil), do: query
+  defp maybe_scope_company(query, ""), do: query
+
+  defp maybe_scope_company(query, company_id) do
+    from(q in query, where: q.company_id == ^company_id)
+  end
 
   defp apply_status_filter(query, nil), do: query
   defp apply_status_filter(query, ""), do: query

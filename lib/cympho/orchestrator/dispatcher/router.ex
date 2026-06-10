@@ -6,11 +6,28 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   selects the least-loaded eligible agent, and provides fallback chains.
   """
 
-  @strategic_keywords ~w[strategic vision funding market partnership acquisition ceo]
+  alias Cympho.Agents.Agent
+
+  @strategic_keywords ~w[strategic vision funding partnership acquisition ceo]
   @product_keywords ~w[product roadmap customer acceptance requirements priority prioritization pm]
-  @design_keywords ~w[ux ui interface workflow prototype usability research]
-  @technical_keywords ~w[technical architecture plan review refactor system infrastructure cto]
+  @design_keywords ~w[ux ui interface workflow prototype usability]
+  @technical_keywords ~w[technical architecture review refactor system infrastructure cto]
   @implementation_keywords ~w[implement build fix test code feature bug integration]
+  @research_keywords [
+    "research",
+    "market research",
+    "competitive",
+    "competitor",
+    "survey",
+    "interview",
+    "persona",
+    "analysis"
+  ]
+  @marketing_keywords ~w[marketing campaign positioning growth seo brand launch demand funnel]
+  @content_keywords ~w[content blog newsletter copy social tweet post article editorial caption]
+  @sales_keywords ~w[sales outreach lead prospect pipeline crm demo sequence]
+  @support_keywords ["support", "customer support", "helpdesk", "faq", "customer reply"]
+  @qa_keywords ["qa", "quality assurance", "regression", "smoke", "test plan", "acceptance test"]
   # Release-engineering work: branch coordination, merge mechanics, deploys,
   # tagging. Keep this BEFORE @implementation_keywords so a "deploy the auth
   # service" issue lands with the release engineer rather than a generic
@@ -21,14 +38,12 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   @doc """
   Infers the appropriate role for an issue based on keywords in title and description.
 
-  Returns `:ceo`, `:cto`, `:product_manager`, `:designer`, `:engineer`, or `:release_engineer`.
+  Returns a canonical agent role.
   """
-  @spec infer_role(map()) ::
-          :ceo | :cto | :product_manager | :designer | :engineer | :release_engineer
+  @spec infer_role(map()) :: atom()
   def infer_role(issue) do
     case assigned_role(issue) do
-      role
-      when role in [:ceo, :cto, :product_manager, :designer, :engineer, :release_engineer] ->
+      role when is_atom(role) and not is_nil(role) ->
         role
 
       _ ->
@@ -40,14 +55,19 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
     text = "#{field(issue, :title)} #{field(issue, :description) || ""}" |> String.downcase()
 
     # Matching order is routing priority. Strategic owner work stays with the
-    # CEO; technical platform words beat product/design words when both appear.
-    # Release keywords are checked before implementation keywords so explicit
-    # merge/deploy work doesn't fall to a generic engineer.
+    # CEO; QA-specific phrases beat generic "plan", and platform words beat
+    # product/design words when both appear.
     cond do
       matches_any?(text, @strategic_keywords) -> :ceo
+      matches_any?(text, @qa_keywords) -> :qa_engineer
       matches_any?(text, @technical_keywords) -> :cto
-      matches_any?(text, @product_keywords) -> :product_manager
       matches_any?(text, @design_keywords) -> :designer
+      matches_any?(text, @research_keywords) -> :researcher
+      matches_any?(text, @content_keywords) -> :content_strategist
+      matches_any?(text, @marketing_keywords) -> :marketer
+      matches_any?(text, @sales_keywords) -> :sales_development
+      matches_any?(text, @support_keywords) -> :customer_support
+      matches_any?(text, @product_keywords) -> :product_manager
       matches_any?(text, @release_keywords) -> :release_engineer
       matches_any?(text, @implementation_keywords) -> :engineer
       true -> :engineer
@@ -56,19 +76,11 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
 
   defp assigned_role(issue) do
     case field(issue, :assigned_role) do
-      role when is_atom(role) -> role
-      role when is_binary(role) -> role_to_atom(role)
+      role when is_atom(role) -> Agent.normalize_role(role)
+      role when is_binary(role) -> Agent.normalize_role(role)
       _ -> nil
     end
   end
-
-  defp role_to_atom("ceo"), do: :ceo
-  defp role_to_atom("cto"), do: :cto
-  defp role_to_atom("product_manager"), do: :product_manager
-  defp role_to_atom("designer"), do: :designer
-  defp role_to_atom("engineer"), do: :engineer
-  defp role_to_atom("release_engineer"), do: :release_engineer
-  defp role_to_atom(_), do: nil
 
   defp field(%{} = map, key), do: Map.get(map, key) || Map.get(map, Atom.to_string(key))
   defp field(_issue, _key), do: nil
@@ -79,9 +91,7 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
 
   Returns {:ok, agent} or {:error, :no_agent_available}.
   """
-  @spec select_agent(:ceo | :cto | :product_manager | :designer | :engineer, [
-          Cympho.Agents.Agent.t()
-        ]) ::
+  @spec select_agent(atom(), [Cympho.Agents.Agent.t()]) ::
           {:ok, Cympho.Agents.Agent.t()} | {:error, :no_agent_available}
   def select_agent(role, eligible_agents) do
     eligible_agents
@@ -109,20 +119,25 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   - `:cto` → [:ceo]
   - `:engineer` → [:cto, :ceo]
   """
-  @spec fallback_chain(:ceo | :cto | :product_manager | :designer | :engineer | :release_engineer) ::
-          [
-            :product_manager | :cto | :ceo | :engineer,
-            ...
-          ]
+  @spec fallback_chain(atom()) :: [atom()]
   def fallback_chain(:ceo), do: []
   def fallback_chain(:product_manager), do: [:ceo]
   def fallback_chain(:designer), do: [:product_manager, :ceo]
   def fallback_chain(:cto), do: [:ceo]
   def fallback_chain(:engineer), do: [:cto, :ceo]
+  def fallback_chain(:qa_engineer), do: [:engineer, :cto, :ceo]
+
+  def fallback_chain(role)
+      when role in [:researcher, :marketer, :content_strategist, :sales_development],
+      do: [:product_manager, :ceo]
+
+  def fallback_chain(:customer_support), do: [:product_manager, :ceo]
+
   # Release engineers fall back to a generic engineer (any engineer can do
   # the work in a pinch), then up the chain. CTO is the ultimate ownership
   # tier for technical work.
   def fallback_chain(:release_engineer), do: [:engineer, :cto, :ceo]
+  def fallback_chain(_role), do: [:cto, :ceo]
 
   defp matches_any?(text, keywords) do
     Enum.any?(keywords, fn keyword ->

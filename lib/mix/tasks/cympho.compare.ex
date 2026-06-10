@@ -18,6 +18,8 @@ defmodule Mix.Tasks.Cympho.Compare do
   use Mix.Task
 
   @switches [json: :boolean]
+  @json_log_level :emergency
+  @table_log_level :warning
 
   # Each feature row:
   #   :slug, :paperclip — the claim from their README
@@ -27,13 +29,14 @@ defmodule Mix.Tasks.Cympho.Compare do
     %{
       slug: "bring_your_own_agent",
       paperclip: "Any agent, any runtime, one org chart",
-      cympho: "Adapter behaviour: claude_code, codex, cursor, http, openclaw, process",
+      cympho:
+        "Adapter behaviour: claude_code, codex, cursor, http, openai_chat, openclaw, process",
       check: &__MODULE__.check_adapters/0
     },
     %{
       slug: "goal_alignment",
       paperclip: "Every task traces back to the company mission",
-      cympho: "Goals + Projects with ancestry links on Issue",
+      cympho: "Goals + Projects + dashboard alignment coverage",
       check: &__MODULE__.check_goals/0
     },
     %{
@@ -69,7 +72,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     %{
       slug: "org_chart",
       paperclip: "Hierarchies, roles, reporting lines",
-      cympho: "OrgChartLive + Agents.role/title/reporting_to",
+      cympho: "OrgChartLive + Agents hierarchy + OrgHealth diagnostics",
       check: &__MODULE__.check_org_chart/0
     },
     %{
@@ -82,19 +85,19 @@ defmodule Mix.Tasks.Cympho.Compare do
     %{
       slug: "plugins",
       paperclip: "Out-of-process plugin workers with capability gates",
-      cympho: "Plugins.Supervisor + capability-gated host services",
+      cympho: "Plugins.Supervisor + capability-gated host services + health diagnostics",
       check: &__MODULE__.check_plugins/0
     },
     %{
       slug: "workspaces",
       paperclip: "Isolated execution workspaces, dev servers, preview URLs",
-      cympho: "Workspaces context with exec-workspace, services, preview proxying",
+      cympho: "Workspaces context with execution health, services, probes, leases, previews",
       check: &__MODULE__.check_workspaces/0
     },
     %{
       slug: "routines_schedules",
       paperclip: "Recurring tasks with cron, webhook, and API triggers",
-      cympho: "Routines + RoutineTriggers + Quantum scheduler",
+      cympho: "Routines + RoutineTriggers + Quantum scheduler + health diagnostics",
       check: &__MODULE__.check_routines/0
     },
     %{
@@ -112,8 +115,15 @@ defmodule Mix.Tasks.Cympho.Compare do
     %{
       slug: "company_portability",
       paperclip: "Export/import orgs with secret scrubbing",
-      cympho: "Companies.export_company/1 + import_company/2",
+      cympho: "Companies.export_company/1 + import_company/2 + non-secret secret manifest",
       check: &__MODULE__.check_portability/0
+    },
+    %{
+      slug: "company_blueprints",
+      paperclip: "16 pre-built companies with specialized agents and skills",
+      cympho:
+        "Executable onboarding/CLI company blueprints that create agents, goals, projects, and seed issues",
+      check: &__MODULE__.check_company_blueprints/0
     },
     # ---- Cympho-exclusive differentiators (Paperclip README does not mention) ----
     %{
@@ -168,35 +178,64 @@ defmodule Mix.Tasks.Cympho.Compare do
   @impl Mix.Task
   def run(argv) do
     {opts, _, _} = OptionParser.parse(argv, strict: @switches)
+    json? = Keyword.get(opts, :json, false)
 
-    # `app.start` boots the full OTP tree (Repo, supervisors, scheduler,
-    # adapters), which we need for Process.whereis/1 checks below.
-    Mix.Task.run("app.start", [])
+    gaps =
+      with_compare_log_level(json?, fn ->
+        # `app.start` boots the full OTP tree (Repo, supervisors, scheduler,
+        # adapters), which we need for Process.whereis/1 checks below.
+        Mix.Task.run("app.start", [])
 
-    results =
-      Enum.map(@features, fn feature ->
-        {verdict, evidence} =
-          try do
-            feature.check.()
-          rescue
-            e -> {:gap, "check raised: #{Exception.message(e)}"}
-          end
+        results =
+          Enum.map(@features, fn feature ->
+            {verdict, evidence} =
+              try do
+                feature.check.()
+              rescue
+                e -> {:gap, "check raised: #{Exception.message(e)}"}
+              end
 
-        Map.merge(feature, %{verdict: verdict, evidence: evidence})
+            Map.merge(feature, %{verdict: verdict, evidence: evidence})
+          end)
+
+        if json? do
+          results
+          |> Enum.map(&Map.drop(&1, [:check]))
+          |> Jason.encode_to_iodata!(pretty: true)
+          |> IO.puts()
+        else
+          print_table(results)
+        end
+
+        Enum.count(results, &(&1.verdict == :gap))
       end)
 
-    if opts[:json] do
-      results
-      |> Enum.map(&Map.drop(&1, [:check]))
-      |> Jason.encode_to_iodata!(pretty: true)
-      |> IO.puts()
-    else
-      print_table(results)
-    end
-
-    gaps = Enum.count(results, &(&1.verdict == :gap))
     if gaps > 0, do: System.at_exit(fn _ -> exit({:shutdown, 1}) end)
   end
+
+  defp with_compare_log_level(json?, fun) do
+    previous_level = Logger.level()
+    previous_repo_config = Application.get_env(:cympho, Cympho.Repo)
+
+    Logger.configure(level: if(json?, do: @json_log_level, else: @table_log_level))
+    silence_repo_query_logging()
+
+    try do
+      fun.()
+    after
+      Logger.flush()
+      restore_repo_config(previous_repo_config)
+      Logger.configure(level: previous_level)
+    end
+  end
+
+  defp silence_repo_query_logging do
+    repo_config = Application.get_env(:cympho, Cympho.Repo, [])
+    Application.put_env(:cympho, Cympho.Repo, Keyword.put(repo_config, :log, false))
+  end
+
+  defp restore_repo_config(nil), do: Application.delete_env(:cympho, Cympho.Repo)
+  defp restore_repo_config(config), do: Application.put_env(:cympho, Cympho.Repo, config)
 
   defp print_table(results) do
     counts = Enum.frequencies_by(results, & &1.verdict)
@@ -256,14 +295,14 @@ defmodule Mix.Tasks.Cympho.Compare do
   # ---- Checks. Each returns {:parity | :exceeds | :gap, evidence_string} ----
 
   def check_adapters do
-    expected = ~w(claude_code codex cursor http openclaw process)a
+    expected = ~w(claude_code codex cursor http openai_chat openclaw process)a
     registered = Cympho.Adapters.Registry.all_types()
     present = Enum.filter(expected, &(&1 in registered))
 
     cond do
       length(present) == length(expected) ->
         {:exceeds,
-         "#{length(registered)} registered adapter types (#{Enum.join(registered, ", ")}) — Paperclip lists 6, Cympho has all 6 plus agrenting"}
+         "#{length(registered)} registered adapter types (#{Enum.join(registered, ", ")}) — Paperclip lists 6, Cympho covers those and adds openai_chat plus agrenting"}
 
       length(present) > 0 ->
         {:gap, "only #{length(present)}/#{length(expected)} adapters registered"}
@@ -276,10 +315,21 @@ defmodule Mix.Tasks.Cympho.Compare do
   end
 
   def check_goals do
-    if module_with_fun?(Cympho.Goals, :list_goals, 0) and
-         module_with_fun?(Cympho.Projects, :list_projects, 0),
-       do: {:parity, "Cympho.Goals + Cympho.Projects present"},
-       else: {:gap, "Goals or Projects context missing"}
+    has_goals = module_with_fun?(Cympho.Goals, :list_goals, 0)
+    has_projects = module_with_fun?(Cympho.Projects, :list_projects, 0)
+    has_alignment = module_with_fun?(Cympho.Goals, :alignment_summary, 2)
+
+    cond do
+      has_goals and has_projects and has_alignment ->
+        {:exceeds,
+         "Goals/projects plus owner-visible alignment coverage for floating work and idle goals"}
+
+      has_goals and has_projects ->
+        {:parity, "Cympho.Goals + Cympho.Projects present"}
+
+      true ->
+        {:gap, "Goals or Projects context missing"}
+    end
   end
 
   def check_heartbeats do
@@ -302,10 +352,22 @@ defmodule Mix.Tasks.Cympho.Compare do
   end
 
   def check_budgets do
-    if module_with_fun?(Cympho.Budgets, :__info__, 1) and
-         module_with_fun?(Cympho.Finances, :__info__, 1),
-       do: {:parity, "Budgets + Finances contexts present"},
-       else: {:gap, "Budget contexts missing"}
+    has_budgets = module_with_fun?(Cympho.Budgets, :__info__, 1)
+    has_finances = module_with_fun?(Cympho.Finances, :__info__, 1)
+    has_posture = module_with_fun?(Cympho.Costs, :spend_posture, 2)
+    has_period = module_with_fun?(Cympho.Costs, :spend_period, 1)
+
+    cond do
+      has_budgets and has_finances and has_posture and has_period ->
+        {:exceeds,
+         "Budgets + Finances hard stops plus owner-visible spend posture, remaining budget, and incident-aware warnings"}
+
+      has_budgets and has_finances ->
+        {:parity, "Budgets + Finances contexts present"}
+
+      true ->
+        {:gap, "Budget contexts missing"}
+    end
   end
 
   def check_multi_company do
@@ -318,30 +380,61 @@ defmodule Mix.Tasks.Cympho.Compare do
   end
 
   def check_issues do
-    if module_with_fun?(Cympho.Issues, :__info__, 1) and
-         module_with_fun?(Cympho.Issues.StateMachine, :__info__, 1) and
-         module_with_fun?(Cympho.Inbox, :__info__, 1),
-       do: {:parity, "Issues + StateMachine + Inbox present"},
-       else: {:gap, "Issue subsystem incomplete"}
+    has_issues = module_with_fun?(Cympho.Issues, :__info__, 1)
+    has_state_machine = module_with_fun?(Cympho.Issues.StateMachine, :__info__, 1)
+    has_inbox = module_with_fun?(Cympho.Inbox, :__info__, 1)
+    has_digest = module_with_fun?(Cympho.IssueDigest, :build, 5)
+    has_memory = module_with_fun?(Cympho.IssueMemory, :handoff_packet, 5)
+
+    cond do
+      has_issues and has_state_machine and has_inbox and has_digest and has_memory ->
+        {:exceeds,
+         "Issues + StateMachine + Inbox plus deterministic executive digests and copyable issue-memory handoff packets"}
+
+      has_issues and has_state_machine and has_inbox ->
+        {:parity, "Issues + StateMachine + Inbox present"}
+
+      true ->
+        {:gap, "Issue subsystem incomplete"}
+    end
   end
 
   def check_governance do
     has_decisions = module_with_fun?(Cympho.Decisions, :__info__, 1)
     has_board = module_with_fun?(Cympho.BoardApprovals, :__info__, 1)
     has_audit = module_with_fun?(Cympho.GovernanceAuditLogs, :__info__, 1)
+    has_risk = module_with_fun?(Cympho.GovernanceRisk, :approval_brief, 1)
 
-    if has_decisions and has_board and has_audit,
-      do: {:parity, "BoardApprovals + Decisions + GovernanceAuditLogs"},
-      else:
+    cond do
+      has_decisions and has_board and has_audit and has_risk ->
+        {:exceeds,
+         "BoardApprovals + Decisions + GovernanceAuditLogs plus owner-facing governance risk briefs for deadlines, split votes, missing votes, thresholds, and audit coverage"}
+
+      has_decisions and has_board and has_audit ->
+        {:parity, "BoardApprovals + Decisions + GovernanceAuditLogs"}
+
+      true ->
         {:gap,
          "Governance missing: board=#{has_board} decisions=#{has_decisions} audit=#{has_audit}"}
+    end
   end
 
   def check_org_chart do
-    if module_with_fun?(CymphoWeb.OrgChartLive, :__info__, 1) and
-         module_with_fun?(Cympho.Agents, :__info__, 1),
-       do: {:parity, "OrgChartLive + Agents context"},
-       else: {:gap, "Org chart UI missing"}
+    has_ui = module_with_fun?(CymphoWeb.OrgChartLive, :__info__, 1)
+    has_agents = module_with_fun?(Cympho.Agents, :__info__, 1)
+    has_health = module_with_fun?(Cympho.OrgHealth, :snapshot, 1)
+
+    cond do
+      has_ui and has_agents and has_health ->
+        {:exceeds,
+         "OrgChartLive + Agents hierarchy plus org health diagnostics for leadership coverage, detached reports, manager span, inactive agents, and adapter health"}
+
+      has_ui and has_agents ->
+        {:parity, "OrgChartLive + Agents context"}
+
+      true ->
+        {:gap, "Org chart UI missing"}
+    end
   end
 
   def check_tool_traces do
@@ -355,9 +448,14 @@ defmodule Mix.Tasks.Cympho.Compare do
   def check_plugins do
     has_ctx = module_with_fun?(Cympho.Plugins, :__info__, 1)
     has_sup = module_with_fun?(Cympho.Plugins.Supervisor, :__info__, 1)
+    has_health = module_with_fun?(Cympho.Plugins, :health_summary, 1)
     running? = Process.whereis(Cympho.Plugins.Supervisor) != nil
 
     cond do
+      has_ctx and has_sup and has_health ->
+        {:exceeds,
+         "Plugins context + supervisor plus owner-visible plugin health for capability gaps, manifest errors, recent error logs, failing webhooks, and supervisor availability"}
+
       has_ctx and has_sup and running? ->
         {:parity, "Plugins context + supervisor running"}
 
@@ -370,18 +468,35 @@ defmodule Mix.Tasks.Cympho.Compare do
   end
 
   def check_workspaces do
-    if module_with_fun?(Cympho.Workspaces, :__info__, 1),
-      do: {:parity, "Workspaces context present"},
-      else: {:gap, "Workspaces missing"}
+    has_context = module_with_fun?(Cympho.Workspaces, :__info__, 1)
+    has_health = module_with_fun?(Cympho.Workspaces, :health_summary, 1)
+    has_preview = module_with_fun?(Cympho.Workspaces.PreviewUrl, :generate_preview_url, 2)
+
+    cond do
+      has_context and has_health and has_preview ->
+        {:exceeds,
+         "Workspaces context plus owner-visible execution health for stale workspaces, runtime services, preview gaps, expiring leases, and failed probes"}
+
+      has_context ->
+        {:parity, "Workspaces context present"}
+
+      true ->
+        {:gap, "Workspaces missing"}
+    end
   end
 
   def check_routines do
     has_routines = module_with_fun?(Cympho.Routines, :__info__, 1)
     has_triggers = module_with_fun?(Cympho.RoutineTriggers, :__info__, 1)
     has_scheduler_mod = module_with_fun?(Cympho.Scheduler, :__info__, 1)
+    has_health = module_with_fun?(Cympho.Routines, :health_summary, 1)
     quantum_running? = Process.whereis(Cympho.Scheduler) != nil
 
     cond do
+      has_routines and has_triggers and has_scheduler_mod and has_health ->
+        {:exceeds,
+         "Routines + Triggers + Quantum scheduling plus owner-visible health diagnostics for trigger gaps, stale runs, paused work, and recent failures"}
+
       has_routines and has_triggers and quantum_running? ->
         {:parity, "Routines + Triggers + Quantum scheduler running"}
 
@@ -395,9 +510,21 @@ defmodule Mix.Tasks.Cympho.Compare do
   end
 
   def check_secrets do
-    if module_with_fun?(Cympho.Secrets, :__info__, 1),
-      do: {:parity, "Secrets context present"},
-      else: {:gap, "Secrets missing"}
+    has_context = module_with_fun?(Cympho.Secrets, :__info__, 1)
+    has_rotation = module_with_fun?(Cympho.Secrets, :rotation_summary, 2)
+    has_versions = module_with_fun?(Cympho.Secrets, :list_secret_versions, 1)
+
+    cond do
+      has_context and has_rotation and has_versions ->
+        {:exceeds,
+         "Encrypted scoped secrets with version history and non-secret rotation posture"}
+
+      has_context ->
+        {:parity, "Secrets context present"}
+
+      true ->
+        {:gap, "Secrets missing"}
+    end
   end
 
   def check_activities do
@@ -417,10 +544,74 @@ defmodule Mix.Tasks.Cympho.Compare do
   end
 
   def check_portability do
-    if module_with_fun?(Cympho.Companies, :export_company, 1) and
-         module_with_fun?(Cympho.Companies, :import_company, 2),
-       do: {:parity, "Companies.export_company/1 + import_company/2"},
-       else: {:gap, "Company portability missing"}
+    has_export = module_with_fun?(Cympho.Companies, :export_company, 1)
+    has_import = module_with_fun?(Cympho.Companies, :import_company, 2)
+    has_manifest = module_with_fun?(Cympho.Companies, :export_secret_manifest, 1)
+
+    cond do
+      has_export and has_import and has_manifest ->
+        {:exceeds,
+         "Companies export/import plus a non-secret secret manifest and remapped post-import restore checklist for omitted credentials"}
+
+      has_export and has_import ->
+        {:parity, "Companies.export_company/1 + import_company/2"}
+
+      true ->
+        {:gap, "Company portability missing"}
+    end
+  end
+
+  def check_company_blueprints do
+    has_list = module_with_fun?(Cympho.Companies, :autonomous_company_blueprints, 0)
+    has_create = module_with_fun?(Cympho.Companies, :create_autonomous_company, 1)
+    paperclip_blueprint_count = 16
+
+    expected_keys = ~w(
+      software
+      go_to_market
+      product_discovery
+      support_ops
+      content_studio
+      sales_pipeline
+      research_lab
+      qa_release
+      agency_delivery
+      community_growth
+      security_compliance
+      data_insights
+      finance_ops
+      devtools_platform
+      incident_response
+      partnerships
+      training_academy
+    )
+
+    blueprints =
+      if has_list do
+        Cympho.Companies.autonomous_company_blueprints()
+      else
+        []
+      end
+
+    keys = Enum.map(blueprints, & &1.key)
+
+    cond do
+      has_list and has_create and length(blueprints) > paperclip_blueprint_count and
+          Enum.all?(expected_keys, &(&1 in keys)) ->
+        {:exceeds,
+         "#{length(blueprints)} executable company blueprints exceed Paperclip's 16 pre-built-company catalog and create live orgs, goals, projects, agents, and seed work through onboarding plus CLI"}
+
+      has_list and has_create and length(blueprints) >= length(expected_keys) and
+          Enum.all?(expected_keys, &(&1 in keys)) ->
+        {:parity,
+         "#{length(blueprints)} executable company blueprints create live orgs, goals, projects, and seed work through onboarding plus CLI"}
+
+      has_list and has_create and blueprints != [] ->
+        {:parity, "#{length(blueprints)} company blueprints available"}
+
+      true ->
+        {:gap, "Company blueprint bootstrap missing"}
+    end
   end
 
   def check_decisions do

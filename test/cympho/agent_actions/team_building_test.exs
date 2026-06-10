@@ -53,6 +53,26 @@ defmodule Cympho.AgentActions.TeamBuildingTest do
       Cympho.AgentHeartbeat.stop_for_agent(new_id)
     end
 
+    test "CEO can hire a marketer for business-function work", %{ceo: ceo, issue: issue} do
+      actions = [
+        %{
+          "type" => "spawn_agent",
+          "name" => "Growth Marketer",
+          "role" => "marketing"
+        }
+      ]
+
+      assert {:ok, %{results: [%{type: "spawn_agent", agent_id: new_id, role: "marketer"}]}} =
+               AgentActions.execute(issue, ceo, actions)
+
+      {:ok, hired} = Agents.get_agent(new_id)
+      assert hired.role == :marketer
+      assert hired.title == "Marketer"
+      assert hired.parent_id == ceo.id
+
+      Cympho.AgentHeartbeat.stop_for_agent(new_id)
+    end
+
     test "engineer cannot spawn an agent", %{engineer: engineer, issue: issue} do
       # Re-checkout the issue to the engineer to satisfy unresolved_current_issue?
       {:ok, _} = Issues.force_release_issue(issue, :todo)

@@ -12,11 +12,81 @@
       </.app_link>
     </:actions>
     <span class={"px-3 py-1 rounded-lg text-xs font-510 border #{status_badge(@approval.status)}"}>
-      String.upcase(@approval.status)
+      {String.upcase(@approval.status)}
     </span>
   </.header>
 
   <div class="mt-6 space-y-6">
+    <section
+      data-testid="governance-risk-brief"
+      class="rounded-lg border border-border bg-subtle p-6"
+    >
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="text-sm font-590 text-text-primary">Governance Risk Brief</h3>
+            <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{risk_badge(@governance_risk.level)}"}>
+              {@governance_risk.label}
+            </span>
+          </div>
+          <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
+            {@governance_risk.summary}
+          </p>
+          <p class="mt-2 text-xs font-510 text-text-primary">
+            {@governance_risk.next_action}
+          </p>
+        </div>
+        <div class="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:min-w-[240px]">
+          <div class="bg-panel px-3 py-2 text-center">
+            <p class="font-mono text-[18px] font-590 leading-none text-emerald-300">
+              {@governance_risk.metrics.approve_votes}
+            </p>
+            <p class="mt-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
+              Approve
+            </p>
+          </div>
+          <div class="bg-panel px-3 py-2 text-center">
+            <p class="font-mono text-[18px] font-590 leading-none text-red-300">
+              {@governance_risk.metrics.deny_votes}
+            </p>
+            <p class="mt-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
+              Deny
+            </p>
+          </div>
+          <div class="bg-panel px-3 py-2 text-center">
+            <p class="font-mono text-[18px] font-590 leading-none text-amber-300">
+              {@governance_risk.metrics.missing_votes}
+            </p>
+            <p class="mt-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
+              Missing
+            </p>
+          </div>
+          <div class="bg-panel px-3 py-2 text-center">
+            <p class="font-mono text-[18px] font-590 leading-none text-blue-300">
+              {@governance_risk.metrics.audit_events}
+            </p>
+            <p class="mt-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
+              Audit
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 grid gap-2 lg:grid-cols-2">
+        <div
+          :for={signal <- @governance_risk.signals}
+          class={"rounded-md border px-3 py-2 #{signal_class(signal.tone)}"}
+        >
+          <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
+            {signal.label}
+          </p>
+          <p class="mt-1 text-xs leading-5 opacity-85">
+            {signal.detail}
+          </p>
+        </div>
+      </div>
+    </section>
+
     <div class="bg-subtle border border-border rounded-lg p-6">
       <h3 class="font-serif text-sm font-510 text-text-secondary mb-2">Description</h3>
       <p class="text-text-primary">{@approval.description}</p>

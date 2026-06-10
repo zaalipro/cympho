@@ -368,23 +368,27 @@ defmodule Cympho.Agents do
 
   @doc """
   Role hierarchy rank: higher rank = more authority.
-  Order: designer(1) < product_manager(2) < engineer(3) < cto(4) < ceo(5)
+  Delivery roles sit below CTO/CEO and cannot perform governance actions.
   """
-  @spec role_rank(:designer | :product_manager | :engineer | :release_engineer | :cto | :ceo) ::
-          non_neg_integer()
-  def role_rank(:designer), do: 1
+  @spec role_rank(atom()) :: non_neg_integer()
   def role_rank(:product_manager), do: 2
   def role_rank(:engineer), do: 3
   def role_rank(:release_engineer), do: 3
+  def role_rank(:qa_engineer), do: 3
   def role_rank(:cto), do: 4
   def role_rank(:ceo), do: 5
+
+  def role_rank(role) when role in [:designer, :researcher, :marketer, :content_strategist],
+    do: 1
+
+  def role_rank(role) when role in [:sales_development, :customer_support], do: 1
+  def role_rank(_), do: 0
 
   @doc """
   Returns true if parent_agent can spawn an agent with child_role.
   Parent must have role_rank >= child_rank (allows peer spawning for redundancy).
   """
-  @spec spawn_authorized?(Agent.t(), :designer | :product_manager | :engineer | :cto | :ceo) ::
-          boolean()
+  @spec spawn_authorized?(Agent.t(), atom()) :: boolean()
   def spawn_authorized?(%Agent{} = parent_agent, child_role) do
     role_rank(parent_agent.role) >= role_rank(child_role)
   end
@@ -392,14 +396,11 @@ defmodule Cympho.Agents do
   @doc """
   Returns the list of roles that the given agent is authorized to spawn.
   """
-  @spec spawnable_roles(Agent.t()) :: [
-          :designer | :product_manager | :engineer | :cto | :ceo,
-          ...
-        ]
+  @spec spawnable_roles(Agent.t()) :: [atom()]
   def spawnable_roles(%Agent{} = parent_agent) do
     parent_rank = role_rank(parent_agent.role)
 
-    [:designer, :product_manager, :engineer, :cto, :ceo]
+    Agent.role_options()
     |> Enum.filter(fn role -> role_rank(role) <= parent_rank end)
   end
 

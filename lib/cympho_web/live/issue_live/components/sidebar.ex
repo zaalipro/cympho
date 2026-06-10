@@ -10,15 +10,18 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
 
   Events (`combobox_status`, `combobox_priority`, `combobox_assignee`,
   `toggle_agent_panel`, `release_issue`, `spawn_agent`,
-  `update_github_pr_number`, `check_github_pr_quality`,
-  `queue_contract_nudge`, `clear_github_pr_number`) bubble to the
+  `prioritize_dispatch`, `prepare_relaunch`, `update_github_pr_number`,
+  `check_github_pr_quality`, `queue_contract_nudge`, `clear_github_pr_number`) bubble to the
   parent LiveView.
   """
   use CymphoWeb, :html
 
   import CymphoWeb.IssueLive.Show.Helpers
 
+  alias Cympho.IssueDigest
+
   attr :issue, :map, required: true
+  attr :runs, :list, default: []
   attr :all_agents, :list, default: []
   attr :orchestrator_enabled?, :boolean, default: false
   attr :show_agent_panel, :boolean, default: false
@@ -26,6 +29,24 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
   attr :documents, :list, default: []
 
   def sidebar(assigns) do
+    ceo_launch_preview = ceo_launch_preview(assigns.issue, assigns.orchestrator_enabled?)
+    ceo_outcome_card = ceo_outcome_card(assigns.issue, assigns.runs, assigns.all_agents)
+
+    assigns =
+      assigns
+      |> assign(:ceo_launch_preview, ceo_launch_preview)
+      |> assign(:ceo_outcome_card, ceo_outcome_card)
+      |> assign(
+        :ceo_flow_steps,
+        ceo_flow_steps(
+          assigns.issue,
+          assigns.runs,
+          assigns.all_agents,
+          ceo_launch_preview,
+          ceo_outcome_card
+        )
+      )
+
     ~H"""
     <aside class="w-full lg:w-[280px] shrink-0 border-t lg:border-t-0 lg:border-l border-hairline bg-surface-1/40">
       <div class="p-4 lg:p-5 space-y-4 lg:sticky lg:top-0 lg:max-h-screen lg:overflow-y-auto">
@@ -77,9 +98,79 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
         <hr class="border-hairline" />
 
         <div id="issue-agent-panel" class="space-y-2">
-          <p :if={!@orchestrator_enabled?} class="text-caption text-ink-tertiary">
-            Agent execution is disabled for review mode.
-          </p>
+          <div
+            :if={!@orchestrator_enabled?}
+            class="rounded-md border border-amber-500/25 bg-amber-500/10 p-2 text-caption text-amber-100"
+          >
+            <p>
+              Review mode is on. Restart the server with
+              <code class="rounded bg-black/20 px-1 py-0.5 text-[11px] text-amber-50">
+                CYMPHO_ORCHESTRATOR_ENABLED=1
+              </code>
+              to run agents.
+            </p>
+            <.app_link
+              navigate={~p"/operations#runtime-services"}
+              class="mt-1 inline-flex text-amber-50 underline underline-offset-2"
+            >
+              Open runtime services
+            </.app_link>
+            <div
+              :if={focused_runtime_command(@issue)}
+              id={"issue-focused-runtime-command-#{@issue.id}"}
+              phx-hook="CopyToClipboard"
+              class="mt-2 rounded border border-amber-500/20 bg-black/15 p-2"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-200">
+                  Focus this issue
+                </p>
+                <button
+                  type="button"
+                  data-copy-text={focused_runtime_command(@issue)}
+                  data-copy-label="Copy command"
+                  data-copy-success-label="Copied"
+                  class="rounded border border-amber-500/25 bg-black/15 px-2 py-1 text-[10px] font-510 text-amber-50 transition hover:bg-amber-500/15"
+                >
+                  Copy command
+                </button>
+              </div>
+              <code class="mt-1 block overflow-x-auto font-mono text-[10px] leading-4 text-amber-50">
+                {focused_runtime_command(@issue)}
+              </code>
+            </div>
+          </div>
+          <div
+            :if={dispatchable_issue?(@issue)}
+            class="rounded-md border border-hairline bg-surface-1/55 p-2"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-tertiary">
+                Dispatch focus
+              </p>
+              <span
+                :if={dispatch_pinned?(@issue)}
+                class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 text-amber-200"
+              >
+                Operator focus active
+              </span>
+            </div>
+            <div class="mt-2">
+              <.button type="button" phx-click="prioritize_dispatch" size="sm" variant="secondary">
+                Prioritize for next dispatch
+              </.button>
+              <.button
+                :if={dispatch_pinned?(@issue)}
+                type="button"
+                phx-click="clear_dispatch_focus"
+                size="sm"
+                variant="secondary"
+                class="mt-2"
+              >
+                Clear focus
+              </.button>
+            </div>
+          </div>
           <div class="flex items-center gap-2">
             <.button
               type="button"
@@ -116,6 +207,283 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
               <.button type="submit" size="sm">Start agent</.button>
             </form>
           </div>
+        </div>
+
+        <div
+          :if={@ceo_flow_steps != []}
+          id="issue-ceo-flow"
+          class="rounded-md border border-hairline bg-surface-1/55 p-3"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-eyebrow text-ink-tertiary uppercase">CEO flow</p>
+              <p class="mt-1 text-sm font-510 text-ink">Owner request loop</p>
+            </div>
+            <span class="shrink-0 rounded-full border border-border bg-panel px-2 py-0.5 text-[10px] font-510 uppercase text-ink-tertiary">
+              Live state
+            </span>
+          </div>
+          <ol class="mt-3 space-y-2">
+            <li :for={step <- @ceo_flow_steps} class="flex gap-2">
+              <span class={ceo_flow_step_dot_class(step.status)}>{step.index}</span>
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="text-caption font-510 text-ink">{step.title}</p>
+                  <span class={ceo_flow_step_badge_class(step.status)}>{step.status_label}</span>
+                </div>
+                <p class="mt-0.5 text-[11px] leading-4 text-ink-tertiary">{step.detail}</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+
+        <div
+          :if={@ceo_launch_preview}
+          id="issue-ceo-launch-preview"
+          phx-hook="CopyToClipboard"
+          class="rounded-md border border-hairline bg-surface-1/55 p-3"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-eyebrow text-ink-tertiary uppercase">CEO launch preview</p>
+              <p class="mt-1 text-sm font-510 text-ink">{@ceo_launch_preview.target}</p>
+            </div>
+            <span class="shrink-0 rounded-full border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-sky-200">
+              Local dry-run
+            </span>
+          </div>
+          <dl class="mt-3 space-y-2 text-caption">
+            <div class="grid grid-cols-[72px_1fr] gap-2">
+              <dt class="text-ink-tertiary">Preflight</dt>
+              <dd class="text-ink-muted">
+                <span class="font-510 text-ink">{@ceo_launch_preview.preflight_label}</span>
+                · {@ceo_launch_preview.preflight_summary}
+              </dd>
+            </div>
+            <div class="grid grid-cols-[72px_1fr] gap-2">
+              <dt class="text-ink-tertiary">Launch</dt>
+              <dd class="text-ink-muted">{@ceo_launch_preview.launch_mode}</dd>
+            </div>
+            <div class="grid grid-cols-[72px_1fr] gap-2">
+              <dt class="text-ink-tertiary">First turn</dt>
+              <dd class="text-ink-muted">
+                {@ceo_launch_preview.first_turn}
+              </dd>
+            </div>
+          </dl>
+          <div
+            :if={@ceo_launch_preview.first_action}
+            class="mt-3 rounded border border-amber-500/25 bg-amber-500/10 px-2 py-2 text-caption"
+          >
+            <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-200">
+              Next setup action
+            </p>
+            <p class="mt-1 leading-4 text-amber-100">
+              <span class="font-510">{item_value(@ceo_launch_preview.first_action, :label)}:</span>
+              {item_value(@ceo_launch_preview.first_action, :detail)}
+            </p>
+            <.app_link
+              :if={item_value(@ceo_launch_preview.first_action, :target_path)}
+              navigate={item_value(@ceo_launch_preview.first_action, :target_path)}
+              class="mt-1 inline-flex text-amber-50 underline underline-offset-2"
+            >
+              {item_value(@ceo_launch_preview.first_action, :target_label) || "Fix setup"}
+            </.app_link>
+          </div>
+          <p class="mt-3 rounded border border-hairline bg-canvas px-2 py-2 text-caption text-ink-muted">
+            No provider call. This preview only reads routing, preflight, and issue state.
+          </p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-copy-text={@ceo_launch_preview.brief}
+              data-copy-label="Copy CEO brief"
+              data-copy-success-label="Copied"
+              class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+            >
+              Copy CEO brief
+            </button>
+            <button
+              type="button"
+              phx-click="use_comment_template"
+              phx-value-template="owner_update"
+              class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+            >
+              Draft owner update
+            </button>
+            <button
+              type="button"
+              phx-click="use_comment_template"
+              phx-value-template="handoff"
+              class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+            >
+              Draft handoff
+            </button>
+          </div>
+        </div>
+
+        <div
+          :if={@ceo_outcome_card}
+          id="issue-ceo-outcome-card"
+          class="rounded-md border border-hairline bg-surface-1/55 p-3"
+        >
+          <% relaunch_setup_action = relaunch_setup_action(@issue, @orchestrator_enabled?) %>
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-eyebrow text-ink-tertiary uppercase">CEO outcome</p>
+              <p class="mt-1 text-sm font-510 text-ink">{@ceo_outcome_card.title}</p>
+              <p class="mt-1 text-caption text-ink-tertiary">{@ceo_outcome_card.detail}</p>
+            </div>
+            <span class={ceo_outcome_card_class(@ceo_outcome_card.status)}>
+              {@ceo_outcome_card.status_label}
+            </span>
+          </div>
+          <p class="mt-3 rounded border border-hairline bg-canvas px-2 py-2 text-caption text-ink-muted">
+            {@ceo_outcome_card.next}
+          </p>
+          <div
+            :if={@ceo_outcome_card.status == :attention && focused_runtime_command(@issue)}
+            id={"issue-ceo-outcome-focused-command-#{@issue.id}"}
+            phx-hook="CopyToClipboard"
+            class="mt-2 rounded border border-amber-500/20 bg-amber-500/[0.06] px-2 py-2"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-200">
+                Focused relaunch command
+              </p>
+              <button
+                type="button"
+                data-copy-text={focused_runtime_command(@issue)}
+                data-copy-label="Copy command"
+                data-copy-success-label="Copied"
+                class="rounded border border-amber-500/25 bg-black/15 px-2 py-1 text-[10px] font-510 text-amber-50 transition hover:bg-amber-500/15"
+              >
+                Copy command
+              </button>
+            </div>
+            <p class="mt-1 text-[11px] leading-4 text-amber-100">
+              Fix the feedback above, then restart runtime focused on this issue.
+            </p>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                :if={!dispatch_pinned?(@issue)}
+                type="button"
+                phx-click="prepare_relaunch"
+                class="rounded border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[10px] font-510 text-amber-50 transition hover:bg-amber-500/15"
+              >
+                {relaunch_focus_button_label(@issue)}
+              </button>
+              <span
+                :if={dispatch_pinned?(@issue)}
+                class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-amber-200"
+              >
+                Relaunch focus queued
+              </span>
+            </div>
+            <div
+              :if={relaunch_setup_action}
+              class="mt-2 rounded border border-amber-500/20 bg-black/10 px-2 py-2 text-caption"
+            >
+              <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-200">
+                Setup still needs
+              </p>
+              <p class="mt-1 leading-4 text-amber-100">
+                <span class="font-510">{item_value(relaunch_setup_action, :label)}:</span>
+                {item_value(relaunch_setup_action, :detail)}
+              </p>
+              <.app_link
+                :if={item_value(relaunch_setup_action, :target_path)}
+                navigate={item_value(relaunch_setup_action, :target_path)}
+                class="mt-1 inline-flex text-amber-50 underline underline-offset-2"
+              >
+                {item_value(relaunch_setup_action, :target_label) || "Fix setup"}
+              </.app_link>
+            </div>
+            <code class="mt-1 block overflow-x-auto font-mono text-[10px] leading-4 text-amber-50">
+              {focused_runtime_command(@issue)}
+            </code>
+          </div>
+          <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-caption">
+            <span class="text-ink-tertiary">{@ceo_outcome_card.timestamp_label}</span>
+            <.app_link
+              navigate="/operations#ceo-outcome-monitor"
+              class="font-510 text-primary hover:underline"
+            >
+              Open Operations monitor
+            </.app_link>
+          </div>
+        </div>
+
+        <div
+          :if={assigned_agent(@issue)}
+          class="rounded-md border border-hairline bg-surface-1/55 p-3"
+        >
+          <% agent = assigned_agent(@issue) %>
+          <% readiness = agent_readiness(@issue, agent, @orchestrator_enabled?) %>
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-eyebrow text-ink-tertiary uppercase">Agent readiness</p>
+              <p class="mt-1 truncate text-sm font-510 text-ink">{agent.name}</p>
+              <p class="mt-0.5 text-caption text-ink-tertiary">{readiness.runtime}</p>
+            </div>
+            <span class={agent_health_class(readiness.health)}>
+              {readiness.health_label}
+            </span>
+          </div>
+          <dl class="mt-3 space-y-2 text-caption">
+            <div class="grid grid-cols-[68px_1fr] gap-2">
+              <dt class="text-ink-tertiary">Profile</dt>
+              <dd class="min-w-0 truncate text-ink-muted">{readiness.profile}</dd>
+            </div>
+            <div class="grid grid-cols-[68px_1fr] gap-2">
+              <dt class="text-ink-tertiary">Command</dt>
+              <dd class="min-w-0 truncate font-mono text-[11px] text-ink-muted">
+                {readiness.command}
+              </dd>
+            </div>
+            <div class="grid grid-cols-[68px_1fr] gap-2">
+              <dt class="text-ink-tertiary">Model</dt>
+              <dd class="min-w-0 truncate text-ink-muted">{readiness.model}</dd>
+            </div>
+          </dl>
+          <p class="mt-3 rounded border border-hairline bg-canvas px-2 py-2 text-caption text-ink-muted">
+            {readiness.next}
+          </p>
+          <div class="mt-3 rounded border border-hairline bg-canvas px-2 py-2">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-tertiary">
+                Agent preflight
+              </span>
+              <span class={preflight_badge_class(readiness.preflight.status)}>
+                {readiness.preflight.label}
+              </span>
+            </div>
+            <p class="mt-1 text-caption leading-4 text-ink-muted">
+              {readiness.preflight.summary}
+            </p>
+            <ul class="mt-2 space-y-1.5">
+              <li :for={item <- readiness.preflight.items} class="flex items-start gap-2">
+                <span class={preflight_dot_class(item.status)}></span>
+                <div class="min-w-0">
+                  <p class="truncate text-[11px] font-510 text-ink-muted">{item.label}</p>
+                  <p class="text-[10px] leading-4 text-ink-tertiary">{item.detail}</p>
+                  <.app_link
+                    :if={preflight_item_target_path(item, agent)}
+                    navigate={preflight_item_target_path(item, agent)}
+                    class="mt-1 inline-flex text-[10px] font-510 text-primary hover:underline"
+                  >
+                    {preflight_item_target_label(item)}
+                  </.app_link>
+                </div>
+              </li>
+            </ul>
+          </div>
+          <.app_link
+            navigate={~p"/agents/#{agent.id}"}
+            class="mt-2 inline-flex text-caption text-primary hover:underline"
+          >
+            Open agent config
+          </.app_link>
         </div>
 
         <hr class="border-hairline" />
@@ -278,5 +646,788 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
       </div>
     </aside>
     """
+  end
+
+  defp ceo_launch_preview(issue, orchestrator_enabled?) do
+    if dispatchable_issue?(issue) do
+      preflight =
+        Cympho.RuntimePreflight.for_issue(issue, autonomy_enabled?: orchestrator_enabled?)
+
+      if ceo_role?(Map.get(preflight, :agent_role)) do
+        target = ceo_launch_target(preflight)
+        launch_mode = ceo_launch_mode(issue, orchestrator_enabled?)
+        first_turn = ceo_first_turn_contract()
+
+        %{
+          target: target,
+          preflight_label: preflight.label,
+          preflight_summary: preflight.summary,
+          first_action: preflight.first_action,
+          launch_mode: launch_mode,
+          first_turn: first_turn,
+          brief: ceo_launch_brief(issue, preflight, target, launch_mode, first_turn)
+        }
+      end
+    end
+  end
+
+  defp ceo_launch_target(%{agent_name: name, adapter: adapter})
+       when is_binary(name) and name != "" do
+    "#{name} · #{adapter_label(adapter)}"
+  end
+
+  defp ceo_launch_target(%{adapter: adapter}), do: "CEO · #{adapter_label(adapter)}"
+  defp ceo_launch_target(_preflight), do: "CEO · Runtime"
+
+  defp ceo_launch_mode(issue, false) do
+    if dispatch_pinned?(issue) do
+      "Focused command is queued; start it from the digest or sidebar when you are ready."
+    else
+      "Review mode is active; copy the focused command to run only this issue."
+    end
+  end
+
+  defp ceo_launch_mode(issue, true) do
+    if dispatch_pinned?(issue) do
+      "Autonomous dispatch is enabled and this issue has operator focus."
+    else
+      "Autonomous dispatch is enabled; use dispatch focus to put this issue first."
+    end
+  end
+
+  defp ceo_role?(role), do: role in [:ceo, "ceo"]
+
+  defp ceo_first_turn_contract do
+    "Return `[owner_update]` or `[handoff]`; when decomposition is needed, create 2-5 scoped sub-issues with acceptance criteria."
+  end
+
+  defp ceo_launch_brief(issue, preflight, target, launch_mode, first_turn) do
+    [
+      "CEO launch brief",
+      "Issue: #{issue_identifier(issue)} · #{Map.get(issue, :title)}",
+      "Status: #{Map.get(issue, :status)} · Priority: #{Map.get(issue, :priority)}",
+      "Target: #{target}",
+      "Preflight: #{preflight.label} · #{preflight.summary}",
+      first_action_line(preflight),
+      "Launch: #{launch_mode}",
+      "Focused command: #{focused_runtime_command(issue)}",
+      "First turn: #{first_turn}",
+      "Description: #{compact_body(Map.get(issue, :description), 240) || "No description supplied."}",
+      "No provider call. This brief only reads routing, preflight, and issue state."
+    ]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join("\n")
+  end
+
+  defp first_action_line(%{first_action: %{label: label, detail: detail}}) do
+    "First action: #{label} · #{detail}"
+  end
+
+  defp first_action_line(_preflight), do: nil
+
+  defp issue_identifier(%{identifier: identifier})
+       when is_binary(identifier) and identifier != "",
+       do: identifier
+
+  defp issue_identifier(%{id: id}) when is_binary(id), do: id
+  defp issue_identifier(_issue), do: "Unidentified issue"
+
+  defp focused_runtime_command(%{id: id, status: status})
+       when is_binary(id) and
+              status in [:todo, :in_review, :blocked, "todo", "in_review", "blocked"] do
+    Cympho.RuntimeOperations.focused_runtime_launch_command(id)
+  end
+
+  defp focused_runtime_command(_issue), do: nil
+
+  defp relaunch_focus_button_label(%{status: status}) when status in [:blocked, "blocked"],
+    do: "Reopen and prioritize relaunch"
+
+  defp relaunch_focus_button_label(_issue), do: "Prioritize relaunch"
+
+  defp relaunch_setup_action(issue, orchestrator_enabled?) do
+    case Cympho.RuntimePreflight.for_issue(issue, autonomy_enabled?: orchestrator_enabled?) do
+      %{first_action: action} when is_map(action) -> action
+      _ -> nil
+    end
+  end
+
+  defp ceo_outcome_card(issue, runs, all_agents) do
+    ceo_agent_ids = ceo_agent_ids(issue, all_agents)
+    latest_comment = latest_ceo_comment(issue, ceo_agent_ids)
+    latest_run = latest_ceo_run(runs, ceo_agent_ids)
+
+    cond do
+      latest_comment && newer_or_equal?(latest_comment.inserted_at, ceo_run_time(latest_run)) ->
+        ceo_comment_outcome_card(latest_comment)
+
+      latest_run ->
+        ceo_run_outcome_card(latest_run)
+
+      ceo_issue?(issue, ceo_agent_ids) ->
+        %{
+          status: :ready,
+          status_label: "Ready",
+          title: "Waiting for first CEO turn",
+          detail: "No CEO run or tagged CEO comment has been recorded yet.",
+          next:
+            "Use the focused command above to start the CEO turn, then require an owner update or handoff.",
+          timestamp: nil,
+          timestamp_label: "No CEO activity yet"
+        }
+
+      true ->
+        nil
+    end
+  end
+
+  defp ceo_agent_ids(issue, all_agents) do
+    agent_ids =
+      all_agents
+      |> List.wrap()
+      |> Enum.filter(&(Map.get(&1, :role) in [:ceo, "ceo"]))
+      |> Enum.map(& &1.id)
+
+    issue_assignee_ids =
+      case issue do
+        %{assignee: %{id: id, role: role}} when is_binary(id) and role in [:ceo, "ceo"] ->
+          [id]
+
+        %{assigned_role: role, assignee_id: id} when is_binary(id) and role in [:ceo, "ceo"] ->
+          [id]
+
+        _ ->
+          []
+      end
+
+    (agent_ids ++ issue_assignee_ids)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
+
+  defp latest_ceo_comment(issue, ceo_agent_ids) do
+    issue
+    |> comments_for_issue()
+    |> Enum.filter(fn comment ->
+      comment.author_type == "agent" and comment.author_id in ceo_agent_ids
+    end)
+    |> Enum.sort_by(&(&1.inserted_at || DateTime.from_unix!(0)), {:desc, DateTime})
+    |> List.first()
+  end
+
+  defp latest_ceo_run(runs, ceo_agent_ids) do
+    runs
+    |> List.wrap()
+    |> Enum.filter(&(&1.agent_id in ceo_agent_ids))
+    |> Enum.sort_by(&(ceo_run_time(&1) || DateTime.from_unix!(0)), {:desc, DateTime})
+    |> List.first()
+  end
+
+  defp ceo_issue?(%{assigned_role: role}, _ceo_agent_ids) when role in [:ceo, "ceo"], do: true
+  defp ceo_issue?(%{assignee_id: assignee_id}, ceo_agent_ids), do: assignee_id in ceo_agent_ids
+  defp ceo_issue?(_issue, _ceo_agent_ids), do: false
+
+  defp ceo_flow_steps(issue, runs, all_agents, launch_preview, outcome_card) do
+    ceo_agent_ids = ceo_agent_ids(issue, all_agents)
+
+    if launch_preview || outcome_card || ceo_issue?(issue, ceo_agent_ids) do
+      latest_run = latest_ceo_run(runs, ceo_agent_ids)
+
+      [
+        %{
+          title: "Owner request captured",
+          detail: ceo_flow_request_detail(issue),
+          status: :complete,
+          status_label: "Captured"
+        },
+        ceo_flow_launch_step(launch_preview, outcome_card, latest_run),
+        ceo_flow_signal_step(outcome_card),
+        ceo_flow_decision_step(outcome_card)
+      ]
+      |> Enum.with_index(1)
+      |> Enum.map(fn {step, index} -> Map.put(step, :index, index) end)
+    else
+      []
+    end
+  end
+
+  defp ceo_flow_request_detail(%{assignee: %{name: name, role: role}})
+       when is_binary(name) and name != "" do
+    "Routed to #{name} in the #{ceo_flow_role_label(role)} lane."
+  end
+
+  defp ceo_flow_request_detail(%{assigned_role: role}) when role in [:ceo, "ceo"] do
+    "Routed to the CEO lane for decomposition, handoff, or owner update."
+  end
+
+  defp ceo_flow_request_detail(_issue), do: "Ready to route to the CEO lane."
+
+  defp ceo_flow_role_label(role) when role in [:ceo, "ceo"], do: "CEO"
+  defp ceo_flow_role_label(role) when role in [:cto, "cto"], do: "CTO"
+
+  defp ceo_flow_role_label(role) do
+    role
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
+
+  defp ceo_flow_launch_step(_launch_preview, %{status: :complete} = outcome_card, _latest_run) do
+    %{
+      title: "CEO turn completed",
+      detail: outcome_card.title,
+      status: :complete,
+      status_label: "Turn done"
+    }
+  end
+
+  defp ceo_flow_launch_step(_launch_preview, %{status: :active} = outcome_card, _latest_run) do
+    %{
+      title: "CEO turn in progress",
+      detail: outcome_card.detail,
+      status: :active,
+      status_label: outcome_card.status_label
+    }
+  end
+
+  defp ceo_flow_launch_step(_launch_preview, %{status: :attention} = outcome_card, _latest_run) do
+    %{
+      title: "Runtime needs attention",
+      detail: outcome_card.detail,
+      status: :attention,
+      status_label: outcome_card.status_label
+    }
+  end
+
+  defp ceo_flow_launch_step(launch_preview, _outcome_card, latest_run) do
+    cond do
+      latest_run && latest_run.status in ["pending", "queued", "running"] ->
+        %{
+          title: "CEO turn in progress",
+          detail: "Runtime has started and is waiting for the CEO response.",
+          status: :active,
+          status_label: run_status_label(latest_run.status)
+        }
+
+      latest_run && latest_run.status in ["failed", "timed_out", "cancelled"] ->
+        %{
+          title: "Runtime needs attention",
+          detail: ceo_run_detail(latest_run),
+          status: :attention,
+          status_label: run_status_label(latest_run.status)
+        }
+
+      launch_preview ->
+        %{
+          title: "Launch CEO turn",
+          detail: launch_preview.launch_mode,
+          status: :ready,
+          status_label: "Launch needed"
+        }
+
+      true ->
+        %{
+          title: "Launch CEO turn",
+          detail: "No CEO runtime signal has been recorded yet.",
+          status: :waiting,
+          status_label: "Waiting"
+        }
+    end
+  end
+
+  defp ceo_flow_signal_step(%{status_label: label} = outcome_card)
+       when label in ["Owner update", "Handoff", "Governance"] do
+    %{
+      title: "#{label} captured",
+      detail: outcome_card.detail,
+      status: :complete,
+      status_label: label
+    }
+  end
+
+  defp ceo_flow_signal_step(%{status: :attention} = outcome_card) do
+    %{
+      title: "Owner signal blocked",
+      detail: outcome_card.next,
+      status: :attention,
+      status_label: outcome_card.status_label
+    }
+  end
+
+  defp ceo_flow_signal_step(%{status: :active} = outcome_card) do
+    %{
+      title: "Waiting for owner signal",
+      detail: outcome_card.next,
+      status: :active,
+      status_label: "Waiting"
+    }
+  end
+
+  defp ceo_flow_signal_step(_outcome_card) do
+    %{
+      title: "Waiting for owner signal",
+      detail: "CEO should leave `[owner_update]` or `[handoff]` as the first useful result.",
+      status: :waiting,
+      status_label: "Waiting"
+    }
+  end
+
+  defp ceo_flow_decision_step(%{status_label: "Owner update"}) do
+    %{
+      title: "Owner decision ready",
+      detail: "Use the update to approve, ask for a follow-up, hand off, or close the issue.",
+      status: :active,
+      status_label: "Decision"
+    }
+  end
+
+  defp ceo_flow_decision_step(%{status_label: "Handoff"}) do
+    %{
+      title: "Follow handoff owner",
+      detail: "Track the named next owner until delivery or review evidence lands.",
+      status: :active,
+      status_label: "Handoff"
+    }
+  end
+
+  defp ceo_flow_decision_step(%{status_label: "Governance"}) do
+    %{
+      title: "Governance signal ready",
+      detail: "Use the recorded decision or review signal for the next board action.",
+      status: :complete,
+      status_label: "Ready"
+    }
+  end
+
+  defp ceo_flow_decision_step(%{status: :attention} = outcome_card) do
+    %{
+      title: "Decision blocked",
+      detail: outcome_card.next,
+      status: :attention,
+      status_label: "Blocked"
+    }
+  end
+
+  defp ceo_flow_decision_step(_outcome_card) do
+    %{
+      title: "Decision pending",
+      detail: "Wait for the owner signal before approving, delegating, or closing the work.",
+      status: :waiting,
+      status_label: "Pending"
+    }
+  end
+
+  defp ceo_comment_outcome_card(comment) do
+    category = IssueDigest.comment_category(comment)
+    body = compact_body(comment.body, 180) || "CEO comment has no visible body."
+
+    {status, status_label, title, next} =
+      case category do
+        :owner_update ->
+          {:complete, "Owner update", "CEO left an owner-facing status update",
+           "Use this update as the current business status, or ask the CEO for the next decision if it is stale."}
+
+        :handoff ->
+          {:complete, "Handoff", "CEO handed work to the next owner",
+           "Follow the named next owner and keep this issue open until their delivery/review signal lands."}
+
+        :blocked ->
+          {:attention, "Blocked", "CEO marked the issue blocked",
+           "Resolve the blocker or relaunch the focused CEO turn after the constraint changes."}
+
+        category when category in [:decision, :review] ->
+          {:complete, "Governance", "CEO recorded a review or decision",
+           "Use this governance signal to approve, request changes, or close with owner context."}
+
+        _ ->
+          {:active, "CEO note", "CEO left a note",
+           "If this is not an owner update or handoff, ask the CEO for a tagged follow-up."}
+      end
+
+    %{
+      status: status,
+      status_label: status_label,
+      title: title,
+      detail: "#{IssueDigest.comment_category_label(category)}: #{body}",
+      next: next,
+      timestamp: comment.inserted_at,
+      timestamp_label: format_timeline_timestamp(comment.inserted_at)
+    }
+  end
+
+  defp ceo_run_outcome_card(run) do
+    {status, status_label, title, next} =
+      cond do
+        run.status in ["pending", "queued", "running"] ->
+          {:active, run_status_label(run.status), "CEO runtime is active",
+           "Wait for the run to finish, then require an owner update, handoff, or decision."}
+
+        run.status in ["completed", "succeeded"] ->
+          {:attention, "No action", "CEO run finished without an accepted action",
+           "Open the comments for contract feedback, then relaunch the focused CEO turn."}
+
+        true ->
+          {:attention, "Needs attention", "CEO runtime needs attention",
+           "Fix the runtime/provider issue, then relaunch from the focused command."}
+      end
+
+    %{
+      status: status,
+      status_label: status_label,
+      title: title,
+      detail: ceo_run_detail(run),
+      next: next,
+      timestamp: ceo_run_time(run),
+      timestamp_label: format_timeline_timestamp(ceo_run_time(run))
+    }
+  end
+
+  defp ceo_run_detail(run) do
+    detail =
+      compact_body(run.error_reason || run.continuation_summary || run.log_excerpt, 180) ||
+        case run.status do
+          status when status in ["pending", "queued", "running"] ->
+            "CEO run is still in flight."
+
+          status when status in ["completed", "succeeded"] ->
+            "No tagged CEO outcome was captured after completion."
+
+          _ ->
+            "No runtime detail captured yet."
+        end
+
+    "#{run_status_label(run.status)} · #{detail}"
+  end
+
+  defp ceo_run_time(nil), do: nil
+  defp ceo_run_time(run), do: run.completed_at || run.started_at || run.inserted_at
+
+  defp newer_or_equal?(%DateTime{} = left, %DateTime{} = right),
+    do: DateTime.compare(left, right) in [:gt, :eq]
+
+  defp newer_or_equal?(%DateTime{}, nil), do: true
+  defp newer_or_equal?(_, _), do: false
+
+  defp ceo_outcome_card_class(:complete),
+    do:
+      "shrink-0 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-emerald-300"
+
+  defp ceo_outcome_card_class(:active),
+    do:
+      "shrink-0 rounded-full border border-blue-500/25 bg-blue-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-blue-300"
+
+  defp ceo_outcome_card_class(:attention),
+    do:
+      "shrink-0 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-amber-300"
+
+  defp ceo_outcome_card_class(:ready),
+    do:
+      "shrink-0 rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[10px] font-510 uppercase text-brand"
+
+  defp ceo_outcome_card_class(_),
+    do:
+      "shrink-0 rounded-full border border-hairline bg-canvas px-2 py-0.5 text-[10px] font-510 uppercase text-ink-muted"
+
+  defp ceo_flow_step_dot_class(:complete),
+    do:
+      "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-emerald-500/25 bg-emerald-500/10 font-mono text-[10px] font-590 text-emerald-300"
+
+  defp ceo_flow_step_dot_class(:active),
+    do:
+      "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-blue-500/25 bg-blue-500/10 font-mono text-[10px] font-590 text-blue-300"
+
+  defp ceo_flow_step_dot_class(:attention),
+    do:
+      "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-amber-500/25 bg-amber-500/10 font-mono text-[10px] font-590 text-amber-300"
+
+  defp ceo_flow_step_dot_class(:ready),
+    do:
+      "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-brand/25 bg-brand/10 font-mono text-[10px] font-590 text-brand"
+
+  defp ceo_flow_step_dot_class(_),
+    do:
+      "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas font-mono text-[10px] font-590 text-ink-tertiary"
+
+  defp ceo_flow_step_badge_class(:complete),
+    do:
+      "shrink-0 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-510 uppercase text-emerald-300"
+
+  defp ceo_flow_step_badge_class(:active),
+    do:
+      "shrink-0 rounded-full border border-blue-500/25 bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-510 uppercase text-blue-300"
+
+  defp ceo_flow_step_badge_class(:attention),
+    do:
+      "shrink-0 rounded-full border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-510 uppercase text-amber-300"
+
+  defp ceo_flow_step_badge_class(:ready),
+    do:
+      "shrink-0 rounded-full border border-brand/25 bg-brand/10 px-1.5 py-0.5 text-[9px] font-510 uppercase text-brand"
+
+  defp ceo_flow_step_badge_class(_),
+    do:
+      "shrink-0 rounded-full border border-hairline bg-canvas px-1.5 py-0.5 text-[9px] font-510 uppercase text-ink-tertiary"
+
+  defp dispatchable_issue?(%{status: status})
+       when status in [:todo, :in_review, "todo", "in_review"],
+       do: true
+
+  defp dispatchable_issue?(_issue), do: false
+
+  defp dispatch_pinned?(issue), do: Cympho.Issues.dispatch_pinned?(issue)
+
+  defp assigned_agent(%{assignee: %{id: id} = agent}) when is_binary(id), do: agent
+  defp assigned_agent(_issue), do: nil
+
+  defp agent_readiness(issue, agent, orchestrator_enabled?) do
+    profile = Cympho.RuntimeProfiles.get(Cympho.RuntimeProfiles.from_agent(agent))
+    pressure = Cympho.RuntimeCapacity.agent(agent, 0)
+    health = agent_health_status(agent.health_status)
+    preflight = Cympho.RuntimePreflight.for_issue(issue, autonomy_enabled?: orchestrator_enabled?)
+    status = agent_readiness_status(preflight.status)
+
+    %{
+      health: status,
+      health_label: agent_readiness_label(status),
+      runtime: "#{adapter_label(agent.adapter)} · #{pressure.slot_label}",
+      profile: (profile && profile.name) || "Custom adapter config",
+      command: runtime_command(agent),
+      model: runtime_model(agent),
+      next: agent_readiness_next(agent, health, preflight),
+      preflight: preflight
+    }
+  end
+
+  defp runtime_command(%{adapter: adapter} = agent)
+       when adapter in [:claude_code, "claude_code"] do
+    config_value(agent, "command") ||
+      runtime_config_value(agent, "command") ||
+      Application.get_env(:cympho, :claude_code_command) ||
+      System.get_env("CYMPHO_CLAUDE_COMMAND") ||
+      "claude"
+  end
+
+  defp runtime_command(%{adapter: adapter}) when adapter in [:codex, "codex"], do: "codex"
+
+  defp runtime_command(%{adapter: adapter} = agent)
+       when adapter in [:cursor, "cursor", :process, "process"] do
+    runtime_config_value(agent, "command") || config_value(agent, "command") ||
+      adapter_label(adapter)
+  end
+
+  defp runtime_command(%{adapter: adapter}), do: adapter_label(adapter)
+
+  defp runtime_model(%{adapter: adapter} = agent)
+       when adapter in [
+              :codex,
+              "codex",
+              :cursor,
+              "cursor",
+              :openai_chat,
+              "openai_chat",
+              :process,
+              "process"
+            ] do
+    runtime_config_value(agent, "model") || config_value(agent, "model") || "No model override"
+  end
+
+  defp runtime_model(%{adapter: adapter} = agent) when adapter in [:claude_code, "claude_code"] do
+    env = Cympho.Agents.RuntimeEnv.from_agent(agent)
+
+    env["ANTHROPIC_MODEL"] ||
+      env["ANTHROPIC_DEFAULT_SONNET_MODEL"] ||
+      env["OPENAI_MODEL"] ||
+      env["MODEL"] ||
+      "No model override"
+  end
+
+  defp runtime_model(_agent), do: "No model override"
+
+  defp preflight_item_target_path(item, agent) do
+    item_value(item, :target_path) || agent_anchor_path(agent, item_value(item, :target_id))
+  end
+
+  defp preflight_item_target_label(item), do: item_value(item, :target_label) || "Fix"
+
+  defp agent_anchor_path(%{id: id}, anchor)
+       when is_binary(id) and id != "" and is_binary(anchor) and anchor != "" do
+    "/agents/#{id}##{anchor}"
+  end
+
+  defp agent_anchor_path(_agent, _anchor), do: nil
+
+  defp item_value(item, key) when is_map(item) do
+    Map.get(item, key) || Map.get(item, Atom.to_string(key))
+  end
+
+  defp agent_readiness_next(
+         %{adapter: adapter, adapter_failure_count: failures},
+         health,
+         %{status: :ready}
+       ) do
+    suffix = health_warning_suffix(health) <> failure_suffix(failures)
+    "Launch preflight is ready. #{adapter_requirement(adapter)}#{suffix}"
+  end
+
+  defp agent_readiness_next(
+         %{adapter: adapter, adapter_failure_count: failures},
+         health,
+         %{status: :review_mode}
+       ) do
+    suffix = health_warning_suffix(health) <> failure_suffix(failures)
+    "Runtime is configured, but dispatch is disabled. #{adapter_requirement(adapter)}#{suffix}"
+  end
+
+  defp agent_readiness_next(
+         %{adapter: adapter, adapter_failure_count: failures},
+         health,
+         %{first_action: first_action}
+       )
+       when not is_nil(first_action) do
+    suffix = health_warning_suffix(health) <> failure_suffix(failures)
+
+    "Resolve #{item_value(first_action, :label)} before dispatch. #{item_value(first_action, :detail)} #{adapter_requirement(adapter)}#{suffix}"
+  end
+
+  defp agent_readiness_next(
+         %{adapter: adapter, adapter_failure_count: failures},
+         health,
+         _preflight
+       ) do
+    suffix = health_warning_suffix(health) <> failure_suffix(failures)
+    "Verify runtime configuration before dispatch. #{adapter_requirement(adapter)}#{suffix}"
+  end
+
+  defp adapter_requirement(adapter) when adapter in [:claude_code, "claude_code"],
+    do: "Claude Code needs ANTHROPIC_API_KEY or a wrapper command that supplies credentials."
+
+  defp adapter_requirement(adapter) when adapter in [:codex, "codex"],
+    do: "Codex needs OPENAI_API_KEY or CODEX_API_KEY plus the codex CLI."
+
+  defp adapter_requirement(adapter) when adapter in [:openai_chat, "openai_chat"],
+    do: "OpenAI Chat needs an OpenAI-compatible endpoint, model, and provider API key."
+
+  defp adapter_requirement(adapter) when adapter in [:process, "process"],
+    do: "Process adapters need a configured command and environment."
+
+  defp adapter_requirement(adapter)
+       when adapter in [:http, :openclaw, :agrenting, "http", "openclaw", "agrenting"],
+       do: "Gateway adapters need endpoint/provider credentials."
+
+  defp adapter_requirement(_adapter), do: "Runtime credentials may be required."
+
+  defp failure_suffix(failures) when is_integer(failures) and failures > 0,
+    do: " Recent adapter failures: #{failures}."
+
+  defp failure_suffix(_failures), do: ""
+
+  defp health_warning_suffix(:healthy), do: ""
+
+  defp health_warning_suffix(health) do
+    " Prior adapter health: #{agent_health_label(health)}."
+  end
+
+  defp config_value(%{config: config}, key) when is_map(config) do
+    Map.get(config, key) || atom_key(config, key)
+  end
+
+  defp config_value(_agent, _key), do: nil
+
+  defp runtime_config_value(%{runtime_config: runtime_config}, key) when is_map(runtime_config) do
+    Map.get(runtime_config, key) || atom_key(runtime_config, key)
+  end
+
+  defp runtime_config_value(_agent, _key), do: nil
+
+  defp atom_key(map, key) do
+    Map.get(map, String.to_existing_atom(key))
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp agent_health_status(nil), do: :healthy
+  defp agent_health_status(status), do: status
+
+  defp agent_readiness_status(:ready), do: :ready
+  defp agent_readiness_status(:review_mode), do: :review_mode
+  defp agent_readiness_status(:blocked), do: :blocked
+  defp agent_readiness_status(:attention), do: :attention
+  defp agent_readiness_status(_), do: :attention
+
+  defp agent_readiness_label(:ready), do: "Launch ready"
+  defp agent_readiness_label(:review_mode), do: "Review mode"
+  defp agent_readiness_label(:blocked), do: "Blocked"
+  defp agent_readiness_label(:attention), do: "Needs config"
+  defp agent_readiness_label(status), do: status |> to_string() |> String.capitalize()
+
+  defp agent_health_label(:healthy), do: "Healthy"
+  defp agent_health_label(:degraded), do: "Degraded"
+  defp agent_health_label(:unavailable), do: "Unavailable"
+  defp agent_health_label(health), do: health |> to_string() |> String.capitalize()
+
+  defp agent_health_class(:ready),
+    do:
+      "shrink-0 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-510 text-emerald-300"
+
+  defp agent_health_class(:review_mode),
+    do:
+      "shrink-0 rounded-full border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-510 text-sky-300"
+
+  defp agent_health_class(:blocked),
+    do:
+      "shrink-0 rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[10px] font-510 text-brand"
+
+  defp agent_health_class(:attention),
+    do:
+      "shrink-0 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 text-amber-300"
+
+  defp agent_health_class(_),
+    do:
+      "shrink-0 rounded-full border border-hairline bg-canvas px-2 py-0.5 text-[10px] font-510 text-ink-tertiary"
+
+  defp preflight_badge_class(:ready),
+    do:
+      "shrink-0 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-510 text-emerald-300"
+
+  defp preflight_badge_class(:review_mode),
+    do:
+      "shrink-0 rounded-full border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-510 text-sky-300"
+
+  defp preflight_badge_class(:attention),
+    do:
+      "shrink-0 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 text-amber-300"
+
+  defp preflight_badge_class(:blocked),
+    do:
+      "shrink-0 rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[10px] font-510 text-brand"
+
+  defp preflight_badge_class(_),
+    do:
+      "shrink-0 rounded-full border border-hairline bg-canvas px-2 py-0.5 text-[10px] font-510 text-ink-tertiary"
+
+  defp preflight_dot_class(:ok),
+    do: "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400"
+
+  defp preflight_dot_class(:info), do: "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400"
+
+  defp preflight_dot_class(:attention),
+    do: "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300"
+
+  defp preflight_dot_class(:blocked),
+    do: "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand"
+
+  defp preflight_dot_class(_),
+    do: "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-ink-tertiary"
+
+  defp adapter_label(nil), do: "No adapter"
+  defp adapter_label(:openai_chat), do: "OpenAI Chat"
+  defp adapter_label("openai_chat"), do: "OpenAI Chat"
+
+  defp adapter_label(adapter) do
+    adapter
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.split()
+    |> Enum.map_join(" ", &String.capitalize/1)
   end
 end

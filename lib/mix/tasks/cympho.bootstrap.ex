@@ -6,15 +6,16 @@ defmodule Mix.Tasks.Cympho.Bootstrap do
 
   ## Usage
 
-      mix cympho.bootstrap --company-name "TestCo" --mission "Build the best API" --engineers 3 --yes
+      mix cympho.bootstrap --company-name "TestCo" --mission "Build the best API" --blueprint software --engineers 3 --yes
 
   ## Options
 
     * `--company-name` - Name of the company (required)
     * `--mission` - Company mission / goal title (default: "Build and run the business autonomously")
+    * `--blueprint` - Company blueprint key (default: software). Examples: software, go_to_market, product_discovery, support_ops, content_studio, sales_pipeline, research_lab, qa_release, agency_delivery, community_growth, security_compliance, data_insights, finance_ops, devtools_platform, incident_response, partnerships, training_academy
     * `--engineers` - Number of engineer agents (default: 2)
     * `--prefix` - Issue prefix (default: "LLM")
-    * `--adapter` - Agent adapter: claude_code, codex, cursor, http, openclaw, process (default: claude_code)
+    * `--adapter` - Agent adapter: claude_code, codex, cursor, http, openai_chat, openclaw, process (default: claude_code)
     * `--yes` - Skip confirmation prompts
   """
 
@@ -25,6 +26,7 @@ defmodule Mix.Tasks.Cympho.Bootstrap do
   @switches [
     company_name: :string,
     mission: :string,
+    blueprint: :string,
     engineers: :integer,
     prefix: :string,
     adapter: :string,
@@ -34,6 +36,7 @@ defmodule Mix.Tasks.Cympho.Bootstrap do
   @aliases [
     n: :company_name,
     m: :mission,
+    b: :blueprint,
     e: :engineers,
     p: :prefix,
     y: :yes
@@ -47,6 +50,7 @@ defmodule Mix.Tasks.Cympho.Bootstrap do
 
     company_name = opts[:company_name]
     mission = opts[:mission] || "Build and run the business autonomously"
+    blueprint = opts[:blueprint] || "software"
     engineers = opts[:engineers] || 2
     prefix = opts[:prefix] || "LLM"
     adapter = (opts[:adapter] || "claude_code") |> String.to_atom()
@@ -56,7 +60,7 @@ defmodule Mix.Tasks.Cympho.Bootstrap do
       Mix.shell().error("Error: --company-name is required.")
 
       Mix.shell().info(
-        "\nUsage: mix cympho.bootstrap --company-name \"Name\" [--mission \"Goal\"] [--engineers N] [--yes]"
+        "\nUsage: mix cympho.bootstrap --company-name \"Name\" [--mission \"Goal\"] [--blueprint software] [--engineers N] [--yes]"
       )
 
       Mix.raise("Missing required option: --company-name")
@@ -65,31 +69,33 @@ defmodule Mix.Tasks.Cympho.Bootstrap do
     engineers = max(0, engineers)
 
     if auto_yes do
-      do_bootstrap(company_name, mission, engineers, prefix, adapter)
+      do_bootstrap(company_name, mission, blueprint, engineers, prefix, adapter)
     else
       Mix.shell().info("""
       About to create:
         Company:    #{company_name}
         Mission:    #{mission}
+        Blueprint:  #{blueprint}
         Engineers:  #{engineers}
         Prefix:     #{prefix}
         Adapter:    #{adapter}
       """)
 
       if Mix.shell().yes?("Proceed with bootstrap?") do
-        do_bootstrap(company_name, mission, engineers, prefix, adapter)
+        do_bootstrap(company_name, mission, blueprint, engineers, prefix, adapter)
       else
         Mix.shell().info("Aborted.")
       end
     end
   end
 
-  defp do_bootstrap(name, mission, engineers, prefix, adapter) do
+  defp do_bootstrap(name, mission, blueprint, engineers, prefix, adapter) do
     Mix.shell().info("Bootstrapping #{name}...")
 
     attrs = %{
       name: name,
       goal_title: mission,
+      blueprint: blueprint,
       engineer_count: engineers,
       issue_prefix: prefix,
       adapter: adapter
@@ -106,6 +112,7 @@ defmodule Mix.Tasks.Cympho.Bootstrap do
         Mix.shell().info("""
 
         ✓ Company created: #{company.name} (#{company.slug})
+        ✓ Blueprint: #{result.blueprint.name}
         ✓ Project: #{project.name} (#{project.prefix})
         ✓ Mission goal: #{goal.title}
         ✓ Agents: #{Enum.map_join(agents, ", ", &"#{&1.name} (#{&1.role})")}

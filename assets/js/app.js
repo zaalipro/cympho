@@ -1600,6 +1600,99 @@ const DatePicker = {
   }
 };
 
+const CopyToClipboard = {
+  mounted() {
+    this.handleClick = (event) => {
+      const button = event.target.closest("[data-copy-text]");
+      if (!button || !this.el.contains(button)) return;
+
+      event.preventDefault();
+      this._copy(button.dataset.copyText || "", button);
+    };
+
+    this.el.addEventListener("click", this.handleClick);
+  },
+
+  destroyed() {
+    this.el.removeEventListener("click", this.handleClick);
+  },
+
+  async _copy(text, button) {
+    if (!text) return;
+
+    try {
+      await this._writeText(text);
+      this._flash(button, button.dataset.copySuccessLabel || "Copied");
+    } catch (_error) {
+      this._flash(button, button.dataset.copyErrorLabel || "Copy failed");
+    }
+  },
+
+  async _writeText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return;
+      } catch (_error) {
+        // Fall back to selection-based copy below.
+      }
+    }
+
+    if (!this._fallbackCopy(text)) {
+      throw new Error("copy failed");
+    }
+  },
+
+  _fallbackCopy(text) {
+    let wroteClipboardData = false;
+    const writeClipboardData = (event) => {
+      if (!event.clipboardData) return;
+      event.clipboardData.setData("text/plain", text);
+      event.preventDefault();
+      wroteClipboardData = true;
+    };
+
+    document.addEventListener("copy", writeClipboardData, true);
+    try {
+      if (document.execCommand("copy") && wroteClipboardData) {
+        return true;
+      }
+    } finally {
+      document.removeEventListener("copy", writeClipboardData, true);
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.top = "0";
+    textarea.style.left = "0";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+
+    try {
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, text.length);
+      return document.execCommand("copy");
+    } finally {
+      textarea.remove();
+    }
+  },
+
+  _flash(button, label) {
+    const original = button.dataset.copyLabel || button.textContent.trim();
+    button.textContent = label;
+    button.dataset.copied = "true";
+
+    window.clearTimeout(button._copyResetTimer);
+    button._copyResetTimer = window.setTimeout(() => {
+      button.textContent = original;
+      delete button.dataset.copied;
+    }, 1200);
+  }
+};
+
 // Boot
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content");
 const liveSocket = new LiveSocket("/live", Socket, {
@@ -1615,7 +1708,8 @@ const liveSocket = new LiveSocket("/live", Socket, {
     AdapterConfigFields,
     DatePicker,
     IssueGateCleanup,
-    InfiniteScroll
+    InfiniteScroll,
+    CopyToClipboard
   }
 });
 

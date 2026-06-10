@@ -142,13 +142,24 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
         <div class="flex flex-col gap-3 border-b border-amber-500/20 px-4 py-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div class="flex flex-wrap items-center gap-2">
-              <h2 class="text-sm font-590 text-ink">Resolve review gates</h2>
+              <h2 class="text-sm font-590 text-ink">
+                {if @gate_resolution.mode == :pre_runtime,
+                  do: "Start runtime first",
+                  else: "Resolve review gates"}
+              </h2>
               <span class="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 text-amber-200">
-                {length(@gate_resolution.blockers)} blocking
+                {if @gate_resolution.mode == :pre_runtime,
+                  do: "Launch needed",
+                  else: "#{length(@gate_resolution.blockers)} blocking"}
               </span>
             </div>
             <p class="mt-1 max-w-3xl text-sm leading-5 text-ink-muted">
-              The issue cannot move to review or close until these evidence gaps are handled.
+              <%= if @gate_resolution.mode == :pre_runtime do %>
+                Start runtime first. This issue has no agent run evidence yet, so delivery notes and
+                artifacts should come after focused dispatch.
+              <% else %>
+                The issue cannot move to review or close until these evidence gaps are handled.
+              <% end %>
             </p>
           </div>
           <div class="flex flex-wrap gap-2">
@@ -183,7 +194,24 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
           </div>
         </div>
 
-        <div class="border-t border-amber-500/20 bg-canvas/45 px-4 py-4">
+        <div
+          :if={@gate_resolution.mode == :pre_runtime}
+          class="border-t border-amber-500/20 bg-canvas/45 px-4 py-4"
+        >
+          <div class="rounded-lg border border-brand/25 bg-brand/10 px-3 py-3">
+            <h3 class="text-sm font-590 text-ink">Runtime launch needed</h3>
+            <p class="mt-1 text-xs leading-5 text-ink-muted">
+              Open the launch checklist and start focused dispatch for this issue. Once a run
+              produces evidence, Cympho will ask for the right completion note, work product, or
+              owner update.
+            </p>
+          </div>
+        </div>
+
+        <div
+          :if={@gate_resolution.mode != :pre_runtime}
+          class="border-t border-amber-500/20 bg-canvas/45 px-4 py-4"
+        >
           <div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h3 class="text-sm font-590 text-ink">Auto-nudges</h3>

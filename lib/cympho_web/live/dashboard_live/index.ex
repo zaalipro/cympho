@@ -173,6 +173,8 @@ defmodule CymphoWeb.DashboardLive.Index do
     |> assign(:recent_inbox, summary.recent_inbox)
     |> assign(:cost_summary, summary.cost_summary)
     |> assign(:runtime_capacity, summary.runtime_capacity)
+    |> assign(:goal_alignment, summary.goal_alignment)
+    |> assign(:autonomy_readiness, summary.autonomy_readiness)
   end
 
   defp current_company(socket) do
@@ -228,17 +230,13 @@ defmodule CymphoWeb.DashboardLive.Index do
     running = status_count(summary.issue_status_counts, :in_progress)
     blocked = status_count(summary.issue_status_counts, :blocked)
     agents = summary.total_agents
+    alignment = summary.goal_alignment
 
     [
-      if(operations.review_nudges.counts.stale > 0,
-        do: %{
-          label: "Review nudges are stale",
-          detail:
-            "#{operations.review_nudges.counts.stale} evidence #{pluralize(operations.review_nudges.counts.stale, "request")} need owner follow-up.",
-          action: "Open Operations",
-          path: "/operations#review-nudges"
-        }
-      ),
+      ceo_outcome_attention_action(operations.ceo_outcomes),
+      stale_review_nudge_action(operations.review_nudges),
+      goal_alignment_action(alignment),
+      cost_control_action(summary.cost_summary),
       if(length(operations.recent_failures) > 0,
         do: %{
           label: "Runtime failures need inspection",
@@ -252,35 +250,40 @@ defmodule CymphoWeb.DashboardLive.Index do
         do: %{
           label: "Review mode is on",
           detail: "Agent execution is disabled, so it is safe to inspect and edit the company.",
-          action: "Enable runtime when ready"
+          action: "Enable runtime when ready",
+          path: "/operations#runtime-launch-checklist"
         }
       ),
       if(company_status == :unconfigured,
         do: %{
           label: "Finish company setup",
           detail: "Create the operating company, initial goal, and agent roster.",
-          action: "Open setup"
+          action: "Open setup",
+          path: "/onboarding"
         }
       ),
       if(agents == 0,
         do: %{
           label: "Hire your first agents",
           detail: "A CEO, CTO, and engineer team make the board actionable.",
-          action: "Create agents"
+          action: "Create agents",
+          path: "/agents/new"
         }
       ),
       if(blocked > 0,
         do: %{
           label: "#{blocked} blocked #{pluralize(blocked, "issue")}",
           detail: "Blocked work needs an owner decision before agents can continue.",
-          action: "Review blockers"
+          action: "Review blockers",
+          path: "/kanban"
         }
       ),
       if(runtime_enabled? and queued > 0 and running == 0,
         do: %{
           label: "Queued work is waiting",
           detail: "#{queued} #{pluralize(queued, "issue")} can be picked up by available agents.",
-          action: "Open board"
+          action: "Open board",
+          path: "/kanban"
         }
       )
     ]
@@ -292,7 +295,8 @@ defmodule CymphoWeb.DashboardLive.Index do
             label: "System is steady",
             detail:
               "No urgent bottlenecks detected. Review priorities or inspect recent activity.",
-            action: "Scan board"
+            action: "Scan board",
+            path: "/kanban"
           }
         ]
 
@@ -301,8 +305,108 @@ defmodule CymphoWeb.DashboardLive.Index do
     end
   end
 
+  defp ceo_outcome_attention_action(%{counts: %{attention: attention}})
+       when is_integer(attention) and attention > 0 do
+    %{
+      label: "CEO outcomes need attention",
+      detail:
+        "#{attention} CEO #{pluralize(attention, "outcome")} #{if attention == 1, do: "needs", else: "need"} owner follow-up after failed or silent turns.",
+      action: "Open CEO monitor",
+      path: "/operations#ceo-outcome-monitor"
+    }
+  end
+
+  defp ceo_outcome_attention_action(_ceo_outcomes), do: nil
+
+  defp goal_alignment_action(%{floating: floating}) when is_integer(floating) and floating > 0 do
+    %{
+      label: "Floating work needs strategy links",
+      detail:
+        "#{floating} open #{pluralize(floating, "issue")} #{if floating == 1, do: "has", else: "have"} no project or goal.",
+      action: "Open goals",
+      path: "/goals"
+    }
+  end
+
+  defp goal_alignment_action(%{total_open: total, mission_aligned: 0})
+       when is_integer(total) and total > 0 do
+    %{
+      label: "Open work has no goal links",
+      detail: "#{total} open #{pluralize(total, "issue")} should be tied to an active goal.",
+      action: "Open goals",
+      path: "/goals"
+    }
+  end
+
+  defp goal_alignment_action(%{active_missions: 0, total_open: total})
+       when is_integer(total) and total > 0 do
+    %{
+      label: "No active mission anchors work",
+      detail: "Create a mission so new agent work can inherit strategic context.",
+      action: "Open goals",
+      path: "/goals"
+    }
+  end
+
+  defp goal_alignment_action(_alignment), do: nil
+
+  defp cost_control_action(%{budget_status: :over_budget} = cost) do
+    %{
+      label: "Budget is over limit",
+      detail: cost_budget_detail(cost, "Spend has crossed the active budget limit."),
+      action: "Open budgets",
+      path: "/budgets"
+    }
+  end
+
+  defp cost_control_action(%{budget_status: :watch} = cost) do
+    %{
+      label: "Budget spend needs review",
+      detail: cost_budget_detail(cost, "Spend is near the configured warning threshold."),
+      action: "Review budget",
+      path: "/budgets"
+    }
+  end
+
+  defp cost_control_action(%{budget_status: :unbudgeted} = cost) do
+    if positive_decimal?(Map.get(cost, :period_cost) || Map.get(cost, :total_cost)) do
+      %{
+        label: "Provider spend has no budget",
+        detail:
+          "#{cost_period_label(cost)} is #{format_cost(Map.get(cost, :period_cost))}. Add a company or agent budget before autonomy scales.",
+        action: "Create budget",
+        path: "/budgets/new"
+      }
+    end
+  end
+
+  defp cost_control_action(_cost), do: nil
+
+  defp cost_budget_detail(cost, fallback) do
+    spend = Map.get(cost, :budget_spend) || Map.get(cost, :period_cost)
+    limit = Map.get(cost, :budget_limit)
+    used_percent = Map.get(cost, :budget_used_percent)
+
+    cond do
+      limit && is_integer(used_percent) ->
+        "#{cost_period_label(cost)} is #{format_cost(spend)} of #{format_cost(limit)} (#{used_percent}% used)."
+
+      limit ->
+        "#{cost_period_label(cost)} is #{format_cost(spend)} of #{format_cost(limit)}."
+
+      true ->
+        fallback
+    end
+  end
+
+  defp positive_decimal?(%Decimal{} = value), do: Decimal.gt?(value, Decimal.new("0"))
+  defp positive_decimal?(value) when is_integer(value), do: value > 0
+  defp positive_decimal?(value) when is_float(value), do: value > 0
+  defp positive_decimal?(_), do: false
+
   defp execution_health(summary, operations) do
     review_nudges = operations.review_nudges
+    pre_runtime_nudges = pre_runtime_review_nudge_count(review_nudges)
     cto_review = status_count(summary.issue_status_counts, :in_review)
     owner_updates = owner_update_count(review_nudges)
     runtime_failures = length(operations.recent_failures)
@@ -310,17 +414,37 @@ defmodule CymphoWeb.DashboardLive.Index do
 
     [
       %{
-        label: "Review nudges",
+        label: if(pre_runtime_nudges > 0, do: "Launch nudges", else: "Review nudges"),
         value: review_nudges.counts.active,
-        hint: "Agent evidence requests",
-        path: "/operations#review-nudges",
+        hint:
+          if(pre_runtime_nudges > 0,
+            do: "Runtime launch requests",
+            else: "Agent evidence requests"
+          ),
+        path:
+          if(pre_runtime_nudges > 0,
+            do: "/operations#runtime-launch-checklist",
+            else: "/operations#review-nudges"
+          ),
         tone: if(review_nudges.counts.active > 0, do: :attention, else: :ok)
       },
       %{
-        label: "Stale nudges",
+        label:
+          if(pre_runtime_nudges > 0 and review_nudges.counts.stale > 0,
+            do: "Launch waits",
+            else: "Stale nudges"
+          ),
         value: review_nudges.counts.stale,
-        hint: "Waiting over 30 minutes",
-        path: "/operations#review-nudges",
+        hint:
+          if(pre_runtime_nudges > 0 and review_nudges.counts.stale > 0,
+            do: "Runtime not started",
+            else: "Waiting over 30 minutes"
+          ),
+        path:
+          if(pre_runtime_nudges > 0 and review_nudges.counts.stale > 0,
+            do: "/operations#runtime-launch-checklist",
+            else: "/operations#review-nudges"
+          ),
         tone: if(review_nudges.counts.stale > 0, do: :danger, else: :ok)
       },
       %{
@@ -353,6 +477,60 @@ defmodule CymphoWeb.DashboardLive.Index do
       }
     ]
   end
+
+  defp stale_review_nudge_action(%{counts: %{stale: stale_count}} = review_nudges)
+       when stale_count > 0 do
+    pre_runtime_stale_count =
+      review_nudges
+      |> Map.get(:active, [])
+      |> Enum.count(fn nudge ->
+        Map.get(nudge, :stale?, false) and pre_runtime_review_nudge?(nudge)
+      end)
+
+    if pre_runtime_stale_count > 0 do
+      %{
+        label: "Runtime launch is waiting",
+        detail:
+          "#{pre_runtime_stale_count} pre-runtime #{pluralize(pre_runtime_stale_count, "issue")} need focused dispatch before evidence can land.",
+        action: "Open launch checklist",
+        path: "/operations#runtime-launch-checklist"
+      }
+    else
+      %{
+        label: "Review nudges are stale",
+        detail:
+          "#{stale_count} evidence #{pluralize(stale_count, "request")} need owner follow-up.",
+        action: "Open Operations",
+        path: "/operations#review-nudges"
+      }
+    end
+  end
+
+  defp stale_review_nudge_action(_review_nudges), do: nil
+
+  defp pre_runtime_review_nudge_count(%{active: active}) do
+    Enum.count(active, &pre_runtime_review_nudge?/1)
+  end
+
+  defp pre_runtime_review_nudge_count(_review_nudges), do: 0
+
+  defp pre_runtime_review_nudge?(%{
+         next_action: %{path: "/operations#runtime-launch-checklist"}
+       }),
+       do: true
+
+  defp pre_runtime_review_nudge?(%{
+         run_count: 0,
+         issue: %{status: status},
+         blocker_keys: blocker_keys
+       })
+       when status in [:todo, "todo"] do
+    Enum.any?(List.wrap(blocker_keys), fn key ->
+      to_string(key) in ["runtime_verification", "agent_note", "work_product"]
+    end)
+  end
+
+  defp pre_runtime_review_nudge?(_nudge), do: false
 
   defp owner_update_count(%{active: active}) do
     Enum.count(active, fn nudge ->
@@ -405,6 +583,43 @@ defmodule CymphoWeb.DashboardLive.Index do
   def capacity_text_class(:watch), do: "text-yellow-300"
   def capacity_text_class(:high), do: "text-brand"
   def capacity_text_class(_), do: "text-text-quaternary"
+
+  def alignment_text_class(:aligned), do: "text-teal-300"
+  def alignment_text_class(:floating_work), do: "text-brand"
+  def alignment_text_class(:missing_goal_links), do: "text-amber-300"
+  def alignment_text_class(:no_mission), do: "text-amber-300"
+  def alignment_text_class(_), do: "text-text-primary"
+
+  def cost_text_class(:on_track), do: "text-teal-300"
+  def cost_text_class(:watch), do: "text-amber-300"
+  def cost_text_class(:over_budget), do: "text-brand"
+  def cost_text_class(:scoped_controls), do: "text-sky-300"
+  def cost_text_class(:unbudgeted), do: "text-text-quaternary"
+  def cost_text_class(_), do: "text-text-quaternary"
+
+  def readiness_badge_class(:healthy), do: "border-teal-500/25 bg-teal-500/10 text-teal-300"
+  def readiness_badge_class(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  def readiness_badge_class(:critical), do: "border-brand/30 bg-brand/10 text-brand"
+  def readiness_badge_class(:setup), do: "border-border bg-surface text-text-tertiary"
+  def readiness_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  def readiness_score_text(:healthy), do: "text-teal-300"
+  def readiness_score_text(:warning), do: "text-amber-300"
+  def readiness_score_text(:critical), do: "text-brand"
+  def readiness_score_text(:setup), do: "text-text-tertiary"
+  def readiness_score_text(_), do: "text-text-primary"
+
+  def readiness_signal_class(:healthy), do: "border-teal-500/25 bg-teal-500/[0.06]"
+  def readiness_signal_class(:warning), do: "border-amber-500/25 bg-amber-500/[0.06]"
+  def readiness_signal_class(:critical), do: "border-brand/35 bg-brand/[0.07]"
+  def readiness_signal_class(:setup), do: "border-border bg-surface/40"
+  def readiness_signal_class(_), do: "border-border bg-surface/40"
+
+  def readiness_signal_text(:healthy), do: "text-teal-300"
+  def readiness_signal_text(:warning), do: "text-amber-300"
+  def readiness_signal_text(:critical), do: "text-brand"
+  def readiness_signal_text(:setup), do: "text-text-tertiary"
+  def readiness_signal_text(_), do: "text-text-primary"
 
   def autonomy_text_class(:active), do: "text-green-300"
   def autonomy_text_class(:paused), do: "text-yellow-300"
@@ -511,6 +726,15 @@ defmodule CymphoWeb.DashboardLive.Index do
   end
 
   def format_cost(_), do: "$0.00"
+
+  def cost_period_label(%{period_days: 1}), do: "24h cost"
+  def cost_period_label(%{period_days: 7}), do: "7d cost"
+  def cost_period_label(%{period_days: days}) when is_integer(days), do: "#{days}d cost"
+  def cost_period_label(_), do: "30d cost"
+
+  def cost_status_label(%{budget_status_label: label}) when is_binary(label), do: label
+  def cost_status_label(%{budget_status: status}), do: status_label(status)
+  def cost_status_label(_), do: "No budget"
 
   def format_tokens(tokens) when is_integer(tokens) and tokens > 0 do
     cond do

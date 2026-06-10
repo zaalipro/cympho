@@ -34,7 +34,7 @@ config :sentry, dsn: nil
 
 config :cympho, :skill_manifest_dir, "test/support/skill_manifests"
 
-config :cympho, :orchestrator, enabled: false
+config :cympho, :orchestrator, enabled: false, only_issue_id: nil
 
 # Tests that exercise the BoardApprovalActionExecutor / HeartbeatEngine.Watchdog
 # start them explicitly via `start_supervised` so they can grant Ecto sandbox

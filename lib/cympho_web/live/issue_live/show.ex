@@ -9,6 +9,7 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.Documents
   alias Cympho.HeartbeatEngine
   alias Cympho.Issues
+  alias Cympho.Issues.AutoAssignment
   alias Cympho.IssueReadStates
   alias Cympho.IssueThreadInteractions
   alias Cympho.Orchestrator
@@ -153,6 +154,33 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   defp maybe_clean_gate_url(socket), do: socket
+
+  defp reopen_for_relaunch(%{status: status} = issue) when status in [:blocked, "blocked"] do
+    Issues.update_issue(issue, %{status: :todo})
+  end
+
+  defp reopen_for_relaunch(issue), do: {:ok, issue}
+
+  defp notify_dispatcher_if_enabled(%{assigns: %{orchestrator_enabled?: true}}) do
+    _ = Cympho.Orchestrator.Dispatcher.poll_now()
+    true
+  end
+
+  defp notify_dispatcher_if_enabled(_socket), do: false
+
+  defp dispatch_focus_flash(:prioritize, true),
+    do: "Issue prioritized and dispatcher notified."
+
+  defp dispatch_focus_flash(:prioritize, false),
+    do:
+      "Issue prioritized for next dispatch. Copy the focused command from the digest or sidebar and start runtime."
+
+  defp dispatch_focus_flash(:relaunch, true),
+    do: "Issue reopened and dispatcher notified for focused relaunch."
+
+  defp dispatch_focus_flash(:relaunch, false),
+    do:
+      "Issue queued for focused relaunch. Copy the focused command from this issue page and start runtime."
 
   @impl true
   def handle_event("add_comment", %{"comment" => comment_params}, socket) do
@@ -506,6 +534,94 @@ defmodule CymphoWeb.IssueLive.Show do
       {:noreply, update(socket, :show_agent_panel, &(!&1))}
     else
       {:noreply, put_flash(socket, :error, "Agent execution is disabled in this runtime")}
+    end
+  end
+
+  @impl true
+  def handle_event("prioritize_dispatch", _params, socket) do
+    case Issues.prioritize_for_dispatch(socket.assigns.issue,
+           actor: socket.assigns[:current_user]
+         ) do
+      {:ok, issue} ->
+        dispatcher_notified? = notify_dispatcher_if_enabled(socket)
+
+        {:noreply,
+         socket
+         |> assign(:issue, %{issue | project: socket.assigns.issue.project})
+         |> put_flash(:info, dispatch_focus_flash(:prioritize, dispatcher_notified?))}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to prioritize issue")}
+    end
+  end
+
+  @impl true
+  def handle_event("clear_dispatch_focus", _params, socket) do
+    case Issues.clear_dispatch_focus(socket.assigns.issue) do
+      {:ok, issue} ->
+        {:noreply,
+         socket
+         |> assign(:issue, %{issue | project: socket.assigns.issue.project})
+         |> put_flash(:info, "Dispatch focus cleared.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to clear dispatch focus")}
+    end
+  end
+
+  @impl true
+  def handle_event("clear_child_dispatch_focus", %{"issue-id" => issue_id}, socket) do
+    with true <- child_issue_id?(socket, issue_id),
+         {:ok, child_issue} <- get_scoped_issue(socket, issue_id),
+         {:ok, _child_issue} <- Issues.clear_dispatch_focus(child_issue) do
+      {:noreply,
+       socket
+       |> assign_child_rollup(socket.assigns.issue.id)
+       |> put_flash(:info, "Dispatch focus cleared for child issue.")}
+    else
+      _ ->
+        {:noreply, put_flash(socket, :error, "Failed to clear child dispatch focus")}
+    end
+  end
+
+  @impl true
+  def handle_event("accept_owner_verification", _params, socket) do
+    case Issues.accept_owner_verification(socket.assigns.issue,
+           actor: socket.assigns[:current_user]
+         ) do
+      {:ok, issue} ->
+        {:noreply,
+         socket
+         |> assign(:issue, issue)
+         |> assign_child_rollup(issue.id)
+         |> maybe_rebuild_timeline()
+         |> put_flash(:info, "Owner verification accepted and issue closed.")}
+
+      {:error, :blocked_by_active_issues} ->
+        {:noreply, put_flash(socket, :error, "Issue is blocked by active issues")}
+
+      {:error, :not_owner_verification} ->
+        {:noreply, put_flash(socket, :error, "Issue is not waiting on owner verification.")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to accept owner verification.")}
+    end
+  end
+
+  @impl true
+  def handle_event("prepare_relaunch", _params, socket) do
+    with {:ok, issue} <- reopen_for_relaunch(socket.assigns.issue),
+         {:ok, issue} <-
+           Issues.prioritize_for_dispatch(issue, actor: socket.assigns[:current_user]) do
+      dispatcher_notified? = notify_dispatcher_if_enabled(socket)
+
+      {:noreply,
+       socket
+       |> assign(:issue, %{issue | project: socket.assigns.issue.project})
+       |> put_flash(:info, dispatch_focus_flash(:relaunch, dispatcher_notified?))}
+    else
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to queue focused relaunch")}
     end
   end
 
@@ -1227,11 +1343,81 @@ defmodule CymphoWeb.IssueLive.Show do
     |> put_flash(:info, "Work product form opened.")
   end
 
+  defp resolve_review_gate(socket, "queue_child_dispatch") do
+    queueable_children =
+      socket.assigns.child_issues
+      |> Enum.map(&Issues.get_issue!(&1.id))
+      |> Enum.filter(&child_dispatch_queueable?/1)
+
+    case queueable_children do
+      [] ->
+        put_flash(socket, :info, "No runnable sub-issues need dispatch.")
+
+      children ->
+        results =
+          Enum.map(children, fn child ->
+            child
+            |> assign_owner_for_child_dispatch()
+            |> Issues.prioritize_for_dispatch(actor: socket.assigns[:current_user])
+          end)
+
+        queued = Enum.count(results, &match?({:ok, _}, &1))
+        failed = length(results) - queued
+
+        dispatcher_notified? =
+          if queued > 0, do: notify_dispatcher_if_enabled(socket), else: false
+
+        socket =
+          socket
+          |> assign_child_rollup(socket.assigns.issue.id)
+          |> put_child_dispatch_flash(queued, failed, dispatcher_notified?)
+
+        socket
+    end
+  end
+
   defp resolve_review_gate(socket, "code_reference") do
     put_flash(socket, :info, "Use the GitHub PR field in the sidebar to set the code reference.")
   end
 
   defp resolve_review_gate(socket, _action), do: socket
+
+  defp assign_owner_for_child_dispatch(child) do
+    case AutoAssignment.assign_owner_for_dispatch(child) do
+      {:ok, assigned} -> assigned
+      {:error, :no_eligible_agent, issue} -> issue
+    end
+  end
+
+  defp child_dispatch_queueable?(child) do
+    child.status not in [:done, :cancelled] and
+      not Issues.dispatch_pinned?(child) and
+      not Issues.is_blocked?(child)
+  end
+
+  defp put_child_dispatch_flash(socket, queued, 0, true) do
+    put_flash(
+      socket,
+      :info,
+      "Queued #{queued} runnable sub-issue#{count_suffix(queued)} and notified the dispatcher."
+    )
+  end
+
+  defp put_child_dispatch_flash(socket, queued, 0, false) do
+    put_flash(
+      socket,
+      :info,
+      "Queued #{queued} runnable sub-issue#{count_suffix(queued)} for focused dispatch. Start runtime from Operations to continue delegated work."
+    )
+  end
+
+  defp put_child_dispatch_flash(socket, queued, failed, _dispatcher_notified?) do
+    put_flash(
+      socket,
+      :error,
+      "Queued #{queued} runnable sub-issue#{count_suffix(queued)}; #{failed} failed to queue."
+    )
+  end
 
   defp default_comment_params(socket) do
     case socket.assigns[:current_user] do

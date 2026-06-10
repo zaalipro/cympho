@@ -1,5 +1,8 @@
 defmodule CymphoWeb.IssueLive.Index do
   use CymphoWeb, :live_view
+
+  import CymphoWeb.Components.IssueDigest, only: [issue_digest_card: 1]
+
   alias Cympho.Issues
   alias Cympho.Agents
   alias Cympho.Projects
@@ -24,6 +27,7 @@ defmodule CymphoWeb.IssueLive.Index do
       |> assign(:agents, list_agents(socket))
       |> assign(:projects, list_projects(socket))
       |> assign(:labels, list_labels(socket))
+      |> assign(:issue_triage_counts, Issues.empty_triage_counts())
       |> assign(:unread_issues, %{})
 
     {:ok, socket}
@@ -56,6 +60,8 @@ defmodule CymphoWeb.IssueLive.Index do
       |> assign(:current_assignee_id, params["assignee_id"] || "")
       |> assign(:current_project_id, params["project_id"] || "")
       |> assign(:current_label_id, params["label_id"] || "")
+      |> assign(:current_triage, normalize_triage(params["triage"]))
+      |> assign(:issue_triage_counts, issue_triage_counts(socket))
       |> assign(:unread_issues, unread_issues)
 
     {:noreply, socket}
@@ -176,6 +182,7 @@ defmodule CymphoWeb.IssueLive.Index do
       "assignee_id" => socket.assigns.current_assignee_id,
       "project_id" => socket.assigns.current_project_id,
       "label_id" => socket.assigns.current_label_id,
+      "triage" => socket.assigns.current_triage,
       "page" => to_string(socket.assigns.page)
     }
 
@@ -195,6 +202,7 @@ defmodule CymphoWeb.IssueLive.Index do
     |> assign(:issues, paginated.issues)
     |> assign(:total, paginated.total)
     |> assign(:total_pages, paginated.total_pages)
+    |> assign(:issue_triage_counts, issue_triage_counts(socket))
     |> assign(:unread_issues, unread_issues)
   end
 
@@ -205,6 +213,7 @@ defmodule CymphoWeb.IssueLive.Index do
     assignee_id = Map.get(overrides, "assignee_id", socket.assigns.current_assignee_id)
     project_id = Map.get(overrides, "project_id", socket.assigns.current_project_id)
     label_id = Map.get(overrides, "label_id", socket.assigns.current_label_id)
+    triage = Map.get(overrides, "triage", socket.assigns.current_triage)
     page = Map.get(overrides, "page", to_string(socket.assigns.page))
 
     query =
@@ -215,12 +224,20 @@ defmodule CymphoWeb.IssueLive.Index do
         assignee_id: assignee_id,
         project_id: project_id,
         label_id: label_id,
+        triage: triage,
         page: page
       }
       |> Enum.reject(fn {_k, v} -> v in ["", nil] end)
       |> Enum.into(%{})
 
     ~p"/issues?#{query}"
+  end
+
+  defp issue_triage_counts(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Issues.triage_counts(company_id)
+      _ -> Issues.empty_triage_counts()
+    end
   end
 
   defp with_company_scope(socket, params) do
@@ -269,6 +286,87 @@ defmodule CymphoWeb.IssueLive.Index do
     end
   end
 
+  defp normalize_triage(triage)
+       when triage in ["open", "ceo", "ready", "active", "review", "blocked", "unassigned"],
+       do: triage
+
+  defp normalize_triage(_), do: ""
+
+  defp triage_lane_url(""), do: ~p"/issues"
+  defp triage_lane_url(lane), do: ~p"/issues?#{%{triage: lane}}"
+
+  defp triage_lanes(counts) do
+    [
+      %{
+        key: "open",
+        label: "Open work",
+        count: count_for(counts, "open"),
+        detail: "Everything not done or cancelled",
+        icon: "hero-list-bullet-mini"
+      },
+      %{
+        key: "ceo",
+        label: "CEO lane",
+        count: count_for(counts, "ceo"),
+        detail: "Owner requests and executive handoffs",
+        icon: "hero-sparkles-mini"
+      },
+      %{
+        key: "ready",
+        label: "Ready",
+        count: count_for(counts, "ready"),
+        detail: "Queued work agents can pick up",
+        icon: "hero-play-mini"
+      },
+      %{
+        key: "active",
+        label: "Active",
+        count: count_for(counts, "active"),
+        detail: "Currently moving through execution",
+        icon: "hero-bolt-mini"
+      },
+      %{
+        key: "review",
+        label: "Review",
+        count: count_for(counts, "review"),
+        detail: "Waiting on acceptance or evidence",
+        icon: "hero-check-badge-mini"
+      },
+      %{
+        key: "blocked",
+        label: "Blocked",
+        count: count_for(counts, "blocked"),
+        detail: "Needs intervention before progress",
+        icon: "hero-exclamation-triangle-mini"
+      },
+      %{
+        key: "unassigned",
+        label: "Unassigned",
+        count: count_for(counts, "unassigned"),
+        detail: "Missing a clear owner or role",
+        icon: "hero-user-plus-mini"
+      }
+    ]
+  end
+
+  defp count_for(counts, key), do: Map.get(counts, key, 0)
+
+  defp triage_lane_class(current, lane) do
+    if current == lane do
+      "border-brand/35 bg-brand/10 text-text-primary shadow-card"
+    else
+      "border-hairline bg-surface-1 text-text-secondary hover:border-border-hover hover:bg-surface-hover/40"
+    end
+  end
+
+  defp triage_lane_count_class(current, lane) do
+    if current == lane do
+      "text-brand"
+    else
+      "text-text-primary"
+    end
+  end
+
   defp status_label(:backlog), do: "Backlog"
   defp status_label(:todo), do: "To Do"
   defp status_label(:in_progress), do: "In Progress"
@@ -309,7 +407,8 @@ defmodule CymphoWeb.IssueLive.Index do
   defp filters_active?(assigns) do
     assigns.current_status != "" or assigns.current_priority != "" or
       assigns.current_search != "" or assigns.current_assignee_id != "" or
-      assigns.current_project_id != "" or assigns.current_label_id != ""
+      assigns.current_project_id != "" or assigns.current_label_id != "" or
+      assigns.current_triage != ""
   end
 
   defp pluralize(1, word), do: word

@@ -422,9 +422,13 @@ defmodule Cympho.Adapters.Error do
   defp normalise_category(_category), do: :unknown
 
   defp normalise_adapter(adapter) when adapter in [nil, ""], do: nil
+  defp normalise_adapter(adapter) when adapter in [:openai_chat, "openai_chat"], do: "OpenAI Chat"
   defp normalise_adapter(adapter), do: adapter |> to_string() |> String.replace("_", " ")
 
   defp adapter_label(nil), do: "The adapter"
+  defp adapter_label("OpenAI Chat"), do: "OpenAI Chat"
+  defp adapter_label(:openai_chat), do: "OpenAI Chat"
+  defp adapter_label("openai_chat"), do: "OpenAI Chat"
 
   defp adapter_label(adapter),
     do: adapter |> to_string() |> String.replace("_", " ") |> String.capitalize()

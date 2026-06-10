@@ -27,6 +27,55 @@
     </:actions>
   </.header>
 
+  <section class="mb-4">
+    <div class="mb-2 flex items-center justify-between px-1">
+      <div>
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Owner triage
+        </p>
+        <p class="mt-0.5 text-xs text-text-tertiary">
+          Jump straight to the queue that needs the next decision.
+        </p>
+      </div>
+      <.link
+        :if={@current_triage != ""}
+        patch={~p"/issues"}
+        class="text-xs font-590 text-brand hover:text-accent-hover"
+      >
+        Show all issues
+      </.link>
+    </div>
+
+    <div class="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+      <.link
+        :for={lane <- triage_lanes(@issue_triage_counts)}
+        patch={triage_lane_url(lane.key)}
+        class={[
+          "group min-w-0 rounded-lg border px-3 py-3 transition-colors",
+          triage_lane_class(@current_triage, lane.key)
+        ]}
+      >
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5">
+              <span class={[lane.icon, "h-4 w-4 shrink-0 text-text-quaternary"]}></span>
+              <p class="truncate text-xs font-590 text-text-primary">{lane.label}</p>
+            </div>
+            <p class="mt-1 line-clamp-2 min-h-8 text-[11px] leading-4 text-text-tertiary">
+              {lane.detail}
+            </p>
+          </div>
+          <span class={[
+            "shrink-0 font-mono text-xl font-590 leading-none tabular-nums",
+            triage_lane_count_class(@current_triage, lane.key)
+          ]}>
+            {lane.count}
+          </span>
+        </div>
+      </.link>
+    </div>
+  </section>
+
   <div class="linear-panel mb-4 p-3">
     <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
       <form phx-submit="search" class="min-w-0 flex-1">
@@ -194,6 +243,12 @@
         <p class="mt-1 truncate text-xs text-text-tertiary">
           {issue_description(issue.description)}
         </p>
+        <.issue_digest_card
+          issue={issue}
+          density="compact"
+          variant="inline"
+          class="mt-1.5"
+        />
       </.app_link>
 
       <div class="hidden min-w-0 text-xs text-text-tertiary md:block">

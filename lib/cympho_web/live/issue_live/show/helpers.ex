@@ -184,11 +184,20 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
   def run_status_color(_), do: "bg-gray-400"
 
   def run_status_label("completed"), do: "Completed"
+  def run_status_label("succeeded"), do: "Succeeded"
   def run_status_label("running"), do: "Running"
   def run_status_label("failed"), do: "Failed"
   def run_status_label("pending"), do: "Pending"
+  def run_status_label("queued"), do: "Queued"
   def run_status_label("cancelled"), do: "Cancelled"
-  def run_status_label(other), do: String.capitalize(to_string(other))
+  def run_status_label("timed_out"), do: "Timed out"
+
+  def run_status_label(other) do
+    other
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
 
   def run_status_tone("completed"), do: "text-green-300"
   def run_status_tone("succeeded"), do: "text-green-300"
@@ -1038,6 +1047,92 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     end
   end
 
+  def runtime_run_ledger(runs, agents, limit \\ 5) do
+    agent_by_id =
+      Map.new(agents || [], fn agent ->
+        {agent.id, agent.name || "Unnamed agent"}
+      end)
+
+    runs
+    |> List.wrap()
+    |> Enum.sort_by(&run_sort_time/1, :desc)
+    |> Enum.take(limit)
+    |> Enum.map(&runtime_run_card(&1, agent_by_id))
+  end
+
+  def runtime_run_card(run, agent_by_id) do
+    detail =
+      compact_body(run.error_reason || run.continuation_summary || run.log_excerpt, 180) ||
+        runtime_run_default_detail(run.status)
+
+    %{
+      id: run.id,
+      status: run.status,
+      status_label: run_status_label(run.status),
+      agent_name: Map.get(agent_by_id, run.agent_id, "Unknown agent"),
+      adapter: runtime_adapter_label(run.adapter),
+      timestamp: run_time(run),
+      timestamp_label: format_timeline_timestamp(run_time(run)),
+      duration: format_run_duration(run),
+      detail: detail,
+      workspace_path: run.workspace_path,
+      input_tokens: run.input_tokens || 0,
+      output_tokens: run.output_tokens || 0,
+      cost_usd: run.cost_usd
+    }
+  end
+
+  def runtime_run_status_class("completed"),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  def runtime_run_status_class("succeeded"),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  def runtime_run_status_class("running"),
+    do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
+
+  def runtime_run_status_class(status) when status in ["pending", "queued"],
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  def runtime_run_status_class(status) when status in ["failed", "timed_out"],
+    do: "border-brand/25 bg-brand/10 text-brand"
+
+  def runtime_run_status_class("cancelled"),
+    do: "border-hairline bg-surface-1 text-ink-tertiary"
+
+  def runtime_run_status_class(_),
+    do: "border-hairline bg-surface-1 text-ink-tertiary"
+
+  defp runtime_adapter_label(nil), do: "Runtime"
+
+  defp runtime_adapter_label(adapter) do
+    adapter
+    |> to_string()
+    |> String.replace("_", " ")
+  end
+
+  defp runtime_run_default_detail(status) when status in ["pending", "queued", "running"],
+    do: "Runtime is still in flight."
+
+  defp runtime_run_default_detail(status) when status in ["completed", "succeeded"],
+    do: "Runtime finished without an owner-visible summary."
+
+  defp runtime_run_default_detail(status) when status in ["failed", "timed_out"],
+    do: "Runtime failed without a captured error excerpt."
+
+  defp runtime_run_default_detail(_status), do: "No runtime detail captured yet."
+
+  defp run_sort_time(run) do
+    run
+    |> run_time()
+    |> case do
+      %DateTime{} = dt -> DateTime.to_unix(dt, :microsecond)
+      _ -> 0
+    end
+  end
+
+  defp run_time(run), do: run.completed_at || run.started_at || run.inserted_at
+
   def artifact_brief([]), do: "No attached work product yet."
 
   def artifact_brief(work_products) do
@@ -1430,33 +1525,77 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
       }) do
     digest = IssueDigest.build(issue, runs, work_products, child_issues, agents)
     blockers = digest.review_readiness.blockers
-    gate_nudges = ReviewNudges.plan(issue, blockers, agents: agents, child_issues: child_issues)
+    pre_runtime? = pre_runtime_review_gate?(issue, runs, blockers)
+
+    gate_nudges =
+      if pre_runtime? do
+        []
+      else
+        ReviewNudges.plan(issue, blockers, agents: agents, child_issues: child_issues)
+      end
 
     contract_nudges =
-      ReviewNudges.plan_contract_gaps(issue,
-        agents: agents,
-        runs: runs,
-        work_products: work_products,
-        child_issues: child_issues
-      )
+      if pre_runtime? do
+        []
+      else
+        ReviewNudges.plan_contract_gaps(issue,
+          agents: agents,
+          runs: runs,
+          work_products: work_products,
+          child_issues: child_issues
+        )
+      end
 
     %{
       active?: blockers != [],
+      mode: if(pre_runtime?, do: :pre_runtime, else: :evidence),
       blockers: blockers,
-      actions: review_gate_actions(issue, blockers),
+      actions: review_gate_actions(issue, blockers, pre_runtime?, child_issues),
       nudges: Enum.uniq_by(gate_nudges ++ contract_nudges, & &1.key),
       cleared_nudges: ReviewNudges.cleared(issue, child_issues: child_issues)
     }
   end
 
-  def review_gate_actions(issue, blockers) do
+  def review_gate_actions(issue, blockers, pre_runtime? \\ false, child_issues \\ nil)
+
+  def review_gate_actions(issue, blockers, true, _child_issues) do
     blockers
-    |> Enum.flat_map(fn blocker ->
-      issue
-      |> review_gate_action(blocker)
-      |> Enum.map(&annotate_gate_action(&1, blocker))
+    |> pre_runtime_review_gate_actions(issue)
+    |> Enum.map(fn action ->
+      blocker = List.first(blockers) || %{key: :runtime_verification, label: "Runtime launch"}
+      annotate_gate_action(action, blocker)
     end)
+  end
+
+  def review_gate_actions(issue, blockers, false, child_issues) do
+    blocker_actions =
+      blockers
+      |> Enum.flat_map(fn blocker ->
+        issue
+        |> review_gate_action(blocker, child_issues)
+        |> Enum.map(&annotate_gate_action(&1, blocker))
+      end)
+
+    [owner_verification_acceptance_action(issue) | blocker_actions]
+    |> Enum.reject(&is_nil/1)
     |> Enum.uniq_by(& &1.label)
+  end
+
+  def owner_verification_acceptance_action(issue) do
+    if Issues.owner_verification_closeable?(issue) do
+      %{
+        type: :live_event,
+        event: "accept_owner_verification",
+        label: "Accept and close",
+        detail: "Accept the CEO owner-verification update and close this issue.",
+        tone: :primary,
+        enabled?: true,
+        reason_body:
+          "Shown because the CEO produced an owner update, runtime completed, and the blocker is waiting on owner verification.",
+        evidence_prompt:
+          "Records an owner acceptance review comment, clears the owner-verification blocker, and closes the issue."
+      }
+    end
   end
 
   def annotate_gate_action(action, blocker) do
@@ -1465,6 +1604,80 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
       gate_label: blocker.label,
       gate_prompt: blocker.prompt
     })
+  end
+
+  def pre_runtime_review_gate?(issue, runs, blockers) do
+    issue.status in [:todo, "todo"] and Enum.empty?(runs) and
+      Enum.any?(List.wrap(blockers), fn blocker ->
+        blocker.key in [:runtime_verification, :agent_note, :work_product]
+      end)
+  end
+
+  def pre_runtime_review_gate_actions(_blockers, issue) do
+    dispatch_pinned? = Issues.dispatch_pinned?(issue)
+
+    [
+      %{
+        type: :live_event,
+        event: "prioritize_dispatch",
+        label: if(dispatch_pinned?, do: "Focus queued", else: "Queue focused dispatch"),
+        detail:
+          if(dispatch_pinned?,
+            do: "Focused dispatch is already queued for this issue.",
+            else: "Pin this issue as the next focused dispatch candidate."
+          ),
+        tone: if(dispatch_pinned?, do: :neutral, else: :primary),
+        enabled?: !dispatch_pinned?,
+        reason_body:
+          "Shown because this issue needs to be first in line when focused runtime starts.",
+        evidence_prompt:
+          "Queue focus here, then copy the focused command or start runtime from Operations.",
+        disabled_reason:
+          if(dispatch_pinned?,
+            do: "Focused dispatch is already queued; copy the command or start runtime.",
+            else: nil
+          )
+      },
+      %{
+        type: :copy,
+        copy_text: Cympho.RuntimeOperations.focused_runtime_launch_command(issue.id),
+        label: "Copy focused command",
+        success_label: "Copied",
+        detail: "Copy a one-issue runtime command for this exact issue.",
+        tone: :attention,
+        reason_body:
+          "Shown because this issue needs a focused CEO/runtime pass before manual delivery evidence is useful.",
+        evidence_prompt:
+          "Run this command in the app shell, then refresh the issue for the first CEO owner update or handoff."
+      },
+      %{
+        type: :anchor,
+        href: "/operations#runtime-launch-checklist",
+        label: "Open launch checklist",
+        detail: "Start focused runtime before adding delivery evidence.",
+        tone: :attention,
+        reason_body:
+          "Shown because this issue has no runtime evidence yet and should run before manual delivery notes are added."
+      }
+    ]
+  end
+
+  def next_owner_assignment(
+        %{issue: issue, all_agents: agents, child_issues: child_issues},
+        %{active?: true, mode: :pre_runtime, blockers: [blocker | _], actions: actions}
+      ) do
+    owner = next_owner_for_blocker(issue, blocker, agents, child_issues)
+
+    %{
+      status: :blocked,
+      status_label: "Launch needed",
+      owner: owner.name,
+      role: owner.role,
+      reason:
+        "#{owner.name} is assigned, but no runtime evidence exists yet. Start runtime from the digest, sidebar, or Operations before adding delivery notes or artifacts.",
+      blocker_label: "Runtime launch",
+      actions: actions
+    }
   end
 
   def next_owner_assignment(
@@ -1561,7 +1774,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
   def next_owner_reason(_issue, %{key: :runtime_verification}, owner, %{
         orchestrator_enabled?: false
       }) do
-    "#{owner.name} owns verification, but agent execution is disabled. Enable runtime execution or attach equivalent evidence before review."
+    "#{owner.name} owns verification, but review mode is on. Restart with CYMPHO_ORCHESTRATOR_ENABLED=1 to run agents, or attach equivalent evidence before review."
   end
 
   def next_owner_reason(_issue, %{key: :runtime_verification}, owner, _assigns) do
@@ -1682,7 +1895,9 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     "rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-510 text-amber-300"
   end
 
-  def review_gate_action(_issue, %{key: :runtime_verification}) do
+  def review_gate_action(issue, blocker, child_issues \\ nil)
+
+  def review_gate_action(_issue, %{key: :runtime_verification}, _child_issues) do
     [
       %{
         type: :event,
@@ -1693,7 +1908,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     ]
   end
 
-  def review_gate_action(_issue, %{key: :agent_note}) do
+  def review_gate_action(_issue, %{key: :agent_note}, _child_issues) do
     [
       %{
         type: :event,
@@ -1704,7 +1919,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     ]
   end
 
-  def review_gate_action(_issue, %{key: :delivery_comment}) do
+  def review_gate_action(_issue, %{key: :delivery_comment}, _child_issues) do
     [
       %{
         type: :event,
@@ -1715,7 +1930,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     ]
   end
 
-  def review_gate_action(_issue, %{key: :owner_summary}) do
+  def review_gate_action(_issue, %{key: :owner_summary}, _child_issues) do
     [
       %{
         type: :event,
@@ -1726,7 +1941,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     ]
   end
 
-  def review_gate_action(_issue, %{key: :ceo_owner_update}) do
+  def review_gate_action(_issue, %{key: :ceo_owner_update}, _child_issues) do
     [
       %{
         type: :event,
@@ -1737,7 +1952,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     ]
   end
 
-  def review_gate_action(_issue, %{key: :work_product}) do
+  def review_gate_action(_issue, %{key: :work_product}, _child_issues) do
     [
       %{
         type: :event,
@@ -1748,18 +1963,34 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     ]
   end
 
-  def review_gate_action(issue, %{key: :child_work}) do
+  def review_gate_action(issue, %{key: :child_work}, child_issues) do
+    child_dispatch = child_dispatch_action_state(issue, child_issues)
+
     [
+      %{
+        type: :event,
+        action: "queue_child_dispatch",
+        label: child_dispatch.label,
+        detail: child_dispatch.detail,
+        enabled?: child_dispatch.enabled?,
+        disabled_reason: child_dispatch.disabled_reason
+      },
       %{
         type: :anchor,
         href: "#issue-sub-issues",
         label: "Open sub-issues",
         detail: "#{open_child_count(issue)} still open."
+      },
+      %{
+        type: :anchor,
+        href: "/operations?parent_issue_id=#{issue.id}#delegated-work-queue",
+        label: "Open delegated queue",
+        detail: "Review queued child issues and focused runtime commands in Operations."
       }
     ]
   end
 
-  def review_gate_action(_issue, %{key: :review_decision}) do
+  def review_gate_action(_issue, %{key: :review_decision}, _child_issues) do
     [
       %{
         type: :event,
@@ -1770,7 +2001,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     ]
   end
 
-  def review_gate_action(_issue, %{key: :code_reference}) do
+  def review_gate_action(_issue, %{key: :code_reference}, _child_issues) do
     [
       %{
         type: :event,
@@ -1781,7 +2012,71 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     ]
   end
 
-  def review_gate_action(_issue, _blocker), do: []
+  def review_gate_action(_issue, _blocker, _child_issues), do: []
+
+  def child_dispatch_action_state(issue, child_issues) do
+    children =
+      child_issues
+      |> case do
+        children when is_list(children) -> children
+        _ -> Issues.list_child_issues(issue.id)
+      end
+      |> Enum.reject(&(&1.status in [:done, :cancelled]))
+      |> Enum.map(&Issues.get_issue!(&1.id))
+
+    runnable = Enum.filter(children, &runnable_child_dispatch?/1)
+    focused = Enum.count(children, &Issues.dispatch_pinned?/1)
+    blocked = Enum.count(children, &Issues.is_blocked?/1)
+
+    cond do
+      runnable != [] ->
+        %{
+          enabled?: true,
+          label: "Queue runnable sub-issues",
+          detail:
+            "#{length(runnable)} runnable of #{length(children)} open child issue#{count_suffix(length(children))} will be prioritized.",
+          disabled_reason: nil
+        }
+
+      children == [] ->
+        %{
+          enabled?: false,
+          label: "No runnable sub-issues",
+          detail: "No open child issues need dispatch.",
+          disabled_reason: "All child work is already closed."
+        }
+
+      true ->
+        %{
+          enabled?: false,
+          label: "No runnable sub-issues",
+          detail: "#{length(children)} open child issue#{count_suffix(length(children))} found.",
+          disabled_reason: no_runnable_child_reason(focused, blocked, length(children))
+        }
+    end
+  end
+
+  defp runnable_child_dispatch?(child) do
+    child.status not in [:done, :cancelled] and
+      not Issues.dispatch_pinned?(child) and
+      not Issues.is_blocked?(child)
+  end
+
+  defp no_runnable_child_reason(focused, blocked, total) do
+    cond do
+      focused == total ->
+        "All open child work is already focused for dispatch."
+
+      blocked == total ->
+        "All open child work is blocked by active dependencies."
+
+      focused > 0 and blocked > 0 and focused + blocked == total ->
+        "Open child work is already focused or blocked by active dependencies."
+
+      true ->
+        "No open child work is currently runnable."
+    end
+  end
 
   def open_child_count(issue) do
     issue.id

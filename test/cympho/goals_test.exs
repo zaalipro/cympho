@@ -1,8 +1,11 @@
 defmodule Cympho.GoalsTest do
   use Cympho.DataCase, async: true
 
+  alias Cympho.Companies
   alias Cympho.Goals
   alias Cympho.Goals.Goal
+  alias Cympho.Issues
+  alias Cympho.Projects
 
   describe "list_goals/0" do
     test "returns all goals" do
@@ -161,6 +164,166 @@ defmodule Cympho.GoalsTest do
       {:ok, goal} = Goals.create_goal(%{title: "Test"})
       changeset = Goals.change_goal(goal)
       assert changeset.changes == %{}
+    end
+  end
+
+  describe "alignment_summary/2" do
+    test "summarizes open work linked to goals, project-only work, and floating work" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Alignment Corp",
+          slug: "alignment-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Aligned Project",
+          prefix: "ALN",
+          company_id: company.id
+        })
+
+      {:ok, mission} =
+        Goals.create_goal(%{
+          title: "Win the market",
+          company_id: company.id,
+          project_id: project.id,
+          goal_type: :mission
+        })
+
+      {:ok, idle_goal} =
+        Goals.create_goal(%{
+          title: "Prepare next bet",
+          company_id: company.id,
+          project_id: project.id,
+          goal_type: :mission
+        })
+
+      {:ok, _aligned} =
+        Issues.create_issue(%{
+          title: "Goal-linked work",
+          company_id: company.id,
+          project_id: project.id,
+          goal_id: mission.id,
+          status: :todo,
+          priority: :high
+        })
+
+      {:ok, _project_only} =
+        Issues.create_issue(%{
+          title: "Project-only work",
+          company_id: company.id,
+          project_id: project.id,
+          status: :in_progress,
+          priority: :medium
+        })
+
+      {:ok, _floating} =
+        Issues.create_issue(%{
+          title: "Floating critical work",
+          company_id: company.id,
+          status: :blocked,
+          priority: :critical
+        })
+
+      {:ok, _done} =
+        Issues.create_issue(%{
+          title: "Completed old work",
+          company_id: company.id,
+          goal_id: idle_goal.id,
+          status: :done
+        })
+
+      summary = Goals.alignment_summary(company.id)
+
+      assert summary.total_open == 3
+      assert summary.mission_aligned == 1
+      assert summary.project_only == 1
+      assert summary.floating == 1
+      assert summary.active_goals == 2
+      assert summary.active_missions == 2
+      assert summary.goals_with_work == 1
+      assert summary.goals_without_work == 1
+      assert summary.aligned_percent == 33
+      assert summary.linked_percent == 67
+      assert summary.status == :floating_work
+      assert [%{title: "Floating critical work"} | _] = summary.risk_issues
+    end
+  end
+
+  describe "goal_work_health/1" do
+    test "rolls issue status health up by company goal" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Goal Health Corp",
+          slug: "goal-health-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Other Goal Health Corp",
+          slug: "other-goal-health-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Goal Health Project",
+          prefix: "GHP",
+          company_id: company.id
+        })
+
+      {:ok, mission} =
+        Goals.create_goal(%{
+          title: "Improve goal health",
+          company_id: company.id,
+          project_id: project.id,
+          goal_type: :mission
+        })
+
+      {:ok, _other_mission} =
+        Goals.create_goal(%{
+          title: "Other company goal",
+          company_id: other_company.id,
+          goal_type: :mission
+        })
+
+      for status <- [:backlog, :todo, :in_progress, :in_review, :blocked, :done, :cancelled] do
+        {:ok, _issue} =
+          Issues.create_issue(%{
+            title: "Goal health #{status}",
+            company_id: company.id,
+            project_id: project.id,
+            goal_id: mission.id,
+            status: status
+          })
+      end
+
+      {:ok, _unlinked} =
+        Issues.create_issue(%{
+          title: "Unlinked work",
+          company_id: company.id,
+          status: :todo
+        })
+
+      {:ok, _foreign} =
+        Issues.create_issue(%{
+          title: "Foreign goal work",
+          company_id: other_company.id,
+          status: :todo
+        })
+
+      health = Goals.goal_work_health(company.id)[mission.id]
+
+      assert health.total == 7
+      assert health.ready == 2
+      assert health.in_progress == 1
+      assert health.in_review == 1
+      assert health.blocked == 1
+      assert health.open == 5
+      assert health.done == 1
+      assert health.cancelled == 1
+      assert health.progress_percent == 14
+      assert %DateTime{} = health.last_activity_at
+      assert map_size(Goals.goal_work_health(company.id)) == 1
     end
   end
 end

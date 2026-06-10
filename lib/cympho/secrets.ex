@@ -6,6 +6,9 @@ defmodule Cympho.Secrets do
   alias Cympho.Secrets.Secret
   alias Cympho.Secrets.EncryptedStorage
 
+  @rotation_due_days 90
+  @rotation_overdue_days 180
+
   def list_secrets(company_id, opts \\ []) do
     Secret
     |> where(company_id: ^company_id)
@@ -14,6 +17,56 @@ defmodule Cympho.Secrets do
     |> maybe_filter(:scope_id, opts[:scope_id])
     |> order_by(asc: :key)
     |> Repo.all()
+  end
+
+  @doc """
+  Returns non-sensitive rotation metadata for active secrets in a company.
+
+  Rotation age is based on the active version row's `inserted_at`, so metadata
+  edits do not reset the clock. Secret values are never decrypted or returned.
+  """
+  def rotation_inventory(company_id, opts \\ []) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+
+    company_id
+    |> list_secrets(opts)
+    |> Enum.map(&rotation_entry(&1, now, opts))
+  end
+
+  def rotation_summary(company_id, opts \\ []) do
+    entries = rotation_inventory(company_id, opts)
+    counts = Enum.frequencies_by(entries, & &1.status)
+
+    %{
+      total: length(entries),
+      fresh: Map.get(counts, :fresh, 0),
+      due_soon: Map.get(counts, :due_soon, 0),
+      overdue: Map.get(counts, :overdue, 0),
+      unknown: Map.get(counts, :unknown, 0),
+      needs_rotation: Map.get(counts, :due_soon, 0) + Map.get(counts, :overdue, 0),
+      by_scope: Enum.frequencies_by(entries, & &1.scope)
+    }
+  end
+
+  def rotation_entry(%Secret{} = secret, now \\ DateTime.utc_now(), opts \\ []) do
+    age_days = secret_age_days(secret, now)
+    due_days = Keyword.get(opts, :due_days, @rotation_due_days)
+    overdue_days = Keyword.get(opts, :overdue_days, @rotation_overdue_days)
+    status = rotation_status(age_days, due_days, overdue_days)
+
+    %{
+      id: secret.id,
+      key: secret.key,
+      scope: secret.scope,
+      scope_id: secret.scope_id,
+      version: secret.version,
+      rotated_at: secret.inserted_at,
+      age_days: age_days,
+      due_days: due_days,
+      overdue_days: overdue_days,
+      status: status,
+      action_label: rotation_action_label(status)
+    }
   end
 
   def list_secrets_page(company_id, opts \\ []) do
@@ -186,6 +239,25 @@ defmodule Cympho.Secrets do
   defp encrypt_value(plaintext) when is_binary(plaintext) do
     EncryptedStorage.encrypt(plaintext)
   end
+
+  defp secret_age_days(%Secret{inserted_at: nil}, _now), do: nil
+
+  defp secret_age_days(%Secret{inserted_at: inserted_at}, now) do
+    max(DateTime.diff(now, inserted_at, :day), 0)
+  end
+
+  defp rotation_status(nil, _due_days, _overdue_days), do: :unknown
+
+  defp rotation_status(age_days, _due_days, overdue_days) when age_days >= overdue_days,
+    do: :overdue
+
+  defp rotation_status(age_days, due_days, _overdue_days) when age_days >= due_days, do: :due_soon
+  defp rotation_status(_age_days, _due_days, _overdue_days), do: :fresh
+
+  defp rotation_action_label(:overdue), do: "Rotate now"
+  defp rotation_action_label(:due_soon), do: "Plan rotation"
+  defp rotation_action_label(:fresh), do: "Current"
+  defp rotation_action_label(:unknown), do: "Review"
 
   @doc """
   Lists active secrets applicable to an agent: company-scoped + agent-scoped.

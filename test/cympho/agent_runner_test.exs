@@ -1,6 +1,7 @@
 defmodule Cympho.AgentRunnerTest do
   use ExUnit.Case, async: false
 
+  alias Cympho.AgentRunner
   alias Cympho.AgentRunner.Mock
 
   describe "Mock.run/4" do
@@ -58,6 +59,38 @@ defmodule Cympho.AgentRunnerTest do
 
       # Should not receive any tool_call_detected messages
       refute_receive {:tool_call_detected, _, _}
+    end
+  end
+
+  describe "run/4" do
+    test "uses the command from resolved adapter config" do
+      tmp_dir = Path.join(System.tmp_dir!(), "cympho-agent-runner-#{System.unique_integer()}")
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      command = Path.join(tmp_dir, "fake-claude")
+
+      File.write!(
+        command,
+        "#!/bin/sh\nfor arg in \"$@\"; do [ \"$arg\" = \"--no-input\" ] && exit 9; done\nprintf '%s\\n' '{\"type\":\"result\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}'\n"
+      )
+
+      File.chmod!(command, 0o755)
+
+      recipient = self()
+      issue = %{id: "config-command", title: "Config command", description: "Use config command"}
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", recipient,
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 1_000
+        )
+
+      assert_receive {:session_started, ^session_id}, 1_000
+      assert_receive {:turn_completed, ^session_id, result}, 1_000
+      assert result["type"] == "result"
     end
   end
 end

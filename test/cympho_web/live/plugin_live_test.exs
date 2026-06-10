@@ -36,6 +36,18 @@ defmodule CymphoWeb.PluginLiveTest do
       assert html =~ plugin.identifier
     end
 
+    test "shows plugin health diagnostics", %{conn: conn, current_company: company} do
+      insert_plugin(company.id, %{name: "Capability Gap", enabled: true, capabilities: []})
+
+      {:ok, view, html} = live(conn, "/plugins")
+
+      assert has_element?(view, "[data-testid='plugin-health']")
+      assert html =~ "Plugin Health"
+      assert html =~ "Watch"
+      assert html =~ "Cap gaps"
+      assert html =~ "Scope capabilities"
+    end
+
     test "filter event narrows the list by status", %{conn: conn, current_company: company} do
       _installed = insert_plugin(company.id, %{name: "Installed Only", status: "installed"})
       _active = insert_plugin(company.id, %{name: "Active Only", status: "active"})

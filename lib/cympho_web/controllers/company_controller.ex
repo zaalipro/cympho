@@ -209,7 +209,7 @@ defmodule CymphoWeb.CompanyController do
       end
 
     case Companies.import_company(company_data, slug_strategy: slug_strategy) do
-      {:ok, %{company: company}} ->
+      {:ok, %{company: company, secrets_to_restore: secrets_to_restore}} ->
         # Creator becomes owner of the imported company.
         Companies.create_membership(%{
           user_id: conn.assigns.current_user.id,
@@ -217,7 +217,9 @@ defmodule CymphoWeb.CompanyController do
           role: "owner"
         })
 
-        conn |> put_status(:created) |> json(%{data: company})
+        conn
+        |> put_status(:created)
+        |> json(%{data: company, secrets_to_restore: secrets_to_restore})
 
       {:error, changeset} when is_struct(changeset) ->
         error_changeset(conn, changeset)

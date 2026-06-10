@@ -33,6 +33,13 @@ defmodule Cympho.RuntimeProfiles do
       description: "Allow more local throughput when RAM and provider quotas are comfortable."
     },
     %{
+      id: "qwen_dashscope",
+      name: "Qwen DashScope",
+      profile_id: "openai-chat-qwen-dashscope",
+      max_concurrent_jobs: 1,
+      description: "Use DashScope compatible-mode chat completions with one safe gateway slot."
+    },
+    %{
       id: "provider_test",
       name: "Provider test",
       profile_id: "process-codex",
@@ -71,6 +78,34 @@ defmodule Cympho.RuntimeProfiles do
         description:
           "Runs Claude Code through the cm wrapper. Good for MiniMax-compatible routing.",
         config: %{"command" => "cm"},
+        runtime_config: %{}
+      },
+      %{
+        id: "claude-qwen-dashscope",
+        name: "Claude-compatible Qwen DashScope",
+        adapter: "claude_code",
+        posture: "Gateway",
+        description:
+          "Legacy Claude CLI route for providers that speak Anthropic-style messages. Use the OpenAI Chat Qwen profile for /chat/completions endpoints.",
+        config: %{"command" => "claude"},
+        runtime_config: %{
+          "env" => %{
+            "ANTHROPIC_MODEL" => "qwen3.7-plus",
+            "ANTHROPIC_BASE_URL" => "https://dashscope.aliyuncs.com/compatible-mode/v1"
+          }
+        }
+      },
+      %{
+        id: "openai-chat-qwen-dashscope",
+        name: "OpenAI Chat Qwen DashScope",
+        adapter: "openai_chat",
+        posture: "Gateway",
+        description:
+          "Calls DashScope compatible-mode chat completions directly. Add OPENAI_API_KEY, DASHSCOPE_API_KEY, or ANTHROPIC_API_KEY in Secrets before execution.",
+        config: %{
+          "endpoint" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "model" => "qwen3.7-plus"
+        },
         runtime_config: %{}
       },
       %{
@@ -191,6 +226,17 @@ defmodule Cympho.RuntimeProfiles do
   def config(profile_id), do: get!(profile_id).config || %{}
   def runtime_config(profile_id), do: get!(profile_id).runtime_config || %{}
 
+  def summary_value(%{config: config, runtime_config: runtime_config}) do
+    runtime_env = runtime_env_from_profile(%{runtime_config: runtime_config})
+
+    cond do
+      present?(config["model"]) -> "Model #{config["model"]}"
+      present?(runtime_env["ANTHROPIC_MODEL"]) -> "Model #{runtime_env["ANTHROPIC_MODEL"]}"
+      present?(config["command"]) -> "Command #{config["command"]}"
+      true -> "Adapter defaults"
+    end
+  end
+
   def summary_value(%{config: config}) do
     cond do
       present?(config["model"]) -> "Model #{config["model"]}"
@@ -198,6 +244,12 @@ defmodule Cympho.RuntimeProfiles do
       true -> "Adapter defaults"
     end
   end
+
+  defp runtime_env_from_profile(%{runtime_config: %{} = runtime_config}) do
+    Map.get(runtime_config, "env") || Map.get(runtime_config, :env) || %{}
+  end
+
+  defp runtime_env_from_profile(_profile), do: %{}
 
   defp present?(value) when is_binary(value), do: String.trim(value) != ""
   defp present?(_), do: false

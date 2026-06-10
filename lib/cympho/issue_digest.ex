@@ -286,6 +286,9 @@ defmodule Cympho.IssueDigest do
       metrics.agent_comments > 0 or metrics.successful_runs > 0 or metrics.work_products > 0 ->
         :in_progress
 
+      pre_runtime_launch_needed?(issue, metrics) ->
+        :pre_runtime
+
       Map.get(issue, :assignee_id) || Map.get(issue, :assigned_role) ->
         :assigned
 
@@ -300,6 +303,7 @@ defmodule Cympho.IssueDigest do
   defp state_label(:coordinating), do: "Coordinating work"
   defp state_label(:ready_for_review), do: "Ready for review"
   defp state_label(:in_progress), do: "In progress"
+  defp state_label(:pre_runtime), do: "Launch needed"
   defp state_label(:assigned), do: "Assigned"
   defp state_label(:not_started), do: "Not started"
 
@@ -325,6 +329,7 @@ defmodule Cympho.IssueDigest do
 
   defp headline(_issue, :ready_for_review, _metrics), do: "Evidence is ready for CTO/CEO review."
   defp headline(_issue, :in_progress, _metrics), do: "Work has started and needs a closing note."
+  defp headline(_issue, :pre_runtime, _metrics), do: "Assigned, but runtime has not started yet."
   defp headline(_issue, :assigned, _metrics), do: "Assigned, but no delivery evidence yet."
   defp headline(_issue, :not_started, _metrics), do: "No agent work has started yet."
 
@@ -356,6 +361,17 @@ defmodule Cympho.IssueDigest do
 
   defp summary(_issue, :in_progress, metrics) do
     "#{metrics.runs} run#{suffix(metrics.runs)}, #{metrics.agent_comments} agent note#{suffix(metrics.agent_comments)}, and #{metrics.work_products} artifact#{suffix(metrics.work_products)} are present."
+  end
+
+  defp summary(issue, :pre_runtime, _metrics) do
+    owner =
+      case issue do
+        %{assignee: %{name: name}} -> name
+        %{assigned_role: role} when role not in [nil, ""] -> humanize(role)
+        _ -> "An agent"
+      end
+
+    "#{owner} owns the next move, but no runtime run has produced evidence yet."
   end
 
   defp summary(issue, :assigned, _metrics) do
@@ -417,6 +433,22 @@ defmodule Cympho.IssueDigest do
     end
   end
 
+  defp next_action(issue, :pre_runtime, metrics) do
+    cond do
+      dispatch_focus_queued?(issue) and ceo_first_turn_required?(issue, metrics) ->
+        "Focused dispatch is queued. Copy the focused command or start runtime; first output must be `[owner_update]` or `[handoff]`."
+
+      dispatch_focus_queued?(issue) ->
+        "Focused dispatch is queued. Copy the focused command or start runtime before asking for delivery evidence."
+
+      ceo_first_turn_required?(issue, metrics) ->
+        "Open the Operations launch checklist or use the focused CEO command from the digest or sidebar; first output must be `[owner_update]` or `[handoff]`."
+
+      true ->
+        "Open the Operations launch checklist or start focused dispatch before asking for delivery evidence."
+    end
+  end
+
   defp next_action(_issue, :assigned, _metrics) do
     "Start the assigned agent or ask the CEO/CTO to split the work into smaller tickets."
   end
@@ -446,6 +478,15 @@ defmodule Cympho.IssueDigest do
       nil -> "No agent signal yet."
       signal -> signal.body
     end
+  end
+
+  defp pre_runtime_launch_needed?(issue, metrics) do
+    assigned? =
+      present?(Map.get(issue, :assignee_id)) or present?(Map.get(issue, :assigned_role))
+
+    issue.status in [:todo, "todo"] and
+      assigned? and
+      metrics.runs == 0 and metrics.agent_comments == 0 and metrics.work_products == 0
   end
 
   defp latest_failed_run_signal(runs) do
@@ -629,19 +670,24 @@ defmodule Cympho.IssueDigest do
   end
 
   defp role_run_summaries(issue, state, metrics, contributions) do
-    [
-      delivery_run_summary(metrics, contributions),
-      review_run_summary(issue, state, metrics, contributions),
-      owner_run_summary(issue, state, metrics, contributions),
-      runtime_run_summary(metrics, contributions)
-    ]
+    delivery = delivery_run_summary(issue, metrics, contributions)
+    review = review_run_summary(issue, state, metrics, contributions)
+    owner = owner_run_summary(issue, state, metrics, contributions)
+    runtime = runtime_run_summary(metrics, contributions)
+
+    if ceo_first_turn_required?(issue, metrics) do
+      [owner, runtime, delivery, review]
+    else
+      [delivery, review, owner, runtime]
+    end
   end
 
-  defp delivery_run_summary(metrics, contributions) do
+  defp delivery_run_summary(issue, metrics, contributions) do
     delivery = delivery_contributions(contributions)
 
     status =
       cond do
+        ceo_first_turn_required?(issue, metrics) -> :waiting
         metrics.failed_runs > 0 -> :blocked
         metrics.active_runs > 0 -> :running
         metrics.tagged_delivery_comments > 0 and delivery_evidence?(metrics) -> :delivery
@@ -658,14 +704,14 @@ defmodule Cympho.IssueDigest do
       owner: contribution_names(delivery),
       status: status,
       status_label: run_summary_status_label(status),
-      summary: delivery_run_summary_text(metrics, delivery),
+      summary: delivery_run_summary_text(issue, metrics, delivery),
       evidence: [
         count_chip(metrics.tagged_delivery_comments, "delivery notes"),
         count_chip(metrics.work_products, "artifacts"),
         count_chip(metrics.successful_runs, "successful runs"),
         count_chip(metrics.child_issues, "sub-issues")
       ],
-      next_action: delivery_run_next_action(metrics, status)
+      next_action: delivery_run_next_action(issue, metrics, status)
     }
   end
 
@@ -710,7 +756,7 @@ defmodule Cympho.IssueDigest do
 
     %{
       key: :owner_update,
-      title: "CEO owner update",
+      title: owner_run_summary_title(issue, metrics),
       role: "CEO / owner liaison",
       owner: contribution_names(owners),
       status: status,
@@ -718,6 +764,7 @@ defmodule Cympho.IssueDigest do
       summary: owner_run_summary_text(issue, state, metrics, owners),
       evidence: [
         count_chip(metrics.tagged_owner_update_comments, "owner updates"),
+        count_chip(metrics.tagged_handoff_comments, "handoffs"),
         count_chip(metrics.tagged_review_decision_comments, "review decisions"),
         count_chip(metrics.child_issues, "delegated issues"),
         count_chip(metrics.closed_child_issues, "closed sub-issues")
@@ -753,8 +800,11 @@ defmodule Cympho.IssueDigest do
     }
   end
 
-  defp delivery_run_summary_text(metrics, delivery) do
+  defp delivery_run_summary_text(issue, metrics, delivery) do
     cond do
+      ceo_first_turn_required?(issue, metrics) ->
+        "Delivery waits for the CEO first turn to produce an owner update, a handoff, or scoped child issues."
+
       metrics.failed_runs > 0 ->
         "Delivery is blocked by #{metrics.failed_runs} failed runtime attempt#{suffix(metrics.failed_runs)}."
 
@@ -778,12 +828,13 @@ defmodule Cympho.IssueDigest do
     end
   end
 
-  defp delivery_run_next_action(_metrics, :blocked),
+  defp delivery_run_next_action(_issue, _metrics, :blocked),
     do: "Fix or document the failed run before review."
 
-  defp delivery_run_next_action(_metrics, :running), do: "Wait for the active run to finish."
+  defp delivery_run_next_action(_issue, _metrics, :running),
+    do: "Wait for the active run to finish."
 
-  defp delivery_run_next_action(metrics, :delivery) do
+  defp delivery_run_next_action(_issue, metrics, :delivery) do
     if metrics.tagged_review_decision_comments > 0 do
       "Use this delivery evidence for the final owner update."
     else
@@ -791,12 +842,84 @@ defmodule Cympho.IssueDigest do
     end
   end
 
-  defp delivery_run_next_action(_metrics, :review),
+  defp delivery_run_next_action(_issue, _metrics, :review),
     do:
       "Ask the delivery owner for `[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ...`."
 
-  defp delivery_run_next_action(_metrics, _status),
-    do: "Start or assign the delivery work."
+  defp delivery_run_next_action(issue, metrics, _status) do
+    if ceo_first_turn_required?(issue, metrics) do
+      "Start the CEO turn before assigning delivery."
+    else
+      "Start or assign the delivery work."
+    end
+  end
+
+  defp owner_run_summary_title(issue, metrics) do
+    if ceo_first_turn_required?(issue, metrics), do: "CEO first turn", else: "CEO owner update"
+  end
+
+  defp owner_run_summary_text(issue, state, metrics, owners) do
+    cond do
+      metrics.tagged_owner_update_comments > 0 ->
+        "A CEO owner update is recorded for this issue."
+
+      ceo_first_turn_required?(issue, metrics) ->
+        "CEO has not produced the first owner-facing signal yet."
+
+      owner_update_due?(issue, state, metrics) ->
+        "Review is ready; CEO should translate the delivery/review state into an owner-facing update."
+
+      metrics.child_issues > 0 ->
+        "Work was delegated across #{metrics.child_issues} sub-issue#{suffix(metrics.child_issues)}; CEO update becomes due before parent closure."
+
+      owners != [] ->
+        "CEO activity exists, but no tagged owner update is present."
+
+      true ->
+        "No CEO update is due until delegated work or a review decision needs owner-facing context."
+    end
+  end
+
+  defp owner_run_next_action(_issue, _state, _metrics, :owner_update),
+    do: "Use the CEO update as the owner-facing status."
+
+  defp owner_run_next_action(issue, _state, metrics, :missing) do
+    if ceo_first_turn_required?(issue, metrics) do
+      "Start the CEO turn; it must leave `[owner_update]` or `[handoff]`, and split work into scoped child issues when execution is needed."
+    else
+      "Add `[owner_update] What happened: ... Business status: shipped/not shipped. Current state: ... Next decision: ... Owner decision needed: ...`."
+    end
+  end
+
+  defp owner_run_next_action(_issue, _state, _metrics, _status),
+    do: "Wait for CTO review or delegated child work to finish."
+
+  defp owner_update_due?(issue, state, metrics) do
+    ceo_first_turn_required?(issue, metrics) or issue.status in [:done, :cancelled] or
+      state == :closed or
+      (metrics.child_issues > 0 and metrics.tagged_review_decision_comments > 0)
+  end
+
+  defp ceo_first_turn_required?(issue, metrics) do
+    ceo_owned?(issue) and metrics.tagged_owner_update_comments == 0 and
+      metrics.tagged_handoff_comments == 0 and metrics.child_issues == 0
+  end
+
+  defp ceo_owned?(%{assigned_role: role}) when role in [:ceo, "ceo"], do: true
+
+  defp ceo_owned?(%{assignee: %{role: role}}) when role in [:ceo, "ceo"], do: true
+
+  defp ceo_owned?(_issue), do: false
+
+  defp dispatch_focus_queued?(%{monitor_state: %{"dispatch" => %{"pinned_at" => pinned_at}}})
+       when is_binary(pinned_at) and pinned_at != "",
+       do: true
+
+  defp dispatch_focus_queued?(%{monitor_state: %{dispatch: %{pinned_at: pinned_at}}})
+       when is_binary(pinned_at) and pinned_at != "",
+       do: true
+
+  defp dispatch_focus_queued?(_issue), do: false
 
   defp review_run_summary_text(_issue, _state, metrics, reviewers) do
     cond do
@@ -837,35 +960,6 @@ defmodule Cympho.IssueDigest do
   defp review_run_next_action(_issue, _state, _metrics, _status),
     do: "Wait for delivery evidence before asking CTO for review."
 
-  defp owner_run_summary_text(issue, state, metrics, owners) do
-    cond do
-      metrics.tagged_owner_update_comments > 0 ->
-        "A CEO owner update is recorded for this issue."
-
-      owner_update_due?(issue, state, metrics) ->
-        "Review is ready; CEO should translate the delivery/review state into an owner-facing update."
-
-      metrics.child_issues > 0 ->
-        "Work was delegated across #{metrics.child_issues} sub-issue#{suffix(metrics.child_issues)}; CEO update becomes due before parent closure."
-
-      owners != [] ->
-        "CEO activity exists, but no tagged owner update is present."
-
-      true ->
-        "No CEO update is due until delegated work or a review decision needs owner-facing context."
-    end
-  end
-
-  defp owner_run_next_action(_issue, _state, _metrics, :owner_update),
-    do: "Use the CEO update as the owner-facing status."
-
-  defp owner_run_next_action(_issue, _state, _metrics, :missing),
-    do:
-      "Add `[owner_update] What happened: ... Business status: shipped/not shipped. Current state: ... Next decision: ... Owner decision needed: ...`."
-
-  defp owner_run_next_action(_issue, _state, _metrics, _status),
-    do: "Wait for CTO review or delegated child work to finish."
-
   defp runtime_run_summary_text(metrics) do
     cond do
       metrics.failed_runs > 0 ->
@@ -902,11 +996,6 @@ defmodule Cympho.IssueDigest do
   defp review_due?(issue, state, metrics) do
     issue.status in [:in_review, :done] or state in [:ready_for_review, :closed] or
       delivery_evidence?(metrics)
-  end
-
-  defp owner_update_due?(issue, state, metrics) do
-    issue.status in [:done, :cancelled] or state == :closed or
-      (metrics.child_issues > 0 and metrics.tagged_review_decision_comments > 0)
   end
 
   defp delivery_evidence_summary(metrics) do

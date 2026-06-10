@@ -37,7 +37,10 @@ defmodule Cympho.AgentPrompt do
   @max_siblings 25
   @open_review_comment_limit 20
   @open_review_query_limit 60
-  @delivery_role_pool [:engineer, :designer, :product_manager, :release_engineer]
+  @owner_revision_marker "owner reopened the ceo verification update"
+  @delivery_role_pool Agent.delivery_roles()
+  @business_delivery_roles Agent.business_delivery_roles()
+  @pr_role_pool Agent.pr_delivery_roles()
 
   @doc """
   Builds a prompt for an issue and optional agent.
@@ -56,6 +59,7 @@ defmodule Cympho.AgentPrompt do
       team_status_block(issue, role_of(agent)),
       budget_block(issue, agent),
       history_block(history),
+      owner_revision_block(history, role_of(agent)),
       open_review_feedback_block(issue, role_of(agent)),
       digest_quality_block(issue, history),
       role_completion_contract_block(role_of(agent)),
@@ -81,7 +85,7 @@ defmodule Cympho.AgentPrompt do
       assignments = Cympho.Agents.count_active_assignments_by_company(company_id)
 
       lines =
-        [:engineer, :release_engineer, :product_manager, :designer]
+        @delivery_role_pool
         |> Enum.map(&team_status_line(&1, company_id, assignments))
         |> Enum.reject(&is_nil/1)
 
@@ -699,8 +703,46 @@ defmodule Cympho.AgentPrompt do
 
   defp role_completion_contract_block(role), do: AgentPromptContract.prompt_block(role)
 
-  defp pull_request_contract_block(issue, role)
-       when role in [:engineer, :product_manager, :designer, :cto] do
+  defp owner_revision_block(%{comments: comments}, :ceo) do
+    case latest_owner_revision_comment(comments) do
+      nil ->
+        nil
+
+      %Comment{body: body} ->
+        """
+        ## Owner revision request
+        The owner reopened the latest CEO verification update instead of accepting closure. Treat this turn as a focused CEO revision, not as a generic blocked issue.
+
+        Required this turn:
+        - Read the owner review below and address the gap directly.
+        - If the answer is known, leave a revised `[owner_update]` with Business status, Current state, Next decision, and Owner decision needed.
+        - If more work is needed, create or delegate the missing work, then `block_issue` with a `[blocked]` note that names the dependency.
+        - Do not repeat the previous owner update unchanged.
+
+        Owner review: #{truncate(body, 700)}
+        """
+        |> String.trim()
+    end
+  end
+
+  defp owner_revision_block(_history, _role), do: nil
+
+  defp latest_owner_revision_comment(comments) do
+    comments
+    |> List.wrap()
+    |> Enum.reverse()
+    |> Enum.find(&owner_revision_comment?/1)
+  end
+
+  defp owner_revision_comment?(%Comment{author_type: "user", body: body}) when is_binary(body) do
+    body
+    |> String.downcase()
+    |> String.contains?(@owner_revision_marker)
+  end
+
+  defp owner_revision_comment?(_comment), do: false
+
+  defp pull_request_contract_block(issue, role) when role in @pr_role_pool or role == :cto do
     PullRequestContract.prompt_block(issue)
   end
 
@@ -828,13 +870,17 @@ defmodule Cympho.AgentPrompt do
     any requested side effect that is not represented in this block.
 
     Every response that advances, reviews, blocks, delegates, or completes work MUST include a `comment` action. Start the comment body with one purpose tag: `[owner_update]`, `[decision]`, `[handoff]`, `[review]`, `[blocked]`, or `[delivery]`. Then state the fields that match your role:
-    - Engineer/Product/Design delivery: `[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ...`
+    - Delivery agents: `[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ...` (`Files changed` can name documents, campaigns, research artifacts, QA plans, or support assets when no code changed.)
     - CTO review: `[review] Verdict: accepted/request changes/blocked. What happened: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ...`
     - CEO owner update: `[owner_update] What happened: ... Business status: shipped/not shipped. Current state: ... Next decision: ... Owner decision needed: ...`
     - Blocked work: `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ...`
     Never emit `attach_work_product`, `submit_review`, `approve_issue`, `request_changes`, `block_issue`, `handoff`, or a meaningful `create_issue` without a paired owner-readable `comment`. The issue page uses these comments as the owner-facing execution record and groups noisy activity by those tags.
 
     Treat your final response summary as run memory. Include objective, actions taken, files changed or artifacts, validation, risks/gaps, current state, and next decision. Avoid vague endings like "done", "fixed", or "tests passed" without the decision context; Cympho folds your summary and tagged comment into the issue memory panel.
+
+    `attach_work_product` has a strict schema: use `title` for the artifact name, optional `description` for artifact contents/summary, optional `kind`, `payload`, `metadata`, and `url`. Valid `kind` values are `code_change`, `document`, `url`, `artifact`, or `other`; for strategy plans/specs, use `document`. If you include `payload`, it must be a JSON object; put long artifact text in `description` or in `payload.text`. Do not use `name` or `content` keys for work products.
+
+    A run is incomplete if the current issue remains `in_progress` and assigned to you. After delegation or decomposition, also emit a state-changing action such as `handoff`, `block_issue`, `approve_issue`, or `request_changes`. For CEO decomposition where child issues must finish first, use `block_issue` with a clear `[blocked]` comment such as "Waiting for delegated sub-issues."
 
     Split conservatively. Prefer 2–5 focused sub-issues with acceptance criteria over a broad fan-out. The server can reject excessive active sub-issues; when that happens, review, finish, request changes, or block the existing work instead of creating more.
     """
@@ -854,7 +900,7 @@ defmodule Cympho.AgentPrompt do
     Use this action when a `mission_idle` wake fires or when a fresh mission goal needs decomposition. Required fields: `goal_id` (a mission-type Goal id) and `initiatives` (a list of `{title, description, role, priority?}` objects, max 8). Each initiative becomes a sibling issue under the mission goal and routes immediately to its `role`. Prefer this over emitting many `create_issue` actions: it captures the full plan atomically and the company can run autonomously from one batch.
 
     ### When to use `spawn_agent`
-    Hire a new agent when a `no_agent_for_role` wake fires (the dispatcher could not find anyone for an issue's role) or when the team status block above shows a role at zero capacity for upcoming work. Required fields: `name` (display name), `role` (one of: ceo, cto, engineer, product_manager, designer). Optional: `title`, `adapter`, `instructions`. The new agent starts polling immediately. Do not spawn duplicates — if a role already has 1+ idle agents, delegate or wait instead.
+    Hire a new agent when a `no_agent_for_role` wake fires (the dispatcher could not find anyone for an issue's role) or when the team status block above shows a role at zero capacity for upcoming work. Required fields: `name` (display name), `role` (one of: #{Enum.join(Agent.role_strings(), ", ")}). Optional: `title`, `adapter`, `instructions`. The new agent starts polling immediately. Do not spawn duplicates — if a role already has 1+ idle agents, delegate or wait instead.
 
     ### When to use `delegate`
     Use `delegate` (not `handoff`) when you specifically know which subordinate should pick up the work. Required fields: `to_agent_id` and `reason`. `handoff` clears the assignee and lets the dispatcher route by role; `delegate` pins the issue to the named agent and wakes them with a `manager_directive`. You must outrank the target — the server rejects equal-or-higher rank delegations.
@@ -954,6 +1000,33 @@ defmodule Cympho.AgentPrompt do
     |> String.trim()
   end
 
+  defp role_action_guidance(:qa_engineer) do
+    """
+    ### Allowed actions for your role (QA engineer)
+    - `comment`, `attach_work_product`, `submit_review`, `create_issue` (for reproducible defects or follow-up coverage), `escalate`
+
+    ### MUST NOT emit
+    - `approve_issue`, `request_changes`, `block_issue` — governance actions reserved for CEO/CTO.
+
+    Focus on reproducible evidence: test plan, coverage matrix, failed/passing scenarios, screenshots or logs summarized as artifacts, and concrete follow-up issues for defects.
+    """
+    |> String.trim()
+  end
+
+  defp role_action_guidance(role) when role in @business_delivery_roles do
+    """
+    ### Allowed actions for your role (#{role_label(role)})
+    - `create_issue`, `submit_review`, `comment`, `attach_work_product`, `escalate`
+
+    ### MUST NOT emit
+    - `approve_issue`, `request_changes`, `block_issue` — governance actions reserved for CEO/CTO.
+    - `set_pr_url` unless your work genuinely produced a pull request.
+
+    Produce reviewable business artifacts: research briefs, campaign plans, copy drafts, outreach lists, support responses, or customer evidence. Attach the artifact and submit review to your supervisor with the next business decision.
+    """
+    |> String.trim()
+  end
+
   defp role_action_guidance(_) do
     """
     ### Action types
@@ -989,6 +1062,11 @@ defmodule Cympho.AgentPrompt do
           "description": "Goal: turn the approved onboarding scope into engineer-ready work. Role: cto. Success criteria: sub-tickets have acceptance criteria, dependencies, and verification steps.",
           "role": "cto",
           "priority": "high"
+        },
+        {
+          "type": "block_issue",
+          "reason": "[blocked] Cause: waiting for delegated product and CTO sub-issues to return evidence. Attempted fix: split the owner request into measurable planning work. Needs: sub-issue completion. Current state: delegated. Next decision: review evidence and approve or request changes.",
+          "blocker_kind": "external_dep"
         }
       ]
     }
@@ -1117,6 +1195,26 @@ defmodule Cympho.AgentPrompt do
     |> String.trim()
   end
 
+  defp action_contract_example(:qa_engineer) do
+    delivery_example(
+      "QA regression plan",
+      "Ran smoke and regression coverage for onboarding. Passing: account creation and step persistence. Failing: password reset empty state lacks an accessible label.",
+      "QA regression matrix",
+      "Includes tested scenarios, results, evidence links, and follow-up defect recommendations.",
+      "QA pass is ready for CTO review; one follow-up defect is recommended."
+    )
+  end
+
+  defp action_contract_example(role) when role in @business_delivery_roles do
+    delivery_example(
+      "#{role_label(role)} work package",
+      "Completed the assigned business-function work and packaged the evidence for review.",
+      "#{role_label(role)} artifact",
+      "Contains the research, copy, campaign, outreach, or support deliverable and the assumptions behind it.",
+      "#{role_label(role)} work is ready for supervisor review."
+    )
+  end
+
   defp action_contract_example(_role) do
     """
     ### JSON shape and example
@@ -1147,6 +1245,38 @@ defmodule Cympho.AgentPrompt do
     """
     |> String.trim()
   end
+
+  defp delivery_example(title, comment_summary, artifact_title, artifact_description, notes) do
+    """
+    ### JSON shape and example — #{title}
+    Each action requires `type` plus the fields listed in the action playbook above.
+
+    ```cympho-actions
+    {
+      "actions": [
+        {
+          "type": "comment",
+          "body": "[delivery] What happened: #{comment_summary} Files changed: #{artifact_title}. Verification: checked the artifact against the issue acceptance criteria. Risks: assumptions are listed in the artifact. Current state: ready for review. Next decision: supervisor accepts, requests changes, or routes follow-up work."
+        },
+        {
+          "type": "attach_work_product",
+          "kind": "document",
+          "title": "#{artifact_title}",
+          "description": "#{artifact_description}"
+        },
+        {
+          "type": "submit_review",
+          "role": "ceo",
+          "notes": "#{notes}"
+        }
+      ]
+    }
+    ```
+    """
+    |> String.trim()
+  end
+
+  defp role_label(role), do: Agent.role_label(role)
 
   ## ── skills block ──────────────────────────────────────────────
 
@@ -1278,9 +1408,10 @@ defmodule Cympho.AgentPrompt do
   defp load_recent_comments(issue_id) do
     Comment
     |> where([c], c.issue_id == ^issue_id)
-    |> order_by([c], asc: c.inserted_at)
+    |> order_by([c], desc: c.inserted_at, desc: c.id)
     |> limit(@recent_comments_limit)
     |> Repo.all()
+    |> Enum.reverse()
   rescue
     _ -> []
   end

@@ -30,6 +30,25 @@ defmodule Cympho.AgentActionsTest do
 
       assert {:error, {:unsupported_action, "ship_money"}} = AgentActions.parse(body)
     end
+
+    test "normalizes attach_work_product name and content aliases" do
+      body = """
+      ```cympho-actions
+      {"actions":[{"type":"attach_work_product","kind":"strategy_doc","name":"CEO execution plan","content":"Plan summary for the owner.","payload":"long plan text"}]}
+      ```
+      """
+
+      assert {:ok,
+              [
+                %{
+                  "type" => "attach_work_product",
+                  "kind" => "document",
+                  "title" => "CEO execution plan",
+                  "description" => "Plan summary for the owner.",
+                  "payload" => %{"text" => "long plan text"}
+                }
+              ]} = AgentActions.parse(body)
+    end
   end
 
   describe "execute/3" do
@@ -753,6 +772,29 @@ defmodule Cympho.AgentActionsTest do
       assert work_product.title == "Implementation notes"
       assert work_product.kind == "document"
       assert work_product.payload["files"] == ["README.md"]
+    end
+
+    test "attach_work_product executes normalized name and content aliases", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      body = """
+      ```cympho-actions
+      {"actions":[{"type":"attach_work_product","kind":"strategy_doc","name":"CEO execution plan","content":"Plan summary for the owner.","payload":"long plan text"}]}
+      ```
+      """
+
+      assert {:ok, actions} = AgentActions.parse(body)
+
+      assert {:ok, %{results: [%{type: "attach_work_product", work_product_id: id}]}} =
+               AgentActions.execute(issue, engineer, actions)
+
+      [work_product] = WorkProducts.list_work_products(issue.id)
+      assert work_product.id == id
+      assert work_product.title == "CEO execution plan"
+      assert work_product.description == "Plan summary for the owner."
+      assert work_product.kind == "document"
+      assert work_product.payload == %{"text" => "long plan text"}
     end
 
     test "set_pr_url updates the issue PR URL and records a review note", %{

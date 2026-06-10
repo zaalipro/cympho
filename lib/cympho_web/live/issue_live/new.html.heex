@@ -19,13 +19,21 @@
         :if={@intake_route}
         class="rounded-lg border border-brand/25 bg-brand/10 px-4 py-3"
       >
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div class="min-w-0">
             <p class="text-xs font-590 uppercase tracking-[0.08em] text-brand">Owner intake</p>
             <p class="mt-1 text-sm text-text-secondary">
               First stop:
-              <span class="font-590 text-text-primary">{@intake_route.agent.name}</span>
+              <span class="font-590 text-text-primary">
+                {if @intake_route.agent, do: @intake_route.agent.name, else: "CEO lane"}
+              </span>
               <span class="text-text-quaternary">({@intake_route.role})</span>
+            </p>
+            <p class="mt-2 max-w-2xl text-xs leading-5 text-text-tertiary">
+              CEO first turn must return
+              <span class="font-590 text-text-secondary">[owner_update]</span>
+              or <span class="font-590 text-text-secondary">[handoff]</span>. If the request needs
+              execution, the CEO should split it into 2-5 scoped issues with acceptance criteria.
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -34,6 +42,12 @@
             </span>
             <span class="rounded-full border border-border bg-panel px-2.5 py-1 text-text-secondary">
               Medium
+            </span>
+            <span
+              :if={@intake_route[:missing?]}
+              class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-1 text-amber-300"
+            >
+              CEO agent missing
             </span>
             <span class={[
               "rounded-full border px-2.5 py-1",
@@ -45,6 +59,51 @@
               {if @runtime_enabled?, do: "Runtime active", else: "Review mode"}
             </span>
           </div>
+        </div>
+
+        <div class="mt-3 grid gap-2 border-t border-brand/15 pt-3 sm:grid-cols-3">
+          <div class="rounded-md border border-brand/15 bg-panel/60 px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Route
+            </p>
+            <p class="mt-1 text-xs text-text-secondary">Owner request -> CEO lane</p>
+          </div>
+          <div class="rounded-md border border-brand/15 bg-panel/60 px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Save effect
+            </p>
+            <p class="mt-1 text-xs text-text-secondary">
+              {if @intake_route[:missing?],
+                do: "Creates a CEO-role To Do issue; no provider call.",
+                else: "Creates a To Do issue; no provider call."}
+            </p>
+          </div>
+          <div class="rounded-md border border-brand/15 bg-panel/60 px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Next screen
+            </p>
+            <p class="mt-1 text-xs text-text-secondary">
+              {if @intake_route[:missing?],
+                do: "Opens the issue with the CEO setup blocker visible.",
+                else: "Opens the issue with CEO flow status."}
+            </p>
+          </div>
+        </div>
+
+        <div
+          :if={@intake_route[:missing?]}
+          class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2"
+        >
+          <p class="text-xs leading-5 text-amber-100">
+            No CEO agent is configured yet. The issue will stay in the CEO lane until a CEO agent
+            exists.
+          </p>
+          <.app_link
+            navigate={~p"/agents/new"}
+            class="shrink-0 rounded-md border border-amber-500/25 bg-black/15 px-2.5 py-1.5 text-xs font-510 text-amber-50 hover:bg-amber-500/15"
+          >
+            Add CEO agent
+          </.app_link>
         </div>
       </div>
 
@@ -60,7 +119,7 @@
         label="Description"
         type="textarea"
         rows={8}
-        placeholder="Add context, acceptance criteria, constraints, and anything the agent should verify."
+        placeholder={@description_placeholder}
       />
 
       <div class={[

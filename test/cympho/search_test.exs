@@ -1,9 +1,13 @@
 defmodule Cympho.SearchTest do
   use Cympho.DataCase, async: true
 
+  alias Cympho.Agents
+  alias Cympho.Companies
+  alias Cympho.Goals
   alias Cympho.Search
   alias Cympho.Issues
   alias Cympho.Comments
+  alias Cympho.Projects
 
   setup do
     {:ok, issue1} =
@@ -106,5 +110,110 @@ defmodule Cympho.SearchTest do
       issue = hd(issues)
       assert is_list(issue.comments)
     end
+  end
+
+  describe "search_all/3" do
+    test "scopes issues, agents, projects, and goals to the requested company" do
+      unique = System.unique_integer([:positive])
+      needle = "tenantneedle#{unique}"
+
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Search Tenant #{unique}",
+          slug: "search-tenant-#{unique}"
+        })
+
+      {:ok, foreign_company} =
+        Companies.create_company(%{
+          name: "Foreign Search Tenant #{unique}",
+          slug: "foreign-search-tenant-#{unique}"
+        })
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "#{needle} current project",
+          prefix: unique_prefix(),
+          company_id: company.id
+        })
+
+      {:ok, foreign_project} =
+        Projects.create_project(%{
+          name: "#{needle} foreign project",
+          prefix: unique_prefix(),
+          company_id: foreign_company.id
+        })
+
+      {:ok, goal} =
+        Goals.create_goal(%{
+          title: "#{needle} current goal",
+          company_id: company.id,
+          project_id: project.id,
+          goal_type: :mission
+        })
+
+      {:ok, foreign_goal} =
+        Goals.create_goal(%{
+          title: "#{needle} foreign goal",
+          company_id: foreign_company.id,
+          project_id: foreign_project.id,
+          goal_type: :mission
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "#{needle} current issue",
+          company_id: company.id,
+          project_id: project.id,
+          goal_id: goal.id
+        })
+
+      {:ok, foreign_issue} =
+        Issues.create_issue(%{
+          title: "#{needle} foreign issue",
+          company_id: foreign_company.id,
+          project_id: foreign_project.id,
+          goal_id: foreign_goal.id
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "#{needle} current agent",
+          role: :engineer,
+          company_id: company.id
+        })
+
+      {:ok, foreign_agent} =
+        Agents.create_agent(%{
+          name: "#{needle} foreign agent",
+          role: :engineer,
+          company_id: foreign_company.id
+        })
+
+      results = Search.search_all(needle, %{}, company_id: company.id)
+
+      assert Enum.map(results.issues, & &1.id) == [issue.id]
+      assert Enum.map(results.agents, & &1.id) == [agent.id]
+      assert Enum.map(results.projects, & &1.id) == [project.id]
+      assert Enum.map(results.goals, & &1.id) == [goal.id]
+
+      refute Enum.any?(results.issues, &(&1.id == foreign_issue.id))
+      refute Enum.any?(results.agents, &(&1.id == foreign_agent.id))
+      refute Enum.any?(results.projects, &(&1.id == foreign_project.id))
+      refute Enum.any?(results.goals, &(&1.id == foreign_goal.id))
+    end
+  end
+
+  defp unique_prefix do
+    unique = System.unique_integer([:positive])
+
+    letters =
+      0..5
+      |> Enum.map(fn shift ->
+        divisor = round(:math.pow(26, shift))
+        <<?A + rem(div(unique, divisor), 26)>>
+      end)
+      |> Enum.join()
+
+    "S" <> letters
   end
 end

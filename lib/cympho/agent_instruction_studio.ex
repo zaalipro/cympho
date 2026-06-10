@@ -9,9 +9,10 @@ defmodule Cympho.AgentInstructionStudio do
 
   alias Cympho.AgentPromptContractEval
   alias Cympho.AgentPromptContract
-  alias Cympho.Agents.Agent
+  alias Cympho.Agents.{Agent, RolePlaybook}
 
   @delivery_roles Agent.delivery_roles()
+  @pr_roles Agent.pr_delivery_roles()
 
   @conflict_phrases [
     "skip comments",
@@ -41,6 +42,28 @@ defmodule Cympho.AgentInstructionStudio do
   ]
 
   @pr_terms ["branch", "pull request", "pr", "task list", "checkbox", "github"]
+
+  @mission_terms [
+    "goal",
+    "goal_id",
+    "mission",
+    "strategy",
+    "business outcome",
+    "aligned",
+    "floating work"
+  ]
+
+  @operating_loop_terms [
+    "orient",
+    "decide",
+    "act",
+    "verify",
+    "report",
+    "current state",
+    "next decision",
+    "one next move",
+    "single highest-leverage"
+  ]
 
   def analyze(agent_or_role, opts_or_instructions \\ [])
 
@@ -75,7 +98,7 @@ defmodule Cympho.AgentInstructionStudio do
       audits: audits,
       scenarios: scenarios,
       eval_coverage: AgentPromptContractEval.coverage(role),
-      patches: patches(role, adapter, contract),
+      patches: instruction_patches(role, adapter, contract, instructions),
       prompt_contract: contract
     }
   end
@@ -93,10 +116,30 @@ defmodule Cympho.AgentInstructionStudio do
     end)
     |> Kernel.++([
       memory_audit(instructions),
+      mission_alignment_audit(instructions),
+      operating_loop_audit(instructions),
       conflict_audit(instructions),
       pr_audit(role, instructions),
       adapter_audit(adapter)
     ])
+  end
+
+  defp mission_alignment_audit(instructions) do
+    hits = term_hits(instructions, @mission_terms)
+
+    %{
+      key: :mission_alignment,
+      label: "Mission alignment",
+      status: if(hits > 0, do: :ok, else: :neutral),
+      detail:
+        if hits > 0 do
+          "Custom instructions reinforce goal, mission, or business-outcome context."
+        else
+          "Runtime prompts inject goal-linking guidance. Custom instructions can reinforce it when this agent often creates, splits, or closes work."
+        end,
+      fix:
+        "Add the mission alignment patch so agents preserve goal context and call out floating work."
+    }
   end
 
   defp memory_audit(instructions) do
@@ -117,6 +160,24 @@ defmodule Cympho.AgentInstructionStudio do
     }
   end
 
+  defp operating_loop_audit(instructions) do
+    hits = term_hits(instructions, @operating_loop_terms)
+
+    %{
+      key: :operating_loop,
+      label: "Operating loop",
+      status: if(hits >= 2, do: :ok, else: :weak),
+      detail:
+        if hits >= 2 do
+          "Custom instructions reinforce the orient, decide, act, verify, report loop."
+        else
+          "Runtime prompts inject the operating loop; custom instructions should reinforce it for agents that drift, retry silently, or skip final reports."
+        end,
+      fix:
+        "Add the operating-loop patch so the agent follows the same turn rhythm every run."
+    }
+  end
+
   defp conflict_audit(instructions) do
     conflicts = phrase_hits(instructions, @conflict_phrases)
 
@@ -134,7 +195,7 @@ defmodule Cympho.AgentInstructionStudio do
     }
   end
 
-  defp pr_audit(role, instructions) when role in @delivery_roles or role == :cto do
+  defp pr_audit(role, instructions) when role in @pr_roles or role == :cto do
     hits = term_hits(instructions, @pr_terms)
 
     %{
@@ -209,6 +270,21 @@ defmodule Cympho.AgentInstructionStudio do
         term_hits(instructions, ["product", "design", "cto", "delegate"]) >= 2,
         "[handoff]"
       ),
+      scenario(
+        :owner_signoff_loop,
+        "Owner signoff and revision loop",
+        "Hands complete CEO work back for owner acceptance, then revises instead of repeating when the owner requests changes.",
+        term_hits(instructions, [
+          "owner verification",
+          "owner signoff",
+          "owner acceptance",
+          "owner reopened",
+          "request revision",
+          "ceo revision"
+        ]) >= 1,
+        "[owner_update] + [blocked]"
+      ),
+      operating_loop_scenario(instructions),
       blocked_scenario(instructions)
     ]
   end
@@ -230,31 +306,61 @@ defmodule Cympho.AgentInstructionStudio do
         term_hits(instructions, ["review", "verification", "gaps", "follow-up"]) >= 2,
         "[review]"
       ),
+      operating_loop_scenario(instructions),
       blocked_scenario(instructions)
     ]
   end
 
   defp scenarios(role, instructions, adapter) when role in @delivery_roles do
-    [
+    base = [
       scenario(
         :delivery_package,
         "Deliver reviewable work",
         "Leaves files changed, verification, risks, current state, and next decision.",
         term_hits(instructions, ["files changed", "verification", "risks", "next decision"]) >= 2,
         "[delivery]"
-      ),
-      scenario(
-        :pr_quality,
-        "Create a clean PR",
-        "Uses issue identifier in branch/title and a task-list PR description when a PR is created.",
-        term_hits(instructions, @pr_terms) >= 1 or adapter in ["codex", "claude_code", "cursor"],
-        "set_pr_url"
-      ),
-      blocked_scenario(instructions)
+      )
     ]
+
+    pr_scenarios =
+      if role in @pr_roles do
+        [
+          scenario(
+            :pr_quality,
+            "Create a clean PR",
+            "Uses issue identifier in branch/title and a task-list PR description when a PR is created.",
+            term_hits(instructions, @pr_terms) >= 1 or
+              adapter in ["codex", "claude_code", "cursor"],
+            "set_pr_url"
+          )
+        ]
+      else
+        [
+          scenario(
+            :business_artifact,
+            "Package a business artifact",
+            "Attaches a research brief, campaign plan, content draft, lead list, support response, or QA matrix for review.",
+            term_hits(instructions, ["artifact", "document", "brief", "evidence", "attach"]) >= 1,
+            "attach_work_product"
+          )
+        ]
+      end
+
+    base ++ pr_scenarios ++ [operating_loop_scenario(instructions), blocked_scenario(instructions)]
   end
 
-  defp scenarios(_role, instructions, _adapter), do: [blocked_scenario(instructions)]
+  defp scenarios(_role, instructions, _adapter),
+    do: [operating_loop_scenario(instructions), blocked_scenario(instructions)]
+
+  defp operating_loop_scenario(instructions) do
+    scenario(
+      :operating_loop,
+      "Orient, decide, act, verify, report",
+      "Starts from current context, chooses one next move, takes validated action, and leaves a tagged status update.",
+      term_hits(instructions, @operating_loop_terms) >= 2,
+      "operating loop"
+    )
+  end
 
   defp blocked_scenario(instructions) do
     scenario(
@@ -289,8 +395,26 @@ defmodule Cympho.AgentInstructionStudio do
         source: "Injected",
         status: :ok,
         summary:
-          "#{contract.role_label} mandate, allowed actions, anti-patterns, and quality bar.",
-        preview: AgentPromptContract.prompt_block(role)
+          "#{contract.role_label} mandate, operating loop, allowed actions, anti-patterns, and quality bar.",
+        preview: RolePlaybook.for_role(role, %{})
+      },
+      %{
+        label: "Operating loop guide",
+        source: "Injected",
+        status: :ok,
+        summary:
+          "Agents orient on current context, decide one next move, act through cympho-actions, verify evidence, and report with a tagged comment.",
+        preview:
+          "Orient: read current context.\nDecide: pick one next move.\nAct: use allowed cympho-actions.\nVerify: name evidence or blockers.\nReport: leave the role's tagged final comment."
+      },
+      %{
+        label: "Mission alignment guide",
+        source: "Injected",
+        status: :ok,
+        summary:
+          "Agents keep issue work connected to goals and name floating work before it drifts.",
+        preview:
+          "Preserve goal/project context when creating or handing off work. Name the mission or business outcome in final comments, and call out unlinked work explicitly."
       },
       %{
         label: "Custom instructions",
@@ -345,14 +469,15 @@ defmodule Cympho.AgentInstructionStudio do
     }
   end
 
-  defp maybe_add_pr_section(sections, role) when role in @delivery_roles or role == :cto do
+  defp maybe_add_pr_section(sections, role) when role in @pr_roles or role == :cto do
     sections ++
       [
         %{
           label: "PR quality contract",
           source: "Injected",
           status: :ok,
-          summary: "Branch, title, and body requirements are injected for delivery/review roles.",
+          summary:
+            "Branch, title, and body requirements are injected for code delivery/review roles.",
           preview:
             "Branch includes issue identifier. PR title starts with issue identifier. PR body includes summary, validation, risks, and task-list checkboxes."
         }
@@ -364,12 +489,30 @@ defmodule Cympho.AgentInstructionStudio do
   defp patches(role, adapter, contract) do
     [
       owner_memory_patch(contract),
+      operating_loop_patch(),
       role_patch(role),
+      mission_alignment_patch(role),
+      owner_signoff_patch(role),
       blocked_patch(),
       pr_patch(role),
       adapter_patch(adapter)
     ]
     |> Enum.reject(&is_nil/1)
+  end
+
+  defp instruction_patches(role, adapter, contract, instructions) do
+    role
+    |> patches(adapter, contract)
+    |> Enum.map(fn patch ->
+      Map.put(patch, :present?, patch_present?(instructions, patch))
+    end)
+  end
+
+  defp patch_present?(instructions, patch) do
+    current = to_string(instructions || "")
+    marker = "## #{patch.title}"
+
+    String.contains?(current, marker) or String.contains?(current, patch.body)
   end
 
   defp owner_memory_patch(contract) do
@@ -380,6 +523,17 @@ defmodule Cympho.AgentInstructionStudio do
       reason: "Reduces noisy issues and gives the owner a useful issue page.",
       body:
         "After every meaningful action, leave one concise owner-readable tagged comment using this shape:\n#{contract.required_template}\nDo not paste raw logs. Summarize what changed, how it was verified, remaining risks, current state, and the exact next decision."
+    }
+  end
+
+  defp operating_loop_patch do
+    %{
+      id: "operating-loop",
+      title: "Operating loop",
+      tone: :primary,
+      reason: "Prevents drift by giving the agent the same turn rhythm every run.",
+      body:
+        "On every turn, follow this loop before finalizing: Orient on issue, goal, project, latest comments, blockers, and current owner/manager intent. Decide the single next move that advances the issue. Act only through allowed `cympho-actions`. Verify with tests, artifact evidence, review evidence, or a named blocker. Report with the required tagged comment including current state and next decision."
     }
   end
 
@@ -411,13 +565,39 @@ defmodule Cympho.AgentInstructionStudio do
       id: "delivery-evidence",
       title: "Delivery evidence",
       tone: :neutral,
-      reason: "Makes engineer/product/design output reviewable.",
+      reason: "Makes #{role_label(role)} output reviewable.",
       body:
-        "Before `submit_review`, attach the work product or PR/reference and leave `[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ...`. Include concrete file paths, commands/tests run, and any remaining risk."
+        "Before `submit_review`, attach the work product, artifact, or PR/reference and leave `[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ...`. Include concrete artifact names, commands/tests or evidence checked, and any remaining risk."
     }
   end
 
   defp role_patch(_role), do: nil
+
+  defp mission_alignment_patch(role) do
+    %{
+      id: "mission-alignment",
+      title: "Mission alignment",
+      tone: :primary,
+      reason:
+        "Keeps #{role_label(role)} work attached to company goals instead of drifting into unowned tasks.",
+      body:
+        "Before creating, handing off, reviewing, or closing work, name the goal, mission, or business outcome it advances. Preserve `goal_id` and project context on child issues. If the work is floating, say that explicitly and ask the CEO/owner to select or create the right goal before broad execution."
+    }
+  end
+
+  defp owner_signoff_patch(:ceo) do
+    %{
+      id: "ceo-owner-signoff",
+      title: "CEO owner signoff loop",
+      tone: :primary,
+      reason:
+        "Keeps owner acceptance and requested revisions from looking like generic blocked work.",
+      body:
+        "When work is ready for owner acceptance, leave `[owner_update] What happened: ... Business status: ... Current state: ... Next decision: ... Owner decision needed: verify or request revision.` Then use `block_issue` with a `[blocked]` note saying the owner must verify the CEO update. If the owner reopens the CEO verification update, address the gap with a revised owner update, delegate missing work, or name the blocker. Do not repeat the prior update unchanged."
+    }
+  end
+
+  defp owner_signoff_patch(_role), do: nil
 
   defp blocked_patch do
     %{
@@ -430,7 +610,7 @@ defmodule Cympho.AgentInstructionStudio do
     }
   end
 
-  defp pr_patch(role) when role in @delivery_roles or role == :cto do
+  defp pr_patch(role) when role in @pr_roles or role == :cto do
     %{
       id: "pr-quality",
       title: "PR quality",
@@ -556,38 +736,14 @@ defmodule Cympho.AgentInstructionStudio do
   defp adapter_label("claude_code"), do: "Claude Code"
   defp adapter_label("codex"), do: "Codex"
   defp adapter_label("cursor"), do: "Cursor"
+  defp adapter_label("openai_chat"), do: "OpenAI Chat"
   defp adapter_label("openclaw"), do: "OpenClaw"
   defp adapter_label("process"), do: "Process"
   defp adapter_label(adapter), do: adapter |> to_string() |> String.replace("_", " ")
 
-  defp normalize_role(role) when is_atom(role), do: role
+  defp normalize_role(role), do: Agent.normalize_role(role) || :engineer
 
-  defp normalize_role(role) do
-    role
-    |> to_string()
-    |> String.trim()
-    |> String.downcase()
-    |> String.replace("-", "_")
-    |> case do
-      "ceo" -> :ceo
-      "cto" -> :cto
-      "engineer" -> :engineer
-      "product_manager" -> :product_manager
-      "product" -> :product_manager
-      "designer" -> :designer
-      "design" -> :designer
-      _ -> :engineer
-    end
-  end
-
-  defp role_label(:ceo), do: "CEO"
-  defp role_label(:cto), do: "CTO"
-  defp role_label(:engineer), do: "Engineer"
-  defp role_label(:product_manager), do: "Product"
-  defp role_label(:designer), do: "Design"
-
-  defp role_label(role),
-    do: role |> to_string() |> String.replace("_", " ") |> String.capitalize()
+  defp role_label(role), do: Agent.role_label(role)
 
   defp plural(1), do: ""
   defp plural(_), do: "s"

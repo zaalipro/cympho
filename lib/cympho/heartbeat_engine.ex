@@ -112,7 +112,7 @@ defmodule Cympho.HeartbeatEngine do
   Cancels a run that is pending or running.
   """
   @spec cancel_run(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t()}
-  def cancel_run(%Run{status: status} = run) when status in ~w(pending running) do
+  def cancel_run(%Run{status: status} = run) when status in ~w(pending queued running) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     run
@@ -246,15 +246,39 @@ defmodule Cympho.HeartbeatEngine do
 
   @spec find_stale_runs(pos_integer()) :: [Run.t()]
   def find_stale_runs(threshold_minutes \\ @stale_threshold_minutes) do
+    threshold_minutes
+    |> stale_runs_query()
+    |> Repo.all()
+  end
+
+  @doc """
+  Finds stale runs for a single company.
+  """
+  @spec find_stale_runs_for_company(String.t(), pos_integer()) :: [Run.t()]
+  def find_stale_runs_for_company(company_id, threshold_minutes \\ @stale_threshold_minutes)
+      when is_binary(company_id) do
+    threshold_minutes
+    |> stale_runs_query()
+    |> where([r], r.company_id == ^company_id)
+    |> Repo.all()
+  end
+
+  @doc """
+  Finds pending or queued runs that never started within the threshold.
+  """
+  @spec find_stale_waiting_runs_for_company(String.t(), pos_integer()) :: [Run.t()]
+  def find_stale_waiting_runs_for_company(
+        company_id,
+        threshold_minutes \\ @stale_threshold_minutes
+      )
+      when is_binary(company_id) do
     threshold = DateTime.add(DateTime.utc_now(), -threshold_minutes * 60, :second)
 
-    # Bound the batch so a backlog (e.g. after extended downtime) doesn't
-    # block the watchdog tick. Anything we miss this tick gets caught on
-    # the next 5-minute tick.
     Run
-    |> where([r], r.status == "running")
-    |> where([r], r.last_heartbeat_at < ^threshold)
-    |> order_by([r], asc: r.last_heartbeat_at)
+    |> where([r], r.company_id == ^company_id)
+    |> where([r], r.status in ["pending", "queued"])
+    |> where([r], r.inserted_at < ^threshold)
+    |> order_by([r], asc: r.inserted_at)
     |> limit(^@stale_run_batch_size)
     |> Repo.all()
   end
@@ -285,22 +309,52 @@ defmodule Cympho.HeartbeatEngine do
   """
   @spec find_orphaned_runs() :: [Run.t()]
   def find_orphaned_runs do
-    Run
-    |> where([r], r.status == "running")
-    |> order_by([r], asc: r.started_at)
-    |> limit(^@stale_run_batch_size)
+    orphaned_runs_query()
     |> Repo.all()
-    |> Enum.reject(fn run ->
-      case Cympho.Orchestrator.whereis(run.issue_id) do
-        nil -> false
-        pid -> Process.alive?(pid)
-      end
-    end)
+    |> Enum.reject(&active_orchestrator_run?/1)
+  end
+
+  @doc """
+  Finds orphaned runs for a single company.
+  """
+  @spec find_orphaned_runs_for_company(String.t()) :: [Run.t()]
+  def find_orphaned_runs_for_company(company_id) when is_binary(company_id) do
+    orphaned_runs_query()
+    |> where([r], r.company_id == ^company_id)
+    |> Repo.all()
+    |> Enum.reject(&active_orchestrator_run?/1)
   end
 
   # ---------------------------------------------------------------------------
   # Cost tracking
   # ---------------------------------------------------------------------------
+
+  defp stale_runs_query(threshold_minutes) do
+    threshold = DateTime.add(DateTime.utc_now(), -threshold_minutes * 60, :second)
+
+    # Bound the batch so a backlog (e.g. after extended downtime) doesn't
+    # block the watchdog tick. Anything we miss this tick gets caught on
+    # the next 5-minute tick.
+    Run
+    |> where([r], r.status == "running")
+    |> where([r], is_nil(r.last_heartbeat_at) or r.last_heartbeat_at < ^threshold)
+    |> order_by([r], asc: r.last_heartbeat_at)
+    |> limit(^@stale_run_batch_size)
+  end
+
+  defp orphaned_runs_query do
+    Run
+    |> where([r], r.status == "running")
+    |> order_by([r], asc: r.started_at)
+    |> limit(^@stale_run_batch_size)
+  end
+
+  defp active_orchestrator_run?(run) do
+    case Cympho.Orchestrator.whereis(run.issue_id) do
+      nil -> false
+      pid -> Process.alive?(pid)
+    end
+  end
 
   defp record_cost_event(%Run{} = run) do
     cost = run.cost_usd || Decimal.new("0")

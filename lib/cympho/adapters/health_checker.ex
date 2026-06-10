@@ -13,10 +13,10 @@ defmodule Cympho.Adapters.HealthChecker do
   use GenServer
   require Logger
 
-  alias Cympho.Adapters
   alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Repo
+  alias Cympho.Runtime
   import Ecto.Query
 
   @type health_state :: :healthy | :degraded | :unavailable
@@ -139,14 +139,13 @@ defmodule Cympho.Adapters.HealthChecker do
 
   @impl true
   def handle_info(:check_all, state) do
-    perform_health_checks(state)
+    state = perform_health_checks(state)
     timer_ref = Process.send_after(self(), :check_all, state.interval)
     {:noreply, %{state | timer_ref: timer_ref}}
   end
 
   def handle_info({:check_agent, agent_id}, state) do
-    check_agent_health(agent_id, state)
-    {:noreply, state}
+    {:noreply, check_agent_health(agent_id, state)}
   end
 
   @impl true
@@ -178,15 +177,17 @@ defmodule Cympho.Adapters.HealthChecker do
   defp perform_health_checks(state) do
     query = from a in Agent, where: a.status != :offline, select: a.id
 
-    {:ok, count} =
+    {:ok, {count, state}} =
       Repo.transaction(fn ->
         query
         |> Repo.stream(max_rows: @health_check_batch_size)
-        |> Stream.each(fn agent_id -> check_agent_health(agent_id, state) end)
-        |> Enum.count()
+        |> Enum.reduce({0, state}, fn agent_id, {count, state} ->
+          {count + 1, check_agent_health(agent_id, state)}
+        end)
       end)
 
     Logger.debug("[HealthChecker] checked #{count} active agents")
+    state
   end
 
   defp check_agent_health(agent_id, state) do
@@ -206,19 +207,26 @@ defmodule Cympho.Adapters.HealthChecker do
   @health_check_timeout_ms 5_000
 
   defp check_adapter_health(%Agent{} = agent) do
-    case Adapters.Registry.resolve_agent(%{adapter: agent.adapter, config: agent.config}) do
-      {:ok, adapter_module, _config} ->
-        run_with_timeout(adapter_module, agent)
+    case Runtime.resolve_adapter_config(agent, validate_config?: false) do
+      {:ok, adapter_module, config} ->
+        run_with_timeout(adapter_module, agent, config)
 
-      {:error, :no_adapter} ->
+      {:error, reason} when reason in [:no_adapter, :no_adapter_available, :unknown_adapter] ->
         %{status: :unavailable, message: "Adapter not found", checked_at: DateTime.utc_now()}
+
+      {:error, reason} ->
+        %{
+          status: :unavailable,
+          message: "Adapter config unavailable: #{inspect(reason)}",
+          checked_at: DateTime.utc_now()
+        }
     end
   end
 
-  defp run_with_timeout(adapter_module, %Agent{} = agent) do
+  defp run_with_timeout(adapter_module, %Agent{} = agent, config) do
     task =
       Task.Supervisor.async_nolink(Cympho.TaskSupervisor, fn ->
-        adapter_module.health_check(agent.config)
+        adapter_module.health_check(config)
       end)
 
     case Task.yield(task, @health_check_timeout_ms) || Task.shutdown(task, :brutal_kill) do

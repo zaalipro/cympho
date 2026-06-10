@@ -1,6 +1,7 @@
 defmodule CymphoWeb.OrgChartLive do
   use CymphoWeb, :live_view
-  alias Cympho.Agents
+  alias Cympho.{Agents, OrgHealth}
+  alias Cympho.Agents.Agent
 
   @impl true
   def mount(_params, _session, socket) do
@@ -12,6 +13,7 @@ defmodule CymphoWeb.OrgChartLive do
      socket
      |> assign(:page_title, "Org Chart")
      |> assign(:org_chart, load_org_chart(socket))
+     |> assign(:org_health, load_org_health(socket))
      |> assign(:selected_agent_id, nil)
      |> assign(:selected_agent_stats, nil)
      |> assign(:show_company_stats, false)
@@ -20,15 +22,15 @@ defmodule CymphoWeb.OrgChartLive do
 
   @impl true
   def handle_info({:agent_created, _agent}, socket) do
-    {:noreply, assign(socket, :org_chart, load_org_chart(socket))}
+    {:noreply, assign_org(socket)}
   end
 
   def handle_info({:agent_updated, _agent}, socket) do
-    {:noreply, assign(socket, :org_chart, load_org_chart(socket))}
+    {:noreply, assign_org(socket)}
   end
 
   def handle_info({:agent_deleted, _agent}, socket) do
-    {:noreply, assign(socket, :org_chart, load_org_chart(socket))}
+    {:noreply, assign_org(socket)}
   end
 
   @impl true
@@ -134,7 +136,7 @@ defmodule CymphoWeb.OrgChartLive do
           </:actions>
         </.header>
 
-        <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div class="linear-panel px-4 py-3">
             <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
               Company agents
@@ -153,7 +155,127 @@ defmodule CymphoWeb.OrgChartLive do
             </p>
             <p class="mt-1 text-2xl font-590 text-text-primary">{tree_depth(@org_chart)}</p>
           </div>
+          <div class="linear-panel px-4 py-3">
+            <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
+              Org health
+            </p>
+            <p class={"mt-1 text-2xl font-590 #{org_health_text(@org_health.level)}"}>
+              {@org_health.label}
+            </p>
+          </div>
         </div>
+
+        <section
+          data-testid="org-health"
+          class="mb-5 rounded-lg border border-border bg-panel px-5 py-4"
+        >
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="text-sm font-590 text-text-primary">Org Health</h2>
+                <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{org_health_badge(@org_health.level)}"}>
+                  {@org_health.label}
+                </span>
+              </div>
+              <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
+                {@org_health.summary}
+              </p>
+            </div>
+
+            <div class="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:min-w-[420px] sm:grid-cols-5">
+              <.org_health_metric
+                label="Role gaps"
+                value={@org_health.metrics.missing_roles}
+                tone={if @org_health.metrics.missing_roles > 0, do: :critical, else: :ok}
+              />
+              <.org_health_metric
+                label="Demand gaps"
+                value={@org_health.metrics.role_demand_gaps}
+                tone={if @org_health.metrics.role_demand_gaps > 0, do: :warning, else: :ok}
+              />
+              <.org_health_metric
+                label="Detached"
+                value={@org_health.metrics.detached_agents}
+                tone={if @org_health.metrics.detached_agents > 0, do: :critical, else: :ok}
+              />
+              <.org_health_metric
+                label="Over span"
+                value={@org_health.metrics.overloaded_managers}
+                tone={if @org_health.metrics.overloaded_managers > 0, do: :warning, else: :ok}
+              />
+              <.org_health_metric
+                label="Unhealthy"
+                value={@org_health.metrics.inactive_agents + @org_health.metrics.degraded_agents}
+                tone={
+                  if @org_health.metrics.inactive_agents + @org_health.metrics.degraded_agents > 0,
+                    do: :warning,
+                    else: :ok
+                }
+              />
+            </div>
+          </div>
+
+          <div
+            :if={@org_health.recommendations != []}
+            class="mt-4 grid gap-2 lg:grid-cols-2"
+          >
+            <div
+              :for={recommendation <- @org_health.recommendations}
+              class={"rounded-md border px-3 py-2 #{org_recommendation_class(recommendation.severity)}"}
+            >
+              <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
+                {recommendation.label}
+              </p>
+              <p class="mt-1 text-xs leading-5 opacity-85">{recommendation.detail}</p>
+            </div>
+          </div>
+
+          <div
+            :if={@org_health.role_demand_gaps != []}
+            data-testid="org-demand-staffing"
+            class="mt-4 divide-y divide-border overflow-hidden rounded-md border border-border bg-surface/50"
+          >
+            <div
+              :for={gap <- @org_health.role_demand_gaps}
+              class="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <p class="text-sm font-590 text-text-primary">{gap.label}</p>
+                  <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 text-amber-200">
+                    {gap.open_issues} open {plural_noun(gap.open_issues, "issue")}
+                  </span>
+                  <span
+                    :if={gap.suggested_parent}
+                    class="rounded-full border border-border bg-panel px-2 py-0.5 text-[10px] font-510 text-text-tertiary"
+                  >
+                    Reports to {gap.suggested_parent.name}
+                  </span>
+                </div>
+                <div
+                  :if={gap.examples != []}
+                  class="mt-1 flex max-w-2xl flex-wrap gap-1.5"
+                >
+                  <.app_link
+                    :for={example <- gap.examples}
+                    navigate={~p"/issues/#{example.id}"}
+                    class="max-w-full truncate rounded-md border border-border bg-panel px-2 py-1 text-[11px] text-text-tertiary transition hover:border-brand/40 hover:text-brand"
+                    title={issue_example_label(example)}
+                  >
+                    {issue_example_label(example)}
+                  </.app_link>
+                </div>
+              </div>
+
+              <.app_link
+                navigate={~p"/agents/new?#{new_agent_query_for_gap(gap)}"}
+                class="inline-flex shrink-0 items-center justify-center rounded-md border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-590 text-brand transition hover:border-brand/50 hover:bg-brand/15"
+              >
+                Hire {gap.label}
+              </.app_link>
+            </div>
+          </div>
+        </section>
 
         <div
           :if={Enum.empty?(@org_chart)}
@@ -351,6 +473,19 @@ defmodule CymphoWeb.OrgChartLive do
     end
   end
 
+  defp load_org_health(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> OrgHealth.snapshot(company_id)
+      _ -> OrgHealth.snapshot(nil)
+    end
+  end
+
+  defp assign_org(socket) do
+    socket
+    |> assign(:org_chart, load_org_chart(socket))
+    |> assign(:org_health, load_org_health(socket))
+  end
+
   attr :nodes, :list, required: true
   attr :level, :integer, default: 0
 
@@ -431,6 +566,23 @@ defmodule CymphoWeb.OrgChartLive do
     """
   end
 
+  attr :label, :string, required: true
+  attr :value, :integer, required: true
+  attr :tone, :atom, default: :ok
+
+  def org_health_metric(assigns) do
+    ~H"""
+    <div class="bg-surface/70 px-3 py-2 text-center">
+      <p class={"font-mono text-[18px] font-590 leading-none #{org_metric_text(@tone)}"}>
+        {@value}
+      </p>
+      <p class="mt-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
+        {@label}
+      </p>
+    </div>
+    """
+  end
+
   defp tree_count(nodes) when is_list(nodes) do
     Enum.reduce(nodes, 0, fn node, acc -> acc + 1 + tree_count(node.children) end)
   end
@@ -459,17 +611,17 @@ defmodule CymphoWeb.OrgChartLive do
   def role_color(:ceo), do: "#9A7CA8"
   def role_color(:cto), do: "#5db8a6"
   def role_color(:engineer), do: "#5db872"
+  def role_color(:release_engineer), do: "#7cbf78"
+  def role_color(:qa_engineer), do: "#7fd3c8"
   def role_color(:product_manager), do: "#e8a55a"
   def role_color(:designer), do: "#A96B83"
+  def role_color(:researcher), do: "#9b8cff"
+  def role_color(:marketer), do: "#f59e72"
+  def role_color(:content_strategist), do: "#d477b8"
+  def role_color(:sales_development), do: "#f3c464"
+  def role_color(:customer_support), do: "#6abf8f"
 
-  def role_label(:engineer), do: "Engineer"
-  def role_label(:ceo), do: "CEO"
-  def role_label(:cto), do: "CTO"
-  def role_label(:product_manager), do: "Product Manager"
-  def role_label(:designer), do: "Designer"
-
-  def role_label(other),
-    do: other |> to_string() |> String.replace("_", " ") |> String.capitalize()
+  def role_label(role), do: Agent.role_label(role)
 
   def status_color(:idle), do: "#6B7280"
   def status_color(:running), do: "#5db872"
@@ -481,4 +633,46 @@ defmodule CymphoWeb.OrgChartLive do
   def status_color(:pending_approval), do: "#D97757"
   def status_color(:terminated), do: "#6B7280"
   def status_color(_), do: "#5A544C"
+
+  defp org_health_text(:critical), do: "text-red-300"
+  defp org_health_text(:warning), do: "text-amber-300"
+  defp org_health_text(:healthy), do: "text-emerald-300"
+  defp org_health_text(_), do: "text-text-primary"
+
+  defp org_health_badge(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  defp org_health_badge(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  defp org_health_badge(:healthy), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+  defp org_health_badge(_), do: "border-border bg-surface text-text-tertiary"
+
+  defp org_metric_text(:critical), do: "text-red-300"
+  defp org_metric_text(:warning), do: "text-amber-300"
+  defp org_metric_text(:ok), do: "text-emerald-300"
+  defp org_metric_text(_), do: "text-text-primary"
+
+  defp org_recommendation_class(:critical), do: "border-red-500/20 bg-red-500/10 text-red-100"
+
+  defp org_recommendation_class(:warning),
+    do: "border-amber-500/20 bg-amber-500/10 text-amber-100"
+
+  defp org_recommendation_class(_), do: "border-border bg-surface text-text-secondary"
+
+  defp new_agent_query_for_gap(gap) do
+    %{role: to_string(gap.role), name: gap.label}
+    |> maybe_put_parent_query(gap.suggested_parent)
+  end
+
+  defp maybe_put_parent_query(query, %{id: id}) when is_binary(id),
+    do: Map.put(query, :parent_id, id)
+
+  defp maybe_put_parent_query(query, _), do: query
+
+  defp issue_example_label(%{identifier: identifier, title: title})
+       when is_binary(identifier) and identifier != "" do
+    "#{identifier} · #{title}"
+  end
+
+  defp issue_example_label(%{title: title}), do: title || "Untitled issue"
+
+  defp plural_noun(1, singular), do: singular
+  defp plural_noun(_count, singular), do: singular <> "s"
 end

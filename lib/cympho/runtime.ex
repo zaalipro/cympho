@@ -97,6 +97,28 @@ defmodule Cympho.Runtime do
     end
   end
 
+  @doc """
+  Resolves the adapter module and config an agent would use at runtime.
+
+  This is intentionally lighter than `preflight/3`: it does not reserve
+  capacity, resolve workspaces, or check budgets. It exists for read-only
+  diagnostics like adapter health checks that must evaluate the same
+  secret-backed config a real run would receive.
+
+  Options:
+    * `:validate_config?` - validates adapter config before returning. Defaults
+      to `true`; diagnostics can set it to `false` so the adapter's own
+      `health_check/1` can return a nuanced status.
+  """
+  @spec resolve_adapter_config(Agent.t(), keyword()) ::
+          {:ok, module(), map()} | {:error, term()}
+  def resolve_adapter_config(%Agent{} = agent, opts \\ []) do
+    with {:ok, env} <- resolve_env(agent),
+         {:ok, adapter, adapter_config} <- resolve_adapter(agent, env, opts) do
+      {:ok, adapter, adapter_config}
+    end
+  end
+
   defp verify_company(%Issue{company_id: nil}, %Agent{company_id: nil}), do: :ok
 
   defp verify_company(%Issue{company_id: nil}, %Agent{company_id: company_id})
@@ -205,9 +227,16 @@ defmodule Cympho.Runtime do
       |> Map.merge(Keyword.get(opts, :adapter_config, %{}) || %{})
       |> with_secret_backed_api_key(adapter, env)
 
-    case Adapters.resolve(%{adapter: adapter, config: config}) do
-      {:ok, module, resolved_config} -> {:ok, module, resolved_config}
-      {:error, reason} -> {:error, reason}
+    if Keyword.get(opts, :validate_config?, true) do
+      case Adapters.resolve(%{adapter: adapter, config: config}) do
+        {:ok, module, resolved_config} -> {:ok, module, resolved_config}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      case Adapters.Registry.resolve_agent(%{adapter: adapter, config: config}) do
+        {:ok, module, resolved_config} -> {:ok, module, resolved_config}
+        {:error, :no_adapter} -> {:error, :no_adapter_available}
+      end
     end
   end
 
@@ -225,6 +254,19 @@ defmodule Cympho.Runtime do
 
   defp with_secret_backed_api_key(config, :openclaw, env) do
     put_config_new(config, "api_key", env["OPENCLAW_API_KEY"])
+  end
+
+  defp with_secret_backed_api_key(config, :openai_chat, env) do
+    config
+    |> put_config_new(
+      "api_key",
+      env["DASHSCOPE_API_KEY"] || env["OPENAI_API_KEY"] || env["ANTHROPIC_API_KEY"]
+    )
+    |> put_config_new(
+      "endpoint",
+      env["DASHSCOPE_BASE_URL"] || env["OPENAI_BASE_URL"] || env["ANTHROPIC_BASE_URL"]
+    )
+    |> put_config_new("model", env["DASHSCOPE_MODEL"] || env["OPENAI_MODEL"] || env["MODEL"])
   end
 
   defp with_secret_backed_api_key(config, :agrenting, env) do

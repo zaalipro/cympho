@@ -2,6 +2,7 @@ defmodule Cympho.CostsTest do
   use Cympho.DataCase
 
   alias Cympho.Costs
+  alias Cympho.Finances.{BudgetIncident, BudgetPolicy}
   alias Cympho.Finances.TokenUsage
   alias Cympho.Goals
 
@@ -209,6 +210,79 @@ defmodule Cympho.CostsTest do
     end
   end
 
+  describe "spend_posture/2" do
+    test "reports on-track company policy spend" do
+      company = insert_company()
+      _policy = insert_budget_policy(company, budget_limit_usd: Decimal.new("100.00"))
+
+      posture = Costs.spend_posture(company.id, Decimal.new("45.00"))
+
+      assert posture.budget_status == :on_track
+      assert posture.budget_status_label == "On track"
+      assert posture.budget_configured
+      assert posture.budget_comparable
+      assert posture.budget_used_percent == 45
+      assert Decimal.eq?(posture.budget_remaining, Decimal.new("55.00"))
+    end
+
+    test "warns when period spend crosses the warning threshold" do
+      company = insert_company()
+
+      _policy =
+        insert_budget_policy(company,
+          budget_limit_usd: Decimal.new("100.00"),
+          warning_threshold_pct: Decimal.new("80.0")
+        )
+
+      posture = Costs.spend_posture(company.id, Decimal.new("85.00"))
+
+      assert posture.budget_status == :watch
+      assert posture.budget_used_percent == 85
+    end
+
+    test "treats unresolved exceeded incidents as over budget" do
+      company = insert_company()
+      policy = insert_budget_policy(company, budget_limit_usd: Decimal.new("100.00"))
+
+      insert_budget_incident(company, policy, "budget_exceeded")
+
+      posture = Costs.spend_posture(company.id, Decimal.new("25.00"))
+
+      assert posture.budget_status == :over_budget
+      assert posture.budget_incident_count == 1
+    end
+
+    test "reports unbudgeted spend when no controls exist" do
+      company = insert_company()
+
+      posture = Costs.spend_posture(company.id, Decimal.new("12.50"))
+
+      assert posture.budget_status == :unbudgeted
+      refute posture.budget_configured
+      refute posture.budget_comparable
+      assert posture.budget_status_label == "No budget"
+    end
+
+    test "recognizes scoped controls without fabricating a company percentage" do
+      company = insert_company()
+
+      _policy =
+        insert_budget_policy(company,
+          scope: "agent",
+          scope_id: Ecto.UUID.generate(),
+          budget_limit_usd: Decimal.new("50.00")
+        )
+
+      posture = Costs.spend_posture(company.id, Decimal.new("12.50"))
+
+      assert posture.budget_status == :scoped_controls
+      assert posture.budget_configured
+      refute posture.budget_comparable
+      assert posture.budget_used_percent == nil
+      assert posture.budget_control_count == 1
+    end
+  end
+
   defp insert_company do
     Cympho.Repo.insert!(%Cympho.Companies.Company{
       name: "Test Company #{System.unique_integer()}",
@@ -230,6 +304,40 @@ defmodule Cympho.CostsTest do
 
     %TokenUsage{}
     |> TokenUsage.changeset(attrs)
+    |> Repo.insert!()
+  end
+
+  defp insert_budget_policy(company, attrs) do
+    attrs =
+      Keyword.merge(
+        [
+          company_id: company.id,
+          scope: "company",
+          period: "monthly",
+          budget_limit_usd: Decimal.new("100.00"),
+          warning_threshold_pct: Decimal.new("80.0"),
+          action_on_exceed: "warn",
+          is_active: true
+        ],
+        attrs
+      )
+      |> Map.new()
+
+    %BudgetPolicy{}
+    |> BudgetPolicy.changeset(attrs)
+    |> Repo.insert!()
+  end
+
+  defp insert_budget_incident(company, policy, event_type) do
+    %BudgetIncident{}
+    |> BudgetIncident.changeset(%{
+      budget_policy_id: policy.id,
+      company_id: company.id,
+      event_type: event_type,
+      spend_usd: Decimal.new("125.00"),
+      budget_limit_usd: policy.budget_limit_usd,
+      threshold_pct: Decimal.new("125.0")
+    })
     |> Repo.insert!()
   end
 end

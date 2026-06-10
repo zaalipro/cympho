@@ -4,6 +4,7 @@ defmodule CymphoWeb.KanbanLive.Index do
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.AgentHeartbeat
+  alias Cympho.HeartbeatEngine
   alias Cympho.Orchestrator.Dispatcher
   alias Cympho.Projects
 
@@ -428,7 +429,7 @@ defmodule CymphoWeb.KanbanLive.Index do
       to_status: to_status,
       message: message,
       blockers: blockers,
-      actions: transition_blocker_actions(issue.id, blockers)
+      actions: transition_blocker_actions(issue, blockers)
     }
   end
 
@@ -451,16 +452,37 @@ defmodule CymphoWeb.KanbanLive.Index do
     }
   end
 
-  defp transition_blocker_actions(issue_id, blockers) do
-    issue_path = "/issues/#{issue_id}"
+  defp transition_blocker_actions(%Issue{} = issue, blockers) do
+    issue_path = "/issues/#{issue.id}"
 
-    [
-      %{label: "Open issue", path: issue_path}
-      | blockers
-        |> Enum.flat_map(&blocker_action(issue_path, &1))
-        |> Enum.uniq_by(& &1.label)
-    ]
+    if pre_runtime_transition_blocker?(issue, blockers) do
+      [
+        %{label: "Open issue", path: issue_path},
+        %{label: "Open launch checklist", path: "/operations#runtime-launch-checklist"},
+        %{label: "Open issue preflight", path: "#{issue_path}#issue-agent-panel"}
+      ]
+    else
+      [
+        %{label: "Open issue", path: issue_path}
+        | blockers
+          |> Enum.flat_map(&blocker_action(issue_path, &1))
+          |> Enum.uniq_by(& &1.label)
+      ]
+    end
   end
+
+  defp pre_runtime_transition_blocker?(%Issue{status: status} = issue, blockers)
+       when status in [:todo, "todo"] do
+    runtime_blocked? =
+      Enum.any?(blockers, fn
+        %{key: :runtime_verification} -> true
+        _ -> false
+      end)
+
+    runtime_blocked? and Enum.empty?(HeartbeatEngine.list_runs_for_issue(issue.id))
+  end
+
+  defp pre_runtime_transition_blocker?(_issue, _blockers), do: false
 
   defp blocker_action(issue_path, %{key: :runtime_verification}) do
     [

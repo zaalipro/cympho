@@ -38,10 +38,37 @@ defmodule Cympho.RouterKeywordFloorTest do
     assert :release_engineer ==
              Router.infer_role(%{title: "Deploy and tag a new release", description: ""})
 
+    assert :researcher ==
+             Router.infer_role(%{title: "Research competitor positioning", description: ""})
+
+    assert :content_strategist ==
+             Router.infer_role(%{title: "Draft newsletter and social captions", description: ""})
+
+    assert :marketer ==
+             Router.infer_role(%{title: "Plan SEO launch campaign", description: ""})
+
+    assert :sales_development ==
+             Router.infer_role(%{title: "Build prospect outreach sequence", description: ""})
+
+    assert :customer_support ==
+             Router.infer_role(%{title: "Write customer support FAQ", description: ""})
+
+    assert :qa_engineer ==
+             Router.infer_role(%{title: "Run regression smoke test plan", description: ""})
+
     assert :engineer ==
              Router.infer_role(%{title: "Fix the login bug", description: ""})
 
     assert :engineer == Router.infer_role(%{title: "no keywords here", description: ""})
+  end
+
+  test "Router respects assigned business-function roles" do
+    assert :marketer ==
+             Router.infer_role(%{
+               title: "Generic task",
+               description: "",
+               assigned_role: "marketing"
+             })
   end
 
   test "Routing.classify_role/2 returns :fallback source with keyword role when LLM off" do

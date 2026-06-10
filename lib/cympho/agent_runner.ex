@@ -46,8 +46,7 @@ defmodule Cympho.AgentRunner do
       "-p",
       "--bare",
       "--output-format",
-      "json",
-      "--no-input"
+      "json"
     ]
 
     prompt = build_prompt(issue, agent_id, opts)
@@ -64,12 +63,28 @@ defmodule Cympho.AgentRunner do
   end
 
   defp cli_command(opts) do
-    opts[:command] ||
-      opts["command"] ||
+    config = option_value(opts, :config) || %{}
+
+    option_value(opts, :command) ||
+      option_value(config, :command) ||
       Application.get_env(:cympho, :claude_code_command) ||
       System.get_env("CYMPHO_CLAUDE_COMMAND") ||
       "claude"
   end
+
+  defp option_value(opts, key) when is_list(opts) do
+    Keyword.get(opts, key) ||
+      case List.keyfind(opts, Atom.to_string(key), 0) do
+        {_, value} -> value
+        nil -> nil
+      end
+  end
+
+  defp option_value(%{} = opts, key) do
+    Map.get(opts, key) || Map.get(opts, Atom.to_string(key))
+  end
+
+  defp option_value(_opts, _key), do: nil
 
   defp bash_command(command, claude_args, prompt) do
     claude_cmd = Enum.map_join([command | claude_args], " ", &shell_quote/1)

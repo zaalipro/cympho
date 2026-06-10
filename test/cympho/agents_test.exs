@@ -342,6 +342,7 @@ defmodule Cympho.AgentsTest do
       assert :codex in options
       assert :cursor in options
       assert :http in options
+      assert :openai_chat in options
       assert :openclaw in options
       assert :process in options
       assert :agrenting in options
@@ -351,7 +352,17 @@ defmodule Cympho.AgentsTest do
   describe "Agent.adapter_options/0" do
     test "returns valid adapter types from schema" do
       options = Agent.adapter_options()
-      assert options == [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting]
+
+      assert options == [
+               :claude_code,
+               :codex,
+               :cursor,
+               :http,
+               :openai_chat,
+               :openclaw,
+               :process,
+               :agrenting
+             ]
     end
   end
 
@@ -361,8 +372,47 @@ defmodule Cympho.AgentsTest do
       assert changeset.changes[:name] == "New Name"
     end
 
+    test "accepts business-function roles as first-class agent roles" do
+      assert [
+               :ceo,
+               :cto,
+               :product_manager,
+               :designer,
+               :engineer,
+               :release_engineer,
+               :qa_engineer,
+               :researcher,
+               :marketer,
+               :content_strategist,
+               :sales_development,
+               :customer_support
+             ] = Agent.role_options()
+
+      for role <- Agent.role_options() do
+        changeset = Agents.change_agent(%Agent{}, %{name: "Test #{role}", role: role})
+        assert changeset.valid?, "Expected role #{role} to be valid"
+      end
+
+      assert Agent.normalize_role("qa") == :qa_engineer
+      assert Agent.normalize_role("marketing") == :marketer
+      assert Agent.normalize_role("social") == :content_strategist
+      assert Agent.normalize_role("outreach") == :sales_development
+      assert Agent.normalize_role("support") == :customer_support
+      assert Agent.normalize_role("research") == :researcher
+      assert Agent.role_label(:qa_engineer) == "QA Engineer"
+    end
+
     test "accepts all valid adapter values" do
-      for adapter <- [:claude_code, :codex, :cursor, :http, :openclaw, :process, :agrenting] do
+      for adapter <- [
+            :claude_code,
+            :codex,
+            :cursor,
+            :http,
+            :openai_chat,
+            :openclaw,
+            :process,
+            :agrenting
+          ] do
         changeset =
           Agents.change_agent(%Agent{}, %{name: "Test", role: :engineer, adapter: adapter})
 
@@ -498,6 +548,20 @@ defmodule Cympho.AgentsTest do
 
       # Clean up
       Cympho.AgentHeartbeat.stop_for_agent(agent.id)
+    end
+
+    test "CEO can spawn non-engineering business-function agents", %{agent: _parent_agent} do
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "CEO Business Parent",
+          role: :ceo
+        })
+
+      for role <- [:researcher, :marketer, :content_strategist, :sales_development] do
+        assert {:ok, agent} = Agents.spawn_agent(%{name: "Spawned #{role}", role: role}, ceo.id)
+        assert agent.role == role
+        Cympho.AgentHeartbeat.stop_for_agent(agent.id)
+      end
     end
   end
 

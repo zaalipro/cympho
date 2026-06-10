@@ -6,6 +6,7 @@ defmodule CymphoWeb.AgentLiveTest do
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues
   alias Cympho.Repo
+  alias Cympho.Secrets
 
   defp create_agent(attrs), do: Agents.create_agent(scoped_attrs(attrs))
   defp create_issue(attrs), do: Issues.create_issue(scoped_attrs(attrs))
@@ -227,6 +228,9 @@ defmodule CymphoWeb.AgentLiveTest do
 
       {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=configuration")
 
+      view |> element("button[phx-click='add_env_row']") |> render_click()
+      view |> element("button[phx-click='add_env_row']") |> render_click()
+
       html =
         view
         |> form("form[phx-submit='config_save']", %{
@@ -247,6 +251,40 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ ~r/<option value="codex" selected/
       assert html =~ ~r/<option[^>]+value="codex-gpt-5.5"[^>]+selected/
       refute html =~ ~r/data-adapter-panel="codex"[^>]*hidden/
+    end
+
+    test "runtime profile selector previews Qwen chat config before save", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Qwen Preview Agent",
+          role: :ceo,
+          status: :idle,
+          adapter: :claude_code
+        })
+
+      {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      html =
+        view
+        |> form("form[phx-submit='config_save']", %{
+          "agent" => %{
+            "name" => agent.name,
+            "title" => "",
+            "role" => "ceo",
+            "parent_id" => "",
+            "runtime_profile_id" => "openai-chat-qwen-dashscope",
+            "adapter" => "claude_code",
+            "max_concurrent_jobs" => "1"
+          }
+        })
+        |> render_change()
+
+      assert html =~ "OpenAI Chat Qwen DashScope"
+      assert html =~ "OpenAI Chat"
+      assert html =~ "qwen3.7-plus"
+
+      assert html =~
+               "https://dashscope.aliyuncs.com/compatible-mode/v1"
     end
 
     test "saving runtime profile persists profile id and concrete adapter config", %{
@@ -281,6 +319,45 @@ defmodule CymphoWeb.AgentLiveTest do
       assert updated.adapter == :claude_code
       assert updated.config["command"] == "cm"
       assert updated.runtime_config["profile_id"] == "claude-cm"
+    end
+
+    test "saving Qwen DashScope profile persists non-secret chat config", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Qwen Profile Agent",
+          role: :ceo,
+          status: :idle,
+          adapter: :claude_code,
+          config: %{"command" => "claude"}
+        })
+
+      {:ok, view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      assert html =~ "OpenAI Chat Qwen DashScope"
+
+      view
+      |> form("form[phx-submit='config_save']", %{
+        "agent" => %{
+          "name" => agent.name,
+          "title" => "",
+          "role" => "ceo",
+          "parent_id" => "",
+          "runtime_profile_id" => "openai-chat-qwen-dashscope",
+          "adapter" => "claude_code",
+          "max_concurrent_jobs" => "1"
+        }
+      })
+      |> render_submit()
+
+      {:ok, updated} = Agents.get_agent(agent.id)
+      assert updated.adapter == :openai_chat
+      assert updated.config["model"] == "qwen3.7-plus"
+
+      assert updated.config["endpoint"] ==
+               "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+      assert updated.runtime_config["profile_id"] == "openai-chat-qwen-dashscope"
+      refute inspect(updated.config) =~ "API_KEY"
     end
 
     test "runtime capacity updates when adapter and concurrency change", %{conn: conn} do
@@ -623,6 +700,39 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "codex --model gpt-5.5"
     end
 
+    test "adapter readiness ignores unrelated scoped secrets", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Wrong Secret Remote Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :agrenting,
+          config: %{
+            "agent_did" => "did:example:remote-agent",
+            "capability" => "implementation",
+            "max_price" => "1.00"
+          }
+        })
+
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: agent.company_id,
+          scope: "company",
+          key: "OPENAI_API_KEY",
+          value: "wrong-provider-key",
+          description: "Wrong provider key"
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      assert html =~ "Agent preflight"
+      assert html =~ "Agrenting API key"
+      assert html =~ "Add AGRENTING_API_KEY"
+      assert html =~ "Open secrets"
+      refute html =~ "Credential source is configured"
+      refute html =~ "wrong-provider-key"
+    end
+
     test "adapter readiness reflects unsaved runtime env rows", %{conn: conn} do
       {:ok, agent} =
         create_agent(%{
@@ -655,6 +765,36 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Agent preflight"
       assert html =~ "Review mode only"
       assert html =~ "Credential source is configured"
+    end
+
+    test "Claude readiness shows provider model and endpoint", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Claude Provider Route Agent",
+          role: :ceo,
+          status: :idle,
+          adapter: :claude_code,
+          config: %{"command" => "echo"},
+          runtime_config: %{
+            "env" => %{
+              "ANTHROPIC_API_KEY" => "secret-key",
+              "ANTHROPIC_MODEL" => "qwen3.7-plus",
+              "ANTHROPIC_BASE_URL" => "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            }
+          }
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      assert html =~ "Agent preflight"
+      assert html =~ "Provider model"
+      assert html =~ "qwen3.7-plus"
+      assert html =~ "Gateway endpoint"
+
+      assert html =~
+               "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+      assert html =~ "Anthropic-compatible credentials are configured"
     end
 
     test "quick runtime preset previews profile and concurrency before save", %{conn: conn} do
@@ -932,6 +1072,40 @@ defmodule CymphoWeb.AgentLiveTest do
       {:ok, _view, html} = live(conn, "/agents/new")
 
       assert html =~ "Adapter"
+    end
+
+    test "new agent form accepts role, name, and manager query params", %{conn: conn} do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Plan SEO launch campaign",
+          description: "Launch marketing demand funnel.",
+          status: :todo
+        })
+
+      {:ok, _view, html} =
+        live(conn, "/agents/new?role=marketing&name=Growth%20Marketer&parent_id=#{ceo.id}")
+
+      assert html =~ ~s(value="Growth Marketer")
+      assert html =~ ~r/<option value="marketer" selected/
+      assert html =~ ~r/<option value="#{ceo.id}" selected/
+      assert html =~ "Marketer playbook"
+      assert html =~ "target markets"
+      assert html =~ ~s(data-testid="hire-demand-context")
+      assert html =~ "Demand-backed hire"
+      assert html =~ "1 open issue"
+      assert html =~ "Queued work needs a Marketer"
+      assert html =~ "Plan SEO launch campaign"
+      assert html =~ "/issues/#{issue.id}"
+      assert html =~ issue.identifier
+      assert html =~ "Reports to CEO"
     end
 
     test "new agent form shows Codex model selector when Codex is selected", %{conn: conn} do

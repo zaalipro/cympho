@@ -90,6 +90,7 @@ defmodule CymphoWeb.AdapterLive.Index do
   defp adapter_icon(:codex), do: "🔬"
   defp adapter_icon(:cursor), do: "🖱"
   defp adapter_icon(:http), do: "🌐"
+  defp adapter_icon(:openai_chat), do: "💬"
   defp adapter_icon(:openclaw), do: "🐾"
   defp adapter_icon(:process), do: "⚙"
   defp adapter_icon(_), do: "📦"

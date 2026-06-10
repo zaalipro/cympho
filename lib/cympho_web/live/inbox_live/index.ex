@@ -69,6 +69,10 @@ defmodule CymphoWeb.InboxLive.Index do
     {:noreply, apply_inbox_change(socket, state, at: 0)}
   end
 
+  def handle_info({:inbox_bulk_updated, _agent_id}, socket) do
+    {:noreply, load_inbox(socket)}
+  end
+
   def handle_info({:run_status_changed, payload}, socket) do
     selected_agent_id = socket.assigns[:selected_agent_id]
 
@@ -104,6 +108,29 @@ defmodule CymphoWeb.InboxLive.Index do
   @impl true
   def handle_event("mark_read", params, socket) do
     inbox_action(socket, params, &Inbox.mark_read/2)
+  end
+
+  def handle_event("mark_unread_read", _params, socket) do
+    case mark_unread_read_for_scope(socket) do
+      {:ok, 0} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "No unread inbox items to mark as read.")
+         |> load_inbox()}
+
+      {:ok, count} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, marked_read_message(count))
+         |> load_inbox()}
+
+      {:error, :unauthorized} ->
+        {:noreply,
+         put_flash(socket, :error, "You don't have permission to access this inbox scope")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Could not update inbox items")}
+    end
   end
 
   def handle_event("dismiss", params, socket) do
@@ -188,6 +215,24 @@ defmodule CymphoWeb.InboxLive.Index do
 
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Inbox entry not found")}
+    end
+  end
+
+  defp mark_unread_read_for_scope(socket) do
+    agent_id = socket.assigns.selected_agent_id
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+
+    cond do
+      agent_id == "all" and company_id ->
+        Inbox.mark_unread_read_for_company(company_id)
+
+      agent_id in [nil, "", "all"] ->
+        {:error, :unauthorized}
+
+      true ->
+        with {:ok, _agent} <- authorize_agent_access(agent_id, socket) do
+          Inbox.mark_unread_read_for_agent(agent_id)
+        end
     end
   end
 
@@ -475,6 +520,9 @@ defmodule CymphoWeb.InboxLive.Index do
   defp inbox_scope_label("all", _agent), do: "All agents"
   defp inbox_scope_label(_agent_id, %{name: name}), do: name
   defp inbox_scope_label(_agent_id, _agent), do: "Selected agent"
+
+  defp marked_read_message(1), do: "Marked 1 unread inbox item as read."
+  defp marked_read_message(count), do: "Marked #{count} unread inbox items as read."
 
   defp status_filter_label(nil), do: "All"
   defp status_filter_label(status), do: String.capitalize(status)

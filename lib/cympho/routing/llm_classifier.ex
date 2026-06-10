@@ -12,14 +12,14 @@ defmodule Cympho.Routing.LlmClassifier do
   and company name. No comments, no secrets, no other agent context.
   """
 
+  alias Cympho.Agents.Agent
+
   require Logger
 
   @endpoint "https://api.anthropic.com/v1/messages"
   @anthropic_version "2023-06-01"
   @model "claude-haiku-4-5-20251001"
   @default_timeout_ms 1_500
-
-  @roles ~w[ceo cto product_manager designer engineer release_engineer]
 
   @doc """
   Classifies an issue. Options:
@@ -114,10 +114,9 @@ defmodule Cympho.Routing.LlmClassifier do
 
     role_string = role_from_json || cleaned
 
-    if role_string in @roles do
-      {:ok, String.to_existing_atom(role_string)}
-    else
-      :error
+    case Agent.normalize_role(role_string) do
+      nil -> :error
+      role -> {:ok, role}
     end
   end
 
@@ -128,13 +127,19 @@ defmodule Cympho.Routing.LlmClassifier do
     company = company_name(issue)
 
     """
-    You classify engineering issues into one of these roles:
+    You classify company work into one of these roles:
     - ceo (strategic/business/funding/vision)
     - cto (architecture/technical-direction/platform-decisions)
     - product_manager (roadmap/requirements/prioritisation)
     - designer (ux/ui/interface/workflow)
     - engineer (implementation/bug-fixes/features/tests)
     - release_engineer (merges/deploys/release-coordination/conflicts)
+    - qa_engineer (QA plans/regression/smoke testing/quality assurance)
+    - researcher (market/customer/competitive research and analysis)
+    - marketer (campaigns/positioning/growth/SEO/demand generation)
+    - content_strategist (blog/newsletter/social/copy/editorial work)
+    - sales_development (outreach/leads/prospecting/pipeline/demo prep)
+    - customer_support (support/helpdesk/customer replies/FAQ/service recovery)
 
     Respond with exactly one role token from the list above. No prose.
 

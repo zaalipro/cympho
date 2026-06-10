@@ -7,6 +7,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
     - :max_concurrent_agents — max simultaneous dispatches (default 3)
     - :active_states         — issue states considered runnable (default [:todo, :in_review])
     - :terminal_states       — issue states that stop reconciliation (default [:done, :cancelled])
+    - :only_issue_id          — optional issue UUID for focused dispatch
 
   The dispatcher finds assigned or unassigned issues in active states, checks
   each one out for a company-scoped eligible agent, then starts an Orchestrator
@@ -365,19 +366,27 @@ defmodule Cympho.Orchestrator.Dispatcher do
         query
       end
 
+    query =
+      case dispatch_only_issue_id() do
+        issue_id when is_binary(issue_id) and issue_id != "" ->
+          where(query, [i, _c], i.id == ^issue_id)
+
+        _ ->
+          query
+      end
+
     query
     |> preload([:blocked_by, :assignee])
-    |> order_by([i],
-      asc:
-        fragment(
-          "CASE ? WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END",
-          i.priority
-        )
-    )
-    |> order_by([i], asc: i.inserted_at)
+    |> Issues.order_for_dispatch()
     |> limit(^limit)
     |> Cympho.Repo.all()
     |> Enum.reject(&Issues.is_blocked?/1)
+  end
+
+  defp dispatch_only_issue_id do
+    :cympho
+    |> Application.get_env(:orchestrator, [])
+    |> Keyword.get(:only_issue_id)
   end
 
   # Anything older than this with an `assigned_role` is a stalled wakeup —
@@ -488,6 +497,17 @@ defmodule Cympho.Orchestrator.Dispatcher do
   def backoff_ms_for_attempt(attempts) when attempts >= 0 do
     min(round(@base_backoff_ms * :math.pow(2, attempts)), @max_backoff_ms)
   end
+
+  @doc """
+  Resolves the agent the dispatcher would use for an issue without checking it out.
+
+  This is read-only and mirrors the dispatch path's explicit-assignee and
+  fallback-chain routing rules so operator previews do not drift from runtime
+  behavior.
+  """
+  @spec preview_agent_for_issue(Cympho.Issues.Issue.t()) ::
+          {:ok, Cympho.Agents.Agent.t()} | {:error, :no_agent_available}
+  def preview_agent_for_issue(%Cympho.Issues.Issue{} = issue), do: agent_for_issue(issue)
 
   defp record_dispatch_failure(%Cympho.Issues.Issue{} = issue, %State{} = state, reason) do
     # When the fallback chain has nothing to assign — every role from the

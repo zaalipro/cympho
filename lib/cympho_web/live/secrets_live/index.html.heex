@@ -18,9 +18,53 @@
       secret={@selected_secret}
       form_mode={@form_mode}
       company_id={@company_id}
+      prefill={@secret_prefill}
+      return_to={@secret_prefill["return_to"]}
       on_cancel={JS.push("hide_form")}
     />
   <% end %>
+
+  <div
+    :if={@rotation_summary.total > 0}
+    class="mb-4 rounded-lg border border-border bg-panel p-4"
+  >
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+          Rotation posture
+        </p>
+        <p class="mt-1 text-sm text-text-secondary">
+          {@rotation_summary.needs_rotation} of {@rotation_summary.total} active secrets need rotation attention.
+        </p>
+      </div>
+      <div class="grid grid-cols-3 overflow-hidden rounded-md border border-border bg-border text-center">
+        <div class="bg-surface px-3 py-2">
+          <p class="font-mono text-sm font-590 leading-none text-emerald-300">
+            {@rotation_summary.fresh}
+          </p>
+          <p class="mt-1 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+            Fresh
+          </p>
+        </div>
+        <div class="bg-surface px-3 py-2">
+          <p class="font-mono text-sm font-590 leading-none text-amber-300">
+            {@rotation_summary.due_soon}
+          </p>
+          <p class="mt-1 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+            Due
+          </p>
+        </div>
+        <div class="bg-surface px-3 py-2">
+          <p class="font-mono text-sm font-590 leading-none text-red-300">
+            {@rotation_summary.overdue}
+          </p>
+          <p class="mt-1 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+            Overdue
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
   
 <!-- Secrets List -->
   <.infinite_scroll
@@ -63,6 +107,7 @@
     >
       <div class="flex items-start justify-between">
         <div class="flex-1">
+          <% rotation = secret_rotation(secret) %>
           <div class="flex items-center gap-3 mb-2">
             <h3 class="font-serif text-lg font-semibold text-text-primary">
               {secret.key}
@@ -75,6 +120,12 @@
             </span>
             <span class="text-xs text-text-quaternary">
               v{secret.version}
+            </span>
+            <span class={[
+              "rounded-full border px-2 py-0.5 text-xs font-medium",
+              rotation_badge_class(rotation.status)
+            ]}>
+              {rotation_status_label(rotation)}
             </span>
           </div>
 

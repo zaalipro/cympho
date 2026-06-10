@@ -1,7 +1,7 @@
 defmodule CymphoWeb.PluginLive.Index do
   use CymphoWeb, :live_view
 
-  alias Cympho.{Skills, Companies}
+  alias Cympho.{Skills, Companies, Plugins}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -12,6 +12,7 @@ defmodule CymphoWeb.PluginLive.Index do
      |> assign(:companies, companies)
      |> assign(:selected_company_id, nil)
      |> assign(:selected_status, nil)
+     |> assign(:plugin_health, Plugins.health_summary())
      |> assign(:infinite_scroll, %{})
      |> assign(:page_title, "Plugins")}
   end
@@ -41,6 +42,7 @@ defmodule CymphoWeb.PluginLive.Index do
       socket
       |> assign(:selected_company_id, company_id)
       |> assign(:selected_status, status)
+      |> assign(:plugin_health, Plugins.health_summary(company_id))
 
     {:noreply, reset_stream(socket, :plugins, &fetch_plugins(socket, &1))}
   end
@@ -59,6 +61,7 @@ defmodule CymphoWeb.PluginLive.Index do
             {:noreply,
              socket
              |> stream_insert(:plugins, updated_plugin)
+             |> refresh_plugin_health()
              |> put_flash(
                :info,
                "Plugin #{if updated_plugin.enabled, do: "enabled", else: "disabled"}"
@@ -82,6 +85,7 @@ defmodule CymphoWeb.PluginLive.Index do
             {:noreply,
              socket
              |> stream_delete(:plugins, deleted)
+             |> refresh_plugin_health()
              |> put_flash(:info, "Plugin deleted successfully")}
 
           {:error, _} ->
@@ -106,6 +110,10 @@ defmodule CymphoWeb.PluginLive.Index do
       %{id: company_id} -> Skills.get_company_plugin(company_id, id)
       _ -> {:error, :not_found}
     end
+  end
+
+  defp refresh_plugin_health(socket) do
+    assign(socket, :plugin_health, Plugins.health_summary(socket.assigns[:selected_company_id]))
   end
 
   def status_class("active"), do: "border-success/20 bg-success/10 text-success"
@@ -142,4 +150,42 @@ defmodule CymphoWeb.PluginLive.Index do
 
   def capability_count(capabilities) when is_list(capabilities), do: length(capabilities)
   def capability_count(_), do: 0
+
+  attr :label, :string, required: true
+  attr :value, :integer, required: true
+  attr :tone, :atom, default: :neutral
+
+  def plugin_health_metric(assigns) do
+    ~H"""
+    <div class="bg-surface/70 px-3 py-2 text-center">
+      <p class={"font-mono text-[18px] font-590 leading-none #{plugin_metric_text(@tone)}"}>
+        {@value}
+      </p>
+      <p class="mt-1 text-[10px] uppercase tracking-[0.12em] text-text-quaternary">
+        {@label}
+      </p>
+    </div>
+    """
+  end
+
+  def plugin_health_badge(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def plugin_health_badge(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  def plugin_health_badge(:healthy),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  def plugin_health_badge(:empty), do: "border-border bg-surface text-text-tertiary"
+  def plugin_health_badge(_), do: "border-border bg-surface text-text-tertiary"
+
+  def plugin_metric_text(:critical), do: "text-red-300"
+  def plugin_metric_text(:warning), do: "text-amber-300"
+  def plugin_metric_text(:ok), do: "text-emerald-300"
+  def plugin_metric_text(_), do: "text-text-primary"
+
+  def plugin_recommendation_class(:critical), do: "border-red-500/20 bg-red-500/10 text-red-100"
+
+  def plugin_recommendation_class(:warning),
+    do: "border-amber-500/20 bg-amber-500/10 text-amber-100"
+
+  def plugin_recommendation_class(_), do: "border-border bg-surface text-text-secondary"
 end

@@ -1,0 +1,701 @@
+defmodule Cympho.RuntimePreflight do
+  @moduledoc """
+  Non-invasive runtime readiness checks for saved agent configuration.
+
+  The preflight is intentionally read-only: it checks local command presence,
+  configured credential signals, model/provider fields, and dispatch mode
+  without starting an agent or calling a provider.
+  """
+
+  alias Cympho.Agents
+  alias Cympho.Agents.Agent
+  alias Cympho.Agents.RuntimeEnv
+  alias Cympho.Issues.Issue
+  alias Cympho.Secrets
+
+  @type item_status :: :ok | :info | :attention | :blocked
+  @type status :: :ready | :review_mode | :attention | :blocked
+
+  @doc """
+  Returns a non-secret preflight summary for an agent.
+
+  Options:
+    * `:autonomy_enabled?` - overrides dispatcher mode for tests/UI previews.
+    * `:secret_count` - count of scoped secrets available for display.
+    * `:secret_keys` - scoped secret keys that can supply credentials.
+  """
+  @spec for_agent(map(), keyword()) :: map()
+  def for_agent(agent, opts \\ []) when is_map(agent) do
+    adapter = normalize_adapter(map_value(agent, :adapter))
+    env_vars = RuntimeEnv.from_agent(agent)
+    command = command_for_agent(agent, adapter)
+    model = model_for_agent(agent, adapter, env_vars)
+    endpoint = endpoint_for_agent(agent, adapter, env_vars)
+    secret_count = Keyword.get(opts, :secret_count, 0)
+    secret_keys = Keyword.get(opts, :secret_keys, []) |> normalize_secret_keys()
+    autonomy_enabled? = Keyword.get(opts, :autonomy_enabled?, dispatcher_enabled?())
+
+    runtime = %{
+      agent: agent,
+      adapter: adapter,
+      command: command,
+      model: model,
+      env_vars: env_vars,
+      secret_count: secret_count,
+      secret_keys: secret_keys,
+      return_to: Keyword.get(opts, :return_to),
+      provider: config_value(agent, "provider"),
+      endpoint: endpoint,
+      process_preset: config_value(agent, "process_preset")
+    }
+
+    items =
+      [selected_adapter_item(adapter)] ++
+        readiness_items(adapter, runtime) ++
+        [execution_mode_item(autonomy_enabled?)]
+
+    blocked_count = Enum.count(items, &(&1.status == :blocked))
+    attention_count = Enum.count(items, &(&1.status == :attention))
+
+    status =
+      cond do
+        blocked_count > 0 -> :blocked
+        attention_count > 0 -> :attention
+        not autonomy_enabled? -> :review_mode
+        true -> :ready
+      end
+
+    %{
+      status: status,
+      label: status_label(status, attention_count),
+      summary: summary(adapter, status, attention_count),
+      adapter: adapter,
+      command: command,
+      model: model,
+      items: items,
+      first_action: first_action(items)
+    }
+  end
+
+  @doc """
+  Returns a non-secret preflight summary for an issue's dispatch path.
+
+  This uses the dispatcher's read-only routing preview, so assigned agents that
+  are not idle/capacity-eligible and auto-route candidates are evaluated the
+  same way the dispatcher will evaluate them.
+  """
+  @spec for_issue(Issue.t(), keyword()) :: map()
+  def for_issue(%Issue{} = issue, opts \\ []) do
+    case Cympho.Orchestrator.Dispatcher.preview_agent_for_issue(issue) do
+      {:ok, agent} ->
+        preflight =
+          for_agent(
+            agent,
+            opts
+            |> Keyword.put_new(:return_to, issue_return_to(issue))
+            |> put_secret_count(agent)
+          )
+
+        routed? = is_nil(map_value(issue, :assignee_id))
+
+        %{
+          preflight
+          | summary: issue_summary(issue, agent, preflight),
+            first_action: first_action(preflight.items)
+        }
+        |> Map.merge(%{
+          agent_id: agent.id,
+          agent_name: agent.name,
+          agent_role: agent.role,
+          routed?: routed?
+        })
+
+      {:error, :no_agent_available} ->
+        role = Cympho.Orchestrator.Dispatcher.Router.infer_role(issue)
+        {summary, detail, opts} = dispatch_blocker(issue, role)
+        items = [item(:blocked, "Dispatch eligibility", detail, opts)]
+
+        %{
+          status: :blocked,
+          label: "No agent",
+          summary: summary,
+          adapter: nil,
+          command: nil,
+          model: nil,
+          agent_id: nil,
+          agent_name: nil,
+          agent_role: role,
+          routed?: is_nil(map_value(issue, :assignee_id)),
+          items: items,
+          first_action: first_action(items)
+        }
+    end
+  end
+
+  defp dispatcher_enabled? do
+    Cympho.Orchestrator.Dispatcher.enabled?()
+  rescue
+    _ -> false
+  end
+
+  defp put_secret_count(opts, agent) do
+    if Keyword.has_key?(opts, :secret_count) and Keyword.has_key?(opts, :secret_keys) do
+      opts
+    else
+      secrets = agent |> map_value(:id) |> list_agent_secrets()
+
+      opts
+      |> Keyword.put_new(:secret_count, length(secrets))
+      |> Keyword.put_new(:secret_keys, Enum.map(secrets, & &1.key))
+    end
+  end
+
+  defp list_agent_secrets(agent_id) when is_binary(agent_id),
+    do: Secrets.list_secrets_for_agent(agent_id)
+
+  defp list_agent_secrets(_agent_id), do: []
+
+  defp selected_adapter_item(adapter) do
+    item(:ok, "Selected adapter", adapter_label(adapter))
+  end
+
+  defp execution_mode_item(true),
+    do: item(:ok, "Execution mode", "Autonomous dispatch is enabled.")
+
+  defp execution_mode_item(false) do
+    item(:info, "Execution mode", "Review mode only. Agents will not auto-dispatch.",
+      target_path: "/operations#runtime-services",
+      target_label: "Open service gates"
+    )
+  end
+
+  defp readiness_items("claude_code", runtime) do
+    command = first_present([runtime.command, "claude"])
+
+    [
+      command_item("Runtime command", command,
+        shell?: true,
+        target_path: agent_config_path(runtime, "agent-runtime-profile"),
+        target_label: "Change profile"
+      ),
+      claude_credentials_item(command, runtime),
+      claude_model_item(runtime),
+      claude_endpoint_item(runtime)
+    ]
+  end
+
+  defp readiness_items("codex", runtime) do
+    [
+      command_item("CLI command", "codex",
+        target_path: agent_config_path(runtime, "agent-runtime-profile"),
+        target_label: "Change profile"
+      ),
+      model_item("Codex model", runtime.model,
+        target_path: agent_config_path(runtime, "agent-codex-model"),
+        target_label: "Choose model"
+      ),
+      credentials_item(runtime, ["OPENAI_API_KEY", "CODEX_API_KEY"], "OpenAI/Codex key"),
+      item(:ok, "Invocation", "Runs as codex --model #{runtime.model || "default"}.")
+    ]
+  end
+
+  defp readiness_items("cursor", runtime) do
+    [
+      command_item("Cursor command", runtime.command || "agent",
+        target_path: agent_config_path(runtime, "agent-cursor-command"),
+        target_label: "Edit command"
+      ),
+      model_item("Cursor model", runtime.model,
+        target_path: agent_config_path(runtime, "agent-cursor-model"),
+        target_label: "Choose model"
+      ),
+      item(:ok, "Account", "Uses the local Cursor CLI account and installed model access.")
+    ]
+  end
+
+  defp readiness_items("process", runtime) do
+    [
+      command_item("Command", runtime.command,
+        target_path: agent_config_path(runtime, "agent-process-command"),
+        target_label: "Edit command"
+      ),
+      model_item("Forwarded model", runtime.model,
+        target_path: agent_config_path(runtime, "agent-process-model"),
+        target_label: "Choose model"
+      ),
+      item(
+        :ok,
+        "Preset",
+        "Preset #{runtime.process_preset || "custom"} controls args and model forwarding."
+      )
+    ]
+  end
+
+  defp readiness_items("openclaw", runtime) do
+    [
+      item(:ok, "Provider", runtime.provider || "default provider"),
+      model_item("Provider model", runtime.model,
+        target_path: agent_config_path(runtime, "agent-openclaw-model"),
+        target_label: "Choose model"
+      ),
+      endpoint_item(runtime.endpoint,
+        target_path: agent_config_path(runtime, "agent-openclaw-endpoint"),
+        target_label: "Set endpoint"
+      )
+    ]
+  end
+
+  defp readiness_items("openai_chat", runtime) do
+    [
+      credentials_item(
+        runtime,
+        ["OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY"],
+        "Chat completion key"
+      ),
+      model_item("Chat model", runtime.model,
+        target_path: agent_config_path(runtime, "agent-openai-chat-model"),
+        target_label: "Set model"
+      ),
+      openai_chat_endpoint_item(runtime.endpoint,
+        target_path: agent_config_path(runtime, "agent-openai-chat-endpoint"),
+        target_label: "Set endpoint"
+      )
+    ]
+  end
+
+  defp readiness_items("agrenting", runtime) do
+    config = runtime.agent.config || %{}
+
+    [
+      credentials_item(runtime, ["AGRENTING_API_KEY"], "Agrenting API key"),
+      required_config_item(config, "agent_did", "Remote agent DID",
+        target_path: agent_config_path(runtime, "agent-runtime-profile"),
+        target_label: "Open agent config"
+      ),
+      required_config_item(config, "capability", "Default capability",
+        target_path: agent_config_path(runtime, "agent-runtime-profile"),
+        target_label: "Open agent config"
+      ),
+      required_config_item(config, "max_price", "Max price per run",
+        target_path: agent_config_path(runtime, "agent-runtime-profile"),
+        target_label: "Open agent config"
+      )
+    ]
+  end
+
+  defp readiness_items(_adapter, _runtime) do
+    [item(:attention, "Adapter contract", "This adapter does not expose readiness checks yet.")]
+  end
+
+  defp claude_credentials_item(command, runtime) do
+    cond do
+      credentials_present?(runtime, ["ANTHROPIC_API_KEY"]) ->
+        item(:ok, "Credentials", "Anthropic-compatible credentials are configured.")
+
+      command not in [nil, "", "claude"] ->
+        item(
+          :ok,
+          "Credentials",
+          "#{command} can source credentials from a wrapper or $HOME/.cld."
+        )
+
+      true ->
+        item(:attention, "Credentials", "Add ANTHROPIC_API_KEY or choose a wrapper command.",
+          target_path:
+            secret_setup_path(
+              "ANTHROPIC_API_KEY",
+              "Anthropic-compatible runtime credential",
+              Map.get(runtime, :return_to)
+            ),
+          target_label: "Add secret"
+        )
+    end
+  end
+
+  defp credentials_item(runtime, keys, label) do
+    if credentials_present?(runtime, keys) do
+      item(:ok, label, "Credential source is configured through secrets or env.")
+    else
+      item(:attention, label, "Add #{Enum.join(keys, " or ")} as a secret or runtime env var.",
+        target_path:
+          secret_setup_path(
+            List.first(keys),
+            "#{label} for agent runtime",
+            Map.get(runtime, :return_to)
+          ),
+        target_label: "Add secret"
+      )
+    end
+  end
+
+  defp credentials_present?(runtime, keys) do
+    Enum.any?(keys, &(&1 in runtime.secret_keys)) ||
+      Enum.any?(keys, fn key ->
+        runtime_value? = runtime.env_vars |> Map.get(key) |> present?()
+        system_value? = key |> System.get_env() |> present?()
+
+        runtime_value? or system_value?
+      end)
+  end
+
+  defp normalize_secret_keys(keys) when is_list(keys) do
+    keys
+    |> Enum.filter(&is_binary/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp normalize_secret_keys(_keys), do: []
+
+  defp command_item(label, command, opts) when command in [nil, ""] do
+    item(:attention, label, "Choose the command Cympho should execute.", opts)
+  end
+
+  defp command_item(label, command, opts) do
+    if command_available?(command, opts) do
+      item(:ok, label, "#{command} was found on this machine.")
+    else
+      item(:blocked, label, "#{command} was not found in PATH or configured shell env.", opts)
+    end
+  end
+
+  defp model_item(label, model, opts) when model in [nil, ""],
+    do: item(:attention, label, "Choose a model before autonomous runs.", opts)
+
+  defp model_item(label, model, _opts), do: item(:ok, label, model)
+
+  defp endpoint_item(endpoint, opts) when endpoint in [nil, ""],
+    do: item(:attention, "Gateway endpoint", "Add the gateway URL before autonomous runs.", opts)
+
+  defp endpoint_item(endpoint, _opts), do: item(:ok, "Gateway endpoint", endpoint)
+
+  defp openai_chat_endpoint_item(endpoint, opts) when endpoint in [nil, ""] do
+    item(
+      :attention,
+      "Chat endpoint",
+      "Add the chat completions URL before autonomous runs.",
+      opts
+    )
+  end
+
+  defp openai_chat_endpoint_item(endpoint, _opts), do: item(:ok, "Chat endpoint", endpoint)
+
+  defp claude_model_item(%{model: model}) when model in [nil, ""] do
+    item(:ok, "Provider model", "Default from Claude, ANTHROPIC_MODEL, or wrapper routing.")
+  end
+
+  defp claude_model_item(%{model: model}), do: item(:ok, "Provider model", model)
+
+  defp claude_endpoint_item(%{endpoint: endpoint}) when endpoint in [nil, ""] do
+    item(:ok, "Gateway endpoint", "Default Anthropic endpoint or wrapper routing.")
+  end
+
+  defp claude_endpoint_item(%{endpoint: endpoint}), do: item(:ok, "Gateway endpoint", endpoint)
+
+  defp required_config_item(config, key, label, opts) do
+    case Map.get(config, key) || atom_key(config, key) do
+      value when value not in [nil, ""] -> item(:ok, label, to_string(value))
+      _ -> item(:attention, label, "Set by the remote-agent hire flow.", opts)
+    end
+  end
+
+  defp item(status, label, detail, opts \\ []) do
+    target =
+      opts
+      |> Keyword.take([:target_id, :target_label, :target_path])
+      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+      |> Map.new()
+
+    Map.merge(%{status: status, label: label, detail: detail}, target)
+  end
+
+  defp first_action(items) do
+    Enum.find(items, &(&1.status in [:blocked, :attention, :info]))
+  end
+
+  defp command_available?(command, opts) do
+    executable_available?(command) or
+      (Keyword.get(opts, :shell?, false) and shell_command_available?(command))
+  end
+
+  defp executable_available?(command) do
+    cond do
+      command in [nil, ""] ->
+        false
+
+      String.starts_with?(command, "/") ->
+        File.exists?(command) and not File.dir?(command)
+
+      true ->
+        not is_nil(System.find_executable(command))
+    end
+  end
+
+  defp shell_command_available?(command) do
+    command = shell_quote(command)
+
+    script =
+      "shopt -s expand_aliases 2>/dev/null || true; source \"$HOME/.cld\" 2>/dev/null || true; command -v #{command} >/dev/null 2>&1"
+
+    case System.cmd("bash", ["-lc", script], stderr_to_stdout: true) do
+      {_, 0} -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp command_for_agent(agent, "claude_code") do
+    config_value(agent, "command") ||
+      runtime_config_value(agent, "command") ||
+      Application.get_env(:cympho, :claude_code_command) ||
+      System.get_env("CYMPHO_CLAUDE_COMMAND") ||
+      "claude"
+  end
+
+  defp command_for_agent(_agent, "codex"), do: "codex"
+
+  defp command_for_agent(agent, adapter) when adapter in ["cursor", "process"] do
+    runtime_config_value(agent, "command") || config_value(agent, "command") ||
+      adapter_label(adapter)
+  end
+
+  defp command_for_agent(_agent, adapter), do: adapter_label(adapter)
+
+  defp agent_config_path(%{agent: agent}, anchor) do
+    case map_value(agent, :id) do
+      id when is_binary(id) and id != "" -> "/agents/#{id}##{anchor}"
+      _ -> nil
+    end
+  end
+
+  defp issue_return_to(%Issue{id: id}) when is_binary(id), do: "/issues/#{id}"
+  defp issue_return_to(_issue), do: nil
+
+  defp secret_setup_path(key, description, return_to) when is_binary(key) and key != "" do
+    query =
+      [
+        {"key", key},
+        {"scope", "company"},
+        {"description", description},
+        {"return_to", return_to}
+      ]
+      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+      |> URI.encode_query()
+
+    "/settings/secrets?#{query}"
+  end
+
+  defp secret_setup_path(_key, _description, _return_to), do: "/settings/secrets"
+
+  defp model_for_agent(agent, adapter, _env_vars)
+       when adapter in ["codex", "cursor", "process"] do
+    runtime_config_value(agent, "model") || config_value(agent, "model")
+  end
+
+  defp model_for_agent(agent, "openai_chat", env_vars) do
+    runtime_config_value(agent, "model") ||
+      config_value(agent, "model") ||
+      env_vars["OPENAI_MODEL"] ||
+      env_vars["DASHSCOPE_MODEL"] ||
+      env_vars["MODEL"]
+  end
+
+  defp model_for_agent(_agent, "claude_code", env_vars) do
+    env_vars["ANTHROPIC_MODEL"] ||
+      env_vars["ANTHROPIC_DEFAULT_SONNET_MODEL"] ||
+      env_vars["OPENAI_MODEL"] ||
+      env_vars["MODEL"] ||
+      System.get_env("ANTHROPIC_MODEL") ||
+      System.get_env("ANTHROPIC_DEFAULT_SONNET_MODEL")
+  end
+
+  defp model_for_agent(agent, _adapter, _env_vars) do
+    runtime_config_value(agent, "model") || config_value(agent, "model")
+  end
+
+  defp endpoint_for_agent(agent, "claude_code", env_vars) do
+    env_vars["ANTHROPIC_BASE_URL"] ||
+      env_vars["ANTHROPIC_API_BASE"] ||
+      env_vars["OPENAI_BASE_URL"] ||
+      System.get_env("ANTHROPIC_BASE_URL") ||
+      System.get_env("ANTHROPIC_API_BASE") ||
+      config_value(agent, "endpoint") ||
+      config_value(agent, "base_url")
+  end
+
+  defp endpoint_for_agent(agent, "openai_chat", env_vars) do
+    config_value(agent, "endpoint") ||
+      config_value(agent, "base_url") ||
+      env_vars["OPENAI_BASE_URL"] ||
+      env_vars["DASHSCOPE_BASE_URL"]
+  end
+
+  defp endpoint_for_agent(agent, _adapter, _env_vars) do
+    config_value(agent, "endpoint") || config_value(agent, "base_url")
+  end
+
+  defp status_label(:ready, _count), do: "Ready"
+  defp status_label(:review_mode, _count), do: "Review mode only"
+  defp status_label(:blocked, _count), do: "Blocked"
+  defp status_label(:attention, 1), do: "1 config check"
+  defp status_label(:attention, count), do: "#{count} config checks"
+
+  defp summary(adapter, :ready, _count), do: "#{adapter_label(adapter)} has basic runtime signal."
+
+  defp summary(adapter, :review_mode, _count) do
+    "#{adapter_label(adapter)} is configured, but dispatch is disabled for review mode."
+  end
+
+  defp summary(adapter, :blocked, _count) do
+    "#{adapter_label(adapter)} points at a command Cympho cannot find on this machine."
+  end
+
+  defp summary(adapter, _status, count) do
+    "#{adapter_label(adapter)} needs #{count} runtime check#{plural(count)} before autonomous runs."
+  end
+
+  defp issue_summary(issue, agent, preflight) do
+    if is_nil(map_value(issue, :assignee_id)) do
+      "Auto-route would choose #{agent.name}. #{preflight.summary}"
+    else
+      "#{agent.name} is assigned. #{preflight.summary}"
+    end
+  end
+
+  defp no_agent_summary(issue, role) do
+    if is_nil(map_value(issue, :assignee_id)) do
+      "No idle eligible #{role_label(role)} is available for this auto-route candidate."
+    else
+      "The assigned agent is not currently eligible for #{role_label(role)} dispatch."
+    end
+  end
+
+  defp dispatch_blocker(issue, role) do
+    case map_value(issue, :assignee_id) do
+      nil ->
+        role_name = role_label(role)
+
+        target_opts =
+          if role == :ceo do
+            [target_path: "/agents/new", target_label: "Add CEO agent"]
+          else
+            []
+          end
+
+        {no_agent_summary(issue, role),
+         "Add or free an eligible #{role_name} before this issue can dispatch.", target_opts}
+
+      assignee_id ->
+        case Agents.get_agent(assignee_id) do
+          {:ok, agent} ->
+            assigned_agent_blocker(issue, agent, role)
+
+          {:error, _} ->
+            role_name = role_label(role)
+
+            {"The assigned agent no longer exists for #{role_name} dispatch.",
+             "Reassign this issue or clear the assignee so auto-route can choose an eligible #{role_name}.",
+             []}
+        end
+    end
+  end
+
+  defp assigned_agent_blocker(issue, agent, role) do
+    role_name = role_label(role)
+    name = agent_name(agent)
+
+    cond do
+      not idle_agent?(agent) ->
+        {"#{name} is #{agent_status_label(agent.status)}, so it cannot pick up #{role_name} dispatch.",
+         "Wait for #{name} to return idle, stop or release its current run, or assign a different eligible #{role_name}.",
+         []}
+
+      Agents.is_agent_at_capacity?(agent) ->
+        {"#{name} is at its configured concurrency limit.",
+         "Wait for a run to finish or raise its concurrency limit before dispatching this issue.",
+         []}
+
+      not same_company?(issue, agent) ->
+        {"#{name} belongs to a different company scope.",
+         "Assign an agent in this company or clear the assignee for auto-route.", []}
+
+      not Issue.role_authorized?(agent.role, role) ->
+        {"#{name} is not authorized for #{role_name} work.",
+         "Assign an eligible #{role_name} or a higher-ranking supervisor.", []}
+
+      true ->
+        {"The assigned agent is not currently eligible for #{role_name} dispatch.",
+         "Add or free an eligible #{role_name} before this issue can dispatch.", []}
+    end
+  end
+
+  defp role_label(nil), do: "agent"
+  defp role_label(role), do: Agent.role_label(role)
+
+  defp config_value(agent, key), do: nested_value(agent, :config, key)
+  defp runtime_config_value(agent, key), do: nested_value(agent, :runtime_config, key)
+
+  defp nested_value(agent, field, key) do
+    case map_value(agent, field) do
+      %{} = map -> Map.get(map, key) || atom_key(map, key)
+      _ -> nil
+    end
+  end
+
+  defp map_value(map, key) when is_map(map) do
+    Map.get(map, key) || Map.get(map, to_string(key))
+  end
+
+  defp atom_key(map, key) do
+    Map.get(map, String.to_existing_atom(key))
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp normalize_adapter(nil), do: "unknown"
+  defp normalize_adapter(adapter), do: adapter |> to_string() |> String.trim()
+
+  defp adapter_label(""), do: "Unknown adapter"
+  defp adapter_label(nil), do: "Unknown adapter"
+  defp adapter_label("openai_chat"), do: "OpenAI Chat"
+  defp adapter_label(:openai_chat), do: "OpenAI Chat"
+
+  defp adapter_label(adapter) do
+    adapter
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.split()
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  defp first_present(values) do
+    Enum.find(values, &present?/1)
+  end
+
+  defp idle_agent?(agent), do: map_value(agent, :status) in [:idle, "idle"]
+
+  defp same_company?(%Issue{company_id: nil}, _agent), do: true
+  defp same_company?(_issue, %{company_id: nil}), do: true
+
+  defp same_company?(%Issue{company_id: company_id}, %{company_id: company_id}),
+    do: true
+
+  defp same_company?(_issue, _agent), do: false
+
+  defp agent_name(agent), do: map_value(agent, :name) || "Assigned agent"
+
+  defp agent_status_label(nil), do: "not idle"
+
+  defp agent_status_label(status) do
+    status
+    |> to_string()
+    |> String.replace("_", " ")
+  end
+
+  defp present?(value) when is_binary(value), do: String.trim(value) != ""
+  defp present?(_), do: false
+
+  defp shell_quote(value), do: "'" <> String.replace(to_string(value), "'", "'\"'\"'") <> "'"
+  defp plural(1), do: ""
+  defp plural(_), do: "s"
+end

@@ -7,6 +7,7 @@ defmodule Cympho.Adapters.Registry do
     - `:codex`       → Cympho.Adapters.CodexAdapter
     - `:cursor`      → Cympho.Adapters.CursorAdapter
     - `:http`        → Cympho.Adapters.HttpAdapter
+    - `:openai_chat` → Cympho.Adapters.OpenAIChatAdapter
     - `:openclaw`    → Cympho.Adapters.OpenClawAdapter
     - `:process`     → Cympho.Adapters.ProcessAdapter
     - `:agrenting`   → Cympho.Adapters.AgrentingAdapter
@@ -110,6 +111,7 @@ defmodule Cympho.Adapters.Registry do
       {:codex, Cympho.Adapters.CodexAdapter},
       {:cursor, Cympho.Adapters.CursorAdapter},
       {:http, Cympho.Adapters.HttpAdapter},
+      {:openai_chat, Cympho.Adapters.OpenAIChatAdapter},
       {:openclaw, Cympho.Adapters.OpenClawAdapter},
       {:process, Cympho.Adapters.ProcessAdapter},
       {:agrenting, Cympho.Adapters.AgrentingAdapter}

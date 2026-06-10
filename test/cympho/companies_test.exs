@@ -4,6 +4,8 @@ defmodule Cympho.CompaniesTest do
   alias Cympho.Companies
   alias Cympho.Companies.{Company, CompanyInvite, JoinRequest}
   alias Cympho.Goals.Goal
+  alias Cympho.Projects
+  alias Cympho.Secrets
 
   describe "companies" do
     test "create_company/1 with valid data creates a company" do
@@ -168,10 +170,53 @@ defmodule Cympho.CompaniesTest do
   describe "export/import" do
     test "export_company/1 scrubs secret fields" do
       {:ok, company} = Companies.create_company(%{name: "Export Corp", slug: "export-corp"})
+
+      {:ok, _project} =
+        Projects.create_project(%{
+          name: "Sensitive GitHub",
+          prefix: "SGH",
+          company_id: company.id,
+          github_webhook_secret: "github-webhook-secret"
+        })
+
       data = Companies.export_company(company.id)
 
       assert data.company.logo_url == nil
       refute data.company[:password_hash]
+
+      [project] = data.projects
+      assert project.github_webhook_secret == "***REDACTED***"
+      refute inspect(data) =~ "github-webhook-secret"
+    end
+
+    test "export_company/1 includes a non-sensitive secret restore manifest" do
+      {:ok, company} = Companies.create_company(%{name: "Manifest Corp", slug: "manifest-corp"})
+
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "DASHSCOPE_API_KEY",
+          value: "super-secret-provider-key",
+          description: "Qwen runtime credential"
+        })
+
+      data = Companies.export_company(company.id)
+
+      assert [
+               %{
+                 key: "DASHSCOPE_API_KEY",
+                 scope: "company",
+                 scope_id: nil,
+                 description: "Qwen runtime credential",
+                 version: 1
+               } = manifest_entry
+             ] = data.secret_manifest
+
+      assert manifest_entry.inserted_at
+      assert manifest_entry.updated_at
+      refute Map.has_key?(manifest_entry, :encrypted_value)
+      refute inspect(data) =~ "super-secret-provider-key"
     end
 
     test "import_company/1 creates new company from exported data" do
@@ -182,6 +227,48 @@ defmodule Cympho.CompaniesTest do
       assert result.company.name == "Source Corp"
       assert result.company.slug =~ "source-corp"
       assert result.company.id != company.id
+    end
+
+    test "import_company/1 returns remapped secrets that need restoration" do
+      {:ok, company} = Companies.create_company(%{name: "Secret Source", slug: "secret-source"})
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Secret Project",
+          prefix: "SPR",
+          company_id: company.id
+        })
+
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "project",
+          scope_id: project.id,
+          key: "PROJECT_TOKEN",
+          value: "do-not-export-this-token",
+          description: "Project deploy token"
+        })
+
+      data = Companies.export_company(company.id)
+      json_data = data |> Jason.encode!() |> Jason.decode!()
+
+      assert {:ok, result} = Companies.import_company(json_data)
+      new_project_id = Map.fetch!(result.id_maps.projects, project.id)
+
+      assert [
+               %{
+                 key: "PROJECT_TOKEN",
+                 scope: "project",
+                 original_scope_id: old_project_id,
+                 scope_id: ^new_project_id,
+                 description: "Project deploy token",
+                 restore_status: "requires_value"
+               }
+             ] = result.secrets_to_restore
+
+      assert old_project_id == project.id
+      assert Secrets.list_secrets(result.company.id) == []
+      refute inspect(result) =~ "do-not-export-this-token"
     end
 
     test "import_company/1 handles slug collision with suffix strategy" do
@@ -198,6 +285,61 @@ defmodule Cympho.CompaniesTest do
   end
 
   describe "create_autonomous_company/1" do
+    test "lists autonomous company blueprints for onboarding and CLI" do
+      blueprints = Companies.autonomous_company_blueprints()
+      keys = Enum.map(blueprints, & &1.key)
+
+      expected_keys = ~w(
+        software
+        go_to_market
+        product_discovery
+        support_ops
+        content_studio
+        sales_pipeline
+        research_lab
+        qa_release
+        agency_delivery
+        community_growth
+        security_compliance
+        data_insights
+        finance_ops
+        devtools_platform
+        incident_response
+        partnerships
+        training_academy
+      )
+
+      assert length(blueprints) >= length(expected_keys)
+      assert Enum.all?(expected_keys, &(&1 in keys))
+
+      assert {:ok, blueprint} = Companies.autonomous_company_blueprint("go_to_market")
+      assert blueprint.default_prefix == "GTM"
+      assert blueprint.seed_issue_count == 5
+      assert blueprint.role_summary =~ "Sales"
+    end
+
+    test "every listed blueprint can bootstrap a live company" do
+      blueprints = Companies.autonomous_company_blueprints()
+
+      assert length(blueprints) >= 17
+
+      for blueprint <- blueprints do
+        assert {:ok, result} =
+                 Companies.create_autonomous_company(%{
+                   name: "Blueprint #{blueprint.key} Smoke",
+                   blueprint: blueprint.key,
+                   engineer_count: 1
+                 })
+
+        assert result.blueprint.key == blueprint.key
+        assert result.company.governance_config["company_blueprint"] == blueprint.key
+        assert result.project.name
+        assert result.goal.goal_type == :mission
+        assert length(result.seed_issues) == blueprint.seed_issue_count
+        assert Enum.all?(result.seed_issues, &(&1.assignee_id && &1.assigned_role))
+      end
+    end
+
     test "creates company with agents, goal, project, and seed issues" do
       assert {:ok, result} =
                Companies.create_autonomous_company(%{
@@ -207,6 +349,7 @@ defmodule Cympho.CompaniesTest do
                })
 
       assert %Company{name: "Bootstrap Test Co"} = result.company
+      assert result.blueprint.key == "software"
       assert result.project.name == "Company OS"
       assert %Goal{title: "Build something great", goal_type: :mission} = result.goal
       assert length(result.agents) == 6
@@ -229,6 +372,109 @@ defmodule Cympho.CompaniesTest do
       assert length(result.seed_issues) == 5
       assert Enum.all?(result.seed_issues, &(&1.goal_id == result.goal.id))
       assert Enum.all?(result.seed_issues, &(&1.origin_type == "onboarding"))
+    end
+
+    test "creates go-to-market blueprint with specialized agents and seed work" do
+      assert {:ok, result} =
+               Companies.create_autonomous_company(%{
+                 name: "Growth Blueprint Co",
+                 blueprint: "go_to_market",
+                 engineer_count: 1
+               })
+
+      assert result.blueprint.key == "go_to_market"
+      assert result.company.governance_config["company_blueprint"] == "go_to_market"
+      assert result.company.description =~ "growth company"
+      assert result.project.name == "Growth OS"
+
+      assert %Goal{
+               title: "Launch a repeatable go-to-market motion for the offer",
+               goal_type: :mission
+             } = result.goal
+
+      roles = Enum.map(result.agents, & &1.role)
+
+      assert :ceo in roles
+      assert :cto in roles
+      assert :engineer in roles
+      assert :product_manager in roles
+      assert :designer in roles
+      assert :researcher in roles
+      assert :marketer in roles
+      assert :content_strategist in roles
+      assert :sales_development in roles
+      assert :customer_support in roles
+
+      assert length(result.agents) == 10
+      assert length(result.seed_issues) == 5
+
+      assert Enum.any?(
+               result.seed_issues,
+               &(&1.title == "Build the first outbound prospect list" and
+                   &1.assigned_role == "sales_development")
+             )
+
+      assert Enum.any?(
+               result.seed_issues,
+               &(&1.title == "Create the first support knowledge base skeleton" and
+                   &1.assigned_role == "customer_support")
+             )
+    end
+
+    test "creates QA and release blueprint with specialized agents and seed work" do
+      assert {:ok, result} =
+               Companies.create_autonomous_company(%{
+                 name: "Release Blueprint Co",
+                 blueprint: "qa_release",
+                 engineer_count: 1
+               })
+
+      assert result.blueprint.key == "qa_release"
+      assert result.company.governance_config["company_blueprint"] == "qa_release"
+      assert result.project.name == "Release OS"
+
+      assert %Goal{
+               title: "Ship changes safely with clear QA, release, and rollback evidence",
+               goal_type: :mission
+             } = result.goal
+
+      roles = Enum.map(result.agents, & &1.role)
+
+      assert :qa_engineer in roles
+      assert :release_engineer in roles
+      assert length(result.agents) == 7
+      assert length(result.seed_issues) == 5
+
+      assert Enum.any?(
+               result.seed_issues,
+               &(&1.assigned_role == "qa_engineer" and &1.assignee_id)
+             )
+
+      assert Enum.any?(
+               result.seed_issues,
+               &(&1.assigned_role == "release_engineer" and &1.assignee_id)
+             )
+    end
+
+    test "keeps duplicate blueprint project prefixes valid" do
+      assert {:ok, first} =
+               Companies.create_autonomous_company(%{
+                 name: "First Growth Prefix Co",
+                 blueprint: "go_to_market",
+                 engineer_count: 1
+               })
+
+      assert {:ok, second} =
+               Companies.create_autonomous_company(%{
+                 name: "Second Growth Prefix Co",
+                 blueprint: "go_to_market",
+                 engineer_count: 1
+               })
+
+      assert first.project.prefix == "GTM"
+      assert second.project.prefix != first.project.prefix
+      assert second.project.prefix =~ ~r/^[A-Z]+$/
+      assert String.length(second.project.prefix) <= 10
     end
 
     test "works with zero engineers" do

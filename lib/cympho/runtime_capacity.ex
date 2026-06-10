@@ -8,7 +8,7 @@ defmodule Cympho.RuntimeCapacity do
   """
 
   @local_adapters ~w(claude_code codex cursor process)
-  @gateway_adapters ~w(http openclaw agrenting)
+  @gateway_adapters ~w(http openai_chat openclaw agrenting)
 
   @type level :: :safe | :watch | :high
 
@@ -197,6 +197,8 @@ defmodule Cympho.RuntimeCapacity do
   defp slot_label(max_jobs, false), do: "#{max_jobs} gateway slot#{plural(max_jobs)}"
 
   defp adapter_label(nil), do: "Unknown adapter"
+  defp adapter_label("openai_chat"), do: "OpenAI Chat"
+  defp adapter_label(:openai_chat), do: "OpenAI Chat"
 
   defp adapter_label(adapter) do
     adapter

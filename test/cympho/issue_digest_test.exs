@@ -42,6 +42,79 @@ defmodule Cympho.IssueDigestTest do
     assert Enum.all?(digest.completion_contract, &(&1.status == :neutral))
   end
 
+  test "summarizes assigned todo issues without runs as pre-runtime launch work" do
+    agent_id = Ecto.UUID.generate()
+
+    digest =
+      IssueDigest.build(%Issue{
+        title: "Launch assigned work",
+        status: :todo,
+        priority: :high,
+        assignee_id: agent_id,
+        assignee: %Agent{id: agent_id, name: "CEO Agent", role: :ceo},
+        comments: []
+      })
+
+    assert digest.state == :pre_runtime
+    assert digest.label == "Launch needed"
+    assert digest.headline == "Assigned, but runtime has not started yet."
+
+    assert digest.summary ==
+             "CEO Agent owns the next move, but no runtime run has produced evidence yet."
+
+    assert digest.latest_signal == "No agent signal yet."
+    assert digest.next_action =~ "Operations launch checklist"
+    assert digest.next_action =~ "focused CEO command"
+    assert digest.next_action =~ "digest or sidebar"
+    assert digest.next_action =~ "[owner_update]"
+    assert digest.next_action =~ "[handoff]"
+    refute digest.next_action =~ "from the sidebar"
+
+    assert Enum.map(digest.role_run_summaries, & &1.key) == [
+             :owner_update,
+             :runtime,
+             :delivery,
+             :review
+           ]
+
+    owner = Enum.find(digest.role_run_summaries, &(&1.key == :owner_update))
+    delivery = Enum.find(digest.role_run_summaries, &(&1.key == :delivery))
+
+    assert owner.title == "CEO first turn"
+    assert owner.status == :missing
+    assert owner.summary =~ "first owner-facing signal"
+    assert Enum.any?(owner.evidence, &(&1.label == "handoffs"))
+    assert owner.next_action =~ "Start the CEO turn"
+    assert owner.next_action =~ "[owner_update]"
+    assert owner.next_action =~ "[handoff]"
+
+    assert delivery.status == :waiting
+    assert delivery.summary =~ "Delivery waits for the CEO first turn"
+    assert delivery.next_action == "Start the CEO turn before assigning delivery."
+  end
+
+  test "summarizes queued focused dispatch as the active pre-runtime action" do
+    agent_id = Ecto.UUID.generate()
+
+    digest =
+      IssueDigest.build(%Issue{
+        title: "Queued CEO launch",
+        status: :todo,
+        priority: :high,
+        assignee_id: agent_id,
+        assignee: %Agent{id: agent_id, name: "CEO Agent", role: :ceo},
+        monitor_state: %{"dispatch" => %{"pinned_at" => "2026-06-09T12:00:00Z"}},
+        comments: []
+      })
+
+    assert digest.state == :pre_runtime
+    assert digest.next_action =~ "Focused dispatch is queued"
+    assert digest.next_action =~ "Copy the focused command"
+    assert digest.next_action =~ "[owner_update]"
+    assert digest.next_action =~ "[handoff]"
+    refute digest.next_action =~ "from the sidebar"
+  end
+
   test "surfaces failed runs as the highest-priority signal" do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 

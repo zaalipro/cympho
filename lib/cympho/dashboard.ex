@@ -7,6 +7,9 @@ defmodule Cympho.Dashboard do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Agents.Agent
+  alias Cympho.AutonomyReadiness
+  alias Cympho.Costs
+  alias Cympho.Goals
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues.Issue
   alias Cympho.RuntimeCapacity
@@ -117,7 +120,9 @@ defmodule Cympho.Dashboard do
       recent_activities: Enum.map(recent_activities(10, company_id), &activity_to_map/1),
       recent_inbox: Enum.map(recent_inbox(company_id, 6), &inbox_to_map/1),
       cost_summary: cost_summary(company_id),
-      runtime_capacity: runtime_capacity(company_id)
+      runtime_capacity: runtime_capacity(company_id),
+      goal_alignment: Goals.alignment_summary(company_id),
+      autonomy_readiness: AutonomyReadiness.snapshot(company_id)
     }
   end
 
@@ -133,8 +138,10 @@ defmodule Cympho.Dashboard do
       routine_health: routine_health(nil),
       recent_activities: [],
       recent_inbox: [],
-      cost_summary: %{total_cost: Decimal.new(0), run_count: 0},
-      runtime_capacity: RuntimeCapacity.company([])
+      cost_summary: empty_cost_summary(),
+      runtime_capacity: RuntimeCapacity.company([]),
+      goal_alignment: Goals.empty_alignment_summary(),
+      autonomy_readiness: AutonomyReadiness.empty_snapshot()
     }
   end
 
@@ -187,6 +194,8 @@ defmodule Cympho.Dashboard do
     import Ecto.Query
 
     try do
+      spend_period = Costs.spend_period(company_id)
+
       runs =
         Cympho.HeartbeatEngine.Run
         |> scoped(company_id)
@@ -209,22 +218,68 @@ defmodule Cympho.Dashboard do
           acc + (run.output_tokens || 0)
         end)
 
+      period_runs =
+        Enum.filter(runs, fn run ->
+          case run_timestamp(run) do
+            %DateTime{} = timestamp ->
+              DateTime.compare(timestamp, spend_period.started_at) != :lt
+
+            _ ->
+              true
+          end
+        end)
+
+      period_cost =
+        Enum.reduce(period_runs, Decimal.new(0), fn run, acc ->
+          cost = run.cost_usd || Decimal.new(0)
+          Decimal.add(acc, cost)
+        end)
+
       %{
         total_cost: total_cost,
         total_input_tokens: total_input,
         total_output_tokens: total_output,
-        total_runs: length(runs)
+        total_runs: length(runs),
+        period_cost: period_cost,
+        period_runs: length(period_runs),
+        period_days: spend_period.days,
+        period_started_at: spend_period.started_at
       }
+      |> Map.merge(Costs.spend_posture(company_id, period_cost))
     rescue
-      _ ->
-        %{
-          total_cost: Decimal.new(0),
-          total_input_tokens: 0,
-          total_output_tokens: 0,
-          total_runs: 0
-        }
+      _ -> empty_cost_summary()
     end
   end
+
+  defp empty_cost_summary do
+    %{
+      total_cost: Decimal.new(0),
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      total_runs: 0,
+      period_cost: Decimal.new(0),
+      period_runs: 0,
+      period_days: 30,
+      period_started_at: nil,
+      budget_spend: Decimal.new(0),
+      budget_limit: nil,
+      budget_remaining: nil,
+      budget_used_percent: nil,
+      budget_status: :unbudgeted,
+      budget_status_label: "No budget",
+      budget_configured: false,
+      budget_comparable: false,
+      budget_source: :none,
+      budget_period: "monthly",
+      budget_control_count: 0,
+      budget_warning_threshold_pct: Decimal.new("80.0"),
+      budget_incident_count: 0
+    }
+  end
+
+  defp run_timestamp(%{completed_at: %DateTime{} = completed_at}), do: completed_at
+  defp run_timestamp(%{inserted_at: %DateTime{} = inserted_at}), do: inserted_at
+  defp run_timestamp(_), do: nil
 
   def routine_health(nil),
     do: %{status: "idle", message: "No routine activity", total: 0, failed: 0, running: 0}
