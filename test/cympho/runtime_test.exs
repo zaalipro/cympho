@@ -33,7 +33,7 @@ defmodule Cympho.RuntimeTest do
         role: :engineer,
         status: :idle,
         adapter: :process,
-        config: %{"command" => "echo"}
+        config: %{"command" => "echo", "repo_capable" => true}
       })
 
     {:ok, issue} =
@@ -65,6 +65,29 @@ defmodule Cympho.RuntimeTest do
     assert File.dir?(context.cwd)
     assert context.adapter_config["cwd"] == context.cwd
     assert context.metadata["workspace_source"] == "issue_workspace"
+  end
+
+  test "dispatch preflight blocks repo delivery on non-repo runtimes", %{
+    company: company,
+    issue: issue
+  } do
+    {:ok, chat_engineer} =
+      Agents.create_agent(%{
+        company_id: company.id,
+        name: "Chat Runtime Engineer",
+        role: :engineer,
+        status: :idle,
+        adapter: :openai_chat,
+        config: %{
+          "endpoint" => "https://dashscope.example.com/compatible-mode/v1/chat/completions",
+          "model" => "qwen3.6-flash"
+        }
+      })
+
+    {:ok, issue} = Issues.update_issue(issue, %{assigned_role: "engineer"})
+
+    assert {:error, {:repo_delivery_runtime_unavailable, :engineer}} =
+             Runtime.dispatchable?(issue, chat_engineer)
   end
 
   test "preflight blocks paused companies", %{company: company, agent: agent, issue: issue} do
@@ -128,6 +151,50 @@ defmodule Cympho.RuntimeTest do
     assert context.env["OPENAI_API_KEY"] == "company-key"
     assert context.env["AGENT_TOKEN"] == "agent-key"
     assert context.adapter_config["env"]["AGENT_TOKEN"] == "agent-key"
+  end
+
+  test "preflight injects DashScope secret into OpenAI chat adapter config", %{
+    company: company
+  } do
+    {:ok, ceo} =
+      Agents.create_agent(%{
+        company_id: company.id,
+        name: "Qwen Runtime CEO",
+        role: :ceo,
+        status: :idle,
+        adapter: :openai_chat,
+        config: %{
+          "endpoint" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "model" => "qwen3.6-flash"
+        }
+      })
+
+    {:ok, _secret} =
+      Secrets.create_secret(%{
+        company_id: company.id,
+        scope: "company",
+        key: "DASHSCOPE_API_KEY",
+        value: "dashscope-test-key"
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        company_id: company.id,
+        title: "CEO Qwen runtime smoke",
+        status: :todo,
+        assigned_role: "ceo",
+        assignee_id: ceo.id
+      })
+
+    assert {:ok, context} = Runtime.preflight(issue, ceo)
+    assert context.adapter == Cympho.Adapters.OpenAIChatAdapter
+    assert context.adapter_config["api_key"] == "dashscope-test-key"
+
+    assert context.adapter_config["endpoint"] ==
+             "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+    assert context.adapter_config["model"] == "qwen3.6-flash"
+    assert context.adapter_config["env"]["DASHSCOPE_API_KEY"] == "dashscope-test-key"
   end
 
   test "preflight rejects configured workspaces whose cwd is missing", %{

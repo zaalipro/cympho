@@ -6,10 +6,12 @@ defmodule CymphoWeb.IssueLive.Show do
 
   alias Cympho.Agents
   alias Cympho.Comments
+  alias Cympho.DeliveryBriefReadiness
   alias Cympho.Documents
   alias Cympho.HeartbeatEngine
   alias Cympho.Issues
   alias Cympho.Issues.AutoAssignment
+  alias Cympho.IssueBriefReadiness
   alias Cympho.IssueReadStates
   alias Cympho.IssueThreadInteractions
   alias Cympho.Orchestrator
@@ -18,6 +20,7 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.WorkProducts
 
   @timeline_filters ~w(signal comments runs artifacts all)
+  @repo_delivery_roles Cympho.Agents.Agent.pr_delivery_roles() |> Enum.map(&Atom.to_string/1)
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -68,6 +71,8 @@ defmodule CymphoWeb.IssueLive.Show do
            orchestrator_enabled?: Cympho.Orchestrator.Dispatcher.enabled?(),
            show_agent_panel: false,
            editing: nil,
+           description_draft: nil,
+           description_return_to: nil,
            assignee_search: "",
            runs: runs,
            interactions: interactions,
@@ -100,6 +105,8 @@ defmodule CymphoWeb.IssueLive.Show do
     socket =
       socket
       |> apply_action(socket.assigns.live_action, id)
+      |> assign_description_return_to(params)
+      |> apply_edit_param(params)
       |> apply_gate_param(params)
       |> maybe_clean_gate_url()
 
@@ -125,6 +132,46 @@ defmodule CymphoWeb.IssueLive.Show do
   defp apply_action(socket, nil, id) do
     apply_action(socket, :show, id)
   end
+
+  defp apply_edit_param(socket, %{"edit" => "description", "repair" => "owner_brief"}) do
+    draft_owner_brief_repair(socket)
+  end
+
+  defp apply_edit_param(socket, %{"repair" => "owner_brief"}) do
+    draft_owner_brief_repair(socket)
+  end
+
+  defp apply_edit_param(socket, %{"edit" => "description"}) do
+    assign(socket, editing: "description", description_draft: nil)
+  end
+
+  defp apply_edit_param(socket, _params), do: socket
+
+  defp assign_description_return_to(socket, %{"return_to" => return_to} = params) do
+    repair_description? =
+      params["edit"] == "description" or params["repair"] == "owner_brief"
+
+    assign(
+      socket,
+      :description_return_to,
+      if(repair_description?, do: safe_return_path(return_to))
+    )
+  end
+
+  defp assign_description_return_to(socket, _params),
+    do: assign(socket, :description_return_to, nil)
+
+  defp safe_return_path(return_to) when is_binary(return_to) do
+    return_to = URI.decode(return_to)
+
+    cond do
+      String.starts_with?(return_to, "//") -> nil
+      String.starts_with?(return_to, "/") and not String.contains?(return_to, "://") -> return_to
+      true -> nil
+    end
+  end
+
+  defp safe_return_path(_return_to), do: nil
 
   defp apply_gate_param(socket, %{"gate" => gate}) when is_binary(gate) do
     case gate do
@@ -181,6 +228,13 @@ defmodule CymphoWeb.IssueLive.Show do
   defp dispatch_focus_flash(:relaunch, false),
     do:
       "Issue queued for focused relaunch. Copy the focused command from this issue page and start runtime."
+
+  defp owner_revision_flash(true),
+    do: "Owner revision requested and dispatcher notified for focused CEO relaunch."
+
+  defp owner_revision_flash(false),
+    do:
+      "Owner revision requested and focused CEO relaunch queued. Start runtime from Operations to continue."
 
   @impl true
   def handle_event("add_comment", %{"comment" => comment_params}, socket) do
@@ -408,13 +462,38 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   @impl true
+  def handle_event("start_editing", %{"field" => "description"}, socket) do
+    {:noreply,
+     assign(socket, editing: "description", description_draft: nil, description_return_to: nil)}
+  end
+
+  @impl true
   def handle_event("start_editing", %{"field" => field}, socket) do
-    {:noreply, assign(socket, :editing, field)}
+    {:noreply, assign(socket, editing: field, description_draft: nil, description_return_to: nil)}
   end
 
   @impl true
   def handle_event("cancel_editing", _params, socket) do
-    {:noreply, assign(socket, :editing, nil)}
+    {:noreply, assign(socket, editing: nil, description_draft: nil, description_return_to: nil)}
+  end
+
+  @impl true
+  def handle_event("draft_owner_brief_repair", _params, socket) do
+    {:noreply, draft_owner_brief_repair(socket, flash?: true)}
+  end
+
+  @impl true
+  def handle_event("draft_delivery_brief_repair", _params, socket) do
+    case DeliveryBriefReadiness.evaluate(socket.assigns.issue) do
+      %{status: status, repair_scaffold: scaffold} when status in [:thin, :draft] ->
+        {:noreply,
+         socket
+         |> assign(editing: "description", description_draft: scaffold)
+         |> put_flash(:info, "Delivery brief scaffold loaded into the description editor.")}
+
+      _readiness ->
+        {:noreply, put_flash(socket, :info, "Delivery brief is already ready for dispatch.")}
+    end
   end
 
   @impl true
@@ -423,7 +502,7 @@ defmodule CymphoWeb.IssueLive.Show do
       {:ok, issue} ->
         {:noreply,
          socket
-         |> assign(issue: issue, editing: nil)
+         |> assign(issue: issue, editing: nil, description_draft: nil)
          |> put_flash(:info, "Title updated")}
 
       {:error, _} ->
@@ -440,12 +519,25 @@ defmodule CymphoWeb.IssueLive.Show do
 
   @impl true
   def handle_event("save_description", %{"description" => description}, socket) do
+    return_to = socket.assigns[:description_return_to]
+
     case Issues.update_issue(socket.assigns.issue, %{description: description}) do
       {:ok, issue} ->
-        {:noreply,
-         socket
-         |> assign(issue: issue, editing: nil)
-         |> put_flash(:info, "Description updated")}
+        socket =
+          socket
+          |> assign(
+            issue: issue,
+            editing: nil,
+            description_draft: nil,
+            description_return_to: nil
+          )
+          |> put_flash(:info, "Description updated")
+
+        if return_to do
+          {:noreply, push_navigate(socket, to: return_to)}
+        else
+          {:noreply, socket}
+        end
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to update description")}
@@ -605,6 +697,32 @@ defmodule CymphoWeb.IssueLive.Show do
 
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "Failed to accept owner verification.")}
+    end
+  end
+
+  @impl true
+  def handle_event("request_owner_revision", _params, socket) do
+    case Issues.request_owner_verification_revision(socket.assigns.issue,
+           actor: socket.assigns[:current_user]
+         ) do
+      {:ok, issue} ->
+        dispatcher_notified? = notify_dispatcher_if_enabled(socket)
+
+        {:noreply,
+         socket
+         |> assign(:issue, issue)
+         |> assign_child_rollup(issue.id)
+         |> maybe_rebuild_timeline()
+         |> put_flash(:info, owner_revision_flash(dispatcher_notified?))}
+
+      {:error, :blocked_by_active_issues} ->
+        {:noreply, put_flash(socket, :error, "Issue is blocked by active issues")}
+
+      {:error, :not_owner_verification} ->
+        {:noreply, put_flash(socket, :error, "Issue is not waiting on owner verification.")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to request CEO revision.")}
     end
   end
 
@@ -1172,6 +1290,30 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
+  defp draft_owner_brief_repair(socket, opts \\ []) do
+    flash? = Keyword.get(opts, :flash?, false)
+
+    case IssueBriefReadiness.evaluate(socket.assigns.issue) do
+      %{status: status, launch_scaffold: scaffold} when status in [:thin, :draft] ->
+        socket = assign(socket, editing: "description", description_draft: scaffold)
+
+        if flash? do
+          put_flash(socket, :info, "Repair scaffold loaded into the description editor.")
+        else
+          socket
+        end
+
+      _readiness ->
+        socket = assign(socket, editing: "description", description_draft: nil)
+
+        if flash? do
+          put_flash(socket, :info, "Owner brief is already ready for CEO launch.")
+        else
+          socket
+        end
+    end
+  end
+
   defp assign_child_rollup(socket, issue_id) do
     child_issues = Issues.list_child_issues(issue_id)
     child_tree = Issues.list_descendants_tree(issue_id, 4)
@@ -1499,4 +1641,30 @@ defmodule CymphoWeb.IssueLive.Show do
       nil
     end
   end
+
+  defp issue_preflight(issue, orchestrator_enabled?) do
+    Cympho.RuntimePreflight.for_issue(issue, autonomy_enabled?: orchestrator_enabled?)
+  end
+
+  defp delivery_brief_readiness(issue, preflight) do
+    if repo_delivery_issue?(issue) or repo_delivery_preflight?(preflight) do
+      DeliveryBriefReadiness.evaluate(issue)
+    end
+  end
+
+  defp repo_delivery_issue?(issue) do
+    repo_delivery_role?(Map.get(issue, :assigned_role)) or repo_delivery_assignee?(issue)
+  end
+
+  defp repo_delivery_preflight?(%{agent_role: role}), do: repo_delivery_role?(role)
+  defp repo_delivery_preflight?(_preflight), do: false
+
+  defp repo_delivery_assignee?(%{assignee: %{role: role}}), do: repo_delivery_role?(role)
+  defp repo_delivery_assignee?(_issue), do: false
+
+  defp repo_delivery_role?(role) when is_atom(role),
+    do: role |> Atom.to_string() |> repo_delivery_role?()
+
+  defp repo_delivery_role?(role) when is_binary(role), do: role in @repo_delivery_roles
+  defp repo_delivery_role?(_role), do: false
 end

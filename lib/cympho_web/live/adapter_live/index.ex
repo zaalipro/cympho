@@ -27,6 +27,8 @@ defmodule CymphoWeb.AdapterLive.Index do
       |> assign(:adapters, adapters)
       |> assign(:health, health)
       |> assign(:agents_by_adapter, agents_by_adapter)
+      |> assign(:runtime_readiness, build_runtime_readiness(adapters, health, agents_by_adapter))
+      |> assign(:adapter_event_error, nil)
 
     {:ok, socket}
   end
@@ -39,28 +41,204 @@ defmodule CymphoWeb.AdapterLive.Index do
   @impl true
   def handle_event("refresh_health", _params, socket) do
     health = Adapters.check_all_health()
-    {:noreply, assign(socket, :health, health)}
-  end
-
-  @impl true
-  def handle_event("test_adapter", %{"key" => key}, socket) do
-    key_atom = String.to_existing_atom(key)
-    result = Adapters.check_health(key_atom, %{})
-
-    health = Map.put(socket.assigns.health, key_atom, result)
-
-    message =
-      case result.status do
-        :healthy -> "#{adapter_name(socket, key_atom)} health check passed"
-        :degraded -> "#{adapter_name(socket, key_atom)} is degraded: #{result.message}"
-        :unhealthy -> "#{adapter_name(socket, key_atom)} is unhealthy: #{result.message}"
-        :unknown -> "#{adapter_name(socket, key_atom)} status unknown"
-      end
 
     {:noreply,
      socket
      |> assign(:health, health)
-     |> put_flash(:info, message)}
+     |> assign(:adapter_event_error, nil)
+     |> assign(
+       :runtime_readiness,
+       build_runtime_readiness(socket.assigns.adapters, health, socket.assigns.agents_by_adapter)
+     )}
+  end
+
+  @impl true
+  def handle_event("test_adapter", %{"key" => key}, socket) do
+    case parse_adapter_key(socket, key) do
+      {:ok, key_atom} ->
+        result = Adapters.check_health(key_atom, %{})
+        health = Map.put(socket.assigns.health, key_atom, result)
+
+        message =
+          case result.status do
+            :healthy -> "#{adapter_name(socket, key_atom)} health check passed"
+            :degraded -> "#{adapter_name(socket, key_atom)} is degraded: #{result.message}"
+            :unhealthy -> "#{adapter_name(socket, key_atom)} is unhealthy: #{result.message}"
+            :unknown -> "#{adapter_name(socket, key_atom)} status unknown"
+          end
+
+        {:noreply,
+         socket
+         |> assign(:health, health)
+         |> assign(:adapter_event_error, nil)
+         |> assign(
+           :runtime_readiness,
+           build_runtime_readiness(
+             socket.assigns.adapters,
+             health,
+             socket.assigns.agents_by_adapter
+           )
+         )
+         |> put_flash(:info, message)}
+
+      :error ->
+        {:noreply, assign(socket, :adapter_event_error, "Unknown adapter")}
+    end
+  end
+
+  defp parse_adapter_key(socket, key) do
+    key = to_string(key)
+
+    socket.assigns.adapters
+    |> Enum.find(fn adapter -> Atom.to_string(adapter.key) == key end)
+    |> case do
+      nil -> :error
+      adapter -> {:ok, adapter.key}
+    end
+  end
+
+  defp build_runtime_readiness(adapters, health, agents_by_adapter) do
+    counts = adapter_counts(adapters, health, agents_by_adapter)
+    attention_adapter = first_attention_adapter(adapters, health)
+
+    %{
+      summary: runtime_summary(counts, attention_adapter),
+      tone: runtime_tone(counts),
+      stats: runtime_stats(counts),
+      lanes: runtime_lanes(counts),
+      attention_adapter: attention_adapter,
+      actions: runtime_actions(counts)
+    }
+  end
+
+  defp adapter_counts(adapters, health, agents_by_adapter) do
+    healthy = Enum.count(adapters, &(health_status(health, &1.key) == :healthy))
+    degraded = Enum.count(adapters, &(health_status(health, &1.key) == :degraded))
+    unhealthy = Enum.count(adapters, &(health_status(health, &1.key) == :unhealthy))
+    unknown = Enum.count(adapters, &(health_status(health, &1.key) == :unknown))
+    unavailable = Enum.count(adapters, &(not &1.available))
+    assigned = agents_by_adapter |> Map.values() |> Enum.map(&length/1) |> Enum.sum()
+    attention = Enum.count(adapters, &adapter_attention?(&1, health))
+
+    configured =
+      Enum.count(adapters, fn adapter ->
+        length(Map.get(agents_by_adapter, adapter.key, [])) > 0
+      end)
+
+    %{
+      total: length(adapters),
+      healthy: healthy,
+      degraded: degraded,
+      unhealthy: unhealthy,
+      unknown: unknown,
+      unavailable: unavailable,
+      assigned_agents: assigned,
+      configured_adapters: configured,
+      attention: attention
+    }
+  end
+
+  defp health_status(health, key), do: Map.get(Map.get(health, key, %{}), :status, :unknown)
+
+  defp first_attention_adapter(adapters, health) do
+    Enum.find(adapters, &adapter_attention?(&1, health))
+  end
+
+  defp adapter_attention?(adapter, health) do
+    health_status(health, adapter.key) in [:degraded, :unhealthy, :unknown] or
+      not adapter.available
+  end
+
+  defp runtime_summary(%{total: 0}, _attention_adapter), do: "No adapters are registered."
+
+  defp runtime_summary(%{assigned_agents: 0} = counts, _attention_adapter) do
+    "#{counts.healthy} of #{counts.total} adapters are healthy, but no agents are assigned to a runtime yet."
+  end
+
+  defp runtime_summary(%{attention: 0} = counts, _attention_adapter) do
+    "#{counts.healthy} of #{counts.total} adapters are healthy with #{counts.assigned_agents} assigned #{pluralize(counts.assigned_agents, "agent")}."
+  end
+
+  defp runtime_summary(counts, nil) do
+    "#{counts.healthy} of #{counts.total} adapters are healthy; #{counts.attention} runtime signals need attention."
+  end
+
+  defp runtime_summary(counts, adapter) do
+    "#{counts.healthy} of #{counts.total} adapters are healthy; check #{adapter.name} before routing more work."
+  end
+
+  defp runtime_tone(%{total: 0}), do: :blocked
+  defp runtime_tone(%{assigned_agents: 0}), do: :attention
+  defp runtime_tone(%{healthy: healthy}) when healthy == 0, do: :blocked
+  defp runtime_tone(%{attention: 0}), do: :ready
+  defp runtime_tone(_counts), do: :attention
+
+  defp runtime_stats(counts) do
+    [
+      %{label: "Healthy", value: counts.healthy, note: "#{counts.total} registered"},
+      %{
+        label: "Assigned agents",
+        value: counts.assigned_agents,
+        note: "#{counts.configured_adapters} adapters in use"
+      },
+      %{
+        label: "Needs attention",
+        value: counts.attention,
+        note: "#{counts.unavailable} unavailable"
+      }
+    ]
+  end
+
+  defp runtime_lanes(counts) do
+    [
+      %{
+        label: "Healthy adapters",
+        value: counts.healthy,
+        state: lane_state(counts.healthy, "ready", "missing"),
+        tone: :ready
+      },
+      %{
+        label: "Degraded",
+        value: counts.degraded,
+        state: lane_state(counts.degraded, "watch", "clear"),
+        tone: :warning
+      },
+      %{
+        label: "Unhealthy",
+        value: counts.unhealthy,
+        state: lane_state(counts.unhealthy, "repair", "clear"),
+        tone: :danger
+      },
+      %{
+        label: "Unavailable",
+        value: counts.unavailable,
+        state: lane_state(counts.unavailable, "install", "clear"),
+        tone: :muted
+      }
+    ]
+  end
+
+  defp lane_state(count, positive, zero), do: if(count > 0, do: positive, else: zero)
+
+  defp runtime_actions(%{assigned_agents: 0}) do
+    [
+      %{label: "Add agent", url: ~p"/agents/new", tone: :primary, icon: "hero-plus-mini"},
+      %{label: "Secrets", url: ~p"/settings/secrets", tone: :neutral, icon: "hero-key-mini"},
+      %{label: "Operations", url: ~p"/operations", tone: :neutral, icon: "hero-command-line-mini"}
+    ]
+  end
+
+  defp runtime_actions(_counts) do
+    [
+      %{
+        label: "Operations",
+        url: ~p"/operations",
+        tone: :primary,
+        icon: "hero-command-line-mini"
+      },
+      %{label: "Add agent", url: ~p"/agents/new", tone: :neutral, icon: "hero-plus-mini"},
+      %{label: "Secrets", url: ~p"/settings/secrets", tone: :neutral, icon: "hero-key-mini"}
+    ]
   end
 
   defp adapter_name(socket, key) do
@@ -85,6 +263,31 @@ defmodule CymphoWeb.AdapterLive.Index do
 
   defp availability_label(true), do: "Available"
   defp availability_label(false), do: "Unavailable"
+
+  defp runtime_panel_class(:ready), do: "border-success/25 bg-success/10"
+  defp runtime_panel_class(:attention), do: "border-amber-500/25 bg-amber-500/10"
+  defp runtime_panel_class(:blocked), do: "border-brand/25 bg-brand/10"
+  defp runtime_panel_class(_tone), do: "border-border bg-surface"
+
+  defp runtime_action_class(:primary) do
+    "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-3 text-sm font-510 text-on-primary transition-colors hover:bg-accent-hover"
+  end
+
+  defp runtime_action_class(_tone) do
+    "inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+  end
+
+  defp runtime_lane_class(:ready),
+    do: "rounded-lg border border-success/25 bg-success/10 px-4 py-3"
+
+  defp runtime_lane_class(:warning),
+    do: "rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3"
+
+  defp runtime_lane_class(:danger), do: "rounded-lg border border-brand/25 bg-brand/10 px-4 py-3"
+  defp runtime_lane_class(_tone), do: "rounded-lg border border-border bg-surface-1 px-4 py-3"
+
+  defp pluralize(1, word), do: word
+  defp pluralize(_count, word), do: word <> "s"
 
   defp adapter_icon(:claude_code), do: "⚡"
   defp adapter_icon(:codex), do: "🔬"

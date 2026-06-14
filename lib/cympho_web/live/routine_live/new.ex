@@ -2,13 +2,16 @@ defmodule CymphoWeb.RoutineLive.New do
   use CymphoWeb, :live_view
   alias Cympho.Routines
   alias Cympho.Routines.Routine
+  alias CymphoWeb.RoutineLive.FormHelpers
 
   @impl true
   def mount(_params, _session, socket) do
     changeset = Routines.change_routine(%Routine{})
 
     socket =
-      assign(socket, changeset: changeset, form: to_form(changeset), page_title: "New Routine")
+      socket
+      |> assign(changeset: changeset, form: to_form(changeset), page_title: "New Routine")
+      |> FormHelpers.assign_context_options()
 
     {:ok, socket}
   end
@@ -20,12 +23,18 @@ defmodule CymphoWeb.RoutineLive.New do
 
   @impl true
   def handle_event("save", %{"routine" => routine_params}, socket) do
-    case Routines.create_routine(routine_params) do
-      {:ok, routine} ->
-        {:noreply, push_navigate(socket, to: ~p"/routines/#{routine.id}")}
+    with {:ok, routine_params} <-
+           FormHelpers.scoped_routine_params(socket, routine_params, put_company_scope: true) do
+      case Routines.create_routine(routine_params) do
+        {:ok, routine} ->
+          {:noreply, push_navigate(socket, to: ~p"/routines/#{routine.id}")}
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign(socket, changeset: changeset, form: to_form(changeset))}
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:noreply, assign(socket, changeset: changeset, form: to_form(changeset))}
+      end
+    else
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Choose an owner and project from this company.")}
     end
   end
 end

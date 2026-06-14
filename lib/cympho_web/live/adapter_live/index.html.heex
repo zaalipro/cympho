@@ -1,20 +1,15 @@
 <.settings_layout active={:adapters}>
-  <.header title={@page_title}>
+  <.header
+    title={@page_title}
+    subtitle="Bring your own agent runtime, test adapter health, and see whether the company is ready to launch work."
+  >
     <:actions>
       <button
         type="button"
         phx-click="refresh_health"
         class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center gap-2"
       >
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-          />
-        </svg>
-        Refresh Health
+        <.icon name="hero-arrow-path-mini" class="h-4 w-4" /> Refresh Health
       </button>
     </:actions>
   </.header>
@@ -32,30 +27,79 @@
   >
     {@flash[:error]}
   </div>
-  
-<!-- Status Overview -->
-  <div class="mb-6 bg-surface border border-border rounded-xl p-4">
-    <h2 class="font-serif text-xs font-510 text-text-secondary uppercase tracking-wider mb-4">
-      Adapter Status Overview
-    </h2>
-    <div class="grid grid-cols-3 gap-4">
-      <div class="text-center">
-        <div class="text-2xl font-510 text-success">
-          {Enum.count(@adapters, fn a -> Map.get(@health, a.key, %{}).status == :healthy end)}
+
+  <div
+    :if={@adapter_event_error}
+    class="mb-6 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-lg"
+  >
+    {@adapter_event_error}
+  </div>
+
+  <div
+    id="adapter-runtime-readiness"
+    data-testid="adapter-runtime-readiness"
+    class={[
+      "mb-6 overflow-hidden rounded-xl border",
+      runtime_panel_class(@runtime_readiness.tone)
+    ]}
+  >
+    <div class="border-b border-border/70 px-5 py-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-eyebrow uppercase text-text-quaternary">Adapter Status Overview</p>
+          <h2 class="mt-1 text-card-title text-text-primary">Runtime readiness</h2>
+          <p class="mt-2 max-w-3xl text-sm leading-6 text-text-secondary">
+            {@runtime_readiness.summary}
+          </p>
         </div>
-        <div class="text-xs text-text-quaternary mt-1">Healthy</div>
+        <div class="flex flex-wrap gap-2">
+          <.app_link
+            :for={action <- @runtime_readiness.actions}
+            navigate={action.url}
+            class={runtime_action_class(action.tone)}
+          >
+            <.icon name={action.icon} class="h-4 w-4" />
+            <span>{action.label}</span>
+          </.app_link>
+        </div>
       </div>
-      <div class="text-center">
-        <div class="text-2xl font-510 text-brand">
-          {Enum.count(@adapters, fn a -> Map.get(@health, a.key, %{}).status == :unhealthy end)}
+    </div>
+
+    <div class="grid gap-3 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+      <div class="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
+        <div
+          :for={stat <- @runtime_readiness.stats}
+          class="rounded-lg border border-border bg-surface-1 px-4 py-3"
+        >
+          <p class="text-eyebrow uppercase text-text-quaternary">{stat.label}</p>
+          <p class="mt-3 font-mono text-2xl font-590 text-text-primary">{stat.value}</p>
+          <p class="mt-1 text-xs text-text-tertiary">{stat.note}</p>
         </div>
-        <div class="text-xs text-text-quaternary mt-1">Unhealthy</div>
       </div>
-      <div class="text-center">
-        <div class="text-2xl font-510 text-text-tertiary">
-          {Enum.count(@adapters, fn a -> not a.available end)}
-        </div>
-        <div class="text-xs text-text-quaternary mt-1">Unavailable</div>
+
+      <div class="min-w-0 rounded-lg border border-border bg-surface-1 px-4 py-3">
+        <p class="text-eyebrow uppercase text-text-quaternary">First attention</p>
+        <%= if @runtime_readiness.attention_adapter do %>
+          <p class="mt-3 truncate text-sm font-590 text-text-primary">
+            {@runtime_readiness.attention_adapter.name}
+          </p>
+          <p class="mt-1 text-xs text-text-tertiary">
+            Test health or configure credentials before routing more work here.
+          </p>
+        <% else %>
+          <p class="mt-3 text-sm font-590 text-text-primary">None</p>
+          <p class="mt-1 text-xs text-text-tertiary">
+            Registered adapters are not reporting attention signals.
+          </p>
+        <% end %>
+      </div>
+    </div>
+
+    <div class="grid gap-2 border-t border-border/70 px-5 py-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div :for={lane <- @runtime_readiness.lanes} class={runtime_lane_class(lane.tone)}>
+        <p class="text-eyebrow uppercase text-text-quaternary">{lane.label}</p>
+        <p class="mt-3 font-mono text-2xl font-590 text-text-primary">{lane.value}</p>
+        <p class="mt-1 text-xs capitalize text-text-tertiary">{lane.state}</p>
       </div>
     </div>
   </div>

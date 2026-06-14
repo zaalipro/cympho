@@ -19,8 +19,14 @@ defmodule CymphoWeb.InboxLiveTest do
       {:ok, _view, html} = live(conn, "/inbox")
 
       assert html =~ "Inbox"
+      assert html =~ "Inbox command"
       assert html =~ "Agent handoffs"
       assert html =~ "Queue scope"
+      assert html =~ "Action queue"
+      assert html =~ "Review decisions"
+      assert html =~ "Runtime / evidence"
+      assert html =~ "Unread handoffs"
+      assert html =~ "Deferred cleanup"
     end
 
     test "shows agent selector", %{conn: conn} do
@@ -37,6 +43,7 @@ defmodule CymphoWeb.InboxLiveTest do
 
       # The default 'all' shows agent selector
       assert html =~ "select_agent"
+      assert html =~ "Inbox is clear"
     end
   end
 
@@ -148,6 +155,11 @@ defmodule CymphoWeb.InboxLiveTest do
       assert html =~ "Next action"
       assert html =~ "Open the Operations launch checklist"
       assert html =~ ~s(href="/operations#runtime-launch-checklist")
+      assert html =~ "Action queue"
+      assert html =~ "Unread handoffs"
+      assert html =~ "Read"
+      assert html =~ "Runtime / evidence"
+      assert html =~ "No runtime launch or review-evidence repair request is waiting."
       assert html =~ "Open issue"
       assert html =~ "Mark read"
 
@@ -235,6 +247,12 @@ defmodule CymphoWeb.InboxLiveTest do
 
       assert html =~ "Define issue for CEO"
       assert html =~ "Runtime launch needed"
+      assert html =~ "Inbox command"
+      assert html =~ "Action queue"
+      assert html =~ "Runtime / evidence"
+      assert html =~ "Needs evidence"
+      assert html =~ "Start runtime before evidence"
+      assert html =~ "Open launch checklist"
 
       assert html =~
                "Runtime has not produced evidence yet. Open the launch checklist or issue preflight before asking for delivery notes."

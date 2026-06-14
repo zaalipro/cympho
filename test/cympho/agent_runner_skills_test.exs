@@ -34,9 +34,14 @@ defmodule Cympho.AgentRunnerSkillsTest do
       assert prompt =~ "Issue ID: TEST-456"
       assert prompt =~ "Title: Test Issue"
       assert prompt =~ "Available Skills"
+      assert prompt =~ "Use a skill only"
+      assert prompt =~ "declared capabilities fit the current issue"
+      assert prompt =~ "evidence packet"
       assert prompt =~ "### Skill: Test Skill (1.0.0)"
       assert prompt =~ "Identifier: `test_skill`"
       assert prompt =~ "Capabilities: file_io, web_search"
+      assert prompt =~ "Description: A test skill"
+      assert prompt =~ "Entrypoint: test.sh"
     end
 
     test "builds prompt with multiple skills" do

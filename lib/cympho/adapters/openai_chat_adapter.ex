@@ -13,6 +13,19 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
   @default_timeout 120_000
   @default_model "qwen3.7-plus"
   @max_response_bytes 2 * 1024 * 1024
+  @default_system_prompt """
+  You are a Cympho runtime agent. Work only from the supplied issue context and \
+  the allowed Cympho action contract. Keep owner-visible progress concise, do \
+  not expose secrets, and do not include private reasoning.
+
+  Before claiming completion, report verification evidence. When your turn \
+  changes state, hands work off, or asks the owner to decide, include:
+  - Evidence produced: artifact, PR, test, log, decision, or issue memory created.
+  - Evidence inspected: what you checked before making the claim.
+  - Restart packet: current state, next command or action, and blockers.
+
+  Emit cympho-actions JSON only when requesting Cympho side effects.
+  """
 
   @impl true
   def run(issue, agent_id, recipient_pid, opts) when is_pid(recipient_pid) do
@@ -45,7 +58,8 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
   defp call_chat_completion(prompt, config) do
     with :ok <- validate_config(config),
          {:ok, payload} <- build_payload(prompt, config),
-         {:ok, response} <- request(chat_url(endpoint(config)), api_key(config), payload, config),
+         {:ok, response} <-
+           request(normalize_chat_url(endpoint(config)), api_key(config), payload, config),
          {:ok, result} <- parse_chat_response(response.body) do
       {:ok, result}
     end
@@ -58,9 +72,7 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
         "messages" => [
           %{
             "role" => "system",
-            "content" =>
-              config_value(config, "system_prompt") ||
-                "You are a Cympho agent. Work from the supplied issue context, report concise owner-visible progress, and include cympho-actions JSON only when requesting side effects."
+            "content" => config_value(config, "system_prompt") || @default_system_prompt
           },
           %{"role" => "user", "content" => prompt}
         ],
@@ -296,13 +308,27 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
   defp api_key(config), do: config_value(config, "api_key")
   defp model(config), do: config_value(config, "model") || @default_model
 
-  defp chat_url(endpoint) do
-    endpoint = endpoint |> to_string() |> String.trim() |> String.trim_trailing("/")
+  @doc false
+  def normalize_chat_url(endpoint) when endpoint in [nil, ""], do: ""
 
-    if String.ends_with?(endpoint, "/chat/completions") do
-      endpoint
+  def normalize_chat_url(endpoint) do
+    endpoint = endpoint |> to_string() |> String.trim()
+
+    if endpoint == "" do
+      ""
     else
-      endpoint <> "/chat/completions"
+      uri = URI.parse(endpoint)
+      path = uri.path || ""
+      path = String.trim_trailing(path, "/")
+
+      path =
+        if String.ends_with?(path, "/chat/completions") do
+          path
+        else
+          path <> "/chat/completions"
+        end
+
+      URI.to_string(%{uri | path: path})
     end
   end
 

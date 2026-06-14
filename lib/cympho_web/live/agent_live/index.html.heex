@@ -78,6 +78,135 @@
     />
   </div>
 
+  <.panel
+    :if={@org_health}
+    id="agent-role-coverage"
+    data-testid="agent-role-coverage"
+    class="mb-4 overflow-hidden"
+  >
+    <div class="flex flex-col gap-4 px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Role coverage
+          </p>
+          <span class={"inline-flex rounded-full border px-2 py-0.5 text-[11px] font-510 #{org_health_badge_class(@org_health.level)}"}>
+            {@org_health.label}
+          </span>
+        </div>
+        <h2 class="mt-1 text-base font-590 text-text-primary">
+          Team coverage for queued autonomous work
+        </h2>
+        <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
+          {@org_health.summary}
+        </p>
+      </div>
+
+      <div class="flex flex-wrap gap-2">
+        <.app_link
+          navigate={~p"/operations#runtime-staffing-gaps"}
+          class="inline-flex items-center justify-center rounded-md border border-border bg-panel px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+        >
+          Open staffing view
+        </.app_link>
+        <.app_link
+          :if={@org_health.role_demand_gaps != []}
+          navigate={
+            ~p"/agents/new?#{new_agent_query_for_gap(List.first(@org_health.role_demand_gaps))}"
+          }
+          class="inline-flex items-center justify-center rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-590 text-amber-100 transition-colors hover:bg-amber-500/15"
+        >
+          {first_staffing_gap_label(@org_health)}
+        </.app_link>
+      </div>
+    </div>
+
+    <div class="grid border-t border-border bg-panel/40 text-sm md:grid-cols-4">
+      <div class="border-b border-border px-4 py-3 md:border-b-0 md:border-r">
+        <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          Active agents
+        </p>
+        <p class="mt-1 font-mono text-2xl font-590 text-text-primary">
+          {@org_health.metrics.total_agents}
+        </p>
+      </div>
+      <div class="border-b border-border px-4 py-3 md:border-b-0 md:border-r">
+        <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          Unstaffed roles
+        </p>
+        <p class="mt-1 font-mono text-2xl font-590 text-text-primary">
+          {@org_health.metrics.role_demand_gaps}
+        </p>
+      </div>
+      <div class="border-b border-border px-4 py-3 md:border-b-0 md:border-r">
+        <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          Waiting issues
+        </p>
+        <p class="mt-1 font-mono text-2xl font-590 text-text-primary">
+          {@org_health.metrics.unstaffed_role_issues}
+        </p>
+      </div>
+      <div class="px-4 py-3">
+        <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          Adapter risk
+        </p>
+        <p class="mt-1 font-mono text-2xl font-590 text-text-primary">
+          {@org_health.metrics.degraded_agents}
+        </p>
+      </div>
+    </div>
+
+    <div
+      :if={@org_health.role_demand_gaps == []}
+      class="border-t border-border px-4 py-3 text-sm text-text-tertiary"
+    >
+      Queued work has active role coverage.
+    </div>
+
+    <div
+      :if={@org_health.role_demand_gaps != []}
+      class="divide-y divide-amber-500/15 border-t border-amber-500/20 bg-amber-500/[0.04]"
+    >
+      <div
+        :for={gap <- @org_health.role_demand_gaps}
+        class="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center"
+      >
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <p class="text-sm font-590 text-text-primary">{gap.label}</p>
+            <span class={"rounded-full border px-2 py-0.5 text-[10px] font-510 #{org_metric_tone_class(:warning)}"}>
+              {gap.open_issues} open {plural_noun(gap.open_issues, "issue")}
+            </span>
+            <span
+              :if={gap.suggested_parent}
+              class="rounded-full border border-border bg-panel px-2 py-0.5 text-[10px] font-510 text-text-tertiary"
+            >
+              Reports to {gap.suggested_parent.name}
+            </span>
+          </div>
+
+          <div :if={gap.examples != []} class="mt-2 flex max-w-4xl flex-wrap gap-1.5">
+            <.app_link
+              :for={example <- gap.examples}
+              navigate={~p"/issues/#{example.id}"}
+              class="max-w-full truncate rounded-md border border-border bg-canvas px-2 py-1 text-[11px] text-text-tertiary transition hover:border-brand/40 hover:text-brand"
+              title={issue_example_label(example)}
+            >
+              {issue_example_label(example)}
+            </.app_link>
+          </div>
+        </div>
+
+        <.app_link
+          navigate={~p"/agents/new?#{new_agent_query_for_gap(gap)}"}
+          class="inline-flex items-center justify-center rounded-md border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-590 text-brand transition hover:border-brand/50 hover:bg-brand/15"
+        >
+          Hire {gap.label}
+        </.app_link>
+      </div>
+    </div>
+  </.panel>
+
   <.panel :if={Enum.empty?(@agents)}>
     <.empty_state
       title="No agents yet"
@@ -108,7 +237,7 @@
         </div>
       </div>
 
-      <div class="hidden grid-cols-[minmax(220px,1fr)_110px_110px_120px_minmax(170px,1fr)_100px_48px] gap-4 border-b border-border bg-panel/70 px-4 py-2 text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary lg:grid">
+      <div class="hidden grid-cols-[minmax(220px,1fr)_110px_110px_120px_minmax(170px,1fr)_100px_92px] gap-4 border-b border-border bg-panel/70 px-4 py-2 text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary lg:grid">
         <span>Agent</span>
         <span>Status</span>
         <span>Health</span>
@@ -121,7 +250,8 @@
       <div
         :for={agent <- agents}
         id={"agent-row-#{agent.id}"}
-        class="group grid gap-3 border-b border-border px-4 py-3 last:border-b-0 hover:bg-surface-hover/60 lg:grid-cols-[minmax(220px,1fr)_110px_110px_120px_minmax(170px,1fr)_100px_48px] lg:items-center lg:gap-4"
+        data-testid={"agent-row-#{agent.id}"}
+        class="group grid gap-3 border-b border-border px-4 py-3 last:border-b-0 hover:bg-surface-hover/60 lg:grid-cols-[minmax(220px,1fr)_110px_110px_120px_minmax(170px,1fr)_100px_92px] lg:items-center lg:gap-4"
       >
         <.app_link navigate={~p"/agents/#{agent.id}"} class="min-w-0">
           <div class="flex min-w-0 items-center gap-3">
@@ -163,7 +293,11 @@
         </div>
 
         <div class="flex justify-end">
-          <.overflow_menu label={"Actions for #{agent.name}"}>
+          <.overflow_menu
+            label={"Manage #{agent.name}"}
+            trigger_text="Manage"
+            data-testid={"agent-manage-menu-#{agent.id}"}
+          >
             <.menu_item navigate={~p"/agents/#{agent.id}"}>View profile</.menu_item>
             <.menu_item navigate={~p"/agents/#{agent.id}/edit"}>Edit settings</.menu_item>
             <.menu_item

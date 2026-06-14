@@ -5,7 +5,7 @@ defmodule CymphoWeb.RoutineLive.Show do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    case Routines.get_routine(id) do
+    case get_scoped_routine(socket, id) do
       {:ok, routine} ->
         runs = RoutineTriggers.list_runs(routine.id, limit: 50)
         {:ok, assign(socket, routine: routine, runs: runs)}
@@ -17,7 +17,7 @@ defmodule CymphoWeb.RoutineLive.Show do
 
   @impl true
   def handle_params(%{"id" => id}, _url, socket) do
-    case Routines.get_routine(id) do
+    case get_scoped_routine(socket, id) do
       {:ok, routine} ->
         runs = RoutineTriggers.list_runs(routine.id, limit: 50)
 
@@ -82,7 +82,7 @@ defmodule CymphoWeb.RoutineLive.Show do
   def handle_event("archive_routine", _params, socket) do
     case Routines.archive_routine(socket.assigns.routine) do
       {:ok, _routine} ->
-        {:noreply, push_navigate(socket, to: ~p"/")}
+        {:noreply, push_navigate(socket, to: ~p"/routines")}
 
       {:error, :invalid_transition} ->
         {:noreply, put_flash(socket, :error, "Cannot archive this routine")}
@@ -106,4 +106,14 @@ defmodule CymphoWeb.RoutineLive.Show do
 
   def format_datetime(nil), do: "-"
   def format_datetime(datetime), do: Calendar.strftime(datetime, "%Y-%m-%d %H:%M")
+
+  defp get_scoped_routine(socket, id) do
+    case current_company_id(socket) do
+      nil -> Routines.get_routine(id)
+      company_id -> Routines.get_company_routine(company_id, id)
+    end
+  end
+
+  defp current_company_id(%{assigns: %{current_company: %{id: id}}}), do: id
+  defp current_company_id(_socket), do: nil
 end

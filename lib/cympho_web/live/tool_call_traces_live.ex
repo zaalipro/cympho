@@ -2,6 +2,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.ToolCallTraces
   alias Cympho.Agents
+  alias Cympho.RuntimeOperations
 
   @impl true
   def mount(_params, _session, socket) do
@@ -102,7 +103,10 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
     integrity_status = ToolCallTraces.verify_chain_integrity(company_id)
 
-    {:noreply, assign(socket, :integrity_status, integrity_status)}
+    {:noreply,
+     socket
+     |> assign(:integrity_status, integrity_status)
+     |> assign_trace_command()}
   end
 
   @impl true
@@ -200,8 +204,16 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   defp maybe_put(opts, _key, ""), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
+  defp filters_active?(filters) do
+    Enum.any?(filters, fn {_key, value} -> value not in [nil, ""] end)
+  end
+
   defp load_statistics(socket) do
-    assign(socket, :statistics, ToolCallTraces.get_statistics(socket.assigns.company_id))
+    statistics = ToolCallTraces.get_statistics(socket.assigns.company_id)
+
+    socket
+    |> assign(:statistics, statistics)
+    |> assign_trace_command()
   end
 
   defp get_scoped_trace(company_id, id) do
@@ -242,6 +254,162 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   def integrity_status_label({:error, :chain_broken, _, _}), do: "Chain integrity broken!"
   def integrity_status_label({:error, _}), do: "Integrity check failed"
 
+  defp assign_trace_command(socket) do
+    assign(socket, :trace_command, build_trace_command(socket.assigns))
+  end
+
+  defp build_trace_command(%{integrity_status: {:error, _}, statistics: statistics}) do
+    %{
+      tone: :critical,
+      badge: "Chain broken",
+      title: "Stop trusting trace exports until integrity is repaired",
+      summary:
+        "The immutable trace chain failed verification. Inspect the affected sequence before using exports for audit or governance.",
+      action_label: "Verify again",
+      action_event: "verify_integrity",
+      action_path: nil,
+      metrics: trace_command_metrics(statistics)
+    }
+  end
+
+  defp build_trace_command(%{statistics: %{error_calls: errors} = statistics}) when errors > 0 do
+    %{
+      tone: :critical,
+      badge: "Tool failures",
+      title: "Inspect failed tool calls",
+      summary:
+        "#{pluralize(errors, "tool call")} ended in error. Filter the trace list, open the failing row, and compare arguments to the tool result.",
+      action_label: "Filter failures",
+      action_event: nil,
+      action_path: "#trace-filters",
+      metrics: trace_command_metrics(statistics)
+    }
+  end
+
+  defp build_trace_command(%{statistics: %{pending_calls: pending} = statistics})
+       when pending > 0 do
+    %{
+      tone: :warning,
+      badge: "Pending tools",
+      title: "Check unfinished tool calls",
+      summary:
+        "#{pluralize(pending, "tool call")} are still pending or timed out. Filter pending traces before relaunching the same issue.",
+      action_label: "Review pending",
+      action_event: nil,
+      action_path: "#trace-filters",
+      metrics: trace_command_metrics(statistics)
+    }
+  end
+
+  defp build_trace_command(%{statistics: %{total_calls: 0} = statistics}) do
+    %{
+      tone: :attention,
+      badge: "No traces yet",
+      title: "Launch runtime to capture tool evidence",
+      summary:
+        "No tool calls have been recorded for this company. Once agents use tools, immutable trace evidence will appear here.",
+      action_label: "Open operations",
+      action_event: nil,
+      action_path: "/operations#runtime-launch-checklist",
+      metrics: trace_command_metrics(statistics)
+    }
+  end
+
+  defp build_trace_command(%{integrity_status: :unknown, statistics: statistics}) do
+    %{
+      tone: :attention,
+      badge: "Integrity unchecked",
+      title: "Verify the audit chain",
+      summary:
+        "Trace capture is available, but the chain has not been checked in this session. Verify before exporting evidence.",
+      action_label: "Verify integrity",
+      action_event: "verify_integrity",
+      action_path: nil,
+      metrics: trace_command_metrics(statistics)
+    }
+  end
+
+  defp build_trace_command(%{statistics: statistics}) do
+    %{
+      tone: :ready,
+      badge: "Trace chain healthy",
+      title: "Tool evidence is audit-ready",
+      summary:
+        "All current tool calls are successful and the trace chain is ready for export or issue-level review.",
+      action_label: "Review traces",
+      action_event: nil,
+      action_path: "#traces-table",
+      metrics: trace_command_metrics(statistics)
+    }
+  end
+
+  defp trace_command_metrics(statistics) do
+    [
+      %{label: "Total", value: to_string(statistics.total_calls)},
+      %{label: "Success", value: to_string(statistics.success_calls)},
+      %{label: "Errors", value: to_string(statistics.error_calls)},
+      %{label: "Pending", value: to_string(statistics.pending_calls)}
+    ]
+  end
+
+  defp trace_command_badge_class(:critical),
+    do: "border-red-500/25 bg-red-500/10 text-red-300"
+
+  defp trace_command_badge_class(:warning),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
+
+  defp trace_command_badge_class(:attention),
+    do: "border-brand/25 bg-brand/10 text-brand"
+
+  defp trace_command_badge_class(:ready),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp trace_command_action_class(:critical),
+    do: "border-red-500/25 bg-red-500/10 text-red-200 hover:bg-red-500/15"
+
+  defp trace_command_action_class(:warning),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15"
+
+  defp trace_command_action_class(:attention),
+    do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
+
+  defp trace_command_action_class(:ready),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
+
+  defp trace_recovery(%{status: status} = trace) when status in ["error", "timeout", "pending"] do
+    %{
+      title: trace_recovery_title(status),
+      summary: trace_recovery_summary(status, trace),
+      issue_path: trace.issue_id && "/issues/#{trace.issue_id}",
+      operations_path: "/operations#runtime-failures",
+      focused_command:
+        trace.issue_id && RuntimeOperations.focused_runtime_launch_command(trace.issue_id)
+    }
+  end
+
+  defp trace_recovery(_trace), do: nil
+
+  defp trace_recovery_title("pending"), do: "Recovery path"
+  defp trace_recovery_title("timeout"), do: "Timeout recovery"
+  defp trace_recovery_title(_status), do: "Failure recovery"
+
+  defp trace_recovery_summary("pending", _trace) do
+    "This tool call has not resolved yet. Inspect the linked issue before relaunching so duplicate work is not started."
+  end
+
+  defp trace_recovery_summary("timeout", _trace) do
+    "The tool call timed out. Inspect issue context, then use a focused relaunch if the issue still needs runtime work."
+  end
+
+  defp trace_recovery_summary(_status, trace) do
+    tool = trace.tool_name || "tool"
+
+    "The #{tool} call failed. Compare arguments and result below, then relaunch the linked issue only after the blocker is fixed."
+  end
+
+  defp pluralize(1, singular), do: "1 #{singular}"
+  defp pluralize(count, singular), do: "#{count} #{singular}s"
+
   def format_datetime(datetime) do
     DateTime.to_string(datetime)
   end
@@ -258,6 +426,70 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
     ~H"""
     <div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0">
       <.header title="Tool Call Traces" subtitle="Browse and verify immutable tool-call chains." />
+
+      <section
+        id="trace-command"
+        data-testid="trace-command"
+        class="mb-6 overflow-hidden rounded-lg border border-border bg-panel"
+      >
+        <div class="border-b border-border bg-gradient-to-b from-surface-2/50 to-transparent px-5 py-4">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                  Trace command
+                </p>
+                <span class={[
+                  "rounded-full border px-2 py-0.5 text-[11px] font-510",
+                  trace_command_badge_class(@trace_command.tone)
+                ]}>
+                  {@trace_command.badge}
+                </span>
+              </div>
+              <h2 class="mt-2 text-lg font-590 tracking-tight text-text-primary">
+                {@trace_command.title}
+              </h2>
+              <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
+                {@trace_command.summary}
+              </p>
+            </div>
+
+            <button
+              :if={@trace_command.action_event}
+              type="button"
+              phx-click={@trace_command.action_event}
+              class={[
+                "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
+                trace_command_action_class(@trace_command.tone)
+              ]}
+            >
+              <span class="hero-shield-check-mini h-4 w-4"></span>
+              {@trace_command.action_label}
+            </button>
+
+            <a
+              :if={@trace_command.action_path}
+              href={@trace_command.action_path}
+              class={[
+                "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
+                trace_command_action_class(@trace_command.tone)
+              ]}
+            >
+              <span class="hero-arrow-right-mini h-4 w-4"></span>
+              {@trace_command.action_label}
+            </a>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
+          <div :for={metric <- @trace_command.metrics} class="bg-surface px-4 py-3">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              {metric.label}
+            </p>
+            <p class="mt-1 font-mono text-sm font-590 text-text-primary">{metric.value}</p>
+          </div>
+        </div>
+      </section>
 
       <div class="mb-6 flex flex-wrap gap-4 items-center justify-between">
         <div class="flex gap-2">
@@ -327,7 +559,11 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
         </div>
       </div>
 
-      <form phx-submit="filter" class="mb-6 bg-surface border border-border rounded-xl p-4">
+      <form
+        id="trace-filters"
+        phx-submit="filter"
+        class="mb-6 scroll-mt-6 bg-surface border border-border rounded-xl p-4"
+      >
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
           <div>
             <label class="block text-xs font-510 text-text-secondary mb-1.5">Tool Name</label>
@@ -420,7 +656,10 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 min-w-0">
         <div class="lg:col-span-2 min-w-0">
-          <div class="bg-surface border border-border rounded-xl overflow-hidden">
+          <div
+            id="traces-table"
+            class="scroll-mt-6 bg-surface border border-border rounded-xl overflow-hidden"
+          >
             <div class="px-4 py-3 border-b border-border">
               <h2 class="text-sm font-590 text-text-primary">Traces</h2>
             </div>
@@ -441,19 +680,47 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
                     <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
                       Status
                     </th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
+                    <th class="hidden px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider md:table-cell">
                       Time
                     </th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
+                    <th class="hidden px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider md:table-cell">
                       Chain Hash
                     </th>
                   </tr>
                 </thead>
                 <tbody id="traces-tbody" phx-update="stream" class="divide-y divide-border">
                   <tr id="traces-empty" class="only:table-row hidden">
-                    <td colspan="6" class="p-8 text-center text-text-secondary">
-                      <p class="mb-2">No traces found</p>
-                      <p class="text-sm">Tool call traces will appear here as agents use tools</p>
+                    <td colspan="6" class="p-8 text-center">
+                      <div class="mx-auto max-w-md">
+                        <p class="text-sm font-590 text-text-primary">
+                          {if filters_active?(@filters),
+                            do: "No traces match these filters",
+                            else: "No tool evidence captured yet"}
+                        </p>
+                        <p class="mt-1 text-sm leading-5 text-text-tertiary">
+                          {if filters_active?(@filters),
+                            do:
+                              "Clear filters to return to the full trace chain, or open Operations if you expected runtime activity.",
+                            else:
+                              "Launch runtime from Operations; every agent tool call will land here with arguments, result, actor, and chain hash."}
+                        </p>
+                        <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+                          <button
+                            :if={filters_active?(@filters)}
+                            type="button"
+                            phx-click="clear_filters"
+                            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                          >
+                            Clear filters
+                          </button>
+                          <a
+                            href="/operations#runtime-launch-checklist"
+                            class="inline-flex items-center gap-1.5 rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-xs font-510 text-brand transition-colors hover:bg-brand/15"
+                          >
+                            Open Operations
+                          </a>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                   <tr
@@ -488,10 +755,10 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
                         {String.capitalize(trace.status)}
                       </span>
                     </td>
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-text-secondary">
+                    <td class="hidden px-4 py-3 whitespace-nowrap text-sm text-text-secondary md:table-cell">
                       {format_datetime(trace.occurred_at)}
                     </td>
-                    <td class="px-4 py-3 text-xs text-text-secondary font-mono">
+                    <td class="hidden px-4 py-3 text-xs text-text-secondary font-mono md:table-cell">
                       {String.slice(trace.chain_hash, 0..7)}...
                     </td>
                   </tr>
@@ -532,6 +799,63 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
               </div>
 
               <div class="p-4 space-y-4">
+                <% recovery = trace_recovery(@selected_trace) %>
+                <div
+                  :if={recovery}
+                  id={"trace-recovery-#{@selected_trace.id}"}
+                  class="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-3"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <p class="text-xs font-590 uppercase tracking-[0.12em] text-amber-200">
+                      {recovery.title}
+                    </p>
+                    <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-510 text-amber-200">
+                      {String.capitalize(@selected_trace.status)}
+                    </span>
+                  </div>
+                  <p class="mt-2 text-xs leading-5 text-text-tertiary">
+                    {recovery.summary}
+                  </p>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    <a
+                      :if={recovery.issue_path}
+                      href={recovery.issue_path}
+                      class="inline-flex items-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-brand/40 hover:bg-surface-hover hover:text-text-primary"
+                    >
+                      Open issue
+                    </a>
+                    <a
+                      href={recovery.operations_path}
+                      class="inline-flex items-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-brand/40 hover:bg-surface-hover hover:text-text-primary"
+                    >
+                      Open runtime failures
+                    </a>
+                  </div>
+                  <div
+                    :if={recovery.focused_command}
+                    id={"trace-focused-command-#{@selected_trace.id}"}
+                    phx-hook="CopyToClipboard"
+                    class="mt-3 rounded-md border border-border bg-canvas px-3 py-2"
+                  >
+                    <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <span class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                        Focused relaunch
+                      </span>
+                      <button
+                        type="button"
+                        data-copy-text={recovery.focused_command}
+                        data-copy-label="Copy command"
+                        class="rounded-md border border-border bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                      >
+                        Copy command
+                      </button>
+                    </div>
+                    <code class="block whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-text-secondary">
+                      {recovery.focused_command}
+                    </code>
+                  </div>
+                </div>
+
                 <div>
                   <div class="text-xs text-text-secondary mb-1">Sequence Number</div>
                   <div class="text-sm font-mono text-text-primary">

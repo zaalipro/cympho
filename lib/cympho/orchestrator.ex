@@ -719,21 +719,36 @@ defmodule Cympho.Orchestrator do
   defp extract_result_content(_), do: "No content returned"
 
   defp handle_agent_actions(issue, agent_id, body) do
-    with {:ok, actions} <- AgentActions.parse(body),
-         {:ok, result} <- AgentActions.execute(issue, agent_id, actions) do
-      maybe_create_completion_handoff_comment(issue, agent_id, body, actions, result)
+    case AgentActions.parse(body) do
+      {:ok, actions} ->
+        handle_parsed_agent_actions(issue, agent_id, body, actions)
 
-      if AgentActions.unresolved_current_issue?(issue, agent_id) do
-        block_issue_with_comment(issue, "Agent actions did not resolve the current issue.")
-        {:error, :unresolved_current_issue}
-      else
-        :ok
-      end
-    else
       {:error, reason} ->
         block_issue_with_comment(
           issue,
           "Agent response did not include a valid cympho-actions block: #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  defp handle_parsed_agent_actions(issue, agent_id, body, actions) do
+    case AgentActions.execute(issue, agent_id, actions) do
+      {:ok, result} ->
+        maybe_create_completion_handoff_comment(issue, agent_id, body, actions, result)
+
+        if AgentActions.unresolved_current_issue?(issue, agent_id) do
+          block_issue_with_comment(issue, "Agent actions did not resolve the current issue.")
+          {:error, :unresolved_current_issue}
+        else
+          :ok
+        end
+
+      {:error, reason} ->
+        block_issue_with_comment(
+          issue,
+          "Agent cympho-actions block parsed, but action execution failed: #{inspect(reason)}"
         )
 
         {:error, reason}

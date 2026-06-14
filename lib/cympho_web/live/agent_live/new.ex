@@ -1,13 +1,22 @@
 defmodule CymphoWeb.AgentLive.New do
   use CymphoWeb, :live_view
+  require Logger
+
+  alias Cympho.AgentHeartbeat
   alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Agents.RolePlaybook
   alias Cympho.Agents.RuntimeEnv
   alias Cympho.Adapters.RuntimeOptions
+  alias Cympho.Comments
+  alias Cympho.Issues.AutoAssignment
   alias Cympho.OrgHealth
+  alias Cympho.Orchestrator.Dispatcher
+  alias Cympho.RuntimeProfiles
+  alias CymphoWeb.UserAuth
 
   @default_role "engineer"
+  @repo_delivery_roles Agent.pr_delivery_roles()
 
   @default_attrs %{
     "role" => @default_role,
@@ -20,18 +29,22 @@ defmodule CymphoWeb.AgentLive.New do
   def mount(params, _session, socket) do
     company = socket.assigns[:current_company]
     role = prefill_role(params)
-    attrs = initial_attrs(params, company)
-    selected_adapter = selected_adapter_from_params(attrs)
+    selected_profile_id = selected_profile_from_params(params)
+    attrs = initial_attrs(params, company, selected_profile_id)
+    selected_adapter = selected_adapter_from_params(attrs, selected_profile_id)
+    runtime = runtime_form_from_params(attrs, selected_adapter, selected_profile_id)
     changeset = Agents.change_agent(%Agent{}, attrs)
 
     {:ok,
      socket
      |> assign(:page_title, "New Agent")
      |> assign(:pending_approval_id, nil)
-     |> assign(:env_text, "")
+     |> assign(:env_text, env_text_from_profile(selected_profile_id))
      |> assign(:hire_context, hire_context(params, company, role))
+     |> assign(:return_to, return_to(params))
      |> assign(:selected_adapter, selected_adapter)
-     |> assign_runtime_form(default_runtime_form(selected_adapter))
+     |> assign_runtime_profile(selected_profile_id)
+     |> assign_runtime_form(runtime)
      |> assign(:reports_to_options, reports_to_options(company, nil))
      |> assign(:form, to_form(changeset))}
   end
@@ -41,15 +54,20 @@ defmodule CymphoWeb.AgentLive.New do
     company = socket.assigns[:current_company]
 
     agent_params = maybe_refresh_instructions_for_role(agent_params)
-    env_text = Map.get(agent_params, "env_text", "")
-    selected_adapter = selected_adapter_from_params(agent_params)
-    runtime = runtime_form_from_params(agent_params, selected_adapter)
+    selected_profile_id = selected_profile_from_params(agent_params)
+    env_text = env_text_from_params(agent_params, selected_profile_id)
+    agent_params = Map.put(agent_params, "env_text", env_text)
+    selected_adapter = selected_adapter_from_params(agent_params, selected_profile_id)
+    runtime = runtime_form_from_params(agent_params, selected_adapter, selected_profile_id)
 
     changeset =
       %Agent{}
       |> Agents.change_agent(
         agent_params
-        |> maybe_put_adapter_config(selected_adapter, runtime)
+        |> maybe_apply_runtime_profile(selected_profile_id)
+        |> maybe_put_adapter_config(selected_adapter, runtime, selected_profile_id)
+        |> maybe_put_runtime_profile(selected_profile_id)
+        |> maybe_put_profile_concurrency(agent_params, selected_profile_id)
         |> normalize_agent_params()
         |> maybe_put_company_id(company)
       )
@@ -59,24 +77,32 @@ defmodule CymphoWeb.AgentLive.New do
      socket
      |> assign(:env_text, env_text)
      |> assign(:selected_adapter, selected_adapter)
+     |> assign_runtime_profile(selected_profile_id)
      |> assign_runtime_form(runtime)
      |> assign(:form, to_form(changeset))}
   end
 
   def handle_event("save", %{"agent" => agent_params}, socket) do
     company = socket.assigns[:current_company]
-    selected_adapter = selected_adapter_from_params(agent_params)
-    runtime = runtime_form_from_params(agent_params, selected_adapter)
+    selected_profile_id = selected_profile_from_params(agent_params)
+    env_text = env_text_from_params(agent_params, selected_profile_id)
+    agent_params = Map.put(agent_params, "env_text", env_text)
+    selected_adapter = selected_adapter_from_params(agent_params, selected_profile_id)
+    runtime = runtime_form_from_params(agent_params, selected_adapter, selected_profile_id)
 
     params =
       agent_params
-      |> maybe_put_adapter_config(selected_adapter, runtime)
+      |> maybe_apply_runtime_profile(selected_profile_id)
+      |> maybe_put_adapter_config(selected_adapter, runtime, selected_profile_id)
+      |> maybe_put_runtime_profile(selected_profile_id)
+      |> maybe_put_profile_concurrency(agent_params, selected_profile_id)
       |> normalize_agent_params()
       |> maybe_put_company_id(company)
 
     case Agents.create_agent(params) do
-      {:ok, _agent} ->
-        {:noreply, push_navigate(socket, to: ~p"/agents")}
+      {:ok, agent} ->
+        socket = maybe_assign_waiting_role_work(socket, agent)
+        {:noreply, push_navigate(socket, to: socket.assigns.return_to || ~p"/agents")}
 
       {:error, :pending_board_approval, approval_id} ->
         socket =
@@ -94,6 +120,7 @@ defmodule CymphoWeb.AgentLive.New do
         {:noreply,
          socket
          |> assign(:selected_adapter, selected_adapter)
+         |> assign_runtime_profile(selected_profile_id)
          |> assign_runtime_form(runtime)
          |> assign(form: to_form(Map.put(changeset, :action, :insert)))}
     end
@@ -118,6 +145,38 @@ defmodule CymphoWeb.AgentLive.New do
   def process_provider_options, do: RuntimeOptions.process_provider_options()
   def process_provider_model_options, do: RuntimeOptions.process_provider_model_options()
   def process_model_options(provider), do: RuntimeOptions.process_model_options(provider)
+  def runtime_profile_options, do: RuntimeProfiles.options()
+  def runtime_profile_summary(profile), do: RuntimeProfiles.summary_value(profile)
+
+  def runtime_profile_concurrency(profile),
+    do: RuntimeProfiles.max_concurrent_jobs_for_profile(profile.id)
+
+  def runtime_profile_capability(profile) do
+    if profile.id == RuntimeProfiles.custom_id() do
+      nil
+    else
+      runtime_profile_capability_badge(profile)
+    end
+  end
+
+  defp runtime_profile_capability_badge(profile) do
+    runtime = %{
+      adapter: profile.adapter,
+      config: profile.config || %{},
+      runtime_config: profile.runtime_config || %{}
+    }
+
+    cond do
+      Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(runtime) ->
+        %{label: "Repo capable", class: "border-success/25 bg-success/10 text-success"}
+
+      profile.adapter == "openai_chat" ->
+        %{label: "Text/action only", class: "border-amber-500/25 bg-amber-500/10 text-amber-200"}
+
+      true ->
+        nil
+    end
+  end
 
   defp maybe_put_company_id(params, %{id: company_id}) do
     Map.put(params, "company_id", company_id)
@@ -125,7 +184,7 @@ defmodule CymphoWeb.AgentLive.New do
 
   defp maybe_put_company_id(params, _), do: params
 
-  defp initial_attrs(params, company) do
+  defp initial_attrs(params, company, profile_id) do
     role = prefill_role(params)
 
     @default_attrs
@@ -133,6 +192,9 @@ defmodule CymphoWeb.AgentLive.New do
     |> Map.put("instructions", RolePlaybook.default_overrides_template(role))
     |> maybe_put_prefill_name(params, role)
     |> maybe_put_prefill_parent(params, company)
+    |> maybe_apply_runtime_profile(profile_id)
+    |> maybe_put_runtime_profile(profile_id)
+    |> maybe_put_profile_concurrency(params, profile_id)
     |> maybe_put_company_id(company)
   end
 
@@ -191,6 +253,7 @@ defmodule CymphoWeb.AgentLive.New do
       gap ->
         %{
           label: gap.label,
+          role: role,
           open_issues: gap.open_issues,
           examples: gap.examples,
           suggested_parent: gap.suggested_parent
@@ -199,6 +262,108 @@ defmodule CymphoWeb.AgentLive.New do
   end
 
   defp hire_context(_params, _company, _role), do: nil
+
+  defp return_to(%{"return_to" => return_to}), do: UserAuth.safe_return_path(return_to)
+  defp return_to(_params), do: nil
+
+  defp maybe_assign_waiting_role_work(socket, %Agent{company_id: company_id, role: role} = agent) do
+    case socket.assigns[:hire_context] do
+      %{role: ^role} when is_binary(company_id) ->
+        case AutoAssignment.assign_waiting_role_work_with_issues(company_id, role) do
+          {:ok, assigned_issues, queued} ->
+            ensure_agent_heartbeat(agent)
+            add_staffing_hire_receipts(assigned_issues, agent)
+            wake_count = enqueue_staffing_hire_wakes(assigned_issues, agent)
+
+            put_flash(
+              socket,
+              :info,
+              demand_hire_flash(agent, length(assigned_issues), queued, wake_count)
+            )
+
+          _ ->
+            socket
+        end
+
+      _ ->
+        socket
+    end
+  end
+
+  defp add_staffing_hire_receipts(assigned_issues, %Agent{} = agent) do
+    Enum.each(assigned_issues, fn issue ->
+      _ = system_comment(issue, staffing_hire_receipt(issue, agent))
+    end)
+  end
+
+  defp staffing_hire_receipt(issue, %Agent{} = agent) do
+    role = Agent.normalize_role(issue.assigned_role) || agent.role
+    role_label = Agent.role_label(role)
+    name = agent.name || agent.id
+
+    "[handoff] Demand-backed hire assigned this #{role_label} issue to #{name}. " <>
+      "Why: queued #{String.downcase(role_label)} work had #{staffing_gap_reason(role)}. " <>
+      "Current state: assigned and queued for manual dispatch. " <>
+      "Next decision: #{name} should produce delivery evidence, hand off to the right role, or block with a recoverable reason. " <>
+      "Restart packet: read the issue brief, acceptance criteria, latest comments, and this staffing receipt before acting."
+  end
+
+  defp staffing_gap_reason(role) when role in @repo_delivery_roles,
+    do: "no eligible repo-capable owner"
+
+  defp staffing_gap_reason(_role), do: "no eligible owner"
+
+  defp system_comment(issue, body) do
+    Comments.create_comment(%{
+      body: body,
+      author_type: "system",
+      author_id: "00000000-0000-0000-0000-000000000000",
+      issue_id: issue.id
+    })
+  end
+
+  defp ensure_agent_heartbeat(%Agent{id: agent_id, name: name}) do
+    case AgentHeartbeat.start_for_agent(agent_id) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, :already_started} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "[AgentLive.New] demand-backed hire #{name || agent_id} created but heartbeat did not start: #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  defp enqueue_staffing_hire_wakes(assigned_issues, %Agent{id: agent_id, role: role}) do
+    assigned_issues
+    |> Enum.count(fn issue ->
+      case Dispatcher.enqueue_wake(issue.id, "manual_dispatch", %{
+             "source" => "demand_backed_hire",
+             "agent_id" => agent_id,
+             "role" => to_string(role)
+           }) do
+        {:ok, _} -> true
+        _ -> false
+      end
+    end)
+  end
+
+  defp demand_hire_flash(%Agent{name: name}, assigned, _queued, wake_count) when assigned > 0 do
+    "#{name} created, assigned to #{assigned} waiting #{plural_noun(assigned, "issue")}, and queued #{wake_count} #{plural_noun(wake_count, "wake")}."
+  end
+
+  defp demand_hire_flash(%Agent{name: name}, _assigned, queued, _wake_count) when queued > 0 do
+    "#{name} created. #{queued} waiting #{plural_noun(queued, "issue")} still need eligible capacity."
+  end
+
+  defp demand_hire_flash(%Agent{name: name}, _assigned, _queued, _wake_count) do
+    "#{name} created. No matching waiting issues needed assignment."
+  end
 
   defp normalize_agent_params(params) do
     params
@@ -219,19 +384,75 @@ defmodule CymphoWeb.AgentLive.New do
     |> normalize_runtime_env()
   end
 
-  defp selected_adapter_from_params(params) do
-    params
-    |> Map.get("adapter", "claude_code")
+  defp selected_adapter_from_params(params, profile_id) do
+    fallback =
+      params
+      |> Map.get("adapter", "claude_code")
+      |> normalize_adapter()
+
+    profile_id
+    |> RuntimeProfiles.adapter_for(fallback)
     |> normalize_adapter()
   end
 
-  defp maybe_put_adapter_config(params, adapter, runtime) do
+  defp maybe_apply_runtime_profile(params, profile_id) do
+    if RuntimeProfiles.custom?(profile_id) do
+      params
+    else
+      profile = RuntimeProfiles.get!(profile_id)
+
+      params
+      |> Map.put("adapter", profile.adapter)
+      |> Map.put("config", profile.config || %{})
+    end
+  end
+
+  defp maybe_put_runtime_profile(params, profile_id) do
+    runtime_config =
+      profile_id
+      |> RuntimeProfiles.runtime_config()
+      |> Map.put("profile_id", RuntimeProfiles.normalize_id(profile_id))
+
+    Map.put(params, "runtime_config", runtime_config)
+  end
+
+  defp maybe_put_profile_concurrency(attrs, source_params, profile_id) do
+    cond do
+      explicit_concurrency?(source_params) ->
+        attrs
+
+      max_jobs = RuntimeProfiles.max_concurrent_jobs_for_profile(profile_id) ->
+        Map.put(attrs, "max_concurrent_jobs", to_string(max_jobs))
+
+      true ->
+        attrs
+    end
+  end
+
+  defp explicit_concurrency?(params) do
+    case Map.get(params, "max_concurrent_jobs") do
+      value when is_binary(value) -> String.trim(value) != ""
+      value when is_integer(value) -> true
+      _ -> false
+    end
+  end
+
+  defp maybe_put_adapter_config(params, adapter, runtime, profile_id) do
     config =
       params
       |> Map.get("config", %{})
+      |> adapter_config_base(profile_id)
       |> build_adapter_config(adapter, runtime)
 
     Map.put(params, "config", config)
+  end
+
+  defp adapter_config_base(config, profile_id) do
+    if RuntimeProfiles.custom?(profile_id) do
+      config || %{}
+    else
+      RuntimeProfiles.config(profile_id)
+    end
   end
 
   defp build_adapter_config(config, "codex", runtime) do
@@ -293,9 +514,17 @@ defmodule CymphoWeb.AgentLive.New do
     |> assign(:openclaw_harness_id, runtime.openclaw_harness_id)
   end
 
-  defp runtime_form_from_params(params, adapter) do
-    fallback = default_runtime_form(adapter)
+  defp runtime_form_from_params(params, adapter, profile_id) do
+    fallback = runtime_form_fallback(adapter, profile_id)
 
+    if RuntimeProfiles.custom?(profile_id) do
+      runtime_form_from_custom_params(params, adapter, fallback)
+    else
+      fallback
+    end
+  end
+
+  defp runtime_form_from_custom_params(params, adapter, fallback) do
     provider =
       params
       |> param_string("provider", fallback.provider)
@@ -318,6 +547,35 @@ defmodule CymphoWeb.AgentLive.New do
         param_string(params, "openclaw_harness_id", fallback.openclaw_harness_id)
     }
     |> maybe_default_runtime_model(adapter, provider, process_preset)
+  end
+
+  defp runtime_form_fallback(adapter, profile_id) do
+    if RuntimeProfiles.custom?(profile_id) do
+      default_runtime_form(adapter)
+    else
+      profile_id
+      |> RuntimeProfiles.config()
+      |> runtime_form_from_config(adapter)
+    end
+  end
+
+  defp runtime_form_from_config(config, adapter) do
+    config = config || %{}
+    provider = config["provider"] || default_provider(adapter)
+    process_preset = config["process_preset"] || RuntimeOptions.process_default_preset()
+
+    %{
+      model: config["model"] || default_model(adapter, provider, process_preset),
+      provider: provider,
+      command: config["command"] || default_command(adapter, process_preset),
+      process_preset: process_preset,
+      process_args: args_to_text(config["args"]),
+      cwd: config["cwd"] || "",
+      openai_chat_endpoint: if(adapter == "openai_chat", do: config["endpoint"] || "", else: ""),
+      openclaw_endpoint: if(adapter == "openclaw", do: config["endpoint"] || "", else: ""),
+      openclaw_runtime: config["agent_runtime"] || "subagent",
+      openclaw_harness_id: config["harness_id"] || ""
+    }
   end
 
   defp default_runtime_form(adapter) do
@@ -424,6 +682,42 @@ defmodule CymphoWeb.AgentLive.New do
     |> Enum.reject(&(&1 == ""))
   end
 
+  defp args_to_text(args) when is_list(args), do: Enum.join(args, "\n")
+  defp args_to_text(_args), do: ""
+
+  defp selected_profile_from_params(params) do
+    params
+    |> Map.get("runtime_profile_id")
+    |> RuntimeProfiles.normalize_id()
+  end
+
+  defp assign_runtime_profile(socket, profile_id) do
+    profile_id = RuntimeProfiles.normalize_id(profile_id)
+
+    socket
+    |> assign(:runtime_profiles, RuntimeProfiles.all())
+    |> assign(:selected_runtime_profile_id, profile_id)
+    |> assign(:runtime_profile, RuntimeProfiles.get!(profile_id))
+  end
+
+  defp env_text_from_params(params, profile_id) do
+    case Map.get(params, "env_text") do
+      text when is_binary(text) ->
+        if String.trim(text) == "", do: env_text_from_profile(profile_id), else: text
+
+      _ ->
+        env_text_from_profile(profile_id)
+    end
+  end
+
+  defp env_text_from_profile(profile_id) do
+    profile_id
+    |> RuntimeProfiles.runtime_config()
+    |> Map.get("env", %{})
+    |> Enum.sort_by(fn {key, _value} -> key end)
+    |> Enum.map_join("\n", fn {key, value} -> "#{key}=#{value}" end)
+  end
+
   defp normalize_runtime_env(params) do
     case Map.pop(params, "env_text") do
       {nil, params} ->
@@ -505,6 +799,37 @@ defmodule CymphoWeb.AgentLive.New do
   defp adapter_label(:openclaw), do: "OpenClaw"
   defp adapter_label(:process), do: "Process"
   defp adapter_label(:agrenting), do: "Agrenting"
+
+  defp adapter_label("claude_code"), do: adapter_label(:claude_code)
+  defp adapter_label("codex"), do: adapter_label(:codex)
+  defp adapter_label("cursor"), do: adapter_label(:cursor)
+  defp adapter_label("http"), do: adapter_label(:http)
+  defp adapter_label("openai_chat"), do: adapter_label(:openai_chat)
+  defp adapter_label("openclaw"), do: adapter_label(:openclaw)
+  defp adapter_label("process"), do: adapter_label(:process)
+  defp adapter_label("agrenting"), do: adapter_label(:agrenting)
+  defp adapter_label(adapter) when is_binary(adapter), do: adapter
+
+  defp runtime_profile_secret_setup_path(%{id: id, adapter: "openai_chat"})
+       when is_binary(id) do
+    cond do
+      String.contains?(id, "dashscope") ->
+        ~p"/settings/secrets?#{[key: "DASHSCOPE_API_KEY", scope: "company", description: "DashScope compatible-mode runtime credential"]}"
+
+      true ->
+        ~p"/settings/secrets?#{[key: "OPENAI_API_KEY", scope: "company", description: "OpenAI-compatible chat runtime credential"]}"
+    end
+  end
+
+  defp runtime_profile_secret_setup_path(%{adapter: "claude_code"}) do
+    ~p"/settings/secrets?#{[key: "ANTHROPIC_API_KEY", scope: "company", description: "Anthropic-compatible runtime credential"]}"
+  end
+
+  defp runtime_profile_secret_setup_path(%{adapter: "codex"}) do
+    ~p"/settings/secrets?#{[key: "OPENAI_API_KEY", scope: "company", description: "OpenAI or Codex runtime credential"]}"
+  end
+
+  defp runtime_profile_secret_setup_path(_profile), do: nil
 
   defp issue_example_label(%{identifier: identifier, title: title})
        when is_binary(identifier) and identifier != "" do

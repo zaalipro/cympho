@@ -45,16 +45,15 @@ defmodule Cympho.AutonomousLoopTest do
   describe "Move 5 — create_issue response envelope" do
     test "includes identifier, assigned_role, and status", %{
       ceo: ceo,
+      engineer: engineer,
       seed_issue: seed
     } do
       {:ok, issue} = Issues.checkout_issue(seed, ceo, :ceo)
 
       actions = [
-        %{
-          "type" => "create_issue",
-          "title" => "Ship the homepage",
-          "role" => "engineer"
-        }
+        delivery_issue_action(%{
+          "title" => "Ship the homepage"
+        })
       ]
 
       assert {:ok, %{results: [result]}} = AgentActions.execute(issue, ceo, actions)
@@ -64,11 +63,14 @@ defmodule Cympho.AutonomousLoopTest do
                issue_id: child_id,
                identifier: identifier,
                assigned_role: "engineer",
+               assignee_id: assignee_id,
                status: :todo
              } = result
 
       created = Issues.get_issue!(child_id)
       assert created.identifier == identifier or created.id == identifier
+      assert created.assignee_id == engineer.id
+      assert assignee_id == engineer.id
     end
   end
 
@@ -78,13 +80,14 @@ defmodule Cympho.AutonomousLoopTest do
   describe "Move 2 — wake-on-create for child issues" do
     test "emits a wake row in the dispatcher's queue for each new child", %{
       ceo: ceo,
+      engineer: engineer,
       seed_issue: seed
     } do
       {:ok, issue} = Issues.checkout_issue(seed, ceo, :ceo)
 
       actions = [
-        %{"type" => "create_issue", "title" => "Sub one", "role" => "engineer"},
-        %{"type" => "create_issue", "title" => "Sub two", "role" => "engineer"}
+        delivery_issue_action(%{"title" => "Sub one"}),
+        delivery_issue_action(%{"title" => "Sub two"})
       ]
 
       assert {:ok, %{results: results}} = AgentActions.execute(issue, ceo, actions)
@@ -92,16 +95,15 @@ defmodule Cympho.AutonomousLoopTest do
 
       child_ids = Enum.map(results, & &1.issue_id)
 
-      # `enqueue_wake/3` on an unassigned issue does not persist an AgentWake
-      # (those need an agent_id). It instead pushes the dispatcher to poll.
-      # We verify the children are dispatcher-visible: they are :todo + have
-      # an assigned_role set. The wake call itself is best-effort and
-      # idempotent at the mailbox level.
+      # Child issues stay queued for runtime checkout, but receive a concrete
+      # owner when capacity is available so the wake queue can target that
+      # agent immediately.
       Enum.each(child_ids, fn id ->
         c = Issues.get_issue!(id)
         assert c.status == :todo
         assert c.parent_id == issue.id
         assert c.assigned_role == "engineer"
+        assert c.assignee_id == engineer.id
       end)
     end
   end
@@ -208,6 +210,37 @@ defmodule Cympho.AutonomousLoopTest do
       {:ok, child} =
         Issues.create_issue(%{
           title: "Engineer subtask",
+          company_id: company.id,
+          parent_id: parent.id,
+          status: :in_progress,
+          assignee_id: engineer.id,
+          assigned_role: "engineer"
+        })
+
+      {:ok, _} = Issues.transition_issue(child, :in_review)
+
+      wakes = Wakes.list_issue_wakes(parent.id)
+      assert Enum.any?(wakes, &(&1.reason == "child_status_changed" and &1.agent_id == cto.id))
+    end
+
+    test "wakes the parent's assigned role when decomposition left it blocked and unassigned", %{
+      company: company,
+      cto: cto,
+      engineer: engineer
+    } do
+      {:ok, parent} =
+        Issues.create_issue(%{
+          title: "Blocked parent owned by CTO role",
+          company_id: company.id,
+          status: :blocked,
+          assignee_id: nil,
+          assigned_role: "cto",
+          skip_auto_assign: true
+        })
+
+      {:ok, child} =
+        Issues.create_issue(%{
+          title: "Engineer subtask under blocked parent",
           company_id: company.id,
           parent_id: parent.id,
           status: :in_progress,
@@ -377,6 +410,7 @@ defmodule Cympho.AutonomousLoopTest do
           name: "Backup Engineer",
           role: :engineer,
           adapter: :process,
+          config: %{"repo_capable" => true},
           status: :idle,
           company_id: company.id
         })
@@ -440,7 +474,7 @@ defmodule Cympho.AutonomousLoopTest do
       # CEO decomposes via the action surface.
       assert {:ok, %{results: [%{issue_id: child_id, assigned_role: "engineer"}]}} =
                AgentActions.execute(root, ceo, [
-                 %{"type" => "create_issue", "title" => "Engineer leaf X", "role" => "engineer"}
+                 delivery_issue_action(%{"title" => "Engineer leaf X"})
                ])
 
       # Engineer picks it up + finishes.
@@ -499,5 +533,19 @@ defmodule Cympho.AutonomousLoopTest do
       DateTime.utc_now() |> DateTime.add(seconds_offset, :second) |> DateTime.truncate(:second)
 
     from(w in AgentWake, where: w.id == ^wake_id) |> Repo.update_all(set: [inserted_at: cutoff])
+  end
+
+  defp delivery_issue_action(attrs) do
+    Map.merge(
+      %{
+        "type" => "create_issue",
+        "role" => "engineer",
+        "acceptance_criteria" => "Child issue completes the scoped delivery task.",
+        "evidence_required" => "Code diff, work product, or delivery note with evidence.",
+        "verification_required" => "Run a focused verification or name the blocker.",
+        "definition_of_done" => "Ready for review with evidence and risk named."
+      },
+      attrs
+    )
   end
 end

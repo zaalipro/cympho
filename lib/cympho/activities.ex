@@ -17,35 +17,12 @@ defmodule Cympho.Activities do
   end
 
   def list_company_activities(company_id, opts \\ []) do
-    action = Keyword.get(opts, :action)
-    actor_type = Keyword.get(opts, :actor_type)
     limit = Keyword.get(opts, :limit, 50)
     offset = Keyword.get(opts, :offset, 0)
 
-    # Build base query joining with issues to filter by company
     query =
-      from(a in Activity,
-        join: i in Issue,
-        on: a.issue_id == i.id,
-        where: i.company_id == ^company_id,
-        order_by: [desc: a.inserted_at]
-      )
-
-    # Apply action filter
-    query =
-      if action && action != "" do
-        where(query, action: ^action)
-      else
-        query
-      end
-
-    # Apply actor_type filter
-    query =
-      if actor_type && actor_type != "" do
-        where(query, actor_type: ^actor_type)
-      else
-        query
-      end
+      company_activities_base_query(company_id, opts)
+      |> order_by([a], desc: a.inserted_at)
 
     # Get total count before pagination
     total =
@@ -65,6 +42,34 @@ defmodule Cympho.Activities do
     {activities, total || 0}
   end
 
+  def company_activity_snapshot(company_id, opts \\ []) do
+    query = company_activities_base_query(company_id, opts)
+
+    total =
+      query
+      |> select([a], count(a.id))
+      |> Repo.one()
+
+    by_action =
+      query
+      |> group_by([a], a.action)
+      |> select([a], {a.action, count(a.id)})
+      |> Repo.all()
+      |> Map.new()
+
+    latest =
+      query
+      |> order_by([a], desc: a.inserted_at)
+      |> limit(1)
+      |> Repo.one()
+      |> case do
+        nil -> nil
+        activity -> Repo.preload(activity, [:issue])
+      end
+
+    %{total: total || 0, by_action: by_action, latest: latest}
+  end
+
   @doc """
   Keyset (infinite-scroll) page of a company's activities, newest first.
 
@@ -72,13 +77,7 @@ defmodule Cympho.Activities do
   null) and returns a `Cympho.Pagination.Page` with `:issue` preloaded.
   """
   def list_company_activities_page(company_id, opts \\ []) do
-    from(a in Activity,
-      join: i in Issue,
-      on: a.issue_id == i.id,
-      where: i.company_id == ^company_id
-    )
-    |> maybe_where_action(Keyword.get(opts, :action))
-    |> maybe_where_actor_type(Keyword.get(opts, :actor_type))
+    company_activities_base_query(company_id, opts)
     |> Cympho.Pagination.page(
       limit: Keyword.get(opts, :limit, 50),
       after: Keyword.get(opts, :after),
@@ -94,6 +93,16 @@ defmodule Cympho.Activities do
 
   defp maybe_where_actor_type(query, actor_type),
     do: where(query, [a], a.actor_type == ^actor_type)
+
+  defp company_activities_base_query(company_id, opts) do
+    from(a in Activity,
+      join: i in Issue,
+      on: a.issue_id == i.id,
+      where: i.company_id == ^company_id
+    )
+    |> maybe_where_action(Keyword.get(opts, :action))
+    |> maybe_where_actor_type(Keyword.get(opts, :actor_type))
+  end
 
   defp preload_page_issues(%Cympho.Pagination.Page{} = page) do
     %{page | entries: Repo.preload(page.entries, [:issue])}

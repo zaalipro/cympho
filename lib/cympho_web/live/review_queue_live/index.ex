@@ -1,6 +1,6 @@
 defmodule CymphoWeb.ReviewQueueLive.Index do
   use CymphoWeb, :live_view
-  alias Cympho.Issues
+  alias Cympho.{HeartbeatEngine, IssueDigest, Issues, Repo, WorkProducts}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -87,19 +87,27 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
       nil ->
         socket
         |> assign(:awaiting_review, [])
+        |> assign(:awaiting_review_decisions, [])
         |> assign(:kicked_back, [])
         |> assign(:spec_review, [])
+        |> assign(:review_command, empty_review_command())
         |> assign(:stats, empty_stats())
 
       company ->
         awaiting = list_awaiting_review(company.id)
+        awaiting_decisions = Enum.map(awaiting, &decision_card/1)
         kicked_back = list_kicked_back(company.id)
         spec_review = list_spec_review(company.id)
 
         socket
         |> assign(:awaiting_review, awaiting)
+        |> assign(:awaiting_review_decisions, awaiting_decisions)
         |> assign(:kicked_back, kicked_back)
         |> assign(:spec_review, spec_review)
+        |> assign(
+          :review_command,
+          build_review_command(awaiting_decisions, kicked_back, spec_review)
+        )
         |> assign(:stats, build_stats(awaiting, kicked_back, spec_review))
     end
   end
@@ -118,8 +126,8 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
     |> where([i], i.company_id == ^company_id)
     |> where([i], i.status == :in_review)
     |> order_by([i], asc: i.updated_at)
-    |> Cympho.Repo.all()
-    |> Cympho.Repo.preload([:assignee, :project, :last_reviewer])
+    |> Repo.all()
+    |> Repo.preload([:assignee, :project, :last_reviewer, :comments])
   end
 
   defp list_kicked_back(company_id) do
@@ -129,8 +137,8 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
     |> where([i], i.company_id == ^company_id)
     |> where([i], i.status == :todo and not is_nil(i.last_reviewer_id))
     |> order_by([i], asc: i.updated_at)
-    |> Cympho.Repo.all()
-    |> Cympho.Repo.preload([:assignee, :project, :last_reviewer])
+    |> Repo.all()
+    |> Repo.preload([:assignee, :project, :last_reviewer])
   end
 
   defp list_spec_review(company_id) do
@@ -141,8 +149,8 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
     |> where([i], i.status == :backlog and i.assigned_role == "cto")
     |> where([i], fragment("?->>'spec_review_required' = ?", i.monitor_state, "true"))
     |> order_by([i], asc: i.inserted_at)
-    |> Cympho.Repo.all()
-    |> Cympho.Repo.preload([:project])
+    |> Repo.all()
+    |> Repo.preload([:project])
   end
 
   defp empty_stats do
@@ -174,6 +182,307 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
 
     %{total: length(all), oldest_age_hours: age_hours, by_role: by_role}
   end
+
+  defp empty_review_command do
+    %{
+      tone: :clear,
+      eyebrow: "Review command",
+      heading: "Review queue is clear",
+      detail: "No acceptance, rework, or CTO spec decision is waiting right now.",
+      action_label: "Open issues",
+      action_path: "/issues?triage=review",
+      focus: nil,
+      blocker_labels: [],
+      ready_count: 0,
+      blocked_count: 0,
+      rework_count: 0,
+      spec_count: 0,
+      oldest_label: "—"
+    }
+  end
+
+  defp build_review_command(decision_cards, kicked_back, spec_review) do
+    blocked_cards = Enum.filter(decision_cards, &(&1.blocker_count > 0))
+    ready_cards = Enum.filter(decision_cards, &(&1.blocker_count == 0))
+    oldest = List.first(decision_cards) || first_focus(kicked_back) || first_focus(spec_review)
+
+    command =
+      cond do
+        blocked_cards != [] ->
+          card = List.first(blocked_cards)
+
+          %{
+            tone: :attention,
+            eyebrow: "Review command",
+            heading: "Resolve review gates",
+            detail:
+              "#{card.label} cannot close yet. Fix the listed evidence gaps before approving it.",
+            action_label: "Open gated issue",
+            action_path: issue_path(card.issue),
+            focus: card,
+            blocker_labels: card.blocker_labels
+          }
+
+        ready_cards != [] ->
+          card = List.first(ready_cards)
+
+          %{
+            tone: :ready,
+            eyebrow: "Review command",
+            heading: "Accept review-ready work",
+            detail:
+              "#{card.label} has clear approval gates. Inspect the evidence, then approve or request changes.",
+            action_label: "Review decision",
+            action_path: issue_path(card.issue),
+            focus: card,
+            blocker_labels: []
+          }
+
+        spec_review != [] ->
+          issue = List.first(spec_review)
+
+          %{
+            tone: :active,
+            eyebrow: "Review command",
+            heading: "Approve CTO spec gate",
+            detail:
+              "#{issue_label(issue)} is waiting for CTO initiative acceptance before execution starts.",
+            action_label: "Open spec gate",
+            action_path: issue_path(issue),
+            focus: focus_card(issue, "Spec review", []),
+            blocker_labels: []
+          }
+
+        kicked_back != [] ->
+          issue = List.first(kicked_back)
+
+          %{
+            tone: :rework,
+            eyebrow: "Review command",
+            heading: "Track rework loop",
+            detail:
+              "#{issue_label(issue)} was returned for changes. Watch the assignee until new evidence lands.",
+            action_label: "Open rework issue",
+            action_path: issue_path(issue),
+            focus: focus_card(issue, "Rework", []),
+            blocker_labels: []
+          }
+
+        true ->
+          empty_review_command()
+      end
+
+    command
+    |> Map.put(:ready_count, length(ready_cards))
+    |> Map.put(:blocked_count, length(blocked_cards))
+    |> Map.put(:rework_count, length(kicked_back))
+    |> Map.put(:spec_count, length(spec_review))
+    |> Map.put(:oldest_label, oldest_label(oldest))
+  end
+
+  defp decision_card(issue) do
+    runs = HeartbeatEngine.list_runs_for_issue(issue.id)
+    work_products = WorkProducts.list_work_products(issue.id)
+    child_issues = Issues.list_child_issues(issue.id)
+
+    blockers = IssueDigest.review_status_blockers(issue, :done, runs, work_products, child_issues)
+
+    focus_card(
+      issue,
+      "Decision",
+      blockers,
+      review_decision_packet(issue, blockers, runs, work_products, child_issues)
+    )
+  end
+
+  defp focus_card(issue, lane, blockers, review_packet \\ nil) do
+    blocker_labels = Enum.map(blockers, & &1.label)
+
+    %{
+      issue: issue,
+      lane: lane,
+      label: issue_label(issue),
+      age: format_age(issue.updated_at),
+      role: issue.assigned_role || "unassigned",
+      assignee: assignee_name(issue),
+      blocker_count: length(blockers),
+      blocker_labels: blocker_labels,
+      review_packet: review_packet
+    }
+  end
+
+  defp review_decision_packet(issue, blockers, runs, work_products, child_issues) do
+    blocker_count = length(blockers)
+    completed_runs = Enum.count(runs, &(&1.status in ["completed", "succeeded"]))
+    failed_runs = Enum.count(runs, &(&1.status in ["failed", "timed_out"]))
+    closed_children = Enum.count(child_issues, &(&1.status in [:done, :cancelled]))
+    total_children = length(child_issues)
+
+    %{
+      tone: if(blocker_count == 0, do: :ready, else: :attention),
+      verdict:
+        if(blocker_count == 0,
+          do: "Approve candidate",
+          else: "Request changes first"
+        ),
+      summary:
+        if(blocker_count == 0,
+          do: "Review gates are clear; perform final human inspection before closing.",
+          else:
+            "#{blocker_count} review #{if blocker_count == 1, do: "gate", else: "gates"} still block approval."
+        ),
+      evidence: [
+        run_evidence_line(completed_runs, failed_runs),
+        work_product_evidence_line(work_products),
+        pr_evidence_line(issue),
+        child_issue_evidence_line(closed_children, total_children)
+      ],
+      risks: review_risk_lines(blockers)
+    }
+  end
+
+  defp run_evidence_line(completed_runs, failed_runs) do
+    cond do
+      completed_runs > 0 and failed_runs > 0 ->
+        "#{completed_runs} completed runtime #{plural_suffix(completed_runs)}; #{failed_runs} failed #{plural_suffix(failed_runs)} need review."
+
+      completed_runs > 0 ->
+        "#{completed_runs} completed runtime #{plural_suffix(completed_runs)} recorded."
+
+      failed_runs > 0 ->
+        "#{failed_runs} failed runtime #{plural_suffix(failed_runs)} recorded; inspect before approval."
+
+      true ->
+        "No completed runtime run recorded."
+    end
+  end
+
+  defp work_product_evidence_line([]), do: "No work product attached."
+
+  defp work_product_evidence_line(work_products) do
+    code_count = Enum.count(work_products, &(&1.kind == "code_change"))
+
+    "#{length(work_products)} work #{plural_noun(length(work_products), "product")} attached#{if code_count > 0, do: " (#{code_count} code)", else: ""}."
+  end
+
+  defp pr_evidence_line(issue) do
+    if Cympho.Issues.Issue.pr_url(issue, issue.project) in [nil, ""] do
+      "No PR link set."
+    else
+      "PR link is set."
+    end
+  end
+
+  defp child_issue_evidence_line(_closed_children, 0), do: "No delegated sub-issues."
+
+  defp child_issue_evidence_line(closed_children, total_children) do
+    "#{closed_children}/#{total_children} delegated #{plural_noun(total_children, "sub-issue")} closed."
+  end
+
+  defp review_risk_lines([]) do
+    ["No blocking review gate detected. Confirm product quality manually before approval."]
+  end
+
+  defp review_risk_lines(blockers) do
+    blockers
+    |> Enum.map(& &1.label)
+    |> Enum.take(4)
+  end
+
+  defp plural_suffix(1), do: "run"
+  defp plural_suffix(_), do: "runs"
+
+  defp plural_noun(1, noun), do: noun
+  defp plural_noun(_count, noun), do: noun <> "s"
+
+  defp review_gate_heading(%{blocker_count: 0}), do: "Ready for close"
+  defp review_gate_heading(_card), do: "Evidence gaps block closure"
+
+  defp review_gate_detail(%{blocker_count: 0}) do
+    "Approval gates are clear. Inspect the issue evidence, then approve or request changes."
+  end
+
+  defp review_gate_detail(%{blocker_count: 1}) do
+    "Fix this gate before approving. The close action will stay guarded until evidence is present."
+  end
+
+  defp review_gate_detail(%{blocker_count: count}) do
+    "Fix these #{count} gates before approving. The close action will stay guarded until evidence is present."
+  end
+
+  defp review_gate_card_class(%{blocker_count: 0}) do
+    "border-emerald-500/20 bg-emerald-500/[0.06]"
+  end
+
+  defp review_gate_card_class(_card), do: "border-amber-500/25 bg-amber-500/[0.06]"
+
+  defp review_gate_badge_class(%{blocker_count: 0}) do
+    "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
+  end
+
+  defp review_gate_badge_class(_card), do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
+
+  defp review_packet_card_class(%{tone: :ready}) do
+    "border-emerald-500/20 bg-emerald-500/[0.04]"
+  end
+
+  defp review_packet_card_class(_packet), do: "border-amber-500/20 bg-amber-500/[0.04]"
+
+  defp review_packet_badge_class(%{tone: :ready}) do
+    "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
+  end
+
+  defp review_packet_badge_class(_packet),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
+
+  defp assignee_name(%{assignee: %Ecto.Association.NotLoaded{}}), do: nil
+  defp assignee_name(%{assignee: %{name: name}}), do: name
+  defp assignee_name(_), do: nil
+
+  defp first_focus([]), do: nil
+  defp first_focus([issue | _]), do: focus_card(issue, lane_label(issue), [])
+
+  defp issue_label(issue), do: "#{issue.identifier || "Issue"} · #{issue.title}"
+  defp issue_path(issue), do: "/issues/#{issue.id}"
+
+  defp lane_label(%{status: :todo}), do: "Rework"
+  defp lane_label(%{status: :backlog}), do: "Spec review"
+  defp lane_label(_issue), do: "Review"
+
+  defp oldest_label(nil), do: "—"
+  defp oldest_label(%{age: age}) when is_binary(age), do: age
+  defp oldest_label(%{issue: issue}), do: format_age(issue.updated_at)
+
+  defp review_command_tone_class(:attention),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
+
+  defp review_command_tone_class(:ready),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
+
+  defp review_command_tone_class(:active),
+    do: "border-brand/25 bg-brand/10 text-brand"
+
+  defp review_command_tone_class(:rework),
+    do: "border-blue-500/25 bg-blue-500/10 text-blue-200"
+
+  defp review_command_tone_class(_),
+    do: "border-border bg-surface text-text-secondary"
+
+  defp review_command_action_class(:attention),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
+
+  defp review_command_action_class(:ready),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
+
+  defp review_command_action_class(:active),
+    do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
+
+  defp review_command_action_class(:rework),
+    do: "border-blue-500/25 bg-blue-500/10 text-blue-200 hover:bg-blue-500/15"
+
+  defp review_command_action_class(_),
+    do:
+      "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary"
 
   defp request_changes_attrs(issue) do
     %{

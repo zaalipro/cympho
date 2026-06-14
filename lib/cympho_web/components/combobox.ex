@@ -36,6 +36,7 @@ defmodule CymphoWeb.Components.Combobox do
   attr :clearable?, :boolean, default: true
   attr :align, :string, default: "left", values: ~w(left right)
   attr :class, :string, default: nil
+  attr :trigger_class, :any, default: nil
   attr :rest, :global
 
   def combobox(assigns) do
@@ -66,7 +67,8 @@ defmodule CymphoWeb.Components.Combobox do
           "bg-surface-1 hover:bg-surface-2 border border-hairline",
           "transition-colors duration-100",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas",
-          length(@selected_ids) > 0 && "border-hairline-strong"
+          length(@selected_ids) > 0 && "border-hairline-strong",
+          @trigger_class
         ]}
         aria-haspopup="listbox"
         aria-expanded="false"

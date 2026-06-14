@@ -7,6 +7,7 @@ defmodule CymphoWeb.IssueLiveTest do
   alias Cympho.Comments
   alias Cympho.Agents
   alias Cympho.Companies
+  alias Cympho.Goals
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Inbox
   alias Cympho.Projects
@@ -17,8 +18,26 @@ defmodule CymphoWeb.IssueLiveTest do
   alias Cympho.WorkProducts
 
   defp create_agent(attrs), do: Agents.create_agent(scoped_attrs(attrs))
+  defp create_goal(attrs), do: Goals.create_goal(scoped_attrs(attrs))
   defp create_issue(attrs), do: Issues.create_issue(scoped_attrs(attrs))
   defp create_project(attrs), do: Projects.create_project(scoped_attrs(attrs))
+
+  defp textarea_value(html, selector) do
+    html
+    |> Floki.parse_document!()
+    |> Floki.find(selector)
+    |> Floki.text()
+  end
+
+  defp element_attrs(html, selector) do
+    html
+    |> Floki.parse_document!()
+    |> Floki.find(selector)
+    |> case do
+      [{_tag, attrs, _children} | _rest] -> Map.new(attrs)
+      [] -> %{}
+    end
+  end
 
   setup do
     {:ok, issue} =
@@ -38,6 +57,28 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert html =~ "All Issues"
       assert html =~ issue.title
+    end
+
+    test "shows mission context on issue rows" do
+      {:ok, mission} =
+        create_goal(%{
+          title: "Raise activation quality",
+          goal_type: :mission
+        })
+
+      {:ok, _issue} =
+        create_issue(%{
+          title: "Aligned list row",
+          description: "Owner needs this tied to the activation mission.",
+          status: :todo,
+          priority: :high,
+          goal_id: mission.id
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues")
+
+      assert html =~ "Aligned list row"
+      assert html =~ "Mission: Raise activation quality"
     end
 
     test "shows issue status badges", %{issue: _issue} do
@@ -79,6 +120,98 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "List CEO"
       assert html =~ "Launch needed"
       assert html =~ "Assigned, but runtime has not started yet."
+    end
+
+    test "shows launch readiness on dispatchable rows" do
+      {:ok, _agent} =
+        create_agent(%{
+          name: "List Launch Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom", "repo_capable" => true}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Implement list row code path",
+          description: """
+          Acceptance criteria: the list row shows the runtime state.
+          Evidence required: issue page link and visible target agent.
+          Verification required: render the issue list.
+          Definition of done: the row is complete.
+          """,
+          status: :todo,
+          priority: :high,
+          assigned_role: "engineer"
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues")
+
+      assert html =~ "Launch"
+      assert html =~ "Implement list row code path"
+      assert html =~ "List Launch Engineer"
+      assert html =~ ~s(href="/issues/#{issue.id}#issue-agent-panel")
+
+      launch_text =
+        html
+        |> Floki.parse_document!()
+        |> Floki.find("a[href='/issues/#{issue.id}#issue-agent-panel']")
+        |> Floki.text()
+
+      assert launch_text =~ "List Launch Engineer"
+      assert launch_text =~ ~r/(Ready|Review mode|Needs setup|Blocked|No agent)/
+    end
+
+    test "shows an attention queue with concrete next actions", %{current_company: company} do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Queue CEO",
+          role: :ceo,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, _ceo_issue} =
+        create_issue(%{
+          title: "Queue CEO launch",
+          description: "CEO should provide owner signal.",
+          status: :todo,
+          priority: :high,
+          assignee_id: ceo.id,
+          assigned_role: "ceo",
+          company_id: company.id
+        })
+
+      {:ok, _blocked_issue} =
+        create_issue(%{
+          title: "Queue blocked release",
+          description: "Needs owner intervention before agents continue.",
+          status: :blocked,
+          priority: :critical,
+          company_id: company.id
+        })
+
+      {:ok, _unassigned_issue} =
+        create_issue(%{
+          title: "Queue missing owner",
+          description: "Needs someone to own the next move.",
+          status: :todo,
+          priority: :medium,
+          company_id: company.id
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues")
+
+      assert html =~ "Attention queue"
+      assert html =~ "First concrete moves from the issues currently in view."
+      assert html =~ "Queue blocked release"
+      assert html =~ "Unblock"
+      assert html =~ "Queue CEO launch"
+      assert html =~ "Launch CEO"
+      assert html =~ "Queue missing owner"
+      assert html =~ "Assign owner"
+      assert html =~ "Open"
     end
 
     test "shows owner triage lanes and filters the CEO lane", %{current_company: company} do
@@ -155,6 +288,15 @@ defmodule CymphoWeb.IssueLiveTest do
           company_id: company.id
         })
 
+      {:ok, mission} =
+        create_goal(%{
+          title: "Launch Mission",
+          goal_type: :mission,
+          status: "active",
+          company_id: company.id,
+          project_id: launch_project.id
+        })
+
       {:ok, user} =
         Users.create_user(%{
           email: "owner-route-#{System.unique_integer([:positive])}@example.com",
@@ -196,19 +338,124 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Owner request -&gt; CEO lane"
       assert html =~ "Creates a To Do issue; no provider call."
       assert html =~ "Opens the issue with CEO flow status."
-      assert html =~ "Signals the CEO should produce:"
+      assert html =~ "Launch packet"
+      assert html =~ "Make the CEO turn useful"
+      assert html =~ "Owner brief"
+      assert html =~ "Define the work first"
+      assert html =~ "Outcome"
+      assert html =~ "Risk/constraint"
+      assert html =~ "Done signal"
+      assert html =~ "First CEO signal"
+      assert html =~ "Routing lock"
+      assert html =~ "Open the CEO flow on the issue page."
+      assert html =~ "Watch for the first owner update, handoff, or blocker."
+      assert html =~ "Owner brief readiness"
+      assert html =~ "Too thin for autonomy"
+      assert html =~ "0/6"
+      assert html =~ "Next prompt:"
+      assert html =~ "Outcome: Name the owner-visible result"
+      assert html =~ "Launch scaffold"
+      assert html =~ "Use scaffold"
+      assert html =~ "Copy scaffold"
+      assert html =~ "Complete these lines to make the first CEO turn decision-grade."
+      assert html =~ "CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`):"
+
+      assert html =~
+               "Missing signals: Outcome, Context, Risk/constraint, Done signal, First CEO signal, Evidence."
+
+      assert html =~ "Focused CEO run needs a ready brief"
+      assert html =~ "Create a draft now, or add the missing signal first"
+      assert html =~ "Create behavior"
+      assert html =~ "Draft only until the brief is ready"
+      assert html =~ "Create Draft CEO Issue"
+      assert html =~ ~s(data-testid="issue-create-mobile-summary")
+      assert html =~ ~s(data-testid="issue-create-launch-rail")
+      assert html =~ "Brief readiness"
+      assert html =~ "First run route"
+      queue_attrs = element_attrs(html, "input#queue-dispatch-focus")
+      assert Map.has_key?(queue_attrs, "disabled")
+      refute Map.has_key?(queue_attrs, "checked")
+      assert html =~ "CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`):"
+      assert html =~ "Evidence to inspect after the run:"
+      assert html =~ "Constraints / risks:"
       assert html =~ "Goal:\nContext:"
       refute html =~ "Goal:\\nContext:"
       assert html =~ "Project"
       assert html =~ "Operating Project"
       assert html =~ "Launch Project"
+      assert html =~ "Mission context"
+      assert html =~ "Launch Mission will be attached to this issue."
+      assert html =~ "Goal-linked issues carry lineage"
+
+      composer_index = :binary.match(html, ~s(id="issue-intake-composer")) |> elem(0)
+      mobile_summary_index = :binary.match(html, ~s(id="issue-create-mobile-summary")) |> elem(0)
+      owner_intake_index = :binary.match(html, ~s(id="issue-owner-intake")) |> elem(0)
+      mission_context_index = :binary.match(html, ~s(id="issue-mission-context")) |> elem(0)
+      launch_packet_index = :binary.match(html, ~s(id="issue-launch-packet")) |> elem(0)
+
+      launch_rail_index =
+        :binary.match(html, ~s(data-testid="issue-create-launch-rail")) |> elem(0)
+
+      title_index = :binary.match(html, ~s(name="issue[title]")) |> elem(0)
+      description_index = :binary.match(html, ~s(name="issue[description]")) |> elem(0)
+
+      assert composer_index < owner_intake_index
+      assert composer_index < mobile_summary_index
+      assert mobile_summary_index < owner_intake_index
+      assert composer_index < mission_context_index
+      assert composer_index < launch_packet_index
+      assert launch_packet_index < launch_rail_index
+      assert title_index < launch_packet_index
+      assert description_index < launch_packet_index
+
+      html =
+        view
+        |> element("#owner-brief-scaffold-copy button", "Use scaffold")
+        |> render_click()
+
+      assert textarea_value(html, "textarea[name='issue[description]']") =~
+               "Goal: &lt;the business outcome the owner wants&gt;"
+
+      launch_ready_description = """
+      Goal: improve onboarding conversion.
+      Context: activation drops after workspace setup.
+      Constraints / risks: must not slow first workspace creation.
+      Definition of done: CEO has split the work or produced a decision.
+      CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`): start with a handoff if execution is needed.
+      Evidence to inspect after the run: scoped sub-issues and acceptance criteria.
+      """
+
+      html =
+        view
+        |> form("form", %{
+          "queue_dispatch_focus" => "false",
+          "issue" => %{
+            "title" => "Owner asks for onboarding",
+            "description" => launch_ready_description,
+            "project_id" => launch_project.id
+          }
+        })
+        |> render_change()
+
+      assert html =~ "Ready for CEO launch"
+      assert html =~ "6/6"
+      assert html =~ "All launch signals are present."
+      assert html =~ "Goal: Owner asks for onboarding"
+      assert html =~ "Missing signals: none."
+      assert html =~ "Queue focused CEO run after create"
+      assert html =~ "Ready to create and queue"
+      assert html =~ "Create and Queue CEO Run"
+      queue_attrs = element_attrs(html, "input#queue-dispatch-focus")
+      assert Map.has_key?(queue_attrs, "checked")
+      refute Map.has_key?(queue_attrs, "disabled")
 
       result =
         view
         |> form("form", %{
+          "queue_dispatch_focus" => "true",
           "issue" => %{
             "title" => "Owner asks for onboarding",
-            "description" => "CEO should decompose this.",
+            "description" => launch_ready_description,
             "project_id" => launch_project.id
           }
         })
@@ -220,7 +467,159 @@ defmodule CymphoWeb.IssueLiveTest do
       assert created.assignee_id == ceo.id
       assert created.assigned_role == "ceo"
       assert created.project_id == launch_project.id
+      assert created.goal_id == mission.id
+      assert created.lineage["goal_id"] == mission.id
+      assert created.lineage["mission_id"] == mission.id
       assert created.created_by_user_id == user.id
+      assert Issues.dispatch_pinned?(created)
+
+      expected_path = "/issues/#{created.id}#issue-ceo-flow-checklist"
+      assert {:error, {:live_redirect, %{to: ^expected_path}}} = result
+    end
+
+    test "does not queue focused dispatch for thin owner briefs" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Owner Route Thin Brief Co",
+          slug: "owner-route-thin-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, user} =
+        Users.create_user(%{
+          email: "owner-route-thin-#{System.unique_integer([:positive])}@example.com",
+          name: "Owner"
+        })
+
+      {:ok, _membership} =
+        Companies.create_membership(%{
+          user_id: user.id,
+          company_id: company.id,
+          role: "owner",
+          is_board_member: true
+        })
+
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Thin Intake CEO",
+          role: :ceo,
+          status: :idle,
+          company_id: company.id
+        })
+
+      conn =
+        conn()
+        |> Plug.Test.init_test_session(%{})
+        |> Plug.Conn.put_session("user_id", user.id)
+        |> Plug.Conn.put_session("company_id", company.id)
+
+      {:ok, view, html} = live(conn, "/issues/new")
+
+      assert html =~ "Too thin for autonomy"
+      assert html =~ "Focused CEO run needs a ready brief"
+      assert html =~ "Draft only until the brief is ready"
+      assert html =~ "Create Draft CEO Issue"
+      queue_attrs = element_attrs(html, "input#queue-dispatch-focus")
+      assert Map.has_key?(queue_attrs, "disabled")
+      refute Map.has_key?(queue_attrs, "checked")
+
+      result =
+        view
+        |> form("form", %{
+          "queue_dispatch_focus" => "false",
+          "issue" => %{
+            "title" => "Thin",
+            "description" => "Do it."
+          }
+        })
+        |> render_submit()
+
+      [created] = Issues.list_issues(%{company_id: company.id})
+      assert created.assignee_id == ceo.id
+      assert created.assigned_role == "ceo"
+      refute Issues.dispatch_pinned?(created)
+
+      expected_path = "/issues/#{created.id}"
+      assert {:error, {:live_redirect, %{to: ^expected_path}}} = result
+    end
+
+    test "does not queue focused dispatch for almost-ready owner briefs" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Owner Route Almost Ready Co",
+          slug: "owner-route-almost-ready-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, user} =
+        Users.create_user(%{
+          email: "owner-route-almost-ready-#{System.unique_integer([:positive])}@example.com",
+          name: "Owner"
+        })
+
+      {:ok, _membership} =
+        Companies.create_membership(%{
+          user_id: user.id,
+          company_id: company.id,
+          role: "owner",
+          is_board_member: true
+        })
+
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Almost Ready CEO",
+          role: :ceo,
+          status: :idle,
+          company_id: company.id
+        })
+
+      conn =
+        conn()
+        |> Plug.Test.init_test_session(%{})
+        |> Plug.Conn.put_session("user_id", user.id)
+        |> Plug.Conn.put_session("company_id", company.id)
+
+      {:ok, view, _html} = live(conn, "/issues/new")
+
+      almost_ready_description = """
+      Goal: improve onboarding conversion.
+      Context: activation drops after workspace setup.
+      Constraints / risks: must not slow first workspace creation.
+      Definition of done: CEO has split the work or produced a decision.
+      CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`): start with a handoff if execution is needed.
+      """
+
+      html =
+        view
+        |> form("form", %{
+          "queue_dispatch_focus" => "false",
+          "issue" => %{
+            "title" => "Owner asks for almost-ready onboarding",
+            "description" => almost_ready_description
+          }
+        })
+        |> render_change()
+
+      assert html =~ "Needs one more pass"
+      assert html =~ "5/6"
+      assert html =~ "Evidence: Specify what proof should be inspected after the run."
+      assert html =~ "Focused CEO run needs a ready brief"
+      assert html =~ "Draft only until the brief is ready"
+      assert html =~ "Create Draft CEO Issue"
+
+      result =
+        view
+        |> form("form", %{
+          "queue_dispatch_focus" => "false",
+          "issue" => %{
+            "title" => "Owner asks for almost-ready onboarding",
+            "description" => almost_ready_description
+          }
+        })
+        |> render_submit()
+
+      [created] = Issues.list_issues(%{company_id: company.id})
+      assert created.assignee_id == ceo.id
+      assert created.assigned_role == "ceo"
+      refute Issues.dispatch_pinned?(created)
 
       expected_path = "/issues/#{created.id}"
       assert {:error, {:live_redirect, %{to: ^expected_path}}} = result
@@ -270,6 +669,10 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Creates a CEO-role To Do issue; no provider call."
       assert html =~ "Opens the issue with the CEO setup blocker visible."
       assert html =~ "will stay in the CEO lane"
+      assert html =~ "Launch packet"
+      refute html =~ "Queue focused CEO run after create"
+      assert html =~ "CEO setup needed"
+      assert html =~ "Create CEO Issue"
 
       result =
         view
@@ -289,6 +692,67 @@ defmodule CymphoWeb.IssueLiveTest do
       assert created.assigned_role == "ceo"
       assert created.project_id == project.id
       assert created.created_by_user_id == user.id
+      refute Issues.dispatch_pinned?(created)
+
+      expected_path = "/issues/#{created.id}"
+      assert {:error, {:live_redirect, %{to: ^expected_path}}} = result
+    end
+
+    test "can create a CEO issue without queueing focused dispatch" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Owner Route Manual Launch Co",
+          slug: "owner-route-manual-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, user} =
+        Users.create_user(%{
+          email: "owner-route-manual-#{System.unique_integer([:positive])}@example.com",
+          name: "Owner"
+        })
+
+      {:ok, _membership} =
+        Companies.create_membership(%{
+          user_id: user.id,
+          company_id: company.id,
+          role: "owner",
+          is_board_member: true
+        })
+
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Manual Launch CEO",
+          role: :ceo,
+          status: :idle,
+          company_id: company.id
+        })
+
+      conn =
+        conn()
+        |> Plug.Test.init_test_session(%{})
+        |> Plug.Conn.put_session("user_id", user.id)
+        |> Plug.Conn.put_session("company_id", company.id)
+
+      {:ok, view, html} = live(conn, "/issues/new")
+
+      assert html =~ "Focused CEO run needs a ready brief"
+      assert html =~ "Create Draft CEO Issue"
+
+      result =
+        view
+        |> form("form", %{
+          "queue_dispatch_focus" => "false",
+          "issue" => %{
+            "title" => "Owner asks for manual launch",
+            "description" => "CEO should wait for manual focus."
+          }
+        })
+        |> render_submit()
+
+      [created] = Issues.list_issues(%{company_id: company.id})
+      assert created.assignee_id == ceo.id
+      assert created.assigned_role == "ceo"
+      refute Issues.dispatch_pinned?(created)
 
       expected_path = "/issues/#{created.id}"
       assert {:error, {:live_redirect, %{to: ^expected_path}}} = result
@@ -303,6 +767,59 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ issue.description
       assert html =~ "backlog"
       assert html =~ "high"
+    end
+
+    test "shows linked mission context in the sidebar" do
+      {:ok, project} =
+        create_project(%{
+          name: "Sidebar Mission Project",
+          prefix: "SMP"
+        })
+
+      {:ok, mission} =
+        create_goal(%{
+          title: "Sidebar Mission",
+          goal_type: :mission,
+          status: "active",
+          project_id: project.id
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Mission-backed issue",
+          description: "Needs mission context on the issue page.",
+          status: :todo,
+          priority: :high,
+          project_id: project.id,
+          goal_id: mission.id
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ ~s(data-testid="issue-mission-context")
+      assert html =~ "Mission context"
+      assert html =~ "Sidebar Mission"
+      assert html =~ "Mission context is attached to this issue inside Sidebar Mission Project"
+      assert html =~ ~s(href="/goals/#{mission.id}")
+      assert html =~ ~s(href="/projects/#{project.id}")
+    end
+
+    test "shows floating mission context for unlinked issues" do
+      {:ok, issue} =
+        create_issue(%{
+          title: "Floating detail issue",
+          description: "No goal yet.",
+          status: :todo,
+          priority: :medium
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ ~s(data-testid="issue-mission-context")
+      assert html =~ "No goal linked"
+      assert html =~ "Floating"
+      assert html =~ "This work is not tied to a mission"
+      assert html =~ ~s(href="/goals")
     end
 
     test "shows focused runtime command for dispatchable issues in review mode" do
@@ -321,6 +838,9 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ ~s(id="issue-focused-runtime-command-#{issue.id}")
       assert html =~ ~s(phx-hook="CopyToClipboard")
       assert html =~ "Copy command"
+      assert html =~ ~s(data-testid="start-agent-disabled-reason")
+      assert html =~ "Inline agent start is disabled in review mode"
+      assert html =~ "Use the focused command above or open Operations to launch runtime."
     end
 
     test "prioritizes a dispatchable issue from the sidebar" do
@@ -430,13 +950,16 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, view, html} = live(conn(), "/issues/#{parent.id}")
 
       assert html =~ "Queue runnable sub-issues"
+      assert html =~ ~s(id="issue-delegated-dispatch-control")
+      assert html =~ "Dispatch delegated work"
+      assert html =~ "1 runnable of 3 open child issues will be prioritized."
       assert html =~ "Open sub-issues"
       assert html =~ "Open delegated queue"
       assert html =~ ~s(href="/operations?parent_issue_id=#{parent.id}#delegated-work-queue")
 
       html =
         view
-        |> element("#issue-digest-actions button", "Queue runnable sub-issues")
+        |> element("#issue-delegated-dispatch-control button", "Queue runnable sub-issues")
         |> render_click()
 
       assert html =~
@@ -503,6 +1026,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Queued 1 runnable sub-issue for focused dispatch."
       assert html =~ "No runnable sub-issues"
       assert html =~ "Open child work is already focused or blocked by active dependencies."
+      assert html =~ ~s(id="issue-delegated-dispatch-control")
 
       assert has_element?(
                view,
@@ -576,6 +1100,15 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Owner request loop"
       assert html =~ "Owner request captured"
       assert html =~ "Routed to CEO Preview in the CEO lane."
+      assert html =~ "CEO flow snapshot"
+      assert html =~ ~s(data-testid="issue-ceo-flow-snapshot")
+      assert html =~ "Launch needed"
+
+      assert html =~
+               "Start the first CEO turn and require an owner update, handoff, or blocker before delivery proceeds."
+
+      assert html =~ ~s(href="#issue-ceo-flow-checklist")
+      assert html =~ "Open CEO checklist"
       assert html =~ "Launch CEO turn"
       assert html =~ "Launch needed"
       assert html =~ "Waiting for owner signal"
@@ -591,7 +1124,11 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ ~s(href="/operations#runtime-services")
       assert html =~ "[owner_update]"
       assert html =~ "[handoff]"
+      assert html =~ "[blocked]"
       assert html =~ "2-5 scoped sub-issues"
+      assert html =~ "evidence required"
+      assert html =~ "verification required"
+      assert html =~ "definition of done"
       assert html =~ "No provider call"
       assert html =~ ~s(phx-hook="CopyToClipboard")
       assert html =~ "Copy CEO brief"
@@ -600,6 +1137,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "No description supplied."
       assert html =~ "Draft owner update"
       assert html =~ "Draft handoff"
+      assert html =~ "Draft blocker"
 
       html =
         view
@@ -617,6 +1155,15 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert html =~ "[handoff] What happened:"
       assert html =~ "Next owner:"
+
+      html =
+        view
+        |> element("#issue-ceo-launch-preview button[phx-value-template='blocked']")
+        |> render_click()
+
+      assert html =~ "[blocked] Cause:"
+      assert html =~ "Attempted fix:"
+      assert html =~ "Needs:"
     end
 
     test "shows CEO setup blocker on issue detail when no CEO agent exists" do
@@ -674,8 +1221,13 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
       assert html =~ "CEO flow"
+      assert html =~ "CEO flow snapshot"
       assert html =~ "CEO turn completed"
       assert html =~ "Owner update captured"
+
+      assert html =~
+               "Review the CEO owner update, then accept it, request revision, or keep delegated work moving."
+
       assert html =~ "Owner decision ready"
       assert html =~ "CEO outcome"
       assert html =~ "Owner update"
@@ -749,6 +1301,77 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "owner accepted the CEO verification update"
     end
 
+    test "requests CEO owner-verification revisions from the digest" do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "CEO Revision Verifier",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Revise owner verification",
+          description: "Owner should ask the CEO for one focused revision.",
+          status: :blocked,
+          priority: :high,
+          assignee_id: ceo.id,
+          assigned_role: "ceo"
+        })
+
+      Repo.insert!(%Run{
+        agent_id: ceo.id,
+        issue_id: issue.id,
+        company_id: issue.company_id,
+        status: "completed",
+        adapter: "openai_chat",
+        continuation_summary: "CEO owner update produced."
+      })
+
+      {:ok, _owner_update} =
+        Comments.create_comment(%{
+          body:
+            "[owner_update] What happened: CEO produced the first turn. Business status: not shipped. Current state: waiting on owner verification. Next decision: owner accepts or requests revision. Owner decision needed: verify.",
+          author_type: "agent",
+          author_id: ceo.id,
+          issue_id: issue.id
+        })
+
+      {:ok, _blocked} =
+        Comments.create_comment(%{
+          body:
+            "[blocked] Cause: Waiting for owner to verify the smoke test output. Current state: blocked on owner verification. Next decision: owner closes after verification.",
+          author_type: "agent",
+          author_id: ceo.id,
+          issue_id: issue.id
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Accept and close"
+      assert html =~ "Request revision"
+
+      html =
+        view
+        |> element("#issue-digest-actions button", "Request revision")
+        |> render_click()
+
+      assert html =~ "Owner revision requested"
+
+      reopened = Issues.get_issue!(issue.id)
+      assert reopened.status == :todo
+      assert reopened.assignee_id == ceo.id
+      assert Issues.dispatch_pinned?(reopened)
+      refute Issues.owner_verification_closeable?(reopened)
+
+      assert Enum.any?(
+               Comments.list_comments(issue.id),
+               &String.contains?(&1.body, "owner reopened the CEO verification update")
+             )
+    end
+
     test "shows CEO outcome card when the latest CEO run needs attention" do
       {:ok, ceo} =
         create_agent(%{
@@ -779,6 +1402,7 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
 
       assert html =~ "CEO flow"
+      assert html =~ "CEO flow checklist"
       assert html =~ "Runtime needs attention"
       assert html =~ "Owner signal blocked"
       assert html =~ "Decision blocked"
@@ -797,6 +1421,12 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ ~s(id="issue-ceo-outcome-focused-command-#{issue.id}")
       assert html =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue.id}"
       assert html =~ "Open Operations monitor"
+
+      assert has_element?(
+               view,
+               "#issue-ceo-flow-checklist button",
+               "Reopen and prioritize relaunch"
+             )
 
       html =
         view
@@ -844,7 +1474,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Launch needed"
       assert html =~ "Assigned, but runtime has not started yet."
       assert html =~ "Open the Operations launch checklist"
-      assert html =~ "first output must be `[owner_update]` or `[handoff]`"
+      assert html =~ "first output must be `[owner_update]`, `[handoff]`, or `[blocked]`"
       assert html =~ ~s(id="issue-digest-actions")
       assert html =~ ~s(phx-hook="CopyToClipboard")
       assert html =~ "Queue focused dispatch"
@@ -958,7 +1588,7 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "__missing_cympho_test_command__ was not found"
       assert html =~ "Execution mode"
       assert html =~ "Edit command"
-      assert html =~ "/agents/#{agent.id}#agent-process-command"
+      assert html =~ "/agents/#{agent.id}?tab=configuration#agent-process-command"
     end
 
     test "shows dispatch eligibility blocker for busy assigned agent on issue detail" do
@@ -987,6 +1617,132 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Dispatch eligibility"
       assert html =~ "Busy Runtime Agent is running"
       assert html =~ "return idle"
+    end
+
+    test "shows thin delivery brief warning on issue detail" do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Brief Check Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom", "repo_capable" => true}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Thin delivery brief issue",
+          description: "Do it.",
+          status: :todo,
+          priority: :high,
+          assignee_id: agent.id,
+          assigned_role: "engineer"
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ ~s(id="issue-description")
+      assert html =~ "Agent preflight"
+      assert html =~ "Needs config"
+      assert html =~ "Delivery brief"
+      assert html =~ "Too thin for delivery"
+      assert html =~ "Acceptance criteria"
+      assert html =~ "Edit issue brief"
+      assert html =~ "/issues/#{issue.id}#issue-description"
+      assert html =~ "Delivery brief repair"
+      assert html =~ "Copy scaffold"
+      assert html =~ "Use scaffold"
+
+      html =
+        view
+        |> element("#issue-delivery-brief-repair button", "Use scaffold")
+        |> render_click()
+
+      assert html =~ "Delivery brief scaffold loaded into the description editor."
+      assert html =~ ~s(phx-submit="save_description")
+      assert textarea_value(html, "textarea[name='description']") =~ "Delivery goal:"
+      assert textarea_value(html, "textarea[name='description']") =~ "Acceptance criteria:"
+      assert textarea_value(html, "textarea[name='description']") =~ "Evidence required:"
+      assert textarea_value(html, "textarea[name='description']") =~ "Verification required:"
+      assert textarea_value(html, "textarea[name='description']") =~ "Definition of done:"
+    end
+
+    test "shows delivery brief repair for an assigned repo agent without assigned role" do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Assigned Brief Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Build assigned engineer brief",
+          description: "Do it.",
+          status: :todo,
+          priority: :high,
+          assignee_id: agent.id
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Agent preflight"
+      assert html =~ "Delivery brief"
+      assert html =~ "Too thin for delivery"
+      assert html =~ "Delivery brief repair"
+      assert html =~ "Use scaffold"
+
+      html =
+        view
+        |> element("#issue-delivery-brief-repair button", "Use scaffold")
+        |> render_click()
+
+      assert html =~ "Delivery brief scaffold loaded into the description editor."
+      assert textarea_value(html, "textarea[name='description']") =~ "Acceptance criteria:"
+      assert textarea_value(html, "textarea[name='description']") =~ "Evidence required:"
+      assert textarea_value(html, "textarea[name='description']") =~ "Definition of done:"
+    end
+
+    test "shows auto-route readiness and delivery repair for unassigned repo issue" do
+      {:ok, _agent} =
+        create_agent(%{
+          name: "Auto Route Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom", "repo_capable" => true}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Fix code path from auto route",
+          description: "Do it.",
+          status: :todo,
+          priority: :high
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Auto-route readiness"
+      assert html =~ "Auto Route Engineer"
+      assert html =~ "routed by dispatcher"
+      assert html =~ "Delivery brief"
+      assert html =~ "Too thin for delivery"
+      assert html =~ "Delivery brief repair"
+      assert html =~ "Use scaffold"
+
+      html =
+        view
+        |> element("#issue-delivery-brief-repair button", "Use scaffold")
+        |> render_click()
+
+      assert html =~ "Delivery brief scaffold loaded into the description editor."
+      assert textarea_value(html, "textarea[name='description']") =~ "Acceptance criteria:"
+      assert textarea_value(html, "textarea[name='description']") =~ "Evidence required:"
+      assert textarea_value(html, "textarea[name='description']") =~ "Verification required:"
+      assert textarea_value(html, "textarea[name='description']") =~ "Definition of done:"
     end
 
     test "renders comments section", %{issue: issue} do
@@ -1134,6 +1890,13 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Current signal"
       assert html =~ "Runtime complete"
       assert html =~ "Runtime run ledger"
+      assert html =~ "Owner decision packet"
+      assert html =~ "Decision requested"
+      assert html =~ "Evidence to trust"
+      assert html =~ "Risk / gaps"
+      assert html =~ "Next owner"
+      assert html =~ "Runtime Agent"
+      assert html =~ "Follow 2 open delegated sub-issues"
       assert html =~ "Owner update"
       assert html =~ "Work narrative"
       assert html =~ "Owner request"
@@ -1224,6 +1987,208 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "10s"
     end
 
+    test "shows CEO flow checklist for CEO-owned issues", %{issue: issue} do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Checklist CEO",
+          role: :ceo,
+          status: :idle
+        })
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          title: "Improve onboarding activation",
+          description: """
+          Goal: improve onboarding activation.
+          Context: setup drops after project creation.
+          Constraints / risks: must not slow first project creation.
+          Definition of done: CEO creates a plan or handoff with acceptance criteria.
+          CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`): handoff if execution is needed.
+          Evidence to inspect after the run: scoped child issues and verification notes.
+          """,
+          status: :todo,
+          assigned_role: "ceo",
+          assignee_id: ceo.id
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "CEO flow checklist"
+      assert html =~ ~s(data-testid="issue-ceo-flow-checklist")
+      assert html =~ "CEO launch packet"
+      assert html =~ ~s(data-testid="issue-ceo-launch-packet")
+      assert html =~ "Ready to launch"
+
+      assert html =~
+               "Queue focus if needed, run the focused command, then require the CEO to leave `[owner_update]`, `[handoff]`, or `[blocked]`."
+
+      assert html =~ "Owner brief readiness"
+      assert html =~ "Ready for CEO launch (6/6 signals)"
+      assert html =~ "First-turn contract"
+      assert html =~ "Focused command"
+      assert html =~ "Copy packet"
+      assert html =~ "Copy command"
+      refute html =~ "Owner brief repair"
+      assert html =~ "Owner brief readiness: Ready for CEO launch (6/6 signals)"
+      assert html =~ "First-turn contract: Return `[owner_update]`, `[handoff]`, or `[blocked]`"
+      assert html =~ "Observe after launch"
+      assert html =~ "Runtime result"
+      assert html =~ "Watch for a completed or failed CEO run before judging the flow."
+      assert html =~ "CEO signal"
+      assert html =~ "First useful output must be `[owner_update]`, `[handoff]`, or `[blocked]`."
+      assert html =~ "Delegated work"
+      assert html =~ "Owner decision"
+      assert html =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue.id}"
+      assert html =~ "Issue defined"
+      assert html =~ "Brief readiness"
+      assert html =~ "6/6 signals"
+      assert html =~ "All launch signals are present."
+      assert html =~ "CEO assigned"
+      assert html =~ "Checklist CEO"
+      assert html =~ "Runtime launch"
+      assert html =~ "Launch needed"
+      assert html =~ "No CEO runtime has started yet."
+      assert html =~ "CEO outcome"
+      assert html =~ "Awaiting signal"
+
+      assert html =~
+               "First useful CEO result should be `[owner_update]`, `[handoff]`, or `[blocked]`."
+
+      assert html =~ "Owner signoff"
+      assert html =~ "Owner signoff starts after a CEO owner update is posted."
+      assert html =~ "Queue focused CEO run"
+
+      command_attrs =
+        element_attrs(html, "#issue-ceo-launch-packet button[data-copy-label='Copy command']")
+
+      assert command_attrs["data-copy-text"] =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue.id}"
+      assert command_attrs["data-copy-text"] =~ "mise exec -- mix phx.server"
+
+      html =
+        view
+        |> element("#issue-ceo-flow-checklist button", "Queue focused CEO run")
+        |> render_click()
+
+      assert html =~
+               "Issue prioritized for next dispatch. Copy the focused command from the digest or sidebar and start runtime."
+
+      assert html =~ "Focus queued"
+      assert html =~ "Focus is queued. Start the focused runtime command below"
+      assert html =~ "then watch for `[owner_update]`, `[handoff]`, or `[blocked]`"
+
+      updated = Issues.get_issue!(issue.id)
+      assert Issues.dispatch_pinned?(updated)
+    end
+
+    test "CEO flow checklist holds thin briefs before runtime launch", %{issue: issue} do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Thin Brief CEO",
+          role: :ceo,
+          status: :idle
+        })
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          title: "Short",
+          description: "Do it.",
+          status: :todo,
+          assigned_role: "ceo",
+          assignee_id: ceo.id
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "CEO flow checklist"
+      assert html =~ "CEO launch packet"
+      assert html =~ "Needs operator check"
+      assert html =~ "Too thin for autonomy (0/6 signals)"
+      assert html =~ "Owner brief readiness: Too thin for autonomy (0/6 signals)"
+      assert html =~ "Complete the owner brief before launching CEO runtime"
+      assert html =~ "Observe after launch"
+      assert html =~ "Brief repair"
+      assert html =~ "Launch gate"
+      assert html =~ "Needs attention"
+      assert html =~ "Brief readiness"
+      assert html =~ "0/6 signals"
+      assert html =~ "Outcome: Name the owner-visible result"
+      assert html =~ "Complete the owner brief signals before launching CEO runtime."
+      assert html =~ "Owner brief repair"
+      assert html =~ "Copy repair scaffold"
+      assert html =~ "Use scaffold"
+      assert html =~ "Brief repair scaffold:"
+      assert html =~ "Constraints / risks:"
+      assert html =~ "Focused command: hidden until the owner brief is decision-grade."
+      assert has_element?(view, "#issue-ceo-launch-packet button", "Copy packet")
+      assert has_element?(view, "#issue-ceo-brief-repair button", "Use scaffold")
+      refute has_element?(view, "#issue-ceo-launch-packet button", "Copy command")
+      refute has_element?(view, "#issue-ceo-launch-packet code")
+      refute has_element?(view, "#issue-ceo-flow-checklist button", "Queue focused CEO run")
+
+      html =
+        view
+        |> element("#issue-ceo-brief-repair button", "Use scaffold")
+        |> render_click()
+
+      assert html =~ ~s(phx-submit="save_description")
+      assert html =~ "Repair scaffold loaded into the description editor."
+      assert html =~ "Goal: &lt;the business outcome the owner wants&gt;"
+
+      assert html =~
+               "Constraints / risks: &lt;deadline, budget, known risk, or thing the CEO must not do&gt;"
+    end
+
+    test "CEO flow checklist recognizes owner update signoff state", %{issue: issue} do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Signoff CEO",
+          role: :ceo,
+          status: :idle
+        })
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          status: :blocked,
+          assigned_role: "ceo",
+          assignee_id: ceo.id
+        })
+
+      Repo.insert!(%Run{
+        agent_id: ceo.id,
+        issue_id: issue.id,
+        company_id: issue.company_id,
+        status: "completed",
+        adapter: "claude_code",
+        continuation_summary: "CEO owner update produced."
+      })
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body:
+            "[owner_update] What happened: CEO verified the plan. Business status: not shipped. Current state: waiting on owner acceptance. Next decision: owner accepts or requests revision. Owner decision needed: accept.",
+          author_type: "agent",
+          author_id: ceo.id,
+          issue_id: issue.id
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "CEO flow checklist"
+      assert html =~ "CEO flow snapshot"
+      assert html =~ "Owner update captured"
+      assert html =~ "Runtime launch"
+      assert html =~ "Completed"
+      assert html =~ "CEO outcome"
+      assert html =~ "Owner signal"
+      assert html =~ "Owner signoff"
+      assert html =~ "Owner review"
+
+      assert html =~
+               "CEO update exists and the issue is blocked for owner acceptance or revision."
+
+      assert html =~ "Owner should accept the CEO update or request revision."
+    end
+
     test "shows pending agent wake in the handoff lane", %{issue: issue} do
       {:ok, ceo} =
         create_agent(%{
@@ -1266,6 +2231,56 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Sub-issues"
       assert html =~ "Child execution task"
       assert html =~ "Engineer-owned acceptance criteria"
+    end
+
+    test "shows delegated child execution contract", %{issue: issue} do
+      {:ok, _child} =
+        create_issue(%{
+          title: "Implement invite handoff",
+          description: """
+          Build the invite handoff path.
+
+          ## Execution brief
+
+          Parent issue: #{issue.identifier || "CYM-1"} - #{issue.title}
+          Target role: Engineer
+
+          **Acceptance criteria**
+          - User can complete invite flow
+          - Audit trail records inviter
+
+          **Dependencies**
+          - (none)
+
+          **Evidence required**
+          - PR and work product link
+
+          **Verification required**
+          - mix test test/cympho_web/live/invite_flow_test.exs
+
+          **Definition of done**
+          - CTO can review from parent issue
+          """,
+          status: :todo,
+          priority: :medium,
+          parent_id: issue.id,
+          monitor_state: %{"estimated_minutes" => 45}
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Implement invite handoff"
+      assert html =~ "Build the invite handoff path."
+      assert html =~ "Execution contract"
+      assert html =~ "~45m"
+      assert html =~ "Acceptance"
+      assert html =~ "User can complete invite flow +1"
+      assert html =~ "Evidence"
+      assert html =~ "PR and work product link"
+      assert html =~ "Verification"
+      assert html =~ "mix test test/cympho_web/live/invite_flow_test.exs"
+      assert html =~ "Done"
+      assert html =~ "CTO can review from parent issue"
     end
 
     test "renders work products in the activity timeline", %{issue: issue} do
@@ -1708,7 +2723,7 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _delivery_comment} =
         Comments.create_comment(%{
           body:
-            "[delivery] What happened: delivered the work. Files changed: review evidence. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
+            "[delivery] What happened: delivered the work. Files changed: review evidence. Evidence produced: review evidence artifact and completed runtime. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the review evidence artifact and completed runtime.",
           author_type: "agent",
           author_id: agent.id,
           issue_id: issue.id
@@ -1747,7 +2762,7 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _review_comment} =
         Comments.create_comment(%{
           body:
-            "[review] Verdict: accepted. What happened: evidence accepted. Verification: passed. Gaps: none. Follow-up issues: none. Next decision: close.",
+            "[review] Verdict: accepted. What happened: evidence accepted. Evidence inspected: delivery note, run, and work product. Verification: passed. Gaps: none. Follow-up issues: none. Next decision: close. Restart packet: CEO should inspect the accepted review, run, and work product before closing.",
           author_type: "agent",
           author_id: cto.id,
           issue_id: issue.id
@@ -1781,7 +2796,7 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _comment} =
         Comments.create_comment(%{
           body:
-            "[delivery] What happened: delivered reviewable work. Files changed: reviewable evidence. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
+            "[delivery] What happened: delivered reviewable work. Files changed: reviewable evidence. Evidence produced: reviewable evidence artifact and completed runtime. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the reviewable evidence artifact and completed runtime.",
           author_type: "agent",
           author_id: agent.id,
           issue_id: issue.id
@@ -1865,7 +2880,7 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _comment} =
         Comments.create_comment(%{
           body:
-            "[delivery] What happened: delivered reviewable work. Files changed: reviewable evidence. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
+            "[delivery] What happened: delivered reviewable work. Files changed: reviewable evidence. Evidence produced: reviewable evidence artifact and completed runtime. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the reviewable evidence artifact and completed runtime.",
           author_type: "agent",
           author_id: agent.id,
           issue_id: issue.id
@@ -1984,6 +2999,81 @@ defmodule CymphoWeb.IssueLiveTest do
   end
 
   describe "Show - Inline Description Edit" do
+    test "opens description editor from edit query param", %{issue: issue} do
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}?edit=description")
+
+      assert html =~ ~s(phx-submit="save_description")
+      assert html =~ "Test description for the issue"
+      refute html =~ ~s(phx-click="start_editing" phx-value-field="description")
+    end
+
+    test "opens owner brief repair scaffold from query param", %{issue: issue} do
+      {:ok, issue} = Issues.update_issue(issue, %{title: "Improve onboarding quality"})
+
+      {:ok, _view, html} =
+        live(conn(), "/issues/#{issue.id}?edit=description&repair=owner_brief")
+
+      assert html =~ ~s(phx-submit="save_description")
+
+      description = textarea_value(html, "textarea[name='description']")
+      assert description =~ "Goal: Improve onboarding quality"
+      assert description =~ "Definition of done:"
+      assert description =~ "CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`):"
+      assert description =~ "Missing signals:"
+      refute description =~ "Test description for the issue"
+    end
+
+    test "returns to operations checklist after saving owner brief repair", %{issue: issue} do
+      return_to = "/operations#runtime-launch-checklist"
+      encoded_return_to = URI.encode_www_form(return_to)
+
+      {:ok, view, _html} =
+        live(
+          conn(),
+          "/issues/#{issue.id}?edit=description&repair=owner_brief&return_to=#{encoded_return_to}"
+        )
+
+      description = """
+      Goal: Improve onboarding quality for trial users.
+      Context: Activation drops when setup has no clear next step.
+      Risk/constraint: Keep the launch cheap and observable before building more automation.
+      Definition of done: CEO hands off a scoped onboarding fix with acceptance criteria.
+      CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`): `[handoff]` to CTO with split tasks.
+      Evidence: Use onboarding completion, first issue created, and runtime launch notes.
+      """
+
+      assert {:error, {:live_redirect, %{to: ^return_to}}} =
+               view
+               |> form("form[phx-submit='save_description']", %{"description" => description})
+               |> render_submit()
+
+      assert {:ok, updated} = Issues.get_issue(issue.id)
+      assert updated.description == description
+    end
+
+    test "ignores unsafe owner brief repair return paths", %{issue: issue} do
+      encoded_return_to = URI.encode_www_form("https://evil.example/issues")
+
+      {:ok, view, _html} =
+        live(
+          conn(),
+          "/issues/#{issue.id}?edit=description&repair=owner_brief&return_to=#{encoded_return_to}"
+        )
+
+      html =
+        view
+        |> form("form[phx-submit='save_description']", %{
+          "description" => "Updated description without unsafe redirect"
+        })
+        |> render_submit()
+
+      assert is_binary(html)
+      assert html =~ "Description updated"
+
+      assert {:ok, updated} = Issues.get_issue(issue.id)
+      assert updated.description == "Updated description without unsafe redirect"
+    end
+
     test "enters edit mode and saves description", %{issue: issue} do
       {:ok, view, _html} = live(conn(), "/issues/#{issue.id}")
 
@@ -2087,7 +3177,7 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _comment} =
         Comments.create_comment(%{
           body:
-            "[delivery] What happened: delivered the reviewable work. Files changed: review evidence. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
+            "[delivery] What happened: delivered the reviewable work. Files changed: review evidence. Evidence produced: review evidence artifact and completed runtime. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the review evidence artifact and completed runtime.",
           author_type: "agent",
           author_id: agent.id,
           issue_id: issue.id
@@ -2142,7 +3232,7 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, _comment} =
         Comments.create_comment(%{
           body:
-            "[delivery] What happened: delivered the work. Files changed: closure evidence. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
+            "[delivery] What happened: delivered the work. Files changed: closure evidence. Evidence produced: closure evidence artifact and completed runtime. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the closure evidence artifact and completed runtime.",
           author_type: "agent",
           author_id: agent.id,
           issue_id: issue.id

@@ -47,20 +47,49 @@ defmodule CymphoWeb.CostLive.Index do
   end
 
   defp assign_cost_data(socket, company_id, days) do
+    summary = Costs.summary(company_id, days)
+    by_agent = Costs.by_agent(company_id, days)
+    by_issue = Costs.by_issue(company_id, days)
+    by_model = Costs.by_model(company_id, days)
+    by_provider = Costs.by_provider(company_id, days)
+    daily_costs = Costs.daily_costs(company_id, days)
+    by_goal = Costs.by_goal(company_id, days)
+    by_mission = Costs.by_mission(company_id, days)
+    active_budgets = Costs.active_budgets(company_id)
+    approaching_budgets = Costs.approaching_threshold_budgets(company_id)
+    exceeded_budgets = Costs.exceeded_budgets(company_id)
+    spend_posture = Costs.spend_posture(company_id, summary.total_cost)
+
     socket
-    |> assign(:summary, Costs.summary(company_id, days))
-    |> assign(:by_agent, Costs.by_agent(company_id, days))
-    |> assign(:by_issue, Costs.by_issue(company_id, days))
-    |> assign(:by_model, Costs.by_model(company_id, days))
-    |> assign(:by_provider, Costs.by_provider(company_id, days))
-    |> assign(:daily_costs, Costs.daily_costs(company_id, days))
-    |> assign(:by_goal, Costs.by_goal(company_id, days))
-    |> assign(:by_mission, Costs.by_mission(company_id, days))
+    |> assign(:summary, summary)
+    |> assign(:by_agent, by_agent)
+    |> assign(:by_issue, by_issue)
+    |> assign(:by_model, by_model)
+    |> assign(:by_provider, by_provider)
+    |> assign(:daily_costs, daily_costs)
+    |> assign(:by_goal, by_goal)
+    |> assign(:by_mission, by_mission)
     |> assign(:sparkline_7d, Costs.sparkline(company_id, 7))
     |> assign(:sparkline_30d, Costs.sparkline(company_id, 30))
-    |> assign(:active_budgets, Costs.active_budgets(company_id))
-    |> assign(:approaching_budgets, Costs.approaching_threshold_budgets(company_id))
-    |> assign(:exceeded_budgets, Costs.exceeded_budgets(company_id))
+    |> assign(:active_budgets, active_budgets)
+    |> assign(:approaching_budgets, approaching_budgets)
+    |> assign(:exceeded_budgets, exceeded_budgets)
+    |> assign(:spend_posture, spend_posture)
+    |> assign(:spend_runway, build_spend_runway(summary, spend_posture, days))
+    |> assign(
+      :cost_command,
+      build_cost_command(%{
+        days: days,
+        summary: summary,
+        spend_posture: spend_posture,
+        by_agent: by_agent,
+        by_issue: by_issue,
+        by_provider: by_provider,
+        active_budgets: active_budgets,
+        approaching_budgets: approaching_budgets,
+        exceeded_budgets: exceeded_budgets
+      })
+    )
   end
 
   defp parse_days(days) when is_binary(days) do
@@ -90,9 +119,17 @@ defmodule CymphoWeb.CostLive.Index do
 
   def format_tokens(_), do: "0"
 
+  def budget_spent_percentage(summary) do
+    summary.budget_spent
+    |> decimal_or_zero()
+    |> Decimal.div(decimal_or_zero(summary.budget_limit))
+    |> Decimal.mult(100)
+    |> format_percentage()
+  end
+
   def budget_utilization_pct(budget) do
     pct = Budget.utilization_percentage(budget)
-    Decimal.to_string(pct, :normal) <> "%"
+    format_percentage(pct)
   end
 
   def budget_progress_color(budget) do
@@ -173,7 +210,7 @@ defmodule CymphoWeb.CostLive.Index do
       costs
       |> Enum.with_index()
       |> Enum.map(fn {cost, i} ->
-        x = if length(costs) > 1, do: i / (length(costs) - 1) * 100, else: 50
+        x = if length(costs) > 1, do: i / (length(costs) - 1) * 100.0, else: 50.0
 
         y =
           if Decimal.gt?(max_val, Decimal.new("0")) do
@@ -192,6 +229,410 @@ defmodule CymphoWeb.CostLive.Index do
   def goal_type_label(:initiative), do: "Initiative"
   def goal_type_label(:milestone), do: "Milestone"
   def goal_type_label(_), do: "Goal"
+
+  defp build_cost_command(%{
+         spend_posture: %{budget_status: :over_budget} = posture,
+         exceeded_budgets: exceeded_budgets
+       }) do
+    count = max(length(exceeded_budgets), posture.budget_incident_count)
+
+    %{
+      tone: :critical,
+      badge: "Hard stop risk",
+      title: "Freeze spend until budget is resolved",
+      summary:
+        "#{pluralize(count, "budget control")} need attention before more autonomous runtime is launched.",
+      action_label: "Review budgets",
+      action_path: "/budgets",
+      driver: budget_driver(exceeded_budgets, posture),
+      metrics: cost_command_metrics(posture)
+    }
+  end
+
+  defp build_cost_command(%{
+         spend_posture: %{budget_status: :watch} = posture,
+         by_agent: by_agent,
+         by_issue: by_issue,
+         by_provider: by_provider,
+         approaching_budgets: approaching_budgets
+       }) do
+    %{
+      tone: :warning,
+      badge: "Spend watch",
+      title: "Triage spend before the next run",
+      summary:
+        "Spend is near the configured warning threshold. Check the largest driver before approving more runtime.",
+      action_label: "Inspect drivers",
+      action_path: "#top-cost-drivers",
+      driver: top_cost_driver(by_agent, by_issue, by_provider, approaching_budgets),
+      metrics: cost_command_metrics(posture)
+    }
+  end
+
+  defp build_cost_command(%{
+         spend_posture: %{budget_status: :unbudgeted} = posture,
+         summary: summary
+       }) do
+    has_spend? = Decimal.gt?(decimal_or_zero(summary.total_cost), Decimal.new("0"))
+
+    %{
+      tone: :attention,
+      badge: "Unbudgeted spend",
+      title:
+        if(has_spend?,
+          do: "Add a company budget before scaling agents",
+          else: "Set the first spend guardrail"
+        ),
+      summary:
+        if(has_spend?,
+          do:
+            "Agent spend exists without a company budget envelope. Add a cap before expanding autonomous runs.",
+          else:
+            "No spend has landed yet, but a budget cap makes launch decisions safer once agents start running."
+        ),
+      action_label: "Create budget",
+      action_path: "/budgets/new",
+      driver:
+        if(has_spend?, do: "Current period spend: #{format_cost(summary.total_cost)}", else: nil),
+      metrics: cost_command_metrics(posture)
+    }
+  end
+
+  defp build_cost_command(%{spend_posture: %{budget_status: :scoped_controls} = posture}) do
+    %{
+      tone: :attention,
+      badge: "Scoped controls",
+      title: "Add a company budget envelope",
+      summary:
+        "#{pluralize(posture.budget_control_count, "scoped control")} exist, but there is no comparable company-wide spend limit.",
+      action_label: "Create company budget",
+      action_path: "/budgets/new",
+      driver: nil,
+      metrics: cost_command_metrics(posture)
+    }
+  end
+
+  defp build_cost_command(%{
+         spend_posture: posture,
+         by_agent: by_agent,
+         by_issue: by_issue,
+         by_provider: by_provider
+       }) do
+    %{
+      tone: :ready,
+      badge: "Spend under control",
+      title: "Cost posture is clear for the next run",
+      summary: "Spend is inside the active budget envelope for this period.",
+      action_label: "Review budgets",
+      action_path: "#active-budgets",
+      driver: top_cost_driver(by_agent, by_issue, by_provider, []),
+      metrics: cost_command_metrics(posture)
+    }
+  end
+
+  defp budget_driver([budget | _], _posture),
+    do: "#{budget.name}: #{budget_utilization_pct(budget)} used"
+
+  defp budget_driver([], %{budget_incident_count: count}) when count > 0,
+    do: "#{pluralize(count, "unresolved budget incident")}"
+
+  defp budget_driver([], _posture), do: nil
+
+  defp top_cost_driver(
+         [%{agent: %{name: name}, total_cost: cost} | _],
+         _issues,
+         _providers,
+         _budgets
+       ) do
+    "Top agent: #{name} · #{format_cost(cost)}"
+  end
+
+  defp top_cost_driver(
+         _agents,
+         [%{issue: %{title: title}, total_cost: cost} | _],
+         _providers,
+         _budgets
+       ) do
+    "Top issue: #{title} · #{format_cost(cost)}"
+  end
+
+  defp top_cost_driver(_agents, _issues, [%{provider: provider, total_cost: cost} | _], _budgets) do
+    "Top provider: #{provider} · #{format_cost(cost)}"
+  end
+
+  defp top_cost_driver(_agents, _issues, _providers, [budget | _]) do
+    "Closest budget: #{budget.name} · #{budget_utilization_pct(budget)} used"
+  end
+
+  defp top_cost_driver(_agents, _issues, _providers, _budgets), do: nil
+
+  defp cost_command_metrics(posture) do
+    [
+      %{label: "Spend", value: format_cost(posture.budget_spend)},
+      %{label: "Limit", value: posture_limit(posture)},
+      %{label: "Used", value: posture_used(posture)},
+      %{label: "Incidents", value: to_string(posture.budget_incident_count)}
+    ]
+  end
+
+  defp posture_limit(%{budget_limit: nil}), do: "Not set"
+  defp posture_limit(%{budget_limit: limit}), do: format_cost(limit)
+
+  defp posture_used(%{budget_used_percent: nil}), do: "N/A"
+  defp posture_used(%{budget_used_percent: used}), do: format_percentage(used)
+
+  defp cost_command_badge_class(:critical),
+    do: "border-red-500/25 bg-red-500/10 text-red-300"
+
+  defp cost_command_badge_class(:warning),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
+
+  defp cost_command_badge_class(:attention),
+    do: "border-brand/25 bg-brand/10 text-brand"
+
+  defp cost_command_badge_class(:ready),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp cost_command_action_class(:critical),
+    do: "border-red-500/25 bg-red-500/10 text-red-200 hover:bg-red-500/15"
+
+  defp cost_command_action_class(:warning),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15"
+
+  defp cost_command_action_class(:attention),
+    do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
+
+  defp cost_command_action_class(:ready),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
+
+  defp build_spend_runway(summary, %{budget_status: :over_budget} = posture, days) do
+    %{
+      tone: :critical,
+      label: "Budget exhausted",
+      headline: "Pause autonomous launches",
+      summary:
+        "Current period spend has reached or exceeded the active budget. Resolve the budget or lower spend before launching more agents.",
+      metrics: spend_runway_metrics(summary, posture, days, "0 days"),
+      action_label: "Open budgets",
+      action_path: "/budgets"
+    }
+  end
+
+  defp build_spend_runway(summary, %{budget_comparable: false} = posture, days) do
+    %{
+      tone: :attention,
+      label: "No company runway",
+      headline: "Set a comparable budget",
+      summary:
+        "Cympho can see spend, but it cannot calculate runway until a company-wide budget limit exists.",
+      metrics: spend_runway_metrics(summary, posture, days, "N/A"),
+      action_label: "Create budget",
+      action_path: "/budgets/new"
+    }
+  end
+
+  defp build_spend_runway(summary, posture, days) do
+    daily_burn = average_daily_burn(summary.total_cost, days)
+    remaining = decimal_or_zero(posture.budget_remaining)
+    runway_label = runway_label(remaining, daily_burn)
+
+    tone =
+      cond do
+        Decimal.eq?(daily_burn, Decimal.new("0")) ->
+          :ready
+
+        Decimal.lt?(remaining, Decimal.new("0")) or Decimal.eq?(remaining, Decimal.new("0")) ->
+          :critical
+
+        Decimal.lt?(remaining, Decimal.mult(daily_burn, Decimal.new("7"))) ->
+          :warning
+
+        true ->
+          :ready
+      end
+
+    %{
+      tone: tone,
+      label: spend_runway_label(tone),
+      headline: spend_runway_headline(tone, daily_burn),
+      summary: spend_runway_summary(tone, daily_burn),
+      metrics: spend_runway_metrics(summary, posture, days, runway_label),
+      action_label: spend_runway_action_label(tone),
+      action_path: spend_runway_action_path(tone)
+    }
+  end
+
+  defp average_daily_burn(total_cost, days) when is_integer(days) and days > 0 do
+    total_cost
+    |> decimal_or_zero()
+    |> Decimal.div(Decimal.new(days))
+  end
+
+  defp average_daily_burn(_total_cost, _days), do: Decimal.new("0")
+
+  defp runway_label(remaining, daily_burn) do
+    cond do
+      Decimal.eq?(daily_burn, Decimal.new("0")) ->
+        "No burn"
+
+      Decimal.lt?(remaining, Decimal.new("0")) or Decimal.eq?(remaining, Decimal.new("0")) ->
+        "0 days"
+
+      true ->
+        days =
+          remaining
+          |> Decimal.div(daily_burn)
+          |> Decimal.round(1)
+          |> Decimal.to_string(:normal)
+
+        "#{days} days"
+    end
+  end
+
+  defp spend_runway_label(:critical), do: "Runway exhausted"
+  defp spend_runway_label(:warning), do: "Short runway"
+  defp spend_runway_label(_), do: "Runway healthy"
+
+  defp spend_runway_headline(:critical, _daily_burn), do: "Stop or raise the budget"
+  defp spend_runway_headline(:warning, _daily_burn), do: "Triage spend before the next launch"
+
+  defp spend_runway_headline(_tone, daily_burn) do
+    if Decimal.eq?(daily_burn, Decimal.new("0")) do
+      "No burn in this window"
+    else
+      "Budget runway supports the next run"
+    end
+  end
+
+  defp spend_runway_summary(:critical, _daily_burn) do
+    "Remaining budget is at or below zero. Pause broad runtime until the owner resolves the cap."
+  end
+
+  defp spend_runway_summary(:warning, _daily_burn) do
+    "At the current burn rate, budget runway is under a week. Inspect the largest driver before launching more work."
+  end
+
+  defp spend_runway_summary(_tone, daily_burn) do
+    if Decimal.eq?(daily_burn, Decimal.new("0")) do
+      "No spend has landed in the selected window, so runway is not being consumed yet."
+    else
+      "Current burn rate leaves enough runway for routine autonomous work."
+    end
+  end
+
+  defp spend_runway_metrics(summary, posture, days, runway_label) do
+    [
+      %{label: "Runway", value: runway_label},
+      %{label: "Daily burn", value: format_cost(average_daily_burn(summary.total_cost, days))},
+      %{label: "Remaining", value: posture_remaining(posture)},
+      %{label: "Window", value: "#{days}d"}
+    ]
+  end
+
+  defp posture_remaining(%{budget_remaining: nil}), do: "Not set"
+  defp posture_remaining(%{budget_remaining: remaining}), do: format_cost(remaining)
+
+  defp spend_runway_action_label(:critical), do: "Open budgets"
+  defp spend_runway_action_label(:warning), do: "Inspect drivers"
+  defp spend_runway_action_label(_), do: "Review budgets"
+
+  defp spend_runway_action_path(:warning), do: "#top-cost-drivers"
+  defp spend_runway_action_path(_), do: "#active-budgets"
+
+  defp spend_runway_badge_class(:critical),
+    do: "border-red-500/25 bg-red-500/10 text-red-300"
+
+  defp spend_runway_badge_class(:warning),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
+
+  defp spend_runway_badge_class(:attention),
+    do: "border-brand/25 bg-brand/10 text-brand"
+
+  defp spend_runway_badge_class(:ready),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp spend_runway_action_class(:critical),
+    do: "border-red-500/25 bg-red-500/10 text-red-200 hover:bg-red-500/15"
+
+  defp spend_runway_action_class(:warning),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15"
+
+  defp spend_runway_action_class(:attention),
+    do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
+
+  defp spend_runway_action_class(:ready),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
+
+  defp cost_empty_state(assigns) do
+    assigns =
+      assigns
+      |> assign_new(:icon, fn -> "hero-chart-bar-square-mini" end)
+      |> assign_new(:primary_label, fn -> nil end)
+      |> assign_new(:primary_path, fn -> nil end)
+      |> assign_new(:secondary_label, fn -> nil end)
+      |> assign_new(:secondary_path, fn -> nil end)
+
+    ~H"""
+    <div
+      data-testid={@testid}
+      class="rounded-lg border border-dashed border-border bg-panel/50 px-4 py-7 text-center"
+    >
+      <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-subtle text-text-tertiary">
+        <.icon name={@icon} class="h-5 w-5" />
+      </div>
+      <h3 class="text-sm font-590 text-text-primary">{@title}</h3>
+      <p class="mx-auto mt-1 max-w-md text-sm leading-5 text-text-tertiary">
+        {@detail}
+      </p>
+      <div :if={@primary_label || @secondary_label} class="mt-5 flex flex-wrap justify-center gap-2">
+        <.app_link
+          :if={@primary_label && @primary_path}
+          navigate={@primary_path}
+          class={cost_empty_action_class(:primary)}
+        >
+          {@primary_label}
+        </.app_link>
+        <.app_link
+          :if={@secondary_label && @secondary_path}
+          navigate={@secondary_path}
+          class={cost_empty_action_class(:neutral)}
+        >
+          {@secondary_label}
+        </.app_link>
+      </div>
+    </div>
+    """
+  end
+
+  defp cost_empty_action_class(:primary) do
+    "inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-510 text-white transition-colors hover:bg-primary-hover"
+  end
+
+  defp cost_empty_action_class(_tone) do
+    "inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+  end
+
+  defp format_percentage(percentage) do
+    percentage
+    |> decimal_or_zero()
+    |> Decimal.round(1)
+    |> Decimal.to_string(:normal)
+    |> trim_decimal_fraction()
+    |> Kernel.<>("%")
+  end
+
+  defp trim_decimal_fraction(value) do
+    if String.contains?(value, ".") do
+      value
+      |> String.trim_trailing("0")
+      |> String.trim_trailing(".")
+    else
+      value
+    end
+  end
+
+  defp pluralize(1, singular), do: "1 #{singular}"
+  defp pluralize(count, singular), do: "#{count} #{singular}s"
 
   defp decimal_or_zero(%Decimal{} = value), do: value
   defp decimal_or_zero(value) when is_integer(value), do: Decimal.new(value)

@@ -33,11 +33,26 @@ defmodule Cympho.RuntimeProfiles do
       description: "Allow more local throughput when RAM and provider quotas are comfortable."
     },
     %{
+      id: "qwen_dashscope_flash",
+      name: "Qwen DashScope Flash",
+      profile_id: "openai-chat-qwen-dashscope-flash",
+      max_concurrent_jobs: 1,
+      description: "Use low-cost DashScope Qwen flash chat completions for smoke runs."
+    },
+    %{
       id: "qwen_dashscope",
       name: "Qwen DashScope",
       profile_id: "openai-chat-qwen-dashscope",
       max_concurrent_jobs: 1,
-      description: "Use DashScope compatible-mode chat completions with one safe gateway slot."
+      description:
+        "Use stronger DashScope compatible-mode chat completions with one safe gateway slot."
+    },
+    %{
+      id: "qwen_dashscope_intl",
+      name: "Qwen DashScope Intl",
+      profile_id: "openai-chat-qwen-dashscope-intl",
+      max_concurrent_jobs: 1,
+      description: "Use DashScope International compatible-mode chat completions."
     },
     %{
       id: "provider_test",
@@ -96,14 +111,40 @@ defmodule Cympho.RuntimeProfiles do
         }
       },
       %{
+        id: "openai-chat-qwen-dashscope-flash",
+        name: "OpenAI Chat Qwen DashScope Flash",
+        adapter: "openai_chat",
+        posture: "Low-cost gateway",
+        description:
+          "Calls DashScope compatible-mode chat completions directly with qwen3.6-flash for cheap CEO smoke tests. Add DASHSCOPE_API_KEY in Secrets before execution; OPENAI_API_KEY and ANTHROPIC_API_KEY remain accepted aliases for compatible gateways.",
+        config: %{
+          "endpoint" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "model" => "qwen3.6-flash"
+        },
+        runtime_config: %{}
+      },
+      %{
         id: "openai-chat-qwen-dashscope",
         name: "OpenAI Chat Qwen DashScope",
         adapter: "openai_chat",
         posture: "Gateway",
         description:
-          "Calls DashScope compatible-mode chat completions directly. Add OPENAI_API_KEY, DASHSCOPE_API_KEY, or ANTHROPIC_API_KEY in Secrets before execution.",
+          "Calls DashScope compatible-mode chat completions directly with qwen3.7-plus for stronger CEO planning. Add DASHSCOPE_API_KEY in Secrets before execution; OPENAI_API_KEY and ANTHROPIC_API_KEY remain accepted aliases for compatible gateways.",
         config: %{
           "endpoint" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "model" => "qwen3.7-plus"
+        },
+        runtime_config: %{}
+      },
+      %{
+        id: "openai-chat-qwen-dashscope-intl",
+        name: "OpenAI Chat Qwen DashScope Intl",
+        adapter: "openai_chat",
+        posture: "Gateway",
+        description:
+          "Calls DashScope International compatible-mode chat completions directly. Add DASHSCOPE_API_KEY or OPENAI_API_KEY in Secrets before execution.",
+        config: %{
+          "endpoint" => "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
           "model" => "qwen3.7-plus"
         },
         runtime_config: %{}
@@ -166,11 +207,11 @@ defmodule Cympho.RuntimeProfiles do
         name: "Process Codex CLI",
         adapter: "process",
         posture: "Local process",
-        description: "Runs Codex as a generic process adapter with model forwarding.",
+        description: "Runs Codex as a generic process adapter with lower-cost model forwarding.",
         config:
           Map.merge(Cympho.Adapters.RuntimeOptions.process_defaults("codex"), %{
             "process_preset" => "codex",
-            "model" => "gpt-5.5"
+            "model" => "gpt-5.4-mini"
           }),
         runtime_config: %{}
       }
@@ -185,6 +226,17 @@ defmodule Cympho.RuntimeProfiles do
 
   def quick_preset(id) when is_binary(id), do: Enum.find(@quick_presets, &(&1.id == id))
   def quick_preset(_), do: nil
+
+  def max_concurrent_jobs_for_profile(profile_id, fallback \\ nil) do
+    profile_id = normalize_id(profile_id)
+
+    @quick_presets
+    |> Enum.find(&(&1.profile_id == profile_id))
+    |> case do
+      %{max_concurrent_jobs: max_jobs} -> max_jobs
+      _ -> fallback
+    end
+  end
 
   def get(id) do
     id = normalize_id(id)

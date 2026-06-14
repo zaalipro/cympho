@@ -3,6 +3,7 @@ defmodule CymphoWeb.KanbanLiveTest do
   import Phoenix.LiveViewTest
   alias Cympho.Agents
   alias Cympho.Comments
+  alias Cympho.Goals
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues
   alias Cympho.Projects
@@ -10,6 +11,7 @@ defmodule CymphoWeb.KanbanLiveTest do
   alias Cympho.WorkProducts
 
   defp create_agent(attrs), do: Agents.create_agent(scoped_attrs(attrs))
+  defp create_goal(attrs), do: Goals.create_goal(scoped_attrs(attrs))
   defp create_issue(attrs), do: Issues.create_issue(scoped_attrs(attrs))
   defp create_project(attrs), do: Projects.create_project(scoped_attrs(attrs))
 
@@ -60,6 +62,50 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert html =~ "Start with the CEO"
     end
 
+    test "groups board header controls in one aligned toolbar" do
+      {:ok, _view, html} = live(conn(), "/kanban")
+
+      toolbar =
+        html
+        |> Floki.parse_document!()
+        |> Floki.find("[data-testid='kanban-header-actions']")
+
+      toolbar_text = Floki.text(toolbar)
+      view_controls = Floki.find(toolbar, "[data-testid='kanban-view-controls']")
+      view_controls_text = Floki.text(view_controls)
+      toolbar_class = toolbar |> Floki.attribute("class") |> List.first()
+      view_controls_class = view_controls |> Floki.attribute("class") |> List.first()
+
+      new_issue_class =
+        toolbar
+        |> Floki.find("a[href='/issues/new']")
+        |> Floki.attribute("class")
+        |> List.first()
+
+      assert toolbar != []
+      assert view_controls != []
+      assert toolbar_class =~ "grid-cols-2"
+      assert toolbar_class =~ "sm:flex"
+      assert view_controls_class =~ "order-2"
+      assert view_controls_class =~ "sm:flex"
+      assert toolbar_text =~ "List"
+      assert toolbar_text =~ "Project:"
+      assert toolbar_text =~ "Swimlanes"
+      assert toolbar_text =~ "Compact"
+      assert toolbar_text =~ "Detailed"
+      assert toolbar_text =~ "New Issue"
+      assert view_controls_text =~ "List"
+      assert view_controls_text =~ "Project:"
+      assert view_controls_text =~ "Swimlanes"
+      assert view_controls_text =~ "Compact"
+      assert view_controls_text =~ "Detailed"
+      refute view_controls_text =~ "New Issue"
+      assert Floki.find(toolbar, "a[href='/issues/new']") != []
+      assert new_issue_class =~ "order-1"
+      assert new_issue_class =~ "w-full"
+      assert new_issue_class =~ "sm:w-auto"
+    end
+
     test "renders launch checklist action for assigned todo digest cards" do
       {:ok, agent} =
         create_agent(%{
@@ -89,6 +135,114 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert html =~ ~s(href="/operations#runtime-launch-checklist")
     end
 
+    test "renders launch readiness on dispatchable board cards" do
+      {:ok, _agent} =
+        create_agent(%{
+          name: "Board Launch Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom", "repo_capable" => true}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Board implementation launch chip",
+          description: """
+          Acceptance criteria: board card shows runtime state.
+          Evidence required: card link and target agent.
+          Verification required: render the board.
+          Definition of done: card is complete.
+          """,
+          status: :todo,
+          priority: :high,
+          assigned_role: "engineer"
+        })
+
+      {:ok, _view, html} = live(conn(), "/kanban")
+
+      assert html =~ "Board implementation launch chip"
+      assert html =~ ~s(href="/issues/#{issue.id}#issue-agent-panel")
+
+      launch_text =
+        html
+        |> Floki.parse_document!()
+        |> Floki.find("a[href='/issues/#{issue.id}#issue-agent-panel']")
+        |> Floki.text()
+
+      assert launch_text =~ "Board Launch Engineer"
+      assert launch_text =~ ~r/(Ready|Review mode|Needs setup|Blocked|No agent)/
+    end
+
+    test "renders board command flow metrics and focus queue" do
+      {:ok, project} = create_project(%{name: "Command Board", prefix: "CB"})
+
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Command CEO",
+          role: :ceo,
+          status: :idle,
+          project_id: project.id
+        })
+
+      {:ok, reviewer} =
+        create_agent(%{
+          name: "Command CTO",
+          role: :cto,
+          status: :idle,
+          project_id: project.id
+        })
+
+      {:ok, blocked} =
+        create_issue(%{
+          title: "Board blocked release",
+          description: "Needs intervention.",
+          status: :blocked,
+          priority: :critical,
+          project_id: project.id
+        })
+
+      {:ok, ceo_launch} =
+        create_issue(%{
+          title: "Board CEO launch",
+          description: "Needs the CEO first turn.",
+          status: :todo,
+          priority: :high,
+          assignee_id: ceo.id,
+          assigned_role: "ceo",
+          project_id: project.id
+        })
+
+      {:ok, review} =
+        create_issue(%{
+          title: "Board review approval",
+          description: "Needs acceptance.",
+          status: :in_review,
+          priority: :medium,
+          assignee_id: reviewer.id,
+          project_id: project.id
+        })
+
+      {:ok, _view, html} = live(conn(), "/kanban?project_id=#{project.id}")
+
+      assert html =~ "Board command"
+      assert html =~ "Flow health"
+      assert html =~ "Focus queue"
+      assert html =~ "3 cards"
+      assert html =~ "Blocked"
+      assert html =~ "Awaiting acceptance"
+      assert html =~ "Queued for next dispatch"
+      assert html =~ "Board blocked release"
+      assert html =~ "Unblock"
+      assert html =~ ~s(href="/issues/#{blocked.id}")
+      assert html =~ "Board CEO launch"
+      assert html =~ "Launch CEO"
+      assert html =~ ~s(href="/issues/#{ceo_launch.id}")
+      assert html =~ "Board review approval"
+      assert html =~ "Review"
+      assert html =~ ~s(href="/issues/#{review.id}")
+    end
+
     test "supports compact digest density" do
       {:ok, _view, html} = live(conn(), "/kanban?density=compact")
 
@@ -96,6 +250,31 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert html =~ "Not started"
       assert html =~ "No agent work has started yet."
       refute html =~ "Start with the CEO"
+    end
+
+    test "shows mission context on board cards", %{project: project} do
+      {:ok, mission} =
+        create_goal(%{
+          title: "Board mission context",
+          goal_type: :mission,
+          project_id: project.id
+        })
+
+      {:ok, _issue} =
+        create_issue(%{
+          title: "Aligned board card",
+          description: "Board should show why this work exists.",
+          status: :todo,
+          priority: :high,
+          project_id: project.id,
+          goal_id: mission.id
+        })
+
+      {:ok, _view, html} = live(conn(), "/kanban")
+
+      assert html =~ "Aligned board card"
+      assert html =~ "Mission: Board mission context"
+      assert html =~ "Project only"
     end
 
     test "renders drag-and-drop attributes" do

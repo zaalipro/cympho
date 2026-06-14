@@ -304,8 +304,22 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   @doc """
-  Finds runs whose agent process has crashed (orphaned).
-  An orphaned run has status "running" but no active orchestrator for the issue.
+  Recovers a run that has no live orchestrator.
+
+  Runs that never started are cancelled instead of failed so an abandoned
+  pre-runtime record does not poison review gates after a later successful
+  retry. Running orphans still fail because work may have been interrupted.
+  """
+  @spec recover_orphaned_run(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t()}
+  def recover_orphaned_run(%Run{status: status} = run) when status in ~w(pending queued),
+    do: cancel_run(run)
+
+  def recover_orphaned_run(%Run{} = run), do: recover_stale_run(run)
+
+  @doc """
+  Finds runs whose orchestrator process has crashed or disappeared.
+  An orphaned run is pending, queued, or running with no active orchestrator
+  for the issue.
   """
   @spec find_orphaned_runs() :: [Run.t()]
   def find_orphaned_runs do
@@ -344,10 +358,12 @@ defmodule Cympho.HeartbeatEngine do
 
   defp orphaned_runs_query do
     Run
-    |> where([r], r.status == "running")
-    |> order_by([r], asc: r.started_at)
+    |> where([r], r.status in ["pending", "queued", "running"])
+    |> order_by([r], asc: r.inserted_at)
     |> limit(^@stale_run_batch_size)
   end
+
+  defp active_orchestrator_run?(%Run{issue_id: nil}), do: false
 
   defp active_orchestrator_run?(run) do
     case Cympho.Orchestrator.whereis(run.issue_id) do

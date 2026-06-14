@@ -5,10 +5,15 @@ defmodule CymphoWeb.CompanyLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
+    blueprints = Companies.autonomous_company_blueprints()
+
     {:ok,
      socket
      |> assign(:page_title, "Companies")
      |> assign(:infinite_scroll, %{})
+     |> assign(:blueprints, blueprints)
+     |> assign(:launch_summary, launch_summary(blueprints))
+     |> assign(:featured_blueprints, Enum.take(blueprints, 5))
      |> init_stream(:companies, &fetch_companies/1)}
   end
 
@@ -48,6 +53,7 @@ defmodule CymphoWeb.CompanyLive.Index do
 
     {:noreply,
      socket
+     |> refresh_launch_summary()
      |> reset_stream(:companies, &fetch_companies/1)
      |> put_flash(:info, "Company deleted successfully")}
   end
@@ -63,4 +69,61 @@ defmodule CymphoWeb.CompanyLive.Index do
   def format_inserted_at(company) do
     Calendar.strftime(company.inserted_at, "%Y-%m-%d %H:%M")
   end
+
+  defp launch_summary(blueprints) do
+    companies = Companies.list_companies()
+    active_count = Enum.count(companies, &(&1.status == "active"))
+    paused_count = Enum.count(companies, &(&1.status == "paused"))
+
+    %{
+      total_companies: length(companies),
+      active_companies: active_count,
+      paused_companies: paused_count,
+      blueprint_count: length(blueprints),
+      seed_issue_count: Enum.reduce(blueprints, 0, &(&1.seed_issue_count + &2)),
+      launch_posture: launch_posture(length(companies), active_count, paused_count)
+    }
+  end
+
+  defp refresh_launch_summary(socket) do
+    assign(socket, :launch_summary, launch_summary(socket.assigns.blueprints))
+  end
+
+  defp launch_posture(0, _active_count, _paused_count) do
+    %{
+      label: "No companies yet",
+      detail:
+        "Start from a blueprint to create agents, goals, a project, and seed work in one launch.",
+      tone: :attention
+    }
+  end
+
+  defp launch_posture(_total, 0, paused_count) when paused_count > 0 do
+    %{
+      label: "All companies paused",
+      detail:
+        "Resume an existing company or launch a fresh blueprint before assigning runtime work.",
+      tone: :warning
+    }
+  end
+
+  defp launch_posture(_total, active_count, paused_count) do
+    %{
+      label: "#{active_count} active companies",
+      detail:
+        "#{paused_count} paused. Use blueprints for new operating companies or import a portable backup.",
+      tone: :ready
+    }
+  end
+
+  defp posture_badge_class(:ready),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp posture_badge_class(:warning),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
+
+  defp posture_badge_class(:attention),
+    do: "border-brand/25 bg-brand/10 text-brand"
+
+  defp posture_badge_class(_tone), do: "border-border bg-surface text-text-tertiary"
 end

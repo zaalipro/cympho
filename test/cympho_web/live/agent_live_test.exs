@@ -3,13 +3,18 @@ defmodule CymphoWeb.AgentLiveTest do
 
   import Phoenix.LiveViewTest
   alias Cympho.Agents
+  alias Cympho.AgentHeartbeat
+  alias Cympho.Comments
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues
   alias Cympho.Repo
   alias Cympho.Secrets
+  alias Cympho.Skills
+  alias Cympho.Wakes
 
   defp create_agent(attrs), do: Agents.create_agent(scoped_attrs(attrs))
   defp create_issue(attrs), do: Issues.create_issue(scoped_attrs(attrs))
+  defp create_plugin(attrs), do: Skills.create_plugin(scoped_attrs(attrs))
 
   describe "Index - Agent Dashboard" do
     test "renders the agents page", %{conn: conn} do
@@ -18,7 +23,7 @@ defmodule CymphoWeb.AgentLiveTest do
     end
 
     test "renders list of agents", %{conn: conn} do
-      {:ok, _agent} =
+      {:ok, agent} =
         create_agent(%{
           name: "Test Engineer",
           role: :engineer,
@@ -28,6 +33,13 @@ defmodule CymphoWeb.AgentLiveTest do
       {:ok, _view, html} = live(conn, "/agents")
       assert html =~ "Test Engineer"
       assert html =~ "Engineer"
+      assert html =~ ~s(data-testid="agent-row-#{agent.id}")
+      assert html =~ ~s(data-testid="agent-manage-menu-#{agent.id}")
+      assert html =~ ~s(aria-label="Manage Test Engineer")
+      assert html =~ ~s(title="Manage Test Engineer")
+      assert html =~ "Manage"
+      assert html =~ "View profile"
+      assert html =~ "Edit settings"
     end
 
     test "renders status dashboard with counts", %{conn: conn} do
@@ -40,6 +52,43 @@ defmodule CymphoWeb.AgentLiveTest do
       {:ok, _view, html} = live(conn, "/agents")
       assert html =~ "Idle"
       assert html =~ "Running"
+    end
+
+    test "surfaces delegated role staffing gaps with prefilled hire links", %{conn: conn} do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Coverage CEO",
+          role: :ceo,
+          status: :idle
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Define pricing activation research",
+          description: "Product Manager should define acceptance criteria before engineering.",
+          status: :todo,
+          priority: :high,
+          assigned_role: "product_manager"
+        })
+
+      {:ok, _view, html} = live(conn, "/agents")
+
+      assert html =~ ~s(data-testid="agent-role-coverage")
+      assert html =~ "Role coverage"
+      assert html =~ "Team coverage for queued autonomous work"
+      assert html =~ "Unstaffed roles"
+      assert html =~ "Waiting issues"
+      assert html =~ "Product Manager"
+      assert html =~ "1 open issue"
+      assert html =~ "Reports to Coverage CEO"
+      assert html =~ "Hire Product Manager"
+      assert html =~ "/issues/#{issue.id}"
+      assert html =~ issue.identifier
+      assert html =~ "role=product_manager"
+      assert html =~ "name=Product+Manager"
+      assert html =~ "runtime_profile_id=openai-chat-qwen-dashscope-flash"
+      assert html =~ "return_to=%2Fagents%23agent-role-coverage"
+      assert html =~ "parent_id=#{ceo.id}"
     end
 
     test "does not show spawn button when current_agent_role is nil" do
@@ -126,6 +175,163 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Test Agent"
     end
 
+    test "dashboard queues an immediate heartbeat for an idle agent", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Heartbeat Now Agent",
+          role: :engineer,
+          status: :idle
+        })
+
+      on_exit(fn -> _ = AgentHeartbeat.stop_for_agent(agent.id) end)
+
+      {:ok, view, html} = live(conn, "/agents/#{agent.id}")
+
+      assert html =~ "Run Heartbeat"
+      assert html =~ ~s(phx-click="run_heartbeat")
+      refute html =~ "coming soon"
+      refute html =~ "Heartbeat trigger"
+
+      html =
+        view
+        |> element("button[phx-click='run_heartbeat']", "Run Heartbeat")
+        |> render_click()
+
+      assert html =~ "Heartbeat queued. The agent will pick up assigned To Do work if available."
+      assert {:ok, pid} = AgentHeartbeat.whereis(agent.id)
+      assert Process.alive?(pid)
+    end
+
+    test "dashboard disables heartbeat action while agent is paused", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Paused Heartbeat Agent",
+          role: :engineer,
+          status: :paused
+        })
+
+      {:ok, view, html} = live(conn, "/agents/#{agent.id}")
+
+      assert html =~ "Run Heartbeat"
+      assert html =~ "Resume this agent before running heartbeat"
+      refute html =~ "coming soon"
+      assert has_element?(view, "button[phx-click='run_heartbeat'][disabled]")
+    end
+
+    test "dashboard surfaces agent command readiness and prompt guide actions", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Command Center Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          instructions: "Do good work."
+        })
+
+      {:ok, _queued_issue} =
+        create_issue(%{
+          title: "Assigned queued work",
+          description: "Needs the agent.",
+          status: :todo,
+          priority: :high,
+          assignee_id: agent.id
+        })
+
+      {:ok, _review_issue} =
+        create_issue(%{
+          title: "Assigned review work",
+          description: "Needs review.",
+          status: :in_review,
+          priority: :medium,
+          assignee_id: agent.id
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
+
+      assert html =~ "Agent command"
+      assert html =~ "Run readiness"
+      assert html =~ "Prompt guide"
+      assert html =~ "Tune guide"
+      assert html =~ "Needs tuning"
+      assert html =~ "Issue memory discipline"
+      assert html =~ "Operating loop"
+      assert html =~ "pending guide patches"
+      assert html =~ "Owner-readable memory"
+      assert html =~ "Active"
+      assert html =~ "Review"
+      assert html =~ "Queued"
+      assert html =~ "Wakes"
+      assert html =~ ~s(href="/agents/#{agent.id}?tab=configuration#agent-instruction-studio")
+      assert html =~ ~s(href="/agents/#{agent.id}?tab=configuration#agent-runtime-profile")
+    end
+
+    test "dashboard shows prompt tuning canary until a tuned prompt runs", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Canary Awaiting Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          instructions:
+            "After every meaningful action, comment with [delivery] What happened, files changed, verification, and next decision."
+        })
+
+      {:ok, _revision} =
+        Agents.create_config_revision(agent, %{
+          source: "prompt_tuning"
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
+
+      assert html =~ ~s(data-testid="prompt-tuning-canary")
+      assert html =~ "Prompt canary"
+      assert html =~ "Awaiting validation"
+      assert html =~ "Prompt tuning v1 has not produced a newer run yet."
+      assert html =~ ~s(href="/agents/#{agent.id}?tab=runs")
+    end
+
+    test "dashboard validates prompt tuning after a successful newer run", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Canary Validated Agent",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          instructions:
+            "After every meaningful action, comment with [delivery] What happened, files changed, verification, and next decision."
+        })
+
+      {:ok, _revision} =
+        Agents.create_config_revision(agent, %{
+          source: "prompt_tuning"
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Canary validation run",
+          status: :todo,
+          assignee_id: agent.id
+        })
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      Repo.insert!(%Run{
+        company_id: issue.company_id,
+        agent_id: agent.id,
+        issue_id: issue.id,
+        status: "completed",
+        adapter: "codex",
+        completed_at: now
+      })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}")
+
+      assert html =~ "Prompt canary"
+      assert html =~ "Validated"
+      assert html =~ "Latest run after prompt tuning v1 completed successfully."
+    end
+
     test "runs tab explains normalized adapter failures", %{conn: conn} do
       {:ok, agent} =
         create_agent(%{
@@ -158,6 +364,53 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Credentials missing"
       assert html =~ "Add the API key"
       assert html =~ "OPENAI_API_KEY not set"
+    end
+
+    test "skills tab surfaces prompt-ready loadout and blocked assignments", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Skillful Agent",
+          role: :engineer,
+          status: :idle
+        })
+
+      {:ok, prompt_ready} =
+        create_plugin(%{
+          identifier: "prompt-ready-#{System.unique_integer([:positive])}",
+          name: "Prompt Ready Skill",
+          version: "1.0.0",
+          manifest: %{"entrypoint" => "noop"},
+          capabilities: ["git"],
+          status: "active",
+          enabled: true
+        })
+
+      {:ok, errored} =
+        create_plugin(%{
+          identifier: "errored-#{System.unique_integer([:positive])}",
+          name: "Errored Skill",
+          version: "1.0.0",
+          manifest: %{"entrypoint" => "noop"},
+          manifest_errors: %{"entrypoint" => "missing"},
+          capabilities: ["api_call"],
+          status: "error",
+          enabled: true
+        })
+
+      {:ok, _ready_assignment} = Skills.assign_skill_to_agent(agent.id, prompt_ready.id)
+      {:ok, _errored_assignment} = Skills.assign_skill_to_agent(agent.id, errored.id)
+
+      {:ok, view, html} = live(conn, "/agents/#{agent.id}?tab=skills")
+
+      assert has_element?(view, "[data-testid='agent-skill-loadout']")
+      assert html =~ "Agent skill loadout"
+      assert html =~ "Prompt capability readiness"
+      assert html =~ "1/2 assigned skill(s) are prompt-ready"
+      assert html =~ "Repair assigned skills"
+      assert html =~ "Prompt Ready Skill"
+      assert html =~ "Prompt-ready"
+      assert html =~ "Errored Skill"
+      assert html =~ "Repair before prompt"
     end
 
     test "renders instructions tab when set", %{conn: conn} do
@@ -287,6 +540,81 @@ defmodule CymphoWeb.AgentLiveTest do
                "https://dashscope.aliyuncs.com/compatible-mode/v1"
     end
 
+    test "runtime profile selector previews low-cost Qwen flash config before save", %{
+      conn: conn
+    } do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Qwen Flash Preview Agent",
+          role: :ceo,
+          status: :idle,
+          adapter: :claude_code
+        })
+
+      {:ok, view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      assert html =~ "OpenAI Chat Qwen DashScope Flash"
+
+      html =
+        view
+        |> form("form[phx-submit='config_save']", %{
+          "agent" => %{
+            "name" => agent.name,
+            "title" => "",
+            "role" => "ceo",
+            "parent_id" => "",
+            "runtime_profile_id" => "openai-chat-qwen-dashscope-flash",
+            "adapter" => "claude_code",
+            "max_concurrent_jobs" => "1"
+          }
+        })
+        |> render_change()
+
+      assert html =~ "OpenAI Chat Qwen DashScope Flash"
+      assert html =~ "Low-cost gateway"
+      assert html =~ "OpenAI Chat"
+      assert html =~ "qwen3.6-flash"
+
+      assert html =~
+               "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    end
+
+    test "runtime profile selector previews Qwen international chat config before save", %{
+      conn: conn
+    } do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Qwen Intl Preview Agent",
+          role: :ceo,
+          status: :idle,
+          adapter: :claude_code
+        })
+
+      {:ok, view, _html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      html =
+        view
+        |> form("form[phx-submit='config_save']", %{
+          "agent" => %{
+            "name" => agent.name,
+            "title" => "",
+            "role" => "ceo",
+            "parent_id" => "",
+            "runtime_profile_id" => "openai-chat-qwen-dashscope-intl",
+            "adapter" => "claude_code",
+            "max_concurrent_jobs" => "1"
+          }
+        })
+        |> render_change()
+
+      assert html =~ "OpenAI Chat Qwen DashScope Intl"
+      assert html =~ "OpenAI Chat"
+      assert html =~ "qwen3.7-plus"
+
+      assert html =~
+               "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    end
+
     test "saving runtime profile persists profile id and concrete adapter config", %{
       conn: conn
     } do
@@ -360,6 +688,86 @@ defmodule CymphoWeb.AgentLiveTest do
       refute inspect(updated.config) =~ "API_KEY"
     end
 
+    test "saving low-cost Qwen flash profile persists non-secret chat config", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Qwen Flash Profile Agent",
+          role: :ceo,
+          status: :idle,
+          adapter: :claude_code,
+          config: %{"command" => "claude"}
+        })
+
+      {:ok, view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      assert html =~ "OpenAI Chat Qwen DashScope Flash"
+
+      view
+      |> form("form[phx-submit='config_save']", %{
+        "agent" => %{
+          "name" => agent.name,
+          "title" => "",
+          "role" => "ceo",
+          "parent_id" => "",
+          "runtime_profile_id" => "openai-chat-qwen-dashscope-flash",
+          "adapter" => "claude_code",
+          "max_concurrent_jobs" => "1"
+        }
+      })
+      |> render_submit()
+
+      {:ok, updated} = Agents.get_agent(agent.id)
+      assert updated.adapter == :openai_chat
+      assert updated.config["model"] == "qwen3.6-flash"
+
+      assert updated.config["endpoint"] ==
+               "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+      assert updated.runtime_config["profile_id"] == "openai-chat-qwen-dashscope-flash"
+      refute inspect(updated.config) =~ "API_KEY"
+    end
+
+    test "saving Qwen DashScope international profile persists non-secret chat config", %{
+      conn: conn
+    } do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Qwen Intl Profile Agent",
+          role: :ceo,
+          status: :idle,
+          adapter: :claude_code,
+          config: %{"command" => "claude"}
+        })
+
+      {:ok, view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      assert html =~ "OpenAI Chat Qwen DashScope Intl"
+
+      view
+      |> form("form[phx-submit='config_save']", %{
+        "agent" => %{
+          "name" => agent.name,
+          "title" => "",
+          "role" => "ceo",
+          "parent_id" => "",
+          "runtime_profile_id" => "openai-chat-qwen-dashscope-intl",
+          "adapter" => "claude_code",
+          "max_concurrent_jobs" => "1"
+        }
+      })
+      |> render_submit()
+
+      {:ok, updated} = Agents.get_agent(agent.id)
+      assert updated.adapter == :openai_chat
+      assert updated.config["model"] == "qwen3.7-plus"
+
+      assert updated.config["endpoint"] ==
+               "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+
+      assert updated.runtime_config["profile_id"] == "openai-chat-qwen-dashscope-intl"
+      refute inspect(updated.config) =~ "API_KEY"
+    end
+
     test "runtime capacity updates when adapter and concurrency change", %{conn: conn} do
       {:ok, agent} =
         create_agent(%{
@@ -427,7 +835,26 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Validates"
       assert html =~ "Catches"
       assert html =~ "Effective prompt preview"
+      assert html =~ "Operating loop guide"
       assert html =~ "Scenario checks"
+      assert html =~ "Orient, decide, act, verify, report"
+      assert html =~ "Runtime drill"
+      assert html =~ "one-turn checklist"
+      assert html =~ "Scope the next action"
+      assert html =~ "Attach evidence"
+      assert html =~ "No completion claim without a verification line"
+      assert html =~ "Turn guide"
+      assert html =~ "injected playbook"
+      assert html =~ "First move"
+      assert html =~ "Evidence to produce"
+      assert html =~ "Completion signal"
+      assert html =~ "artifact / PR / evidence"
+      assert html =~ "Turn ledger"
+      assert html =~ "restartable evidence"
+      assert html =~ "Evidence produced"
+      assert html =~ "State change"
+      assert html =~ "Restart context"
+      assert html =~ "work product / PR / source evidence"
       assert html =~ "Suggested instruction patches"
       assert html =~ "Required final comment"
       assert html =~ "[delivery] What happened:"
@@ -437,6 +864,7 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Quick snippets"
       assert html =~ "[blocked] Cause:"
       assert html =~ "Owner-readable memory"
+      assert html =~ "Operating loop"
       assert html =~ "PR quality"
 
       html =
@@ -484,6 +912,49 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "Save changes to persist it"
       assert html =~ "## Owner-readable memory"
       assert html =~ "After every meaningful action"
+
+      {:ok, unchanged} = Agents.get_agent(agent.id)
+      assert unchanged.instructions == "Do good work."
+
+      html =
+        view
+        |> element("button[phx-value-patch='operating-loop']", "Apply patch")
+        |> render_click()
+
+      assert html =~ "Applied Operating loop"
+      assert html =~ "Orient on issue, goal, project"
+      assert html =~ "Decide the single next move"
+    end
+
+    test "configuration tab applies recommended instruction patches together without saving", %{
+      conn: conn
+    } do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Batch Patch Agent",
+          role: :engineer,
+          status: :idle,
+          instructions: "Do good work."
+        })
+
+      {:ok, view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      assert html =~ "Apply next 5 recommended patches"
+
+      html =
+        view
+        |> element(
+          "button[data-testid='apply-recommended-instruction-patches']",
+          "Apply next 5 recommended patches"
+        )
+        |> render_click()
+
+      assert html =~ "Applied 5 recommended patches"
+      assert html =~ "Studio score"
+      assert html =~ "Save changes to persist it"
+      assert html =~ "## Owner-readable memory"
+      assert html =~ "## Operating loop"
+      assert html =~ "## Last action receipt"
 
       {:ok, unchanged} = Agents.get_agent(agent.id)
       assert unchanged.instructions == "Do good work."
@@ -543,13 +1014,31 @@ defmodule CymphoWeb.AgentLiveTest do
 
       {:ok, _revision} =
         Agents.create_config_revision(agent, %{
-          source: "prompt_tuning"
+          source: "prompt_tuning",
+          studio_audits_extra: %{
+            "tuning_release" => %{
+              "kind" => "prompt_tuning_release",
+              "patch_count" => 2,
+              "patches" => [
+                %{"title" => "Owner-readable memory"},
+                %{"title" => "Delivery evidence"}
+              ],
+              "expected_effect" => "Runs should leave clearer owner-readable issue memory.",
+              "rollback" =>
+                "Use the agent Instruction Studio revision history to restore the previous prompt if the next run regresses."
+            }
+          }
         })
 
       {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
 
       assert html =~ "Last prompt tuning: v1"
       assert html =~ "Prompt tuning"
+      assert html =~ "Prompt tuning release"
+      assert html =~ "2 patches"
+      assert html =~ "Runs should leave clearer owner-readable issue memory."
+      assert html =~ "Patches: Owner-readable memory, Delivery evidence"
+      assert html =~ "Rollback: Use the agent Instruction Studio revision history"
     end
 
     test "configuration tab restores older instruction revision", %{conn: conn} do
@@ -795,6 +1284,72 @@ defmodule CymphoWeb.AgentLiveTest do
                "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
       assert html =~ "Anthropic-compatible credentials are configured"
+    end
+
+    test "OpenAI Chat readiness shows configured and normalized request URLs", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "OpenAI Chat Route Agent",
+          role: :ceo,
+          status: :idle,
+          adapter: :openai_chat,
+          config: %{
+            "endpoint" => "https://dashscope.example.com/compatible-mode/v1/",
+            "model" => "qwen3.7-plus"
+          }
+        })
+
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: agent.company_id,
+          scope: "company",
+          key: "DASHSCOPE_API_KEY",
+          value: "test-api-key",
+          description: "DashScope key"
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      assert html =~ "Agent preflight"
+      assert html =~ "Chat model"
+      assert html =~ "qwen3.7-plus"
+      assert html =~ "Configured endpoint"
+      assert html =~ "https://dashscope.example.com/compatible-mode/v1/"
+      assert html =~ "Request URL"
+
+      assert html =~
+               "https://dashscope.example.com/compatible-mode/v1/chat/completions"
+
+      assert html =~ "Execution capability"
+      assert html =~ "cannot edit files"
+      assert html =~ "Credential source is configured"
+      refute html =~ "test-api-key"
+    end
+
+    test "OpenAI Chat readiness links missing DashScope credentials to DASHSCOPE_API_KEY", %{
+      conn: conn
+    } do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Missing DashScope Credential Agent",
+          role: :ceo,
+          status: :idle,
+          adapter: :openai_chat,
+          config: %{
+            "endpoint" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "model" => "qwen3.6-flash"
+          }
+        })
+
+      {:ok, _view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+
+      assert html =~ "Agent preflight"
+      assert html =~ "Chat completion key"
+      assert html =~ "Add DASHSCOPE_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY"
+      assert html =~ "Add secret"
+      assert html =~ "key=DASHSCOPE_API_KEY"
+      assert html =~ "scope=company"
+      refute html =~ "Credential source is configured"
     end
 
     test "quick runtime preset previews profile and concurrency before save", %{conn: conn} do
@@ -1072,6 +1627,119 @@ defmodule CymphoWeb.AgentLiveTest do
       {:ok, _view, html} = live(conn, "/agents/new")
 
       assert html =~ "Adapter"
+      assert html =~ "Agent launch plan"
+      assert html =~ ~s(data-testid="new-agent-identity-section")
+      assert html =~ ~s(data-testid="new-agent-adapter-section")
+      assert html =~ ~s(data-testid="new-agent-guide-section")
+      assert html =~ ~s(data-testid="new-agent-setup-checklist")
+      assert html =~ ~s(data-testid="new-agent-role-guide")
+      assert html =~ ~s(data-testid="new-agent-form-actions")
+      assert html =~ "Hire checklist"
+      assert html =~ "Selected role"
+      assert html =~ ~s(data-testid="new-agent-runtime-profile")
+      assert html =~ "Runtime profile"
+    end
+
+    test "new agent form previews and saves DashScope runtime profile", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, view, html} =
+        live(
+          conn,
+          "/agents/new?role=ceo&name=Qwen%20CEO&runtime_profile_id=openai-chat-qwen-dashscope-flash"
+        )
+
+      assert html =~ ~s(data-testid="new-agent-runtime-profile")
+      assert html =~ "OpenAI Chat Qwen DashScope Flash"
+      assert html =~ "OpenAI Chat"
+      assert html =~ "qwen3.6-flash"
+      assert html =~ "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      assert html =~ "1 slot"
+      assert html =~ "Text/action only"
+      assert html =~ "Add required key"
+      assert html =~ "key=DASHSCOPE_API_KEY"
+      assert html =~ ~r/<option[^>]+value="openai-chat-qwen-dashscope-flash"[^>]+selected/
+      assert html =~ ~r/<option[^>]+value="openai_chat"[^>]+selected/
+
+      view
+      |> form("form", %{
+        "agent" => %{
+          "name" => "Qwen CEO",
+          "role" => "ceo",
+          "parent_id" => "",
+          "runtime_profile_id" => "openai-chat-qwen-dashscope-flash",
+          "adapter" => "claude_code",
+          "instructions" => "Own CEO triage and handoffs."
+        }
+      })
+      |> render_submit()
+
+      created =
+        company.id
+        |> Agents.list_agents_by_company()
+        |> Enum.find(&(&1.name == "Qwen CEO"))
+
+      assert created.adapter == :openai_chat
+      assert created.config["model"] == "qwen3.6-flash"
+
+      assert created.config["endpoint"] ==
+               "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+      assert created.runtime_config["profile_id"] == "openai-chat-qwen-dashscope-flash"
+      assert created.max_concurrent_jobs == 1
+      refute Map.has_key?(created.config, "api_key")
+    end
+
+    test "new agent form marks process Codex profile as repo capable", %{
+      conn: conn
+    } do
+      {:ok, _view, html} =
+        live(conn, "/agents/new?role=engineer&runtime_profile_id=process-codex")
+
+      assert html =~ ~s(data-testid="new-agent-runtime-profile")
+      assert html =~ "Process Codex CLI"
+      assert html =~ "Process"
+      assert html =~ "Repo capable"
+      assert html =~ "codex"
+      assert html =~ "gpt-5.5"
+      assert html =~ ~r/<option[^>]+value="process-codex"[^>]+selected/
+      assert html =~ ~r/<option[^>]+value="process"[^>]+selected/
+    end
+
+    test "new agent form keeps default concurrency for custom runtime profile", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, view, html} = live(conn, "/agents/new?role=engineer&name=Custom%20Engineer")
+
+      assert html =~ ~s(data-testid="new-agent-runtime-profile")
+      assert html =~ ~r/<option[^>]+value="custom"[^>]+selected/
+      refute html =~ "1 slot"
+
+      view
+      |> form("form", %{
+        "agent" => %{
+          "name" => "Custom Engineer",
+          "role" => "engineer",
+          "parent_id" => "",
+          "runtime_profile_id" => "custom",
+          "adapter" => "process",
+          "process_preset" => "custom",
+          "runtime_command" => "echo",
+          "instructions" => "Work from the issue brief."
+        }
+      })
+      |> render_submit()
+
+      created =
+        company.id
+        |> Agents.list_agents_by_company()
+        |> Enum.find(&(&1.name == "Custom Engineer"))
+
+      assert created.adapter == :process
+      assert created.max_concurrent_jobs == 3
+      assert created.runtime_config["profile_id"] == "custom"
     end
 
     test "new agent form accepts role, name, and manager query params", %{conn: conn} do
@@ -1096,7 +1764,8 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ ~s(value="Growth Marketer")
       assert html =~ ~r/<option value="marketer" selected/
       assert html =~ ~r/<option value="#{ceo.id}" selected/
-      assert html =~ "Marketer playbook"
+      assert html =~ "Marketer focus"
+      assert html =~ "Owner-readable memory"
       assert html =~ "target markets"
       assert html =~ ~s(data-testid="hire-demand-context")
       assert html =~ "Demand-backed hire"
@@ -1106,6 +1775,85 @@ defmodule CymphoWeb.AgentLiveTest do
       assert html =~ "/issues/#{issue.id}"
       assert html =~ issue.identifier
       assert html =~ "Reports to CEO"
+    end
+
+    test "demand-backed hire assigns waiting role work and returns to source", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Plan SEO launch campaign",
+          description: "Launch marketing demand funnel.",
+          status: :todo,
+          assigned_role: "marketer",
+          skip_auto_assign: true
+        })
+
+      return_to = "/agents#agent-role-coverage"
+
+      {:ok, view, html} =
+        live(
+          conn,
+          "/agents/new?role=marketing&name=Growth%20Marketer&parent_id=#{ceo.id}&return_to=#{URI.encode_www_form(return_to)}"
+        )
+
+      assert html =~ ~s(data-testid="hire-demand-context")
+      assert html =~ "Queued work needs a Marketer"
+      assert html =~ "Plan SEO launch campaign"
+
+      result =
+        view
+        |> form("form", %{
+          "agent" => %{
+            "name" => "Growth Marketer",
+            "role" => "marketer",
+            "parent_id" => ceo.id,
+            "runtime_profile_id" => "openai-chat-qwen-dashscope-flash",
+            "adapter" => "claude_code",
+            "instructions" => "Own growth execution."
+          }
+        })
+        |> render_submit()
+
+      assert {:error, {:live_redirect, %{to: ^return_to}}} = result
+
+      created =
+        company.id
+        |> Agents.list_agents_by_company()
+        |> Enum.find(&(&1.name == "Growth Marketer"))
+
+      on_exit(fn -> _ = AgentHeartbeat.stop_for_agent(created.id) end)
+      assert {:ok, pid} = AgentHeartbeat.whereis(created.id)
+      assert Process.alive?(pid)
+
+      issue = Issues.get_issue!(issue.id)
+
+      assert issue.assignee_id == created.id
+      assert issue.status == :todo
+
+      assert [wake] = Wakes.list_issue_wakes(issue.id)
+      assert wake.agent_id == created.id
+      assert wake.reason == "manual_dispatch"
+      assert wake.status == "pending"
+      assert wake.metadata["source"] == "demand_backed_hire"
+      assert wake.metadata["agent_id"] == created.id
+      assert wake.metadata["role"] == "marketer"
+
+      [comment] = Comments.list_comments(issue.id)
+      assert comment.author_type == "system"
+      assert comment.body =~ "[handoff] Demand-backed hire assigned this Marketer issue"
+      assert comment.body =~ "Growth Marketer"
+      assert comment.body =~ "queued marketer work had no eligible owner"
+      refute comment.body =~ "repo-capable owner"
     end
 
     test "new agent form shows Codex model selector when Codex is selected", %{conn: conn} do

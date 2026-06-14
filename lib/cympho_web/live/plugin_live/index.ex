@@ -3,6 +3,8 @@ defmodule CymphoWeb.PluginLive.Index do
 
   alias Cympho.{Skills, Companies, Plugins}
 
+  @filter_statuses ~w(installed active disabled error)
+
   @impl true
   def mount(_params, _session, socket) do
     companies = Companies.list_companies()
@@ -22,11 +24,19 @@ defmodule CymphoWeb.PluginLive.Index do
     {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
-  defp apply_action(socket, :index, _params) do
-    socket
-    |> assign(:page_title, "Plugins")
-    |> assign(:plugin, nil)
-    |> init_stream(:plugins, &fetch_plugins(socket, &1))
+  defp apply_action(socket, :index, params) do
+    company_id = normalize_company_filter(params["company_id"], socket.assigns.companies)
+    status = normalize_status_filter(params["status"])
+
+    socket =
+      socket
+      |> assign(:page_title, "Plugins")
+      |> assign(:plugin, nil)
+      |> assign(:selected_company_id, company_id)
+      |> assign(:selected_status, status)
+      |> assign(:plugin_health, Plugins.health_summary(company_id))
+
+    init_stream(socket, :plugins, &fetch_plugins(socket, &1))
   end
 
   defp apply_action(socket, nil, params) do
@@ -35,8 +45,8 @@ defmodule CymphoWeb.PluginLive.Index do
 
   @impl true
   def handle_event("filter", %{"company_id" => company_id, "status" => status}, socket) do
-    company_id = if company_id == "", do: nil, else: company_id
-    status = if status == "", do: nil, else: status
+    company_id = normalize_company_filter(company_id, socket.assigns.companies)
+    status = normalize_status_filter(status)
 
     socket =
       socket
@@ -104,6 +114,21 @@ defmodule CymphoWeb.PluginLive.Index do
       after: cursor
     )
   end
+
+  defp normalize_company_filter(company_id, companies) when is_binary(company_id) do
+    company_id = String.trim(company_id)
+
+    cond do
+      company_id == "" -> nil
+      Enum.any?(companies, &(&1.id == company_id)) -> company_id
+      true -> nil
+    end
+  end
+
+  defp normalize_company_filter(_company_id, _companies), do: nil
+
+  defp normalize_status_filter(status) when status in @filter_statuses, do: status
+  defp normalize_status_filter(_status), do: nil
 
   defp fetch_company_plugin(socket, id) do
     case socket.assigns[:current_company] do
@@ -188,4 +213,64 @@ defmodule CymphoWeb.PluginLive.Index do
     do: "border-amber-500/20 bg-amber-500/10 text-amber-100"
 
   def plugin_recommendation_class(_), do: "border-border bg-surface text-text-secondary"
+
+  def plugin_posture_label(:empty), do: "Setup posture"
+  def plugin_posture_label(_level), do: "Runtime posture"
+
+  def plugin_posture_text(:empty) do
+    "No extensions are installed yet. Add one plugin, scope its capabilities, then watch worker logs and webhooks here."
+  end
+
+  def plugin_posture_text(_level) do
+    "Supervision, capability scope, webhooks, and recent plugin logs are quiet."
+  end
+
+  def plugin_next_action_class(:critical), do: "border-red-500/25 bg-red-500/10 text-red-100"
+  def plugin_next_action_class(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-100"
+
+  def plugin_next_action_class(:ok),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-100"
+
+  def plugin_next_action_class(_), do: "border-border bg-surface text-text-secondary"
+
+  def plugin_next_action_path(%{key: :install_first_plugin}), do: "/plugins/marketplace"
+  def plugin_next_action_path(%{key: :review_marketplace}), do: "/plugins/marketplace"
+
+  def plugin_next_action_path(%{key: :start_supervisor}),
+    do: "/operations#runtime-launch-checklist"
+
+  def plugin_next_action_path(%{key: :repair_manifests}), do: "/plugins?status=error"
+  def plugin_next_action_path(%{key: :audit_disabled_plugins}), do: "/plugins?status=disabled"
+  def plugin_next_action_path(_action), do: "/plugins"
+
+  def plugin_filters_active?(company_id, status),
+    do: company_id not in [nil, ""] or status not in [nil, ""]
+
+  def plugin_empty_icon(company_id, status) do
+    if plugin_filters_active?(company_id, status),
+      do: "hero-funnel-mini",
+      else: "hero-puzzle-piece-mini"
+  end
+
+  def plugin_empty_title(company_id, status) do
+    if plugin_filters_active?(company_id, status),
+      do: "No plugins match these filters",
+      else: "No runtime plugins installed yet"
+  end
+
+  def plugin_empty_detail(company_id, status) do
+    if plugin_filters_active?(company_id, status) do
+      "Clear filters to return to the full extension inventory, or open the marketplace if this capability still needs to be installed."
+    else
+      "Install one tightly scoped extension, verify its manifest and capability boundary, then watch health and webhook evidence here."
+    end
+  end
+
+  def plugin_empty_action_class(:primary) do
+    "inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-510 text-white transition-colors hover:bg-primary-hover"
+  end
+
+  def plugin_empty_action_class(_tone) do
+    "inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+  end
 end

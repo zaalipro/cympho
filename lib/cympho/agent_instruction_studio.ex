@@ -34,6 +34,8 @@ defmodule Cympho.AgentInstructionStudio do
     "owner-readable",
     "owner readable",
     "what happened",
+    "evidence inspected",
+    "evidence produced",
     "current state",
     "next decision",
     "summarize",
@@ -65,6 +67,30 @@ defmodule Cympho.AgentInstructionStudio do
     "single highest-leverage"
   ]
 
+  @receipt_terms [
+    "last action receipt",
+    "action taken",
+    "evidence/artifact",
+    "evidence",
+    "artifact",
+    "verification",
+    "remaining risk",
+    "risk",
+    "next decision"
+  ]
+
+  @restart_terms [
+    "restart packet",
+    "restartable",
+    "resume",
+    "fresh agent",
+    "hidden chat history",
+    "next owner",
+    "exact next action",
+    "current state",
+    "next decision"
+  ]
+
   def analyze(agent_or_role, opts_or_instructions \\ [])
 
   def analyze(%Agent{} = agent, opts) when is_list(opts) do
@@ -81,6 +107,9 @@ defmodule Cympho.AgentInstructionStudio do
     role = normalize_role(role)
     instructions = to_string(instructions || "")
     contract = AgentPromptContract.build(role, instructions)
+    runtime_drill = RolePlaybook.runtime_drill(role)
+    turn_guide = RolePlaybook.turn_contract(role)
+    turn_ledger = RolePlaybook.turn_ledger(role)
     adapter = opts |> Keyword.get(:adapter) |> normalize_adapter()
     audits = audits(role, instructions, contract, adapter)
     scenarios = scenarios(role, instructions, adapter)
@@ -94,7 +123,20 @@ defmodule Cympho.AgentInstructionStudio do
       status_label: status_label(status),
       score: score,
       summary: summary(status, role, score),
-      effective_sections: effective_sections(role, instructions, contract, adapter, opts),
+      runtime_drill: runtime_drill,
+      turn_guide: turn_guide,
+      turn_ledger: turn_ledger,
+      effective_sections:
+        effective_sections(
+          role,
+          instructions,
+          contract,
+          runtime_drill,
+          turn_guide,
+          turn_ledger,
+          adapter,
+          opts
+        ),
       audits: audits,
       scenarios: scenarios,
       eval_coverage: AgentPromptContractEval.coverage(role),
@@ -118,6 +160,8 @@ defmodule Cympho.AgentInstructionStudio do
       memory_audit(instructions),
       mission_alignment_audit(instructions),
       operating_loop_audit(instructions),
+      last_action_receipt_audit(instructions),
+      restart_packet_audit(instructions),
       conflict_audit(instructions),
       pr_audit(role, instructions),
       adapter_audit(adapter)
@@ -151,9 +195,9 @@ defmodule Cympho.AgentInstructionStudio do
       status: if(hits >= 2, do: :ok, else: :weak),
       detail:
         if hits >= 2 do
-          "Custom instructions reinforce owner-readable summaries and next decisions."
+          "Custom instructions reinforce owner-readable summaries, next decisions, and restart packets."
         else
-          "Custom instructions should explicitly ask for concise owner-readable summaries, current state, and next decision."
+          "Custom instructions should explicitly ask for concise owner-readable summaries, current state, next decision, and restart packet."
         end,
       fix:
         "Add the owner-readable summary patch so agents collapse routine work into useful issue memory."
@@ -173,8 +217,43 @@ defmodule Cympho.AgentInstructionStudio do
         else
           "Runtime prompts inject the operating loop; custom instructions should reinforce it for agents that drift, retry silently, or skip final reports."
         end,
+      fix: "Add the operating-loop patch so the agent follows the same turn rhythm every run."
+    }
+  end
+
+  defp last_action_receipt_audit(instructions) do
+    hits = term_hits(instructions, @receipt_terms)
+
+    %{
+      key: :last_action_receipt,
+      label: "Last action receipt",
+      status: if(hits >= 3, do: :ok, else: :weak),
+      detail:
+        if hits >= 3 do
+          "Custom instructions reinforce action, evidence, verification, risk, next-decision receipts, and restart packets."
+        else
+          "Custom instructions should make the final tagged comment easy to inspect with action taken, evidence, verification, remaining risk, next decision, and restart packet."
+        end,
       fix:
-        "Add the operating-loop patch so the agent follows the same turn rhythm every run."
+        "Add the last-action receipt patch so every run ends with inspectable evidence instead of vague status."
+    }
+  end
+
+  defp restart_packet_audit(instructions) do
+    hits = term_hits(instructions, @restart_terms)
+
+    %{
+      key: :restart_packet,
+      label: "Restart packet",
+      status: if(hits >= 2, do: :ok, else: :weak),
+      detail:
+        if hits >= 2 do
+          "Custom instructions reinforce restartable handoff context for future turns."
+        else
+          "Custom instructions should tell the agent to leave enough context for a fresh agent, reviewer, CEO, or owner to resume without hidden chat history."
+        end,
+      fix:
+        "Add the restart-packet patch so interrupted, delegated, or relaunched work has a clear next owner and exact next action."
     }
   end
 
@@ -284,6 +363,7 @@ defmodule Cympho.AgentInstructionStudio do
         ]) >= 1,
         "[owner_update] + [blocked]"
       ),
+      patrol_recovery_scenario(instructions),
       operating_loop_scenario(instructions),
       blocked_scenario(instructions)
     ]
@@ -306,6 +386,7 @@ defmodule Cympho.AgentInstructionStudio do
         term_hits(instructions, ["review", "verification", "gaps", "follow-up"]) >= 2,
         "[review]"
       ),
+      patrol_recovery_scenario(instructions),
       operating_loop_scenario(instructions),
       blocked_scenario(instructions)
     ]
@@ -316,7 +397,7 @@ defmodule Cympho.AgentInstructionStudio do
       scenario(
         :delivery_package,
         "Deliver reviewable work",
-        "Leaves files changed, verification, risks, current state, and next decision.",
+        "Leaves files changed, verification, risks, current state, next decision, and restart packet.",
         term_hits(instructions, ["files changed", "verification", "risks", "next decision"]) >= 2,
         "[delivery]"
       )
@@ -346,7 +427,8 @@ defmodule Cympho.AgentInstructionStudio do
         ]
       end
 
-    base ++ pr_scenarios ++ [operating_loop_scenario(instructions), blocked_scenario(instructions)]
+    base ++
+      pr_scenarios ++ [operating_loop_scenario(instructions), blocked_scenario(instructions)]
   end
 
   defp scenarios(_role, instructions, _adapter),
@@ -362,11 +444,29 @@ defmodule Cympho.AgentInstructionStudio do
     )
   end
 
+  defp patrol_recovery_scenario(instructions) do
+    scenario(
+      :patrol_recovery,
+      "Recover stalled work from Patrol",
+      "Handles stalled-work wakes with a review decision, intervene mode, and tagged explanation instead of comment-only loops.",
+      term_hits(instructions, [
+        "patrol",
+        "stalled",
+        "intervene",
+        "force_handoff",
+        "reassign",
+        "approve_issue",
+        "request_changes"
+      ]) >= 2,
+      "review decision or `intervene`"
+    )
+  end
+
   defp blocked_scenario(instructions) do
     scenario(
       :blocked_work,
       "Escalate blocked work",
-      "Explains cause, attempted fix, needs, current state, and next decision instead of stalling silently.",
+      "Explains cause, attempted fix, needs, current state, next decision, and restart packet instead of stalling silently.",
       term_hits(instructions, ["blocked", "cause", "attempted fix", "needs"]) >= 1,
       "[blocked]"
     )
@@ -388,7 +488,16 @@ defmodule Cympho.AgentInstructionStudio do
     }
   end
 
-  defp effective_sections(role, instructions, contract, adapter, opts) do
+  defp effective_sections(
+         role,
+         instructions,
+         contract,
+         runtime_drill,
+         turn_guide,
+         turn_ledger,
+         adapter,
+         opts
+       ) do
     [
       %{
         label: "Role playbook",
@@ -406,6 +515,54 @@ defmodule Cympho.AgentInstructionStudio do
           "Agents orient on current context, decide one next move, act through cympho-actions, verify evidence, and report with a tagged comment.",
         preview:
           "Orient: read current context.\nDecide: pick one next move.\nAct: use allowed cympho-actions.\nVerify: name evidence or blockers.\nReport: leave the role's tagged final comment."
+      },
+      %{
+        label: "Runtime drill",
+        source: "Injected",
+        status: :ok,
+        summary:
+          "One-turn checklist that prevents vague handoffs, comment-only turns, and unverifiable completion claims.",
+        preview: runtime_drill_preview(runtime_drill)
+      },
+      %{
+        label: "Turn guide",
+        source: "Injected",
+        status: :ok,
+        summary:
+          "Role-specific first move, evidence, action boundary, completion signal, and escalation contract.",
+        preview: turn_guide_preview(turn_guide)
+      },
+      %{
+        label: "Turn ledger",
+        source: "Injected",
+        status: :ok,
+        summary:
+          "Durable issue-page evidence that makes each autonomous run auditable and restartable.",
+        preview: turn_ledger_preview(turn_ledger)
+      },
+      %{
+        label: "Last action receipt",
+        source: "Injected",
+        status: :ok,
+        summary:
+          "Final tagged comments carry action, evidence, verification, risk, next decision, and restart packet in one inspectable packet.",
+        preview: last_action_receipt_preview(RolePlaybook.last_action_receipt(role))
+      },
+      %{
+        label: "Restart packet guide",
+        source: "Injected",
+        status: :ok,
+        summary:
+          "Agents leave enough decision, scope, evidence, risk, next-owner, and next-action context for a fresh turn to resume from the issue page.",
+        preview: restart_packet_preview(RolePlaybook.restart_packet(role))
+      },
+      %{
+        label: "Stop condition guide",
+        source: "Injected",
+        status: :ok,
+        summary:
+          "Agents stop only after a durable issue update, handoff, review decision, work product, or blocker has been recorded.",
+        preview: RolePlaybook.stop_condition(role)
       },
       %{
         label: "Mission alignment guide",
@@ -486,16 +643,60 @@ defmodule Cympho.AgentInstructionStudio do
 
   defp maybe_add_pr_section(sections, _role), do: sections
 
+  defp turn_guide_preview(turn_guide) do
+    turn_guide
+    |> Enum.map(fn item ->
+      "#{item.label}: #{item.detail}\nSignal: #{item.signal}"
+    end)
+    |> Enum.join("\n\n")
+  end
+
+  defp runtime_drill_preview(runtime_drill) do
+    runtime_drill
+    |> Enum.map(fn item ->
+      "#{item.label}: #{item.detail}\nGate: #{item.gate}"
+    end)
+    |> Enum.join("\n\n")
+  end
+
+  defp turn_ledger_preview(turn_ledger) do
+    turn_ledger
+    |> Enum.map(fn item ->
+      "#{item.label}: #{item.detail}\nDurable signal: #{item.signal}"
+    end)
+    |> Enum.join("\n\n")
+  end
+
+  defp last_action_receipt_preview(items) do
+    items
+    |> Enum.map(fn item ->
+      "#{item.label}: #{item.detail}\nSignal: #{item.signal}"
+    end)
+    |> Enum.join("\n\n")
+  end
+
+  defp restart_packet_preview(items) do
+    items
+    |> Enum.map(fn item ->
+      "#{item.label}: #{item.detail}\nSignal: #{item.signal}"
+    end)
+    |> Enum.join("\n\n")
+  end
+
   defp patches(role, adapter, contract) do
     [
       owner_memory_patch(contract),
       operating_loop_patch(),
+      last_action_receipt_patch(),
+      restart_packet_patch(role),
       role_patch(role),
       mission_alignment_patch(role),
       owner_signoff_patch(role),
+      patrol_recovery_patch(role),
       blocked_patch(),
       pr_patch(role),
-      adapter_patch(adapter)
+      adapter_patch(adapter),
+      stop_condition_patch(role)
     ]
     |> Enum.reject(&is_nil/1)
   end
@@ -522,7 +723,7 @@ defmodule Cympho.AgentInstructionStudio do
       tone: :primary,
       reason: "Reduces noisy issues and gives the owner a useful issue page.",
       body:
-        "After every meaningful action, leave one concise owner-readable tagged comment using this shape:\n#{contract.required_template}\nDo not paste raw logs. Summarize what changed, how it was verified, remaining risks, current state, and the exact next decision."
+        "After every meaningful action, leave one concise owner-readable tagged comment using this shape:\n#{contract.required_template}\nDo not paste raw logs. Summarize what changed, the evidence inspected or produced, how it was verified, remaining risks, current state, the exact next decision, and the restart packet."
     }
   end
 
@@ -533,7 +734,30 @@ defmodule Cympho.AgentInstructionStudio do
       tone: :primary,
       reason: "Prevents drift by giving the agent the same turn rhythm every run.",
       body:
-        "On every turn, follow this loop before finalizing: Orient on issue, goal, project, latest comments, blockers, and current owner/manager intent. Decide the single next move that advances the issue. Act only through allowed `cympho-actions`. Verify with tests, artifact evidence, review evidence, or a named blocker. Report with the required tagged comment including current state and next decision."
+        "On every turn, follow this loop before finalizing: Orient on issue, goal, project, latest comments, blockers, and current owner/manager intent. Decide the single next move that advances the issue. Act only through allowed `cympho-actions`. Verify with tests, artifact evidence, review evidence, or a named blocker. Report with the required tagged comment including current state, next decision, and restart packet."
+    }
+  end
+
+  defp last_action_receipt_patch do
+    %{
+      id: "last-action-receipt",
+      title: "Last action receipt",
+      tone: :primary,
+      reason:
+        "Makes the final tagged comment quick to inspect before another agent or owner acts.",
+      body:
+        "Before stopping, make the final tagged comment easy to inspect by including: Action taken, Evidence/artifact, Verification, Remaining risk, Next decision, and Restart packet. If any receipt field is unknown, use `[blocked]` instead of claiming completion."
+    }
+  end
+
+  defp restart_packet_patch(role) do
+    %{
+      id: "restart-packet",
+      title: "Restart packet",
+      tone: :primary,
+      reason: "Makes delegated, interrupted, or relaunched work resumable from the issue page.",
+      body:
+        "If the next turn may be run by a fresh agent, reviewer, CEO, or owner, make the issue page restartable: name the decision just made, active scope, evidence/artifact to inspect, files or child issues touched, blocker or risk, next owner, and exact next action. Do not rely on hidden chat history. Role continuity signal: #{restart_packet_signal(role)}."
     }
   end
 
@@ -545,7 +769,7 @@ defmodule Cympho.AgentInstructionStudio do
       reason:
         "Keeps CEO issues readable when work is split across Product, Design, CTO, and engineers.",
       body:
-        "When receiving an owner request, first state the business outcome, then delegate with `[handoff]` to Product, Design, and CTO as needed. Before closure, add `[owner_update] What happened: ... Business status: ... Current state: ... Next decision: ... Owner decision needed: ...`."
+        "When receiving an owner request, first state the business outcome, then choose exactly one first-turn exit. If the answer is ready, leave `[owner_update] What happened: ... Business status: shipped/not shipped/ready for owner signoff. Evidence inspected: ... Verification: ... Remaining risk: ... Current state: ... Next decision: ... Owner decision needed: ... Restart packet: ...`. If execution is needed, create 2-5 scoped child issues with acceptance criteria, leave `[handoff]` with evidence/artifact, verification, remaining risk, next decision, and restart packet, and `block_issue` the parent as waiting on delegated sub-work. If blocked, leave `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ... Restart packet: ...`."
     }
   end
 
@@ -556,7 +780,7 @@ defmodule Cympho.AgentInstructionStudio do
       tone: :neutral,
       reason: "Makes CTO decomposition and review auditable.",
       body:
-        "For large work, split into child issues with acceptance criteria, dependencies, and review order. When reviewing, leave `[review] Verdict: accepted/request changes/blocked. What happened: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ...`."
+        "For large work, split into child issues with acceptance criteria, dependencies, and review order. When reviewing, leave `[review] Verdict: accepted/request changes/blocked. What happened: ... Evidence inspected: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ... Restart packet: ...`."
     }
   end
 
@@ -567,7 +791,7 @@ defmodule Cympho.AgentInstructionStudio do
       tone: :neutral,
       reason: "Makes #{role_label(role)} output reviewable.",
       body:
-        "Before `submit_review`, attach the work product, artifact, or PR/reference and leave `[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ...`. Include concrete artifact names, commands/tests or evidence checked, and any remaining risk."
+        "Before `submit_review`, attach the work product, artifact, or PR/reference and leave `[delivery] What happened: ... Files changed: ... Evidence produced: ... Verification: ... Risks: ... Current state: ... Next decision: ... Restart packet: ...`. Include concrete artifact names, commands/tests or evidence checked, remaining risk, and exactly how the reviewer should resume."
     }
   end
 
@@ -593,11 +817,24 @@ defmodule Cympho.AgentInstructionStudio do
       reason:
         "Keeps owner acceptance and requested revisions from looking like generic blocked work.",
       body:
-        "When work is ready for owner acceptance, leave `[owner_update] What happened: ... Business status: ... Current state: ... Next decision: ... Owner decision needed: verify or request revision.` Then use `block_issue` with a `[blocked]` note saying the owner must verify the CEO update. If the owner reopens the CEO verification update, address the gap with a revised owner update, delegate missing work, or name the blocker. Do not repeat the prior update unchanged."
+        "When work is ready for owner acceptance, leave `[owner_update] What happened: ... Business status: ready for owner signoff. Evidence inspected: completed child issues, reviews, PRs, work products, checks, or blockers. Verification: reviewed the evidence packet against the owner request. Remaining risk: ... Current state: waiting for owner verification. Next decision: owner accepts or requests revision. Owner decision needed: verify or request revision. Restart packet: ...` Then use `block_issue` with a `[blocked]` note saying the owner must verify the CEO update and including its own restart packet. Do not call the business status `shipped` while the issue is blocked only for owner signoff. If the owner reopens the CEO verification update, address the gap with a revised owner update, delegate missing work, or name the blocker. Do not repeat the prior update unchanged."
     }
   end
 
   defp owner_signoff_patch(_role), do: nil
+
+  defp patrol_recovery_patch(role) when role in [:ceo, :cto] do
+    %{
+      id: "patrol-recovery",
+      title: "Patrol recovery",
+      tone: :danger,
+      reason: "Keeps stalled-work wakes from turning into comment-only loops.",
+      body:
+        "When Patrol wakes you for stalled work, inspect status, assignee, latest evidence, and blocker history. If the issue is in review and evidence is ready, make the review decision with `approve_issue` or `request_changes`. If execution or blocked work is stalled, use `intervene` with the cheapest decisive mode: `unblock`, `force_handoff`, `reassign`, or `cancel`. Always leave a tagged `[review]`, `[handoff]`, or `[blocked]` comment explaining why that recovery mode fits."
+    }
+  end
+
+  defp patrol_recovery_patch(_role), do: nil
 
   defp blocked_patch do
     %{
@@ -606,7 +843,7 @@ defmodule Cympho.AgentInstructionStudio do
       tone: :danger,
       reason: "Prevents silent stalls and gives CTO/CEO something actionable.",
       body:
-        "If blocked, do not keep retrying silently. Leave `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ...` and hand off to the role that can unblock it."
+        "If blocked, do not keep retrying silently. Leave `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ... Restart packet: ...` and hand off to the role that can unblock it."
     }
   end
 
@@ -657,6 +894,17 @@ defmodule Cympho.AgentInstructionStudio do
   end
 
   defp adapter_patch(_adapter), do: nil
+
+  defp stop_condition_patch(role) do
+    %{
+      id: "stop-condition",
+      title: "Stop condition",
+      tone: :primary,
+      reason: "Prevents prose-only turns by naming what must be recorded before the agent stops.",
+      body:
+        "Before ending a run, confirm the issue has a durable next state recorded in `cympho-actions`:\n#{RolePlaybook.stop_condition(role)}"
+    }
+  end
 
   defp score(audits, scenarios) do
     penalties =
@@ -744,6 +992,14 @@ defmodule Cympho.AgentInstructionStudio do
   defp normalize_role(role), do: Agent.normalize_role(role) || :engineer
 
   defp role_label(role), do: Agent.role_label(role)
+
+  defp restart_packet_signal(:ceo), do: "owner/CTO/agent next action"
+  defp restart_packet_signal(:cto), do: "engineer/CEO/release next action"
+
+  defp restart_packet_signal(role) when role in @delivery_roles,
+    do: "reviewer next action"
+
+  defp restart_packet_signal(_role), do: "next owner + action"
 
   defp plural(1), do: ""
   defp plural(_), do: "s"

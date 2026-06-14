@@ -10,6 +10,7 @@ defmodule CymphoWeb.QuickIssueController do
 
   alias Cympho.Agents
   alias Cympho.Companies
+  alias Cympho.Goals
   alias Cympho.Issues
   alias Cympho.Issues.Issue
   alias Cympho.Projects
@@ -70,6 +71,8 @@ defmodule CymphoWeb.QuickIssueController do
     with {:ok, status} <- validate_status(Map.get(params, "status", "todo")),
          {:ok, priority} <- validate_priority(Map.get(params, "priority", "medium")),
          {:ok, project_id} <- validate_project(company_id, Map.get(params, "project_id")),
+         {:ok, goal} <- validate_goal(company_id, Map.get(params, "goal_id")),
+         :ok <- validate_goal_project(goal, project_id),
          {:ok, assignee} <- resolve_assignee(company_id, Map.get(params, "assignee_id")) do
       attrs =
         %{
@@ -79,6 +82,7 @@ defmodule CymphoWeb.QuickIssueController do
           "company_id" => company_id
         }
         |> put_optional("project_id", project_id)
+        |> put_goal(goal)
         |> put_assignee(assignee)
         |> put_created_by(conn.assigns[:current_user])
 
@@ -115,6 +119,27 @@ defmodule CymphoWeb.QuickIssueController do
     end
   end
 
+  defp validate_goal(_company_id, goal_id) when goal_id in [nil, ""], do: {:ok, nil}
+
+  defp validate_goal(company_id, goal_id) do
+    case Goals.get_company_goal(company_id, goal_id) do
+      {:ok, %{status: "active"} = goal} -> {:ok, goal}
+      {:ok, _goal} -> {:error, "Choose an active goal."}
+      {:error, :not_found} -> {:error, "Choose a goal from this company."}
+    end
+  end
+
+  defp validate_goal_project(nil, _project_id), do: :ok
+  defp validate_goal_project(%{project_id: nil}, _project_id), do: :ok
+  defp validate_goal_project(%{project_id: project_id}, project_id), do: :ok
+
+  defp validate_goal_project(%{project_id: goal_project_id}, project_id)
+       when project_id in [nil, ""] and is_binary(goal_project_id),
+       do: :ok
+
+  defp validate_goal_project(_goal, _project_id),
+    do: {:error, "Choose a goal that matches the selected project."}
+
   defp resolve_assignee(company_id, assignee_id) when assignee_id in [nil, ""] do
     case Agents.get_company_ceo(company_id) do
       {:ok, ceo} -> {:ok, ceo}
@@ -133,6 +158,14 @@ defmodule CymphoWeb.QuickIssueController do
 
   defp put_optional(attrs, _key, nil), do: attrs
   defp put_optional(attrs, key, value), do: Map.put(attrs, key, value)
+
+  defp put_goal(attrs, nil), do: attrs
+
+  defp put_goal(attrs, goal) do
+    attrs
+    |> Map.put("goal_id", goal.id)
+    |> put_optional("project_id", goal.project_id)
+  end
 
   defp put_assignee(attrs, nil), do: attrs
 

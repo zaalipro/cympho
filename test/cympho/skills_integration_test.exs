@@ -104,6 +104,42 @@ defmodule Cympho.SkillsIntegrationTest do
       assert List.first(skills).identifier == "enabled_skill"
     end
 
+    test "excludes errored assigned skills from prompt availability and reports loadout repair" do
+      agent = insert_agent()
+
+      errored_plugin =
+        %Plugin{}
+        |> Plugin.changeset(%{
+          identifier: "errored_skill",
+          name: "Errored Skill",
+          version: "1.0.0",
+          capabilities: ["api_call"],
+          enabled: true,
+          company_id: agent.company_id,
+          status: "error",
+          manifest: %{"entrypoint" => "noop"},
+          manifest_errors: %{"entrypoint" => "missing"}
+        })
+        |> Repo.insert!()
+
+      %AgentSkill{}
+      |> AgentSkill.changeset(%{
+        agent_id: agent.id,
+        plugin_id: errored_plugin.id
+      })
+      |> Repo.insert!()
+
+      assert Skills.available_for_agent(agent.id) == []
+
+      summary = Skills.agent_skill_summary(agent.id, agent.company_id)
+
+      assert summary.level == :critical
+      assert summary.metrics.assigned_plugins == 1
+      assert summary.metrics.prompt_ready_plugins == 0
+      assert summary.metrics.manifest_error_assignments == 1
+      assert summary.next_action.key == :repair_assigned_skills
+    end
+
     test "gracefully degrades on error" do
       # This test verifies that errors during skill loading are caught
       # and an empty list is returned instead of crashing

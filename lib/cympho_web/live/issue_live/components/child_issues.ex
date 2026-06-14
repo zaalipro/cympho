@@ -41,6 +41,8 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
             style={"padding-left: #{node.depth * 18 + 4}px;"}
           >
             <% health = Map.get(@health_by_child_id, node.issue.id) %>
+            <% contract = execution_contract(node.issue) %>
+            <% description = visible_description(node.issue.description, contract) %>
             <span
               :if={node.depth > 0}
               aria-hidden="true"
@@ -68,11 +70,37 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
                 </span>
               </div>
               <p
-                :if={node.issue.description not in [nil, ""]}
+                :if={description}
                 class="mt-1 line-clamp-2 text-caption text-ink-tertiary"
               >
-                {node.issue.description}
+                {description}
               </p>
+              <div
+                :if={contract.rows != [] or contract.estimate}
+                class="mt-2 rounded-md border border-hairline bg-canvas/70 px-2.5 py-2"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-[10px] font-590 uppercase tracking-[0.14em] text-ink-tertiary">
+                    Execution contract
+                  </span>
+                  <span
+                    :if={contract.estimate}
+                    class="shrink-0 rounded-full border border-hairline bg-surface-1 px-2 py-0.5 font-mono text-[10px] text-ink-tertiary"
+                  >
+                    {contract.estimate}
+                  </span>
+                </div>
+                <div class="mt-1.5 grid gap-1.5 md:grid-cols-2">
+                  <div :for={row <- contract.rows} class="min-w-0">
+                    <span class="text-[10px] font-590 uppercase text-ink-tertiary">
+                      {row.label}
+                    </span>
+                    <p class="line-clamp-1 text-[11px] leading-4 text-ink-secondary">
+                      {row.value}
+                    </p>
+                  </div>
+                </div>
+              </div>
               <div :if={health} class="mt-2 flex flex-wrap gap-1.5">
                 <span
                   :for={chip <- health.evidence}
@@ -177,4 +205,153 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
   defp chip_class(:missing),
     do:
       "rounded-full border border-hairline bg-surface-1 px-2 py-0.5 text-[10px] uppercase text-ink-tertiary"
+
+  @contract_sections [
+    {"Acceptance", "Acceptance criteria"},
+    {"Evidence", "Evidence required"},
+    {"Verification", "Verification required"},
+    {"Done", "Definition of done"}
+  ]
+
+  defp execution_contract(issue) do
+    description = issue.description || ""
+
+    rows =
+      @contract_sections
+      |> Enum.map(fn {label, heading} ->
+        case description |> contract_values(heading) |> contract_summary() do
+          nil -> nil
+          value -> %{label: label, value: value}
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    %{rows: rows, estimate: estimate_label(issue)}
+  end
+
+  defp visible_description(nil, _contract), do: nil
+
+  defp visible_description(description, %{rows: rows}) do
+    description = String.trim(description)
+
+    cond do
+      description == "" ->
+        nil
+
+      rows == [] ->
+        description
+
+      String.contains?(description, "## Execution brief") ->
+        description
+        |> String.split("## Execution brief", parts: 2)
+        |> List.first()
+        |> String.trim()
+        |> blank_to_nil()
+
+      true ->
+        description
+    end
+  end
+
+  defp contract_values(description, heading) do
+    lines = String.split(description, "\n")
+
+    case markdown_section(lines, heading) do
+      [] -> inline_values(lines, heading)
+      values -> values
+    end
+  end
+
+  defp markdown_section(lines, heading) do
+    heading_line = "**#{heading}**"
+
+    with index when is_integer(index) <-
+           Enum.find_index(lines, &(String.trim(&1) == heading_line)) do
+      lines
+      |> Enum.drop(index + 1)
+      |> Enum.take_while(&(not contract_heading?(&1)))
+      |> clean_contract_lines()
+    else
+      _ -> []
+    end
+  end
+
+  defp inline_values(lines, heading) do
+    prefix = String.downcase("#{heading}:")
+
+    lines
+    |> Enum.flat_map(fn line ->
+      trimmed = String.trim(line)
+
+      if String.starts_with?(String.downcase(trimmed), prefix) do
+        trimmed
+        |> String.slice(String.length(prefix)..-1//1)
+        |> List.wrap()
+      else
+        []
+      end
+    end)
+    |> clean_contract_lines()
+  end
+
+  defp contract_heading?(line) do
+    line = String.trim(line)
+
+    (String.starts_with?(line, "**") and String.ends_with?(line, "**")) or
+      String.starts_with?(line, "##")
+  end
+
+  defp clean_contract_lines(lines) do
+    lines
+    |> Enum.map(&clean_contract_line/1)
+    |> Enum.reject(&blank_or_placeholder?/1)
+  end
+
+  defp clean_contract_line(line) do
+    line
+    |> String.trim()
+    |> String.replace(~r/^[-*]\s+/, "")
+    |> String.trim()
+  end
+
+  defp blank_or_placeholder?(""), do: true
+  defp blank_or_placeholder?("(none)"), do: true
+  defp blank_or_placeholder?("None called out by the delegating agent."), do: true
+  defp blank_or_placeholder?(_), do: false
+
+  defp contract_summary([]), do: nil
+
+  defp contract_summary([first | rest]) do
+    case length(rest) do
+      0 -> first
+      count -> "#{first} +#{count}"
+    end
+  end
+
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(value), do: value
+
+  defp estimate_label(%{monitor_state: monitor_state}) do
+    case estimated_minutes(monitor_state) do
+      minutes when is_integer(minutes) and minutes > 0 -> "~#{minutes}m"
+      _ -> nil
+    end
+  end
+
+  defp estimate_label(_), do: nil
+
+  defp estimated_minutes(%{"estimated_minutes" => minutes}), do: positive_integer(minutes)
+  defp estimated_minutes(%{estimated_minutes: minutes}), do: positive_integer(minutes)
+  defp estimated_minutes(_), do: nil
+
+  defp positive_integer(minutes) when is_integer(minutes) and minutes > 0, do: minutes
+
+  defp positive_integer(minutes) when is_binary(minutes) do
+    case Integer.parse(minutes) do
+      {value, ""} when value > 0 -> value
+      _ -> nil
+    end
+  end
+
+  defp positive_integer(_), do: nil
 end

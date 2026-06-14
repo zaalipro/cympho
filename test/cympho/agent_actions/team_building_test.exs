@@ -1,7 +1,7 @@
 defmodule Cympho.AgentActions.TeamBuildingTest do
   use Cympho.DataCase, async: false
 
-  alias Cympho.{AgentActions, Agents, Companies, Issues, Wakes}
+  alias Cympho.{AgentActions, Agents, Comments, Companies, Issues, Wakes}
   alias Cympho.Wakes.AgentWake
   import Ecto.Query
 
@@ -33,7 +33,42 @@ defmodule Cympho.AgentActions.TeamBuildingTest do
   describe "spawn_agent" do
     setup [:start_heartbeat_supervisor]
 
-    test "CEO can hire a new engineer", %{ceo: ceo, issue: issue} do
+    test "CEO must use an eligible idle engineer before hiring a duplicate", %{
+      ceo: ceo,
+      engineer: engineer,
+      issue: issue
+    } do
+      actions = [
+        %{
+          "type" => "spawn_agent",
+          "name" => "Duplicate Engineer",
+          "role" => "engineer"
+        }
+      ]
+
+      assert {:error, {:spawn_agent_existing_capacity, :engineer, candidates}} =
+               AgentActions.execute(issue, ceo, actions)
+
+      assert candidates =~ engineer.name
+
+      comments = Comments.list_comments(issue.id)
+      assert Enum.any?(comments, &(&1.body =~ "spawn_agent rejected"))
+      assert Enum.any?(comments, &(&1.body =~ "Use delegate, create_issue, or handoff"))
+      assert Enum.any?(comments, &(&1.body =~ engineer.name))
+
+      refute Enum.any?(
+               Agents.list_agents_by_role(:engineer, ceo.company_id),
+               &(&1.name == "Duplicate Engineer")
+             )
+    end
+
+    test "CEO can hire a new engineer when existing engineers are at capacity", %{
+      ceo: ceo,
+      engineer: engineer,
+      issue: issue
+    } do
+      {:ok, _active} = saturate_agent(engineer)
+
       actions = [
         %{
           "type" => "spawn_agent",
@@ -53,6 +88,159 @@ defmodule Cympho.AgentActions.TeamBuildingTest do
       Cympho.AgentHeartbeat.stop_for_agent(new_id)
     end
 
+    test "repo-delivery hires from a chat-only parent default to a repo-capable runtime profile",
+         %{
+           ceo: ceo,
+           engineer: engineer,
+           issue: issue
+         } do
+      {:ok, _active} = saturate_agent(engineer)
+
+      original_default = Application.get_env(:cympho, :default_adapter)
+      Application.put_env(:cympho, :default_adapter, :openai_chat)
+
+      on_exit(fn ->
+        if is_nil(original_default) do
+          Application.delete_env(:cympho, :default_adapter)
+        else
+          Application.put_env(:cympho, :default_adapter, original_default)
+        end
+      end)
+
+      {:ok, chat_ceo} = Agents.update_agent(ceo, %{adapter: :openai_chat})
+
+      actions = [
+        %{
+          "type" => "spawn_agent",
+          "name" => "Repo Engineer",
+          "role" => "engineer"
+        }
+      ]
+
+      assert {:ok, %{results: [%{type: "spawn_agent", agent_id: new_id, role: "engineer"}]}} =
+               AgentActions.execute(issue, chat_ceo, actions)
+
+      {:ok, hired} = Agents.get_agent(new_id)
+      assert hired.adapter == :process
+      assert hired.config["process_preset"] == "codex"
+      assert hired.config["command"] == "codex"
+      assert hired.runtime_config["profile_id"] == "process-codex"
+      assert Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(hired)
+
+      Cympho.AgentHeartbeat.stop_for_agent(new_id)
+    end
+
+    test "repo-delivery hire ignores text-only engineers and wakes waiting repo work",
+         %{
+           company: company,
+           ceo: ceo,
+           engineer: engineer,
+           issue: issue
+         } do
+      {:ok, _chat_engineer} = Agents.update_agent(engineer, %{adapter: :openai_chat})
+
+      {:ok, queued_issue} =
+        Issues.create_issue(%{
+          title: "Implement queued repo work",
+          description: """
+          Acceptance criteria: scoped repository change is implemented.
+          Evidence required: PR or work product plus delivery note.
+          Verification required: run a focused test.
+          Definition of done: ready for CTO review.
+          """,
+          status: :todo,
+          priority: :high,
+          assigned_role: "engineer",
+          company_id: company.id
+        })
+
+      assert is_nil(queued_issue.assignee_id)
+
+      actions = [
+        %{
+          "type" => "spawn_agent",
+          "name" => "Repo Lane Engineer",
+          "role" => "engineer"
+        }
+      ]
+
+      assert {:ok,
+              %{
+                results: [
+                  %{
+                    type: "spawn_agent",
+                    agent_id: new_id,
+                    role: "engineer",
+                    assigned_count: 1,
+                    wake_count: 1,
+                    assigned_issue_ids: [assigned_issue_id]
+                  }
+                ]
+              }} = AgentActions.execute(issue, ceo, actions)
+
+      assert assigned_issue_id == queued_issue.id
+
+      {:ok, hired} = Agents.get_agent(new_id)
+      assert Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(hired)
+
+      reloaded_issue = Issues.get_issue!(queued_issue.id)
+      assert reloaded_issue.assignee_id == new_id
+      assert reloaded_issue.assigned_role == "engineer"
+      assert reloaded_issue.status == :todo
+
+      [wake] = Wakes.list_issue_wakes(queued_issue.id)
+      assert wake.agent_id == new_id
+      assert wake.reason == "manual_dispatch"
+      assert wake.status == "pending"
+      assert wake.metadata["source"] == "demand_backed_hire"
+      assert wake.metadata["role"] == "engineer"
+      assert wake.metadata["agent_id"] == new_id
+
+      comments = Comments.list_comments(issue.id)
+      assert Enum.any?(comments, &(&1.body =~ "Assigned 1 waiting issue"))
+      assert Enum.any?(comments, &(&1.body =~ "queued 1 wake"))
+
+      child_comments = Comments.list_comments(queued_issue.id)
+      assert Enum.any?(child_comments, &(&1.body =~ "[handoff] Demand-backed hire assigned"))
+      assert Enum.any?(child_comments, &(&1.body =~ "Repo Lane Engineer"))
+
+      assert Enum.any?(
+               child_comments,
+               &(&1.body =~ "queued engineer work had no eligible repo-capable owner")
+             )
+
+      Cympho.AgentHeartbeat.stop_for_agent(new_id)
+    end
+
+    test "repo-delivery hires reject explicit text-only adapters", %{
+      ceo: ceo,
+      engineer: engineer,
+      issue: issue
+    } do
+      {:ok, _active} = saturate_agent(engineer)
+
+      actions = [
+        %{
+          "type" => "spawn_agent",
+          "name" => "Chat Engineer",
+          "role" => "engineer",
+          "adapter" => "openai_chat"
+        }
+      ]
+
+      assert {:error, {:spawn_agent_repo_runtime_required, :engineer, "openai_chat"}} =
+               AgentActions.execute(issue, ceo, actions)
+
+      comments = Comments.list_comments(issue.id)
+      assert Enum.any?(comments, &(&1.body =~ "must use a repo-capable runtime"))
+      assert Enum.any?(comments, &(&1.body =~ "OpenAI Chat cannot edit files"))
+
+      refute Enum.any?(
+               Agents.list_agents_by_role(:engineer, ceo.company_id),
+               &(&1.name == "Chat Engineer")
+             )
+    end
+
     test "CEO can hire a marketer for business-function work", %{ceo: ceo, issue: issue} do
       actions = [
         %{
@@ -69,6 +257,29 @@ defmodule Cympho.AgentActions.TeamBuildingTest do
       assert hired.role == :marketer
       assert hired.title == "Marketer"
       assert hired.parent_id == ceo.id
+
+      Cympho.AgentHeartbeat.stop_for_agent(new_id)
+    end
+
+    test "business-function hires can inherit a chat adapter from the parent", %{
+      ceo: ceo,
+      issue: issue
+    } do
+      {:ok, chat_ceo} = Agents.update_agent(ceo, %{adapter: :openai_chat})
+
+      actions = [
+        %{
+          "type" => "spawn_agent",
+          "name" => "Gateway Researcher",
+          "role" => "researcher"
+        }
+      ]
+
+      assert {:ok, %{results: [%{type: "spawn_agent", agent_id: new_id, role: "researcher"}]}} =
+               AgentActions.execute(issue, chat_ceo, actions)
+
+      {:ok, hired} = Agents.get_agent(new_id)
+      assert hired.adapter == :openai_chat
 
       Cympho.AgentHeartbeat.stop_for_agent(new_id)
     end
@@ -109,7 +320,8 @@ defmodule Cympho.AgentActions.TeamBuildingTest do
         %{
           "type" => "delegate",
           "to_agent_id" => engineer.id,
-          "reason" => "You wrote that module last week."
+          "reason" =>
+            "Acceptance criteria: implement the scoped module change without expanding the parent issue. Evidence required: code diff or work product plus delivery note. Verification required: focused module test or named blocker. Definition of done: ready for CTO review with evidence and risk named."
         }
       ]
 
@@ -122,10 +334,89 @@ defmodule Cympho.AgentActions.TeamBuildingTest do
       assert reloaded.assignee_id == engineer.id
       assert reloaded.assigned_role == "engineer"
       assert reloaded.status == :todo
+      original_description = String.trim(issue.description || "")
+      assert original_description != ""
+      assert reloaded.description =~ original_description
+      assert reloaded.description =~ "## Manager delegation brief"
+      assert reloaded.description =~ "From: #{ceo.name} (ceo)"
+      assert reloaded.description =~ "To: #{engineer.name} (engineer)"
+      assert reloaded.description =~ "Directive:"
+      assert reloaded.description =~ "Acceptance criteria: implement the scoped module change"
 
       [wake] = pending_wakes(engineer.id, "manager_directive")
-      assert wake.metadata["reason"] =~ "module last week"
+      assert wake.metadata["reason"] =~ "Acceptance criteria"
       assert wake.metadata["from_agent_id"] == ceo.id
+    end
+
+    test "CEO cannot delegate a thin issue directly to an engineer", %{
+      ceo: ceo,
+      engineer: engineer,
+      issue: issue
+    } do
+      actions = [
+        %{
+          "type" => "delegate",
+          "to_agent_id" => engineer.id,
+          "reason" => "You know this part; please take it."
+        }
+      ]
+
+      assert {:error,
+              {:delegate_delivery_brief_too_thin, :engineer, next_prompt, missing, scaffold}} =
+               AgentActions.execute(issue, ceo, actions)
+
+      assert next_prompt =~ "Acceptance criteria"
+      assert "Acceptance criteria" in missing
+      assert scaffold =~ "Delivery goal:"
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.assignee_id == ceo.id
+      assert reloaded.assigned_role == "ceo"
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "delegate rejected") and
+                 String.contains?(comment.body, "directive is too thin") and
+                 String.contains?(comment.body, "Repair scaffold")
+             end)
+
+      assert pending_wakes(engineer.id, "manager_directive") == []
+    end
+
+    test "short target ids are rejected without crashing", %{
+      ceo: ceo,
+      engineer: engineer,
+      issue: issue
+    } do
+      short_id = String.slice(engineer.id, 0, 8)
+
+      actions = [
+        %{
+          "type" => "delegate",
+          "to_agent_id" => short_id,
+          "reason" =>
+            "Acceptance criteria: implement the scoped module change without expanding the parent issue. Evidence required: code diff or work product plus delivery note. Verification required: focused module test or named blocker. Definition of done: ready for CTO review with evidence and risk named."
+        }
+      ]
+
+      assert {:error, {:invalid_agent_target_id, "delegate", ^short_id}} =
+               AgentActions.execute(issue, ceo, actions)
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.assignee_id == ceo.id
+      assert reloaded.assigned_role == "ceo"
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "delegate rejected") and
+                 String.contains?(comment.body, "full agent UUID")
+             end)
+
+      assert pending_wakes(engineer.id, "manager_directive") == []
     end
 
     test "engineer cannot delegate (governance role required)", %{
@@ -179,7 +470,7 @@ defmodule Cympho.AgentActions.TeamBuildingTest do
       actions = [
         %{
           "type" => "escalate",
-          "reason" => "Spec conflicts with itself, need human-level call.",
+          "reason" => escalation_reason(),
           "to_role" => "cto"
         }
       ]
@@ -196,10 +487,54 @@ defmodule Cympho.AgentActions.TeamBuildingTest do
 
       [wake] = pending_wakes(cto.id, "escalation_from_subordinate")
       assert wake.metadata["from_agent_id"] == engineer.id
-      assert wake.metadata["reason"] =~ "Spec conflicts"
+      assert wake.metadata["reason"] =~ "Cause:"
 
       # CEO is unaffected.
       assert pending_wakes(ceo.id, "escalation_from_subordinate") == []
+    end
+
+    test "thin escalation is rejected before blocking the issue", %{
+      cto: cto,
+      engineer: engineer,
+      issue: issue
+    } do
+      {:ok, engineer} = Agents.update_agent(engineer, %{parent_id: cto.id})
+
+      {:ok, _} = Issues.force_release_issue(issue, :todo)
+      {:ok, eng_issue} = Issues.checkout_issue(issue, engineer, :engineer)
+
+      actions = [
+        %{
+          "type" => "escalate",
+          "reason" => "Spec conflicts.",
+          "to_role" => "cto"
+        }
+      ]
+
+      assert {:error, {:escalation_reason_too_thin, missing, scaffold}} =
+               AgentActions.execute(eng_issue, engineer, actions)
+
+      assert "Needs" in missing
+      assert "Current state" in missing
+      assert "Next decision" in missing
+      assert scaffold =~ "Current escalation: Spec conflicts."
+      assert scaffold =~ "Restart packet:"
+
+      reloaded = Issues.get_issue!(eng_issue.id)
+      assert reloaded.status == :in_progress
+      assert reloaded.assignee_id == engineer.id
+      assert reloaded.assigned_role == "engineer"
+
+      comments = Comments.list_comments(eng_issue.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "escalate rejected") and
+                 String.contains?(comment.body, "escalation reason is too thin") and
+                 String.contains?(comment.body, "Repair scaffold")
+             end)
+
+      assert pending_wakes(cto.id, "escalation_from_subordinate") == []
     end
 
     test "CEO cannot escalate (no supervisor)", %{ceo: ceo, issue: issue} do
@@ -219,7 +554,7 @@ defmodule Cympho.AgentActions.TeamBuildingTest do
       {:ok, _} = Issues.force_release_issue(issue, :todo)
       {:ok, eng_issue} = Issues.checkout_issue(issue, engineer, :engineer)
 
-      actions = [%{"type" => "escalate", "reason" => "no parent"}]
+      actions = [%{"type" => "escalate", "reason" => escalation_reason()}]
 
       assert {:ok, %{results: [%{type: "escalate", to_agent_id: target}]}} =
                AgentActions.execute(eng_issue, engineer, actions)
@@ -265,6 +600,18 @@ defmodule Cympho.AgentActions.TeamBuildingTest do
 
   ## helpers
 
+  defp saturate_agent(agent) do
+    Issues.create_issue(%{
+      title: "Saturate #{agent.name}",
+      description: "Consumes the existing agent slot for capacity-sensitive hire tests.",
+      status: :in_progress,
+      priority: :medium,
+      company_id: agent.company_id,
+      assignee_id: agent.id,
+      assigned_role: to_string(agent.role)
+    })
+  end
+
   defp pending_wakes(agent_id, reason) do
     Repo.all(
       from w in AgentWake,
@@ -284,5 +631,17 @@ defmodule Cympho.AgentActions.TeamBuildingTest do
     end
 
     :ok
+  end
+
+  defp escalation_reason do
+    """
+    Cause: spec conflicts with itself and cannot be resolved at engineer authority.
+    Attempted fix: reviewed the issue description and checked the implementation constraints.
+    Needs: CTO chooses the correct interpretation or cuts scope.
+    Current state: implementation is paused before code changes.
+    Next decision: CTO decides which requirement wins.
+    Restart packet: resume from the conflicting spec lines and either update scope or delegate a clarified implementation.
+    """
+    |> String.trim()
   end
 end

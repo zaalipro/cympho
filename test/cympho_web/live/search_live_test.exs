@@ -7,6 +7,33 @@ defmodule CymphoWeb.SearchLiveTest do
   alias Cympho.Projects
 
   describe "Search page" do
+    test "renders starter command actions before a query", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/search")
+
+      assert html =~ ~s(data-testid="search-command")
+      assert html =~ "Search command"
+      assert html =~ "Ready for scoped company search."
+      assert html =~ "New issue"
+      assert html =~ "Board"
+      assert html =~ "Operations"
+      assert html =~ "No top match."
+      assert html =~ ~s(data-testid="search-core-filters")
+      assert html =~ ~s(data-testid="search-advanced-filters")
+      assert html =~ "Advanced filters"
+      assert html =~ "Optional"
+      refute advanced_filter_open?(html)
+      assert html =~ ~s(data-testid="search-results-empty")
+      assert html =~ "Search is ready"
+      assert html =~ "Jump to current work, open the board, or create the next issue from here."
+    end
+
+    test "opens advanced filters when an advanced filter is active", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/search?role=engineer")
+
+      assert html =~ "1 active advanced"
+      assert advanced_filter_open?(html)
+    end
+
     test "renders company-scoped results and scoped filter options", %{
       conn: conn,
       current_company: company
@@ -57,6 +84,11 @@ defmodule CymphoWeb.SearchLiveTest do
 
       assert html =~ "Find company work"
       assert html =~ "Filters"
+      assert html =~ ~s(data-testid="search-command")
+      assert html =~ "Search command"
+      assert html =~ "3 total matches. Top match: Issue. No filters active."
+      assert html =~ "Open top result"
+      assert html =~ "Focus issues"
       assert html =~ "Results"
       assert html =~ "#{needle} current issue"
       assert html =~ "#{needle} project"
@@ -67,6 +99,33 @@ defmodule CymphoWeb.SearchLiveTest do
       {:ok, _view, issue_tab_html} = live(conn, "/search?q=#{needle}&tab=issues")
 
       assert issue_tab_html =~ "1 issue match for &quot;#{needle}&quot;"
+    end
+
+    test "renders an actionable empty state when filters remove every match", %{
+      conn: conn,
+      current_company: company
+    } do
+      unique = System.unique_integer([:positive])
+      needle = "filteredfind#{unique}"
+
+      {:ok, _issue} =
+        Issues.create_issue(%{
+          title: "#{needle} todo issue",
+          description: "The filter should hide this search hit.",
+          company_id: company.id,
+          status: :todo
+        })
+
+      {:ok, _view, html} = live(conn, "/search?q=#{needle}&status=blocked")
+
+      assert html =~ "No matches under the current filters."
+      assert html =~ ~s(data-testid="search-results-empty")
+      assert html =~ "No matches inside these filters"
+      assert html =~ "The query exists, but the active filters exclude every matching item."
+      assert html =~ "Clear filters"
+      assert html =~ "New issue"
+      assert html =~ "Issues"
+      refute html =~ "#{needle} todo issue"
     end
   end
 
@@ -82,5 +141,18 @@ defmodule CymphoWeb.SearchLiveTest do
       |> Enum.join()
 
     "L" <> letters
+  end
+
+  defp advanced_filter_open?(html) do
+    html
+    |> Floki.parse_document!()
+    |> Floki.find(~s(details[data-testid="search-advanced-filters"]))
+    |> case do
+      [{"details", attrs, _children}] ->
+        Enum.any?(attrs, fn {name, _value} -> name == "open" end)
+
+      _ ->
+        false
+    end
   end
 end

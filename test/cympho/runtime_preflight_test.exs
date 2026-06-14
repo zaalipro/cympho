@@ -64,7 +64,7 @@ defmodule Cympho.RuntimePreflightTest do
     agent = %{
       adapter: :openai_chat,
       config: %{
-        "endpoint" => "https://dashscope.example.com/v1/chat/completions",
+        "endpoint" => "https://dashscope.example.com/compatible-mode/v1/",
         "model" => "qwen3.7-plus"
       },
       runtime_config: %{"env" => %{"DASHSCOPE_API_KEY" => "secret-key"}}
@@ -82,8 +82,15 @@ defmodule Cympho.RuntimePreflightTest do
 
     assert Enum.any?(
              preflight.items,
-             &(&1.label == "Chat endpoint" and
-                 &1.detail == "https://dashscope.example.com/v1/chat/completions")
+             &(&1.label == "Configured endpoint" and
+                 &1.detail == "https://dashscope.example.com/compatible-mode/v1/")
+           )
+
+    assert Enum.any?(
+             preflight.items,
+             &(&1.label == "Request URL" and
+                 &1.detail ==
+                   "https://dashscope.example.com/compatible-mode/v1/chat/completions")
            )
 
     assert Enum.any?(
@@ -91,7 +98,60 @@ defmodule Cympho.RuntimePreflightTest do
              &(&1.label == "Chat completion key" and &1.status == :ok)
            )
 
+    assert Enum.any?(
+             preflight.items,
+             &(&1.label == "Execution capability" and &1.status == :info and
+                 &1.detail =~ "cannot edit files")
+           )
+
     refute inspect(preflight) =~ "secret-key"
+  end
+
+  test "links missing DashScope chat credentials to DASHSCOPE_API_KEY" do
+    agent = %{
+      adapter: :openai_chat,
+      config: %{
+        "endpoint" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model" => "qwen3.6-flash"
+      },
+      runtime_config: %{}
+    }
+
+    preflight = RuntimePreflight.for_agent(agent, autonomy_enabled?: true)
+    item = Enum.find(preflight.items, &(&1.label == "Chat completion key"))
+    uri = URI.parse(item.target_path)
+    query = URI.decode_query(uri.query)
+
+    assert preflight.status == :attention
+    assert item.status == :attention
+    assert item.detail =~ "Add DASHSCOPE_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY"
+    assert uri.path == "/settings/secrets"
+    assert query["key"] == "DASHSCOPE_API_KEY"
+    assert query["scope"] == "company"
+    assert query["description"] == "Chat completion key for agent runtime"
+  end
+
+  test "links missing generic chat credentials to OPENAI_API_KEY" do
+    agent = %{
+      adapter: :openai_chat,
+      config: %{
+        "endpoint" => "https://api.openai.example.com/v1",
+        "model" => "gpt-compatible"
+      },
+      runtime_config: %{}
+    }
+
+    preflight = RuntimePreflight.for_agent(agent, autonomy_enabled?: true)
+    item = Enum.find(preflight.items, &(&1.label == "Chat completion key"))
+    uri = URI.parse(item.target_path)
+    query = URI.decode_query(uri.query)
+
+    assert preflight.status == :attention
+    assert item.status == :attention
+    assert item.detail =~ "Add OPENAI_API_KEY or DASHSCOPE_API_KEY or ANTHROPIC_API_KEY"
+    assert uri.path == "/settings/secrets"
+    assert query["key"] == "OPENAI_API_KEY"
+    assert query["scope"] == "company"
   end
 
   test "blocks when a local process command is missing" do
@@ -163,7 +223,8 @@ defmodule Cympho.RuntimePreflightTest do
     assert Enum.any?(
              preflight.items,
              &(&1.label == "Command" and &1.status == :blocked and
-                 &1.target_path == "/agents/#{agent.id}#agent-process-command" and
+                 &1.target_path ==
+                   "/agents/#{agent.id}?tab=configuration#agent-process-command" and
                  &1.target_label == "Edit command")
            )
   end
@@ -181,6 +242,63 @@ defmodule Cympho.RuntimePreflightTest do
         config: %{
           "agent_did" => "did:example:remote-engineer",
           "capability" => "implementation",
+          "delivery_mode" => "push",
+          "max_price" => "1.00"
+        },
+        company_id: company.id
+      })
+
+    {:ok, _secret} =
+      Secrets.create_secret(%{
+        company_id: company.id,
+        scope: "company",
+        key: "AGRENTING_API_KEY",
+        value: "test-api-key",
+        description: "Agrenting API key for agent runtime"
+      })
+
+    {:ok, _repo_secret} =
+      Secrets.create_secret(%{
+        company_id: company.id,
+        scope: "company",
+        key: "AGRENTING_REPO_ACCESS_TOKEN",
+        value: "repo-token",
+        description: "Agrenting repo access token"
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Secret-backed issue",
+        description: complete_delivery_brief(),
+        status: :todo,
+        priority: :high,
+        assigned_role: "engineer",
+        assignee_id: agent.id,
+        company_id: company.id
+      })
+
+    preflight = RuntimePreflight.for_issue(issue, autonomy_enabled?: true)
+
+    assert preflight.status == :ready
+    assert Enum.any?(preflight.items, &(&1.label == "Agrenting API key" and &1.status == :ok))
+    assert Enum.any?(preflight.items, &(&1.label == "Delivery mode" and &1.status == :ok))
+    refute inspect(preflight) =~ "test-api-key"
+    refute inspect(preflight) =~ "repo-token"
+  end
+
+  test "for_issue warns when Agrenting output mode is assigned to repo delivery" do
+    {:ok, company} =
+      Companies.create_company(%{name: "Preflight Agrenting Output Co", slug: unique_slug()})
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Output Remote Engineer",
+        role: :engineer,
+        status: :idle,
+        adapter: :agrenting,
+        config: %{
+          "agent_did" => "did:example:output-remote-engineer",
+          "capability" => "implementation",
           "max_price" => "1.00"
         },
         company_id: company.id
@@ -197,7 +315,8 @@ defmodule Cympho.RuntimePreflightTest do
 
     {:ok, issue} =
       Issues.create_issue(%{
-        title: "Secret-backed issue",
+        title: "Remote repo delivery without push mode",
+        description: complete_delivery_brief(),
         status: :todo,
         priority: :high,
         assigned_role: "engineer",
@@ -207,9 +326,234 @@ defmodule Cympho.RuntimePreflightTest do
 
     preflight = RuntimePreflight.for_issue(issue, autonomy_enabled?: true)
 
+    assert preflight.status == :attention
+    assert preflight.first_action.label == "Repo-capable runtime"
+    assert preflight.first_action.detail =~ "not configured for repo-delivery capability"
+
+    assert Enum.any?(
+             preflight.items,
+             &(&1.label == "Delivery mode" and &1.status == :info and
+                 &1.detail =~ "Output mode")
+           )
+
+    refute inspect(preflight) =~ "test-api-key"
+  end
+
+  test "for_issue warns when repo delivery is assigned to a text-only chat adapter" do
+    {:ok, company} =
+      Companies.create_company(%{name: "Preflight Text Only Repo Co", slug: unique_slug()})
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Chat Engineer",
+        role: :engineer,
+        status: :idle,
+        adapter: :openai_chat,
+        config: %{
+          "endpoint" => "https://dashscope.example.com/compatible-mode/v1/chat/completions",
+          "model" => "qwen3.6-flash"
+        },
+        company_id: company.id
+      })
+
+    {:ok, _secret} =
+      Secrets.create_secret(%{
+        company_id: company.id,
+        scope: "company",
+        key: "DASHSCOPE_API_KEY",
+        value: "test-api-key",
+        description: "DashScope key"
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Implement owner-intake scaffold button",
+        status: :todo,
+        priority: :high,
+        assigned_role: "engineer",
+        assignee_id: agent.id,
+        company_id: company.id
+      })
+
+    preflight = RuntimePreflight.for_issue(issue, autonomy_enabled?: true)
+
+    assert preflight.status == :attention
+    assert preflight.agent_id == agent.id
+    assert preflight.first_action.label == "Repo-capable runtime"
+    assert preflight.first_action.detail =~ "not configured for repo-delivery capability"
+    assert preflight.first_action.detail =~ "file changes, tests, branches, or PRs"
+
+    assert preflight.first_action.target_path ==
+             "/agents/#{agent.id}?tab=configuration#agent-runtime-profile"
+
+    assert preflight.first_action.target_label == "Open runtime profile"
+
+    assert Enum.any?(
+             preflight.items,
+             &(&1.label == "Chat completion key" and &1.status == :ok)
+           )
+
+    refute inspect(preflight) =~ "test-api-key"
+  end
+
+  test "for_issue falls back to CTO when engineer lane has only text-only capacity" do
+    {:ok, company} =
+      Companies.create_company(%{name: "Preflight CTO Fallback Co", slug: unique_slug()})
+
+    {:ok, _chat_engineer} =
+      Agents.create_agent(%{
+        name: "Chat Engineer",
+        role: :engineer,
+        status: :idle,
+        adapter: :openai_chat,
+        config: %{
+          "endpoint" => "https://dashscope.example.com/compatible-mode/v1/chat/completions",
+          "model" => "qwen3.6-flash"
+        },
+        company_id: company.id
+      })
+
+    {:ok, cto} =
+      Agents.create_agent(%{
+        name: "Fallback CTO",
+        role: :cto,
+        status: :idle,
+        adapter: :process,
+        config: %{"command" => "echo", "model" => "custom"},
+        company_id: company.id
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Implement fallback routing",
+        description: complete_delivery_brief(),
+        status: :todo,
+        priority: :high,
+        assigned_role: "engineer",
+        company_id: company.id
+      })
+
+    preflight = RuntimePreflight.for_issue(issue, autonomy_enabled?: true)
+
+    assert preflight.agent_id == cto.id
+    assert preflight.agent_name == "Fallback CTO"
+    assert preflight.agent_role == :cto
+    assert preflight.routed? == true
+    assert preflight.summary =~ "Auto-route would choose Fallback CTO"
+  end
+
+  test "for_issue warns when repo delivery is assigned to a no-op custom process" do
+    {:ok, company} =
+      Companies.create_company(%{name: "Preflight Noop Process Co", slug: unique_slug()})
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Echo Process Engineer",
+        role: :engineer,
+        status: :idle,
+        adapter: :process,
+        config: %{"command" => "echo", "model" => "custom"},
+        company_id: company.id
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Implement owner-intake scaffold button",
+        description: complete_delivery_brief(),
+        status: :todo,
+        priority: :high,
+        assigned_role: "engineer",
+        assignee_id: agent.id,
+        company_id: company.id
+      })
+
+    preflight = RuntimePreflight.for_issue(issue, autonomy_enabled?: true)
+
+    assert preflight.status == :attention
+    assert preflight.first_action.label == "Repo-capable runtime"
+    assert preflight.first_action.detail =~ "not configured for repo-delivery capability"
+    assert preflight.first_action.detail =~ "file changes, tests, branches, or PRs"
+
+    assert preflight.first_action.target_path ==
+             "/agents/#{agent.id}?tab=configuration#agent-runtime-profile"
+  end
+
+  test "for_issue accepts preloaded non-secret credential metadata" do
+    {:ok, company} =
+      Companies.create_company(%{name: "Preflight Cached Secrets Co", slug: unique_slug()})
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Cached Remote Engineer",
+        role: :engineer,
+        status: :idle,
+        adapter: :agrenting,
+        config: %{
+          "agent_did" => "did:example:cached-remote-engineer",
+          "capability" => "implementation",
+          "delivery_mode" => "push",
+          "max_price" => "1.00"
+        },
+        company_id: company.id
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Secret-cache-backed issue",
+        description: complete_delivery_brief(),
+        status: :todo,
+        priority: :high,
+        assigned_role: "engineer",
+        assignee_id: agent.id,
+        company_id: company.id
+      })
+
+    preflight =
+      RuntimePreflight.for_issue(issue,
+        autonomy_enabled?: true,
+        secret_summary_by_agent: %{
+          agent.id => %{count: 2, keys: ["AGRENTING_API_KEY", "AGRENTING_REPO_ACCESS_TOKEN"]}
+        }
+      )
+
     assert preflight.status == :ready
     assert Enum.any?(preflight.items, &(&1.label == "Agrenting API key" and &1.status == :ok))
-    refute inspect(preflight) =~ "test-api-key"
+    refute inspect(preflight) =~ "secret-cache"
+  end
+
+  test "for_issue warns when delegated repo work has a thin delivery brief" do
+    {:ok, company} =
+      Companies.create_company(%{name: "Preflight Thin Delivery Co", slug: unique_slug()})
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Thin Brief Engineer",
+        role: :engineer,
+        status: :idle,
+        adapter: :process,
+        config: %{"command" => "echo", "model" => "custom", "repo_capable" => true},
+        company_id: company.id
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Build vague thing",
+        description: "Do it.",
+        status: :todo,
+        priority: :high,
+        assigned_role: "engineer",
+        assignee_id: agent.id,
+        company_id: company.id
+      })
+
+    preflight = RuntimePreflight.for_issue(issue, autonomy_enabled?: true)
+
+    assert preflight.status == :attention
+    assert preflight.first_action.label == "Delivery brief"
+    assert preflight.first_action.detail =~ "Too thin for delivery (0/4 signals)"
+    assert preflight.first_action.detail =~ "Acceptance criteria"
+    assert preflight.first_action.target_path == "/issues/#{issue.id}#issue-description"
+    assert preflight.first_action.target_label == "Edit issue brief"
   end
 
   test "for_issue ignores unrelated scoped secrets for provider credentials" do
@@ -316,4 +660,20 @@ defmodule Cympho.RuntimePreflightTest do
   end
 
   defp unique_slug, do: "preflight-#{System.unique_integer([:positive])}"
+
+  defp complete_delivery_brief do
+    """
+    Acceptance criteria:
+    - Scoped implementation satisfies the parent request.
+
+    Evidence required:
+    - Pull request or work product is linked.
+
+    Verification required:
+    - Focused test or manual smoke path is recorded.
+
+    Definition of done:
+    - Ready for review after evidence and verification are attached.
+    """
+  end
 end

@@ -9,6 +9,8 @@ defmodule CymphoWeb.AgentLive.Show do
   alias Cympho.Adapters.Registry, as: AdapterRegistry
   alias Cympho.Adapters.RuntimeOptions
   alias Cympho.AgentInstructionStudio
+  alias Cympho.AgentInstructionTuner
+  alias Cympho.AgentHeartbeat
   alias Cympho.HeartbeatEngine
   alias Cympho.Issues
   alias Cympho.RuntimeCapacity
@@ -222,6 +224,58 @@ defmodule CymphoWeb.AgentLive.Show do
          socket
          |> assign(:instruction_patch_feedback, feedback)
          |> assign(:form, to_form(changeset))}
+    end
+  end
+
+  def handle_event("apply_recommended_instruction_patches", _params, socket) do
+    role = current_form_value(socket, :role, socket.assigns.agent.role)
+
+    instructions =
+      current_form_value(socket, :instructions, socket.assigns.agent.instructions || "")
+
+    selected_adapter =
+      socket.assigns[:selected_adapter] || selected_adapter_from_agent(socket.assigns.agent)
+
+    plan =
+      socket.assigns.agent
+      |> Map.put(:role, Agent.normalize_role(role) || socket.assigns.agent.role)
+      |> Map.put(:adapter, selected_adapter)
+      |> Map.put(:instructions, instructions)
+      |> AgentInstructionTuner.plan()
+
+    if plan.changed do
+      params =
+        socket
+        |> current_agent_form_params(%{"instructions" => plan.instructions})
+        |> normalize_agent_params()
+
+      changeset =
+        socket.assigns.agent
+        |> Agents.change_agent(params)
+        |> Map.put(:action, :validate)
+
+      feedback = %{
+        patch_id: "recommended",
+        title: recommended_patch_count_label(plan.patch_count),
+        before_score: plan.current_score,
+        after_score: plan.projected_score,
+        changed?: true
+      }
+
+      {:noreply,
+       socket
+       |> assign(:instruction_patch_feedback, feedback)
+       |> assign(:form, to_form(changeset))}
+    else
+      feedback = %{
+        patch_id: "recommended",
+        title: "Recommended patches",
+        before_score: plan.current_score,
+        after_score: plan.projected_score,
+        changed?: false
+      }
+
+      {:noreply, assign(socket, :instruction_patch_feedback, feedback)}
     end
   end
 
@@ -496,6 +550,44 @@ defmodule CymphoWeb.AgentLive.Show do
     end
   end
 
+  def handle_event("run_heartbeat", _params, socket) do
+    agent = socket.assigns.agent
+
+    cond do
+      is_paused?(agent) ->
+        {:noreply, put_flash(socket, :error, "Resume the agent before running heartbeat.")}
+
+      agent.status == :terminated or agent.governance_status == "terminated" ->
+        {:noreply, put_flash(socket, :error, "Terminated agents cannot run heartbeat.")}
+
+      true ->
+        case trigger_agent_heartbeat(agent.id) do
+          :ok ->
+            {:noreply,
+             socket
+             |> put_flash(
+               :info,
+               "Heartbeat queued. The agent will pick up assigned To Do work if available."
+             )
+             |> refresh_agent()
+             |> assign(:heartbeat_feedback, %{
+               type: :info,
+               message:
+                 "Heartbeat queued. The agent will pick up assigned To Do work if available."
+             })}
+
+          {:error, _reason} ->
+            {:noreply,
+             socket
+             |> put_flash(:error, "Could not queue heartbeat for this agent.")
+             |> assign(:heartbeat_feedback, %{
+               type: :error,
+               message: "Could not queue heartbeat for this agent."
+             })}
+        end
+    end
+  end
+
   @impl true
   def handle_info({:agent_updated, updated_agent}, socket) do
     if socket.assigns.agent.id == updated_agent.id do
@@ -515,6 +607,21 @@ defmodule CymphoWeb.AgentLive.Show do
     case socket.assigns[:current_company] do
       %{id: company_id} -> Agents.get_company_agent(company_id, id)
       _ -> {:error, :not_found}
+    end
+  end
+
+  defp refresh_agent(socket) do
+    case get_scoped_agent(socket, socket.assigns.agent.id) do
+      {:ok, agent} -> assign_agent(socket, agent)
+      {:error, :not_found} -> socket
+    end
+  end
+
+  defp trigger_agent_heartbeat(agent_id) do
+    case AgentHeartbeat.start_for_agent(agent_id) do
+      {:ok, _pid} -> AgentHeartbeat.trigger_heartbeat(agent_id)
+      {:error, :already_started} -> AgentHeartbeat.trigger_heartbeat(agent_id)
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -538,6 +645,7 @@ defmodule CymphoWeb.AgentLive.Show do
     |> assign(:recent_runs, runs)
     |> assign(:latest_run, List.first(runs))
     |> assign(:recent_issues, recent_issues)
+    |> assign_new(:heartbeat_feedback, fn -> nil end)
     |> assign(:env_vars, env_vars)
     |> assign(:secret_count, secret_count)
     |> assign(:secret_keys, secret_keys)
@@ -561,12 +669,14 @@ defmodule CymphoWeb.AgentLive.Show do
   defp refresh_skills(socket) do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
     plugins = if company_id, do: Skills.list_plugins(company_id: company_id), else: []
-    assigned = Skills.list_skills_for_agent(socket.assigns.agent.id)
-    assigned_ids = MapSet.new(assigned, & &1.id)
+    assignments = Skills.list_skill_assignments_for_agent(socket.assigns.agent.id)
+    assigned_ids = MapSet.new(assignments, & &1.plugin_id)
+    skill_summary = Skills.agent_skill_summary(socket.assigns.agent.id, company_id)
 
     socket
     |> assign(:plugins, plugins)
     |> assign(:assigned_skill_ids, assigned_ids)
+    |> assign(:agent_skill_summary, skill_summary)
   end
 
   defp maybe_default_tab(socket) do
@@ -675,6 +785,9 @@ defmodule CymphoWeb.AgentLive.Show do
         current <> "\n\n" <> block
     end
   end
+
+  defp recommended_patch_count_label(1), do: "1 recommended patch"
+  defp recommended_patch_count_label(count), do: "#{count} recommended patches"
 
   defp maybe_record_config_revision(socket, before_agent, after_agent) do
     if tracked_config_changed?(before_agent, after_agent) do
@@ -885,7 +998,7 @@ defmodule CymphoWeb.AgentLive.Show do
   end
 
   defp put_preflight_api_key(config, "openai_chat", env_vars, secret_keys) do
-    keys = ["OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY"]
+    keys = openai_chat_credential_keys(config)
 
     config
     |> put_preflight_key("api_key", env_first(env_vars, keys))
@@ -917,6 +1030,34 @@ defmodule CymphoWeb.AgentLive.Show do
       value = Map.get(env_vars || %{}, key)
       if value in [nil, ""], do: nil, else: value
     end)
+  end
+
+  defp openai_chat_credential_keys(runtime_or_config) do
+    endpoint = runtime_or_config |> runtime_value(:endpoint) |> to_string() |> String.downcase()
+    model = runtime_or_config |> runtime_value(:model) |> to_string() |> String.downcase()
+
+    if String.contains?(endpoint, "dashscope") or String.starts_with?(model, "qwen") do
+      ["DASHSCOPE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+    else
+      ["OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY"]
+    end
+  end
+
+  defp runtime_value(map, key) when is_map(map) do
+    Map.get(map, key) || Map.get(map, to_string(key))
+  end
+
+  defp runtime_value(_map, _key), do: nil
+
+  defp openai_chat_secret_setup_path(runtime_or_config) do
+    key = runtime_or_config |> openai_chat_credential_keys() |> List.first()
+
+    "/settings/secrets?" <>
+      URI.encode_query(%{
+        "key" => key,
+        "scope" => "company",
+        "description" => "#{key} for OpenAI-compatible chat runtime"
+      })
   end
 
   defp put_clean(map, _key, value) when value in [nil, ""], do: map
@@ -1256,6 +1397,111 @@ defmodule CymphoWeb.AgentLive.Show do
   def issue_status_class(:cancelled), do: "border-border bg-surface text-text-quaternary"
   def issue_status_class(_), do: "border-border bg-surface text-text-secondary"
 
+  attr :label, :string, required: true
+  attr :value, :any, required: true
+  attr :tone, :atom, default: :neutral
+
+  def skill_loadout_metric(assigns) do
+    ~H"""
+    <div class="rounded-md border border-border bg-canvas px-3 py-2">
+      <p class={"font-mono text-lg font-590 leading-none #{skill_metric_text(@tone)}"}>
+        {@value}
+      </p>
+      <p class="mt-1 text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+        {@label}
+      </p>
+    </div>
+    """
+  end
+
+  def skill_loadout_badge(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
+  def skill_loadout_badge(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  def skill_loadout_badge(:healthy),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  def skill_loadout_badge(:empty), do: "border-border bg-surface text-text-tertiary"
+  def skill_loadout_badge(_), do: "border-border bg-surface text-text-tertiary"
+
+  def skill_metric_text(:critical), do: "text-red-300"
+  def skill_metric_text(:warning), do: "text-amber-300"
+  def skill_metric_text(:ok), do: "text-emerald-300"
+  def skill_metric_text(_), do: "text-text-primary"
+
+  def skill_recommendation_class(:critical), do: "border-red-500/20 bg-red-500/10 text-red-100"
+
+  def skill_recommendation_class(:warning),
+    do: "border-amber-500/20 bg-amber-500/10 text-amber-100"
+
+  def skill_recommendation_class(_), do: "border-border bg-surface text-text-secondary"
+
+  def skill_next_action_class(:critical), do: "border-red-500/25 bg-red-500/10 text-red-100"
+  def skill_next_action_class(:warning), do: "border-amber-500/25 bg-amber-500/10 text-amber-100"
+
+  def skill_next_action_class(:ok),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-100"
+
+  def skill_next_action_class(_), do: "border-border bg-surface text-text-secondary"
+
+  def skill_next_action_path(%{key: :install_first_skill}), do: "/plugins/marketplace"
+
+  def skill_next_action_path(%{key: key})
+      when key in [:repair_assigned_skills, :scope_assigned_capabilities], do: "/plugins"
+
+  def skill_next_action_path(_action), do: "#agent-skill-library"
+
+  def agent_skill_prompt_label(plugin, assigned_ids) do
+    assigned? = MapSet.member?(assigned_ids, plugin.id)
+
+    cond do
+      not assigned? -> "Not assigned"
+      plugin_manifest_error?(plugin) -> "Repair before prompt"
+      inactive_plugin?(plugin) -> "Assigned inactive"
+      true -> "Prompt-ready"
+    end
+  end
+
+  def agent_skill_prompt_class(plugin, assigned_ids) do
+    assigned? = MapSet.member?(assigned_ids, plugin.id)
+
+    cond do
+      not assigned? -> "border-border bg-surface text-text-quaternary"
+      plugin_manifest_error?(plugin) -> "border-red-500/20 bg-red-500/10 text-red-300"
+      inactive_plugin?(plugin) -> "border-amber-500/20 bg-amber-500/10 text-amber-300"
+      true -> "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+    end
+  end
+
+  def plugin_capability_count(%{capabilities: capabilities}) when is_list(capabilities),
+    do: length(capabilities)
+
+  def plugin_capability_count(_plugin), do: 0
+
+  def plugin_status_label(nil), do: "Unknown"
+
+  def plugin_status_label(status) do
+    status
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
+
+  def plugin_status_class("active"),
+    do: "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+
+  def plugin_status_class("installed"), do: "border-blue-500/20 bg-blue-500/10 text-blue-300"
+  def plugin_status_class("disabled"), do: "border-border bg-subtle text-text-tertiary"
+  def plugin_status_class("error"), do: "border-red-500/20 bg-red-500/10 text-red-300"
+  def plugin_status_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  defp inactive_plugin?(plugin), do: !plugin.enabled or plugin.status == "disabled"
+  defp plugin_manifest_error?(%{status: "error"}), do: true
+
+  defp plugin_manifest_error?(%{manifest_errors: errors}) when is_map(errors),
+    do: map_size(errors) > 0
+
+  defp plugin_manifest_error?(_plugin), do: false
+
   def run_status_class("succeeded"),
     do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
 
@@ -1421,6 +1667,225 @@ defmodule CymphoWeb.AgentLive.Show do
   def health_pill_class(:unhealthy), do: "border-brand/25 bg-brand/10 text-brand"
   def health_pill_class(:unavailable), do: "border-border bg-surface text-text-quaternary"
   def health_pill_class(_), do: "border-border bg-surface text-text-secondary"
+
+  defp agent_command_summary(agent, readiness, studio, recent_issues, wake_history, latest_run) do
+    active_count = count_status(recent_issues, [:in_progress])
+    review_count = count_status(recent_issues, [:in_review])
+    queued_count = count_status(recent_issues, [:todo, :backlog])
+    wake_count = length(List.wrap(wake_history))
+
+    action =
+      cond do
+        readiness.status in [:command_not_found, :missing_config] ->
+          %{
+            tone: :attention,
+            label: "Fix runtime",
+            detail: readiness.summary,
+            path: "/agents/#{agent.id}?tab=configuration#agent-runtime-profile"
+          }
+
+        studio.status in [:attention, :weak] or studio.score < 70 ->
+          %{
+            tone: :attention,
+            label: "Tune guide",
+            detail: studio.summary,
+            path: "/agents/#{agent.id}?tab=configuration#agent-instruction-studio"
+          }
+
+        review_count > 0 ->
+          %{
+            tone: :review,
+            label: "Review work",
+            detail:
+              "#{review_count} issue#{plural_suffix(review_count)} waiting on acceptance or evidence.",
+            path: issue_query_path(%{assignee_id: agent.id, status: "in_review"})
+          }
+
+        active_count > 0 ->
+          %{
+            tone: :active,
+            label: "Observe runs",
+            detail:
+              "#{active_count} active issue#{plural_suffix(active_count)} assigned to this agent.",
+            path: "/agents/#{agent.id}?tab=runs"
+          }
+
+        queued_count > 0 ->
+          %{
+            tone: :ready,
+            label: "Dispatch queue",
+            detail:
+              "#{queued_count} queued issue#{plural_suffix(queued_count)} ready for this agent.",
+            path: issue_query_path(%{assignee_id: agent.id})
+          }
+
+        true ->
+          %{
+            tone: :steady,
+            label: "Ready for work",
+            detail: "No active assigned issues in the recent window.",
+            path: "/issues/new?assignee_id=#{agent.id}"
+          }
+      end
+
+    %{
+      readiness: readiness,
+      studio: studio,
+      action: action,
+      active_count: active_count,
+      review_count: review_count,
+      queued_count: queued_count,
+      wake_count: wake_count,
+      latest_run_status: latest_run && latest_run.status
+    }
+  end
+
+  defp prompt_guide_next_steps(studio) do
+    audits =
+      studio
+      |> Map.get(:audits, [])
+      |> Enum.map(&Map.merge(&1, %{kind: "Audit"}))
+
+    scenarios =
+      studio
+      |> Map.get(:scenarios, [])
+      |> Enum.map(&Map.merge(&1, %{kind: "Scenario"}))
+
+    (audits ++ scenarios)
+    |> Enum.filter(&(&1.status in [:attention, :weak]))
+    |> Enum.sort_by(&prompt_guide_sort_key/1)
+    |> Enum.uniq_by(& &1.key)
+    |> Enum.take(3)
+  end
+
+  defp prompt_guide_sort_key(%{status: status, key: key, label: label}) do
+    {prompt_status_rank(status), prompt_key_rank(key), to_string(label)}
+  end
+
+  defp prompt_status_rank(:attention), do: 0
+  defp prompt_status_rank(:weak), do: 1
+  defp prompt_status_rank(_status), do: 2
+
+  defp prompt_key_rank(:guardrail_conflicts), do: 0
+  defp prompt_key_rank(:custom_override_coverage), do: 1
+  defp prompt_key_rank(:operating_loop), do: 2
+  defp prompt_key_rank(:memory_discipline), do: 3
+  defp prompt_key_rank(:mission_alignment), do: 4
+  defp prompt_key_rank(_key), do: 5
+
+  defp prompt_patch_summary(studio) do
+    pending =
+      studio
+      |> Map.get(:patches, [])
+      |> Enum.reject(&Map.get(&1, :present?))
+
+    labels =
+      pending
+      |> Enum.take(2)
+      |> Enum.map(& &1.title)
+
+    %{
+      count: length(pending),
+      labels:
+        case labels do
+          [] -> "none"
+          list -> Enum.join(list, ", ")
+        end
+    }
+  end
+
+  defp prompt_tuning_canary(nil, _latest_run), do: nil
+
+  defp prompt_tuning_canary(revision, nil) do
+    %{
+      status: :awaiting,
+      label: "Awaiting validation",
+      summary:
+        "Prompt tuning v#{revision.version} has not produced a newer run yet. Dispatch one issue before trusting the new guide."
+    }
+  end
+
+  defp prompt_tuning_canary(revision, latest_run) do
+    if run_after_revision?(latest_run, revision) do
+      prompt_tuning_canary_for_run(revision, latest_run)
+    else
+      prompt_tuning_canary(revision, nil)
+    end
+  end
+
+  defp prompt_tuning_canary_for_run(revision, %{status: status})
+       when status in ["completed", "succeeded"] do
+    %{
+      status: :validated,
+      label: "Validated",
+      summary: "Latest run after prompt tuning v#{revision.version} completed successfully."
+    }
+  end
+
+  defp prompt_tuning_canary_for_run(revision, %{status: status})
+       when status in ["running", "queued", "pending"] do
+    %{
+      status: :running,
+      label: "Validation running",
+      summary: "A run after prompt tuning v#{revision.version} is still #{status}."
+    }
+  end
+
+  defp prompt_tuning_canary_for_run(revision, %{status: status}) do
+    %{
+      status: :attention,
+      label: "Needs attention",
+      summary:
+        "Latest run after prompt tuning v#{revision.version} ended as #{status}. Inspect the run before applying this guide broadly."
+    }
+  end
+
+  defp run_after_revision?(run, revision) do
+    run_at = run.completed_at || run.started_at || run.inserted_at
+    revision_at = revision.inserted_at
+
+    match?(%DateTime{}, run_at) and match?(%DateTime{}, revision_at) and
+      DateTime.compare(run_at, revision_at) in [:gt, :eq]
+  end
+
+  defp prompt_canary_class(:validated), do: "border-emerald-500/20 bg-emerald-500/[0.06]"
+  defp prompt_canary_class(:running), do: "border-sky-500/25 bg-sky-500/[0.06]"
+  defp prompt_canary_class(:attention), do: "border-brand/25 bg-brand/[0.06]"
+  defp prompt_canary_class(:awaiting), do: "border-amber-500/25 bg-amber-500/[0.06]"
+  defp prompt_canary_class(_), do: "border-border bg-surface"
+
+  defp prompt_canary_badge_class(:validated),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp prompt_canary_badge_class(:running),
+    do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+
+  defp prompt_canary_badge_class(:attention), do: "border-brand/25 bg-brand/10 text-brand"
+
+  defp prompt_canary_badge_class(:awaiting),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  defp prompt_canary_badge_class(_), do: "border-border bg-panel text-text-tertiary"
+
+  defp count_status(issues, statuses) do
+    statuses = MapSet.new(statuses)
+    Enum.count(List.wrap(issues), &MapSet.member?(statuses, &1.status))
+  end
+
+  defp plural_suffix(1), do: ""
+  defp plural_suffix(_), do: "s"
+
+  defp issue_query_path(query), do: "/issues?" <> URI.encode_query(query)
+
+  defp agent_command_action_class(:attention),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
+
+  defp agent_command_action_class(:review), do: "border-brand/25 bg-brand/10 text-brand"
+  defp agent_command_action_class(:active), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
+  defp agent_command_action_class(:ready), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+
+  defp agent_command_action_class(_),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
 
   defp runtime_capacity(adapter, max_jobs, runs) do
     running_runs =
@@ -1607,10 +2072,10 @@ defmodule CymphoWeb.AgentLive.Show do
     [
       credentials_item(
         runtime,
-        ["OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY"],
+        openai_chat_credential_keys(runtime),
         "Chat completion key",
-        target_path: "/settings/secrets",
-        target_label: "Open secrets"
+        target_path: openai_chat_secret_setup_path(runtime),
+        target_label: "Add secret"
       ),
       model_item("Chat model", runtime.model,
         target_id: "agent-openai-chat-model",
@@ -1620,14 +2085,15 @@ defmodule CymphoWeb.AgentLive.Show do
         do:
           readiness_item(
             :attention,
-            "Chat endpoint",
+            "Configured endpoint",
             "Add the OpenAI-compatible chat completions URL before autonomous runs.",
             target_id: "agent-openai-chat-endpoint",
             target_label: "Set endpoint"
           ),
-        else: readiness_item(:ok, "Chat endpoint", runtime.endpoint)
-      )
-    ]
+        else: readiness_item(:ok, "Configured endpoint", runtime.endpoint)
+      ),
+      openai_chat_capability_item()
+    ] ++ openai_chat_request_url_items(runtime.endpoint)
   end
 
   defp readiness_items("process", runtime) do
@@ -1727,6 +2193,26 @@ defmodule CymphoWeb.AgentLive.Show do
   end
 
   defp normalize_secret_keys(_keys), do: []
+
+  defp openai_chat_request_url_items(endpoint) when endpoint in [nil, ""], do: []
+
+  defp openai_chat_request_url_items(endpoint) do
+    [
+      readiness_item(
+        :ok,
+        "Request URL",
+        Cympho.Adapters.OpenAIChatAdapter.normalize_chat_url(endpoint)
+      )
+    ]
+  end
+
+  defp openai_chat_capability_item do
+    readiness_item(
+      :info,
+      "Execution capability",
+      "Chat adapters can emit Cympho actions, but cannot edit files, run tests, create branches, or open real PRs without a repo-capable runtime."
+    )
+  end
 
   defp command_item(label, command, opts) when command in [nil, ""] do
     readiness_item(:attention, label, "Choose the command Cympho should execute.", opts)
@@ -1914,6 +2400,10 @@ defmodule CymphoWeb.AgentLive.Show do
   defp studio_card_class(:weak), do: "border-amber-500/25 bg-amber-500/[0.06]"
   defp studio_card_class(_status), do: "border-border bg-surface"
 
+  defp prompt_guide_step_class(:attention), do: "border-brand/25 bg-brand/[0.06]"
+  defp prompt_guide_step_class(:weak), do: "border-amber-500/25 bg-amber-500/[0.06]"
+  defp prompt_guide_step_class(_status), do: "border-border bg-surface"
+
   defp instruction_patch_class(:primary), do: "border-brand/30 bg-brand/10"
   defp instruction_patch_class(:danger), do: "border-brand/25 bg-brand/[0.06]"
   defp instruction_patch_class(_tone), do: "border-border bg-surface"
@@ -2027,6 +2517,44 @@ defmodule CymphoWeb.AgentLive.Show do
 
   defp latest_prompt_tuning_revision(config_revisions) do
     Enum.find(config_revisions, &(&1.source == "prompt_tuning"))
+  end
+
+  defp revision_tuning_release(%{studio_audits: audits}) when is_map(audits) do
+    case release_value(audits, :tuning_release) do
+      release when is_map(release) ->
+        patch_titles = tuning_release_patch_titles(release_value(release, :patches))
+
+        %{
+          patch_count: release_value(release, :patch_count) || length(patch_titles),
+          patch_titles: patch_titles,
+          expected_effect:
+            release_value(release, :expected_effect) || "Prompt guardrails were updated.",
+          rollback:
+            release_value(release, :rollback) ||
+              "Use revision history to restore the previous prompt if the next run regresses."
+        }
+
+      _ ->
+        nil
+    end
+  end
+
+  defp revision_tuning_release(_revision), do: nil
+
+  defp tuning_release_patch_titles(patches) when is_list(patches) do
+    patches
+    |> Enum.map(fn
+      patch when is_map(patch) -> release_value(patch, :title)
+      patch when is_binary(patch) -> patch
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp tuning_release_patch_titles(_patches), do: []
+
+  defp release_value(map, key) when is_map(map) do
+    Map.get(map, to_string(key)) || Map.get(map, key)
   end
 
   defp revision_status_badge(nil), do: studio_badge_class(nil)

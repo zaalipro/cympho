@@ -77,13 +77,15 @@ defmodule Cympho.Integration.MissionBetterThanLinearTest do
         "initiatives" => [
           %{
             "title" => "Beat Linear: kanban polish",
-            "description" => "Faster drag-and-drop. Tighter columns. ",
+            "description" =>
+              "Context: board work needs to feel faster and clearer than Linear.\nDefinition of done: kanban polish is ready for CTO spec review.\nEvidence to inspect: drag latency target, column density, and UX risk.",
             "role" => "engineer",
             "priority" => "high"
           },
           %{
             "title" => "Beat Linear: search velocity",
-            "description" => "Sub-100ms search across all surfaces.",
+            "description" =>
+              "Context: search must make cross-surface work retrieval faster than Linear.\nDefinition of done: search velocity work is ready for CTO spec review.\nEvidence to inspect: sub-100ms target, indexed surfaces, and failure risk.",
             "role" => "engineer",
             "priority" => "high"
           }
@@ -110,7 +112,8 @@ defmodule Cympho.Integration.MissionBetterThanLinearTest do
                AgentActions.execute(pending_issue, cto, [
                  %{
                    "type" => "approve_issue",
-                   "notes" => "Spec ready; releasing to engineering."
+                   "notes" =>
+                     "Acceptance criteria: scoped mission improvement is ready for implementation. Evidence required: code change or work product plus delivery note. Verification required: focused product smoke check. Definition of done: ready for CTO review with evidence and risk named."
                  }
                ])
     end)

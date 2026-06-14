@@ -1,5 +1,8 @@
 <div class="p-6 lg:p-8">
-  <.header title="Approvals">
+  <.header
+    title="Approvals"
+    subtitle="Track agent-requested approvals, unblock pending work, and keep a decision trail."
+  >
     <:actions>
       <form phx-change="filter_status">
         <.select_menu
@@ -17,9 +20,79 @@
     </:actions>
   </.header>
 
-  <div class="mt-6 overflow-hidden border border-border rounded-xl">
-    <table class="w-full">
-      <thead>
+  <div
+    id="approval-command"
+    data-testid="approval-command"
+    class="mt-6 overflow-hidden rounded-xl border border-border bg-panel"
+  >
+    <div class="border-b border-border px-5 py-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-eyebrow uppercase text-text-quaternary">Decision queue</p>
+          <h2 class="mt-1 text-card-title text-text-primary">
+            {@approval_command.summary}
+          </h2>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <.app_link
+            :for={action <- @approval_command.actions}
+            navigate={action.url}
+            class={approval_action_class(action.tone)}
+          >
+            <.icon name={action.icon} class="h-4 w-4" />
+            <span>{action.label}</span>
+          </.app_link>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid min-w-0 gap-3 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+      <div class="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <.link
+          :for={lane <- @approval_command.lanes}
+          patch={lane.url}
+          class={approval_lane_class(lane)}
+        >
+          <span class="text-eyebrow uppercase text-text-quaternary">{lane.label}</span>
+          <span class={approval_lane_count_class(lane)}>{lane.count}</span>
+          <span class="mt-1 block text-xs text-text-tertiary">{lane.state}</span>
+        </.link>
+      </div>
+
+      <div class="min-w-0 rounded-lg border border-border bg-surface-1 px-4 py-3">
+        <p class="text-eyebrow uppercase text-text-quaternary">Queue pressure</p>
+        <div class="mt-3 grid grid-cols-2 gap-3">
+          <div>
+            <p class="font-mono text-2xl font-590 text-text-primary">
+              {@approval_command.pending_count}
+            </p>
+            <p class="text-xs text-text-tertiary">pending</p>
+          </div>
+          <div>
+            <p class="font-mono text-2xl font-590 text-text-primary">
+              {@approval_command.linked_issue_count}
+            </p>
+            <p class="text-xs text-text-tertiary">linked issues</p>
+          </div>
+        </div>
+        <p class="mt-3 text-xs text-text-tertiary">
+          Oldest pending:
+          <span class="text-text-secondary">
+            {if @approval_command.oldest_pending,
+              do: @approval_command.oldest_pending.type,
+              else: "none"}
+          </span>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div
+    data-testid="approvals-responsive-queue"
+    class="mt-6 overflow-hidden rounded-xl border border-border bg-panel md:overflow-x-auto"
+  >
+    <table class="w-full md:min-w-[760px]">
+      <thead class="hidden md:table-header-group">
         <tr class="bg-panel">
           <th class="px-4 py-3 text-left text-xs font-510 text-text-secondary">Type</th>
           <th class="px-4 py-3 text-left text-xs font-510 text-text-secondary">Status</th>
@@ -29,36 +102,84 @@
           <th class="px-4 py-3 text-right text-xs font-510 text-text-secondary"></th>
         </tr>
       </thead>
-      <tbody id="approvals-tbody" phx-update="stream" class="divide-y divide-border">
-        <tr id="approvals-empty" class="only:table-row hidden">
-          <td colspan="6" class="px-4 py-12 text-center text-sm text-text-tertiary">
-            No approvals yet.
+      <tbody
+        id="approvals-tbody"
+        phx-update="stream"
+        class="block divide-y divide-border md:table-row-group"
+      >
+        <tr id="approvals-empty" class="only:block hidden md:only:table-row">
+          <td colspan="6" class="block px-4 py-12 text-center md:table-cell">
+            <div class="mx-auto max-w-md">
+              <p class="text-sm font-590 text-text-primary">
+                {approval_empty_title(@status_filter)}
+              </p>
+              <p class="mt-1 text-sm leading-5 text-text-tertiary">
+                {approval_empty_detail(@status_filter)}
+              </p>
+              <div class="mt-4 flex flex-wrap justify-center gap-2">
+                <.link
+                  :if={@status_filter}
+                  patch={approval_filter_path(nil)}
+                  class={approval_empty_action_class(:primary)}
+                >
+                  Clear filter
+                </.link>
+                <.app_link
+                  navigate={~p"/activity?filter_action=approval_created"}
+                  class={approval_empty_action_class(:neutral)}
+                >
+                  Activity
+                </.app_link>
+              </div>
+            </div>
           </td>
         </tr>
         <tr
           :for={{dom_id, approval} <- @streams.approvals}
           id={dom_id}
-          class="hover:bg-subtle transition-colors"
+          data-testid={"approval-row-#{approval.id}"}
+          class="block p-4 transition-colors hover:bg-subtle md:table-row md:p-0"
         >
-          <td class="px-4 py-3 text-sm text-text-primary">{approval.type}</td>
-          <td class="px-4 py-3">
-            <span class={"text-xs font-510 px-2 py-0.5 rounded-full " <> status_badge_class(approval.status)}>
+          <td class="block py-1 md:table-cell md:px-4 md:py-3">
+            <div class="flex flex-wrap items-center gap-2 md:block">
+              <div class="text-sm font-510 text-text-primary">{approval.type}</div>
+              <span class={"text-xs font-510 px-2 py-0.5 rounded-full capitalize md:hidden " <> status_badge_class(approval.status)}>
+                {approval.status}
+              </span>
+            </div>
+            <div class="mt-1 text-xs text-text-tertiary">
+              {approval_row_note(approval)}
+            </div>
+          </td>
+          <td class="hidden px-4 py-3 md:table-cell">
+            <span class={"text-xs font-510 px-2 py-0.5 rounded-full capitalize " <> status_badge_class(approval.status)}>
               {approval.status}
             </span>
           </td>
-          <td class="px-4 py-3 text-sm text-text-secondary">
-            {if approval.requested_by, do: approval.requested_by.name, else: "-"}
+          <td class="block py-1 md:table-cell md:px-4 md:py-3">
+            <span class="mr-2 text-xs font-510 text-text-quaternary md:hidden">Requested by</span>
+            <span class="text-sm text-text-secondary">
+              {if approval.requested_by, do: approval.requested_by.name, else: "-"}
+            </span>
           </td>
-          <td class="px-4 py-3 text-sm text-text-quaternary">{length(approval.issues)}</td>
-          <td class="px-4 py-3 text-xs text-text-quaternary">
-            {Calendar.strftime(approval.inserted_at, "%b %d, %H:%M")}
+          <td class="block py-1 md:table-cell md:px-4 md:py-3">
+            <span class="mr-2 text-xs font-510 text-text-quaternary md:hidden">
+              Linked issues
+            </span>
+            <span class="text-sm text-text-quaternary">{length(approval.issues)}</span>
           </td>
-          <td class="px-4 py-3 text-right">
+          <td class="block py-1 md:table-cell md:px-4 md:py-3">
+            <span class="mr-2 text-xs font-510 text-text-quaternary md:hidden">Created</span>
+            <span class="text-xs text-text-quaternary">
+              {Calendar.strftime(approval.inserted_at, "%b %d, %H:%M")}
+            </span>
+          </td>
+          <td class="block pt-3 md:table-cell md:px-4 md:py-3 md:text-right">
             <.link
               navigate={~p"/approvals/#{approval.id}"}
-              class="text-xs text-accent hover:text-accent-hover"
+              class={approval_row_action_class(approval.status)}
             >
-              View
+              {approval_row_action_label(approval.status)}
             </.link>
           </td>
         </tr>

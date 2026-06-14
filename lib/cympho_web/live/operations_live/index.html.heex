@@ -110,6 +110,126 @@
           </div>
 
           <div
+            id="runtime-next-launch-step"
+            data-testid="runtime-next-launch-step"
+            class={"mt-3 rounded-md border p-3 #{launch_plan_card_class(@launch_plan.tone)}"}
+          >
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                    Next launch step
+                  </p>
+                  <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{launch_plan_badge_class(@launch_plan.tone)}"}>
+                    {@launch_plan.label}
+                  </span>
+                </div>
+                <p class="mt-1.5 max-w-3xl text-sm leading-5 text-text-tertiary">
+                  {@launch_plan.summary}
+                </p>
+              </div>
+              <.app_link
+                :if={@launch_plan.target_path}
+                navigate={@launch_plan.target_path}
+                class={"inline-flex shrink-0 items-center justify-center rounded-md border px-2.5 py-1.5 text-xs font-510 transition #{ceo_flow_action_class(@launch_plan.tone)}"}
+              >
+                {@launch_plan.target_label}
+              </.app_link>
+            </div>
+
+            <div
+              :if={@launch_plan.issue}
+              class="mt-3 rounded-md border border-border bg-canvas/70 px-2.5 py-2"
+            >
+              <div class="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <.app_link
+                  navigate={@launch_plan.issue.target_path}
+                  class="min-w-0 break-words text-sm font-590 leading-5 text-text-primary hover:text-brand"
+                >
+                  {@launch_plan.issue.identifier} · {@launch_plan.issue.title}
+                </.app_link>
+                <div class="flex shrink-0 flex-wrap gap-1.5">
+                  <span class="rounded-full border border-border bg-panel px-2 py-0.5 text-[10px] font-510 text-text-tertiary">
+                    {@launch_plan.issue.status_label}
+                  </span>
+                  <span class={"rounded-full border px-2 py-0.5 text-[10px] font-510 #{preflight_badge_class(@launch_plan.issue.preflight_status)}"}>
+                    {@launch_plan.issue.preflight_label}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div
+              :if={Map.get(@launch_plan, :repair_scaffold)}
+              id="runtime-next-brief-repair-scaffold"
+              phx-hook="CopyToClipboard"
+              class="mt-3 rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2.5"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-amber-300">
+                    Brief repair scaffold
+                  </p>
+                  <p class="mt-1 text-[11px] leading-4 text-text-tertiary">
+                    Paste this into the issue description, replace placeholders, then refresh this
+                    checklist.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-copy-text={Map.get(@launch_plan, :repair_scaffold)}
+                  data-copy-label="Copy repair scaffold"
+                  data-copy-success-label="Copied"
+                  data-copy-error-label="Scaffold below"
+                  class="rounded-md border border-amber-500/25 bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary transition hover:border-amber-500/50 hover:bg-surface-hover hover:text-text-primary"
+                >
+                  Copy repair scaffold
+                </button>
+              </div>
+              <pre class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-text-tertiary"><%= Map.get(@launch_plan, :repair_scaffold) %></pre>
+            </div>
+
+            <div
+              :if={@launch_plan.command}
+              id="runtime-next-launch-command"
+              phx-hook="CopyToClipboard"
+              class="mt-3 rounded-md border border-border bg-canvas p-2.5"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                  {@launch_plan.command_label}
+                </p>
+                <button
+                  type="button"
+                  data-copy-text={@launch_plan.command}
+                  data-copy-label="Copy command"
+                  data-copy-success-label="Copied"
+                  class="rounded-md border border-border bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
+                >
+                  Copy command
+                </button>
+              </div>
+              <code class="mt-1.5 block overflow-x-auto font-mono text-[11px] leading-5 text-text-secondary">
+                {@launch_plan.command}
+              </code>
+            </div>
+
+            <div class="mt-3 grid gap-2 md:grid-cols-3">
+              <div
+                :for={step <- @launch_plan.steps}
+                class={"min-w-0 rounded-md border px-2.5 py-2 #{launch_plan_step_class(step.state)}"}
+              >
+                <p class="truncate text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                  {step.label}
+                </p>
+                <p class="mt-1 text-[11px] leading-4 text-text-secondary">
+                  {step.detail}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div
             :if={@runtime_enablement.command}
             id="runtime-broad-launch-command"
             phx-hook="CopyToClipboard"
@@ -166,6 +286,165 @@
             </div>
           </div>
 
+          <div
+            id="ceo-flow-verifier"
+            data-testid="ceo-flow-verifier"
+            class="mt-4 rounded-md border border-border bg-surface/50 p-3"
+          >
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                    CEO flow verification
+                  </p>
+                  <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{ceo_flow_badge_class(@ceo_flow.stage)}"}>
+                    {@ceo_flow.label}
+                  </span>
+                </div>
+                <p class="mt-1.5 max-w-3xl text-sm leading-5 text-text-tertiary">
+                  {@ceo_flow.summary}
+                </p>
+              </div>
+              <div class="flex shrink-0 flex-wrap gap-2">
+                <.app_link
+                  navigate={@ceo_flow.next_action.path}
+                  class={"inline-flex items-center justify-center rounded-md border px-2.5 py-1.5 text-xs font-510 transition #{ceo_flow_action_class(@ceo_flow.next_action.tone)}"}
+                >
+                  {@ceo_flow.next_action.label}
+                </.app_link>
+                <button
+                  :if={@ceo_flow.ceo_count > 0}
+                  type="button"
+                  phx-click="create_ceo_flow_smoke_issue"
+                  class="inline-flex items-center justify-center rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-510 text-emerald-200 transition hover:bg-emerald-500/15"
+                >
+                  Create CEO to CTO smoke
+                </button>
+              </div>
+            </div>
+
+            <div class="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <div
+                :for={step <- @ceo_flow.steps}
+                class={"min-w-0 rounded-md border px-3 py-2.5 #{ceo_flow_step_class(step.state)}"}
+              >
+                <div class="flex items-start justify-between gap-2">
+                  <p class="truncate text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                    {step.label}
+                  </p>
+                  <p class={[
+                    "font-mono text-[18px] font-590 leading-none tabular-nums",
+                    ceo_flow_step_value_class(step.state)
+                  ]}>
+                    {step.value}
+                  </p>
+                </div>
+                <p class="mt-1 truncate text-[11px] leading-4 text-text-tertiary">
+                  {step.detail}
+                </p>
+              </div>
+            </div>
+
+            <div
+              :if={@ceo_flow.primary_candidate}
+              class="mt-3 rounded-md border border-border bg-canvas/70 p-3"
+            >
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div class="min-w-0">
+                  <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                    Next CEO candidate
+                  </p>
+                  <.app_link
+                    navigate={@ceo_flow.primary_candidate.target_path}
+                    class="mt-1 block truncate text-sm font-590 text-text-primary hover:text-brand"
+                  >
+                    {@ceo_flow.primary_candidate.identifier} · {@ceo_flow.primary_candidate.title}
+                  </.app_link>
+                  <p class="mt-1 text-xs leading-4 text-text-tertiary">
+                    {@ceo_flow.primary_candidate.preflight_label} · {@ceo_flow.primary_candidate.preflight_summary}
+                  </p>
+                  <div
+                    :if={@ceo_flow.primary_candidate.brief_readiness_label}
+                    class="mt-2 flex flex-wrap items-center gap-2"
+                  >
+                    <span class={"rounded-full border px-2 py-0.5 text-[10px] font-510 #{owner_brief_readiness_badge_class(@ceo_flow.primary_candidate.brief_readiness_status)}"}>
+                      Owner brief {@ceo_flow.primary_candidate.brief_readiness_score}
+                    </span>
+                    <span class="text-[11px] leading-4 text-text-tertiary">
+                      {@ceo_flow.primary_candidate.brief_readiness_label} · {@ceo_flow.primary_candidate.brief_readiness_next}
+                    </span>
+                  </div>
+                  <div
+                    :if={@ceo_flow.primary_candidate.brief_repair_scaffold}
+                    id="ceo-flow-brief-repair-scaffold"
+                    phx-hook="CopyToClipboard"
+                    class="mt-2 rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2.5"
+                  >
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-amber-300">
+                        Brief repair scaffold
+                      </p>
+                      <button
+                        type="button"
+                        data-copy-text={@ceo_flow.primary_candidate.brief_repair_scaffold}
+                        data-copy-label="Copy repair scaffold"
+                        data-copy-success-label="Copied"
+                        data-copy-error-label="Scaffold below"
+                        class="rounded-md border border-amber-500/25 bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary transition hover:border-amber-500/50 hover:bg-surface-hover hover:text-text-primary"
+                      >
+                        Copy repair scaffold
+                      </button>
+                    </div>
+                    <pre class="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-text-tertiary"><%= @ceo_flow.primary_candidate.brief_repair_scaffold %></pre>
+                  </div>
+                </div>
+                <span class={"shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-510 #{preflight_badge_class(@ceo_flow.primary_candidate.preflight_status)}"}>
+                  {@ceo_flow.primary_candidate.status_label}
+                </span>
+              </div>
+
+              <div
+                :if={@ceo_flow.primary_candidate.brief}
+                id="ceo-flow-candidate-brief"
+                data-testid="ceo-flow-candidate-brief"
+                phx-hook="CopyToClipboard"
+                class="mt-3 rounded-md border border-sky-500/20 bg-sky-500/[0.06] px-3 py-2.5"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-sky-300">
+                    Candidate proof packet
+                  </p>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      data-copy-text={@ceo_flow.primary_candidate.brief}
+                      data-copy-label="Copy proof packet"
+                      data-copy-success-label="Copied"
+                      class="rounded-md border border-sky-500/25 bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary transition hover:border-sky-500/50 hover:bg-surface-hover hover:text-text-primary"
+                    >
+                      Copy proof packet
+                    </button>
+                    <button
+                      type="button"
+                      data-copy-text={@ceo_flow.primary_candidate.focused_command}
+                      data-copy-label="Copy command"
+                      data-copy-success-label="Copied"
+                      class="rounded-md border border-sky-500/25 bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary transition hover:border-sky-500/50 hover:bg-surface-hover hover:text-text-primary"
+                    >
+                      Copy command
+                    </button>
+                  </div>
+                </div>
+                <p class="mt-1 text-[11px] leading-4 text-text-secondary">
+                  {@ceo_flow.primary_candidate.first_turn}
+                </p>
+                <code class="mt-2 block overflow-x-auto whitespace-pre-wrap font-mono text-[11px] leading-5 text-text-tertiary">
+                  {@ceo_flow.primary_candidate.focused_command}
+                </code>
+              </div>
+            </div>
+          </div>
+
           <div class="mt-4 rounded-md border border-border bg-surface/50">
             <div class="flex flex-wrap items-start justify-between gap-3 border-b border-border px-3 py-3">
               <div>
@@ -176,17 +455,37 @@
                   {launch_preview_summary(@runtime_mode, @launch_preview)}
                 </p>
               </div>
-              <span class="rounded-full border border-border bg-panel px-2 py-0.5 text-[11px] font-510 text-text-tertiary">
-                {@launch_preview.total_candidates} {plural_noun(
-                  @launch_preview.total_candidates,
-                  "candidate"
-                )}
-              </span>
+              <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <button
+                  :if={@launch_preview.focused_count > 0}
+                  id="runtime-clear-focused-queue"
+                  type="button"
+                  phx-click="clear_all_dispatch_focus"
+                  data-confirm={
+                    "Clear focused dispatch from #{@launch_preview.focused_count} #{plural_noun(@launch_preview.focused_count, "issue")}?"
+                  }
+                  class="inline-flex items-center justify-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
+                >
+                  Clear focused queue
+                </button>
+                <span class="rounded-full border border-border bg-panel px-2 py-0.5 text-[11px] font-510 text-text-tertiary">
+                  {@launch_preview.total_candidates} {plural_noun(
+                    @launch_preview.total_candidates,
+                    "candidate"
+                  )}
+                </span>
+              </div>
             </div>
             <div
               :if={@launch_preview.total_candidates > 0}
               class="flex flex-wrap gap-1.5 border-b border-border px-3 py-2"
             >
+              <span
+                :if={@launch_preview.focused_count > 0}
+                class={"rounded-full border px-2 py-0.5 text-[10px] font-510 #{launch_order_class(:operator_focus)}"}
+              >
+                {@launch_preview.focused_count} focused
+              </span>
               <span class={"rounded-full border px-2 py-0.5 text-[10px] font-510 #{preflight_badge_class(:ready)}"}>
                 {@launch_preview.preflight_counts.ready} ready
               </span>
@@ -331,12 +630,34 @@
                     </button>
                   </div>
                   <p class="mt-1 text-[11px] leading-4 text-text-secondary">
-                    First turn: Return `[owner_update]` or `[handoff]`; when decomposition is
-                    needed, create 2-5 scoped sub-issues with acceptance criteria.
+                    First turn: Return `[owner_update]`, `[handoff]`, or `[blocked]`; when
+                    execution is needed, create 2-5 scoped child issues with acceptance criteria
+                    and block the parent as waiting on delegated sub-work.
                   </p>
                   <p class="mt-1 text-[11px] leading-4 text-text-quaternary">
                     No provider call. This brief only reads routing, preflight, and issue state.
                   </p>
+                  <div
+                    :if={candidate.brief_repair_scaffold}
+                    class="mt-2 rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-2.5 py-2"
+                  >
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-amber-300">
+                        Brief repair scaffold
+                      </p>
+                      <button
+                        type="button"
+                        data-copy-text={candidate.brief_repair_scaffold}
+                        data-copy-label="Copy repair scaffold"
+                        data-copy-success-label="Copied"
+                        data-copy-error-label="Scaffold below"
+                        class="rounded-md border border-amber-500/25 bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary transition hover:border-amber-500/50 hover:bg-surface-hover hover:text-text-primary"
+                      >
+                        Copy repair scaffold
+                      </button>
+                    </div>
+                    <pre class="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-text-tertiary"><%= candidate.brief_repair_scaffold %></pre>
+                  </div>
                 </div>
                 <details class="group mt-2">
                   <summary class="inline-flex cursor-pointer list-none items-center gap-1.5 text-[11px] font-510 text-brand hover:text-brand/80 [&::-webkit-details-marker]:hidden">
@@ -736,20 +1057,17 @@
                     Clear dispatch focus
                   </button>
                   <.app_link
-                    :if={
-                      !work.queueable? && work.setup_blocked? &&
-                        preflight_action_target_path(work.preflight.first_action)
-                    }
+                    :if={delegated_work_setup_action?(work)}
                     id={"delegated-work-fix-setup-#{work.issue_id}"}
                     navigate={preflight_action_target_path(work.preflight.first_action)}
-                    class="rounded-md border border-brand/25 bg-brand/10 px-2.5 py-1.5 text-[11px] font-510 text-brand transition hover:bg-brand/15"
+                    class={delegated_work_setup_action_class(work)}
                   >
-                    Fix setup first
+                    {delegated_work_setup_action_label(work)}
                   </.app_link>
                   <span
                     :if={
                       !work.queueable? && !work.dispatch_pinned? && !work.setup_blocked? &&
-                        !work.blocked?
+                        !work.preflight_attention? && !work.blocked?
                     }
                     class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-[11px] font-510 text-text-quaternary"
                   >
@@ -775,10 +1093,10 @@
       >
         <div
           data-testid="ceo-outcome-header"
-          class="space-y-3 border-b border-border px-5 py-4"
+          class="space-y-4 border-b border-border px-5 py-4"
         >
-          <div class="space-y-3">
-            <div class="min-w-0">
+          <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] xl:items-start">
+            <div class="min-w-0 max-w-3xl">
               <div class="flex flex-wrap items-center gap-2">
                 <h2 class="text-sm font-590 text-text-primary">CEO Outcome Monitor</h2>
                 <span class="shrink-0 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-510 text-text-tertiary">
@@ -791,57 +1109,43 @@
             </div>
 
             <div
-              data-testid="ceo-outcome-metrics"
-              class="grid min-w-0 max-w-full grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-3 xl:grid-cols-6"
+              data-testid="ceo-outcome-health-strip"
+              class="grid min-w-0 grid-cols-3 gap-px overflow-hidden rounded-md border border-border bg-border"
             >
-              <div class="min-w-0 bg-surface/70 px-2 py-2 text-center">
-                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-emerald-300">
-                  {@ceo_outcomes.counts.owner_updates}
-                </p>
-                <p class="mt-1.5 truncate text-[9px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                  Updates
+              <div class="min-w-0 bg-surface/70 px-3 py-2.5">
+                <p class="text-[11px] font-510 text-text-quaternary">Signal</p>
+                <p class="mt-1 font-mono text-lg font-590 leading-none tabular-nums text-emerald-300">
+                  {ceo_outcome_signal_count(@ceo_outcomes.counts)}
                 </p>
               </div>
-              <div class="min-w-0 bg-surface/70 px-2 py-2 text-center">
-                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-sky-300">
-                  {@ceo_outcomes.counts.handoffs}
-                </p>
-                <p class="mt-1.5 truncate text-[9px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                  Handoff
+              <div class="min-w-0 bg-surface/70 px-3 py-2.5">
+                <p class="text-[11px] font-510 text-text-quaternary">Receipts</p>
+                <p class="mt-1 font-mono text-lg font-590 leading-none tabular-nums text-teal-300">
+                  {@ceo_outcomes.counts.receipt_complete}/{@ceo_outcomes.counts.receipt_checked}
                 </p>
               </div>
-              <div class="min-w-0 bg-surface/70 px-2 py-2 text-center">
-                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-brand">
-                  {@ceo_outcomes.counts.decompositions}
-                </p>
-                <p class="mt-1.5 truncate text-[9px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                  Split
-                </p>
-              </div>
-              <div class="min-w-0 bg-surface/70 px-2 py-2 text-center">
-                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-violet-300">
-                  {@ceo_outcomes.counts.governance}
-                </p>
-                <p class="mt-1.5 truncate text-[9px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                  Decision
-                </p>
-              </div>
-              <div class="min-w-0 bg-surface/70 px-2 py-2 text-center">
-                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-sky-300">
-                  {@ceo_outcomes.counts.running}
-                </p>
-                <p class="mt-1.5 truncate text-[9px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                  Active
-                </p>
-              </div>
-              <div class="min-w-0 bg-surface/70 px-2 py-2 text-center">
-                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-amber-300">
+              <div class="min-w-0 bg-surface/70 px-3 py-2.5">
+                <p class="text-[11px] font-510 text-text-quaternary">Attention</p>
+                <p class="mt-1 font-mono text-lg font-590 leading-none tabular-nums text-amber-300">
                   {@ceo_outcomes.counts.attention}
                 </p>
-                <p class="mt-1.5 truncate text-[9px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                  Attention
-                </p>
               </div>
+            </div>
+          </div>
+
+          <div
+            data-testid="ceo-outcome-metrics"
+            class="grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7"
+          >
+            <div
+              :for={metric <- ceo_outcome_metric_cards(@ceo_outcomes.counts)}
+              class="min-w-0 rounded-md border border-border bg-surface/60 px-3 py-2.5"
+            >
+              <p class="text-[11px] font-510 text-text-quaternary">{metric.label}</p>
+              <p class={"mt-1 font-mono text-lg font-590 leading-none tabular-nums #{metric.value_class}"}>
+                {metric.value}
+              </p>
+              <p class="mt-1 text-[11px] leading-4 text-text-tertiary">{metric.detail}</p>
             </div>
           </div>
         </div>
@@ -878,12 +1182,23 @@
                 <p class="mt-1 text-[11px] leading-4 text-text-quaternary">
                   {outcome.agent_name} · {outcome.project_name} · {outcome.issue_status_label}
                 </p>
+                <div
+                  :if={outcome.receipt}
+                  class="mt-2 flex max-w-3xl flex-wrap items-center gap-2"
+                >
+                  <span class={"rounded-full border px-2 py-0.5 text-[10px] font-510 #{ceo_receipt_badge_class(outcome.receipt.status)}"}>
+                    {outcome.receipt.status_label}
+                  </span>
+                  <span class="text-[11px] leading-4 text-text-tertiary">
+                    {outcome.receipt.summary}
+                  </span>
+                </div>
                 <details
-                  :if={outcome.outcome in [:silent, :failed]}
+                  :if={repairable_ceo_outcome?(outcome)}
                   class="group mt-2"
                 >
                   <summary class="inline-flex cursor-pointer list-none items-center gap-1.5 text-[11px] font-510 text-brand hover:text-brand/80 [&::-webkit-details-marker]:hidden">
-                    Fix and relaunch
+                    {ceo_outcome_repair_label(outcome)}
                     <span class="hero-chevron-down-mini h-3.5 w-3.5 transition-transform group-open:rotate-180">
                     </span>
                   </summary>
@@ -907,7 +1222,7 @@
                       </button>
                     </div>
                     <p class="mt-1 text-[11px] leading-4 text-text-quaternary">
-                      Fix the feedback above, then restart runtime focused on this issue.
+                      {ceo_outcome_repair_detail(outcome)}
                     </p>
                     <code class="mt-1.5 block overflow-x-auto font-mono text-[11px] leading-5 text-text-secondary">
                       {outcome.focused_command}
@@ -966,8 +1281,8 @@
                   <div class="absolute right-0 top-full z-40 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-panel p-3 text-left shadow-dialog sm:left-0 sm:right-auto">
                     <p class="text-xs font-590 text-text-primary">How this is diagnosed</p>
                     <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                      Doctor combines service gates, adapter health, recent runtime failures,
-                      review nudges, local concurrency, and BEAM host footprint into one
+                      Doctor combines service gates, staffing gaps, adapter health, recent runtime
+                      failures, review nudges, local concurrency, and BEAM host footprint into one
                       operator checklist.
                     </p>
                   </div>
@@ -1056,6 +1371,28 @@
                 >
                   <span class="hero-wrench-screwdriver-mini h-3.5 w-3.5"></span>
                   {finding.target_label}
+                </.app_link>
+                <a
+                  :if={
+                    Map.get(finding, :secondary_target_path) &&
+                      anchor_path?(finding.secondary_target_path)
+                  }
+                  href={finding.secondary_target_path}
+                  class="inline-flex items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-tertiary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
+                >
+                  <span class="hero-arrow-down-mini h-3.5 w-3.5"></span>
+                  {finding.secondary_target_label}
+                </a>
+                <.app_link
+                  :if={
+                    Map.get(finding, :secondary_target_path) &&
+                      not anchor_path?(finding.secondary_target_path)
+                  }
+                  navigate={finding.secondary_target_path}
+                  class="inline-flex items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-tertiary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
+                >
+                  <span class="hero-wrench-screwdriver-mini h-3.5 w-3.5"></span>
+                  {finding.secondary_target_label}
                 </.app_link>
                 <code
                   :if={Map.get(finding, :command)}
@@ -1175,6 +1512,84 @@
           class="px-5 py-10 text-center text-sm text-text-tertiary"
         >
           No agents configured yet.
+        </div>
+
+        <div
+          :if={@prompt_tuning_receipt}
+          data-testid="prompt-tuning-receipt"
+          class="border-b border-border bg-surface/35 px-5 py-4"
+        >
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                  Prompt tuning receipt
+                </p>
+                <span class="rounded-full border border-teal-500/25 bg-teal-500/10 px-2 py-0.5 text-[11px] font-510 text-teal-300">
+                  {@prompt_tuning_receipt.patch_count} {plural_noun(
+                    @prompt_tuning_receipt.patch_count,
+                    "patch",
+                    "patches"
+                  )}
+                </span>
+              </div>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Recorded a rollback revision for {@prompt_tuning_receipt.agent_count} {plural_noun(
+                  @prompt_tuning_receipt.agent_count,
+                  "agent"
+                )}. Use this receipt to compare the next run against the intended behavior.
+              </p>
+            </div>
+            <button
+              type="button"
+              phx-click="close_prompt_receipt"
+              class="shrink-0 rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+            >
+              Dismiss
+            </button>
+          </div>
+
+          <div class="mt-3 grid gap-2 lg:grid-cols-2">
+            <div
+              :for={agent <- @prompt_tuning_receipt.agents}
+              class="rounded-lg border border-teal-500/20 bg-teal-500/[0.05] px-3 py-3"
+            >
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-590 text-text-primary">{agent.agent_name}</p>
+                  <p class="mt-0.5 text-[11px] text-text-quaternary">
+                    v{agent.revision} rollback point recorded
+                  </p>
+                </div>
+                <p class="font-mono text-sm text-teal-200">
+                  {agent.from_score}/100 -> {agent.to_score}/100
+                </p>
+              </div>
+              <p class="mt-2 text-xs leading-5 text-text-tertiary">
+                {agent.expected_effect}
+              </p>
+              <div
+                :if={agent.validation_checks != []}
+                class="mt-2 rounded-md border border-teal-500/15 bg-canvas/70 px-2.5 py-2"
+              >
+                <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-teal-300">
+                  Next-run validation
+                </p>
+                <ul class="mt-1.5 space-y-1 text-[11px] leading-4 text-text-tertiary">
+                  <li :for={check <- agent.validation_checks} class="flex gap-1.5">
+                    <span class="mt-1 h-1 w-1 shrink-0 rounded-full bg-teal-300"></span>
+                    <span>{check}</span>
+                  </li>
+                </ul>
+              </div>
+              <p class="mt-2 text-[11px] leading-4 text-text-quaternary">
+                Patches: {Enum.join(agent.patch_titles, ", ")}
+              </p>
+              <p class="mt-1 text-[11px] leading-4 text-text-quaternary">
+                Rollback: {agent.rollback}
+              </p>
+            </div>
+          </div>
         </div>
 
         <div
@@ -1354,6 +1769,83 @@
           class="px-5 py-10 text-center text-sm text-text-tertiary"
         >
           No prompt contract gaps found in open work.
+        </div>
+
+        <div
+          :if={@contract_failures.counts.entries > 0}
+          class="border-b border-border bg-panel px-5 py-4"
+        >
+          <div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                Repair queue
+              </p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Start here. These are the highest-priority contract gaps blocking owner-ready
+                issue memory.
+              </p>
+            </div>
+            <span class="text-xs text-text-quaternary">
+              Top repairs: {min(length(@contract_failures.entries), 3)} of {@contract_failures.counts.entries}
+            </span>
+          </div>
+
+          <div class="mt-3 grid gap-2 lg:grid-cols-3">
+            <div
+              :for={
+                {entry, index} <- Enum.with_index(Enum.take(@contract_failures.entries, 3), 1)
+              }
+              class={"rounded-lg border px-3 py-3 #{contract_queue_card_class(entry.status)}"}
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-mono text-[11px] text-text-quaternary">
+                      {String.pad_leading(Integer.to_string(index), 2, "0")}
+                    </span>
+                    <span class={"rounded-full border px-2 py-0.5 text-[10px] font-510 #{contract_badge_class(entry.status)}"}>
+                      {entry.status_label}
+                    </span>
+                  </div>
+                  <p class="mt-2 line-clamp-2 text-sm font-510 text-text-primary">
+                    {entry.issue_identifier} · {entry.issue_title}
+                  </p>
+                  <p class="mt-1 truncate text-[11px] text-text-quaternary">
+                    {entry.contract_label} · {entry.agent_name}
+                  </p>
+                </div>
+              </div>
+
+              <p class="mt-2 line-clamp-3 text-xs leading-5 text-text-tertiary">
+                {entry.recommendation}
+              </p>
+
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  phx-click="queue_contract_nudge"
+                  phx-value-issue-id={entry.issue_id}
+                  phx-value-contract={entry.contract_key}
+                  disabled={!entry.nudge_enabled? || entry.nudge_queued?}
+                  class={[
+                    "rounded-md border px-2 py-1 text-[11px] font-510",
+                    entry.nudge_enabled? && !entry.nudge_queued? &&
+                      "border-amber-500/25 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15",
+                    (!entry.nudge_enabled? || entry.nudge_queued?) &&
+                      "cursor-not-allowed border-border bg-panel text-text-quaternary"
+                  ]}
+                >
+                  {if entry.nudge_queued?, do: "Queued", else: "Queue nudge"}
+                </button>
+                <.app_link
+                  navigate={~p"/issues/#{entry.issue_id}"}
+                  class="rounded-md border border-border bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                >
+                  Open issue
+                </.app_link>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div
@@ -1603,6 +2095,133 @@
             <p class="mt-2 font-mono text-[11px] tabular-nums text-text-quaternary">
               {@capacity.active_runs} runs · {@capacity.checked_out_issues} checkouts
             </p>
+          </div>
+        </div>
+        <div
+          :if={Map.get(@capacity, :repo_delivery)}
+          data-testid="repo-delivery-capacity"
+          class={[
+            "mt-4 rounded-md border px-3 py-3",
+            repo_delivery_card_class(@capacity.repo_delivery.status)
+          ]}
+        >
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                  Repo delivery lane
+                </p>
+                <span class={[
+                  "rounded-full border px-2 py-0.5 text-[11px] font-510",
+                  repo_delivery_badge_class(@capacity.repo_delivery.status)
+                ]}>
+                  {@capacity.repo_delivery.label}
+                </span>
+              </div>
+              <p class="mt-1 text-sm leading-5 text-text-primary">
+                {@capacity.repo_delivery.summary}
+              </p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                {@capacity.repo_delivery.hint}
+              </p>
+              <div class="mt-2 flex flex-wrap gap-1.5 text-[10px] font-510">
+                <span class="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-emerald-300">
+                  {@capacity.repo_delivery.repo_capable_slots} repo-capable slots
+                </span>
+                <span class="rounded-full border border-border bg-surface px-2 py-0.5 text-text-quaternary">
+                  {@capacity.repo_delivery.text_only_slots} text-only slots
+                </span>
+              </div>
+            </div>
+            <div class="flex shrink-0 flex-wrap gap-2">
+              <.app_link
+                :if={@capacity.repo_delivery.target_path}
+                navigate={@capacity.repo_delivery.target_path}
+                class={"inline-flex items-center justify-center rounded-md border px-2.5 py-1.5 text-xs font-510 transition #{repo_delivery_action_class(@capacity.repo_delivery.status)}"}
+              >
+                {@capacity.repo_delivery.target_label}
+              </.app_link>
+              <.app_link
+                :if={@capacity.repo_delivery.hire_target_path}
+                navigate={@capacity.repo_delivery.hire_target_path}
+                class="inline-flex items-center justify-center rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-510 text-emerald-200 transition hover:bg-emerald-500/15"
+              >
+                {@capacity.repo_delivery.hire_target_label}
+              </.app_link>
+            </div>
+          </div>
+        </div>
+        <div
+          :if={@org_health.role_demand_gaps != []}
+          id="runtime-staffing-gaps"
+          data-testid="runtime-staffing-gaps"
+          class="mt-4 rounded-md border border-amber-500/25 border-l-2 border-l-amber-500/80 bg-amber-500/[0.08] px-3 py-3"
+        >
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-amber-100">
+                  Staffing gaps
+                </p>
+                <span class="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-510 text-amber-100">
+                  {@org_health.metrics.unstaffed_role_issues} open {plural_noun(
+                    @org_health.metrics.unstaffed_role_issues,
+                    "issue"
+                  )}
+                </span>
+              </div>
+              <p class="mt-1 text-sm leading-5 text-amber-100/85">
+                Delegated work includes roles with no active agent. Hire or reassign coverage before broad dispatch, otherwise the CEO/CTO split will stall after decomposition.
+              </p>
+            </div>
+            <.app_link
+              navigate={
+                ~p"/agents/new?#{new_agent_query_for_gap(List.first(@org_health.role_demand_gaps))}"
+              }
+              class="inline-flex shrink-0 items-center justify-center rounded-md border border-amber-500/30 bg-panel px-2.5 py-1.5 text-xs font-510 text-amber-100 transition-colors hover:bg-amber-500/15"
+            >
+              {first_staffing_gap_label(@org_health)}
+            </.app_link>
+          </div>
+
+          <div class="mt-3 divide-y divide-amber-500/15 overflow-hidden rounded-md border border-amber-500/20 bg-canvas/50">
+            <div
+              :for={gap <- @org_health.role_demand_gaps}
+              class="flex flex-col gap-3 px-3 py-3 md:flex-row md:items-center md:justify-between"
+            >
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <p class="text-sm font-590 text-text-primary">{gap.label}</p>
+                  <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 text-amber-200">
+                    {gap.open_issues} open {plural_noun(gap.open_issues, "issue")}
+                  </span>
+                  <span
+                    :if={gap.suggested_parent}
+                    class="rounded-full border border-border bg-panel px-2 py-0.5 text-[10px] font-510 text-text-tertiary"
+                  >
+                    Reports to {gap.suggested_parent.name}
+                  </span>
+                </div>
+
+                <div :if={gap.examples != []} class="mt-2 flex max-w-3xl flex-wrap gap-1.5">
+                  <.app_link
+                    :for={example <- gap.examples}
+                    navigate={~p"/issues/#{example.id}"}
+                    class="max-w-full truncate rounded-md border border-border bg-panel px-2 py-1 text-[11px] text-text-tertiary transition hover:border-brand/40 hover:text-brand"
+                    title={issue_example_label(example)}
+                  >
+                    {issue_example_label(example)}
+                  </.app_link>
+                </div>
+              </div>
+
+              <.app_link
+                navigate={~p"/agents/new?#{new_agent_query_for_gap(gap)}"}
+                class="inline-flex shrink-0 items-center justify-center rounded-md border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-590 text-brand transition hover:border-brand/50 hover:bg-brand/15"
+              >
+                Hire {gap.label}
+              </.app_link>
+            </div>
           </div>
         </div>
         <div
@@ -1908,6 +2527,142 @@
         </div>
       </section>
 
+      <section id="wake-backlog" class="rounded-lg border border-border bg-panel scroll-mt-6">
+        <div class="border-b border-border px-5 py-4">
+          <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div class="min-w-0">
+              <h2 class="text-sm font-590 text-text-primary">Wake Backlog</h2>
+              <p class="mt-1 text-xs leading-5 text-text-quaternary">
+                Stale comment wakes that still occupy agent queue room. Clearing them leaves issue comments intact.
+              </p>
+            </div>
+            <div class="flex shrink-0 flex-wrap items-stretch gap-2">
+              <div class="flex overflow-hidden rounded-md border border-border bg-border">
+                <div class="min-w-[84px] bg-panel px-3 py-2 text-center">
+                  <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-text-primary">
+                    {@wake_queue.counts.pending_comments}
+                  </p>
+                  <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                    Pending
+                  </p>
+                </div>
+                <div class="min-w-[84px] bg-panel px-3 py-2 text-center">
+                  <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-amber-300">
+                    {@wake_queue.counts.stale_comments}
+                  </p>
+                  <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                    Stale
+                  </p>
+                </div>
+              </div>
+              <button
+                :if={@wake_queue.counts.stale_comments > 0}
+                type="button"
+                phx-click="clear_stale_comment_wakes"
+                class="inline-flex items-center justify-center rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs font-590 text-amber-200 transition hover:bg-amber-500/15"
+              >
+                Clear stale wakes
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="px-5 py-4">
+          <div class="rounded-md border border-border bg-surface px-3 py-2.5">
+            <p class="text-sm leading-5 text-text-tertiary">{@wake_queue.summary}</p>
+            <p class="mt-1 text-xs text-text-quaternary">
+              Stale threshold: {@wake_queue.stale_after_minutes} minutes
+            </p>
+          </div>
+        </div>
+
+        <div
+          :if={@wake_queue.counts.stale_comments == 0}
+          class="border-t border-border px-5 py-8 text-center text-sm text-text-tertiary"
+        >
+          No stale comment wakes are holding queue slots.
+        </div>
+
+        <div
+          :if={@wake_queue.counts.stale_comments > 0}
+          class="grid min-w-0 gap-px border-t border-border bg-border lg:grid-cols-[280px_minmax(0,1fr)]"
+        >
+          <div class="min-w-0 bg-panel p-5">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                By agent
+              </h3>
+              <span class="text-xs text-text-quaternary">
+                {@wake_queue.counts.stale_comments} stale
+              </span>
+            </div>
+            <div :if={@wake_queue.by_agent == []} class="mt-4 text-sm text-text-tertiary">
+              No stale agent groups.
+            </div>
+            <div :if={@wake_queue.by_agent != []} class="mt-4 space-y-2">
+              <div
+                :for={group <- @wake_queue.by_agent}
+                class="rounded-lg border border-border bg-surface px-3 py-2"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <p class="truncate text-sm font-510 text-text-primary">{group.label}</p>
+                  <span class="font-mono text-xs text-text-quaternary">{group.count}</span>
+                </div>
+                <p class="mt-1 text-xs text-text-quaternary">
+                  Oldest waiting {format_duration(group.oldest_seconds)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="min-w-0 divide-y divide-border bg-panel">
+            <div class="px-5 py-3">
+              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                Oldest stale wakes
+              </h3>
+            </div>
+            <div :for={wake <- @wake_queue.entries} class="px-5 py-4">
+              <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-510 text-amber-300">
+                      {wake.reason_label}
+                    </span>
+                    <span class="text-xs text-text-quaternary">
+                      Waiting {format_duration(wake.age_seconds)}
+                    </span>
+                  </div>
+                  <p class="mt-2 truncate text-sm font-590 text-text-primary">
+                    {wake.issue_identifier || short_id(wake.issue_id)} · {wake.issue_title ||
+                      "Untitled issue"}
+                  </p>
+                  <p class="mt-1 text-xs text-text-quaternary">
+                    Owner: {wake.agent_name}
+                  </p>
+                </div>
+
+                <div class="flex shrink-0 flex-wrap gap-2 xl:justify-end">
+                  <.app_link
+                    :if={wake.issue}
+                    navigate={~p"/issues/#{wake.issue.id}"}
+                    class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    Open issue
+                  </.app_link>
+                  <.app_link
+                    :if={wake.agent}
+                    navigate={~p"/agents/#{wake.agent.id}?tab=inbox"}
+                    class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    Open agent
+                  </.app_link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="rounded-lg border border-border bg-panel">
         <div class="border-b border-border px-5 py-4">
           <h2 class="text-sm font-590 text-text-primary">Highest Pressure Agents</h2>
@@ -1986,6 +2741,28 @@
               >
                 <span class="hero-wrench-screwdriver-mini h-3.5 w-3.5"></span>
                 {action.target_label}
+              </.app_link>
+              <a
+                :if={
+                  Map.get(action, :secondary_target_path) &&
+                    anchor_path?(action.secondary_target_path)
+                }
+                href={action.secondary_target_path}
+                class="inline-flex items-center gap-1.5 rounded-md border border-border bg-panel px-2 py-1 text-xs font-510 text-text-tertiary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
+              >
+                <span class="hero-arrow-down-mini h-3.5 w-3.5"></span>
+                {action.secondary_target_label}
+              </a>
+              <.app_link
+                :if={
+                  Map.get(action, :secondary_target_path) &&
+                    not anchor_path?(action.secondary_target_path)
+                }
+                navigate={action.secondary_target_path}
+                class="inline-flex items-center gap-1.5 rounded-md border border-border bg-panel px-2 py-1 text-xs font-510 text-text-tertiary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
+              >
+                <span class="hero-wrench-screwdriver-mini h-3.5 w-3.5"></span>
+                {action.secondary_target_label}
               </.app_link>
               <code
                 :if={Map.get(action, :command)}
@@ -2073,7 +2850,7 @@
         </div>
       </section>
 
-      <section id="recent-failures" class="rounded-lg border border-border bg-panel scroll-mt-6">
+      <section id="runtime-failures" class="rounded-lg border border-border bg-panel scroll-mt-6">
         <div class="border-b border-border px-4 py-3">
           <h2 class="text-sm font-590 text-text-primary">Recent Runtime Failures</h2>
         </div>
@@ -2112,6 +2889,30 @@
               >
                 {failure.issue.identifier || short_id(failure.issue.id)}
               </.app_link>
+            </div>
+            <div
+              :if={failure.focused_command}
+              id={"recent-failure-focused-command-#{failure.id}"}
+              phx-hook="CopyToClipboard"
+              class="mt-3 rounded-md border border-border bg-canvas p-2"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                  Focused relaunch
+                </p>
+                <button
+                  type="button"
+                  data-copy-text={failure.focused_command}
+                  data-copy-label="Copy command"
+                  data-copy-success-label="Copied"
+                  class="rounded border border-border bg-panel px-2 py-0.5 text-[10px] font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
+                >
+                  Copy command
+                </button>
+              </div>
+              <code class="mt-1.5 block max-w-full overflow-x-auto font-mono text-[10px] leading-4 text-text-secondary">
+                {failure.focused_command}
+              </code>
             </div>
           </div>
         </div>
@@ -2205,6 +3006,20 @@
                 </div>
                 <pre class="mt-2 whitespace-pre-wrap rounded border border-border bg-panel px-2.5 py-2 text-[11px] leading-5 text-text-secondary">{patch.body}</pre>
               </div>
+            </div>
+            <div
+              :if={agent.validation_checks != []}
+              class="mt-3 rounded-md border border-teal-500/15 bg-teal-500/[0.05] px-3 py-2"
+            >
+              <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-teal-300">
+                Next-run validation
+              </p>
+              <ul class="mt-1.5 space-y-1 text-[11px] leading-4 text-text-tertiary">
+                <li :for={check <- agent.validation_checks} class="flex gap-1.5">
+                  <span class="mt-1 h-1 w-1 shrink-0 rounded-full bg-teal-300"></span>
+                  <span>{check}</span>
+                </li>
+              </ul>
             </div>
           </div>
         </div>

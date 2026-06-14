@@ -268,6 +268,56 @@ defmodule Cympho.HeartbeatEngineTest do
     end
   end
 
+  describe "orphaned run recovery" do
+    test "finds pending runs with no live orchestrator" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: insert_issue(),
+          adapter: "claude_local"
+        })
+
+      assert Enum.any?(HeartbeatEngine.find_orphaned_runs(), &(&1.id == run.id))
+    end
+
+    test "cancels orphaned runs that never started" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: insert_issue(),
+          adapter: "claude_local"
+        })
+
+      assert {:ok, recovered} = HeartbeatEngine.recover_orphaned_run(run)
+      assert recovered.status == "cancelled"
+      assert is_nil(recovered.error_reason)
+    end
+
+    test "fails orphaned running runs" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: insert_issue(),
+          adapter: "claude_local"
+        })
+
+      {:ok, started} = HeartbeatEngine.start_run(run)
+
+      assert {:ok, recovered} = HeartbeatEngine.recover_orphaned_run(started)
+      assert recovered.status == "failed"
+      assert recovered.error_reason == "stale_run_recovered"
+    end
+  end
+
   defp insert_agent(agent_id) do
     Cympho.Repo.insert!(%Cympho.Agents.Agent{
       id: agent_id,

@@ -7,6 +7,7 @@ defmodule CymphoWeb.KanbanLive.Index do
   alias Cympho.HeartbeatEngine
   alias Cympho.Orchestrator.Dispatcher
   alias Cympho.Projects
+  alias Cympho.RuntimePreflight
 
   @status_columns [:backlog, :todo, :in_progress, :in_review, :blocked, :done, :cancelled]
 
@@ -33,14 +34,16 @@ defmodule CymphoWeb.KanbanLive.Index do
     issues = list_company_issues(company_id)
     agent_heartbeat_states = load_heartbeat_states(issues)
     pending_wakes = load_pending_wakes(issues)
+    runtime_enabled? = Dispatcher.enabled?()
 
     socket =
       socket
       |> assign(:issues, issues)
       |> assign(:agent_heartbeat_states, agent_heartbeat_states)
       |> assign(:pending_wakes, pending_wakes)
+      |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, runtime_enabled?))
       |> assign(:projects, projects)
-      |> assign(:runtime_enabled?, Dispatcher.enabled?())
+      |> assign(:runtime_enabled?, runtime_enabled?)
       |> assign(
         :agents,
         if(company_id,
@@ -139,6 +142,7 @@ defmodule CymphoWeb.KanbanLive.Index do
     socket
     |> assign(:issues, issues)
     |> assign(:pending_wakes, load_pending_wakes(issues))
+    |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))
   end
 
   defp apply_project_filter(socket, project_id) do
@@ -155,6 +159,7 @@ defmodule CymphoWeb.KanbanLive.Index do
     socket
     |> assign(:issues, issues)
     |> assign(:pending_wakes, load_pending_wakes(issues))
+    |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))
   end
 
   @impl true
@@ -163,36 +168,49 @@ defmodule CymphoWeb.KanbanLive.Index do
   end
 
   def handle_info({:issue_created, issue}, socket) do
-    {:noreply, update(socket, :issues, fn issues -> [issue | issues] end)}
+    issues = [issue | socket.assigns.issues]
+
+    {:noreply,
+     socket
+     |> assign(:issues, issues)
+     |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))}
   end
 
   def handle_info({:issue_updated, updated_issue}, socket) do
+    issues =
+      Enum.map(socket.assigns.issues, fn issue ->
+        if issue.id == updated_issue.id, do: updated_issue, else: issue
+      end)
+
     {:noreply,
-     update(socket, :issues, fn issues ->
-       Enum.map(issues, fn issue ->
-         if issue.id == updated_issue.id, do: updated_issue, else: issue
-       end)
-     end)}
+     socket
+     |> assign(:issues, issues)
+     |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))}
   end
 
   def handle_info({:issue_deleted, deleted_id}, socket) do
+    issues = Enum.filter(socket.assigns.issues, fn issue -> issue.id != deleted_id end)
+
     {:noreply,
-     update(socket, :issues, fn issues ->
-       Enum.filter(issues, fn issue -> issue.id != deleted_id end)
-     end)}
+     socket
+     |> assign(:issues, issues)
+     |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))}
   end
 
   def handle_info({:agent_updated, updated_agent}, socket) do
+    issues =
+      Enum.map(socket.assigns.issues, fn issue ->
+        if issue.assignee && issue.assignee.id == updated_agent.id do
+          %{issue | assignee: updated_agent}
+        else
+          issue
+        end
+      end)
+
     {:noreply,
-     update(socket, :issues, fn issues ->
-       Enum.map(issues, fn issue ->
-         if issue.assignee && issue.assignee.id == updated_agent.id do
-           %{issue | assignee: updated_agent}
-         else
-           issue
-         end
-       end)
-     end)}
+     socket
+     |> assign(:issues, issues)
+     |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(issues, socket))}
   end
 
   def handle_info({:agent_heartbeat_updated, agent_id, heartbeat_state}, socket) do
@@ -581,6 +599,221 @@ defmodule CymphoWeb.KanbanLive.Index do
   def status_label(:cancelled), do: "Cancelled"
 
   def status_columns, do: @status_columns
+
+  defp launch_readiness_by_issue(issues, socket) when is_list(issues) and is_map(socket) do
+    launch_readiness_by_issue(issues, socket.assigns[:runtime_enabled?] || false)
+  end
+
+  defp launch_readiness_by_issue(issues, runtime_enabled?) when is_list(issues) do
+    issues
+    |> Enum.filter(&launch_readiness_issue?/1)
+    |> Enum.map(fn issue -> {issue.id, launch_readiness(issue, runtime_enabled?)} end)
+    |> Map.new()
+  end
+
+  defp launch_readiness_issue?(%{status: status})
+       when status in [:todo, :in_review, :blocked, "todo", "in_review", "blocked"],
+       do: true
+
+  defp launch_readiness_issue?(_issue), do: false
+
+  defp launch_readiness(issue, runtime_enabled?) do
+    preflight = RuntimePreflight.for_issue(issue, autonomy_enabled?: runtime_enabled?)
+
+    %{
+      status: preflight.status,
+      label: launch_readiness_label(preflight),
+      target: launch_readiness_target(preflight),
+      summary: preflight.summary,
+      path: "/issues/#{issue.id}#issue-agent-panel",
+      class: launch_readiness_class(preflight.status)
+    }
+  end
+
+  defp launch_readiness_label(%{status: :ready}), do: "Ready"
+  defp launch_readiness_label(%{status: :review_mode}), do: "Review mode"
+  defp launch_readiness_label(%{status: :attention}), do: "Needs setup"
+  defp launch_readiness_label(%{status: :blocked, agent_id: nil}), do: "No agent"
+  defp launch_readiness_label(%{status: :blocked}), do: "Blocked"
+  defp launch_readiness_label(%{label: label}) when is_binary(label), do: label
+  defp launch_readiness_label(_preflight), do: "Check"
+
+  defp launch_readiness_target(%{agent_name: name}) when is_binary(name) and name != "",
+    do: name
+
+  defp launch_readiness_target(%{agent_role: role}) when role not in [nil, ""],
+    do: role |> to_string() |> String.replace("_", " ") |> String.capitalize()
+
+  defp launch_readiness_target(_preflight), do: "Route unknown"
+
+  defp launch_readiness_class(:ready),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp launch_readiness_class(:review_mode),
+    do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+
+  defp launch_readiness_class(:attention),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  defp launch_readiness_class(:blocked),
+    do: "border-red-500/25 bg-red-500/10 text-red-300"
+
+  defp launch_readiness_class(_status), do: "border-border bg-panel text-text-secondary"
+
+  def board_flow_metrics(issues) do
+    [
+      %{
+        key: :blocked,
+        label: "Blocked",
+        count: length(blocked_issues(issues)),
+        detail: "Needs operator decision",
+        class: "border-brand/25 bg-brand/10 text-brand"
+      },
+      %{
+        key: :review,
+        label: "Review",
+        count: length(in_review_issues(issues)),
+        detail: "Awaiting acceptance",
+        class: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+      },
+      %{
+        key: :active,
+        label: "Active",
+        count: length(in_progress_issues(issues)),
+        detail: "Runtime or manual work moving",
+        class: "border-blue-500/25 bg-blue-500/10 text-blue-300"
+      },
+      %{
+        key: :ready,
+        label: "Ready",
+        count: length(todo_issues(issues)),
+        detail: "Queued for next dispatch",
+        class: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+      }
+    ]
+  end
+
+  def board_focus_items(issues, pending_wakes) do
+    issues
+    |> Enum.reject(&terminal_issue?/1)
+    |> Enum.map(&board_focus_item(&1, pending_wakes))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.sort_by(fn item ->
+      {item.rank, priority_rank(item.issue.priority), DateTime.to_unix(item.issue.inserted_at)}
+    end)
+    |> Enum.take(3)
+  end
+
+  defp board_focus_item(%{status: :blocked} = issue, _pending_wakes) do
+    board_focus_item(
+      issue,
+      0,
+      "Unblock",
+      "Resolve the blocker before dragging this card forward."
+    )
+  end
+
+  defp board_focus_item(%{assigned_role: "ceo", assignee_id: nil} = issue, _pending_wakes) do
+    board_focus_item(
+      issue,
+      1,
+      "Add CEO",
+      "Create or assign the CEO before this owner request can launch."
+    )
+  end
+
+  defp board_focus_item(%{assignee_id: nil, assigned_role: role} = issue, _pending_wakes)
+       when role in [nil, ""] do
+    board_focus_item(
+      issue,
+      2,
+      "Assign owner",
+      "Pick the agent or role responsible for the next move."
+    )
+  end
+
+  defp board_focus_item(%{assigned_role: "ceo", status: :todo} = issue, _pending_wakes) do
+    board_focus_item(
+      issue,
+      3,
+      "Launch CEO",
+      "Start the first CEO turn and require owner update, handoff, or blocker."
+    )
+  end
+
+  defp board_focus_item(%{status: :in_review} = issue, _pending_wakes) do
+    board_focus_item(issue, 4, "Review", "Accept, request changes, or ask for missing evidence.")
+  end
+
+  defp board_focus_item(%{status: :in_progress} = issue, pending_wakes) do
+    detail =
+      if Map.has_key?(pending_wakes, issue.id) do
+        "A wake is queued. Watch for evidence before moving the card."
+      else
+        "Inspect runtime evidence and make sure the card is not stale."
+      end
+
+    board_focus_item(issue, 5, "Observe", detail)
+  end
+
+  defp board_focus_item(%{status: :todo} = issue, pending_wakes) do
+    detail =
+      if Map.has_key?(pending_wakes, issue.id) do
+        "Wake is queued; watch for the next agent signal."
+      else
+        "Prioritize this card for dispatch or assign an idle agent."
+      end
+
+    board_focus_item(issue, 6, "Dispatch", detail)
+  end
+
+  defp board_focus_item(%{status: :backlog} = issue, _pending_wakes) do
+    board_focus_item(issue, 7, "Scope", "Clarify the request, then promote it to To Do.")
+  end
+
+  defp board_focus_item(_issue, _pending_wakes), do: nil
+
+  defp board_focus_item(issue, rank, action, detail) do
+    %{
+      issue: issue,
+      rank: rank,
+      action: action,
+      detail: detail,
+      identifier: board_issue_identifier(issue),
+      path: "/issues/#{issue.id}"
+    }
+  end
+
+  defp terminal_issue?(%{status: status}), do: status in [:done, :cancelled]
+
+  defp priority_rank(:critical), do: 0
+  defp priority_rank(:high), do: 1
+  defp priority_rank(:medium), do: 2
+  defp priority_rank(:low), do: 3
+  defp priority_rank(_), do: 4
+
+  defp board_issue_identifier(%{identifier: identifier})
+       when is_binary(identifier) and identifier != "",
+       do: identifier
+
+  defp board_issue_identifier(%{issue_number: number}) when is_integer(number),
+    do: "CYM-#{number}"
+
+  defp board_issue_identifier(%{id: id}) when is_binary(id), do: "CYM-#{String.slice(id, 0, 4)}"
+  defp board_issue_identifier(_issue), do: "CYM"
+
+  def board_focus_action_class("Unblock"), do: "border-brand/25 bg-brand/10 text-brand"
+
+  def board_focus_action_class("Add CEO"),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  def board_focus_action_class("Assign owner"),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  def board_focus_action_class("Launch CEO"), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+  def board_focus_action_class("Review"), do: "border-brand/25 bg-brand/10 text-brand"
+  def board_focus_action_class("Observe"), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
+  def board_focus_action_class(_action), do: "border-border bg-panel text-text-secondary"
 
   def kanban_url(project_id, density) do
     query =

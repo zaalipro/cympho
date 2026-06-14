@@ -220,6 +220,63 @@ defmodule Cympho.IssuesTest do
       refute Map.has_key?(updated.monitor_state["dispatch"], "pinned_by_user_id")
       assert updated.monitor_state["pr_quality"]["status"] == "ready"
     end
+
+    test "clears all dispatch focus for one company without touching other monitor state" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Dispatch Focus Clear Co",
+          slug: "dispatch-focus-clear-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Other Dispatch Focus Co",
+          slug: "other-dispatch-focus-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, pinned_one} =
+        Issues.create_issue(%{
+          title: "Focused issue one",
+          status: :todo,
+          company_id: company.id,
+          monitor_state: %{
+            "pr_quality" => %{"status" => "ready"},
+            "dispatch" => %{"pinned_at" => "2026-06-09T00:00:00Z", "note" => "keep me"}
+          }
+        })
+
+      {:ok, pinned_two} =
+        Issues.create_issue(%{
+          title: "Focused issue two",
+          status: :todo,
+          company_id: company.id,
+          monitor_state: %{
+            "dispatch" => %{"pinned_at" => "2026-06-09T00:01:00Z"}
+          }
+        })
+
+      {:ok, other_pinned} =
+        Issues.create_issue(%{
+          title: "Other company focused issue",
+          status: :todo,
+          company_id: other_company.id,
+          monitor_state: %{
+            "dispatch" => %{"pinned_at" => "2026-06-09T00:02:00Z"}
+          }
+        })
+
+      assert {:ok, %{cleared: 2, failed: 0}} = Issues.clear_company_dispatch_focus(company.id)
+
+      pinned_one = Issues.get_issue!(pinned_one.id)
+      pinned_two = Issues.get_issue!(pinned_two.id)
+      other_pinned = Issues.get_issue!(other_pinned.id)
+
+      refute Issues.dispatch_pinned?(pinned_one)
+      refute Issues.dispatch_pinned?(pinned_two)
+      assert Issues.dispatch_pinned?(other_pinned)
+      assert pinned_one.monitor_state["dispatch"]["note"] == "keep me"
+      assert pinned_one.monitor_state["pr_quality"]["status"] == "ready"
+    end
   end
 
   describe "recheck_pr_quality/2" do
@@ -333,7 +390,7 @@ defmodule Cympho.IssuesTest do
       {:ok, _comment} =
         Comments.create_comment(%{
           body:
-            "[delivery] What happened: delivered the work for review. Files changed: evidence document. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
+            "[delivery] What happened: delivered the work for review. Files changed: evidence document. Evidence produced: closure evidence document and completed runtime. Verification: runtime passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the closure evidence document and completed runtime before deciding.",
           author_type: "agent",
           author_id: agent.id,
           issue_id: issue.id
@@ -342,7 +399,7 @@ defmodule Cympho.IssuesTest do
       {:ok, _comment} =
         Comments.create_comment(%{
           body:
-            "[review] Verdict: accepted. What happened: verified the delivered work. Verification: runtime passed. Gaps: none. Follow-up issues: none. Next decision: close.",
+            "[review] Verdict: accepted. What happened: verified the delivered work. Evidence inspected: closure evidence document and completed runtime. Verification: runtime passed. Gaps: none. Follow-up issues: none. Next decision: close. Restart packet: CEO can inspect the accepted review, closure evidence, and runtime result before closing.",
           author_type: "agent",
           author_id: agent.id,
           issue_id: issue.id
@@ -639,6 +696,12 @@ defmodule Cympho.IssuesTest do
                comments,
                &String.contains?(&1.body, "owner accepted the CEO verification update")
              )
+
+      assert Enum.any?(
+               comments,
+               &(String.contains?(&1.body, "Evidence inspected: CEO owner update") and
+                   String.contains?(&1.body, "Restart packet: issue is accepted"))
+             )
     end
 
     test "records owner revision requests and queues focused CEO dispatch" do
@@ -705,6 +768,12 @@ defmodule Cympho.IssuesTest do
       assert Enum.any?(
                comments,
                &String.contains?(&1.body, "owner reopened the CEO verification update")
+             )
+
+      assert Enum.any?(
+               comments,
+               &(String.contains?(&1.body, "Evidence inspected: prior CEO owner update") and
+                   String.contains?(&1.body, "Restart packet: CEO should inspect"))
              )
     end
 

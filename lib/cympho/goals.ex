@@ -37,6 +37,32 @@ defmodule Cympho.Goals do
   end
 
   @doc """
+  Sidebar/quick-create projection for active company goals.
+
+  Keeps root layout assigns small while still letting new work inherit mission
+  context at intake.
+  """
+  def list_for_sidebar(company_id) do
+    Goal
+    |> where([g], g.company_id == ^company_id and g.status == "active")
+    |> order_by([g],
+      asc:
+        fragment(
+          "CASE ? WHEN 'mission' THEN 0 WHEN 'initiative' THEN 1 WHEN 'milestone' THEN 2 ELSE 3 END",
+          g.goal_type
+        ),
+      asc: g.title
+    )
+    |> select([g], %{
+      id: g.id,
+      title: g.title,
+      goal_type: g.goal_type,
+      project_id: g.project_id
+    })
+    |> Repo.all()
+  end
+
+  @doc """
   Keyset (infinite-scroll) page of a company's goals, oldest first.
   """
   def list_goals_by_company_page(company_id, opts \\ []) do

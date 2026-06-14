@@ -116,12 +116,14 @@ defmodule CymphoWeb.UserAuth do
         socket
         |> assign(:nav_projects, Cympho.Projects.list_for_sidebar(company_id))
         |> assign(:nav_agents, Cympho.Agents.list_for_sidebar(company_id))
+        |> assign(:nav_goals, Cympho.Goals.list_for_sidebar(company_id))
         |> assign(:nav_inbox_count, Cympho.Inbox.unread_count_for_company(company_id))
 
       _ ->
         socket
         |> assign(:nav_projects, [])
         |> assign(:nav_agents, [])
+        |> assign(:nav_goals, [])
         |> assign(:nav_inbox_count, 0)
     end
   end

@@ -20,8 +20,9 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
   defp do_run(session_id, issue, agent_id, recipient_pid, opts) do
     config = runtime_config(opts[:config] || %{}, opts)
+    prompt = build_prompt(issue, agent_id, opts)
 
-    case start_process(issue, agent_id, config, recipient_pid, session_id) do
+    case start_process(issue, agent_id, config, recipient_pid, session_id, prompt) do
       {:ok, _pid} ->
         # Process started successfully
         :ok
@@ -31,7 +32,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
     end
   end
 
-  defp start_process(issue, agent_id, config, recipient_pid, session_id) do
+  defp start_process(issue, agent_id, config, recipient_pid, session_id, prompt) do
     command = config[:command] || config["command"]
 
     if is_nil(command) or command == "" do
@@ -41,7 +42,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
       env = build_env(issue, agent_id, config)
       cwd = config[:cwd] || config["cwd"]
 
-      opts = [:binary, :exit_status]
+      opts = [:binary, :exit_status, :use_stdio, :stderr_to_stdout]
 
       opts =
         if cwd do
@@ -59,11 +60,24 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
       # Spawn a long-lived process to manage the port and handle its messages
       spawn_link(fn ->
-        run_process(session_id, command, args, opts, recipient_pid, config)
+        run_process(session_id, command, args, opts, recipient_pid, config, prompt)
       end)
 
       {:ok, self()}
     end
+  end
+
+  defp build_prompt(issue, agent_id, opts) do
+    Cympho.AgentPrompt.build(issue, agent_id,
+      skills: Keyword.get(opts, :skills, []),
+      runtime_context: Keyword.get(opts, :runtime_context),
+      wake_context: Keyword.get(opts, :wake_context)
+    )
+  rescue
+    _ ->
+      issue
+      |> Map.take([:id, :title, :description, :status, :priority])
+      |> Jason.encode!()
   end
 
   defp build_args(_issue, _agent_id, config) do
@@ -144,7 +158,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
     end
   end
 
-  defp run_process(session_id, command, args, opts, recipient_pid, config) do
+  defp run_process(session_id, command, args, opts, recipient_pid, config, prompt) do
     send(recipient_pid, {:session_started, session_id})
 
     # Use spawn_executable with explicit args to avoid shell injection
@@ -163,6 +177,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
           command_charlist = String.to_charlist(command_path)
           opts_with_args = opts ++ [{:args, args}]
           port = Port.open({:spawn_executable, command_charlist}, opts_with_args)
+          write_prompt(port, prompt)
           timeout = config[:timeout] || config["timeout"] || 300_000
           wait_for_process(port, session_id, recipient_pid, timeout, <<>>)
         rescue
@@ -170,6 +185,13 @@ defmodule Cympho.Adapters.ProcessAdapter do
             send(recipient_pid, {:turn_ended_with_error, session_id, inspect(e)})
         end
     end
+  end
+
+  defp write_prompt(port, prompt) do
+    Port.command(port, "#{prompt}\n")
+    :ok
+  rescue
+    ArgumentError -> :closed
   end
 
   defp resolve_command_path(command) do

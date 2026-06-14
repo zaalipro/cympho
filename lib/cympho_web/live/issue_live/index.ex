@@ -4,10 +4,12 @@ defmodule CymphoWeb.IssueLive.Index do
   import CymphoWeb.Components.IssueDigest, only: [issue_digest_card: 1]
 
   alias Cympho.Issues
+  alias Cympho.IssueDigest
   alias Cympho.Agents
   alias Cympho.Projects
   alias Cympho.Labels
   alias Cympho.IssueReadStates
+  alias Cympho.RuntimePreflight
   alias CymphoWeb.Events
 
   @impl true
@@ -28,6 +30,7 @@ defmodule CymphoWeb.IssueLive.Index do
       |> assign(:projects, list_projects(socket))
       |> assign(:labels, list_labels(socket))
       |> assign(:issue_triage_counts, Issues.empty_triage_counts())
+      |> assign(:orchestrator_enabled?, Cympho.Orchestrator.Dispatcher.enabled?())
       |> assign(:unread_issues, %{})
 
     {:ok, socket}
@@ -50,6 +53,8 @@ defmodule CymphoWeb.IssueLive.Index do
     socket =
       socket
       |> assign(:issues, paginated.issues)
+      |> assign(:attention_queue, attention_queue(paginated.issues))
+      |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(paginated.issues, socket))
       |> assign(:page, paginated.page)
       |> assign(:per_page, paginated.per_page)
       |> assign(:total, paginated.total)
@@ -200,6 +205,8 @@ defmodule CymphoWeb.IssueLive.Index do
 
     socket
     |> assign(:issues, paginated.issues)
+    |> assign(:attention_queue, attention_queue(paginated.issues))
+    |> assign(:launch_readiness_by_issue, launch_readiness_by_issue(paginated.issues, socket))
     |> assign(:total, paginated.total)
     |> assign(:total_pages, paginated.total_pages)
     |> assign(:issue_triage_counts, issue_triage_counts(socket))
@@ -365,6 +372,161 @@ defmodule CymphoWeb.IssueLive.Index do
     else
       "text-text-primary"
     end
+  end
+
+  defp attention_queue(issues) do
+    issues
+    |> Enum.reject(&terminal_issue?/1)
+    |> Enum.map(&attention_item/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.sort_by(fn item ->
+      {item.rank, priority_rank(item.issue.priority), DateTime.to_unix(item.issue.inserted_at)}
+    end)
+    |> Enum.take(4)
+  end
+
+  defp attention_item(%{status: :blocked} = issue) do
+    attention_item(issue, 0, "Unblock", "Open the blocker trail and decide the next owner.")
+  end
+
+  defp attention_item(%{assigned_role: "ceo", assignee_id: nil} = issue) do
+    attention_item(issue, 1, "Add CEO", "Create or assign the CEO agent before this can launch.")
+  end
+
+  defp attention_item(%{assigned_role: "ceo", status: :todo} = issue) do
+    attention_item(
+      issue,
+      2,
+      "Launch CEO",
+      "Start the first CEO turn and require owner update, handoff, or blocker."
+    )
+  end
+
+  defp attention_item(%{status: :in_review} = issue) do
+    attention_item(issue, 3, "Review", "Accept, request changes, or ask for missing evidence.")
+  end
+
+  defp attention_item(%{assignee_id: nil, assigned_role: role} = issue)
+       when role in [nil, ""] do
+    attention_item(
+      issue,
+      4,
+      "Assign owner",
+      "Pick the agent or role responsible for the next move."
+    )
+  end
+
+  defp attention_item(%{status: :todo} = issue) do
+    attention_item(issue, 5, "Dispatch", "Prioritize or start an agent run for queued work.")
+  end
+
+  defp attention_item(%{status: :in_progress} = issue) do
+    attention_item(issue, 6, "Observe", "Check runtime evidence and watch for stale execution.")
+  end
+
+  defp attention_item(_issue), do: nil
+
+  defp attention_item(issue, rank, action, detail) do
+    digest = IssueDigest.build(issue)
+
+    %{
+      issue: issue,
+      rank: rank,
+      action: action,
+      detail: detail,
+      digest_label: digest.label,
+      digest_headline: digest.headline,
+      path: "/issues/#{issue.id}"
+    }
+  end
+
+  defp terminal_issue?(%{status: status}), do: status in [:done, :cancelled]
+
+  defp priority_rank(:critical), do: 0
+  defp priority_rank(:high), do: 1
+  defp priority_rank(:medium), do: 2
+  defp priority_rank(:low), do: 3
+  defp priority_rank(_), do: 4
+
+  defp attention_action_class("Unblock"), do: "border-brand/25 bg-brand/10 text-brand"
+  defp attention_action_class("Add CEO"), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  defp attention_action_class("Launch CEO"), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+  defp attention_action_class("Review"), do: "border-brand/25 bg-brand/10 text-brand"
+
+  defp attention_action_class("Assign owner"),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  defp attention_action_class("Observe"), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
+  defp attention_action_class(_), do: "border-border bg-panel text-text-secondary"
+
+  defp launch_readiness_by_issue(issues, socket) do
+    orchestrator_enabled? = socket.assigns[:orchestrator_enabled?] || false
+
+    issues
+    |> Enum.filter(&launch_readiness_issue?/1)
+    |> Enum.map(fn issue ->
+      {issue.id, launch_readiness(issue, orchestrator_enabled?)}
+    end)
+    |> Map.new()
+  end
+
+  defp launch_readiness_issue?(%{status: status})
+       when status in [:todo, :in_review, :blocked, "todo", "in_review", "blocked"],
+       do: true
+
+  defp launch_readiness_issue?(_issue), do: false
+
+  defp launch_readiness(issue, orchestrator_enabled?) do
+    preflight = RuntimePreflight.for_issue(issue, autonomy_enabled?: orchestrator_enabled?)
+
+    %{
+      status: preflight.status,
+      label: launch_readiness_label(preflight),
+      target: launch_readiness_target(preflight),
+      summary: preflight.summary,
+      path: "/issues/#{issue.id}#issue-agent-panel"
+    }
+  end
+
+  defp launch_readiness_for(readiness_by_issue, issue) do
+    Map.get(readiness_by_issue || %{}, issue.id)
+  end
+
+  defp launch_readiness_label(%{status: :ready}), do: "Ready"
+  defp launch_readiness_label(%{status: :review_mode}), do: "Review mode"
+  defp launch_readiness_label(%{status: :attention}), do: "Needs setup"
+  defp launch_readiness_label(%{status: :blocked, agent_id: nil}), do: "No agent"
+  defp launch_readiness_label(%{status: :blocked}), do: "Blocked"
+  defp launch_readiness_label(%{label: label}) when is_binary(label), do: label
+  defp launch_readiness_label(_preflight), do: "Check"
+
+  defp launch_readiness_target(%{agent_name: name}) when is_binary(name) and name != "", do: name
+
+  defp launch_readiness_target(%{agent_role: role}) when role not in [nil, ""],
+    do: role |> to_string() |> String.replace("_", " ") |> String.capitalize()
+
+  defp launch_readiness_target(_preflight), do: "Route unknown"
+
+  defp launch_readiness_class(%{status: :ready}),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp launch_readiness_class(%{status: :review_mode}),
+    do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+
+  defp launch_readiness_class(%{status: :attention}),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  defp launch_readiness_class(%{status: :blocked}),
+    do: "border-red-500/25 bg-red-500/10 text-red-300"
+
+  defp launch_readiness_class(_readiness), do: "border-border bg-panel text-text-secondary"
+
+  defp launch_readiness_link_class(readiness) do
+    [
+      "inline-flex max-w-full flex-col rounded-md border px-2 py-1 text-left transition-colors hover:border-brand/40 hover:bg-brand/10",
+      launch_readiness_class(readiness)
+    ]
+    |> Enum.join(" ")
   end
 
   defp status_label(:backlog), do: "Backlog"

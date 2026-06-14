@@ -1,7 +1,8 @@
 defmodule CymphoWeb.ReviewQueueLiveTest do
   use CymphoWeb.LiveCase, async: true
 
-  alias Cympho.{Agents, Issues, Projects}
+  alias Cympho.{Agents, Comments, Issues, Projects, Repo, WorkProducts}
+  alias Cympho.HeartbeatEngine.Run
 
   setup do
     company = current_company()
@@ -44,7 +45,7 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
     project: project,
     cto: cto
   } do
-    {:ok, _in_review} =
+    {:ok, in_review} =
       Issues.create_issue(
         scoped_attrs(%{
           title: "Awaiting CTO review",
@@ -60,11 +61,95 @@ defmodule CymphoWeb.ReviewQueueLiveTest do
     {:ok, _live, html} = live(conn, "/reviews")
 
     assert html =~ "Review queue"
+    assert html =~ "Review command"
+    assert html =~ "Resolve review gates"
+    assert html =~ "Blocked gates"
+    assert html =~ "Open gated issue"
     assert html =~ "Decision queue"
     assert html =~ "Approve and close"
     assert html =~ "Request changes"
     assert html =~ "Awaiting CTO review"
     assert html =~ "Awaiting review"
+    assert html =~ ~s(data-testid="review-decision-card-#{in_review.id}")
+    assert html =~ ~s(data-testid="review-gate-card-#{in_review.id}")
+    assert html =~ ~s(data-testid="review-action-bar-#{in_review.id}")
+    assert html =~ "Decide from the packet above"
+    assert html =~ "Evidence gaps block closure"
+    assert html =~ "The close action will stay guarded until evidence is present."
+    assert html =~ "Review decision packet"
+    assert html =~ "Request changes first"
+    assert html =~ "Evidence present"
+    assert html =~ "Risk / asks"
+    assert html =~ "No completed runtime run recorded."
+    assert html =~ "No work product attached."
+    assert html =~ "No PR link set."
+    assert html =~ "Runtime verification"
+  end
+
+  test "shows approve-candidate decision packet when review evidence is complete", %{
+    conn: conn,
+    project: project,
+    engineer: engineer,
+    cto: cto
+  } do
+    {:ok, issue} =
+      Issues.create_issue(
+        scoped_attrs(%{
+          title: "Evidence complete review",
+          description: "Reviewer should see a green decision packet.",
+          status: :in_review,
+          priority: :high,
+          project_id: project.id,
+          assigned_role: "cto",
+          assignee_id: cto.id
+        })
+      )
+
+    {:ok, _delivery_comment} =
+      Comments.create_comment(%{
+        body:
+          "[delivery] What happened: completed reviewable work. Files changed: evidence doc. Evidence produced: work product and process run. Verification: process run passed. Risks: none known. Current state: ready for CTO review. Next decision: approve. Restart packet: CTO should inspect the work product and process run before approving.",
+        author_type: "agent",
+        author_id: engineer.id,
+        issue_id: issue.id
+      })
+
+    {:ok, _review_comment} =
+      Comments.create_comment(%{
+        body:
+          "[review] Verdict: accepted. What happened: inspected the evidence. Evidence inspected: review evidence work product and process run. Verification: process run passed. Gaps: none. Follow-up issues: none. Next decision: close. Restart packet: CEO should inspect the accepted review evidence before closing.",
+        author_type: "agent",
+        author_id: cto.id,
+        issue_id: issue.id
+      })
+
+    Repo.insert!(%Run{
+      agent_id: engineer.id,
+      issue_id: issue.id,
+      company_id: issue.company_id,
+      status: "completed",
+      adapter: "process",
+      continuation_summary: "Verification passed."
+    })
+
+    {:ok, _work_product} =
+      WorkProducts.create_work_product(%{
+        issue_id: issue.id,
+        created_by_agent_id: engineer.id,
+        kind: "document",
+        title: "Review evidence",
+        description: "Non-code review evidence."
+      })
+
+    {:ok, _live, html} = live(conn, "/reviews")
+
+    assert html =~ "Evidence complete review"
+    assert html =~ "Review decision packet"
+    assert html =~ "Approve candidate"
+    assert html =~ "Review gates are clear"
+    assert html =~ "1 completed runtime run recorded."
+    assert html =~ "1 work product attached."
+    assert html =~ "No blocking review gate detected"
   end
 
   test "lists kicked-back issues with last_reviewer info", %{

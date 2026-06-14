@@ -11,6 +11,14 @@
     </:actions>
   </.header>
 
+  <div
+    :if={@secret_action_error}
+    data-testid="secret-action-error"
+    class="mb-4 rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200"
+  >
+    {@secret_action_error}
+  </div>
+
   <%= if @show_form do %>
     <.live_component
       module={CymphoWeb.SecretsLive.FormComponent}
@@ -23,6 +31,106 @@
       on_cancel={JS.push("hide_form")}
     />
   <% end %>
+
+  <section
+    id="runtime-credential-guide"
+    data-testid="runtime-credential-guide"
+    class="mb-4 overflow-hidden rounded-lg border border-border bg-panel"
+  >
+    <div class="border-b border-border bg-gradient-to-b from-surface-2/50 to-transparent px-5 py-4">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+              Runtime credential cockpit
+            </p>
+            <span class={[
+              "rounded-full border px-2 py-0.5 text-[11px] font-510",
+              runtime_credential_badge_class(@runtime_credential_guide.status)
+            ]}>
+              {@runtime_credential_guide.ready_count} of {@runtime_credential_guide.total_count} ready
+            </span>
+          </div>
+          <h2 class="mt-2 text-lg font-590 tracking-tight text-text-primary">
+            Provider coverage for autonomous agents
+          </h2>
+          <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
+            {@runtime_credential_guide.summary}
+          </p>
+        </div>
+        <button
+          type="button"
+          phx-click="show_create_form"
+          class="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
+        >
+          <.icon name="hero-plus" class="h-4 w-4" /> Add any secret
+        </button>
+      </div>
+    </div>
+
+    <div class="grid gap-3 p-4 xl:grid-cols-2">
+      <article
+        :for={profile <- @runtime_credential_guide.profiles}
+        data-testid={"runtime-credential-profile-#{profile.id}"}
+        class={[
+          "rounded-lg border p-4 transition-colors",
+          credential_profile_class(profile.ready)
+        ]}
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex min-w-0 gap-3">
+            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-panel text-text-secondary">
+              <span class={[profile.icon, "h-4 w-4"]}></span>
+            </div>
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <h3 class="text-sm font-590 text-text-primary">{profile.title}</h3>
+                <span class={[
+                  "rounded-full border px-2 py-0.5 text-[11px] font-510",
+                  credential_profile_status_class(profile.ready)
+                ]}>
+                  {profile.status_label}
+                </span>
+              </div>
+              <p class="mt-1 text-sm leading-5 text-text-tertiary">{profile.summary}</p>
+            </div>
+          </div>
+        </div>
+
+        <dl class="mt-3 grid gap-2 sm:grid-cols-2">
+          <div class="rounded-md border border-border bg-canvas/60 px-3 py-2">
+            <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Profile
+            </dt>
+            <dd class="mt-1 break-words text-xs text-text-secondary">{profile.profile}</dd>
+          </div>
+          <div class="rounded-md border border-border bg-canvas/60 px-3 py-2">
+            <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Model
+            </dt>
+            <dd class="mt-1 break-words text-xs text-text-secondary">{profile.model}</dd>
+          </div>
+          <div class="rounded-md border border-border bg-canvas/60 px-3 py-2 sm:col-span-2">
+            <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Endpoint
+            </dt>
+            <dd class="mt-1 break-words text-xs text-text-secondary">{profile.endpoint}</dd>
+          </div>
+        </dl>
+
+        <div class="mt-3 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+          <p class="text-xs leading-5 text-text-tertiary">{profile.status_detail}</p>
+          <.link
+            :if={!profile.ready}
+            patch={profile.setup_path}
+            class="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-brand/25 bg-brand/10 px-2.5 py-1.5 text-xs font-510 text-brand transition hover:bg-brand/15"
+          >
+            <.icon name="hero-plus" class="h-3.5 w-3.5" /> Add key
+          </.link>
+        </div>
+      </article>
+    </div>
+  </section>
 
   <div
     :if={@rotation_summary.total > 0}
@@ -89,13 +197,18 @@
             />
           </svg>
         </div>
-        <p class="text-sm text-text-tertiary mb-4">No secrets configured yet.</p>
+        <div class="mb-4 max-w-md">
+          <p class="text-sm font-590 text-text-primary">No runtime secrets stored yet</p>
+          <p class="mt-1 text-sm leading-5 text-text-tertiary">
+            Add a company-scoped provider key before assigning autonomous work. Runtime preflight uses these encrypted secrets to inject agent credentials.
+          </p>
+        </div>
         <button
           type="button"
           phx-click="show_create_form"
           class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
         >
-          Add Your First Secret
+          Add runtime secret
         </button>
       </div>
     </:empty>
@@ -103,13 +216,14 @@
     <div
       :for={{dom_id, secret} <- @streams.secrets}
       id={dom_id}
+      data-testid={"secret-row-#{secret.id}"}
       class="border border-border rounded-lg p-4 hover:bg-subtle transition-colors"
     >
-      <div class="flex items-start justify-between">
-        <div class="flex-1">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0 flex-1">
           <% rotation = secret_rotation(secret) %>
-          <div class="flex items-center gap-3 mb-2">
-            <h3 class="font-serif text-lg font-semibold text-text-primary">
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <h3 class="break-all font-serif text-lg font-semibold text-text-primary">
               {secret.key}
             </h3>
             <span class={[
@@ -133,82 +247,37 @@
             {secret.description}
           </p>
 
-          <div class="text-xs text-text-quaternary">
+          <div class="text-xs leading-5 text-text-quaternary">
             Created: {Calendar.strftime(secret.inserted_at, "%b %d, %Y %H:%M")}
             <span class="mx-2">•</span>
             Updated: {Calendar.strftime(secret.updated_at, "%b %d, %Y %H:%M")}
           </div>
         </div>
 
-        <div class="flex items-center gap-2">
-          <button
-            type="button"
-            phx-click="show_versions"
-            phx-value-id={secret.id}
-            class="p-2 text-text-quaternary hover:text-text-secondary hover:bg-surface rounded-lg transition-colors"
-            title="View version history"
+        <div class="flex shrink-0 justify-end self-end sm:self-auto">
+          <.overflow_menu
+            label={"Manage #{secret.key}"}
+            trigger_text="Manage"
+            data-testid={"secret-manage-menu-#{secret.id}"}
           >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-          </button>
-
-          <button
-            type="button"
-            phx-click="show_edit_form"
-            phx-value-id={secret.id}
-            class="p-2 text-text-quaternary hover:text-text-secondary hover:bg-surface rounded-lg transition-colors"
-            title="Edit secret"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-              />
-            </svg>
-          </button>
-
-          <button
-            type="button"
-            phx-click="rotate"
-            phx-value-id={secret.id}
-            class="p-2 text-text-quaternary hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors"
-            title="Rotate secret"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
-          </button>
-
-          <button
-            type="button"
-            phx-click="delete"
-            phx-value-id={secret.id}
-            data-confirm="Are you sure you want to delete this secret?"
-            class="p-2 text-text-quaternary hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-            title="Delete secret"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-              />
-            </svg>
-          </button>
+            <.menu_item phx-click="show_versions" phx-value-id={secret.id}>
+              Version history
+            </.menu_item>
+            <.menu_item phx-click="show_edit_form" phx-value-id={secret.id}>
+              Edit details
+            </.menu_item>
+            <.menu_item phx-click="rotate" phx-value-id={secret.id}>
+              Rotate secret
+            </.menu_item>
+            <.menu_item
+              danger
+              phx-click="delete"
+              phx-value-id={secret.id}
+              data-confirm={"Delete #{secret.key}? Agents using this #{String.downcase(format_scope(secret.scope))}-scoped credential will fail runtime preflight until a replacement is stored."}
+            >
+              Delete secret
+            </.menu_item>
+          </.overflow_menu>
         </div>
       </div>
     </div>

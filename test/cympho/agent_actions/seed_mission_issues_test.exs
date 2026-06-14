@@ -44,13 +44,15 @@ defmodule Cympho.AgentActions.SeedMissionIssuesTest do
           "initiatives" => [
             %{
               "title" => "Build onboarding flow",
-              "description" => "Acceptance: new users hit aha moment.",
+              "description" =>
+                "Context: activation drops before the aha moment.\nDefinition of done: onboarding path is ready for CTO spec review.\nEvidence to inspect: activation baseline, proposed funnel, and owner-facing success signal.",
               "role" => "product_manager",
               "priority" => "high"
             },
             %{
               "title" => "Plan onboarding architecture",
-              "description" => "Identify modules to change.",
+              "description" =>
+                "Context: onboarding needs a technical plan before implementation.\nDefinition of done: modules, data model, and risk list are ready for review.\nEvidence to inspect: architecture brief and implementation split.",
               "role" => "cto",
               "priority" => "high"
             }
@@ -102,7 +104,8 @@ defmodule Cympho.AgentActions.SeedMissionIssuesTest do
             "initiatives" => [
               %{
                 "title" => "Build onboarding flow",
-                "description" => "Spec ready for the eng pool.",
+                "description" =>
+                  "Context: onboarding needs implementation after CEO prioritization.\nDefinition of done: engineering scope is ready for release into the pool.\nEvidence to inspect: spec-ready brief, acceptance criteria, and risks.",
                 "role" => "engineer",
                 "priority" => "high"
               }
@@ -119,7 +122,8 @@ defmodule Cympho.AgentActions.SeedMissionIssuesTest do
                AgentActions.execute(child, cto, [
                  %{
                    "type" => "approve_issue",
-                   "notes" => "Spec is clear; releasing to the engineer pool."
+                   "notes" =>
+                     "Acceptance criteria: onboarding flow implementation scope is clear. Evidence required: code change or work product plus delivery note. Verification required: focused onboarding smoke check. Definition of done: ready for CTO review with evidence and risk named."
                  }
                ])
 
@@ -132,6 +136,10 @@ defmodule Cympho.AgentActions.SeedMissionIssuesTest do
       assert get_in(reloaded.monitor_state, ["spec_review_required"]) == nil
       assert get_in(reloaded.monitor_state, ["proposed_role"]) == nil
       assert get_in(reloaded.monitor_state, ["spec_approved_role_release"]) == "engineer"
+      assert reloaded.description =~ "## CTO spec approval"
+
+      assert reloaded.description =~
+               "Acceptance criteria: onboarding flow implementation scope is clear."
 
       comments = Cympho.Comments.list_comments(child_id)
 
@@ -139,6 +147,98 @@ defmodule Cympho.AgentActions.SeedMissionIssuesTest do
                c.author_type == "agent" and
                  String.starts_with?(c.body, "[spec-approved]")
              end)
+    end
+
+    test "CTO cannot release repo-bound spec review with a thin delivery brief",
+         %{ceo: ceo, mission_goal: goal, planning_issue: issue} do
+      cto = Cympho.Agents.list_agents_by_role(:cto) |> List.first()
+      assert cto != nil
+
+      {:ok, %{results: [%{created: [%{issue_id: child_id} | _]} | _]}} =
+        AgentActions.execute(issue, ceo, [
+          %{
+            "type" => "seed_mission_issues",
+            "goal_id" => goal.id,
+            "initiatives" => [
+              %{
+                "title" => "Build checkout telemetry",
+                "description" =>
+                  "Context: checkout telemetry is needed for owner reporting.\nDefinition of done: telemetry scope is ready for CTO spec review.\nEvidence to inspect: metric list and business risk.",
+                "role" => "engineer",
+                "priority" => "high"
+              }
+            ]
+          }
+        ])
+
+      child = Issues.get_issue!(child_id)
+
+      assert {:error,
+              {:spec_review_delivery_brief_too_thin, :engineer, next_prompt, missing, scaffold}} =
+               AgentActions.execute(child, cto, [
+                 %{
+                   "type" => "approve_issue",
+                   "notes" => "Spec is clear; releasing to engineering."
+                 }
+               ])
+
+      assert next_prompt =~ "Acceptance criteria"
+      assert "Acceptance criteria" in missing
+      assert scaffold =~ "Delivery goal: Build checkout telemetry"
+
+      reloaded = Issues.get_issue!(child_id)
+      assert reloaded.status == :backlog
+      assert reloaded.assigned_role == "cto"
+      assert get_in(reloaded.monitor_state, ["spec_review_required"]) == true
+
+      comments = Cympho.Comments.list_comments(child_id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "approve_issue rejected") and
+                 String.contains?(comment.body, "release brief is too thin") and
+                 String.contains?(comment.body, "Repair scaffold")
+             end)
+    end
+
+    test "rejects thin initiative briefs before seeding mission backlog",
+         %{ceo: ceo, mission_goal: goal, planning_issue: issue} do
+      actions = [
+        %{
+          "type" => "seed_mission_issues",
+          "goal_id" => goal.id,
+          "initiatives" => [
+            %{
+              "title" => "Build something valuable",
+              "role" => "engineer",
+              "priority" => "high"
+            }
+          ]
+        }
+      ]
+
+      assert {:error,
+              {:mission_initiative_too_thin, "Build something valuable", next_prompt, missing,
+               scaffold}} = AgentActions.execute(issue, ceo, actions)
+
+      assert next_prompt =~ "Context"
+      assert "Context" in missing
+      assert scaffold =~ "Goal: Build something valuable"
+      assert scaffold =~ "Definition of done:"
+
+      comments = Cympho.Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "seed_mission_issues rejected") and
+                 String.contains?(comment.body, "Build something valuable") and
+                 String.contains?(comment.body, "Repair scaffold")
+             end)
+
+      refute Repo.exists?(
+               from i in Issue,
+                 where: i.goal_id == ^goal.id and i.title == "Build something valuable"
+             )
     end
 
     test "rejects when emitter is not a CEO",

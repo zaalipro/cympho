@@ -7,6 +7,19 @@ defmodule Cympho.AgentPromptContractEvalTest do
   alias Cympho.PullRequestContract
 
   describe "eval coverage" do
+    test "CEO contract exposes a routable handoff snippet" do
+      contract = AgentPromptContract.build(:ceo)
+
+      handoff = Enum.find(contract.snippets, &(&1.tag == "[handoff]"))
+
+      assert handoff
+      assert handoff.label == "Handoff"
+      assert handoff.body =~ "Routing targets: assigned_role or assignee_id"
+      assert handoff.body =~ "Estimated minutes"
+      assert handoff.body =~ "Definition of done"
+      assert handoff.body =~ "Review owner"
+    end
+
     test "ships passing fixture coverage for every active role" do
       for role <- AgentPromptContractEval.roles() do
         coverage = AgentPromptContractEval.coverage(role)
@@ -37,11 +50,14 @@ defmodule Cympho.AgentPromptContractEvalTest do
 
       assert delivery_good.expectation_label == "Expected pass"
       assert "Files changed" in delivery_good.validated_fields
+      assert "Evidence produced" in delivery_good.validated_fields
       assert "Verification" in delivery_good.validated_fields
+      assert "Restart packet" in delivery_good.validated_fields
 
       assert delivery_bad.expectation_label == "Expected catch"
       assert "[delivery]" in delivery_bad.gap_fields
       assert "Next decision" in delivery_bad.gap_fields
+      assert "Restart packet" in delivery_bad.gap_fields
       assert delivery_bad.audit_summary =~ "missing"
 
       assert "## Summary" in pr_bad.gap_fields
@@ -68,20 +84,28 @@ defmodule Cympho.AgentPromptContractEvalTest do
 
       assert "[delivery]" in engineer_missing
       assert "Verification" in engineer_missing
+      assert "Evidence produced" in engineer_missing
       assert "Risks" in engineer_missing
+      assert "Restart packet" in engineer_missing
 
       assert %{status: :attention, missing_fields: cto_missing} =
                AgentPromptContract.audit_response(:cto, fixture("cto_bad.md"))
 
       assert "Verdict" in cto_missing
+      assert "Evidence inspected" in cto_missing
       assert "Verification" in cto_missing
       assert "Follow-up issues" in cto_missing
+      assert "Restart packet" in cto_missing
 
       assert %{status: :attention, missing_fields: ceo_missing} =
                AgentPromptContract.audit_response(:ceo, fixture("ceo_bad.md"))
 
       assert "Business status" in ceo_missing
+      assert "Evidence inspected" in ceo_missing
+      assert "Verification" in ceo_missing
+      assert "Remaining risk" in ceo_missing
       assert "Owner decision needed" in ceo_missing
+      assert "Restart packet" in ceo_missing
     end
 
     test "submit_review fixture cannot pass without the delivery contract" do
@@ -108,6 +132,7 @@ defmodule Cympho.AgentPromptContractEvalTest do
       assert "Cause" in missing
       assert "Needs" in missing
       assert "Next decision" in missing
+      assert "Restart packet" in missing
     end
   end
 

@@ -8,6 +8,7 @@ defmodule CymphoWeb.ProjectLiveTest do
   alias Cympho.Projects
   alias Cympho.Repo
   alias Cympho.Secrets
+  alias Cympho.Workspaces
   alias CymphoWeb.ConnCase
 
   describe "Project index" do
@@ -71,6 +72,12 @@ defmodule CymphoWeb.ProjectLiveTest do
       {:ok, view, html} = live(conn, "/projects/new")
 
       assert html =~ "New project"
+      assert html =~ "Project launch plan"
+      assert html =~ "Operating boundary"
+      assert html =~ "Repository and identifier"
+      assert html =~ "Workspace posture"
+      assert html =~ "Setup checklist"
+      assert html =~ "Create behavior"
 
       view
       |> form("form", %{
@@ -79,7 +86,8 @@ defmodule CymphoWeb.ProjectLiveTest do
           "description" => "Second project for multi-project intake.",
           "prefix" => "CP",
           "status" => "active",
-          "repo_url" => ""
+          "repo_url" => "https://github.com/example/customer-portal",
+          "color" => "#d97757"
         }
       })
       |> render_submit()
@@ -87,6 +95,8 @@ defmodule CymphoWeb.ProjectLiveTest do
       [project] = Projects.list_projects_by_company(company.id)
       assert project.name == "Customer Portal"
       assert project.company_id == company.id
+      assert project.repo_url == "https://github.com/example/customer-portal"
+      assert project.color == "#d97757"
     end
   end
 
@@ -103,12 +113,57 @@ defmodule CymphoWeb.ProjectLiveTest do
           company_id: company.id
         })
 
+      {:ok, goal} =
+        Goals.create_goal(%{
+          title: "Ship autonomous project command",
+          company_id: company.id,
+          project_id: project.id,
+          goal_type: :mission
+        })
+
+      {:ok, _issue} =
+        Issues.create_issue(%{
+          title: "Implement project command center",
+          company_id: company.id,
+          project_id: project.id,
+          goal_id: goal.id,
+          status: :in_progress
+        })
+
+      {:ok, _workspace} =
+        Workspaces.create_project_workspace(%{
+          name: "AILogic Workspace",
+          company_id: company.id,
+          project_id: project.id,
+          cwd: "/tmp/ailogic"
+        })
+
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "project",
+          scope_id: project.id,
+          key: "PROJECT_TOKEN",
+          value: "secret-value",
+          description: "Project env var"
+        })
+
       conn = live_session_conn(conn, user, company)
       {:ok, view, html} = live(conn, "/projects/#{project.id}")
 
+      assert has_element?(view, "[data-testid='project-command']")
+      assert has_element?(view, "[data-testid='project-readiness']")
+      assert has_element?(view, "[data-testid='project-goals']")
+      assert html =~ "Project command"
+      assert html =~ "Project work is moving through execution"
+      assert html =~ "Execution readiness"
+      assert html =~ "Mission control"
+      assert html =~ "AILogic Workspace"
+      assert html =~ "PROJECT_TOKEN"
+      assert html =~ "Ship autonomous project command"
       assert html =~ "Project settings"
       assert html =~ "Environment variables"
-      assert html =~ "Recent issues"
+      assert html =~ "Work queue"
       assert html =~ "Save changes"
       refute html =~ "/projects/#{project.id}/edit"
 

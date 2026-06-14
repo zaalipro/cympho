@@ -8,38 +8,29 @@ defmodule CymphoWeb.SearchLive.Index do
   alias Cympho.Projects
   alias Cympho.Labels
 
+  @advanced_filter_keys ~w(goal_id label_id role agent_status project_status goal_status goal_priority)
+
   @impl true
   def mount(_params, _session, socket) do
     current_user = socket.assigns.current_user
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+    filters = default_filters()
 
     socket =
       socket
       |> assign(:page_title, "Search")
       |> assign(:query, "")
-      |> assign(:results, %{issues: [], agents: [], projects: [], goals: []})
+      |> assign(:results, empty_results())
       |> assign(:recent_searches, recent_searches_for_user(current_user))
       |> assign(:agents, list_agents_scoped(company_id))
       |> assign(:projects, list_projects_scoped(company_id))
       |> assign(:goals, list_goals_scoped(company_id))
       |> assign(:role_options, role_options())
       |> assign(:labels, Labels.list_labels())
-      |> assign(:filters, %{
-        "status" => "",
-        "agent_status" => "",
-        "project_status" => "",
-        "goal_status" => "",
-        "goal_priority" => "",
-        "role" => "",
-        "assignee_id" => "",
-        "label_id" => "",
-        "project_id" => "",
-        "goal_id" => "",
-        "date_from" => "",
-        "date_to" => ""
-      })
+      |> assign(:filters, filters)
       |> assign(:active_tab, :all)
       |> assign(:total_count, 0)
+      |> assign(:search_command, empty_search_command(filters))
 
     {:ok, socket}
   end
@@ -49,20 +40,7 @@ defmodule CymphoWeb.SearchLive.Index do
     query = params["q"] || ""
     active_tab = parse_tab(params["tab"])
 
-    filters = %{
-      "status" => params["status"] || "",
-      "agent_status" => params["agent_status"] || "",
-      "project_status" => params["project_status"] || "",
-      "goal_status" => params["goal_status"] || "",
-      "goal_priority" => params["goal_priority"] || "",
-      "role" => params["role"] || "",
-      "assignee_id" => params["assignee_id"] || "",
-      "label_id" => params["label_id"] || "",
-      "project_id" => params["project_id"] || "",
-      "goal_id" => params["goal_id"] || "",
-      "date_from" => params["date_from"] || "",
-      "date_to" => params["date_to"] || ""
-    }
+    filters = filters_from_params(params)
 
     socket =
       socket
@@ -149,8 +127,9 @@ defmodule CymphoWeb.SearchLive.Index do
 
     if String.trim(query) == "" do
       socket
-      |> assign(:results, %{issues: [], agents: [], projects: [], goals: []})
+      |> assign(:results, empty_results())
       |> assign(:total_count, 0)
+      |> assign_search_command()
     else
       company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
       results = Search.search_all(query, filters, limit: 20, company_id: company_id)
@@ -169,7 +148,77 @@ defmodule CymphoWeb.SearchLive.Index do
       socket
       |> assign(:results, results)
       |> assign(:total_count, total_count)
+      |> assign_search_command()
     end
+  end
+
+  defp assign_search_command(socket) do
+    assign(socket, :search_command, build_search_command(socket))
+  end
+
+  defp build_search_command(socket) do
+    results = socket.assigns.results
+    total_count = socket.assigns.total_count
+    query = socket.assigns.query
+    filters = socket.assigns.filters
+    active_tab = socket.assigns.active_tab
+    top_result = top_search_result(results)
+    result_mix = result_mix(socket, results)
+
+    %{
+      active: String.trim(query) != "",
+      result_mix: result_mix,
+      summary: search_command_summary(query, total_count, filters, top_result),
+      top_result: top_result,
+      actions: search_command_actions(socket, total_count, active_tab, top_result, result_mix)
+    }
+  end
+
+  defp empty_search_command(filters) do
+    %{
+      active: false,
+      result_mix: [
+        %{key: :issues, label: "Issues", count: 0, url: ~p"/search?tab=issues"},
+        %{key: :agents, label: "Agents", count: 0, url: ~p"/search?tab=agents"},
+        %{key: :projects, label: "Projects", count: 0, url: ~p"/search?tab=projects"},
+        %{key: :goals, label: "Goals", count: 0, url: ~p"/search?tab=goals"}
+      ],
+      summary: search_command_summary("", 0, filters, nil),
+      top_result: nil,
+      actions: [
+        %{label: "New issue", url: ~p"/issues/new", tone: :primary, icon: "hero-plus-mini"},
+        %{label: "Board", url: ~p"/kanban", tone: :neutral, icon: "hero-view-columns-mini"},
+        %{
+          label: "Operations",
+          url: ~p"/operations",
+          tone: :neutral,
+          icon: "hero-command-line-mini"
+        }
+      ]
+    }
+  end
+
+  defp empty_results, do: %{issues: [], agents: [], projects: [], goals: []}
+
+  defp default_filters do
+    %{
+      "status" => "",
+      "agent_status" => "",
+      "project_status" => "",
+      "goal_status" => "",
+      "goal_priority" => "",
+      "role" => "",
+      "assignee_id" => "",
+      "label_id" => "",
+      "project_id" => "",
+      "goal_id" => "",
+      "date_from" => "",
+      "date_to" => ""
+    }
+  end
+
+  defp filters_from_params(params) do
+    Map.new(default_filters(), fn {key, _value} -> {key, params[key] || ""} end)
   end
 
   defp build_url(socket, overrides) do
@@ -191,6 +240,198 @@ defmodule CymphoWeb.SearchLive.Index do
     |> Enum.into(%{})
     |> then(fn params -> ~p"/search?#{params}" end)
   end
+
+  defp result_mix(socket, results) do
+    [
+      {:issues, "Issues", length(results.issues)},
+      {:agents, "Agents", length(results.agents)},
+      {:projects, "Projects", length(results.projects)},
+      {:goals, "Goals", length(results.goals)}
+    ]
+    |> Enum.map(fn {key, label, count} ->
+      %{key: key, label: label, count: count, url: build_url(socket, %{"tab" => to_string(key)})}
+    end)
+  end
+
+  defp top_search_result(%{issues: [issue | _]}) do
+    %{
+      kind: "Issue",
+      title: issue.title,
+      subtitle: issue_result_subtitle(issue),
+      url: ~p"/issues/#{issue.id}",
+      icon: "hero-document-text-mini"
+    }
+  end
+
+  defp top_search_result(%{agents: [agent | _]}) do
+    %{
+      kind: "Agent",
+      title: agent.name,
+      subtitle:
+        [Agent.role_label(agent.role), format_search_value(agent.status)] |> compact_join(" / "),
+      url: ~p"/agents/#{agent.id}",
+      icon: "hero-sparkles-mini"
+    }
+  end
+
+  defp top_search_result(%{projects: [project | _]}) do
+    %{
+      kind: "Project",
+      title: project.name,
+      subtitle: [project.prefix, format_search_value(project.status)] |> compact_join(" / "),
+      url: ~p"/projects/#{project.id}",
+      icon: "hero-folder-mini"
+    }
+  end
+
+  defp top_search_result(%{goals: [goal | _]}) do
+    %{
+      kind: "Goal",
+      title: goal.title,
+      subtitle:
+        [format_search_value(goal.status), format_search_value(goal.priority)]
+        |> compact_join(" / "),
+      url: ~p"/goals/#{goal.id}",
+      icon: "hero-flag-mini"
+    }
+  end
+
+  defp top_search_result(_results), do: nil
+
+  defp issue_result_subtitle(issue) do
+    [issue.identifier, format_search_value(issue.status), assignee_name(issue)]
+    |> compact_join(" / ")
+  end
+
+  defp assignee_name(%{assignee: %{name: name}}) when is_binary(name) and name != "",
+    do: "Assigned to #{name}"
+
+  defp assignee_name(_issue), do: nil
+
+  defp search_command_summary("", _total_count, _filters, _top_result),
+    do: "Ready for scoped company search."
+
+  defp search_command_summary(_query, 0, filters, _top_result) do
+    if filters_active?(filters) do
+      "No matches under the current filters."
+    else
+      "No matches in this company."
+    end
+  end
+
+  defp search_command_summary(_query, total_count, filters, top_result) do
+    filter_note =
+      if filters_active?(filters),
+        do: "#{filter_count(filters)} filters active.",
+        else: "No filters active."
+
+    "#{total_count} total matches. Top match: #{top_result.kind}. #{filter_note}"
+  end
+
+  defp search_command_actions(socket, total_count, active_tab, top_result, result_mix) do
+    clear_url = ~p"/search?#{%{"q" => socket.assigns.query, "tab" => to_string(active_tab)}}"
+
+    cond do
+      socket.assigns.query in ["", nil] ->
+        starter_search_actions()
+
+      total_count == 0 and filters_active?(socket.assigns.filters) ->
+        [
+          %{label: "Clear filters", url: clear_url, tone: :primary, icon: "hero-x-mark-mini"},
+          %{label: "New issue", url: ~p"/issues/new", tone: :neutral, icon: "hero-plus-mini"},
+          %{label: "Issues", url: ~p"/issues", tone: :neutral, icon: "hero-document-text-mini"}
+        ]
+
+      total_count == 0 ->
+        [
+          %{label: "New issue", url: ~p"/issues/new", tone: :primary, icon: "hero-plus-mini"},
+          %{label: "Issues", url: ~p"/issues", tone: :neutral, icon: "hero-document-text-mini"},
+          %{label: "Board", url: ~p"/kanban", tone: :neutral, icon: "hero-view-columns-mini"}
+        ]
+
+      true ->
+        [
+          %{label: "Open top result", url: top_result.url, tone: :primary, icon: top_result.icon},
+          dominant_result_action(result_mix, active_tab),
+          maybe_clear_filters_action(socket, clear_url)
+        ]
+        |> Enum.reject(&is_nil/1)
+        |> Enum.take(3)
+    end
+  end
+
+  defp starter_search_actions do
+    [
+      %{label: "New issue", url: ~p"/issues/new", tone: :primary, icon: "hero-plus-mini"},
+      %{label: "Board", url: ~p"/kanban", tone: :neutral, icon: "hero-view-columns-mini"},
+      %{label: "Operations", url: ~p"/operations", tone: :neutral, icon: "hero-command-line-mini"}
+    ]
+  end
+
+  defp maybe_clear_filters_action(socket, clear_url) do
+    if filters_active?(socket.assigns.filters) do
+      %{label: "Clear filters", url: clear_url, tone: :neutral, icon: "hero-x-mark-mini"}
+    end
+  end
+
+  defp dominant_result_action(result_mix, active_tab) do
+    result_mix
+    |> Enum.reject(&(&1.count == 0))
+    |> Enum.max_by(& &1.count, fn -> nil end)
+    |> case do
+      nil ->
+        nil
+
+      %{key: ^active_tab} ->
+        nil
+
+      %{label: label, url: url} ->
+        %{
+          label: "Focus #{String.downcase(label)}",
+          url: url,
+          tone: :neutral,
+          icon: "hero-funnel-mini"
+        }
+    end
+  end
+
+  defp compact_join(values, separator) do
+    values
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(separator)
+  end
+
+  defp format_search_value(nil), do: nil
+  defp format_search_value(""), do: nil
+
+  defp format_search_value(value) do
+    value
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
+
+  defp search_command_action_class(:primary) do
+    "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
+  end
+
+  defp search_command_action_class(_tone) do
+    "inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+  end
+
+  defp search_mix_card_class(count) when count > 0 do
+    "flex min-h-24 min-w-0 flex-col justify-between rounded-lg border border-primary/25 bg-primary/10 px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/15"
+  end
+
+  defp search_mix_card_class(_count) do
+    "flex min-h-24 min-w-0 flex-col justify-between rounded-lg border border-border bg-surface-1 px-4 py-3 text-left transition-colors hover:bg-surface-2"
+  end
+
+  defp search_mix_count_class(count) when count > 0,
+    do: "mt-4 font-mono text-2xl font-590 text-primary"
+
+  defp search_mix_count_class(_count),
+    do: "mt-4 font-mono text-2xl font-590 text-text-quaternary"
 
   defp tab_count(_results, :all), do: nil
 
@@ -228,6 +469,36 @@ defmodule CymphoWeb.SearchLive.Index do
   defp active_result_label(:goals, 1), do: "goal match"
   defp active_result_label(:goals, _count), do: "goal matches"
 
+  defp result_empty_state("", _total_count, _filters, actions) do
+    %{
+      icon: "hero-magnifying-glass-mini",
+      title: "Search is ready",
+      detail: "Jump to current work, open the board, or create the next issue from here.",
+      actions: actions
+    }
+  end
+
+  defp result_empty_state(query, 0, filters, actions) do
+    if filters_active?(filters) do
+      %{
+        icon: "hero-funnel-mini",
+        title: "No matches inside these filters",
+        detail: "The query exists, but the active filters exclude every matching item.",
+        actions: actions
+      }
+    else
+      %{
+        icon: "hero-magnifying-glass-mini",
+        title: ~s(No company work matches "#{query}"),
+        detail:
+          "Create a new issue if this is new work, or open the board to inspect active queues.",
+        actions: actions
+      }
+    end
+  end
+
+  defp result_empty_state(_query, _total_count, _filters, _actions), do: nil
+
   defp parse_tab(tab) when tab in ~w(all issues agents projects goals),
     do: String.to_existing_atom(tab)
 
@@ -245,6 +516,12 @@ defmodule CymphoWeb.SearchLive.Index do
 
   defp filter_count(filters) do
     Enum.count(filters, fn {_key, value} -> value not in ["", nil] end)
+  end
+
+  defp advanced_filters_active?(filters), do: advanced_filter_count(filters) > 0
+
+  defp advanced_filter_count(filters) do
+    Enum.count(@advanced_filter_keys, fn key -> Map.get(filters, key) not in ["", nil] end)
   end
 
   defp recent_searches_for_user(nil), do: []

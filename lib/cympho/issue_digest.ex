@@ -8,6 +8,7 @@ defmodule Cympho.IssueDigest do
   """
 
   alias Cympho.AgentPromptContract
+  alias Cympho.Comments.Comment
   alias Cympho.Issues.Issue
 
   @active_run_statuses ~w(pending queued running)
@@ -40,6 +41,7 @@ defmodule Cympho.IssueDigest do
     child_issues = List.wrap(child_issues)
     agents = List.wrap(agents)
     comments = comments_for_issue(issue)
+    receipt_audit = last_action_receipt_audit(comments)
     metrics = metrics(issue, comments, runs, work_products, child_issues)
     state = state(issue, metrics)
     next_action = next_action(issue, state, metrics)
@@ -55,16 +57,29 @@ defmodule Cympho.IssueDigest do
       activity_summary: activity_summary(issue, state, metrics, next_action),
       thread_rollup: thread_rollup(comments, metrics),
       coverage: coverage(metrics),
-      quality: quality(issue, metrics),
+      receipt_audit: receipt_audit,
+      quality: quality(issue, metrics, receipt_audit),
       completion_contract:
         completion_contract(issue, state, metrics, comments, work_products, agents),
-      review_readiness: review_readiness(issue, state, metrics, comments),
+      review_readiness: review_readiness(issue, state, metrics, comments, receipt_audit),
       role_run_summaries: role_run_summaries(issue, state, metrics, contributions),
       contributions: contributions,
       metrics: metrics,
       evidence: evidence_cards(metrics)
     }
   end
+
+  @doc """
+  Audits the latest meaningful agent comment for the receipt fields the owner UI
+  expects before another agent or reviewer acts.
+  """
+  def audit_last_action_receipt(comments) when is_list(comments) do
+    last_action_receipt_audit(comments)
+  end
+
+  def audit_last_action_receipt(%Comment{} = comment), do: audit_receipt_comment(comment)
+  def audit_last_action_receipt(comment) when is_map(comment), do: audit_receipt_comment(comment)
+  def audit_last_action_receipt(_comment), do: last_action_receipt_audit([])
 
   def comment_category_order, do: @comment_category_order
 
@@ -436,13 +451,13 @@ defmodule Cympho.IssueDigest do
   defp next_action(issue, :pre_runtime, metrics) do
     cond do
       dispatch_focus_queued?(issue) and ceo_first_turn_required?(issue, metrics) ->
-        "Focused dispatch is queued. Copy the focused command or start runtime; first output must be `[owner_update]` or `[handoff]`."
+        "Focused dispatch is queued. Copy the focused command or start runtime; first output must be `[owner_update]`, `[handoff]`, or `[blocked]`."
 
       dispatch_focus_queued?(issue) ->
         "Focused dispatch is queued. Copy the focused command or start runtime before asking for delivery evidence."
 
       ceo_first_turn_required?(issue, metrics) ->
-        "Open the Operations launch checklist or use the focused CEO command from the digest or sidebar; first output must be `[owner_update]` or `[handoff]`."
+        "Open the Operations launch checklist or use the focused CEO command from the digest or sidebar; first output must be `[owner_update]`, `[handoff]`, or `[blocked]`."
 
       true ->
         "Open the Operations launch checklist or start focused dispatch before asking for delivery evidence."
@@ -622,6 +637,136 @@ defmodule Cympho.IssueDigest do
           timestamp: comment_time(comment)
         }
     end
+  end
+
+  defp last_action_receipt_audit(comments) do
+    comments
+    |> Enum.filter(&(&1.author_type == "agent"))
+    |> Enum.filter(&meaningful_comment?/1)
+    |> newest_by(&comment_time/1)
+    |> case do
+      nil ->
+        %{
+          status: :neutral,
+          status_label: "No receipt yet",
+          category: nil,
+          category_label: "agent note",
+          summary: "No meaningful agent note is ready for receipt audit.",
+          present_fields: [],
+          missing_fields: [],
+          prompt: last_action_receipt_prompt()
+        }
+
+      comment ->
+        audit_receipt_comment(comment)
+    end
+  end
+
+  defp audit_receipt_comment(comment) do
+    body = comment_body(comment)
+    category = comment_category(comment)
+    present = Enum.filter(receipt_fields(), &receipt_field_present?(body, &1))
+    missing = receipt_fields() -- present
+    status = if missing == [], do: :ok, else: :attention
+
+    %{
+      status: status,
+      status_label: receipt_status_label(status),
+      category: category,
+      category_label: comment_category_label(category),
+      summary: receipt_summary(status, category, missing),
+      present_fields: Enum.map(present, & &1.label),
+      missing_fields: Enum.map(missing, & &1.label),
+      latest_comment: %{
+        body: compact(body, 220),
+        timestamp: comment_time(comment),
+        category: category,
+        label: comment_category_label(category)
+      },
+      prompt: last_action_receipt_prompt()
+    }
+  end
+
+  defp receipt_fields do
+    [
+      %{
+        label: "Action taken",
+        needles: ["action taken", "what happened", "verdict", "decision", "cause"]
+      },
+      %{
+        label: "Evidence/artifact",
+        needles: [
+          "evidence",
+          "artifact",
+          "work product",
+          "pr",
+          "pull request",
+          "files changed",
+          "child issue",
+          "inspected"
+        ]
+      },
+      %{
+        label: "Verification",
+        needles: ["verification", "verified", "tests", "checked", "reviewed", "inspected"]
+      },
+      %{
+        label: "Remaining risk",
+        needles: ["risk", "risks", "gaps", "blocker", "blocked", "none known", "no known risk"]
+      },
+      %{
+        label: "Next decision",
+        needles: [
+          "next decision",
+          "owner decision needed",
+          "next step",
+          "next owner",
+          "follow-up",
+          "review order"
+        ]
+      },
+      %{
+        label: "Restart packet",
+        needles: [
+          "restart packet",
+          "restartable",
+          "resume",
+          "resume scope",
+          "current state",
+          "next owner",
+          "owner decision needed",
+          "review order",
+          "handoff context"
+        ]
+      }
+    ]
+  end
+
+  defp receipt_field_present?(body, %{needles: needles}) do
+    body = String.downcase(body)
+    Enum.any?(needles, &receipt_needle_present?(body, &1))
+  end
+
+  defp receipt_needle_present?(body, "pr") do
+    Regex.match?(~r/(^|[^a-z0-9])pr([^a-z0-9]|$)/, body)
+  end
+
+  defp receipt_needle_present?(body, needle), do: String.contains?(body, needle)
+
+  defp receipt_status_label(:ok), do: "Receipt complete"
+  defp receipt_status_label(:attention), do: "Receipt incomplete"
+  defp receipt_status_label(_status), do: "No receipt yet"
+
+  defp receipt_summary(:ok, category, _missing) do
+    "Latest #{String.downcase(comment_category_label(category))} includes a complete last-action receipt and restart packet."
+  end
+
+  defp receipt_summary(:attention, category, missing) do
+    "Latest #{String.downcase(comment_category_label(category))} is missing #{Enum.map_join(missing, ", ", & &1.label)}."
+  end
+
+  defp last_action_receipt_prompt do
+    "Final tagged comments should name Action taken, Evidence/artifact, Verification, Remaining risk, Next decision, and Restart packet."
   end
 
   defp current_state_summary(issue, state, metrics) do
@@ -844,7 +989,7 @@ defmodule Cympho.IssueDigest do
 
   defp delivery_run_next_action(_issue, _metrics, :review),
     do:
-      "Ask the delivery owner for `[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ...`."
+      "Ask the delivery owner for `[delivery] What happened: ... Files changed: ... Evidence produced: ... Verification: ... Risks: ... Current state: ... Next decision: ... Restart packet: ...`."
 
   defp delivery_run_next_action(issue, metrics, _status) do
     if ceo_first_turn_required?(issue, metrics) do
@@ -885,9 +1030,9 @@ defmodule Cympho.IssueDigest do
 
   defp owner_run_next_action(issue, _state, metrics, :missing) do
     if ceo_first_turn_required?(issue, metrics) do
-      "Start the CEO turn; it must leave `[owner_update]` or `[handoff]`, and split work into scoped child issues when execution is needed."
+      "Start the CEO turn; it must leave `[owner_update]`, `[handoff]`, or `[blocked]`, and split execution into scoped child issues when work can proceed."
     else
-      "Add `[owner_update] What happened: ... Business status: shipped/not shipped. Current state: ... Next decision: ... Owner decision needed: ...`."
+      "Add `[owner_update] What happened: ... Business status: shipped/not shipped/ready for owner signoff. Evidence inspected: ... Verification: ... Remaining risk: ... Current state: ... Next decision: ... Owner decision needed: ... Restart packet: ...`."
     end
   end
 
@@ -953,7 +1098,7 @@ defmodule Cympho.IssueDigest do
     if metrics.open_child_issues > 0 do
       "Review the open child issues first."
     else
-      "Add `[review] Verdict: accepted/request changes/blocked. What happened: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ...`."
+      "Add `[review] Verdict: accepted/request changes/blocked. What happened: ... Evidence inspected: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ... Restart packet: ...`."
     end
   end
 
@@ -1485,8 +1630,8 @@ defmodule Cympho.IssueDigest do
     ]
   end
 
-  defp quality(issue, metrics) do
-    items = quality_items(issue, metrics)
+  defp quality(issue, metrics, receipt_audit) do
+    items = quality_items(issue, metrics, receipt_audit)
     gaps = Enum.filter(items, &(&1.status in [:missing, :attention]))
 
     %{
@@ -1498,8 +1643,8 @@ defmodule Cympho.IssueDigest do
     }
   end
 
-  defp review_readiness(issue, state, metrics, comments) do
-    gates = review_readiness_gates(issue, state, metrics, comments)
+  defp review_readiness(issue, state, metrics, comments, receipt_audit) do
+    gates = review_readiness_gates(issue, state, metrics, comments, receipt_audit)
     blockers = Enum.filter(gates, &(&1.status in [:missing, :attention]))
 
     status =
@@ -1519,8 +1664,8 @@ defmodule Cympho.IssueDigest do
     }
   end
 
-  defp review_readiness_gates(issue, state, metrics, comments) do
-    (quality_items(issue, metrics) ++
+  defp review_readiness_gates(issue, state, metrics, comments, receipt_audit) do
+    (quality_items(issue, metrics, receipt_audit) ++
        role_completion_gates(issue, state, metrics, comments) ++
        [review_decision_gate(issue, state, metrics)])
     |> merge_review_gates()
@@ -1541,12 +1686,13 @@ defmodule Cympho.IssueDigest do
   defp gate_rank(%{key: :runtime_verification}), do: 1
   defp gate_rank(%{key: :agent_note}), do: 2
   defp gate_rank(%{key: :owner_summary}), do: 3
-  defp gate_rank(%{key: :work_product}), do: 4
-  defp gate_rank(%{key: :delivery_comment}), do: 5
-  defp gate_rank(%{key: :code_reference}), do: 6
-  defp gate_rank(%{key: :child_work}), do: 7
-  defp gate_rank(%{key: :review_decision}), do: 8
-  defp gate_rank(%{key: :ceo_owner_update}), do: 9
+  defp gate_rank(%{key: :last_action_receipt}), do: 4
+  defp gate_rank(%{key: :work_product}), do: 5
+  defp gate_rank(%{key: :delivery_comment}), do: 6
+  defp gate_rank(%{key: :code_reference}), do: 7
+  defp gate_rank(%{key: :child_work}), do: 8
+  defp gate_rank(%{key: :review_decision}), do: 9
+  defp gate_rank(%{key: :ceo_owner_update}), do: 10
   defp gate_rank(%{key: key}), do: {99, to_string(key)}
 
   defp gate_severity(:attention), do: 3
@@ -1704,7 +1850,7 @@ defmodule Cympho.IssueDigest do
           "Review note is tagged, but missing required fields: #{missing_field_list(contract_evidence)}."
 
         evidence ->
-          "A decision note exists; CTO review still needs the required verdict, verification, gaps, follow-ups, and next decision."
+          "A decision note exists; CTO review still needs the required verdict, verification, gaps, follow-ups, next decision, and restart packet."
 
         ready_for_review? ->
           "Reviewer must inspect evidence and leave a tagged review or decision."
@@ -1978,7 +2124,7 @@ defmodule Cympho.IssueDigest do
           label: "Delivery comment",
           status: :missing,
           prompt:
-            "Before review, the delivery owner must add `[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ...`."
+            "Before review, the delivery owner must add `[delivery] What happened: ... Files changed: ... Evidence produced: ... Verification: ... Risks: ... Current state: ... Next decision: ... Restart packet: ...`."
         }
     end
   end
@@ -2075,7 +2221,7 @@ defmodule Cympho.IssueDigest do
     end
   end
 
-  defp quality_items(issue, metrics) do
+  defp quality_items(issue, metrics, receipt_audit) do
     [
       %{
         key: :owner_request,
@@ -2111,6 +2257,7 @@ defmodule Cympho.IssueDigest do
               "Add a tagged `comment` such as `[delivery]`, `[review]`, `[blocked]`, `[handoff]`, `[decision]`, or `[owner_update]` so the owner can scan the issue without opening logs."
           )
       },
+      last_action_receipt_quality_item(receipt_audit),
       %{
         key: :work_product,
         label: "Work product",
@@ -2125,6 +2272,35 @@ defmodule Cympho.IssueDigest do
       child_quality_item(metrics),
       code_reference_quality_item(issue, metrics)
     ]
+  end
+
+  defp last_action_receipt_quality_item(%{status: :ok} = audit) do
+    %{
+      key: :last_action_receipt,
+      label: "Last action receipt",
+      status: :ok,
+      prompt:
+        "Latest #{String.downcase(audit.category_label)} includes action, evidence, verification, risk, next decision, and restart packet."
+    }
+  end
+
+  defp last_action_receipt_quality_item(%{status: :attention} = audit) do
+    %{
+      key: :last_action_receipt,
+      label: "Last action receipt",
+      status: :attention,
+      prompt:
+        "Latest #{String.downcase(audit.category_label)} is missing receipt fields: #{Enum.join(audit.missing_fields, ", ")}."
+    }
+  end
+
+  defp last_action_receipt_quality_item(_audit) do
+    %{
+      key: :last_action_receipt,
+      label: "Last action receipt",
+      status: :neutral,
+      prompt: "Checked once the latest meaningful agent note is tagged and owner-readable."
+    }
   end
 
   defp runtime_quality_item(%{failed_runs: failed_runs}) when failed_runs > 0 do
@@ -2338,8 +2514,27 @@ defmodule Cympho.IssueDigest do
   defp newest_by(list, fun) do
     list
     |> Enum.reject(&(fun.(&1) == nil))
-    |> Enum.max_by(fun, DateTime, fn -> nil end)
+    |> Enum.with_index()
+    |> Enum.max_by(
+      fn {item, index} -> {fun.(item), recency_tie_breaker(item, index)} end,
+      &newer_or_same_recency_key?/2,
+      fn -> nil end
+    )
+    |> case do
+      nil -> nil
+      {item, _index} -> item
+    end
   end
+
+  defp newer_or_same_recency_key?({time_a, tie_a}, {time_b, tie_b}) do
+    case DateTime.compare(time_a, time_b) do
+      :gt -> true
+      :eq -> tie_a >= tie_b
+      :lt -> false
+    end
+  end
+
+  defp recency_tie_breaker(_item, index), do: index
 
   defp run_time(run), do: run.completed_at || run.started_at || run.inserted_at
 

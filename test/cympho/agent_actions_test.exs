@@ -1,7 +1,7 @@
 defmodule Cympho.AgentActionsTest do
   use Cympho.DataCase, async: false
 
-  alias Cympho.{AgentActions, Agents, Comments, Companies, Issues, Repo, WorkProducts}
+  alias Cympho.{AgentActions, Agents, Comments, Companies, Issues, Repo, Secrets, WorkProducts}
   alias Cympho.HeartbeatEngine.Run
 
   describe "parse/1" do
@@ -19,6 +19,33 @@ defmodule Cympho.AgentActionsTest do
 
     test "rejects missing action block" do
       assert {:error, :missing_action_block} = AgentActions.parse("Done")
+    end
+
+    test "recovers from common cympho-actions fence typo" do
+      body = """
+      Delivered.
+
+      ```cympo-actions
+      {"actions":[{"type":"comment","body":"Recovered"}]}
+      ```
+      """
+
+      assert {:ok, [%{"type" => "comment", "body" => "Recovered"}]} =
+               AgentActions.parse(body)
+    end
+
+    test "recovers when an action marker precedes a json fence" do
+      body = """
+      summary: completed
+
+      cympo-actions
+      ```json
+      {"actions":[{"type":"comment","body":"Recovered from json fence"}]}
+      ```
+      """
+
+      assert {:ok, [%{"type" => "comment", "body" => "Recovered from json fence"}]} =
+               AgentActions.parse(body)
     end
 
     test "rejects unsupported actions" do
@@ -48,6 +75,27 @@ defmodule Cympho.AgentActionsTest do
                   "payload" => %{"text" => "long plan text"}
                 }
               ]} = AgentActions.parse(body)
+    end
+
+    test "rejects malformed structured create_issue brief fields" do
+      body = """
+      ```cympho-actions
+      {"actions":[{"type":"create_issue","title":"Build thing","role":"engineer","acceptance_criteria":{"too":"nested"}}]}
+      ```
+      """
+
+      assert {:error, {:invalid_string_or_list, "acceptance_criteria"}} =
+               AgentActions.parse(body)
+    end
+
+    test "rejects short delegate target ids" do
+      body = """
+      ```cympho-actions
+      {"actions":[{"type":"delegate","to_agent_id":"68db524a","reason":"Use the named engineer."}]}
+      ```
+      """
+
+      assert {:error, {:invalid_uuid, "to_agent_id"}} = AgentActions.parse(body)
     end
   end
 
@@ -84,6 +132,7 @@ defmodule Cympho.AgentActionsTest do
     test "create_issue inherits company context and audit fields", %{
       issue: issue,
       cto: cto,
+      engineer: engineer,
       company: company,
       project: project,
       goal: goal
@@ -94,11 +143,22 @@ defmodule Cympho.AgentActionsTest do
           "title" => "Build action executor",
           "description" => "Implement executor tests.",
           "role" => "engineer",
+          "acceptance_criteria" => [
+            "Executor runs validated agent actions in order.",
+            "Failures leave a visible rejection comment."
+          ],
+          "evidence_required" => "Code diff and focused AgentActions tests.",
+          "verification_required" => "mix test test/cympho/agent_actions_test.exs",
+          "definition_of_done" => "PR linked, tests pass, and delivery note names risks.",
+          "risks" => ["Do not bypass company scoping."],
           "priority" => "high"
         }
       ]
 
-      assert {:ok, %{results: [%{type: "create_issue", issue_id: created_id}]}} =
+      assert {:ok,
+              %{
+                results: [%{type: "create_issue", issue_id: created_id, assignee_id: assignee_id}]
+              }} =
                AgentActions.execute(issue, cto, actions)
 
       created = Issues.get_issue!(created_id)
@@ -111,8 +171,74 @@ defmodule Cympho.AgentActionsTest do
       assert created.origin_id == issue.id
       assert created.request_depth == issue.request_depth + 1
       assert created.assigned_role == "engineer"
+      assert created.assignee_id == engineer.id
+      assert assignee_id == engineer.id
       assert created.priority == :high
       assert created.status == :todo
+
+      assert created.description =~ "Implement executor tests."
+      assert created.description =~ "## Execution brief"
+      assert created.description =~ "Parent issue: #{issue.identifier}"
+      assert created.description =~ "Target role: engineer"
+      assert created.description =~ "- Executor runs validated agent actions in order."
+      assert created.description =~ "- Failures leave a visible rejection comment."
+      assert created.description =~ "- Code diff and focused AgentActions tests."
+      assert created.description =~ "- mix test test/cympho/agent_actions_test.exs"
+      assert created.description =~ "- PR linked, tests pass, and delivery note names risks."
+      assert created.description =~ "- Do not bypass company scoping."
+    end
+
+    test "create_issue rejects thin delivery briefs before spawning wasted runtime", %{
+      issue: issue,
+      cto: cto
+    } do
+      actions = [
+        %{
+          "type" => "create_issue",
+          "title" => "Build vague thing",
+          "description" => "Please do the implementation.",
+          "role" => "engineer"
+        }
+      ]
+
+      assert {:error,
+              {:delivery_brief_too_thin, :engineer, next_prompt, missing_signals, repair_scaffold}} =
+               AgentActions.execute(issue, cto, actions)
+
+      assert next_prompt =~ "Acceptance criteria"
+      assert "Acceptance criteria" in missing_signals
+      assert repair_scaffold =~ "Acceptance criteria:"
+      assert repair_scaffold =~ "Definition of done:"
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "create_issue rejected") and
+                 String.contains?(comment.body, "delivery brief is too thin") and
+                 String.contains?(comment.body, "Repair scaffold")
+             end)
+
+      refute Enum.any?(Issues.list_child_issues(issue.id), &(&1.title == "Build vague thing"))
+    end
+
+    test "create_issue allows non-delivery planning briefs without repo execution fields", %{
+      issue: issue,
+      cto: cto
+    } do
+      actions = [
+        %{
+          "type" => "create_issue",
+          "title" => "Review architecture strategy",
+          "description" => "Decide the approach before implementation.",
+          "role" => "cto"
+        }
+      ]
+
+      assert {:ok, %{results: [%{type: "create_issue", issue_id: created_id}]}} =
+               AgentActions.execute(issue, cto, actions)
+
+      assert Issues.get_issue!(created_id).assigned_role == "cto"
     end
 
     test "create_issue is rejected when request_depth would exceed the cap", %{
@@ -227,12 +353,10 @@ defmodule Cympho.AgentActionsTest do
       end
 
       actions = [
-        %{
-          "type" => "create_issue",
+        delivery_issue_action(%{
           "title" => "Local child still allowed",
-          "description" => "Company scoped child count should ignore malformed foreign rows.",
-          "role" => "engineer"
-        }
+          "description" => "Company scoped child count should ignore malformed foreign rows."
+        })
       ]
 
       assert {:ok, %{results: [%{type: "create_issue", issue_id: created_id}]}} =
@@ -340,7 +464,7 @@ defmodule Cympho.AgentActionsTest do
           "type" => "submit_review",
           "role" => "cto",
           "notes" =>
-            "[delivery] What happened: implementation is ready for CTO review. Files changed: implementation notes. Verification: completed run passed. Risks: none known. Current state: ready for review. Next decision: CTO review."
+            "[delivery] What happened: implementation is ready for CTO review. Files changed: implementation notes. Evidence produced: delivery notes work product and completed run. Verification: completed run passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the delivery notes and completed run before deciding."
         }
       ]
 
@@ -392,7 +516,7 @@ defmodule Cympho.AgentActionsTest do
           "type" => "submit_review",
           "role" => "cto",
           "notes" =>
-            "[delivery] What happened: evidence is ready for CTO review. Files changed: fallback routing evidence. Verification: completed run passed. Risks: none known. Current state: ready for review. Next decision: CTO review."
+            "[delivery] What happened: evidence is ready for CTO review. Files changed: fallback routing evidence. Evidence produced: fallback routing evidence work product and completed run. Verification: completed run passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the fallback routing evidence and completed run before deciding."
         }
       ]
 
@@ -432,7 +556,7 @@ defmodule Cympho.AgentActionsTest do
           "role" => "cto",
           "head_sha" => "sha-round-one",
           "notes" =>
-            "[delivery] What happened: round one ready. Files changed: lib/foo.ex. Verification: tests pass. Risks: none. Current state: ready. Next decision: CTO review."
+            "[delivery] What happened: round one ready. Files changed: lib/foo.ex. Evidence produced: round one work product and sha-round-one. Verification: tests pass. Risks: none. Current state: ready. Next decision: CTO review. Restart packet: CTO should inspect lib/foo.ex, sha-round-one, and test notes before deciding."
         }
       ]
 
@@ -448,7 +572,7 @@ defmodule Cympho.AgentActionsTest do
                  %{
                    "type" => "request_changes",
                    "role" => "engineer",
-                   "reason" => "Coverage drop in lib/foo.ex; add tests for the retry branch."
+                   "reason" => request_changes_reason()
                  }
                ])
 
@@ -471,7 +595,7 @@ defmodule Cympho.AgentActionsTest do
           "role" => "cto",
           "head_sha" => "sha-round-two",
           "notes" =>
-            "[delivery] What happened: round two addresses the gap. Files changed: lib/foo.ex. Verification: tests pass including new coverage. Risks: none. Current state: ready. Next decision: CTO re-review."
+            "[delivery] What happened: round two addresses the gap. Action taken: resubmitted CTO review after adding coverage. Files changed: lib/foo.ex. Evidence produced: round two work product and sha-round-two. Evidence/artifact: round two work product and sha-round-two. Verification: tests pass including new coverage. Remaining risk: none. Current state: ready. Next decision: CTO re-review. Restart packet: CTO should inspect lib/foo.ex, sha-round-two, and new coverage before deciding."
         }
       ]
 
@@ -497,7 +621,7 @@ defmodule Cympho.AgentActionsTest do
       {:ok, _comment} =
         Comments.create_comment(%{
           body:
-            "[delivery] What happened: delivered the owner-approved work. Files changed: delivery artifact. Verification: completed run passed. Risks: none known. Current state: ready for approval. Next decision: CEO owner update.",
+            "[delivery] What happened: delivered the owner-approved work. Files changed: delivery artifact. Evidence produced: delivery artifact work product and completed run. Verification: completed run passed. Risks: none known. Current state: ready for approval. Next decision: CEO owner update. Restart packet: CEO should inspect the delivery artifact and completed run before closing.",
           author_type: "agent",
           author_id: ceo.id,
           issue_id: issue.id
@@ -511,7 +635,7 @@ defmodule Cympho.AgentActionsTest do
                  %{
                    "type" => "approve_issue",
                    "notes" =>
-                     "[owner_update] What happened: approved. Business status: shipped. Current state: closed. Next decision: none. Owner decision needed: none."
+                     "[owner_update] What happened: approved. Business status: shipped. Evidence inspected: delivery artifact and completed run. Verification: review gates are clear. Remaining risk: none known. Current state: closed. Next decision: none. Owner decision needed: none. Restart packet: issue is closed; no next runtime turn is needed unless reopened."
                  }
                ])
 
@@ -532,7 +656,7 @@ defmodule Cympho.AgentActionsTest do
       {:ok, _comment} =
         Comments.create_comment(%{
           body:
-            "[delivery] What happened: delivered the owner-approved work. Files changed: delivery artifact. Verification: completed run passed. Risks: none known. Current state: ready for approval. Next decision: CEO owner update.",
+            "[delivery] What happened: delivered the owner-approved work. Files changed: delivery artifact. Evidence produced: delivery artifact work product and completed run. Verification: completed run passed. Risks: none known. Current state: ready for approval. Next decision: CEO owner update. Restart packet: CEO should inspect the delivery artifact and completed run before closing.",
           author_type: "agent",
           author_id: ceo.id,
           issue_id: issue.id
@@ -542,7 +666,7 @@ defmodule Cympho.AgentActionsTest do
         %{
           "type" => "approve_issue",
           "notes" =>
-            "[owner_update] What happened: approved this issue. Business status: shipped. Current state: closed. Next decision: none. Owner decision needed: none."
+            "[owner_update] What happened: approved this issue. Business status: shipped. Evidence inspected: delivery artifact and completed run. Verification: review gates are clear. Remaining risk: none known. Current state: closed. Next decision: none. Owner decision needed: none. Restart packet: issue is closed; no next runtime turn is needed unless reopened."
         }
       ]
 
@@ -562,6 +686,42 @@ defmodule Cympho.AgentActionsTest do
                    String.starts_with?(&1.body, "[owner_update]") and
                    String.contains?(&1.body, "approved this issue"))
              )
+    end
+
+    test "approve_issue rejects thin approval notes even when evidence gates pass", %{
+      issue: issue,
+      ceo: ceo
+    } do
+      insert_completed_run(ceo, issue)
+      insert_work_product(issue, ceo)
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body:
+            "[delivery] What happened: delivered the requested owner work. Files changed: delivery artifact. Evidence produced: delivery artifact work product and completed run. Verification: completed run passed. Risks: none known. Current state: ready for approval. Next decision: CEO owner update. Restart packet: CEO should inspect the delivery artifact and completed run before closing.",
+          author_type: "agent",
+          author_id: ceo.id,
+          issue_id: issue.id
+        })
+
+      assert {:error, {:approval_note_too_thin, :ceo, missing, scaffold}} =
+               AgentActions.execute(issue, ceo, [%{"type" => "approve_issue"}])
+
+      assert "Business status" in missing
+      assert "Owner decision needed" in missing
+      assert scaffold =~ "Required shape: [owner_update] What happened:"
+
+      reloaded = Issues.get_issue!(issue.id)
+      refute reloaded.status == :done
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "approve_issue rejected") and
+                 String.contains?(comment.body, "approval note is too thin") and
+                 String.contains?(comment.body, "Repair scaffold")
+             end)
     end
 
     test "approve_issue is rejected for code work without a reviewable reference", %{
@@ -618,7 +778,7 @@ defmodule Cympho.AgentActionsTest do
     end
 
     test "request_changes reopens issue for target role", %{issue: issue, cto: cto} do
-      reason = "Needs tests covering the null-guard in lib/foo.ex"
+      reason = request_changes_reason()
 
       actions = [%{"type" => "request_changes", "role" => "engineer", "reason" => reason}]
 
@@ -637,8 +797,35 @@ defmodule Cympho.AgentActionsTest do
              )
     end
 
+    test "request_changes to repo delivery role rejects thin feedback", %{issue: issue, cto: cto} do
+      reason = "Needs tests covering the null-guard in lib/foo.ex"
+
+      actions = [%{"type" => "request_changes", "role" => "engineer", "reason" => reason}]
+
+      assert {:error, {:request_changes_feedback_too_thin, :engineer, missing, scaffold}} =
+               AgentActions.execute(issue, cto, actions)
+
+      assert "Evidence inspected" in missing
+      assert "Next action" in missing
+      assert scaffold =~ "Required changes:"
+      assert scaffold =~ "Current feedback: #{reason}"
+
+      unchanged = Issues.get_issue!(issue.id)
+      refute unchanged.status == :todo and unchanged.assignee_id == nil
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "request_changes rejected") and
+                 String.contains?(comment.body, "review feedback is too thin") and
+                 String.contains?(comment.body, "Repair scaffold")
+             end)
+    end
+
     test "block_issue blocks and comments with reason", %{issue: issue, ceo: ceo} do
-      actions = [%{"type" => "block_issue", "reason" => "Missing API key"}]
+      reason = block_issue_reason()
+      actions = [%{"type" => "block_issue", "reason" => reason}]
 
       assert {:ok, _} = AgentActions.execute(issue, ceo, actions)
 
@@ -650,8 +837,32 @@ defmodule Cympho.AgentActionsTest do
 
       assert Enum.any?(
                comments,
-               &(&1.author_type == "agent" and &1.body == "[blocked] Missing API key")
+               &(&1.author_type == "agent" and &1.body == "[blocked] #{reason}")
              )
+    end
+
+    test "block_issue rejects thin blocker reason", %{issue: issue, ceo: ceo} do
+      actions = [%{"type" => "block_issue", "reason" => "Missing API key"}]
+
+      assert {:error, {:block_issue_reason_too_thin, missing, scaffold}} =
+               AgentActions.execute(issue, ceo, actions)
+
+      assert "Current state" in missing
+      assert "Next decision" in missing
+      assert scaffold =~ "Current blocker: Missing API key"
+      assert scaffold =~ "Restart packet:"
+
+      unchanged = Issues.get_issue!(issue.id)
+      refute unchanged.status == :blocked
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "block_issue rejected") and
+                 String.contains?(comment.body, "blocker reason is too thin") and
+                 String.contains?(comment.body, "Repair scaffold")
+             end)
     end
 
     test "request_changes is rejected when reason is empty", %{issue: issue, cto: cto} do
@@ -676,7 +887,7 @@ defmodule Cympho.AgentActionsTest do
       cto: cto,
       company: company
     } do
-      reason = "Coverage drop in lib/cympho/payments.ex — add tests for the retry path."
+      reason = request_changes_reason()
 
       assert {:ok, _} =
                AgentActions.execute(issue, cto, [
@@ -710,7 +921,7 @@ defmodule Cympho.AgentActionsTest do
       actions = [
         %{
           "type" => "block_issue",
-          "reason" => "Waiting on owner answer.",
+          "reason" => block_issue_reason(),
           "blocker_kind" => "made_up_kind"
         }
       ]
@@ -727,7 +938,7 @@ defmodule Cympho.AgentActionsTest do
       actions = [
         %{
           "type" => "block_issue",
-          "reason" => "Stripe sandbox is down — see status.stripe.com.",
+          "reason" => block_issue_reason(),
           "blocker_kind" => "external_dep"
         }
       ]
@@ -774,6 +985,46 @@ defmodule Cympho.AgentActionsTest do
       assert work_product.payload["files"] == ["README.md"]
     end
 
+    test "text-only chat adapter can attach documents but not code-change claims", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      {:ok, engineer} = Agents.update_agent(engineer, %{adapter: :openai_chat})
+
+      assert {:ok, %{results: [%{type: "attach_work_product", work_product_id: id}]}} =
+               AgentActions.execute(issue, engineer, [
+                 %{
+                   "type" => "attach_work_product",
+                   "kind" => "document",
+                   "title" => "Implementation plan",
+                   "description" => "Text-only planning output."
+                 }
+               ])
+
+      assert [%{id: ^id, kind: "document"}] = WorkProducts.list_work_products(issue.id)
+
+      assert {:error, {:runtime_capability_blocked, "attach_work_product", "OpenAI Chat"}} =
+               AgentActions.execute(issue, engineer, [
+                 %{
+                   "type" => "attach_work_product",
+                   "kind" => "code_change",
+                   "title" => "Implementation patch",
+                   "description" => "Claims files were changed."
+                 }
+               ])
+
+      assert [%{id: ^id}] = WorkProducts.list_work_products(issue.id)
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "attach_work_product rejected") and
+                 String.contains?(comment.body, "text/action adapter") and
+                 String.contains?(comment.body, "repo-capable runtime")
+             end)
+    end
+
     test "attach_work_product executes normalized name and content aliases", %{
       issue: issue,
       engineer: engineer
@@ -815,10 +1066,208 @@ defmodule Cympho.AgentActionsTest do
       assert Enum.any?(comments, &(&1.author_type == "agent" and String.contains?(&1.body, url)))
     end
 
-    test "handoff releases issue to a target role", %{issue: issue, ceo: ceo} do
+    test "text-only chat adapter cannot stamp a PR URL", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      {:ok, engineer} = Agents.update_agent(engineer, %{adapter: :openai_chat})
+      url = "https://github.com/example/repo/pull/42"
+
+      assert {:error, {:runtime_capability_blocked, "set_pr_url", "OpenAI Chat"}} =
+               AgentActions.execute(issue, engineer, [%{"type" => "set_pr_url", "url" => url}])
+
+      updated = Issues.get_issue!(issue.id)
+      refute updated.github_pr_url == url
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "set_pr_url rejected") and
+                 String.contains?(comment.body, "cannot create or verify repo artifacts")
+             end)
+    end
+
+    test "no-op custom process cannot stamp a PR URL", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      {:ok, engineer} =
+        Agents.update_agent(engineer, %{
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"}
+        })
+
+      url = "https://github.com/example/repo/pull/42"
+
+      assert {:error, {:runtime_capability_blocked, "set_pr_url", "Process"}} =
+               AgentActions.execute(issue, engineer, [%{"type" => "set_pr_url", "url" => url}])
+
+      updated = Issues.get_issue!(issue.id)
+      refute updated.github_pr_url == url
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "set_pr_url rejected") and
+                 String.contains?(comment.body, "non-coding runtime") and
+                 String.contains?(comment.body, "repo-capable runtime")
+             end)
+    end
+
+    test "Agrenting output mode cannot stamp a PR URL", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      {:ok, engineer} =
+        Agents.update_agent(engineer, %{
+          adapter: :agrenting,
+          config: %{
+            "agent_did" => "did:example:output-engineer",
+            "capability" => "implementation",
+            "max_price" => "1.00"
+          }
+        })
+
+      url = "https://github.com/example/repo/pull/42"
+
+      assert {:error, {:runtime_capability_blocked, "set_pr_url", "Agrenting"}} =
+               AgentActions.execute(issue, engineer, [%{"type" => "set_pr_url", "url" => url}])
+
+      updated = Issues.get_issue!(issue.id)
+      refute updated.github_pr_url == url
+    end
+
+    test "Agrenting push mode with repo-token secret can stamp a PR URL", %{
+      issue: issue,
+      engineer: engineer,
+      company: company
+    } do
+      {:ok, engineer} =
+        Agents.update_agent(engineer, %{
+          adapter: :agrenting,
+          config: %{
+            "agent_did" => "did:example:push-engineer",
+            "capability" => "implementation",
+            "delivery_mode" => "push",
+            "max_price" => "1.00"
+          }
+        })
+
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "AGRENTING_REPO_ACCESS_TOKEN",
+          value: "repo-token",
+          description: "Agrenting repo access token"
+        })
+
+      url = "https://github.com/example/repo/pull/42"
+
+      assert {:ok, _} =
+               AgentActions.execute(issue, engineer, [%{"type" => "set_pr_url", "url" => url}])
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.github_pr_url == url
+    end
+
+    test "handoff releases issue to a target role and names an eligible owner", %{
+      issue: issue,
+      ceo: ceo,
+      cto: cto
+    } do
       actions = [%{"type" => "handoff", "role" => "cto", "reason" => "Needs technical plan"}]
 
-      assert {:ok, %{results: [%{type: "handoff", role: "cto"}]}} =
+      assert {:ok, %{results: [%{type: "handoff", role: "cto", assignee_id: cto_id}]}} =
+               AgentActions.execute(issue, ceo, actions)
+
+      assert cto_id == cto.id
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.status == :todo
+      assert updated.assignee_id == cto.id
+      assert updated.assigned_role == "cto"
+    end
+
+    test "handoff rejects thin repo-delivery briefs before releasing the issue", %{
+      issue: issue,
+      ceo: ceo
+    } do
+      {:ok, issue} = Issues.update_issue(issue, %{description: "Build the thing."})
+
+      actions = [%{"type" => "handoff", "role" => "engineer", "reason" => "Please take it."}]
+
+      assert {:error,
+              {:handoff_delivery_brief_too_thin, :engineer, next_prompt, missing, scaffold}} =
+               AgentActions.execute(issue, ceo, actions)
+
+      assert next_prompt =~ "Acceptance criteria"
+      assert "Acceptance criteria" in missing
+      assert scaffold =~ "Delivery goal:"
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.status == :in_progress
+      assert updated.assignee_id == ceo.id
+      assert updated.assigned_role == "ceo"
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "handoff rejected") and
+                 String.contains?(comment.body, "directive is too thin") and
+                 String.contains?(comment.body, "Repair scaffold")
+             end)
+    end
+
+    test "handoff allows ready repo-delivery briefs and names an eligible owner", %{
+      issue: issue,
+      ceo: ceo,
+      engineer: engineer
+    } do
+      actions = [
+        %{
+          "type" => "handoff",
+          "role" => "engineer",
+          "reason" =>
+            "Acceptance criteria: implement the scoped repository change without expanding the issue. Evidence required: code diff or work product plus delivery note. Verification required: focused module test or named blocker. Definition of done: ready for CTO review with evidence and risk named."
+        }
+      ]
+
+      assert {:ok, %{results: [%{type: "handoff", role: "engineer", assignee_id: engineer_id}]}} =
+               AgentActions.execute(issue, ceo, actions)
+
+      assert engineer_id == engineer.id
+
+      updated = Issues.get_issue!(issue.id)
+      assert updated.status == :todo
+      assert updated.assignee_id == engineer.id
+      assert updated.assigned_role == "engineer"
+    end
+
+    test "handoff keeps role routing when no eligible owner is available", %{
+      issue: issue,
+      ceo: ceo,
+      cto: cto
+    } do
+      {:ok, cto} = Agents.update_agent(cto, %{max_concurrent_jobs: 1})
+
+      {:ok, _active} =
+        Issues.create_issue(%{
+          title: "Saturate CTO review lane",
+          description: "Consumes CTO capacity for the handoff fallback test.",
+          status: :in_progress,
+          priority: :medium,
+          company_id: cto.company_id,
+          assignee_id: cto.id,
+          assigned_role: "cto"
+        })
+
+      actions = [%{"type" => "handoff", "role" => "cto", "reason" => "Needs technical plan"}]
+
+      assert {:ok, %{results: [%{type: "handoff", role: "cto", assignee_id: nil}]}} =
                AgentActions.execute(issue, ceo, actions)
 
       updated = Issues.get_issue!(issue.id)
@@ -862,12 +1311,10 @@ defmodule Cympho.AgentActionsTest do
       cto: cto
     } do
       actions = [
-        %{
-          "type" => "create_issue",
+        delivery_issue_action(%{
           "title" => "Dedup target issue",
-          "role" => "engineer",
           "priority" => "medium"
-        }
+        })
       ]
 
       assert {:ok, %{results: [%{type: "create_issue", issue_id: first_id}]}} =
@@ -876,6 +1323,8 @@ defmodule Cympho.AgentActionsTest do
       assert {:ok, %{results: [%{type: "create_issue", issue_id: ^first_id, duplicate: true}]}} =
                AgentActions.execute(issue, cto, actions)
 
+      assert Issues.get_issue!(first_id).parent_id == issue.id
+
       comments = Comments.list_comments(first_id)
 
       assert Enum.any?(comments, fn c ->
@@ -883,13 +1332,72 @@ defmodule Cympho.AgentActionsTest do
              end)
     end
 
+    test "same-title decomposition under a different parent creates that parent's own child",
+         %{
+           company: company,
+           project: project,
+           goal: goal,
+           issue: issue,
+           cto: cto
+         } do
+      actions = [
+        delivery_issue_action(%{
+          "title" => "Existing delegated task",
+          "priority" => "medium"
+        })
+      ]
+
+      assert {:ok, %{results: [%{type: "create_issue", issue_id: existing_id}]}} =
+               AgentActions.execute(issue, cto, actions)
+
+      {:ok, parent} =
+        Issues.create_issue(%{
+          title: "Request existing delegated task again",
+          description: "A separate CTO parent that should reuse the existing delegated work.",
+          status: :todo,
+          priority: :medium,
+          company_id: company.id,
+          project_id: project.id,
+          goal_id: goal.id,
+          assigned_role: "cto"
+        })
+
+      {:ok, parent} = Issues.checkout_issue(parent, cto, :cto)
+
+      assert {:ok,
+              %{
+                issue: %{status: :blocked, assignee_id: nil},
+                results: [
+                  %{
+                    type: "create_issue",
+                    issue_id: new_child_id,
+                    identifier: new_child_ref
+                  }
+                ]
+              }} = AgentActions.execute(parent, cto, actions)
+
+      assert new_child_id != existing_id
+
+      new_child = Issues.get_issue!(new_child_id)
+      assert new_child.parent_id == parent.id
+      assert new_child.title == "Existing delegated task"
+
+      comments = Comments.list_comments(parent.id)
+
+      assert Enum.any?(comments, fn comment ->
+               comment.author_type == "agent" and
+                 String.contains?(comment.body, "Waiting for delegated work") and
+                 String.contains?(comment.body, new_child_ref)
+             end)
+    end
+
     test "create_issue allows different titles", %{issue: issue, cto: cto} do
       actions_a = [
-        %{"type" => "create_issue", "title" => "Task A", "role" => "engineer"}
+        delivery_issue_action(%{"title" => "Task A"})
       ]
 
       actions_b = [
-        %{"type" => "create_issue", "title" => "Task B", "role" => "engineer"}
+        delivery_issue_action(%{"title" => "Task B"})
       ]
 
       assert {:ok, %{results: [%{issue_id: id_a}]}} = AgentActions.execute(issue, cto, actions_a)
@@ -913,7 +1421,7 @@ defmodule Cympho.AgentActionsTest do
       # CTO creates a sub-issue under the CEO's parent issue. The child stays
       # in :todo (unfinished). The CEO then tries to approve the parent.
       child_action = [
-        %{"type" => "create_issue", "title" => "Open child task", "role" => "engineer"}
+        delivery_issue_action(%{"title" => "Open child task"})
       ]
 
       assert {:ok, %{results: [%{issue_id: child_id}]}} =
@@ -966,7 +1474,7 @@ defmodule Cympho.AgentActionsTest do
       {:ok, _comment} =
         Comments.create_comment(%{
           body:
-            "[delivery] What happened: scoped evidence is complete. Files changed: approval evidence. Verification: passed. Risks: none known. Current state: ready for close. Next decision: CEO owner update.",
+            "[delivery] What happened: scoped evidence is complete. Files changed: approval evidence. Evidence produced: approval evidence work product and completed run. Verification: passed. Risks: none known. Current state: ready for close. Next decision: CEO owner update. Restart packet: CEO should inspect the approval evidence and completed run before closing.",
           author_type: "agent",
           author_id: ceo.id,
           issue_id: issue.id
@@ -977,7 +1485,7 @@ defmodule Cympho.AgentActionsTest do
                  %{
                    "type" => "approve_issue",
                    "notes" =>
-                     "[owner_update] What happened: scoped evidence is complete. Business status: ready. Current state: closed. Next decision: none. Owner decision needed: none."
+                     "[owner_update] What happened: scoped evidence is complete. Business status: ready. Evidence inspected: approval evidence and completed run. Verification: review gates are clear. Remaining risk: none known. Current state: closed. Next decision: none. Owner decision needed: none. Restart packet: issue is closed; no next runtime turn is needed unless reopened."
                  }
                ])
 
@@ -995,7 +1503,7 @@ defmodule Cympho.AgentActionsTest do
       {:ok, _comment} =
         Comments.create_comment(%{
           body:
-            "[delivery] What happened: all delegated child work is complete. Files changed: delegated child artifacts. Verification: child issue is closed. Risks: none known. Current state: ready for approval. Next decision: CEO owner update.",
+            "[delivery] What happened: all delegated child work is complete. Files changed: delegated child artifacts. Evidence produced: delegated child artifacts and closed child issue. Verification: child issue is closed. Risks: none known. Current state: ready for approval. Next decision: CEO owner update. Restart packet: CEO should inspect delegated child artifacts and closed child issue before closing.",
           author_type: "agent",
           author_id: ceo.id,
           issue_id: issue.id
@@ -1003,7 +1511,7 @@ defmodule Cympho.AgentActionsTest do
 
       assert {:ok, %{results: [%{issue_id: child_id}]}} =
                AgentActions.execute(issue, cto, [
-                 %{"type" => "create_issue", "title" => "Closable child", "role" => "engineer"}
+                 delivery_issue_action(%{"title" => "Closable child"})
                ])
 
       {:ok, _} = Issues.update_issue(Issues.get_issue!(child_id), %{status: :done})
@@ -1015,7 +1523,7 @@ defmodule Cympho.AgentActionsTest do
                  %{
                    "type" => "approve_issue",
                    "notes" =>
-                     "[owner_update] What happened: all delegated child work is complete. Business status: shipped. Current state: closed. Next decision: none. Owner decision needed: none."
+                     "[owner_update] What happened: all delegated child work is complete. Business status: shipped. Evidence inspected: delegated child artifacts and closed child issue. Verification: review gates are clear. Remaining risk: none known. Current state: closed. Next decision: none. Owner decision needed: none. Restart packet: issue is closed; no next runtime turn is needed unless reopened."
                  }
                ])
 
@@ -1067,5 +1575,45 @@ defmodule Cympho.AgentActionsTest do
       title: "Review evidence",
       description: "Evidence for review gates."
     })
+  end
+
+  defp delivery_issue_action(attrs) do
+    Map.merge(
+      %{
+        "type" => "create_issue",
+        "role" => "engineer",
+        "acceptance_criteria" => "Requested behavior is implemented within the scoped issue.",
+        "evidence_required" => "Code diff or work product and a final delivery note.",
+        "verification_required" => "Run the smallest meaningful focused test or manual check.",
+        "definition_of_done" => "Ready for CTO review with evidence and remaining risk named."
+      },
+      attrs
+    )
+  end
+
+  defp request_changes_reason do
+    """
+    Evidence inspected: PR diff and test output for lib/foo.ex.
+    Action taken: requested changes back to the engineer with a focused null-guard test gap.
+    Required changes:
+    - Add tests covering the null-guard in lib/foo.ex.
+    Verification required: run mix test test/foo_test.exs.
+    Remaining risk: the null-guard can regress until the focused test is added.
+    Next decision: engineer fixes the listed gap, attaches evidence, and resubmits for review.
+    Restart packet: reopen the issue for engineer delivery, inspect lib/foo.ex and test/foo_test.exs, then resubmit with evidence.
+    """
+    |> String.trim()
+  end
+
+  defp block_issue_reason do
+    """
+    Cause: missing API key blocks runtime verification.
+    Attempted fix: checked company secrets and runtime preflight.
+    Needs: owner or operator adds the missing API key.
+    Current state: work is paused until credentials are available.
+    Next decision: resume once the secret is configured.
+    Restart packet: rerun runtime preflight, then continue the current issue.
+    """
+    |> String.trim()
   end
 end

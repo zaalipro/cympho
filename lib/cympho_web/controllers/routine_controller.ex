@@ -8,7 +8,7 @@ defmodule CymphoWeb.RoutineController do
 
   def index(conn, _params) do
     company_id = conn.assigns.current_company.id
-    routines = Routines.list_routines() |> Enum.filter(&belongs_to_company?(&1, company_id))
+    routines = Routines.list_routines(company_id: company_id)
     json(conn, %{data: Enum.map(routines, &serialize/1)})
   end
 
@@ -119,19 +119,12 @@ defmodule CymphoWeb.RoutineController do
     end
   end
 
-  defp belongs_to_company?(routine, company_id) do
-    routine = Cympho.Repo.preload(routine, [:agent, :project])
-
-    (routine.agent && routine.agent.company_id == company_id) ||
-      (routine.project && routine.project.company_id == company_id)
-  end
-
   defp scoped_routine_params(conn, params) do
     company_id = conn.assigns.current_company.id
 
     with :ok <- validate_agent_ref(company_id, params["agent_id"]),
          :ok <- validate_project_ref(company_id, params["project_id"]) do
-      {:ok, params}
+      {:ok, Map.put(params, "company_id", company_id)}
     end
   end
 
@@ -173,6 +166,7 @@ defmodule CymphoWeb.RoutineController do
       name: routine.name,
       description: routine.description,
       status: routine.status,
+      company_id: routine.company_id,
       agent_id: routine.agent_id,
       project_id: routine.project_id,
       inserted_at: routine.inserted_at,

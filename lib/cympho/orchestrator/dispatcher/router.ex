@@ -34,6 +34,7 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   # engineer. "deploy" was previously in @implementation_keywords; it now
   # routes to release_engineer.
   @release_keywords ~w[merge rebase release deploy ship version tag changelog hotfix conflict]
+  @repo_delivery_roles Agent.pr_delivery_roles()
 
   @doc """
   Infers the appropriate role for an issue based on keywords in title and description.
@@ -87,7 +88,10 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
 
   @doc """
   Selects the least-loaded eligible agent for the given role.
-  Tie-breaks by round-robin using agent name.
+  Repo-writing roles require repo-capable runtimes before considering load; if
+  none exist, the dispatcher can fall back to CTO/CEO instead of spending a run
+  on a text-only or no-op delivery agent.
+  Tie-breaks by agent name.
 
   Returns {:ok, agent} or {:error, :no_agent_available}.
   """
@@ -96,12 +100,14 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   def select_agent(role, eligible_agents) do
     eligible_agents
     |> Enum.filter(fn agent -> agent.role == role and agent.status != :error end)
+    |> filter_repo_delivery_capable(role)
     |> Enum.sort_by(fn agent ->
       # Weighted load: prefer the agent with the smallest sum of
       # `estimated_minutes` across in-flight issues; fall back to raw
       # count and name for stable ordering. Issues without an estimate
       # contribute the configured default (60 min) so they aren't free.
-      {agent_estimated_load(agent), agent_count_load(agent), agent.name}
+      {repo_capability_rank(role, agent), agent_estimated_load(agent), agent_count_load(agent),
+       agent.name}
     end)
     |> List.first()
     |> case do
@@ -147,6 +153,22 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
 
   defp agent_count_load(agent) do
     Cympho.Agents.count_active_assignments(agent.id)
+  end
+
+  defp filter_repo_delivery_capable(agents, role) when role in @repo_delivery_roles do
+    Enum.filter(agents, &repo_delivery_capable?/1)
+  end
+
+  defp filter_repo_delivery_capable(agents, _role), do: agents
+
+  defp repo_capability_rank(role, %Agent{} = agent) when role in @repo_delivery_roles do
+    if repo_delivery_capable?(agent), do: 0, else: 1
+  end
+
+  defp repo_capability_rank(_role, _agent), do: 0
+
+  defp repo_delivery_capable?(%Agent{} = agent) do
+    Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(agent, load_secret_keys?: true)
   end
 
   @default_estimate_minutes 60

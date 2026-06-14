@@ -1,4 +1,4 @@
-<.page size="form">
+<.page size="wide">
   <.header title={@goal.title} subtitle="Goal settings.">
     <:actions>
       <.app_link
@@ -10,37 +10,179 @@
     </:actions>
   </.header>
 
-  <.panel>
-    <.simple_form for={@form} phx-submit="save" class="space-y-5 p-5">
-      <.input field={@form[:title]} label="Title" required />
-      <.input field={@form[:description]} label="Description" type="textarea" rows={4} />
-      <div class="grid gap-5 sm:grid-cols-2">
-        <.select
-          name="goal[status]"
-          label="Status"
-          options={[Active: "active", Completed: "completed", Cancelled: "cancelled"]}
-          value={@goal.status}
-        />
-        <.select
-          name="goal[priority]"
-          label="Priority"
-          options={[Critical: "critical", High: "high", Medium: "medium", Low: "low"]}
-          value={@goal.priority}
-        />
-        <.input field={@form[:target_date]} type="date" label="Target date" />
+  <.form
+    for={@form}
+    phx-submit="save"
+    class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
+  >
+    <.panel class="overflow-hidden">
+      <div class="border-b border-border px-5 py-4">
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Goal alignment plan
+        </p>
+        <h2 class="mt-1 text-lg font-590 text-text-primary">Maintain the strategic target</h2>
+        <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
+          Keep the outcome, hierarchy, and project context accurate so linked work stays aimed at
+          the right result.
+        </p>
       </div>
 
-      <:actions>
-        <div class="flex items-center justify-end gap-2 border-t border-hairline pt-5">
-          <.app_link
-            navigate={~p"/goals/#{@goal.id}"}
-            class="rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-          >
-            Cancel
-          </.app_link>
-          <.button type="submit" variant="primary">Save changes</.button>
+      <div class="space-y-6 p-5">
+        <section class="space-y-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Outcome brief
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              Keep this focused on the owner-visible result agents should optimize for.
+            </p>
+          </div>
+
+          <.input field={@form[:title]} label="Title" required />
+          <.input field={@form[:description]} label="Success criteria" type="textarea" rows={5} />
+        </section>
+
+        <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Strategy hierarchy
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              Move this goal carefully. Linked work will continue to point here after save.
+            </p>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-3">
+            <.input
+              type="select"
+              field={@form[:goal_type]}
+              label="Goal type"
+              value={@form[:goal_type].value || @goal.goal_type}
+              options={@goal_type_options}
+            />
+            <.input
+              type="select"
+              field={@form[:parent_id]}
+              label="Parent goal"
+              value={@form[:parent_id].value || ""}
+              options={@parent_goal_options}
+            />
+            <.input
+              type="select"
+              field={@form[:project_id]}
+              label="Project context"
+              value={@form[:project_id].value || ""}
+              options={@project_options}
+            />
+          </div>
+        </section>
+
+        <section class="space-y-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Operating posture
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              Keep priority and target timing aligned with current company focus.
+            </p>
+          </div>
+
+          <div class="grid gap-4 sm:grid-cols-3">
+            <.input
+              type="select"
+              field={@form[:status]}
+              label="Status"
+              value={@form[:status].value || @goal.status}
+              options={[
+                {"Active", "active"},
+                {"Completed", "completed"},
+                {"Cancelled", "cancelled"}
+              ]}
+            />
+            <.input
+              type="select"
+              field={@form[:priority]}
+              label="Priority"
+              value={@form[:priority].value || @goal.priority}
+              options={[
+                {"Critical", "critical"},
+                {"High", "high"},
+                {"Medium", "medium"},
+                {"Low", "low"}
+              ]}
+            />
+            <.input field={@form[:target_date]} type="date" label="Target date" />
+          </div>
+        </section>
+      </div>
+    </.panel>
+
+    <aside class="space-y-4">
+      <section
+        data-testid="goal-setup-checklist"
+        class="rounded-xl border border-border bg-panel p-4 shadow-card"
+      >
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Maintenance checklist
+        </p>
+        <div class="mt-4 space-y-3">
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
+              1
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Outcome still describes success</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Update stale success criteria before linking more work.
+              </p>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
+              2
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Hierarchy is intentional</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Parent changes should match how the owner reviews progress.
+              </p>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
+              3
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Linked issues remain valid</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Review linked work after changing project context.
+              </p>
+            </div>
+          </div>
         </div>
-      </:actions>
-    </.simple_form>
-  </.panel>
+      </section>
+
+      <section class="rounded-xl border border-brand/25 bg-brand/10 p-4">
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
+          Edit behavior
+        </p>
+        <p class="mt-2 text-sm font-590 text-text-primary">Future linking uses these defaults</p>
+        <p class="mt-1 text-xs leading-5 text-text-tertiary">
+          Child goals with no project inherit the parent project when saved from this form.
+        </p>
+      </section>
+    </aside>
+
+    <div class="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end lg:col-span-2">
+      <.app_link
+        navigate={~p"/goals/#{@goal.id}"}
+        class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+      >
+        Cancel
+      </.app_link>
+      <.button type="submit" variant="primary" class="min-h-[40px] w-full sm:w-auto">
+        Save changes
+      </.button>
+    </div>
+  </.form>
 </.page>

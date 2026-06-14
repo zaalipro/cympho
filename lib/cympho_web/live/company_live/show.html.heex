@@ -170,7 +170,7 @@
                   phx-click="delete_membership"
                   phx-value-id={membership.id}
                   class="text-red-400 hover:text-red-300 text-sm"
-                  data-confirm="Are you sure you want to remove this member?"
+                  data-confirm={"Remove #{membership.user.email} from #{@company.name}? They will lose access to this company."}
                 >
                   Remove
                 </button>
@@ -208,7 +208,7 @@
         </button>
         <button
           phx-click="pause_company"
-          data-confirm="Pause?"
+          data-confirm={"Pause #{@company.name}? This stops agent dispatch and new runtime launches until the company is resumed."}
           class="px-4 py-2 text-sm font-510 bg-yellow-600 text-white rounded-lg"
         >
           Pause
@@ -230,7 +230,7 @@
         </button>
         <button
           phx-click="resume_company"
-          data-confirm="Resume?"
+          data-confirm={"Resume #{@company.name}? This re-enables agent dispatch for this company."}
           class="px-4 py-2 text-sm font-510 bg-green-600 text-white rounded-lg"
         >
           Resume

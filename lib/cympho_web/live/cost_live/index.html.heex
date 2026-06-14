@@ -69,6 +69,109 @@
       <% end %>
     </div>
   </div>
+
+  <section
+    id="cost-command"
+    data-testid="cost-command"
+    class="mb-6 overflow-hidden rounded-lg border border-border bg-panel"
+  >
+    <div class="border-b border-border bg-gradient-to-b from-surface-2/50 to-transparent px-5 py-4">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+              Cost command
+            </p>
+            <span class={[
+              "rounded-full border px-2 py-0.5 text-[11px] font-510",
+              cost_command_badge_class(@cost_command.tone)
+            ]}>
+              {@cost_command.badge}
+            </span>
+          </div>
+          <h2 class="mt-2 text-lg font-590 tracking-tight text-text-primary">
+            {@cost_command.title}
+          </h2>
+          <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
+            {@cost_command.summary}
+          </p>
+          <p :if={@cost_command.driver} class="mt-2 text-xs font-510 text-text-secondary">
+            {@cost_command.driver}
+          </p>
+        </div>
+        <a
+          href={@cost_command.action_path}
+          class={[
+            "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
+            cost_command_action_class(@cost_command.tone)
+          ]}
+        >
+          <span class="hero-arrow-right-mini h-4 w-4"></span>
+          {@cost_command.action_label}
+        </a>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
+      <div :for={metric <- @cost_command.metrics} class="bg-surface px-4 py-3">
+        <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          {metric.label}
+        </p>
+        <p class="mt-1 break-words font-mono text-sm font-590 text-text-primary">
+          {metric.value}
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section
+    id="spend-runway"
+    data-testid="spend-runway"
+    class="mb-6 overflow-hidden rounded-lg border border-border bg-panel"
+  >
+    <div class="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Spend runway
+          </p>
+          <span class={[
+            "rounded-full border px-2 py-0.5 text-[11px] font-510",
+            spend_runway_badge_class(@spend_runway.tone)
+          ]}>
+            {@spend_runway.label}
+          </span>
+        </div>
+        <h2 class="mt-2 text-lg font-590 tracking-tight text-text-primary">
+          {@spend_runway.headline}
+        </h2>
+        <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
+          {@spend_runway.summary}
+        </p>
+      </div>
+      <a
+        href={@spend_runway.action_path}
+        class={[
+          "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
+          spend_runway_action_class(@spend_runway.tone)
+        ]}
+      >
+        <span class="hero-arrow-right-mini h-4 w-4"></span>
+        {@spend_runway.action_label}
+      </a>
+    </div>
+
+    <div class="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
+      <div :for={metric <- @spend_runway.metrics} class="bg-surface px-4 py-3">
+        <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          {metric.label}
+        </p>
+        <p class="mt-1 break-words font-mono text-sm font-590 text-text-primary">
+          {metric.value}
+        </p>
+      </div>
+    </div>
+  </section>
   
 <!-- Summary Cards -->
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -137,10 +240,7 @@
       <div class="text-2xl font-510 text-text-primary">{format_cost(@summary.budget_spent)}</div>
       <div class="text-xs text-text-quaternary mt-1">
         <%= if Decimal.gt?(@summary.budget_limit, 0) do %>
-          {Decimal.to_string(
-            Decimal.mult(Decimal.div(@summary.budget_spent, @summary.budget_limit), 100),
-            :normal
-          )}%
+          {budget_spent_percentage(@summary)}
         <% else %>
           N/A
         <% end %>
@@ -153,8 +253,8 @@
     <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
       Daily Cost Trend
     </h2>
-    <div class="h-40 flex items-end gap-1">
-      {max_cost = max_daily_cost(@daily_costs)}
+    <div :if={not Enum.empty?(@daily_costs)} class="h-40 flex items-end gap-1">
+      <% max_cost = max_daily_cost(@daily_costs) %>
       <%= for day <- @daily_costs do %>
         <div class="flex-1 group relative">
           <div
@@ -166,8 +266,17 @@
         </div>
       <% end %>
     </div>
-    <div :if={Enum.empty?(@daily_costs)} class="text-center py-12">
-      <div class="text-text-tertiary text-sm">No cost data for the selected period</div>
+    <div :if={Enum.empty?(@daily_costs)} class="pt-2">
+      <.cost_empty_state
+        testid="daily-cost-empty"
+        icon="hero-chart-bar-square-mini"
+        title="No spend captured in this window"
+        detail="Create a spend guardrail before launching more runtime, or open Operations when you expected agent runs to produce usage."
+        primary_label="Create budget"
+        primary_path={~p"/budgets/new"}
+        secondary_label="Open Operations"
+        secondary_path={~p"/operations#runtime-launch-checklist"}
+      />
     </div>
   </div>
   
@@ -193,8 +302,13 @@
           <span>Today</span>
         </div>
       </div>
-      <div :if={Enum.empty?(@sparkline_7d)} class="text-center py-8">
-        <div class="text-text-tertiary text-sm">No data for sparkline</div>
+      <div :if={Enum.empty?(@sparkline_7d)} class="pt-1">
+        <.cost_empty_state
+          testid="sparkline-7d-empty"
+          icon="hero-presentation-chart-line-mini"
+          title="No 7-day burn line yet"
+          detail="Runtime usage will draw this line once agents complete billable turns."
+        />
       </div>
     </div>
 
@@ -218,8 +332,13 @@
           <span>Today</span>
         </div>
       </div>
-      <div :if={Enum.empty?(@sparkline_30d)} class="text-center py-8">
-        <div class="text-text-tertiary text-sm">No data for sparkline</div>
+      <div :if={Enum.empty?(@sparkline_30d)} class="pt-1">
+        <.cost_empty_state
+          testid="sparkline-30d-empty"
+          icon="hero-presentation-chart-line-mini"
+          title="No 30-day burn line yet"
+          detail="This trend appears after enough agent usage lands in the cost ledger."
+        />
       </div>
     </div>
   </div>
@@ -255,8 +374,13 @@
           </div>
         <% end %>
       </div>
-      <div :if={Enum.empty?(@by_mission)} class="text-center py-8">
-        <div class="text-text-tertiary text-sm">No mission cost data for the selected period</div>
+      <div :if={Enum.empty?(@by_mission)} class="pt-1">
+        <.cost_empty_state
+          testid="cost-mission-empty"
+          icon="hero-flag-mini"
+          title="No mission cost drivers yet"
+          detail="Costs will attach here when agent work is connected to mission goals."
+        />
       </div>
     </div>
 
@@ -294,13 +418,18 @@
           </div>
         <% end %>
       </div>
-      <div :if={Enum.empty?(@by_goal)} class="text-center py-8">
-        <div class="text-text-tertiary text-sm">No goal cost data for the selected period</div>
+      <div :if={Enum.empty?(@by_goal)} class="pt-1">
+        <.cost_empty_state
+          testid="cost-goal-empty"
+          icon="hero-map-mini"
+          title="No goal cost drivers yet"
+          detail="Goal rollups will appear once runtime spend maps back to mission, initiative, or milestone work."
+        />
       </div>
     </div>
   </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+  <div id="top-cost-drivers" class="grid scroll-mt-6 grid-cols-1 gap-6 mb-6 lg:grid-cols-2">
     <!-- Costs by Agent -->
     <div class="bg-surface border border-border rounded-xl p-6">
       <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider mb-4">
@@ -334,8 +463,13 @@
           </div>
         <% end %>
       </div>
-      <div :if={Enum.empty?(@by_agent)} class="text-center py-8">
-        <div class="text-text-tertiary text-sm">No agent cost data for the selected period</div>
+      <div :if={Enum.empty?(@by_agent)} class="pt-1">
+        <.cost_empty_state
+          testid="cost-agent-empty"
+          icon="hero-sparkles-mini"
+          title="No agent cost drivers yet"
+          detail="Agent totals will appear here after CEO, CTO, or engineer runs report token usage."
+        />
       </div>
     </div>
     
@@ -372,8 +506,13 @@
           </div>
         <% end %>
       </div>
-      <div :if={Enum.empty?(@by_issue)} class="text-center py-8">
-        <div class="text-text-tertiary text-sm">No issue cost data for the selected period</div>
+      <div :if={Enum.empty?(@by_issue)} class="pt-1">
+        <.cost_empty_state
+          testid="cost-issue-empty"
+          icon="hero-queue-list-mini"
+          title="No issue cost drivers yet"
+          detail="Issue totals will appear once autonomous runs write usage against work items."
+        />
       </div>
     </div>
   </div>
@@ -411,8 +550,13 @@
           </div>
         <% end %>
       </div>
-      <div :if={Enum.empty?(@by_model)} class="text-center py-8">
-        <div class="text-text-tertiary text-sm">No model cost data for the selected period</div>
+      <div :if={Enum.empty?(@by_model)} class="pt-1">
+        <.cost_empty_state
+          testid="cost-model-empty"
+          icon="hero-cpu-chip-mini"
+          title="No model mix yet"
+          detail="Model spend will break down here after provider usage is recorded."
+        />
       </div>
     </div>
     
@@ -444,16 +588,19 @@
           </div>
         <% end %>
       </div>
-      <div :if={Enum.empty?(@by_provider)} class="text-center py-8">
-        <div class="text-text-tertiary text-sm">
-          No provider cost data for the selected period
-        </div>
+      <div :if={Enum.empty?(@by_provider)} class="pt-1">
+        <.cost_empty_state
+          testid="cost-provider-empty"
+          icon="hero-cloud-mini"
+          title="No provider mix yet"
+          detail="Provider totals will appear here once adapters report billable model usage."
+        />
       </div>
     </div>
   </div>
   
 <!-- Active Budgets -->
-  <div class="bg-surface border border-border rounded-xl p-6">
+  <div id="active-budgets" class="scroll-mt-6 bg-surface border border-border rounded-xl p-6">
     <div class="flex items-center justify-between mb-4">
       <h2 class="font-serif text-sm font-510 text-text-secondary uppercase tracking-wider">
         Active Budgets
@@ -505,14 +652,15 @@
         </div>
       <% end %>
     </div>
-    <div :if={Enum.empty?(@active_budgets)} class="text-center py-8">
-      <div class="text-text-tertiary text-sm mb-2">No active budgets</div>
-      <.app_link
-        navigate={~p"/budgets/new"}
-        class="text-brand hover:text-accent text-sm"
-      >
-        Create a budget →
-      </.app_link>
+    <div :if={Enum.empty?(@active_budgets)} class="pt-1">
+      <.cost_empty_state
+        testid="active-budgets-empty"
+        icon="hero-shield-check-mini"
+        title="No active budgets"
+        detail="Create a company budget so runtime launches have a clear spend envelope."
+        primary_label="Create budget"
+        primary_path={~p"/budgets/new"}
+      />
     </div>
   </div>
 </div>

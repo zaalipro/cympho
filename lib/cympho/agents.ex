@@ -1005,10 +1005,11 @@ defmodule Cympho.Agents do
   """
   def create_config_revision(%Agent{} = agent, attrs) when is_map(attrs) do
     studio = Map.get(attrs, :studio) || AgentInstructionStudio.analyze(agent)
+    studio_audits_extra = Map.get(attrs, :studio_audits_extra, %{})
 
     attrs =
       attrs
-      |> Map.drop([:studio])
+      |> Map.drop([:studio, :studio_audits_extra])
       |> Map.put_new(:role, atom_to_string(agent.role))
       |> Map.put_new(:adapter, atom_to_string(agent.adapter))
       |> Map.put_new(:instructions, agent.instructions)
@@ -1016,7 +1017,7 @@ defmodule Cympho.Agents do
       |> Map.put_new(:runtime_config, agent.runtime_config || %{})
       |> Map.put_new(:studio_score, studio.score)
       |> Map.put_new(:studio_status, atom_to_string(studio.status))
-      |> Map.put_new(:studio_audits, studio_revision_payload(studio))
+      |> Map.put_new(:studio_audits, studio_revision_payload(studio, studio_audits_extra))
       |> Map.put_new(:source, "manual")
 
     create_config_revision(agent.id, attrs)
@@ -1139,7 +1140,7 @@ defmodule Cympho.Agents do
     |> maybe_put(:created_by_agent_id, Keyword.get(opts, :created_by_agent_id))
   end
 
-  defp studio_revision_payload(studio) do
+  defp studio_revision_payload(studio, extra) do
     %{
       "audits" =>
         Enum.map(studio.audits, fn audit ->
@@ -1162,7 +1163,14 @@ defmodule Cympho.Agents do
           }
         end)
     }
+    |> Map.merge(string_key_map(extra))
   end
+
+  defp string_key_map(map) when is_map(map) do
+    Map.new(map, fn {key, value} -> {to_string(key), value} end)
+  end
+
+  defp string_key_map(_), do: %{}
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, _key, ""), do: map

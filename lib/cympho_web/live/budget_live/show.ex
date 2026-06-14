@@ -37,6 +37,8 @@ defmodule CymphoWeb.BudgetLive.Show do
     |> assign(:page_title, socket.assigns.budget.name)
   end
 
+  defp apply_action(socket, nil, params), do: apply_action(socket, :show, params)
+
   defp apply_action(socket, :edit, _params) do
     socket
     |> assign(:page_title, "Edit Budget")
@@ -53,12 +55,11 @@ defmodule CymphoWeb.BudgetLive.Show do
 
   def utilization_percentage(budget) do
     pct = Budgets.Budget.utilization_percentage(budget)
-    Decimal.to_string(pct, :normal) <> "%"
+    format_percentage(pct)
   end
 
   def available_amount(budget) do
     Budgets.Budget.available_amount(budget)
-    |> format_decimal()
   end
 
   def progress_percentage(budget) do
@@ -116,4 +117,29 @@ defmodule CymphoWeb.BudgetLive.Show do
   def format_datetime(datetime) do
     Calendar.strftime(datetime, "%Y-%m-%d %H:%M")
   end
+
+  defp format_percentage(percentage) do
+    percentage
+    |> decimal_or_zero()
+    |> Decimal.round(1)
+    |> Decimal.to_string(:normal)
+    |> trim_decimal_fraction()
+    |> Kernel.<>("%")
+  end
+
+  defp trim_decimal_fraction(value) do
+    if String.contains?(value, ".") do
+      value
+      |> String.trim_trailing("0")
+      |> String.trim_trailing(".")
+    else
+      value
+    end
+  end
+
+  defp decimal_or_zero(%Decimal{} = value), do: value
+  defp decimal_or_zero(value) when is_integer(value), do: Decimal.new(value)
+  defp decimal_or_zero(value) when is_float(value), do: Decimal.from_float(value)
+  defp decimal_or_zero(value) when is_binary(value), do: Decimal.new(value)
+  defp decimal_or_zero(_), do: Decimal.new("0")
 end

@@ -2,7 +2,8 @@ defmodule Cympho.WakesTest do
   use Cympho.DataCase, async: true
 
   alias Cympho.Wakes
-  alias Cympho.{Agents, Companies, Issues, Comments, Projects}
+  alias Cympho.Wakes.AgentWake
+  alias Cympho.{Agents, Companies, Issues, Comments, Projects, Repo}
 
   setup do
     {:ok, project} =
@@ -97,6 +98,125 @@ defmodule Cympho.WakesTest do
              ]
 
       assert [] = Wakes.list_review_nudges(issue_ids, company_id: nil)
+    end
+  end
+
+  describe "stale comment wake cleanup" do
+    test "only consumes stale pending comment wakes scoped to the company" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Wake Cleanup Co",
+          slug: "wake-cleanup-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Other Wake Cleanup Co",
+          slug: "other-wake-cleanup-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Cleanup Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, other_agent} =
+        Agents.create_agent(%{
+          name: "Other Cleanup Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: other_company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Cleanup wake issue",
+          status: :in_progress,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, recent_issue} =
+        Issues.create_issue(%{
+          title: "Recent wake issue",
+          status: :in_progress,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, manual_issue} =
+        Issues.create_issue(%{
+          title: "Manual wake issue",
+          status: :in_progress,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, review_issue} =
+        Issues.create_issue(%{
+          title: "Review wake issue",
+          status: :in_progress,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, other_issue} =
+        Issues.create_issue(%{
+          title: "Other wake issue",
+          status: :in_progress,
+          company_id: other_company.id,
+          assignee_id: other_agent.id
+        })
+
+      {:ok, stale_comment} =
+        Wakes.do_wake_agent(agent.id, issue.id, "issue_commented", "user", "test", %{})
+
+      {:ok, recent_comment} =
+        Wakes.do_wake_agent(agent.id, recent_issue.id, "issue_commented", "user", "test", %{})
+
+      {:ok, manual_wake} =
+        Wakes.do_wake_agent(agent.id, manual_issue.id, "manual_dispatch", "system", "test", %{})
+
+      {:ok, review_wake} =
+        Wakes.do_wake_agent(agent.id, review_issue.id, "issue_commented", "user", "test", %{
+          "source" => "review_nudge"
+        })
+
+      {:ok, other_wake} =
+        Wakes.do_wake_agent(
+          other_agent.id,
+          other_issue.id,
+          "issue_commented",
+          "user",
+          "test",
+          %{}
+        )
+
+      stale_time =
+        DateTime.utc_now()
+        |> DateTime.add(-3 * 60 * 60, :second)
+        |> DateTime.truncate(:second)
+
+      stale_ids = [stale_comment.id, manual_wake.id, review_wake.id, other_wake.id]
+
+      Repo.update_all(from(w in AgentWake, where: w.id in ^stale_ids),
+        set: [inserted_at: stale_time]
+      )
+
+      assert Wakes.count_stale_comment_wakes(company.id, older_than_minutes: 120) == 1
+      assert [listed] = Wakes.list_stale_comment_wakes(company.id, older_than_minutes: 120)
+      assert listed.id == stale_comment.id
+
+      assert {:ok, 1} = Wakes.consume_stale_comment_wakes(company.id, older_than_minutes: 120)
+
+      assert Repo.get!(AgentWake, stale_comment.id).status == "consumed"
+      assert Repo.get!(AgentWake, recent_comment.id).status == "pending"
+      assert Repo.get!(AgentWake, manual_wake.id).status == "pending"
+      assert Repo.get!(AgentWake, review_wake.id).status == "pending"
+      assert Repo.get!(AgentWake, other_wake.id).status == "pending"
     end
   end
 

@@ -36,6 +36,7 @@ defmodule Cympho.OrchestratorTest do
         name: "Orchestrator Agent",
         role: "engineer",
         company_id: company.id,
+        adapter: :claude_code,
         adapter_type: "claude_code"
       })
 
@@ -225,9 +226,8 @@ defmodule Cympho.OrchestratorTest do
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
         send(pid, {:turn_completed, session_id, result})
-        Process.sleep(200)
 
-        assert [wake] = Wakes.list_review_nudges([issue.id])
+        assert [wake] = wait_for_review_nudges(issue.id)
         assert wake.agent_id == agent_id
         assert wake.metadata["source"] == "review_nudge"
         assert "Work product" in wake.metadata["blocker_labels"]
@@ -238,6 +238,66 @@ defmodule Cympho.OrchestratorTest do
                  comment.author_type == "system" and
                    comment.body =~ "Auto-nudge queued for Orchestrator Agent"
                end)
+      end
+    end
+
+    test "labels parsed action execution failures separately from invalid action blocks", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      session_id = "session-action-exec-failure"
+      run_id = Ecto.UUID.generate()
+
+      result = %{
+        "content" => [
+          %{
+            "type" => "text",
+            "text" => """
+            I am approving this.
+
+            ```cympho-actions
+            {"actions":[{"type":"approve_issue","comment":"Approved."}]}
+            ```
+            """
+          }
+        ]
+      }
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+         ]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+           start_run: fn _ -> :ok end,
+           complete_run: fn _run, _attrs -> {:ok, %{id: run_id}} end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        send(pid, {:turn_completed, session_id, result})
+        Process.sleep(150)
+
+        comments = Comments.list_comments(issue.id)
+
+        assert Enum.any?(comments, fn comment ->
+                 comment.author_type == "system" and
+                   comment.body =~
+                     "Agent cympho-actions block parsed, but action execution failed: :unauthorized_action"
+               end)
+
+        refute Enum.any?(comments, fn comment ->
+                 comment.author_type == "system" and
+                   comment.body =~ "did not include a valid cympho-actions block"
+               end)
+
+        assert Issues.get_issue!(issue.id).status == :blocked
       end
     end
   end
@@ -464,4 +524,19 @@ defmodule Cympho.OrchestratorTest do
       assert log =~ "random_garbage_cast"
     end
   end
+
+  defp wait_for_review_nudges(issue_id, attempts \\ 30)
+
+  defp wait_for_review_nudges(issue_id, attempts) when attempts > 0 do
+    case Wakes.list_review_nudges([issue_id]) do
+      [] ->
+        Process.sleep(50)
+        wait_for_review_nudges(issue_id, attempts - 1)
+
+      nudges ->
+        nudges
+    end
+  end
+
+  defp wait_for_review_nudges(_issue_id, 0), do: []
 end

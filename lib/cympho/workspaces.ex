@@ -165,6 +165,14 @@ defmodule Cympho.Workspaces do
     |> Repo.all()
   end
 
+  def list_runtime_services_for_project_workspace(project_workspace_id) do
+    from(rs in RuntimeService,
+      where: rs.project_workspace_id == ^project_workspace_id,
+      order_by: [asc: rs.service_name]
+    )
+    |> Repo.all()
+  end
+
   def get_runtime_service!(id), do: Repo.get!(RuntimeService, id)
 
   def get_runtime_service(id) do
@@ -252,6 +260,12 @@ defmodule Cympho.Workspaces do
     |> Repo.all()
   end
 
+  def create_operation(attrs \\ %{}) do
+    %WorkspaceOperation{}
+    |> WorkspaceOperation.changeset(attrs)
+    |> Repo.insert()
+  end
+
   # --- Leases ---
 
   def create_lease(attrs \\ %{}) do
@@ -264,6 +278,14 @@ defmodule Cympho.Workspaces do
     lease
     |> EnvironmentLease.revoke_changeset()
     |> Repo.update()
+  end
+
+  def list_leases_for_execution_workspace(execution_workspace_id) do
+    from(el in EnvironmentLease,
+      where: el.execution_workspace_id == ^execution_workspace_id,
+      order_by: [desc: el.inserted_at]
+    )
+    |> Repo.all()
   end
 
   def get_company_environment_lease(company_id, id) do
@@ -481,6 +503,50 @@ defmodule Cympho.Workspaces do
     }
   end
 
+  @doc """
+  Builds owner-facing inventory cards for each project workspace.
+
+  The inventory mirrors the health summary predicates so the index view can show
+  which specific workspace needs repair without duplicating runtime status logic.
+  """
+  def workspace_inventory(company_id \\ nil, opts \\ []) do
+    now = opts |> Keyword.get(:now, DateTime.utc_now()) |> DateTime.truncate(:second)
+
+    stale_execution_after =
+      Keyword.get(opts, :stale_execution_after_seconds, @stale_execution_after_seconds)
+
+    stale_before = DateTime.add(now, -stale_execution_after, :second)
+
+    project_workspaces = Repo.all(project_workspace_health_query(company_id))
+    execution_workspaces = Repo.all(execution_workspace_health_query(company_id))
+    runtime_services = Repo.all(runtime_service_health_query(company_id))
+
+    execution_workspaces_by_project =
+      Enum.group_by(execution_workspaces, & &1.project_workspace_id)
+
+    runtime_services_by_project =
+      Enum.group_by(runtime_services, & &1.project_workspace_id)
+
+    Enum.map(project_workspaces, fn workspace ->
+      execution_workspaces =
+        Map.get(execution_workspaces_by_project, workspace.id, [])
+
+      runtime_services =
+        Map.get(runtime_services_by_project, workspace.id, [])
+
+      metrics = workspace_inventory_metrics(execution_workspaces, runtime_services, stale_before)
+      level = workspace_inventory_level(metrics)
+
+      %{
+        workspace: workspace,
+        level: level,
+        label: workspace_inventory_label(level),
+        summary: workspace_inventory_summary(metrics),
+        metrics: metrics
+      }
+    end)
+  end
+
   defp project_workspace_health_query(nil), do: from(pw in ProjectWorkspace)
 
   defp project_workspace_health_query(company_id) do
@@ -520,8 +586,7 @@ defmodule Cympho.Workspaces do
          stale_before,
          expiring_before
        ) do
-    open_execution_workspaces =
-      Enum.filter(execution_workspaces, &(&1.status in ["open", "running", "active"]))
+    open_execution_workspaces = Enum.filter(execution_workspaces, &open_execution_workspace?/1)
 
     running_services = Enum.filter(runtime_services, &(&1.status == "running"))
     active_leases = Enum.filter(leases, &(&1.status == "active"))
@@ -538,6 +603,25 @@ defmodule Cympho.Workspaces do
       expiring_leases: Enum.count(active_leases, &expiring_lease?(&1, expiring_before)),
       failed_probes: Enum.count(probes, &failed_probe?/1)
     }
+  end
+
+  defp workspace_inventory_metrics(execution_workspaces, runtime_services, stale_before) do
+    open_execution_workspaces = Enum.filter(execution_workspaces, &open_execution_workspace?/1)
+    running_services = Enum.filter(runtime_services, &(&1.status == "running"))
+
+    %{
+      total_execution_workspaces: length(execution_workspaces),
+      open_execution_workspaces: length(open_execution_workspaces),
+      stale_execution_workspaces:
+        Enum.count(open_execution_workspaces, &stale_execution_workspace?(&1, stale_before)),
+      running_services: length(running_services),
+      unhealthy_services: Enum.count(runtime_services, &unhealthy_service?/1),
+      previewless_services: Enum.count(running_services, &previewless_service?/1)
+    }
+  end
+
+  defp open_execution_workspace?(%ExecutionWorkspace{status: status}) do
+    status in ["open", "running", "active"]
   end
 
   defp stale_execution_workspace?(%ExecutionWorkspace{last_used_at: nil, opened_at: nil}, _cutoff) do
@@ -655,5 +739,49 @@ defmodule Cympho.Workspaces do
          active_leases: leases
        }) do
     "#{open} execution workspace(s), #{services} runtime service(s), and #{leases} active lease(s) are ready."
+  end
+
+  defp workspace_inventory_level(%{unhealthy_services: count}) when count > 0, do: :critical
+
+  defp workspace_inventory_level(%{
+         previewless_services: previewless,
+         stale_execution_workspaces: stale
+       })
+       when previewless > 0 or stale > 0,
+       do: :warning
+
+  defp workspace_inventory_level(%{open_execution_workspaces: open, running_services: running})
+       when open > 0 or running > 0,
+       do: :healthy
+
+  defp workspace_inventory_level(_metrics), do: :idle
+
+  defp workspace_inventory_label(:critical), do: "Repair"
+  defp workspace_inventory_label(:warning), do: "Inspect"
+  defp workspace_inventory_label(:healthy), do: "Ready"
+  defp workspace_inventory_label(:idle), do: "Idle"
+
+  defp workspace_inventory_summary(%{unhealthy_services: count}) when count > 0 do
+    "#{count} runtime service(s) need repair before agents rely on this workspace."
+  end
+
+  defp workspace_inventory_summary(%{
+         previewless_services: previewless,
+         stale_execution_workspaces: stale
+       })
+       when previewless > 0 or stale > 0 do
+    "#{previewless} preview gap(s) and #{stale} stale execution workspace(s) need inspection."
+  end
+
+  defp workspace_inventory_summary(%{
+         open_execution_workspaces: open,
+         running_services: running
+       })
+       when open > 0 or running > 0 do
+    "#{open} execution workspace(s) and #{running} running service(s) are available."
+  end
+
+  defp workspace_inventory_summary(_metrics) do
+    "No active execution workspace or runtime service is currently attached."
   end
 end

@@ -20,7 +20,8 @@ defmodule Cympho.AgentPromptContractEval do
     "Attempted fix",
     "Needs",
     "Current state",
-    "Next decision"
+    "Next decision",
+    "Restart packet"
   ]
 
   def roles, do: @roles
@@ -163,7 +164,7 @@ defmodule Cympho.AgentPromptContractEval do
         :role_output,
         :pass,
         "CEO owner update",
-        "[owner_update] What happened: CTO accepted the implementation and the PR is ready. Business status: shipped after merge. Current state: awaiting owner merge decision. Next decision: approve merge. Owner decision needed: approve or request changes."
+        "[owner_update] What happened: CTO accepted the implementation and the PR is ready. Business status: shipped after merge. Evidence inspected: CTO review, PR body, and passing tests. Verification: compared the review packet against the owner request. Remaining risk: deployment still depends on owner merge approval. Current state: awaiting owner merge decision. Next decision: approve merge. Owner decision needed: approve or request changes. Restart packet: owner should inspect the CTO review, PR body, and passing tests before approving merge."
       ),
       example(
         :ceo_owner_update_bad,
@@ -184,7 +185,7 @@ defmodule Cympho.AgentPromptContractEval do
         :role_output,
         :pass,
         "CTO review",
-        "[review] Verdict: accepted. What happened: reviewed implementation, PR body, and tests. Verification: focused tests and PR checklist passed. Gaps: none. Follow-up issues: none. Next decision: CEO can approve or merge."
+        "[review] Verdict: accepted. What happened: reviewed implementation, PR body, and tests. Evidence inspected: PR body, work product, and focused test output. Verification: focused tests and PR checklist passed. Gaps: none. Follow-up issues: none. Next decision: CEO can approve or merge. Restart packet: CEO should inspect the accepted review, PR body, work product, and test output before owner update."
       ),
       example(
         :cto_review_bad,
@@ -205,7 +206,7 @@ defmodule Cympho.AgentPromptContractEval do
         :role_output,
         :pass,
         "#{role_label(role)} delivery",
-        "[delivery] What happened: implemented the requested issue workflow. Files changed: lib/cympho/example.ex and tests. Verification: ran focused tests. Risks: follow-up UI polish may still be needed. Current state: ready for review. Next decision: reviewer accepts or requests changes."
+        "[delivery] What happened: implemented the requested issue workflow. Files changed: lib/cympho/example.ex and tests. Evidence produced: code diff, test coverage, and PR checklist. Verification: ran focused tests. Risks: follow-up UI polish may still be needed. Current state: ready for review. Next decision: reviewer accepts or requests changes. Restart packet: reviewer should inspect the code diff, focused tests, and PR checklist before deciding."
       ),
       example(
         :"#{role}_delivery_bad",
@@ -228,7 +229,7 @@ defmodule Cympho.AgentPromptContractEval do
         :blocked_output,
         :pass,
         "Blocked work",
-        "[blocked] Cause: provider credentials are missing. Attempted fix: checked runtime env and project secrets. Needs: owner adds OPENAI_API_KEY or chooses a configured runtime profile. Current state: work is paused before spending retries. Next decision: owner configures credentials."
+        "[blocked] Cause: provider credentials are missing. Attempted fix: checked runtime env and project secrets. Needs: owner adds OPENAI_API_KEY or chooses a configured runtime profile. Current state: work is paused before spending retries. Next decision: owner configures credentials. Restart packet: resume by checking the runtime profile and secret scope after credentials are added."
       ),
       example(
         :"#{role}_blocked_bad",

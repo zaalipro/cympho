@@ -23,6 +23,7 @@ defmodule Cympho.Orchestrator.RouterWeightedLoadTest do
         name: "alice",
         role: :engineer,
         status: :idle,
+        adapter: :codex,
         company_id: company.id
       })
 
@@ -31,6 +32,7 @@ defmodule Cympho.Orchestrator.RouterWeightedLoadTest do
         name: "bob",
         role: :engineer,
         status: :idle,
+        adapter: :codex,
         company_id: company.id
       })
 

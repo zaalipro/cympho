@@ -49,7 +49,8 @@ defmodule Cympho.Plugins do
       label: plugin_health_label(level),
       summary: plugin_health_summary(metrics),
       metrics: metrics,
-      recommendations: recommendations
+      recommendations: recommendations,
+      next_action: plugin_health_next_action(level, recommendations)
     }
   end
 
@@ -115,47 +116,122 @@ defmodule Cympho.Plugins do
     []
     |> maybe_recommend(
       not metrics.supervisor_running? and metrics.enabled_plugins > 0,
+      :start_supervisor,
       :critical,
       "Start supervisor",
       "Plugin workers cannot be supervised while the plugin supervisor is unavailable."
     )
     |> maybe_recommend(
       metrics.status_error_plugins + metrics.manifest_error_plugins > 0,
+      :repair_manifests,
       :critical,
       "Repair manifests",
       "#{metrics.status_error_plugins + metrics.manifest_error_plugins} plugin(s) have an error status or manifest validation errors."
     )
     |> maybe_recommend(
       metrics.recent_error_logs > 0,
+      :inspect_error_logs,
       :critical,
       "Inspect error logs",
       "#{metrics.recent_error_logs} plugin error log(s) were recorded in the last 24 hours."
     )
     |> maybe_recommend(
       metrics.failing_webhooks > 0,
+      :fix_webhooks,
       :warning,
       "Fix webhooks",
       "#{metrics.failing_webhooks} enabled webhook(s) have delivery failures."
     )
     |> maybe_recommend(
       metrics.capabilityless_enabled_plugins > 0,
+      :scope_capabilities,
       :warning,
       "Scope capabilities",
       "#{metrics.capabilityless_enabled_plugins} enabled plugin(s) declare no capabilities."
     )
     |> maybe_recommend(
       metrics.disabled_plugins > 0,
+      :audit_disabled_plugins,
       :info,
       "Audit disabled plugins",
       "#{metrics.disabled_plugins} plugin(s) are disabled."
     )
   end
 
-  defp maybe_recommend(recommendations, false, _severity, _label, _detail), do: recommendations
+  defp maybe_recommend(recommendations, false, _key, _severity, _label, _detail),
+    do: recommendations
 
-  defp maybe_recommend(recommendations, true, severity, label, detail) do
-    recommendations ++ [%{severity: severity, label: label, detail: detail}]
+  defp maybe_recommend(recommendations, true, key, severity, label, detail) do
+    recommendations ++ [%{key: key, severity: severity, label: label, detail: detail}]
   end
+
+  defp plugin_health_next_action(:empty, _recommendations) do
+    %{
+      key: :install_first_plugin,
+      tone: :neutral,
+      label: "Install first plugin",
+      detail:
+        "Open the marketplace and add one tightly scoped extension before expanding automation.",
+      cta: "Browse marketplace"
+    }
+  end
+
+  defp plugin_health_next_action(:healthy, []) do
+    %{
+      key: :review_marketplace,
+      tone: :ok,
+      label: "Review marketplace",
+      detail:
+        "Installed plugins are supervised, quiet, and capability-scoped. Add only extensions with a clear owner workflow.",
+      cta: "Browse marketplace"
+    }
+  end
+
+  defp plugin_health_next_action(_level, [recommendation | _]) do
+    %{
+      key: recommendation.key,
+      tone: recommendation.severity,
+      label: recommendation.label,
+      detail: next_action_detail(recommendation),
+      cta: next_action_cta(recommendation.key)
+    }
+  end
+
+  defp plugin_health_next_action(_level, _recommendations) do
+    %{
+      key: :review_plugins,
+      tone: :neutral,
+      label: "Review plugins",
+      detail: "Inspect installed extensions before enabling additional runtime automation.",
+      cta: "Open plugins"
+    }
+  end
+
+  defp next_action_detail(%{key: :repair_manifests, detail: detail}) do
+    "#{detail} Fix manifest errors first; they usually prevent reliable worker startup."
+  end
+
+  defp next_action_detail(%{key: :scope_capabilities, detail: detail}) do
+    "#{detail} Keep every enabled plugin limited to the host services it truly needs."
+  end
+
+  defp next_action_detail(%{key: :fix_webhooks, detail: detail}) do
+    "#{detail} Repair delivery before trusting the plugin with critical issue workflows."
+  end
+
+  defp next_action_detail(%{key: :inspect_error_logs, detail: detail}) do
+    "#{detail} Treat fresh plugin errors as runtime blockers until the failing extension is understood."
+  end
+
+  defp next_action_detail(%{detail: detail}), do: detail
+
+  defp next_action_cta(:start_supervisor), do: "Open runtime checklist"
+  defp next_action_cta(:repair_manifests), do: "Review errored plugins"
+  defp next_action_cta(:inspect_error_logs), do: "Inspect plugins"
+  defp next_action_cta(:fix_webhooks), do: "Review webhooks"
+  defp next_action_cta(:scope_capabilities), do: "Open plugin settings"
+  defp next_action_cta(:audit_disabled_plugins), do: "Audit disabled"
+  defp next_action_cta(_key), do: "Open plugins"
 
   defp plugin_health_level(%{total_plugins: 0}), do: :empty
 

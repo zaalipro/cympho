@@ -3,6 +3,8 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
 
   alias Cympho.Orchestrator.Dispatcher.Router
   alias Cympho.Agents
+  alias Cympho.Companies
+  alias Cympho.Secrets
 
   describe "infer_role/1" do
     test "returns :ceo for strategic keywords in title" do
@@ -126,6 +128,7 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
           name: "Engineer A",
           role: :engineer,
           status: :idle,
+          adapter: :codex,
           max_concurrent_jobs: 3
         })
 
@@ -142,6 +145,7 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
           name: "Engineer B",
           role: :engineer,
           status: :idle,
+          adapter: :codex,
           max_concurrent_jobs: 3
         })
 
@@ -190,6 +194,133 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
       agents = [engineer2, engineer1]
       assert {:ok, selected} = Router.select_agent(:engineer, agents)
       assert selected.name == "Engineer A"
+    end
+
+    test "prefers repo-capable adapters over chat-only adapters for repo delivery roles" do
+      {:ok, chat_only} =
+        Agents.create_agent(%{
+          name: "AAA Chat Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :openai_chat,
+          max_concurrent_jobs: 3
+        })
+
+      {:ok, repo_capable} =
+        Agents.create_agent(%{
+          name: "ZZZ Codex Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          max_concurrent_jobs: 3
+        })
+
+      assert {:ok, selected} = Router.select_agent(:engineer, [chat_only, repo_capable])
+      assert selected.id == repo_capable.id
+    end
+
+    test "does not treat no-op custom process commands as repo-capable delivery" do
+      {:ok, noop_process} =
+        Agents.create_agent(%{
+          name: "AAA Echo Process Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          max_concurrent_jobs: 3
+        })
+
+      {:ok, repo_capable} =
+        Agents.create_agent(%{
+          name: "ZZZ Codex Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          max_concurrent_jobs: 3
+        })
+
+      assert {:ok, selected} = Router.select_agent(:engineer, [noop_process, repo_capable])
+      assert selected.id == repo_capable.id
+    end
+
+    test "treats a coding process preset as repo-capable delivery" do
+      {:ok, chat_only} =
+        Agents.create_agent(%{
+          name: "AAA Chat Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :openai_chat,
+          max_concurrent_jobs: 3
+        })
+
+      {:ok, process_codex} =
+        Agents.create_agent(%{
+          name: "ZZZ Process Codex Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "codex", "process_preset" => "codex", "model" => "gpt-5.5"},
+          max_concurrent_jobs: 3
+        })
+
+      assert {:ok, selected} = Router.select_agent(:engineer, [chat_only, process_codex])
+      assert selected.id == process_codex.id
+    end
+
+    test "treats Agrenting push mode with repo token secret as repo-capable delivery" do
+      {:ok, company} =
+        Companies.create_company(%{name: "Router Agrenting Co", slug: unique_slug()})
+
+      {:ok, chat_only} =
+        Agents.create_agent(%{
+          name: "AAA Chat Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :openai_chat,
+          max_concurrent_jobs: 3,
+          company_id: company.id
+        })
+
+      {:ok, remote_push} =
+        Agents.create_agent(%{
+          name: "ZZZ Agrenting Push Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :agrenting,
+          config: %{
+            "agent_did" => "did:example:push-engineer",
+            "capability" => "implementation",
+            "delivery_mode" => "push",
+            "max_price" => "1.00"
+          },
+          max_concurrent_jobs: 3,
+          company_id: company.id
+        })
+
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "AGRENTING_REPO_ACCESS_TOKEN",
+          value: "repo-token",
+          description: "Agrenting repo access token"
+        })
+
+      assert {:ok, selected} = Router.select_agent(:engineer, [chat_only, remote_push])
+      assert selected.id == remote_push.id
+    end
+
+    test "rejects repo delivery routing when only chat-only agents exist" do
+      {:ok, chat_only} =
+        Agents.create_agent(%{
+          name: "Chat Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :openai_chat,
+          max_concurrent_jobs: 3
+        })
+
+      assert Router.select_agent(:engineer, [chat_only]) == {:error, :no_agent_available}
     end
   end
 
@@ -240,4 +371,6 @@ defmodule Cympho.Orchestrator.Dispatcher.RouterTest do
       assert role == :engineer
     end
   end
+
+  defp unique_slug, do: "router-#{System.unique_integer([:positive])}"
 end

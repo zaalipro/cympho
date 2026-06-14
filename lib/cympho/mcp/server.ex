@@ -9,7 +9,7 @@ defmodule Cympho.Mcp.Server do
   """
 
   import Ecto.Query, only: [from: 2]
-  alias Cympho.{Issues, Repo, Search}
+  alias Cympho.{Agents, Issues, Repo, Search}
   alias Cympho.Agents.Agent
 
   def tools do
@@ -17,7 +17,7 @@ defmodule Cympho.Mcp.Server do
       %{
         name: "list_issues",
         description:
-          "List issues with optional filtering by status, priority, assignee, or project.",
+          "List issues with optional filtering by status, priority, assignee, assigned role, or project.",
         inputSchema: %{
           type: "object",
           properties: %{
@@ -31,6 +31,7 @@ defmodule Cympho.Mcp.Server do
               description: "Filter by priority: critical, high, medium, low"
             },
             assignee_id: %{type: "string", description: "Filter by assignee agent ID"},
+            assigned_role: %{type: "string", description: "Filter by assigned role"},
             project_id: %{type: "string", description: "Filter by project ID"},
             search: %{type: "string", description: "Search in issue titles and descriptions"},
             limit: %{
@@ -66,7 +67,17 @@ defmodule Cympho.Mcp.Server do
               description: "Priority: critical, high, medium, low",
               default: "medium"
             },
-            project_id: %{type: "string", description: "Project ID to create the issue in"}
+            project_id: %{type: "string", description: "Project ID to create the issue in"},
+            assigned_role: %{
+              type: "string",
+              description:
+                "Optional role to route the issue to: ceo, cto, engineer, product_manager, designer, qa_engineer, release_engineer, researcher, marketer, content_strategist, sales_development, customer_support"
+            },
+            assignee_id: %{
+              type: "string",
+              description:
+                "Optional company agent ID to assign directly. When provided with assigned_role, the role must match that agent."
+            }
           },
           required: ["title"]
         }
@@ -120,7 +131,7 @@ defmodule Cympho.Mcp.Server do
   defp do_call("list_issues", args, agent) do
     params =
       args
-      |> Map.take(["status", "priority", "assignee_id", "project_id", "search"])
+      |> Map.take(["status", "priority", "assignee_id", "assigned_role", "project_id", "search"])
       |> Map.put("company_id", agent.company_id)
       |> Map.put("per_page", to_string(Map.get(args, "limit", 20)))
 
@@ -167,9 +178,8 @@ defmodule Cympho.Mcp.Server do
           if project_belongs_to_company?(id, agent.company_id), do: id, else: :forbidden
       end
 
-    if project_id == :forbidden do
-      %{success: false, errors: %{project_id: ["does not belong to this company"]}}
-    else
+    with :ok <- validate_project_id(project_id),
+         {:ok, routing_attrs} <- routing_attrs(args, agent.company_id) do
       attrs =
         %{
           title: args["title"],
@@ -179,14 +189,19 @@ defmodule Cympho.Mcp.Server do
           company_id: agent.company_id,
           actor_type: "agent",
           actor_id: agent.id,
-          created_by_agent_id: agent.id
+          created_by_agent_id: agent.id,
+          origin_type: "mcp",
+          origin_id: agent.id
         }
+        |> Map.merge(routing_attrs)
         |> maybe_put(:project_id, project_id)
 
       case Issues.create_issue(attrs) do
         {:ok, issue} -> %{success: true, issue: summarize_issue(issue)}
         {:error, changeset} -> %{success: false, errors: format_errors(changeset)}
       end
+    else
+      {:error, errors} -> %{success: false, errors: errors}
     end
   end
 
@@ -247,8 +262,10 @@ defmodule Cympho.Mcp.Server do
       title: issue.title,
       status: issue.status,
       priority: issue.priority,
-      assignee: issue.assignee && issue.assignee.name,
-      project: issue.project && issue.project.prefix
+      assignee: assoc_field(issue, :assignee, :name),
+      assignee_id: Map.get(issue, :assignee_id),
+      assigned_role: Map.get(issue, :assigned_role),
+      project: assoc_field(issue, :project, :prefix)
     }
   end
 
@@ -263,8 +280,81 @@ defmodule Cympho.Mcp.Server do
   defp parse_priority(p) when p in ["critical", "high", "medium", "low"], do: String.to_atom(p)
   defp parse_priority(_), do: :medium
 
+  defp validate_project_id(:forbidden),
+    do: {:error, %{project_id: ["does not belong to this company"]}}
+
+  defp validate_project_id(_project_id), do: :ok
+
+  defp routing_attrs(args, company_id) do
+    with {:ok, role} <- normalize_assigned_role(Map.get(args, "assigned_role")),
+         {:ok, assignee} <- load_assignee(Map.get(args, "assignee_id"), company_id),
+         :ok <- validate_assignee_role(assignee, role) do
+      attrs = %{}
+
+      attrs =
+        case role || (assignee && assignee.role) do
+          nil -> attrs
+          role -> Map.put(attrs, :assigned_role, Atom.to_string(role))
+        end
+
+      attrs =
+        if assignee do
+          Map.put(attrs, :assignee_id, assignee.id)
+        else
+          attrs
+        end
+
+      {:ok, attrs}
+    end
+  end
+
+  defp normalize_assigned_role(nil), do: {:ok, nil}
+  defp normalize_assigned_role(""), do: {:ok, nil}
+
+  defp normalize_assigned_role(role) do
+    case Agent.normalize_role(role) do
+      nil -> {:error, %{assigned_role: ["is not a supported agent role"]}}
+      normalized -> {:ok, normalized}
+    end
+  end
+
+  defp load_assignee(nil, _company_id), do: {:ok, nil}
+  defp load_assignee("", _company_id), do: {:ok, nil}
+
+  defp load_assignee(assignee_id, company_id) when is_binary(assignee_id) do
+    case Agents.get_company_agent(company_id, assignee_id) do
+      {:ok, agent} -> {:ok, agent}
+      {:error, :not_found} -> {:error, %{assignee_id: ["does not belong to this company"]}}
+    end
+  end
+
+  defp load_assignee(_assignee_id, _company_id),
+    do: {:error, %{assignee_id: ["must be a company agent ID"]}}
+
+  defp validate_assignee_role(nil, _role), do: :ok
+  defp validate_assignee_role(_assignee, nil), do: :ok
+
+  defp validate_assignee_role(%Agent{role: role}, role), do: :ok
+
+  defp validate_assignee_role(%Agent{role: role}, expected_role) do
+    {:error,
+     %{
+       assignee_id: [
+         "has role #{Atom.to_string(role)} and cannot be assigned as #{Atom.to_string(expected_role)}"
+       ]
+     }}
+  end
+
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp assoc_field(issue, assoc, field) do
+    case Map.get(issue, assoc) do
+      %Ecto.Association.NotLoaded{} -> nil
+      nil -> nil
+      struct -> Map.get(struct, field)
+    end
+  end
 
   defp filter_by_status(agents, nil), do: agents
 

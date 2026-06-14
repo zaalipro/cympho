@@ -12,8 +12,12 @@ defmodule Cympho.IssueMemory do
   @field_labels [
     "What happened",
     "Files changed",
+    "Evidence produced",
+    "Evidence inspected",
+    "Evidence",
     "Verification",
     "Risks",
+    "Remaining risk",
     "Current state",
     "Next decision",
     "Business status",
@@ -21,9 +25,16 @@ defmodule Cympho.IssueMemory do
     "Verdict",
     "Gaps",
     "Follow-up issues",
+    "Decision",
+    "Tradeoff",
+    "Child issues",
+    "Dependencies",
+    "Acceptance criteria",
+    "Review order",
     "Cause",
     "Attempted fix",
-    "Needs"
+    "Needs",
+    "Restart packet"
   ]
 
   @memory_categories [:delivery, :review, :owner_update, :handoff, :blocked, :decision]
@@ -46,9 +57,10 @@ defmodule Cympho.IssueMemory do
       what_happened: first_field(latest, ["What happened"]),
       files_changed: first_field(latest, ["Files changed"]),
       validation: first_field(latest, ["Verification"]),
-      risks: first_field(latest, ["Risks", "Gaps"]),
+      risks: first_field(latest, ["Risks", "Gaps", "Remaining risk"]),
       current_state: first_field(latest, ["Current state", "Business status"]),
-      next_decision: first_field(latest, ["Next decision", "Owner decision needed"])
+      next_decision: first_field(latest, ["Next decision", "Owner decision needed"]),
+      restart_packet: first_field(latest, ["Restart packet"])
     }
 
     memory = %{
@@ -59,6 +71,7 @@ defmodule Cympho.IssueMemory do
       risks: fields.risks || "No risk or gap note captured yet.",
       current_state: fields.current_state || digest.activity_summary.current_state,
       next_decision: fields.next_decision || digest.next_action,
+      restart_packet: fields.restart_packet || "No restart packet captured yet.",
       stages: memory_stages(digest.role_run_summaries),
       latest_moments: latest_moments(latest),
       noise_summary: noise_summary(digest.metrics),
@@ -110,6 +123,7 @@ defmodule Cympho.IssueMemory do
         "- Risks / gaps: #{memory.risks}",
         "- Current state: #{memory.current_state}",
         "- Next decision: #{memory.next_decision}",
+        "- Restart packet: #{memory.restart_packet}",
         "",
         "## Role stages",
         role_stage_lines(memory.stages),
@@ -178,15 +192,25 @@ defmodule Cympho.IssueMemory do
   end
 
   defp first_field(latest, labels) do
-    @memory_categories
-    |> Enum.find_value(fn category ->
-      comment = Map.get(latest, category)
-      fields = comment && extract_fields(comment.body)
+    latest
+    |> latest_comments_by_time()
+    |> Enum.find_value(fn comment ->
+      fields = extract_fields(comment.body)
 
       Enum.find_value(labels, fn label ->
-        fields && Map.get(fields, label)
+        Map.get(fields, label)
       end)
     end)
+  end
+
+  defp latest_comments_by_time(latest) do
+    latest
+    |> Map.values()
+    |> Enum.reject(&is_nil/1)
+    |> Enum.sort_by(
+      fn comment -> DateTime.to_unix(comment_time(comment), :microsecond) end,
+      :desc
+    )
   end
 
   defp latest_moments(latest) do
@@ -271,6 +295,7 @@ defmodule Cympho.IssueMemory do
         validation_gap(fields, metrics),
         risks_gap(fields, metrics),
         next_decision_gap(fields, metrics),
+        restart_packet_gap(fields, metrics),
         routine_noise_gap(metrics)
       ]
       |> Enum.reject(&is_nil/1)
@@ -355,6 +380,19 @@ defmodule Cympho.IssueMemory do
     end
   end
 
+  defp restart_packet_gap(%{restart_packet: restart_packet}, metrics) do
+    if metrics.owner_relevant_comments > 0 and blank?(restart_packet) do
+      %{
+        key: :restart_packet,
+        label: "Restart packet",
+        detail:
+          "The latest owner-readable note does not say exactly how the next agent should resume.",
+        penalty: 12,
+        nudge?: false
+      }
+    end
+  end
+
   defp routine_noise_gap(metrics) do
     if metrics.routine_comments >= 3 and metrics.owner_relevant_comments == 0 do
       %{
@@ -409,14 +447,14 @@ defmodule Cympho.IssueMemory do
     Refresh the owner-readable issue memory in one concise tagged comment.
 
     Use the right tag for your role:
-    - Delivery: `[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ...`
-    - CTO/review: `[review] Verdict: ... What happened: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ...`
-    - CEO/owner update: `[owner_update] What happened: ... Business status: ... Current state: ... Next decision: ... Owner decision needed: ...`
+    - Delivery: `[delivery] What happened: ... Files changed: ... Evidence produced: ... Verification: ... Risks: ... Current state: ... Next decision: ... Restart packet: ...`
+    - CTO/review: `[review] Verdict: ... What happened: ... Evidence inspected: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ... Restart packet: ...`
+    - CEO/owner update: `[owner_update] What happened: ... Business status: ... Evidence inspected: ... Verification: ... Remaining risk: ... Current state: ... Next decision: ... Owner decision needed: ... Restart packet: ...`
 
     Fix these memory gaps:
     #{gap_details}
 
-    Collapse routine/system noise into signal. Do not paste raw logs; explain what changed, how it was verified, what remains risky, and exactly who decides next.
+    Collapse routine/system noise into signal. Do not paste raw logs; explain what changed, how it was verified, what remains risky, exactly who decides next, and how the next agent should resume.
     """
     |> String.trim()
   end
@@ -482,10 +520,13 @@ defmodule Cympho.IssueMemory do
   defp extract_field(body, label) do
     labels =
       @field_labels
+      |> Enum.sort_by(&String.length/1, :desc)
       |> Enum.map(&Regex.escape/1)
       |> Enum.join("|")
 
-    ~r/#{Regex.escape(label)}:\s*(.*?)(?=\s+(?:#{labels}):|\z)/is
+    field_start = ~S/(?:^|[\r\n]|(?<![[:alnum:]])[ \t])/
+
+    ~r/#{field_start}#{Regex.escape(label)}:\s*(.*?)(?=#{field_start}(?:#{labels}):|\z)/is
     |> Regex.run(body, capture: :all_but_first)
     |> case do
       [value] -> compact(value, 240)

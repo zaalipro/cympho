@@ -12,7 +12,10 @@ defmodule Cympho.Dashboard do
   alias Cympho.Goals
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues.Issue
+  alias Cympho.Oversight.Patrol
+  alias Cympho.Projects.Project
   alias Cympho.RuntimeCapacity
+  alias Cympho.Wakes.AgentWake
 
   def active_agents_count(company_id \\ nil) do
     Agent
@@ -122,7 +125,8 @@ defmodule Cympho.Dashboard do
       cost_summary: cost_summary(company_id),
       runtime_capacity: runtime_capacity(company_id),
       goal_alignment: Goals.alignment_summary(company_id),
-      autonomy_readiness: AutonomyReadiness.snapshot(company_id)
+      autonomy_readiness: AutonomyReadiness.snapshot(company_id),
+      patrol_summary: patrol_summary(company_id)
     }
   end
 
@@ -141,7 +145,8 @@ defmodule Cympho.Dashboard do
       cost_summary: empty_cost_summary(),
       runtime_capacity: RuntimeCapacity.company([]),
       goal_alignment: Goals.empty_alignment_summary(),
-      autonomy_readiness: AutonomyReadiness.empty_snapshot()
+      autonomy_readiness: AutonomyReadiness.empty_snapshot(),
+      patrol_summary: empty_patrol_summary()
     }
   end
 
@@ -281,6 +286,92 @@ defmodule Cympho.Dashboard do
   defp run_timestamp(%{inserted_at: %DateTime{} = inserted_at}), do: inserted_at
   defp run_timestamp(_), do: nil
 
+  def patrol_summary(nil), do: empty_patrol_summary()
+
+  def patrol_summary(company_id) do
+    candidates = Patrol.preview_company(company_id)
+    issues = Enum.map(candidates, &patrol_candidate_to_map/1)
+    pending_wakes = pending_stall_wake_count(company_id)
+    stuck_count = length(issues)
+    status_counts = Enum.frequencies_by(issues, & &1.status)
+    level = patrol_level(stuck_count, pending_wakes)
+
+    %{
+      level: level,
+      label: patrol_label(level),
+      summary: patrol_summary_text(stuck_count, pending_wakes),
+      stuck_count: stuck_count,
+      pending_wakes: pending_wakes,
+      in_progress_count: Map.get(status_counts, :in_progress, 0),
+      in_review_count: Map.get(status_counts, :in_review, 0),
+      blocked_count: Map.get(status_counts, :blocked, 0),
+      issues: Enum.take(issues, 5)
+    }
+  rescue
+    _ ->
+      %{
+        empty_patrol_summary()
+        | level: :unknown,
+          label: "Unavailable",
+          summary: "Patrol preview is unavailable."
+      }
+  end
+
+  defp empty_patrol_summary do
+    %{
+      level: :clear,
+      label: "Clear",
+      summary: "No stuck in-progress, review, or blocked work past patrol thresholds.",
+      stuck_count: 0,
+      pending_wakes: 0,
+      in_progress_count: 0,
+      in_review_count: 0,
+      blocked_count: 0,
+      issues: []
+    }
+  end
+
+  defp pending_stall_wake_count(company_id) do
+    AgentWake
+    |> join(:inner, [w], i in Issue, on: i.id == w.issue_id)
+    |> where(
+      [w, i],
+      i.company_id == ^company_id and w.reason == "issue_stalled_in_progress" and
+        w.status in ["pending", "running"]
+    )
+    |> select([w, _i], count(w.id))
+    |> Repo.one()
+  end
+
+  defp patrol_level(stuck_count, _pending_wakes) when stuck_count > 0, do: :attention
+  defp patrol_level(_stuck_count, pending_wakes) when pending_wakes > 0, do: :queued
+  defp patrol_level(_stuck_count, _pending_wakes), do: :clear
+
+  defp patrol_label(:attention), do: "Intervention ready"
+  defp patrol_label(:queued), do: "Wake queued"
+  defp patrol_label(:clear), do: "Clear"
+  defp patrol_label(_), do: "Unknown"
+
+  defp patrol_summary_text(stuck_count, pending_wakes) when stuck_count > 0 do
+    wake_part =
+      if pending_wakes > 0 do
+        " #{pending_wakes} supervisor #{plural(pending_wakes, "wake")} already queued."
+      else
+        " Next patrol sweep will wake the right supervisor."
+      end
+
+    "#{stuck_count} stalled #{plural(stuck_count, "issue")} #{verb(stuck_count)} supervisor intervention." <>
+      wake_part
+  end
+
+  defp patrol_summary_text(_stuck_count, pending_wakes) when pending_wakes > 0 do
+    "#{pending_wakes} supervisor #{plural(pending_wakes, "wake")} waiting in the queue."
+  end
+
+  defp patrol_summary_text(_stuck_count, _pending_wakes) do
+    "No stuck in-progress, review, or blocked work past patrol thresholds."
+  end
+
   def routine_health(nil),
     do: %{status: "idle", message: "No routine activity", total: 0, failed: 0, running: 0}
 
@@ -290,8 +381,13 @@ defmodule Cympho.Dashboard do
     counts =
       Cympho.RoutineTriggers.RoutineRun
       |> join(:inner, [r], ro in Cympho.Routines.Routine, on: ro.id == r.routine_id)
-      |> join(:inner, [r, ro], ag in Agent, on: ag.id == ro.agent_id)
-      |> where([r, ro, ag], ag.company_id == ^company_id and r.triggered_at >= ^since)
+      |> join(:left, [r, ro], ag in Agent, on: ag.id == ro.agent_id)
+      |> join(:left, [r, ro, ag], p in Project, on: p.id == ro.project_id)
+      |> where(
+        [r, ro, ag, p],
+        (ro.company_id == ^company_id or ag.company_id == ^company_id or
+           p.company_id == ^company_id) and r.triggered_at >= ^since
+      )
       |> group_by([r], r.status)
       |> select([r], {r.status, count(r.id)})
       |> Repo.all()
@@ -355,6 +451,23 @@ defmodule Cympho.Dashboard do
     }
   end
 
+  defp patrol_candidate_to_map(%{
+         issue: issue,
+         supervisor: supervisor,
+         stale_minutes: stale_minutes
+       }) do
+    %{
+      id: issue.id,
+      title: issue.title,
+      identifier: issue.identifier,
+      status: issue.status,
+      updated_at: issue.updated_at,
+      stale_minutes: stale_minutes,
+      supervisor_name: supervisor && supervisor.name,
+      supervisor_role: supervisor && Agent.role_label(supervisor.role)
+    }
+  end
+
   defp assoc_name(struct, key) do
     case Map.get(struct, key) do
       %{name: name} -> name
@@ -398,4 +511,10 @@ defmodule Cympho.Dashboard do
       inserted_at: activity.inserted_at
     }
   end
+
+  defp plural(1, word), do: word
+  defp plural(_, word), do: word <> "s"
+
+  defp verb(1), do: "needs"
+  defp verb(_), do: "need"
 end

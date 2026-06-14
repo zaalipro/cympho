@@ -91,6 +91,19 @@ defmodule Cympho.Secrets do
     end
   end
 
+  def get_company_secret(company_id, id) do
+    query =
+      Secret
+      |> where(company_id: ^company_id)
+      |> where(id: ^id)
+      |> where(is_active: true)
+
+    case Repo.one(query) do
+      nil -> {:error, :not_found}
+      secret -> {:ok, secret}
+    end
+  end
+
   def get_secret_value!(id) do
     secret = Repo.get!(Secret, id)
 

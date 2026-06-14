@@ -10,14 +10,18 @@ defmodule Cympho.AgentActions do
 
   alias Cympho.{
     Activities,
+    AgentPromptContract,
     Agents,
     Comments,
     Decisions,
+    DeliveryBriefReadiness,
     HeartbeatEngine,
+    IssueBriefReadiness,
     IssueDigest,
     Issues,
     PullRequestContract,
     Repo,
+    RuntimeProfiles,
     WorkProducts
   }
 
@@ -86,6 +90,8 @@ defmodule Cympho.AgentActions do
     "prototype" => "artifact"
   }
   @delivery_roles Agent.delivery_roles()
+  @repo_delivery_roles Agent.pr_delivery_roles()
+  @text_only_delivery_adapters [:openai_chat]
 
   # Actions that change governance state require the agent's role to be in this
   # set. Lower-privileged agents that emit them are rejected with
@@ -111,17 +117,17 @@ defmodule Cympho.AgentActions do
   """
   @spec parse(String.t()) :: {:ok, [action()]} | {:error, atom() | tuple()}
   def parse(text) when is_binary(text) do
-    case Regex.scan(~r/```cympho-actions\s*\n(.*?)```/s, text, capture: :all_but_first) do
+    case action_block_jsons(text) do
       [] ->
         {:error, :missing_action_block}
 
       [_one, _two | _] ->
         {:error, :multiple_action_blocks}
 
-      [[json]] when byte_size(json) > @max_block_bytes ->
+      [json] when byte_size(json) > @max_block_bytes ->
         {:error, {:action_block_too_large, byte_size(json), @max_block_bytes}}
 
-      [[json]] ->
+      [json] ->
         json
         |> Jason.decode()
         |> case do
@@ -132,6 +138,20 @@ defmodule Cympho.AgentActions do
   end
 
   def parse(_), do: {:error, :missing_action_block}
+
+  @action_block_patterns [
+    ~r/```(?:cympho-actions|cympo-actions)\s*\n(.*?)```/s,
+    ~r/(?:^|\n)\s*(?:cympho-actions|cympo-actions)\s*\n\s*```json\s*\n(.*?)```/s
+  ]
+
+  defp action_block_jsons(text) do
+    @action_block_patterns
+    |> Enum.flat_map(fn pattern ->
+      Regex.scan(pattern, text, capture: :all_but_first)
+      |> Enum.map(fn [json] -> json end)
+    end)
+    |> Enum.uniq()
+  end
 
   @doc """
   Executes validated actions for an issue and agent.
@@ -192,7 +212,10 @@ defmodule Cympho.AgentActions do
             end
           end)
 
-        %{issue: final_issue, results: Enum.reverse(results)}
+        results = Enum.reverse(results)
+        final_issue = maybe_auto_block_after_decomposition(final_issue, agent, results)
+
+        %{issue: final_issue, results: results}
       end)
 
     case result do
@@ -293,6 +316,294 @@ defmodule Cympho.AgentActions do
 
   defp maybe_emit_rejection_comment(
          %Issue{} = issue,
+         {:runtime_capability_blocked, action_type, adapter}
+       ) do
+    system_comment(
+      issue,
+      "#{action_type} rejected: #{adapter} is a text/action adapter or non-coding runtime and cannot create or verify repo artifacts. " <>
+        "Do not claim file changes, test runs, branches, or PRs from this runtime configuration. " <>
+        "Delegate to a repo-capable runtime or block with the missing runtime/evidence."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:spawn_agent_existing_capacity, role, candidates}
+       ) do
+    system_comment(
+      issue,
+      "spawn_agent rejected: #{Agent.role_label(role)} capacity already exists. " <>
+        "Use delegate, create_issue, or handoff for existing eligible agents first: #{candidates}."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:spawn_agent_repo_runtime_required, role, adapter}
+       ) do
+    system_comment(
+      issue,
+      "spawn_agent rejected: #{Agent.role_label(role)} hires must use a repo-capable runtime. " <>
+        "#{adapter_label(adapter)} cannot edit files, run tests, create branches, or produce PR evidence. " <>
+        "Use Codex, Claude Code, Cursor, OpenClaw, a coding Process preset, or Agrenting push delivery."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:delivery_brief_too_thin, role, next_prompt, missing, scaffold}
+       ) do
+    missing =
+      missing
+      |> Enum.reject(&blank?/1)
+      |> Enum.join(", ")
+
+    missing_part =
+      if missing == "" do
+        ""
+      else
+        " Missing delivery signals: #{missing}."
+      end
+
+    system_comment(
+      issue,
+      "create_issue rejected: #{Agent.role_label(role)} delivery brief is too thin. " <>
+        "#{next_prompt}.#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:mission_initiative_too_thin, title, next_prompt, missing, scaffold}
+       ) do
+    missing =
+      missing
+      |> Enum.reject(&blank?/1)
+      |> Enum.join(", ")
+
+    missing_part =
+      if missing == "" do
+        ""
+      else
+        " Missing initiative signals: #{missing}."
+      end
+
+    system_comment(
+      issue,
+      "seed_mission_issues rejected: initiative #{inspect(title)} is too thin for mission seeding. " <>
+        "#{next_prompt}.#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:spec_review_delivery_brief_too_thin, role, next_prompt, missing, scaffold}
+       ) do
+    missing =
+      missing
+      |> Enum.reject(&blank?/1)
+      |> Enum.join(", ")
+
+    missing_part =
+      if missing == "" do
+        ""
+      else
+        " Missing delivery signals: #{missing}."
+      end
+
+    system_comment(
+      issue,
+      "approve_issue rejected: #{Agent.role_label(role)} release brief is too thin for runtime dispatch. " <>
+        "#{next_prompt}.#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:delegate_delivery_brief_too_thin, role, next_prompt, missing, scaffold}
+       ) do
+    missing =
+      missing
+      |> Enum.reject(&blank?/1)
+      |> Enum.join(", ")
+
+    missing_part =
+      if missing == "" do
+        ""
+      else
+        " Missing delivery signals: #{missing}."
+      end
+
+    system_comment(
+      issue,
+      "delegate rejected: #{Agent.role_label(role)} directive is too thin for runtime dispatch. " <>
+        "#{next_prompt}.#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:handoff_delivery_brief_too_thin, role, next_prompt, missing, scaffold}
+       ) do
+    missing =
+      missing
+      |> Enum.reject(&blank?/1)
+      |> Enum.join(", ")
+
+    missing_part =
+      if missing == "" do
+        ""
+      else
+        " Missing delivery signals: #{missing}."
+      end
+
+    system_comment(
+      issue,
+      "handoff rejected: #{Agent.role_label(role)} directive is too thin for runtime dispatch. " <>
+        "#{next_prompt}.#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:intervene_delivery_brief_too_thin, mode, role, next_prompt, missing, scaffold}
+       ) do
+    missing =
+      missing
+      |> Enum.reject(&blank?/1)
+      |> Enum.join(", ")
+
+    missing_part =
+      if missing == "" do
+        ""
+      else
+        " Missing delivery signals: #{missing}."
+      end
+
+    system_comment(
+      issue,
+      "intervene #{mode} rejected: #{Agent.role_label(role)} recovery directive is too thin for runtime dispatch. " <>
+        "#{next_prompt}.#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:request_changes_feedback_too_thin, role, missing, scaffold}
+       ) do
+    missing =
+      missing
+      |> Enum.reject(&blank?/1)
+      |> Enum.join(", ")
+
+    missing_part =
+      if missing == "" do
+        ""
+      else
+        " Missing review signals: #{missing}."
+      end
+
+    system_comment(
+      issue,
+      "request_changes rejected: #{Agent.role_label(role)} review feedback is too thin for another delivery run." <>
+        "#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:force_fix_pr_feedback_too_thin, missing, scaffold}
+       ) do
+    missing =
+      missing
+      |> Enum.reject(&blank?/1)
+      |> Enum.join(", ")
+
+    missing_part =
+      if missing == "" do
+        ""
+      else
+        " Missing review signals: #{missing}."
+      end
+
+    system_comment(
+      issue,
+      "force_fix_pr rejected: PR fix feedback is too thin for another delivery run." <>
+        "#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:block_issue_reason_too_thin, missing, scaffold}
+       ) do
+    missing =
+      missing
+      |> Enum.reject(&blank?/1)
+      |> Enum.join(", ")
+
+    missing_part =
+      if missing == "" do
+        ""
+      else
+        " Missing blocker signals: #{missing}."
+      end
+
+    system_comment(
+      issue,
+      "block_issue rejected: blocker reason is too thin to recover later." <>
+        "#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:approval_note_too_thin, role, missing, scaffold}
+       ) do
+    missing =
+      missing
+      |> Enum.reject(&blank?/1)
+      |> Enum.join(", ")
+
+    missing_part =
+      if missing == "" do
+        ""
+      else
+        " Missing approval signals: #{missing}."
+      end
+
+    system_comment(
+      issue,
+      "approve_issue rejected: #{Agent.role_label(role)} approval note is too thin for owner memory." <>
+        "#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:escalation_reason_too_thin, missing, scaffold}
+       ) do
+    missing =
+      missing
+      |> Enum.reject(&blank?/1)
+      |> Enum.join(", ")
+
+    missing_part =
+      if missing == "" do
+        ""
+      else
+        " Missing escalation signals: #{missing}."
+      end
+
+    system_comment(
+      issue,
+      "escalate rejected: escalation reason is too thin for a supervisor to act." <>
+        "#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
          {:request_depth_exceeded, current, max}
        ) do
     system_comment(
@@ -312,6 +623,28 @@ defmodule Cympho.AgentActions do
       "create_issue rejected: this issue already has #{current} active sub-issue(s), " <>
         "reaching the limit of #{max}. Stop splitting for now; review, finish, " <>
         "request changes, or block the existing sub-issues before adding more."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:invalid_agent_target_id, action_name, target_id}
+       ) do
+    system_comment(
+      issue,
+      "#{action_name} rejected: `to_agent_id` must be a full agent UUID, got #{inspect(target_id)}. " <>
+        "Copy the complete value from Team status `id:` rather than a short display id."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:agent_target_not_found, action_name, target_id}
+       ) do
+    system_comment(
+      issue,
+      "#{action_name} rejected: no agent exists for `to_agent_id` #{inspect(target_id)}. " <>
+        "Use a currently listed Team status `id:` value or hand off by role."
     )
   end
 
@@ -339,6 +672,15 @@ defmodule Cympho.AgentActions do
 
   # Governance actions (approve, request_changes, block) require the agent to
   # hold a governance role. Lower-privileged agents that emit them are rejected.
+  defp authorize_action(%{"type" => type} = action, %Agent{} = agent)
+       when type in ["attach_work_product", "set_pr_url"] do
+    if non_repo_runtime_delivery_claim?(action, agent) do
+      {:error, {:runtime_capability_blocked, type, adapter_label(agent.adapter)}}
+    else
+      :ok
+    end
+  end
+
   defp authorize_action(%{"type" => type}, %Agent{role: role})
        when type in ["approve_issue", "request_changes", "block_issue"] do
     if role in @governance_roles, do: :ok, else: {:error, :unauthorized_action}
@@ -404,6 +746,60 @@ defmodule Cympho.AgentActions do
   defp authorize_action(%{"type" => "escalate"}, _agent), do: :ok
 
   defp authorize_action(_action, _agent), do: :ok
+
+  defp non_repo_runtime_delivery_claim?(action, %Agent{} = agent) do
+    repo_delivery_claim?(action) and
+      not Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(agent, load_secret_keys?: true)
+  end
+
+  defp text_only_adapter?(adapter) do
+    adapter
+    |> normalize_adapter()
+    |> then(&(&1 in @text_only_delivery_adapters))
+  end
+
+  defp normalize_adapter(adapter) when is_atom(adapter), do: adapter
+
+  defp normalize_adapter(adapter) when is_binary(adapter) do
+    case String.downcase(adapter) do
+      "openai_chat" -> :openai_chat
+      _ -> :unknown
+    end
+  end
+
+  defp normalize_adapter(_adapter), do: :unknown
+
+  defp adapter_label(:openai_chat), do: "OpenAI Chat"
+  defp adapter_label("openai_chat"), do: "OpenAI Chat"
+  defp adapter_label(:process), do: "Process"
+  defp adapter_label("process"), do: "Process"
+  defp adapter_label(:agrenting), do: "Agrenting"
+  defp adapter_label("agrenting"), do: "Agrenting"
+  defp adapter_label(adapter), do: adapter |> to_string() |> String.replace("_", " ")
+
+  defp repo_delivery_claim?(%{"type" => "set_pr_url"}), do: true
+
+  defp repo_delivery_claim?(%{"type" => "attach_work_product"} = action) do
+    work_product_kind(action) == "code_change" or github_pull_request_url?(action["url"])
+  end
+
+  defp repo_delivery_claim?(_action), do: false
+
+  defp work_product_kind(action) do
+    action
+    |> Map.get("kind", "other")
+    |> to_string()
+    |> String.trim()
+    |> String.downcase()
+    |> String.replace(~r/[\s-]+/, "_")
+    |> then(&Map.get(@work_product_kind_aliases, &1, &1))
+  end
+
+  defp github_pull_request_url?(url) when is_binary(url) do
+    match?({:ok, _}, Cympho.Github.parse_pull_request_url(url))
+  end
+
+  defp github_pull_request_url?(_url), do: false
 
   def unresolved_current_issue?(%Issue{} = issue, %Agent{} = agent) do
     case Repo.get(Issue, issue.id) do
@@ -522,7 +918,8 @@ defmodule Cympho.AgentActions do
              :ok <- validate_role(action["role"]),
              :ok <- validate_priority(Map.get(action, "priority", "medium")),
              :ok <- validate_optional_depends_on(action["depends_on"]),
-             :ok <- validate_optional_estimate(action["estimated_minutes"]) do
+             :ok <- validate_optional_estimate(action["estimated_minutes"]),
+             :ok <- validate_optional_brief_fields(action) do
           {:ok,
            Map.merge(action, %{
              "description" => Map.get(action, "description", ""),
@@ -596,6 +993,7 @@ defmodule Cympho.AgentActions do
 
       "delegate" ->
         with :ok <- require_string(action, "to_agent_id"),
+             :ok <- validate_uuid_string(action["to_agent_id"], "to_agent_id"),
              :ok <- validate_optional_string(action, "reason") do
           {:ok, action}
         end
@@ -672,9 +1070,14 @@ defmodule Cympho.AgentActions do
   defp validate_intervene_target(%{"mode" => mode} = action)
        when mode in ["reassign", "force_handoff"] do
     cond do
-      is_binary(action["to_agent_id"]) and action["to_agent_id"] != "" -> :ok
-      is_binary(action["to_role"]) and action["to_role"] != "" -> validate_role(action["to_role"])
-      true -> {:error, :missing_intervene_target}
+      is_binary(action["to_agent_id"]) and action["to_agent_id"] != "" ->
+        validate_uuid_string(action["to_agent_id"], "to_agent_id")
+
+      is_binary(action["to_role"]) and action["to_role"] != "" ->
+        validate_role(action["to_role"])
+
+      true ->
+        {:error, :missing_intervene_target}
     end
   end
 
@@ -703,6 +1106,24 @@ defmodule Cympho.AgentActions do
 
   defp validate_optional_estimate(_), do: {:error, :invalid_estimate}
 
+  @create_issue_brief_fields ~w(
+    acceptance_criteria
+    dependencies
+    evidence_required
+    verification_required
+    definition_of_done
+    risks
+  )
+
+  defp validate_optional_brief_fields(action) do
+    Enum.reduce_while(@create_issue_brief_fields, :ok, fn field, _acc ->
+      case validate_optional_string_or_list(action, field) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
   # Initiatives are a non-empty list of issue specs. Each must have a title and
   # role. Description is optional. Priority defaults to "high" — mission-level
   # work is by definition the company's highest priority.
@@ -725,8 +1146,10 @@ defmodule Cympho.AgentActions do
     item = normalize_string_keys(item)
 
     with :ok <- require_string(item, "title"),
+         :ok <- validate_optional_string(item, "description"),
          :ok <- validate_role(item["role"]),
-         :ok <- validate_priority(Map.get(item, "priority", "high")) do
+         :ok <- validate_priority(Map.get(item, "priority", "high")),
+         :ok <- ensure_mission_initiative_ready(item) do
       :ok
     end
   end
@@ -764,7 +1187,9 @@ defmodule Cympho.AgentActions do
         {:error, {:child_issue_limit_exceeded, active_children, max_children}}
 
       true ->
-        do_create_issue(issue, agent, action)
+        with :ok <- ensure_delivery_brief_ready(action) do
+          do_create_issue(issue, agent, action)
+        end
     end
   end
 
@@ -809,6 +1234,7 @@ defmodule Cympho.AgentActions do
 
   defp execute_action(issue, agent, %{"type" => "request_changes"} = action) do
     with :ok <- ensure_governance_quality(action, "request_changes"),
+         :ok <- ensure_request_changes_feedback_ready(action),
          reason = tagged_review_note(action["reason"] || "Changes requested."),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
@@ -983,7 +1409,8 @@ defmodule Cympho.AgentActions do
     handoff_reason = action["reason"] || "Handing off to #{action["role"]}."
     context_body = build_handoff_context(issue, agent, action, handoff_reason)
 
-    with {:ok, updated} <-
+    with :ok <- ensure_handoff_delivery_brief_ready(issue, action, handoff_reason),
+         {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
              assignee_id: nil,
@@ -991,10 +1418,34 @@ defmodule Cympho.AgentActions do
              checked_out_at: nil,
              assigned_role: action["role"]
            }),
+         {:ok, updated} <- assign_handoff_owner_for_dispatch(updated, action["role"]),
          {:ok, _comment} <- maybe_agent_comment(issue, agent, handoff_reason),
          {:ok, _context_comment} <- system_comment(issue, context_body) do
       handle_handoff_wakeup(updated, agent, action)
-      {:ok, %{type: "handoff", issue_id: updated.id, role: action["role"]}}
+
+      {:ok,
+       %{
+         type: "handoff",
+         issue_id: updated.id,
+         role: action["role"],
+         assignee_id: updated.assignee_id
+       }}
+    end
+  end
+
+  defp assign_handoff_owner_for_dispatch(%Issue{} = issue, role) do
+    role = role_to_atom(role)
+    eligible = eligible_existing_agents(role, issue.company_id)
+
+    case Cympho.Orchestrator.Dispatcher.Router.select_agent(role, eligible) do
+      {:ok, agent} ->
+        Cympho.Issues.update_issue(issue, %{
+          assignee_id: agent.id,
+          assigned_role: to_string(role)
+        })
+
+      {:error, _reason} ->
+        {:ok, issue}
     end
   end
 
@@ -1014,9 +1465,11 @@ defmodule Cympho.AgentActions do
           action["notes"] ||
             "Approved this issue. Required work is complete and ready for the owner."
 
+        tagged_note = tagged_approval_note(agent, note)
+
         with :ok <- ensure_approval_quality(issue),
-             {:ok, _comment} <-
-               maybe_agent_comment(issue, agent, tagged_approval_note(agent, note)),
+             :ok <- ensure_approval_note_ready(agent, tagged_note),
+             {:ok, _comment} <- maybe_agent_comment(issue, agent, tagged_note),
              {:ok, transitioned} <- Issues.transition_issue_with_review_gates(issue, :done),
              {:ok, released} <- Issues.force_release_issue(transitioned, :done),
              {:ok, released} <-
@@ -1031,6 +1484,26 @@ defmodule Cympho.AgentActions do
         # Rejection comment is emitted post-transaction in execute/3.
         {:error, {:children_not_done, Enum.map(open, & &1.id)}}
     end
+  end
+
+  defp ensure_approval_note_ready(%Agent{role: role}, note) when role in @governance_roles do
+    case AgentPromptContract.audit_response(role, note) do
+      %{status: :ok} ->
+        :ok
+
+      %{missing_fields: missing} ->
+        {:error, {:approval_note_too_thin, role, missing, approval_note_scaffold(role, note)}}
+    end
+  end
+
+  defp ensure_approval_note_ready(_agent, _note), do: :ok
+
+  defp approval_note_scaffold(role, note) do
+    [
+      "Current approval note: #{note}",
+      "Required shape: #{AgentPromptContract.required_template(role)}"
+    ]
+    |> Enum.join("\n")
   end
 
   # Spec-review approval: the CTO has signed off on a CEO-seeded initiative
@@ -1052,11 +1525,13 @@ defmodule Cympho.AgentActions do
       |> Map.put("spec_approved_by", agent.id)
       |> Map.put("spec_approved_role_release", proposed_role)
 
-    with {:ok, _comment} <-
+    with :ok <- ensure_spec_release_delivery_brief_ready(issue, proposed_role, note),
+         {:ok, _comment} <-
            maybe_agent_comment(issue, agent, "[spec-approved] #{note}"),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
+             description: spec_review_description(issue, note),
              assignee_id: nil,
              assigned_role: proposed_role,
              monitor_state: cleared_state
@@ -1080,6 +1555,49 @@ defmodule Cympho.AgentActions do
          released_to_role: proposed_role
        }}
     end
+  end
+
+  defp ensure_spec_release_delivery_brief_ready(%Issue{} = issue, role, note) do
+    role_atom = role_to_atom(role)
+
+    if role_atom in @repo_delivery_roles do
+      readiness =
+        DeliveryBriefReadiness.evaluate(%{
+          title: issue.title,
+          description:
+            [issue.description, note]
+            |> Enum.reject(&blank?/1)
+            |> Enum.join("\n")
+        })
+
+      case readiness.status do
+        :thin ->
+          {:error,
+           {:spec_review_delivery_brief_too_thin, role_atom, readiness.next_prompt,
+            missing_readiness_labels(readiness), readiness.repair_scaffold}}
+
+        _ ->
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp spec_review_description(%Issue{} = issue, note) do
+    base =
+      issue.description
+      |> to_string()
+      |> String.trim()
+
+    note =
+      note
+      |> to_string()
+      |> String.trim()
+
+    [base, "## CTO spec approval\n#{note}"]
+    |> Enum.reject(&blank?/1)
+    |> Enum.join("\n\n")
   end
 
   defp spec_review_pending?(%Issue{monitor_state: state}) when is_map(state) do
@@ -1125,7 +1643,7 @@ defmodule Cympho.AgentActions do
   end
 
   defp do_create_issue(issue, agent, action) do
-    case find_recent_duplicate(issue.company_id, action["title"], issue.goal_id) do
+    case find_recent_duplicate(issue.company_id, action["title"], issue.goal_id, issue.id) do
       %Issue{} = existing ->
         comment_body =
           "Duplicate creation attempt by #{agent.name || agent.id}. " <>
@@ -1139,7 +1657,16 @@ defmodule Cympho.AgentActions do
                  author_id: "00000000-0000-0000-0000-000000000000",
                  issue_id: existing.id
                }) do
-          {:ok, %{type: "create_issue", issue_id: existing.id, duplicate: true}}
+          {:ok,
+           %{
+             type: "create_issue",
+             issue_id: existing.id,
+             identifier: existing.identifier || existing.id,
+             assigned_role: existing.assigned_role,
+             assignee_id: existing.assignee_id,
+             status: existing.status,
+             duplicate: true
+           }}
         end
 
       nil ->
@@ -1149,7 +1676,7 @@ defmodule Cympho.AgentActions do
 
         attrs = %{
           title: action["title"],
-          description: action["description"] || "",
+          description: child_issue_description(issue, action),
           priority: action["priority"] || "medium",
           status: :todo,
           company_id: issue.company_id,
@@ -1167,6 +1694,7 @@ defmodule Cympho.AgentActions do
         }
 
         with {:ok, created} <- Issues.create_issue(attrs),
+             {:ok, created} <- assign_child_owner_for_dispatch(created),
              {:ok, blocker_results} <- attach_depends_on(created, issue, action["depends_on"]),
              {:ok, _comment} <- maybe_agent_comment(issue, agent, created_issue_note(created)) do
           # Wake the dispatcher so the child issue is picked up by its role
@@ -1189,12 +1717,189 @@ defmodule Cympho.AgentActions do
              issue_id: created.id,
              identifier: created.identifier || created.id,
              assigned_role: action["role"],
+             assignee_id: created.assignee_id,
              status: created.status,
              depends_on_resolved: blocker_results.resolved,
              depends_on_unresolved: blocker_results.unresolved
            }}
         end
     end
+  end
+
+  defp maybe_auto_block_after_decomposition(%Issue{} = issue, %Agent{role: role} = agent, results)
+       when role in @governance_roles do
+    if decomposition_left_parent_checked_out?(issue, agent, results) do
+      note =
+        tagged_blocked_note(
+          "Waiting for delegated work: #{delegated_issue_labels(results)}. " <>
+            "Attempted fix: decomposed the work into issue(s) above. " <>
+            "Needs: delegated evidence, verification notes, and remaining risk from the child owner. " <>
+            "Current state: parent is paused while delegated work runs. " <>
+            "Next decision: inspect the delegated issue evidence and approve, request changes, or split follow-up work. " <>
+            "Restart packet: read the delegated issue(s), their latest delivery comments, work products, and verification before deciding."
+        )
+
+      with {:ok, updated} <-
+             update_workflow_issue(issue, agent, %{
+               status: :blocked,
+               assignee_id: nil,
+               checkout_run_id: nil,
+               checked_out_at: nil
+             }),
+           {:ok, _comment} <- maybe_agent_comment(issue, agent, note) do
+        updated
+      else
+        _ -> issue
+      end
+    else
+      issue
+    end
+  end
+
+  defp maybe_auto_block_after_decomposition(%Issue{} = issue, _agent, _results), do: issue
+
+  defp decomposition_left_parent_checked_out?(%Issue{} = issue, %Agent{} = agent, results) do
+    issue.status == :in_progress and issue.assignee_id == agent.id and
+      Enum.any?(results, &create_issue_result?/1)
+  end
+
+  defp create_issue_result?(%{type: "create_issue"}), do: true
+  defp create_issue_result?(_), do: false
+
+  defp delegated_issue_labels(results) do
+    results
+    |> Enum.filter(&create_issue_result?/1)
+    |> Enum.map(fn result ->
+      label = result[:identifier] || result[:issue_id] || "delegated issue"
+
+      if result[:duplicate] == true do
+        "#{label} (existing)"
+      else
+        to_string(label)
+      end
+    end)
+    |> Enum.reject(&blank?/1)
+    |> Enum.join(", ")
+    |> case do
+      "" -> "delegated issue(s)"
+      labels -> labels
+    end
+  end
+
+  defp assign_child_owner_for_dispatch(%Issue{} = issue) do
+    case Cympho.Issues.AutoAssignment.assign_owner_for_dispatch(issue) do
+      {:ok, assigned} ->
+        {:ok, assigned}
+
+      {:error, :no_eligible_agent, _issue} ->
+        {:ok, issue}
+    end
+  end
+
+  defp ensure_delivery_brief_ready(%{"role" => role} = action) do
+    role = role_to_atom(role)
+
+    if role in @repo_delivery_roles do
+      readiness =
+        DeliveryBriefReadiness.evaluate(%{
+          title: action["title"],
+          description: delivery_brief_readiness_text(action)
+        })
+
+      case readiness.status do
+        :thin ->
+          {:error,
+           {:delivery_brief_too_thin, role, readiness.next_prompt,
+            missing_readiness_labels(readiness), readiness.repair_scaffold}}
+
+        _ ->
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp ensure_delivery_brief_ready(_action), do: :ok
+
+  defp ensure_handoff_delivery_brief_ready(%Issue{} = issue, action, reason) do
+    role = role_to_atom(action["role"])
+
+    if role in @repo_delivery_roles do
+      readiness =
+        DeliveryBriefReadiness.evaluate(%{
+          title: issue.title,
+          description:
+            [
+              issue.description,
+              reason,
+              action["summary"],
+              action["remaining"],
+              action["decisions"]
+            ]
+            |> Enum.reject(&blank?/1)
+            |> Enum.join("\n")
+        })
+
+      case readiness.status do
+        :thin ->
+          {:error,
+           {:handoff_delivery_brief_too_thin, role, readiness.next_prompt,
+            missing_readiness_labels(readiness), readiness.repair_scaffold}}
+
+        _ ->
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp delivery_brief_readiness_text(action) do
+    [
+      action["description"],
+      structured_delivery_signal("Acceptance criteria", action["acceptance_criteria"]),
+      structured_delivery_signal("Evidence required", action["evidence_required"]),
+      structured_delivery_signal("Verification required", action["verification_required"]),
+      structured_delivery_signal("Definition of done", action["definition_of_done"])
+    ]
+    |> Enum.reject(&blank?/1)
+    |> Enum.join("\n")
+  end
+
+  defp structured_delivery_signal(_label, nil), do: nil
+
+  defp structured_delivery_signal(label, value) do
+    items =
+      value
+      |> explicit_brief_items()
+      |> Enum.reject(&blank?/1)
+
+    if items == [] do
+      nil
+    else
+      "#{label}: #{Enum.join(items, "; ")}"
+    end
+  end
+
+  defp explicit_brief_items(value) when is_binary(value) do
+    value
+    |> String.split(~r/\r?\n/)
+    |> Enum.map(&clean_brief_item/1)
+  end
+
+  defp explicit_brief_items(values) when is_list(values) do
+    values
+    |> Enum.map(&to_string/1)
+    |> Enum.map(&clean_brief_item/1)
+  end
+
+  defp explicit_brief_items(_value), do: []
+
+  defp missing_readiness_labels(%{checks: checks}) do
+    checks
+    |> Enum.reject(& &1.passed?)
+    |> Enum.map(& &1.label)
   end
 
   defp maybe_put_estimate(monitor, nil), do: monitor
@@ -1210,6 +1915,162 @@ defmodule Cympho.AgentActions do
   end
 
   defp maybe_put_estimate(monitor, _), do: monitor
+
+  defp child_issue_description(%Issue{} = parent, action) do
+    base =
+      action
+      |> Map.get("description", "")
+      |> to_string()
+      |> String.trim()
+
+    brief =
+      [
+        "## Execution brief",
+        "",
+        "Parent issue: #{issue_label(parent)}",
+        "Target role: #{human_role(action["role"])}",
+        "",
+        "**Acceptance criteria**",
+        bullet_list(
+          action["acceptance_criteria"],
+          default_acceptance_criteria(action["role"])
+        ),
+        "",
+        "**Dependencies**",
+        bullet_list(action["dependencies"] || action["depends_on"], ["(none)"]),
+        "",
+        "**Evidence required**",
+        bullet_list(action["evidence_required"], default_evidence_required(action["role"])),
+        "",
+        "**Verification required**",
+        bullet_list(
+          action["verification_required"],
+          default_verification_required(action["role"])
+        ),
+        "",
+        "**Definition of done**",
+        bullet_list(action["definition_of_done"], default_definition_of_done(action["role"])),
+        "",
+        "**Risks / constraints**",
+        bullet_list(action["risks"], ["None called out by the delegating agent."])
+      ]
+      |> Enum.join("\n")
+
+    [base, brief]
+    |> Enum.reject(&blank?/1)
+    |> Enum.join("\n\n")
+  end
+
+  defp issue_label(%Issue{} = issue) do
+    case issue.identifier do
+      nil -> issue.title || issue.id
+      identifier -> "#{identifier} · #{issue.title}"
+    end
+  end
+
+  defp bullet_list(value, defaults) do
+    value
+    |> normalize_brief_items(defaults)
+    |> Enum.map_join("\n", &"- #{&1}")
+  end
+
+  defp normalize_brief_items(nil, defaults), do: defaults
+
+  defp normalize_brief_items(value, defaults) when is_binary(value) do
+    value
+    |> String.split(~r/\r?\n/)
+    |> Enum.map(&clean_brief_item/1)
+    |> Enum.reject(&blank?/1)
+    |> case do
+      [] -> defaults
+      items -> items
+    end
+  end
+
+  defp normalize_brief_items(values, defaults) when is_list(values) do
+    values
+    |> Enum.map(&to_string/1)
+    |> Enum.map(&clean_brief_item/1)
+    |> Enum.reject(&blank?/1)
+    |> case do
+      [] -> defaults
+      items -> items
+    end
+  end
+
+  defp normalize_brief_items(_value, defaults), do: defaults
+
+  defp clean_brief_item(value) do
+    value
+    |> String.trim()
+    |> String.replace(~r/^[-*]\s+/, "")
+    |> String.trim()
+  end
+
+  defp default_acceptance_criteria(role)
+       when role in ["engineer", "qa_engineer", "release_engineer"] do
+    [
+      "Deliver the scoped change without expanding the parent issue.",
+      "Record concrete evidence that a reviewer can inspect."
+    ]
+  end
+
+  defp default_acceptance_criteria(_role) do
+    [
+      "Produce the requested artifact or decision.",
+      "Make the output reviewable from this issue."
+    ]
+  end
+
+  defp default_evidence_required(role) when role in ["engineer", "release_engineer"] do
+    [
+      "Linked PR or code_change work product when code changes are made.",
+      "Files changed and focused test output in the final `[delivery]` comment."
+    ]
+  end
+
+  defp default_evidence_required("qa_engineer") do
+    [
+      "Test plan or coverage matrix.",
+      "Pass/fail results with reproduction notes for any defect."
+    ]
+  end
+
+  defp default_evidence_required(_role) do
+    [
+      "Attached work product or owner-readable summary.",
+      "Evidence source and remaining risk in the final tagged comment."
+    ]
+  end
+
+  defp default_verification_required(role)
+       when role in ["engineer", "qa_engineer", "release_engineer"] do
+    [
+      "Run the smallest meaningful automated or manual verification.",
+      "Include exact command, scenario, or blocker if verification cannot run."
+    ]
+  end
+
+  defp default_verification_required(_role) do
+    [
+      "Check the artifact against the parent issue outcome.",
+      "Name what was verified and what still needs owner or reviewer judgment."
+    ]
+  end
+
+  defp default_definition_of_done(role) when role in ["engineer", "release_engineer"] do
+    [
+      "Repo evidence is attached or linked.",
+      "Focused verification is recorded and the issue is submitted for review."
+    ]
+  end
+
+  defp default_definition_of_done(_role) do
+    [
+      "The reviewable artifact is attached or summarized.",
+      "The next decision owner is named in the final tagged comment."
+    ]
+  end
 
   # Resolve a list of `depends_on` references and add them as blockers.
   # Each ref can be:
@@ -1323,7 +2184,9 @@ defmodule Cympho.AgentActions do
                 {:error, {:goal_not_mission, goal.goal_type}}
 
               true ->
-                seed_initiatives(issue, agent, goal, initiatives)
+                with :ok <- ensure_mission_initiatives_ready(initiatives) do
+                  seed_initiatives(issue, agent, goal, initiatives)
+                end
             end
         end
     end
@@ -1379,6 +2242,38 @@ defmodule Cympho.AgentActions do
       end
     end
   end
+
+  defp ensure_mission_initiatives_ready(initiatives) do
+    Enum.reduce_while(initiatives, :ok, fn raw, _acc ->
+      raw
+      |> normalize_string_keys()
+      |> ensure_mission_initiative_ready()
+      |> case do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp ensure_mission_initiative_ready(%{} = item) do
+    readiness =
+      IssueBriefReadiness.evaluate(%{
+        title: item["title"],
+        description: Map.get(item, "description", "")
+      })
+
+    case readiness.status do
+      :thin ->
+        {:error,
+         {:mission_initiative_too_thin, item["title"], readiness.next_prompt,
+          missing_readiness_labels(readiness), readiness.launch_scaffold}}
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp ensure_mission_initiative_ready(_item), do: {:error, :invalid_initiative}
 
   defp seed_one_initiative(issue, agent, goal, item, base_depth) do
     case find_recent_duplicate(issue.company_id, item["title"], goal.id) do
@@ -1470,51 +2365,249 @@ defmodule Cympho.AgentActions do
   defp do_spawn_agent(issue, agent, action) do
     role_atom = role_to_atom(action["role"])
 
-    spawn_attrs = %{
-      name: action["name"],
-      role: role_atom,
-      title: action["title"] || default_title_for_role(role_atom),
-      company_id: agent.company_id,
-      parent_id: agent.id,
-      adapter: action["adapter"] || agent.adapter,
-      instructions: action["instructions"]
-    }
+    spawn_attrs =
+      %{
+        name: action["name"],
+        role: role_atom,
+        title: action["title"] || default_title_for_role(role_atom),
+        company_id: agent.company_id,
+        parent_id: agent.id,
+        instructions: action["instructions"]
+      }
+      |> Map.merge(spawn_runtime_attrs_for_role(role_atom, agent.adapter, action["adapter"]))
 
-    case Agents.spawn_agent(spawn_attrs, agent.id) do
-      {:ok, new_agent} ->
-        _ =
-          system_comment(
-            issue,
-            "Hired new #{role_atom} agent #{new_agent.name} under #{agent.name || agent.id}."
-          )
+    with :ok <- ensure_spawn_authorized(agent, role_atom),
+         :ok <- ensure_spawn_capacity_gap(agent, role_atom),
+         :ok <- ensure_spawn_repo_runtime(role_atom, spawn_attrs),
+         {:spawn, result} <- {:spawn, Agents.spawn_agent(spawn_attrs, agent.id)} do
+      case result do
+        {:ok, new_agent} ->
+          assignment = assign_waiting_work_to_spawned_agent(new_agent)
 
-        {:ok,
-         %{
-           type: "spawn_agent",
-           agent_id: new_agent.id,
-           name: new_agent.name,
-           role: to_string(role_atom)
-         }}
+          _ =
+            system_comment(
+              issue,
+              spawn_agent_comment(new_agent, agent, assignment)
+            )
 
-      {:error, :pending_board_approval, approval_id} ->
-        {:ok,
-         %{
-           type: "spawn_agent",
-           pending_approval: true,
-           approval_id: approval_id
-         }}
+          {:ok,
+           %{
+             type: "spawn_agent",
+             agent_id: new_agent.id,
+             name: new_agent.name,
+             role: to_string(role_atom),
+             assigned_issue_ids: assignment.assigned_issue_ids,
+             assigned_count: assignment.assigned_count,
+             wake_count: assignment.wake_count
+           }}
 
-      {:error, :unauthorized_spawn} ->
-        {:error, :unauthorized_spawn}
+        {:error, :pending_board_approval, approval_id} ->
+          {:ok,
+           %{
+             type: "spawn_agent",
+             pending_approval: true,
+             approval_id: approval_id
+           }}
 
+        {:error, :unauthorized_spawn} ->
+          {:error, :unauthorized_spawn}
+
+        {:error, reason} ->
+          {:error, {:spawn_agent_failed, reason}}
+      end
+    else
       {:error, reason} ->
-        {:error, {:spawn_agent_failed, reason}}
+        {:error, reason}
     end
+  end
+
+  defp ensure_spawn_authorized(%Agent{} = caller, role) when is_atom(role) do
+    if Agents.spawn_authorized?(caller, role), do: :ok, else: {:error, :unauthorized_spawn}
+  end
+
+  defp ensure_spawn_authorized(_caller, _role), do: {:error, :unauthorized_spawn}
+
+  defp ensure_spawn_capacity_gap(%Agent{} = caller, role) when is_atom(role) do
+    eligible =
+      role
+      |> eligible_existing_agents(caller.company_id)
+      |> Enum.reject(&(&1.id == caller.id))
+      |> spawn_capacity_agents(role)
+      |> Enum.sort_by(fn agent ->
+        {Agents.count_active_assignments(agent.id), agent.name || ""}
+      end)
+
+    case eligible do
+      [] ->
+        :ok
+
+      candidates ->
+        {:error,
+         {:spawn_agent_existing_capacity, role,
+          Enum.map_join(Enum.take(candidates, 3), ", ", &agent_capacity_label/1)}}
+    end
+  end
+
+  defp ensure_spawn_capacity_gap(_caller, _role), do: :ok
+
+  defp eligible_existing_agents(role, company_id) when is_binary(company_id),
+    do: Agents.list_eligible_agents(role, company_id)
+
+  defp eligible_existing_agents(role, _company_id), do: Agents.list_eligible_agents(role)
+
+  defp spawn_capacity_agents(agents, role) when role in @repo_delivery_roles do
+    Enum.filter(
+      agents,
+      &Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(&1, load_secret_keys?: true)
+    )
+  end
+
+  defp spawn_capacity_agents(agents, _role), do: agents
+
+  defp agent_capacity_label(%Agent{} = agent) do
+    "#{agent.name || "Unnamed"} (#{String.slice(agent.id, 0, 8)}, " <>
+      "#{Agents.count_active_assignments(agent.id)}/#{agent.max_concurrent_jobs})"
   end
 
   defp role_to_atom(role), do: Agent.normalize_role(role)
 
   defp default_title_for_role(role), do: Agent.role_title(role)
+
+  defp spawn_runtime_attrs_for_role(role, _parent_adapter, requested_adapter)
+       when role in @repo_delivery_roles and requested_adapter in [nil, ""] do
+    repo_delivery_profile_attrs()
+  end
+
+  defp spawn_runtime_attrs_for_role(role, _parent_adapter, requested_adapter)
+       when role in @repo_delivery_roles do
+    %{adapter: requested_adapter}
+  end
+
+  defp spawn_runtime_attrs_for_role(role, parent_adapter, requested_adapter) do
+    %{adapter: spawn_adapter_for_role(role, parent_adapter, requested_adapter)}
+  end
+
+  defp repo_delivery_profile_attrs do
+    profile = RuntimeProfiles.get!("process-codex")
+
+    %{
+      adapter: profile.adapter,
+      config: profile.config,
+      runtime_config: Map.put(profile.runtime_config || %{}, "profile_id", profile.id)
+    }
+  end
+
+  defp ensure_spawn_repo_runtime(role, attrs) when role in @repo_delivery_roles do
+    if Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(attrs) do
+      :ok
+    else
+      {:error, {:spawn_agent_repo_runtime_required, role, Map.get(attrs, :adapter)}}
+    end
+  end
+
+  defp ensure_spawn_repo_runtime(_role, _attrs), do: :ok
+
+  defp assign_waiting_work_to_spawned_agent(%Agent{company_id: company_id, role: role} = agent)
+       when is_binary(company_id) do
+    case Cympho.Issues.AutoAssignment.assign_waiting_role_work_with_issues(company_id, role) do
+      {:ok, assigned_issues, queued_count} ->
+        add_spawn_assignment_receipts(assigned_issues, agent)
+        wake_count = enqueue_demand_backed_hire_wakes(assigned_issues, agent)
+
+        %{
+          assigned_count: length(assigned_issues),
+          assigned_issue_ids: Enum.map(assigned_issues, & &1.id),
+          queued_count: queued_count,
+          wake_count: wake_count
+        }
+
+      _ ->
+        empty_spawn_assignment()
+    end
+  end
+
+  defp assign_waiting_work_to_spawned_agent(_agent), do: empty_spawn_assignment()
+
+  defp empty_spawn_assignment do
+    %{assigned_count: 0, assigned_issue_ids: [], queued_count: 0, wake_count: 0}
+  end
+
+  defp add_spawn_assignment_receipts(assigned_issues, %Agent{} = agent) do
+    Enum.each(assigned_issues, fn issue ->
+      _ = system_comment(issue, spawn_assignment_receipt(issue, agent))
+    end)
+  end
+
+  defp spawn_assignment_receipt(%Issue{} = issue, %Agent{} = agent) do
+    role = Agent.normalize_role(issue.assigned_role) || agent.role
+    role_label = human_role(role)
+    name = agent.name || agent.id
+
+    "[handoff] Demand-backed hire assigned this #{role_label} issue to #{name}. " <>
+      "Why: queued #{role_label} work had #{spawn_staffing_gap_reason(role)}. " <>
+      "Current state: assigned and queued for manual dispatch. " <>
+      "Next decision: #{name} should produce delivery evidence, hand off to the right role, or block with a recoverable reason. " <>
+      "Restart packet: read the issue brief, acceptance criteria, latest comments, and this staffing receipt before acting."
+  end
+
+  defp spawn_staffing_gap_reason(role) when role in @repo_delivery_roles,
+    do: "no eligible repo-capable owner"
+
+  defp spawn_staffing_gap_reason(_role), do: "no eligible owner"
+
+  defp enqueue_demand_backed_hire_wakes(assigned_issues, %Agent{id: agent_id, role: role}) do
+    Enum.count(assigned_issues, fn issue ->
+      case Cympho.Orchestrator.Dispatcher.enqueue_wake(issue.id, "manual_dispatch", %{
+             "source" => "demand_backed_hire",
+             "agent_id" => agent_id,
+             "role" => to_string(role)
+           }) do
+        {:ok, _} -> true
+        _ -> false
+      end
+    end)
+  end
+
+  defp spawn_agent_comment(%Agent{} = new_agent, %Agent{} = parent, assignment) do
+    base =
+      "Hired new #{new_agent.role} agent #{new_agent.name} under #{parent.name || parent.id}."
+
+    cond do
+      assignment.assigned_count > 0 ->
+        base <>
+          " Assigned #{assignment.assigned_count} waiting #{plural_noun(assignment.assigned_count, "issue")} and queued #{assignment.wake_count} #{plural_noun(assignment.wake_count, "wake")}."
+
+      assignment.queued_count > 0 ->
+        base <>
+          " #{assignment.queued_count} waiting #{plural_noun(assignment.queued_count, "issue")} still need eligible capacity."
+
+      true ->
+        base <> " No matching waiting issues needed assignment."
+    end
+  end
+
+  defp plural_noun(1, noun), do: noun
+  defp plural_noun(_count, noun), do: noun <> "s"
+
+  defp spawn_adapter_for_role(_role, _parent_adapter, requested_adapter)
+       when requested_adapter not in [nil, ""],
+       do: requested_adapter
+
+  defp spawn_adapter_for_role(role, parent_adapter, _requested_adapter)
+       when role in @repo_delivery_roles do
+    if text_only_adapter?(parent_adapter),
+      do: default_repo_delivery_adapter(),
+      else: parent_adapter
+  end
+
+  defp spawn_adapter_for_role(_role, parent_adapter, _requested_adapter), do: parent_adapter
+
+  defp default_repo_delivery_adapter do
+    case Cympho.Adapters.Registry.default_adapter() do
+      adapter when adapter in [nil, ""] -> :claude_code
+      adapter -> if text_only_adapter?(adapter), do: :claude_code, else: adapter
+    end
+  end
 
   # Direct-assign an issue to a specific subordinate agent. The caller must
   # outrank the target (role_rank-wise) — without this guard a peer agent
@@ -1524,15 +2617,17 @@ defmodule Cympho.AgentActions do
     target_id = action["to_agent_id"]
     reason = action["reason"] || "Delegated by #{agent.name || agent.id}."
 
-    with {:ok, target} <- Agents.get_agent(target_id),
+    with {:ok, target} <- get_action_target_agent(target_id, "delegate"),
          :ok <- ensure_can_delegate(agent, target),
+         :ok <- ensure_delegate_delivery_brief_ready(issue, target, reason),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
              assignee_id: target.id,
              checkout_run_id: nil,
              checked_out_at: nil,
-             assigned_role: to_string(target.role)
+             assigned_role: to_string(target.role),
+             description: delegated_issue_description(issue, agent, target, reason)
            }),
          {:ok, _comment} <- maybe_agent_comment(issue, agent, tagged_handoff_note(reason)) do
       _ =
@@ -1542,6 +2637,55 @@ defmodule Cympho.AgentActions do
         })
 
       {:ok, %{type: "delegate", issue_id: updated.id, to_agent_id: target.id}}
+    end
+  end
+
+  defp delegated_issue_description(%Issue{} = issue, %Agent{} = agent, %Agent{} = target, reason) do
+    base =
+      issue.description
+      |> to_string()
+      |> String.trim()
+
+    brief =
+      [
+        "## Manager delegation brief",
+        "",
+        "From: #{agent.name || agent.id} (#{human_role(agent.role)})",
+        "To: #{target.name || target.id} (#{human_role(target.role)})",
+        "",
+        "Directive:",
+        reason |> to_string() |> String.trim()
+      ]
+      |> Enum.join("\n")
+      |> String.trim()
+
+    [base, brief]
+    |> Enum.reject(&blank?/1)
+    |> Enum.join("\n\n")
+  end
+
+  defp ensure_delegate_delivery_brief_ready(%Issue{} = issue, %Agent{} = target, reason) do
+    if target.role in @repo_delivery_roles do
+      readiness =
+        DeliveryBriefReadiness.evaluate(%{
+          title: issue.title,
+          description:
+            [issue.description, reason]
+            |> Enum.reject(&blank?/1)
+            |> Enum.join("\n")
+        })
+
+      case readiness.status do
+        :thin ->
+          {:error,
+           {:delegate_delivery_brief_too_thin, target.role, readiness.next_prompt,
+            missing_readiness_labels(readiness), readiness.repair_scaffold}}
+
+        _ ->
+          :ok
+      end
+    else
+      :ok
     end
   end
 
@@ -1572,7 +2716,8 @@ defmodule Cympho.AgentActions do
 
     target_agent_id = resolve_escalation_target(agent, target_role)
 
-    with {:ok, updated} <-
+    with :ok <- ensure_escalation_reason_ready(reason),
+         {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :blocked,
              assignee_id: target_agent_id,
@@ -1662,6 +2807,7 @@ defmodule Cympho.AgentActions do
     with :ok <- ensure_governance_quality(action, "intervene"),
          {:ok, target} <- resolve_intervene_target(agent, action),
          :ok <- ensure_can_delegate(agent, target),
+         :ok <- ensure_intervene_delivery_brief_ready(issue, target.role, reason, "reassign"),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
@@ -1712,6 +2858,7 @@ defmodule Cympho.AgentActions do
     reason = action["reason"] || "Supervisor forced handoff to #{target_role}."
 
     with :ok <- ensure_governance_quality(action, "intervene"),
+         :ok <- ensure_intervene_delivery_brief_ready(issue, target_role, reason, "force_handoff"),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
@@ -1750,6 +2897,56 @@ defmodule Cympho.AgentActions do
     end
   end
 
+  defp ensure_intervene_delivery_brief_ready(%Issue{} = issue, role, reason, mode) do
+    role = role_to_atom(role)
+
+    if role in @repo_delivery_roles do
+      readiness =
+        DeliveryBriefReadiness.evaluate(%{
+          title: issue.title,
+          description:
+            [issue.description, reason]
+            |> Enum.reject(&blank?/1)
+            |> Enum.join("\n")
+        })
+
+      case readiness.status do
+        :thin ->
+          {:error,
+           {:intervene_delivery_brief_too_thin, mode, role, readiness.next_prompt,
+            missing_readiness_labels(readiness), readiness.repair_scaffold}}
+
+        _ ->
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp ensure_intervene_unblock_delivery_brief_ready(%Issue{} = issue, reason) do
+    case delivery_role_for_issue(issue) do
+      role when role in @repo_delivery_roles ->
+        ensure_intervene_delivery_brief_ready(issue, role, reason, "unblock")
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp delivery_role_for_issue(%Issue{assigned_role: role}) when is_binary(role) and role != "" do
+    role_to_atom(role)
+  end
+
+  defp delivery_role_for_issue(%Issue{assignee_id: assignee_id}) when is_binary(assignee_id) do
+    case Agents.get_agent(assignee_id) do
+      {:ok, %Agent{role: role}} -> role
+      _ -> nil
+    end
+  end
+
+  defp delivery_role_for_issue(_issue), do: nil
+
   # `unblock` is the missing inverse of `block_issue`. The supervisor has
   # decided the blocker no longer applies (or never did) — flip back to
   # :todo, clear assignee so the dispatcher can re-route.
@@ -1757,6 +2954,7 @@ defmodule Cympho.AgentActions do
     reason = action["reason"] || "Supervisor unblocked this issue."
 
     with :ok <- ensure_governance_quality(action, "intervene"),
+         :ok <- ensure_intervene_unblock_delivery_brief_ready(issue, reason),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
@@ -1819,7 +3017,7 @@ defmodule Cympho.AgentActions do
   # (using the same router the dispatcher uses for fallback routing).
   defp resolve_intervene_target(_agent, %{"to_agent_id" => target_id})
        when is_binary(target_id) and target_id != "" do
-    Agents.get_agent(target_id)
+    get_action_target_agent(target_id, "intervene")
   end
 
   defp resolve_intervene_target(%Agent{company_id: company_id}, %{"to_role" => role_str})
@@ -1964,6 +3162,22 @@ defmodule Cympho.AgentActions do
   defp blank?(value) when is_binary(value), do: String.trim(value) == ""
   defp blank?(_), do: false
 
+  defp get_action_target_agent(target_id, action_name) do
+    with :ok <- validate_uuid_string(target_id, "to_agent_id") do
+      case Agents.get_agent(target_id) do
+        {:ok, agent} -> {:ok, agent}
+        {:error, :not_found} -> {:error, {:agent_target_not_found, action_name, target_id}}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:error, {:invalid_uuid, _field}} ->
+        {:error, {:invalid_agent_target_id, action_name, target_id}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp maybe_put_kw(opts, _key, nil), do: opts
   defp maybe_put_kw(opts, key, value), do: Keyword.put(opts, key, value)
 
@@ -2008,7 +3222,8 @@ defmodule Cympho.AgentActions do
       |> normalize_map()
       |> Map.put("pr_iteration_count", iteration)
 
-    with {:ok, _comment} <- system_comment(issue, issue_body),
+    with :ok <- ensure_force_fix_pr_feedback_ready(action),
+         {:ok, _comment} <- system_comment(issue, issue_body),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :in_progress,
@@ -2197,11 +3412,74 @@ defmodule Cympho.AgentActions do
 
   @block_reason_kinds ~w(external_dep ci_failure env_unavailable owner_input_needed conflicting_change other)
 
+  @block_issue_reason_checks [
+    %{
+      key: :cause,
+      label: "Cause",
+      detail: "Name the blocker or why work cannot continue.",
+      pattern:
+        ~r/\b(cause|blocker|blocked|blocked on|waiting|missing|because|unavailable|down|failure|failed|conflict|owner input|dependency)\b/i
+    },
+    %{
+      key: :needs,
+      label: "Needs",
+      detail:
+        "Name the owner, system, credential, decision, artifact, or event needed to unblock.",
+      pattern:
+        ~r/\b(needs?|requires?|owner must|must|waiting for|blocked on|until|after|credential|api key|decision|approval|artifact|dependency)\b/i
+    },
+    %{
+      key: :current_state,
+      label: "Current state",
+      detail: "State what is true now, impact, or what was already attempted.",
+      pattern:
+        ~r/\b(current state|status|impact|what happened|attempted fix|tried|inspected|verified|no agent work|agent work remains|ready for owner signoff)\b/i
+    },
+    %{
+      key: :next_decision,
+      label: "Next decision",
+      detail: "Tell the next owner what decision or action resumes the issue.",
+      pattern:
+        ~r/\b(next decision|next action|restart packet|resume|owner accepts|reopens|verify|close|unblock|rerun|continue)\b/i
+    }
+  ]
+
+  @request_changes_feedback_checks [
+    %{
+      key: :evidence_inspected,
+      label: "Evidence inspected",
+      detail: "Name the PR, diff, work product, test output, log, or artifact you reviewed.",
+      pattern:
+        ~r/\b(evidence inspected|inspected|reviewed|pr|pull request|diff|work product|artifact|test output|ci|log)\b/i
+    },
+    %{
+      key: :required_changes,
+      label: "Required changes",
+      detail: "List each concrete change the delivery agent must make.",
+      pattern:
+        ~r/(^|\n)\s*[-*]\s+\S|\b(required changes?|must|fix|add|remove|update|change|cover|handle|rework|replace)\b/i
+    },
+    %{
+      key: :verification_required,
+      label: "Verification required",
+      detail:
+        "Name the test, command, CI check, smoke path, or reproduction that proves the fix.",
+      pattern:
+        ~r/\b(verification|required test|test|spec|ci|smoke|repro|reproduce|run|coverage)\b/i
+    },
+    %{
+      key: :next_action,
+      label: "Next action",
+      detail: "Tell the agent how to resume and when to resubmit for review.",
+      pattern:
+        ~r/\b(next action|next decision|restart packet|resubmit|submit_review|ready for review|return for review|after fixing)\b/i
+    }
+  ]
+
   # Governance actions (request_changes, block_issue, intervene) flip an issue
   # away from forward progress on the authority of a CEO/CTO. We require
   # enough reasoning that the engineer can act and the audit trail is useful.
-  # The bar is "minimum substance" — actually-actionable specifics are still
-  # the responsibility of the reviewer; we just block empty-string rejections.
+  # The bar is a recoverable packet: enough signal for the next owner to act.
   defp ensure_governance_quality(action, type) do
     reason = action |> Map.get("reason", "") |> to_string() |> String.trim()
 
@@ -2211,7 +3489,8 @@ defmodule Cympho.AgentActions do
 
       "block_issue" ->
         with :ok <- validate_governance_reason(reason, 10, "block_issue"),
-             :ok <- validate_block_reason_kind(action) do
+             :ok <- validate_block_reason_kind(action),
+             :ok <- ensure_block_issue_reason_ready(reason) do
           :ok
         end
 
@@ -2231,6 +3510,176 @@ defmodule Cympho.AgentActions do
       true ->
         :ok
     end
+  end
+
+  defp ensure_block_issue_reason_ready(reason) do
+    missing = missing_blocker_reason_signals(reason)
+
+    case missing do
+      [] ->
+        :ok
+
+      _ ->
+        {:error,
+         {:block_issue_reason_too_thin, missing, block_issue_reason_scaffold(reason, missing)}}
+    end
+  end
+
+  defp ensure_escalation_reason_ready(reason) do
+    missing = missing_blocker_reason_signals(reason)
+
+    case missing do
+      [] ->
+        :ok
+
+      _ ->
+        {:error,
+         {:escalation_reason_too_thin, missing, escalation_reason_scaffold(reason, missing)}}
+    end
+  end
+
+  defp missing_blocker_reason_signals(reason) do
+    @block_issue_reason_checks
+    |> Enum.reject(&Regex.match?(&1.pattern, reason))
+    |> Enum.map(& &1.label)
+  end
+
+  defp block_issue_reason_scaffold(reason, missing) do
+    current =
+      reason
+      |> to_string()
+      |> String.trim()
+      |> case do
+        "" -> nil
+        value -> "Current blocker: #{value}"
+      end
+
+    [
+      current,
+      "[blocked] Cause: <why work cannot continue>",
+      "Attempted fix: <what was tried or inspected>",
+      "Needs: <owner, system, credential, decision, artifact, or event required>",
+      "Current state: <what remains true now>",
+      "Next decision: <who decides or acts next>",
+      "Restart packet: <where the next owner should resume>",
+      "Missing blocker signals: #{Enum.join(missing, ", ")}."
+    ]
+    |> Enum.reject(&blank?/1)
+    |> Enum.join("\n")
+  end
+
+  defp escalation_reason_scaffold(reason, missing) do
+    current =
+      reason
+      |> to_string()
+      |> String.trim()
+      |> case do
+        "" -> nil
+        value -> "Current escalation: #{value}"
+      end
+
+    [
+      current,
+      "[blocked] Cause: <why this cannot be solved at your authority level>",
+      "Attempted fix: <what you tried or inspected>",
+      "Needs: <decision, permission, scope cut, owner input, or resource required>",
+      "Current state: <what is true now>",
+      "Next decision: <what the supervisor must decide>",
+      "Restart packet: <where the supervisor should resume>",
+      "Missing escalation signals: #{Enum.join(missing, ", ")}."
+    ]
+    |> Enum.reject(&blank?/1)
+    |> Enum.join("\n")
+  end
+
+  defp ensure_request_changes_feedback_ready(%{"role" => role, "reason" => reason}) do
+    role = role_to_atom(role)
+
+    if role in @repo_delivery_roles do
+      case missing_review_feedback_signals(reason) do
+        [] ->
+          :ok
+
+        missing ->
+          {:error,
+           {:request_changes_feedback_too_thin, role, missing,
+            request_changes_feedback_scaffold(reason, missing)}}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp ensure_request_changes_feedback_ready(_action), do: :ok
+
+  defp ensure_force_fix_pr_feedback_ready(action) do
+    feedback = review_feedback_text(action)
+
+    case missing_review_feedback_signals(feedback) do
+      [] ->
+        :ok
+
+      missing ->
+        {:error,
+         {:force_fix_pr_feedback_too_thin, missing,
+          request_changes_feedback_scaffold(feedback, missing)}}
+    end
+  end
+
+  defp missing_review_feedback_signals(text) do
+    text = to_string(text || "")
+
+    @request_changes_feedback_checks
+    |> Enum.reject(&Regex.match?(&1.pattern, text))
+    |> Enum.map(& &1.label)
+  end
+
+  defp review_feedback_text(action) do
+    comments =
+      action
+      |> Map.get("comments", [])
+      |> List.wrap()
+      |> Enum.map_join("\n", fn
+        %{} = comment ->
+          [
+            comment["path"] || comment[:path],
+            comment["line"] || comment[:line],
+            comment["body"] || comment[:body]
+          ]
+          |> Enum.reject(&blank?/1)
+          |> Enum.map_join(" ", &to_string/1)
+
+        value ->
+          to_string(value)
+      end)
+
+    [action["reason"], comments]
+    |> Enum.reject(&blank?/1)
+    |> Enum.join("\n")
+  end
+
+  defp request_changes_feedback_scaffold(reason, missing) do
+    current =
+      reason
+      |> to_string()
+      |> String.trim()
+      |> case do
+        "" -> nil
+        value -> "Current feedback: #{value}"
+      end
+
+    [
+      current,
+      "[review] Verdict: request changes",
+      "Evidence inspected: <PR, diff, work product, test output, log, or artifact reviewed>",
+      "Required changes:",
+      "- <specific file, behavior, test, or artifact gap to fix>",
+      "Verification required: <command, CI check, smoke path, or reproduction>",
+      "Next action: fix the listed gaps, attach evidence, and resubmit for review.",
+      "Missing review signals: #{Enum.join(missing, ", ")}."
+    ]
+    |> Enum.reject(&blank?/1)
+    |> Enum.join("\n")
   end
 
   defp validate_block_reason_kind(action) do
@@ -2362,7 +3811,7 @@ defmodule Cympho.AgentActions do
   defp quality_gate_instruction(_action_type, _gaps),
     do: "Address the digest quality checklist and retry."
 
-  defp find_recent_duplicate(company_id, title, goal_id) do
+  defp find_recent_duplicate(company_id, title, goal_id, parent_id \\ :any) do
     since = DateTime.utc_now() |> DateTime.add(-24, :hour)
 
     query =
@@ -2379,6 +3828,13 @@ defmodule Cympho.AgentActions do
         from(i in query, where: i.goal_id == ^goal_id)
       else
         from(i in query, where: is_nil(i.goal_id))
+      end
+
+    query =
+      case parent_id do
+        :any -> query
+        nil -> from(i in query, where: is_nil(i.parent_id))
+        parent_id -> from(i in query, where: i.parent_id == ^parent_id)
       end
 
     Repo.one(query)
@@ -2603,6 +4059,15 @@ defmodule Cympho.AgentActions do
         {:error, {:required, field}}
     end
   end
+
+  defp validate_uuid_string(value, field) when is_binary(value) do
+    case Ecto.UUID.cast(value) do
+      {:ok, _uuid} -> :ok
+      :error -> {:error, {:invalid_uuid, field}}
+    end
+  end
+
+  defp validate_uuid_string(_value, field), do: {:error, {:invalid_uuid, field}}
 
   defp validate_role(role) when role in @roles, do: :ok
   defp validate_role(_role), do: {:error, {:invalid_role, @roles}}

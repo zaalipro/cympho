@@ -19,25 +19,31 @@ defmodule Cympho.RuntimeOperations do
   alias Cympho.Activities.Activity
   alias Cympho.Comments.Comment
   alias Cympho.HeartbeatEngine.Run
+  alias Cympho.IssueBriefReadiness
   alias Cympho.IssueDigest
   alias Cympho.IssueMemory
   alias Cympho.Issues.Issue
   alias Cympho.Issues
+  alias Cympho.OrgHealth
   alias Cympho.Orchestrator.Dispatcher.Router
   alias Cympho.Wakes.AgentWake
   alias Cympho.Repo
   alias Cympho.ReviewNudges
   alias Cympho.RuntimeCapacity
   alias Cympho.RuntimeProfiles
-  alias Cympho.Secrets
+  alias Cympho.Secrets.Secret
+  alias Cympho.Wakes
   alias Cympho.WorkProducts.IssueWorkProduct
 
   @active_run_statuses ~w(pending queued running)
   @failed_run_statuses ~w(failed timed_out)
   @review_nudge_statuses ~w(pending running consumed)
+  @runtime_launch_checklist_path "/operations#runtime-launch-checklist"
   @stale_nudge_minutes 30
+  @stale_comment_wake_minutes 120
   @stale_checkout_minutes 120
   @stale_checkout_limit 50
+  @wake_backlog_display_limit 6
   @contract_issue_limit 60
   @dispatch_preview_statuses Application.compile_env(:cympho, [:orchestrator, :active_states], [
                                :todo,
@@ -56,6 +62,7 @@ defmodule Cympho.RuntimeOperations do
   @owner_revision_marker "owner reopened the ceo verification update"
   @ceo_run_feedback_prefixes [
     "Agent response did not include a valid cympho-actions block:",
+    "Agent cympho-actions block parsed, but action execution failed:",
     "Agent actions did not resolve the current issue.",
     "Runtime preflight failed:",
     "Runtime command not found:",
@@ -78,8 +85,7 @@ defmodule Cympho.RuntimeOperations do
   """
   @spec runtime_launch_command() :: String.t()
   def runtime_launch_command do
-    runtime_launch_env()
-    |> Enum.map(fn {env_var, _description} -> "#{env_var}=1" end)
+    runtime_launch_assignments()
     |> Enum.join(" ")
     |> Kernel.<>(" mise exec -- mix phx.server")
   end
@@ -90,6 +96,36 @@ defmodule Cympho.RuntimeOperations do
   @spec focused_runtime_launch_command(String.t()) :: String.t()
   def focused_runtime_launch_command(issue_id) when is_binary(issue_id) do
     "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue_id} " <> runtime_launch_command()
+  end
+
+  defp runtime_launch_assignments do
+    [
+      runtime_port_assignment()
+      | Enum.map(runtime_launch_env(), fn {env_var, _description} -> "#{env_var}=1" end)
+    ]
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp runtime_port_assignment do
+    case runtime_port() do
+      nil -> nil
+      port -> "PORT=#{port}"
+    end
+  end
+
+  defp runtime_port do
+    System.get_env("PORT") || endpoint_port()
+  end
+
+  defp endpoint_port do
+    :cympho
+    |> Application.get_env(CymphoWeb.Endpoint, [])
+    |> get_in([:http, :port])
+    |> case do
+      port when is_integer(port) -> Integer.to_string(port)
+      port when is_binary(port) and port != "" -> port
+      _ -> nil
+    end
   end
 
   @doc """
@@ -141,8 +177,11 @@ defmodule Cympho.RuntimeOperations do
     {:ok, %{checked: 0, released: 0, failed: 0}}
   end
 
+  def stale_comment_wake_minutes, do: @stale_comment_wake_minutes
+
   def snapshot(company_id, opts \\ []) do
     agents = agents(company_id)
+    secret_summary_by_agent = secret_summary_by_agent(company_id, agents)
     active_counts = active_run_counts(company_id)
     checked_out_issues = checked_out_issue_snapshot(company_id)
     slot_counts = slot_hold_counts(active_counts, checked_out_issues.counts.by_agent)
@@ -157,19 +196,32 @@ defmodule Cympho.RuntimeOperations do
         checked_out_issues: checked_out_issues.counts.total,
         stale_checked_out_issues: checked_out_issues.counts.stale,
         stale_checkouts: checked_out_issues.issues,
-        cleanup_available?: sum_counts(active_counts) > 0 or checked_out_issues.counts.stale > 0
+        cleanup_available?: sum_counts(active_counts) > 0 or checked_out_issues.counts.stale > 0,
+        repo_delivery: repo_delivery_coverage(agents, secret_summary_by_agent)
       })
 
     host = host_snapshot(capacity)
     runtime_enablement = runtime_enablement(runtime_mode, services, capacity)
-    launch_preview = launch_preview(company_id, runtime_mode, opts)
+    launch_preview = launch_preview(company_id, runtime_mode, opts, secret_summary_by_agent)
     ceo_outcomes = ceo_outcome_snapshot(company_id, agents)
-    delegated_work = delegated_work_snapshot(company_id, runtime_mode, opts)
+
+    delegated_work =
+      delegated_work_snapshot(company_id, runtime_mode, opts, secret_summary_by_agent)
+
     owner_signoffs = owner_signoff_snapshot(company_id)
-    health = health_summary(agents)
+    org_health = org_health_snapshot(company_id)
+
+    ceo_flow =
+      ceo_flow_snapshot(agents, launch_preview, ceo_outcomes, delegated_work, owner_signoffs)
+
+    launch_plan =
+      launch_plan(runtime_mode, runtime_enablement, launch_preview, ceo_flow, delegated_work)
+
+    health = health_summary(agents, secret_summary_by_agent)
     pressure_agents = pressure_agents(agents, active_counts)
     prompt_radar = prompt_radar(agents)
     review_nudges = review_nudge_snapshot(company_id)
+    wake_queue = wake_queue_snapshot(company_id)
     recent_failures = recent_failures(company_id)
     contract_failures = contract_failure_snapshot(company_id, agents)
 
@@ -179,10 +231,12 @@ defmodule Cympho.RuntimeOperations do
         services,
         capacity,
         host,
+        org_health,
         health,
         pressure_agents,
         prompt_radar,
         review_nudges,
+        wake_queue,
         contract_failures,
         recent_failures
       )
@@ -193,16 +247,20 @@ defmodule Cympho.RuntimeOperations do
       capacity: capacity,
       host: host,
       runtime_enablement: runtime_enablement,
+      launch_plan: launch_plan,
       launch_preview: launch_preview,
       ceo_outcomes: ceo_outcomes,
+      ceo_flow: ceo_flow,
       delegated_work: delegated_work,
       owner_signoffs: owner_signoffs,
       checked_out_issues: checked_out_issues,
       doctor: doctor,
+      org_health: org_health,
       health: health,
       pressure_agents: pressure_agents,
       prompt_radar: prompt_radar,
       review_nudges: review_nudges,
+      wake_queue: wake_queue,
       contract_failures: contract_failures,
       recent_failures: recent_failures,
       next_actions:
@@ -214,12 +272,20 @@ defmodule Cympho.RuntimeOperations do
           pressure_agents,
           prompt_radar,
           review_nudges,
+          wake_queue,
           contract_failures,
+          ceo_outcomes,
           owner_signoffs,
+          org_health,
           delegated_work
         )
     }
   end
+
+  defp org_health_snapshot(company_id) when is_binary(company_id),
+    do: OrgHealth.snapshot(company_id)
+
+  defp org_health_snapshot(_company_id), do: OrgHealth.snapshot(nil)
 
   def services do
     [
@@ -392,6 +458,47 @@ defmodule Cympho.RuntimeOperations do
     "Required dispatch services are enabled. #{disabled} optional automation service#{plural(disabled)} remain disabled."
   end
 
+  defp secret_summary_by_agent(company_id, agents)
+       when is_binary(company_id) and is_list(agents) do
+    agents = Enum.filter(agents, &(is_binary(&1.id) and &1.id != ""))
+    agent_ids = Enum.map(agents, & &1.id)
+
+    if agent_ids == [] do
+      %{}
+    else
+      secrets =
+        Secret
+        |> where([s], s.company_id == ^company_id)
+        |> where([s], s.is_active == true)
+        |> where(
+          [s],
+          s.scope in ["company", "instance"] or
+            (s.scope == "agent" and s.scope_id in ^agent_ids)
+        )
+        |> select([s], %{key: s.key, scope: s.scope, scope_id: s.scope_id})
+        |> order_by([s], asc: s.key)
+        |> Repo.all()
+
+      shared = Enum.filter(secrets, &(&1.scope in ["company", "instance"]))
+      by_agent = secrets |> Enum.filter(&(&1.scope == "agent")) |> Enum.group_by(& &1.scope_id)
+
+      Map.new(agents, fn agent ->
+        {agent.id, secret_summary(shared ++ Map.get(by_agent, agent.id, []))}
+      end)
+    end
+  end
+
+  defp secret_summary_by_agent(_company_id, agents) when is_list(agents) do
+    Map.new(agents, fn agent -> {agent.id, %{count: 0, keys: []}} end)
+  end
+
+  defp secret_summary_by_agent(_company_id, _agents), do: %{}
+
+  defp secret_summary(secrets) do
+    keys = Enum.map(secrets, & &1.key)
+    %{count: length(keys), keys: keys}
+  end
+
   defp service_status(false, _running?), do: :disabled
   defp service_status(true, true), do: :running
   defp service_status(true, false), do: :not_running
@@ -485,6 +592,129 @@ defmodule Cympho.RuntimeOperations do
     "#{stale_checkouts} stale checked-out issue#{plural(stale_checkouts)} still hold agent capacity. Recover stale runtime state before enabling dispatch."
   end
 
+  defp repo_delivery_coverage(agents, secret_summary_by_agent) do
+    entries =
+      agents
+      |> Enum.filter(&(agent_role_atom(&1) in Agent.pr_delivery_roles()))
+      |> Enum.map(&repo_delivery_agent_entry(&1, secret_summary_by_agent))
+
+    repo_capable_entries = Enum.filter(entries, & &1.repo_capable?)
+    text_only_entries = Enum.reject(entries, & &1.repo_capable?)
+    repo_slots = Enum.reduce(repo_capable_entries, 0, &(&1.max_concurrent_jobs + &2))
+    text_only_slots = Enum.reduce(text_only_entries, 0, &(&1.max_concurrent_jobs + &2))
+    first_target = List.first(text_only_entries) || List.first(entries)
+
+    status =
+      cond do
+        repo_slots > 0 -> :ready
+        entries == [] -> :missing
+        true -> :text_only
+      end
+
+    %{
+      status: status,
+      label: repo_delivery_label(status),
+      summary: repo_delivery_summary(status, repo_slots, text_only_slots),
+      hint: repo_delivery_hint(status),
+      repo_capable_agents: length(repo_capable_entries),
+      text_only_agents: length(text_only_entries),
+      repo_capable_slots: repo_slots,
+      text_only_slots: text_only_slots,
+      target_path: repo_delivery_target_path(first_target),
+      target_label: repo_delivery_target_label(status),
+      hire_target_path: repo_delivery_hire_target_path(status),
+      hire_target_label: repo_delivery_hire_target_label(status)
+    }
+  end
+
+  defp repo_delivery_agent_entry(%Agent{} = agent, secret_summary_by_agent) do
+    adapter = adapter_name(agent.adapter)
+    secret_keys = secret_keys_for_agent(secret_summary_by_agent, agent.id)
+
+    %{
+      id: agent.id,
+      name: agent.name,
+      role: agent.role,
+      adapter: adapter,
+      repo_capable?:
+        Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(agent, secret_keys: secret_keys),
+      max_concurrent_jobs: positive_int(agent.max_concurrent_jobs, 1)
+    }
+  end
+
+  defp secret_keys_for_agent(secret_summary_by_agent, agent_id)
+       when is_map(secret_summary_by_agent) and is_binary(agent_id) do
+    case Map.get(secret_summary_by_agent, agent_id) do
+      %{keys: keys} when is_list(keys) -> keys
+      %{"keys" => keys} when is_list(keys) -> keys
+      _ -> []
+    end
+  end
+
+  defp secret_keys_for_agent(_secret_summary_by_agent, _agent_id), do: []
+
+  defp repo_delivery_label(:ready), do: "Repo-ready"
+  defp repo_delivery_label(:text_only), do: "Text-only delivery"
+  defp repo_delivery_label(:missing), do: "No repo lane"
+
+  defp repo_delivery_summary(:ready, repo_slots, text_only_slots) do
+    "#{repo_slots} repo-capable delivery slot#{plural(repo_slots)} available; #{text_only_slots} text-only planning slot#{plural(text_only_slots)}."
+  end
+
+  defp repo_delivery_summary(:text_only, _repo_slots, text_only_slots) do
+    "#{text_only_slots} delivery slot#{plural(text_only_slots)} can plan, but none can edit files, run tests, create branches, or open PRs."
+  end
+
+  defp repo_delivery_summary(:missing, _repo_slots, _text_only_slots) do
+    "No Engineer, QA Engineer, or Release Engineer runtime is ready to produce repo artifacts."
+  end
+
+  defp repo_delivery_hint(:ready) do
+    "CEO and CTO work can route implementation to a runtime that can produce reviewable repo evidence."
+  end
+
+  defp repo_delivery_hint(:text_only) do
+    "Switch one delivery agent to Codex, Claude Code, Cursor, a coding Process preset, or Agrenting push delivery before expecting code changes."
+  end
+
+  defp repo_delivery_hint(:missing) do
+    "Add a repo-capable engineer before launching software-delivery work."
+  end
+
+  defp repo_delivery_target_path(%{id: id}) when is_binary(id) do
+    "/agents/#{id}?tab=configuration#agent-runtime-profile"
+  end
+
+  defp repo_delivery_target_path(_entry) do
+    "/agents/new?" <>
+      URI.encode_query(%{
+        role: "engineer",
+        name: "Repo-capable Engineer",
+        runtime_profile_id: "process-codex",
+        return_to: "/operations#runtime-capacity"
+      })
+  end
+
+  defp repo_delivery_target_label(:ready), do: "Review delivery lane"
+  defp repo_delivery_target_label(:text_only), do: "Open runtime profile"
+  defp repo_delivery_target_label(:missing), do: "Add engineer"
+
+  defp repo_delivery_hire_target_path(:ready), do: nil
+
+  defp repo_delivery_hire_target_path(_status) do
+    "/agents/new?" <>
+      URI.encode_query(%{
+        role: "engineer",
+        name: "Repo-capable Engineer",
+        runtime_profile_id: "process-codex",
+        return_to: "/operations#runtime-capacity"
+      })
+  end
+
+  defp repo_delivery_hire_target_label(:text_only), do: "Hire repo engineer"
+  defp repo_delivery_hire_target_label(:missing), do: "Hire repo engineer"
+  defp repo_delivery_hire_target_label(_status), do: nil
+
   defp runtime_launch_env do
     [
       {"CYMPHO_ORCHESTRATOR_ENABLED", "Starts queued issue dispatch and agent sessions."},
@@ -516,7 +746,7 @@ defmodule Cympho.RuntimeOperations do
     end
   end
 
-  defp launch_preview(nil, _runtime_mode, _opts) do
+  defp launch_preview(nil, _runtime_mode, _opts, _secret_summary_by_agent) do
     %{
       total_candidates: 0,
       shown: 0,
@@ -528,14 +758,16 @@ defmodule Cympho.RuntimeOperations do
     }
   end
 
-  defp launch_preview(company_id, runtime_mode, opts) do
+  defp launch_preview(company_id, runtime_mode, opts, secret_summary_by_agent) do
     autonomy_enabled? = runtime_autonomy_enabled?(runtime_mode)
 
     candidates =
       company_id
       |> dispatch_candidate_issues()
       |> Enum.with_index(1)
-      |> Enum.map(fn {issue, index} -> launch_candidate(issue, index, autonomy_enabled?) end)
+      |> Enum.map(fn {issue, index} ->
+        launch_candidate(issue, index, autonomy_enabled?, secret_summary_by_agent)
+      end)
 
     focus_issue_id = dispatch_focus_issue_id()
 
@@ -556,6 +788,7 @@ defmodule Cympho.RuntimeOperations do
       max_concurrent: @dispatch_max_concurrent,
       focus_issue_id: focus_issue_id,
       focused?: not is_nil(focus_issue_id),
+      focused_count: Enum.count(candidates, & &1.dispatch_pinned?),
       preflight_counts: launch_preflight_counts(candidates),
       candidates: visible_candidates
     }
@@ -594,11 +827,12 @@ defmodule Cympho.RuntimeOperations do
 
   defp runtime_autonomy_enabled?(_runtime_mode), do: false
 
-  defp launch_candidate(issue, index, autonomy_enabled?) do
+  defp launch_candidate(issue, index, autonomy_enabled?, secret_summary_by_agent) do
     role = Router.infer_role(issue)
     first_poll? = index <= @dispatch_max_concurrent
     dispatch_pinned? = Issues.dispatch_pinned?(issue)
-    preflight = launch_preflight(issue, autonomy_enabled?)
+    preflight = launch_preflight(issue, autonomy_enabled?, secret_summary_by_agent)
+    brief_readiness = launch_brief_readiness(issue, role, preflight)
 
     %{
       id: issue.id,
@@ -619,7 +853,10 @@ defmodule Cympho.RuntimeOperations do
       dispatch_pinned?: dispatch_pinned?,
       dispatch_pinned_at: Issues.dispatch_pinned_at(issue),
       focused_command: focused_runtime_launch_command(issue.id),
-      ceo_launch_brief: ceo_launch_brief(issue, role, preflight, dispatch_pinned?),
+      brief_readiness: brief_readiness,
+      brief_repair_scaffold: brief_repair_scaffold(brief_readiness),
+      ceo_launch_brief:
+        ceo_launch_brief(issue, role, preflight, dispatch_pinned?, brief_readiness),
       preflight: preflight
     }
   end
@@ -632,8 +869,12 @@ defmodule Cympho.RuntimeOperations do
   defp launch_dispatch_label(false, true), do: "First poll"
   defp launch_dispatch_label(false, false), do: "Later"
 
-  defp launch_preflight(issue, autonomy_enabled?) do
-    preflight = Cympho.RuntimePreflight.for_issue(issue, autonomy_enabled?: autonomy_enabled?)
+  defp launch_preflight(issue, autonomy_enabled?, secret_summary_by_agent) do
+    preflight =
+      Cympho.RuntimePreflight.for_issue(issue,
+        autonomy_enabled?: autonomy_enabled?,
+        secret_summary_by_agent: secret_summary_by_agent
+      )
 
     %{
       status: preflight.status,
@@ -658,13 +899,22 @@ defmodule Cympho.RuntimeOperations do
 
   defp launch_assignee_name(_issue, _preflight), do: "Auto-route"
 
-  defp ceo_launch_brief(issue, role, preflight, dispatch_pinned?) do
+  defp launch_brief_readiness(issue, role, preflight) do
+    if ceo_role?(role) or ceo_role?(preflight.agent_role) do
+      IssueBriefReadiness.evaluate(issue)
+    end
+  end
+
+  defp ceo_launch_brief(issue, role, preflight, dispatch_pinned?, brief_readiness) do
     if ceo_role?(role) or ceo_role?(preflight.agent_role) do
       [
         "CEO launch brief",
         "Issue: #{issue_identifier(issue)} · #{issue.title || "Untitled issue"}",
         "Status: #{issue.status} · Priority: #{issue.priority}",
         "Target: #{ceo_launch_target(preflight)}",
+        brief_readiness_line(brief_readiness),
+        brief_readiness_next_line(brief_readiness),
+        brief_repair_scaffold_block(brief_readiness),
         "Preflight: #{preflight.label} · #{preflight.summary}",
         preflight_checks_line(preflight),
         first_action_line(preflight),
@@ -678,6 +928,36 @@ defmodule Cympho.RuntimeOperations do
       |> Enum.join("\n")
     end
   end
+
+  defp brief_readiness_line(%{label: label, passed_count: passed, total: total}) do
+    "Owner brief readiness: #{label} (#{passed}/#{total} signals)"
+  end
+
+  defp brief_readiness_line(_readiness), do: nil
+
+  defp brief_readiness_next_line(%{next_prompt: next_prompt}) when is_binary(next_prompt) do
+    "Next brief prompt: #{next_prompt}"
+  end
+
+  defp brief_readiness_next_line(_readiness), do: nil
+
+  defp brief_repair_scaffold(%{status: status, launch_scaffold: scaffold})
+       when status in [:thin, :draft] and is_binary(scaffold) do
+    scaffold
+  end
+
+  defp brief_repair_scaffold(_readiness), do: nil
+
+  defp brief_repair_scaffold_block(%{status: status, launch_scaffold: scaffold})
+       when status in [:thin, :draft] and is_binary(scaffold) do
+    """
+    Brief repair scaffold:
+    #{scaffold}
+    """
+    |> String.trim()
+  end
+
+  defp brief_repair_scaffold_block(_readiness), do: nil
 
   defp ceo_role?(role), do: role in [:ceo, "ceo"]
 
@@ -698,7 +978,7 @@ defmodule Cympho.RuntimeOperations do
   end
 
   defp ceo_first_turn_contract do
-    "Return `[owner_update]` or `[handoff]`; when decomposition is needed, create 2-5 scoped sub-issues with acceptance criteria."
+    "Return `[owner_update]`, `[handoff]`, or `[blocked]`; when execution is needed, create 2-5 scoped child issues with acceptance criteria and block the parent as waiting on delegated sub-work."
   end
 
   defp preflight_checks_line(%{items: items}) when is_list(items) do
@@ -751,6 +1031,432 @@ defmodule Cympho.RuntimeOperations do
       true -> String.slice(text, 0, max) <> "..."
     end
   end
+
+  defp launch_plan(runtime_mode, runtime_enablement, launch_preview, _ceo_flow, delegated_work) do
+    ceo_candidate = launch_preview |> ceo_launch_candidates() |> List.first()
+    focused_candidate = focused_launch_candidate(launch_preview)
+    first_candidate = launch_preview |> Map.get(:candidates, []) |> List.first()
+
+    cond do
+      runtime_enablement.status == :blocked ->
+        cleanup_launch_plan(runtime_enablement)
+
+      runtime_mode.status == :autonomous ->
+        autonomous_launch_plan(focused_candidate || ceo_candidate || first_candidate)
+
+      runtime_mode.status == :degraded ->
+        restart_launch_plan(runtime_enablement)
+
+      ceo_candidate ->
+        ceo_candidate_launch_plan(ceo_candidate)
+
+      delegated_work.queueable_count > 0 ->
+        delegated_work_launch_plan(delegated_work)
+
+      first_candidate && first_candidate.preflight.status == :blocked ->
+        blocked_candidate_launch_plan(first_candidate)
+
+      first_candidate && first_candidate.preflight.status == :attention ->
+        attention_candidate_launch_plan(first_candidate)
+
+      focused_candidate ->
+        focused_candidate_launch_plan(focused_candidate)
+
+      launch_preview.total_candidates > 0 ->
+        broad_launch_plan(runtime_enablement, launch_preview, first_candidate)
+
+      true ->
+        idle_launch_plan()
+    end
+  end
+
+  defp cleanup_launch_plan(runtime_enablement) do
+    %{
+      status: :cleanup_required,
+      tone: :danger,
+      label: "Recover stale runtime state",
+      summary: runtime_enablement.summary,
+      command_label: nil,
+      command: nil,
+      target_path: "#runtime-capacity",
+      target_label: "Review capacity",
+      issue: nil,
+      steps: [
+        launch_step(
+          "Recover",
+          "Release stale runs or checked-out issues that still hold slots.",
+          :active
+        ),
+        launch_step("Refresh", "Confirm capacity is clear before relaunching runtime.", :pending),
+        launch_step(
+          "Relaunch",
+          "Start a focused or broad runtime command after cleanup.",
+          :pending
+        )
+      ]
+    }
+  end
+
+  defp autonomous_launch_plan(candidate) do
+    %{
+      status: :running,
+      tone: :success,
+      label: "Runtime is already dispatching",
+      summary:
+        "Autonomous dispatch is enabled. Watch the launch preview and outcome monitors for the next agent turn.",
+      command_label: nil,
+      command: nil,
+      target_path: candidate_target_path(candidate) || "#ceo-outcome-monitor",
+      target_label: if(candidate, do: "Open next issue", else: "Watch outcomes"),
+      issue: launch_plan_issue(candidate),
+      steps: [
+        launch_step("Watch", "Runtime can pick up eligible To Do or In Review issues.", :active),
+        launch_step(
+          "Verify",
+          "Use outcome monitors to confirm the agent left a durable signal.",
+          :pending
+        )
+      ]
+    }
+  end
+
+  defp restart_launch_plan(runtime_enablement) do
+    %{
+      status: :restart_required,
+      tone: :attention,
+      label: "Restart runtime services",
+      summary: runtime_enablement.summary,
+      command_label: "Broad restart command",
+      command: runtime_enablement.command,
+      target_path: "#runtime-services",
+      target_label: "Review service gates",
+      issue: nil,
+      steps: [
+        launch_step(
+          "Copy",
+          "Use the restart command with required runtime env enabled.",
+          :active
+        ),
+        launch_step(
+          "Restart",
+          "Relaunch the Phoenix server so enabled workers are supervised.",
+          :pending
+        ),
+        launch_step("Refresh", "Confirm every core launch service is running.", :pending)
+      ]
+    }
+  end
+
+  defp ceo_candidate_launch_plan(%{preflight: %{status: :blocked}} = candidate) do
+    action = get_in(candidate, [:preflight, :first_action])
+
+    %{
+      status: :ceo_blocked,
+      tone: :danger,
+      label: "Fix CEO launch setup",
+      summary:
+        "The next CEO issue cannot run yet: #{candidate.preflight.summary || "fix runtime setup first."}",
+      command_label: nil,
+      command: nil,
+      target_path: preflight_action_path(action) || candidate_target_path(candidate),
+      target_label: preflight_action_label(action) || "Open issue",
+      issue: launch_plan_issue(candidate),
+      steps: [
+        launch_step("Fix setup", "Resolve the first blocked preflight check.", :active),
+        launch_step(
+          "Refresh",
+          "Confirm the CEO preflight becomes ready or review-only.",
+          :pending
+        ),
+        launch_step("Launch", "Run the focused CEO command after setup passes.", :pending)
+      ]
+    }
+  end
+
+  defp ceo_candidate_launch_plan(%{preflight: %{status: :attention}} = candidate) do
+    %{
+      status: :ceo_attention,
+      tone: :attention,
+      label: "Review CEO launch preflight",
+      summary: candidate.preflight.summary,
+      command_label: "Focused restart command",
+      command: candidate.focused_command,
+      target_path: candidate_target_path(candidate),
+      target_label: "Open CEO issue",
+      issue: launch_plan_issue(candidate),
+      steps: [
+        launch_step("Review", "Check warnings before starting the focused CEO turn.", :active),
+        launch_step("Restart", "Use the focused command to keep this issue first.", :pending),
+        launch_step(
+          "Observe",
+          "Watch for `[owner_update]`, `[handoff]`, or `[blocked]`.",
+          :pending
+        )
+      ]
+    }
+  end
+
+  defp ceo_candidate_launch_plan(%{brief_readiness: %{status: status}} = candidate)
+       when status in [:thin, :draft] do
+    %{
+      status: :ceo_brief_repair,
+      tone: :attention,
+      label: "Repair CEO owner brief",
+      summary:
+        "#{candidate.identifier} needs a stronger owner brief before a useful CEO turn: #{candidate.brief_readiness.next_prompt}",
+      command_label: nil,
+      command: nil,
+      repair_scaffold: candidate.brief_repair_scaffold,
+      target_path: candidate_description_path(candidate),
+      target_label: "Repair brief",
+      issue: launch_plan_issue(candidate),
+      steps: [
+        launch_step(
+          "Repair brief",
+          "Paste the scaffold into the issue description, fill the missing owner signals, and save.",
+          :active
+        ),
+        launch_step(
+          "Refresh",
+          "Confirm owner brief readiness becomes Ready for CEO launch.",
+          :pending
+        ),
+        launch_step(
+          "Launch",
+          "Use the focused CEO command after the brief is decision-grade.",
+          :pending
+        )
+      ]
+    }
+  end
+
+  defp ceo_candidate_launch_plan(candidate) do
+    %{
+      status: :focused_ceo_ready,
+      tone: :brand,
+      label: "Focused CEO issue is ready",
+      summary:
+        "#{candidate.identifier} is queued for the CEO lane. Restart this server with the focused command to isolate the first CEO turn, then watch the outcome monitor.",
+      command_label: "Focused restart command",
+      command: candidate.focused_command,
+      target_path: candidate_target_path(candidate),
+      target_label: "Open CEO issue",
+      issue: launch_plan_issue(candidate),
+      steps: [
+        launch_step("Copy", "Use the focused command for this issue.", :active),
+        launch_step(
+          "Restart",
+          "Stop the current dev server and relaunch on the configured port.",
+          :pending
+        ),
+        launch_step(
+          "Observe",
+          "The first CEO result must be `[owner_update]`, `[handoff]`, or `[blocked]`.",
+          :pending
+        )
+      ]
+    }
+  end
+
+  defp delegated_work_launch_plan(delegated_work) do
+    %{
+      status: :delegated_work_ready,
+      tone: :attention,
+      label: "Run delegated CEO work",
+      summary:
+        "#{delegated_work.queueable_count} delegated #{plural_noun(delegated_work.queueable_count, "child issue")} can be queued for focused dispatch before the CEO parent can close.",
+      command_label: nil,
+      command: nil,
+      target_path: "#delegated-work-queue",
+      target_label: "Open delegated queue",
+      issue: nil,
+      steps: [
+        launch_step("Queue", "Use Queue runnable work for CEO-created child issues.", :active),
+        launch_step(
+          "Launch",
+          "Run focused dispatch for the child issue at the top of the queue.",
+          :pending
+        ),
+        launch_step(
+          "Return",
+          "Send completed child work back to the CEO parent for signoff.",
+          :pending
+        )
+      ]
+    }
+  end
+
+  defp blocked_candidate_launch_plan(candidate) do
+    action = get_in(candidate, [:preflight, :first_action])
+
+    %{
+      status: :candidate_blocked,
+      tone: :danger,
+      label: "Fix launch setup",
+      summary:
+        "#{candidate.identifier} cannot run yet: #{candidate.preflight.summary || "fix runtime setup first."}",
+      command_label: nil,
+      command: nil,
+      target_path: preflight_action_path(action) || candidate_target_path(candidate),
+      target_label: preflight_action_label(action) || "Open issue",
+      issue: launch_plan_issue(candidate),
+      steps: [
+        launch_step("Fix setup", "Resolve the first blocked preflight check.", :active),
+        launch_step("Refresh", "Confirm preflight becomes ready or review-only.", :pending),
+        launch_step("Launch", "Run focused or broad dispatch after setup passes.", :pending)
+      ]
+    }
+  end
+
+  defp attention_candidate_launch_plan(candidate) do
+    %{
+      status: :candidate_attention,
+      tone: :attention,
+      label: "Review launch preflight",
+      summary: candidate.preflight.summary,
+      command_label: "Focused restart command",
+      command: candidate.focused_command,
+      target_path: candidate_target_path(candidate),
+      target_label: "Open issue",
+      issue: launch_plan_issue(candidate),
+      steps: [
+        launch_step("Review", "Check warnings before starting this focused turn.", :active),
+        launch_step(
+          "Restart",
+          "Use the focused command if this issue should run first.",
+          :pending
+        ),
+        launch_step("Observe", "Confirm the agent leaves a tagged outcome.", :pending)
+      ]
+    }
+  end
+
+  defp focused_candidate_launch_plan(candidate) do
+    %{
+      status: :focused_issue_ready,
+      tone: :brand,
+      label: "Focused issue is ready",
+      summary:
+        "#{candidate.identifier} has operator focus. Restart this server with the focused command to run it before the broader queue.",
+      command_label: "Focused restart command",
+      command: candidate.focused_command,
+      target_path: candidate_target_path(candidate),
+      target_label: "Open issue",
+      issue: launch_plan_issue(candidate),
+      steps: [
+        launch_step("Copy", "Use the focused command for this issue.", :active),
+        launch_step(
+          "Restart",
+          "Relaunch runtime so the dispatcher can poll the focused issue.",
+          :pending
+        ),
+        launch_step(
+          "Observe",
+          "Confirm the agent leaves a tagged, owner-readable outcome.",
+          :pending
+        )
+      ]
+    }
+  end
+
+  defp broad_launch_plan(runtime_enablement, launch_preview, first_candidate) do
+    count = launch_preview.total_candidates
+
+    %{
+      status: :queue_ready,
+      tone: :attention,
+      label: "Queue is ready, runtime is paused",
+      summary:
+        "#{count} runnable #{plural_noun(count, "candidate")} will wait until dispatch is enabled. Use broad dispatch for the queue, or focus a single issue first.",
+      command_label: "Broad restart command",
+      command: runtime_enablement.command,
+      target_path: candidate_target_path(first_candidate) || "#runtime-launch-checklist",
+      target_label: if(first_candidate, do: "Open first issue", else: "Open checklist"),
+      issue: launch_plan_issue(first_candidate),
+      steps: [
+        launch_step(
+          "Choose",
+          "Run broad dispatch, or focus the issue that should go first.",
+          :active
+        ),
+        launch_step(
+          "Restart",
+          "Use the launch command after preflight checks look right.",
+          :pending
+        ),
+        launch_step(
+          "Observe",
+          "Confirm the first agent turn produces a durable update.",
+          :pending
+        )
+      ]
+    }
+  end
+
+  defp idle_launch_plan do
+    %{
+      status: :no_candidates,
+      tone: :neutral,
+      label: "No launchable work",
+      summary: "Create or route a To Do/In Review issue before starting autonomous dispatch.",
+      command_label: nil,
+      command: nil,
+      target_path: "/issues/new",
+      target_label: "Create issue",
+      issue: nil,
+      steps: [
+        launch_step(
+          "Define",
+          "Create a clear owner request with role, priority, and acceptance criteria.",
+          :active
+        ),
+        launch_step("Route", "Assign it directly or let dispatcher route by role.", :pending),
+        launch_step("Launch", "Return here once the launch preview shows a candidate.", :pending)
+      ]
+    }
+  end
+
+  defp focused_launch_candidate(%{candidates: candidates}) when is_list(candidates) do
+    Enum.find(candidates, &Map.get(&1, :dispatch_pinned?))
+  end
+
+  defp focused_launch_candidate(_launch_preview), do: nil
+
+  defp launch_step(label, detail, state) do
+    %{label: label, detail: detail, state: state}
+  end
+
+  defp launch_plan_issue(nil), do: nil
+
+  defp launch_plan_issue(candidate) do
+    %{
+      id: candidate.id,
+      identifier: candidate.identifier,
+      title: candidate.title,
+      status_label: candidate.status_label,
+      priority_label: candidate.priority_label,
+      preflight_label: candidate.preflight.label,
+      preflight_status: candidate.preflight.status,
+      target_path: candidate_target_path(candidate)
+    }
+  end
+
+  defp candidate_target_path(%{id: id}) when is_binary(id), do: "/issues/#{id}"
+  defp candidate_target_path(_candidate), do: nil
+
+  defp candidate_description_path(%{id: id}) when is_binary(id),
+    do: owner_brief_repair_path(id)
+
+  defp candidate_description_path(candidate), do: candidate_target_path(candidate)
+
+  defp owner_brief_repair_path(id) do
+    return_to = URI.encode_www_form(@runtime_launch_checklist_path)
+
+    "/issues/#{id}?edit=description&repair=owner_brief&return_to=#{return_to}#issue-description"
+  end
+
+  defp preflight_action_label(%{target_label: label}) when is_binary(label), do: label
+  defp preflight_action_label(_action), do: nil
 
   defp ceo_outcome_snapshot(nil, _agents), do: empty_ceo_outcome_snapshot("No company selected.")
 
@@ -881,9 +1587,390 @@ defmodule Cympho.RuntimeOperations do
     "#{count} CEO owner #{plural_noun(count, "update")} #{needs_need(count)} owner acceptance before the work can close."
   end
 
-  defp delegated_work_snapshot(nil, _runtime_mode, _opts), do: empty_delegated_work_snapshot()
+  defp ceo_flow_snapshot(agents, launch_preview, ceo_outcomes, delegated_work, owner_signoffs) do
+    ceo_agents = Enum.filter(agents, &(agent_role(&1) == "ceo"))
+    ceo_candidates = ceo_launch_candidates(launch_preview)
+    primary_candidate = List.first(ceo_candidates)
+    counts = ceo_outcomes.counts
+    recent_decisive = ceo_flow_decisive_count(counts)
 
-  defp delegated_work_snapshot(company_id, runtime_mode, opts) do
+    stage =
+      ceo_flow_stage(
+        ceo_agents,
+        primary_candidate,
+        counts,
+        delegated_work,
+        owner_signoffs,
+        recent_decisive
+      )
+
+    %{
+      stage: stage,
+      label: ceo_flow_label(stage),
+      summary:
+        ceo_flow_summary(
+          stage,
+          ceo_agents,
+          primary_candidate,
+          counts,
+          delegated_work,
+          owner_signoffs,
+          recent_decisive
+        ),
+      next_action:
+        ceo_flow_next_action(
+          stage,
+          primary_candidate,
+          delegated_work,
+          owner_signoffs,
+          recent_decisive
+        ),
+      ceo_count: length(ceo_agents),
+      launch_candidate_count: length(ceo_candidates),
+      decisive_outcome_count: recent_decisive,
+      attention_count: Map.get(counts, :attention, 0),
+      owner_signoff_count: owner_signoffs.count,
+      delegated_work_count: delegated_work.count,
+      primary_candidate: ceo_flow_candidate(primary_candidate),
+      steps:
+        ceo_flow_steps(
+          ceo_agents,
+          primary_candidate,
+          counts,
+          delegated_work,
+          owner_signoffs,
+          recent_decisive
+        )
+    }
+  end
+
+  defp ceo_launch_candidates(%{candidates: candidates}) when is_list(candidates) do
+    Enum.filter(candidates, fn candidate ->
+      ceo_role?(candidate.role) or ceo_role?(get_in(candidate, [:preflight, :agent_role]))
+    end)
+  end
+
+  defp ceo_launch_candidates(_launch_preview), do: []
+
+  defp ceo_flow_stage(
+         [],
+         _candidate,
+         _counts,
+         _delegated_work,
+         _owner_signoffs,
+         _recent_decisive
+       ),
+       do: :setup
+
+  defp ceo_flow_stage(_ceos, _candidate, _counts, _delegated_work, %{count: count}, _recent)
+       when count > 0,
+       do: :owner_signoff
+
+  defp ceo_flow_stage(_ceos, _candidate, %{running: running}, _delegated_work, _signoffs, _recent)
+       when running > 0,
+       do: :running
+
+  defp ceo_flow_stage(
+         _ceos,
+         _candidate,
+         %{attention: attention},
+         _delegated_work,
+         _signoffs,
+         _recent
+       )
+       when attention > 0,
+       do: :attention
+
+  defp ceo_flow_stage(
+         _ceos,
+         %{preflight: %{status: :blocked}},
+         _counts,
+         _delegated,
+         _signoffs,
+         _recent
+       ),
+       do: :blocked
+
+  defp ceo_flow_stage(
+         _ceos,
+         %{preflight: %{status: :attention}},
+         _counts,
+         _delegated,
+         _signoffs,
+         _recent
+       ),
+       do: :attention
+
+  defp ceo_flow_stage(
+         _ceos,
+         %{brief_readiness: %{status: status}},
+         _counts,
+         _delegated,
+         _signoffs,
+         _recent
+       )
+       when status in [:thin, :draft],
+       do: :brief_repair
+
+  defp ceo_flow_stage(
+         _ceos,
+         %{preflight: %{status: status}},
+         _counts,
+         _delegated,
+         _signoffs,
+         _recent
+       )
+       when status in [:ready, :review_mode],
+       do: :launch_ready
+
+  defp ceo_flow_stage(_ceos, _candidate, _counts, %{count: count}, _signoffs, _recent)
+       when count > 0,
+       do: :delegated_work
+
+  defp ceo_flow_stage(_ceos, _candidate, _counts, _delegated_work, _owner_signoffs, recent)
+       when recent > 0,
+       do: :observed
+
+  defp ceo_flow_stage(_ceos, _candidate, _counts, _delegated_work, _owner_signoffs, _recent),
+    do: :needs_issue
+
+  defp ceo_flow_label(:setup), do: "CEO missing"
+  defp ceo_flow_label(:owner_signoff), do: "Owner signoff"
+  defp ceo_flow_label(:running), do: "CEO running"
+  defp ceo_flow_label(:attention), do: "Needs attention"
+  defp ceo_flow_label(:blocked), do: "Setup blocked"
+  defp ceo_flow_label(:brief_repair), do: "Brief repair"
+  defp ceo_flow_label(:launch_ready), do: "Ready to launch"
+  defp ceo_flow_label(:delegated_work), do: "Delegated work"
+  defp ceo_flow_label(:observed), do: "Flow observed"
+  defp ceo_flow_label(:needs_issue), do: "Define issue"
+  defp ceo_flow_label(_), do: "Unknown"
+
+  defp ceo_flow_summary(:setup, _ceos, _candidate, _counts, _delegated, _signoffs, _recent) do
+    "Create or activate a CEO agent before the owner request flow can run."
+  end
+
+  defp ceo_flow_summary(:owner_signoff, _ceos, _candidate, _counts, _delegated, signoffs, _recent) do
+    "#{signoffs.count} CEO owner #{plural_noun(signoffs.count, "update")} #{needs_need(signoffs.count)} owner acceptance or revision."
+  end
+
+  defp ceo_flow_summary(:running, _ceos, _candidate, counts, _delegated, _signoffs, _recent) do
+    "#{counts.running} CEO #{plural_noun(counts.running, "run")} active; wait for `[owner_update]`, `[handoff]`, or decomposition."
+  end
+
+  defp ceo_flow_summary(:attention, _ceos, candidate, counts, _delegated, _signoffs, _recent) do
+    cond do
+      counts.attention > 0 ->
+        "#{counts.attention} CEO #{plural_noun(counts.attention, "turn")} need relaunch or contract repair."
+
+      candidate ->
+        "The next CEO candidate exists, but preflight needs operator review before launch."
+
+      true ->
+        "CEO flow needs operator review before the next useful turn."
+    end
+  end
+
+  defp ceo_flow_summary(:blocked, _ceos, candidate, _counts, _delegated, _signoffs, _recent) do
+    "The next CEO launch is blocked: #{get_in(candidate, [:preflight, :summary]) || "fix runtime setup first."}"
+  end
+
+  defp ceo_flow_summary(
+         :brief_repair,
+         _ceos,
+         candidate,
+         _counts,
+         _delegated,
+         _signoffs,
+         _recent
+       ) do
+    "#{candidate.identifier} needs owner brief repair before CEO launch: #{candidate.brief_readiness.next_prompt}"
+  end
+
+  defp ceo_flow_summary(:launch_ready, _ceos, candidate, _counts, _delegated, _signoffs, _recent) do
+    "#{candidate.identifier} is ready for a focused CEO turn; the first result must be an owner update, handoff, or scoped decomposition."
+  end
+
+  defp ceo_flow_summary(
+         :delegated_work,
+         _ceos,
+         _candidate,
+         _counts,
+         delegated,
+         _signoffs,
+         _recent
+       ) do
+    "#{delegated.count} CEO-delegated #{plural_noun(delegated.count, "child issue")} need execution or review before the parent can close."
+  end
+
+  defp ceo_flow_summary(:observed, _ceos, _candidate, _counts, _delegated, _signoffs, recent) do
+    "Recent CEO turns produced #{recent} decisive #{plural_noun(recent, "outcome")}."
+  end
+
+  defp ceo_flow_summary(:needs_issue, _ceos, _candidate, _counts, _delegated, _signoffs, _recent) do
+    "No CEO-lane issue is waiting. Create an owner request and route it to the CEO."
+  end
+
+  defp ceo_flow_next_action(:setup, _candidate, _delegated, _signoffs, _recent),
+    do: %{label: "Create CEO", path: "/agents/new", tone: :attention}
+
+  defp ceo_flow_next_action(:owner_signoff, _candidate, _delegated, _signoffs, _recent),
+    do: %{label: "Review owner signoff", path: "#owner-signoff-queue", tone: :success}
+
+  defp ceo_flow_next_action(:running, _candidate, _delegated, _signoffs, _recent),
+    do: %{label: "Watch CEO outcome", path: "#ceo-outcome-monitor", tone: :brand}
+
+  defp ceo_flow_next_action(:attention, _candidate, _delegated, _signoffs, _recent),
+    do: %{label: "Open CEO monitor", path: "#ceo-outcome-monitor", tone: :attention}
+
+  defp ceo_flow_next_action(:blocked, candidate, _delegated, _signoffs, _recent) do
+    action = get_in(candidate || %{}, [:preflight, :first_action])
+
+    %{
+      label: Map.get(action || %{}, :label, "Fix setup"),
+      path: preflight_action_path(action) || "#runtime-launch-checklist",
+      tone: :danger
+    }
+  end
+
+  defp ceo_flow_next_action(:brief_repair, %{id: id}, _delegated, _signoffs, _recent)
+       when is_binary(id),
+       do: %{
+         label: "Repair owner brief",
+         path: owner_brief_repair_path(id),
+         tone: :attention
+       }
+
+  defp ceo_flow_next_action(:launch_ready, _candidate, _delegated, _signoffs, _recent),
+    do: %{label: "Run focused CEO issue", path: "#runtime-launch-checklist", tone: :brand}
+
+  defp ceo_flow_next_action(:delegated_work, %{id: id}, _delegated, _signoffs, _recent)
+       when is_binary(id),
+       do: %{label: "Inspect delegated work", path: "#ceo-delegated-work", tone: :attention}
+
+  defp ceo_flow_next_action(:delegated_work, _candidate, _delegated, _signoffs, _recent),
+    do: %{label: "Inspect delegated work", path: "#ceo-delegated-work", tone: :attention}
+
+  defp ceo_flow_next_action(:observed, _candidate, _delegated, _signoffs, _recent),
+    do: %{label: "Open CEO monitor", path: "#ceo-outcome-monitor", tone: :success}
+
+  defp ceo_flow_next_action(:needs_issue, _candidate, _delegated, _signoffs, _recent),
+    do: %{label: "Create CEO issue", path: "/issues/new", tone: :attention}
+
+  defp ceo_flow_next_action(_stage, _candidate, _delegated, _signoffs, _recent),
+    do: %{label: "Open Operations", path: "/operations", tone: :neutral}
+
+  defp preflight_action_path(%{target_path: target_path}) when is_binary(target_path),
+    do: target_path
+
+  defp preflight_action_path(_action), do: nil
+
+  defp ceo_flow_candidate(nil), do: nil
+
+  defp ceo_flow_candidate(candidate) do
+    %{
+      id: candidate.id,
+      identifier: candidate.identifier,
+      title: candidate.title,
+      status_label: candidate.status_label,
+      preflight_label: candidate.preflight.label,
+      preflight_status: candidate.preflight.status,
+      preflight_summary: candidate.preflight.summary,
+      brief_readiness_label: get_in(candidate, [:brief_readiness, :label]),
+      brief_readiness_status: get_in(candidate, [:brief_readiness, :status]),
+      brief_readiness_score: brief_readiness_score(candidate.brief_readiness),
+      brief_readiness_next: get_in(candidate, [:brief_readiness, :next_prompt]),
+      brief_repair_scaffold: candidate.brief_repair_scaffold,
+      brief: candidate.ceo_launch_brief,
+      first_turn: ceo_first_turn_contract(),
+      focused_command: candidate.focused_command,
+      target_path: "/issues/#{candidate.id}"
+    }
+  end
+
+  defp brief_readiness_score(%{passed_count: passed, total: total}), do: "#{passed}/#{total}"
+  defp brief_readiness_score(_readiness), do: nil
+
+  defp ceo_flow_steps(ceo_agents, candidate, counts, delegated_work, owner_signoffs, recent) do
+    [
+      %{
+        label: "CEO",
+        state: if(ceo_agents == [], do: :missing, else: :complete),
+        value: length(ceo_agents),
+        detail: if(ceo_agents == [], do: "No active CEO", else: "CEO agent ready")
+      },
+      %{
+        label: "Launch",
+        state: ceo_flow_launch_state(candidate),
+        value: if(candidate, do: 1, else: 0),
+        detail: ceo_flow_launch_detail(candidate)
+      },
+      %{
+        label: "Outcome",
+        state: ceo_flow_outcome_state(counts, recent),
+        value: recent,
+        detail: ceo_flow_outcome_detail(counts, recent)
+      },
+      %{
+        label: "Close",
+        state: if(owner_signoffs.count > 0, do: :attention, else: :complete),
+        value: owner_signoffs.count,
+        detail:
+          if(owner_signoffs.count > 0,
+            do: "Owner signoff waiting",
+            else: "#{delegated_work.count} delegated open"
+          )
+      }
+    ]
+  end
+
+  defp ceo_flow_launch_state(nil), do: :missing
+  defp ceo_flow_launch_state(%{preflight: %{status: :blocked}}), do: :blocked
+  defp ceo_flow_launch_state(%{preflight: %{status: :attention}}), do: :attention
+
+  defp ceo_flow_launch_state(%{brief_readiness: %{status: status}})
+       when status in [:thin, :draft],
+       do: :attention
+
+  defp ceo_flow_launch_state(%{preflight: %{status: status}})
+       when status in [:ready, :review_mode],
+       do: :complete
+
+  defp ceo_flow_launch_state(_candidate), do: :attention
+
+  defp ceo_flow_launch_detail(nil), do: "No CEO issue waiting"
+
+  defp ceo_flow_launch_detail(%{brief_readiness: %{status: status} = readiness})
+       when status in [:thin, :draft] do
+    "Owner brief #{brief_readiness_score(readiness)}"
+  end
+
+  defp ceo_flow_launch_detail(%{preflight: %{label: label}}), do: label
+  defp ceo_flow_launch_detail(_candidate), do: "Review launch setup"
+
+  defp ceo_flow_outcome_state(%{running: running}, _recent) when running > 0, do: :active
+  defp ceo_flow_outcome_state(%{attention: attention}, _recent) when attention > 0, do: :attention
+  defp ceo_flow_outcome_state(_counts, recent) when recent > 0, do: :complete
+  defp ceo_flow_outcome_state(_counts, _recent), do: :missing
+
+  defp ceo_flow_outcome_detail(%{running: running}, _recent) when running > 0,
+    do: "#{running} running"
+
+  defp ceo_flow_outcome_detail(%{attention: attention}, _recent) when attention > 0,
+    do: "#{attention} need attention"
+
+  defp ceo_flow_outcome_detail(_counts, recent) when recent > 0, do: "#{recent} decisive"
+  defp ceo_flow_outcome_detail(_counts, _recent), do: "No CEO outcome yet"
+
+  defp ceo_flow_decisive_count(counts) do
+    counts.owner_updates + counts.handoffs + counts.decompositions + counts.governance +
+      counts.owner_acceptances + counts.owner_revisions
+  end
+
+  defp delegated_work_snapshot(nil, _runtime_mode, _opts, _secret_summary_by_agent),
+    do: empty_delegated_work_snapshot()
+
+  defp delegated_work_snapshot(company_id, runtime_mode, opts, secret_summary_by_agent) do
     autonomy_enabled? = runtime_autonomy_enabled?(runtime_mode)
     parent_issue_id = normalized_issue_id(Keyword.get(opts, :parent_issue_id))
 
@@ -891,7 +1978,9 @@ defmodule Cympho.RuntimeOperations do
       company_id
       |> delegated_work_candidates(parent_issue_id)
       |> Enum.with_index(1)
-      |> Enum.map(fn {issue, index} -> delegated_work_entry(issue, index, autonomy_enabled?) end)
+      |> Enum.map(fn {issue, index} ->
+        delegated_work_entry(issue, index, autonomy_enabled?, secret_summary_by_agent)
+      end)
 
     parent = delegated_work_parent(company_id, parent_issue_id, entries)
     readiness = delegated_work_readiness(entries)
@@ -965,8 +2054,8 @@ defmodule Cympho.RuntimeOperations do
 
   defp normalized_issue_id(_issue_id), do: nil
 
-  defp delegated_work_entry(%Issue{} = issue, index, autonomy_enabled?) do
-    preflight = launch_preflight(issue, autonomy_enabled?)
+  defp delegated_work_entry(%Issue{} = issue, index, autonomy_enabled?, secret_summary_by_agent) do
+    preflight = launch_preflight(issue, autonomy_enabled?, secret_summary_by_agent)
     dispatch_pinned? = Issues.dispatch_pinned?(issue)
     blocked? = Issues.is_blocked?(issue)
     setup_blocked? = preflight.status == :blocked
@@ -1346,6 +2435,7 @@ defmodule Cympho.RuntimeOperations do
     comment = result |> metadata_value("comment_id") |> then(&Map.get(comments_by_id, &1))
     comment_category = comment && IssueDigest.comment_category(comment)
     outcome = ceo_outcome_type(action_type, comment_category)
+    receipt = ceo_outcome_receipt(comment, outcome)
     issue = activity.issue
 
     %{
@@ -1355,6 +2445,7 @@ defmodule Cympho.RuntimeOperations do
       outcome: outcome,
       outcome_label: ceo_outcome_label(outcome),
       detail: ceo_outcome_detail(action_type, result, comment, comment_category),
+      receipt: receipt,
       agent_id: activity.actor_id,
       agent_name: ceo_agent_name(Map.get(ceo_agents, activity.actor_id), activity.actor_id),
       issue_id: issue.id,
@@ -1380,6 +2471,7 @@ defmodule Cympho.RuntimeOperations do
       outcome: outcome,
       outcome_label: ceo_outcome_label(outcome),
       detail: ceo_run_outcome_detail(run, feedback_comment),
+      receipt: nil,
       agent_id: run.agent_id,
       agent_name: ceo_agent_name(Map.get(ceo_agents, run.agent_id) || run.agent, run.agent_id),
       issue_id: issue.id,
@@ -1438,6 +2530,37 @@ defmodule Cympho.RuntimeOperations do
 
   defp ceo_outcome_type(_action_type, _category), do: :action
 
+  defp ceo_outcome_receipt(%Comment{} = comment, outcome)
+       when outcome in [:owner_update, :handoff, :blocked, :governance, :comment] do
+    audit = IssueDigest.audit_last_action_receipt(comment)
+
+    %{
+      status: audit.status,
+      status_label: ceo_receipt_label(audit.status),
+      summary: audit.summary,
+      repair_prompt: ceo_receipt_repair_prompt(audit),
+      missing_fields: Map.get(audit, :missing_fields, []),
+      present_fields: Map.get(audit, :present_fields, [])
+    }
+  end
+
+  defp ceo_outcome_receipt(_comment, _outcome), do: nil
+
+  defp ceo_receipt_label(:ok), do: "Receipt complete"
+  defp ceo_receipt_label(:attention), do: "Receipt gap"
+  defp ceo_receipt_label(_status), do: "Receipt pending"
+
+  defp ceo_receipt_repair_prompt(%{status: :attention, missing_fields: missing})
+       when is_list(missing) and missing != [] do
+    "Focused relaunch should revise the latest tagged CEO comment with: #{Enum.join(missing, ", ")}."
+  end
+
+  defp ceo_receipt_repair_prompt(%{status: :ok}), do: "No receipt repair needed."
+
+  defp ceo_receipt_repair_prompt(_audit) do
+    "Focused relaunch should leave a tagged comment with action, evidence, verification, risk, and next decision."
+  end
+
   defp ceo_outcome_label(:owner_update), do: "Owner update"
   defp ceo_outcome_label(:owner_accepted), do: "Owner accepted"
   defp ceo_outcome_label(:owner_revision), do: "Owner revision"
@@ -1481,20 +2604,54 @@ defmodule Cympho.RuntimeOperations do
   end
 
   defp ceo_run_outcome_detail(%Run{status: status} = run, feedback_comment) do
-    error = AdapterError.from_run(run)
+    error = run_failure_diagnosis(run)
 
     reason =
       run.error_reason ||
         (error && error.title) ||
-        "No error reason recorded."
+        "Unclassified failure"
 
     base = "Run #{String.replace(status || "failed", "_", " ")}: #{compact_text(reason, 120)}"
+    base = append_failure_hint(base, error)
 
     case run_feedback_detail(feedback_comment) do
       nil -> base
       feedback -> "#{base}. Feedback: #{feedback}"
     end
   end
+
+  defp run_failure_diagnosis(%Run{} = run) do
+    AdapterError.from_run(run) || fallback_run_failure_diagnosis(run)
+  end
+
+  defp fallback_run_failure_diagnosis(%Run{status: "timed_out"} = run) do
+    AdapterError.normalize(:timed_out, adapter: run.adapter)
+  end
+
+  defp fallback_run_failure_diagnosis(%Run{status: "cancelled"} = run) do
+    %AdapterError{
+      category: :unknown,
+      title: "Run cancelled",
+      message: "The run was cancelled before Cympho recorded a provider or adapter error.",
+      hint:
+        "Inspect the issue timeline, then use the focused relaunch command if no duplicate run is active.",
+      adapter: run.adapter
+    }
+  end
+
+  defp fallback_run_failure_diagnosis(%Run{status: "failed"} = run) do
+    AdapterError.normalize(:no_output, adapter: run.adapter)
+  end
+
+  defp fallback_run_failure_diagnosis(%Run{} = run) do
+    AdapterError.normalize(run.status || :unknown, adapter: run.adapter)
+  end
+
+  defp append_failure_hint(base, %AdapterError{hint: hint}) when is_binary(hint) and hint != "" do
+    "#{base}. #{compact_text(hint, 140)}"
+  end
+
+  defp append_failure_hint(base, _error), do: base
 
   defp run_feedback_detail(nil), do: nil
 
@@ -1509,13 +2666,24 @@ defmodule Cympho.RuntimeOperations do
         body,
         "Agent response did not include a valid cympho-actions block:"
       ) ->
-        suffix =
-          feedback_suffix(
+        reason =
+          feedback_reason(body, "Agent response did not include a valid cympho-actions block:")
+
+        action_execution_failure_detail(reason) ||
+          "Invalid cympho-actions block#{feedback_suffix(reason)}"
+
+      String.starts_with?(
+        body,
+        "Agent cympho-actions block parsed, but action execution failed:"
+      ) ->
+        reason =
+          feedback_reason(
             body,
-            "Agent response did not include a valid cympho-actions block:"
+            "Agent cympho-actions block parsed, but action execution failed:"
           )
 
-        "Invalid cympho-actions block#{suffix}"
+        action_execution_failure_detail(reason) ||
+          "Action execution failed#{feedback_suffix(reason)}"
 
       true ->
         body
@@ -1524,10 +2692,37 @@ defmodule Cympho.RuntimeOperations do
 
   defp run_feedback_detail(_comment), do: nil
 
-  defp feedback_suffix(body, prefix) do
-    case body |> String.replace_prefix(prefix, "") |> String.trim() do
+  defp feedback_reason(body, prefix) do
+    body
+    |> String.replace_prefix(prefix, "")
+    |> String.trim()
+  end
+
+  defp feedback_suffix(reason) do
+    case String.trim(reason || "") do
       "" -> "."
       text -> ": #{text}"
+    end
+  end
+
+  defp action_execution_failure_detail(reason) do
+    normalized =
+      reason
+      |> to_string()
+      |> String.trim()
+
+    cond do
+      normalized in [":blocked_by_active_issues", "blocked_by_active_issues"] ->
+        "Action execution failed: active child issues or owner-verification dependencies are still open. Inspect delegated work before approving or closing."
+
+      normalized in [":unauthorized_action", "unauthorized_action"] ->
+        "Action execution failed: this agent role is not authorized for that governance action."
+
+      String.starts_with?(normalized, "{:children_not_done") ->
+        "Action execution failed: delegated child issues are still open. Finish, cancel, or request changes on child work before approving the parent."
+
+      true ->
+        nil
     end
   end
 
@@ -1601,7 +2796,8 @@ defmodule Cympho.RuntimeOperations do
       counts
       |> Map.update!(:recent, &(&1 + 1))
       |> Map.update!(ceo_outcome_count_key(entry.outcome), &(&1 + 1))
-      |> maybe_count_attention_outcome(entry.outcome)
+      |> maybe_count_receipt(entry)
+      |> maybe_count_attention_outcome(entry)
     end)
   end
 
@@ -1618,11 +2814,34 @@ defmodule Cympho.RuntimeOperations do
   defp ceo_outcome_count_key(:comment), do: :comments
   defp ceo_outcome_count_key(_outcome), do: :actions
 
-  defp maybe_count_attention_outcome(counts, outcome) when outcome in [:silent, :failed] do
+  defp maybe_count_receipt(counts, %{receipt: %{status: :ok}}) do
+    counts
+    |> Map.update!(:receipt_checked, &(&1 + 1))
+    |> Map.update!(:receipt_complete, &(&1 + 1))
+  end
+
+  defp maybe_count_receipt(counts, %{receipt: %{status: :attention}}) do
+    counts
+    |> Map.update!(:receipt_checked, &(&1 + 1))
+    |> Map.update!(:receipt_incomplete, &(&1 + 1))
+  end
+
+  defp maybe_count_receipt(counts, %{receipt: %{status: status}}) when not is_nil(status) do
+    Map.update!(counts, :receipt_checked, &(&1 + 1))
+  end
+
+  defp maybe_count_receipt(counts, _entry), do: counts
+
+  defp maybe_count_attention_outcome(counts, %{outcome: outcome})
+       when outcome in [:silent, :failed] do
     Map.update!(counts, :attention, &(&1 + 1))
   end
 
-  defp maybe_count_attention_outcome(counts, _outcome), do: counts
+  defp maybe_count_attention_outcome(counts, %{receipt: %{status: :attention}}) do
+    Map.update!(counts, :attention, &(&1 + 1))
+  end
+
+  defp maybe_count_attention_outcome(counts, _entry), do: counts
 
   defp empty_ceo_outcome_counts do
     %{
@@ -1638,6 +2857,9 @@ defmodule Cympho.RuntimeOperations do
       silent: 0,
       failed: 0,
       attention: 0,
+      receipt_checked: 0,
+      receipt_complete: 0,
+      receipt_incomplete: 0,
       comments: 0,
       actions: 0
     }
@@ -1659,7 +2881,8 @@ defmodule Cympho.RuntimeOperations do
         count_label(counts.blocked, "blocked signal"),
         count_label(counts.running, "active run"),
         count_label(counts.silent, "no-action run"),
-        count_label(counts.failed, "failed run")
+        count_label(counts.failed, "failed run"),
+        count_label(counts.receipt_incomplete, "incomplete receipt")
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -1682,6 +2905,9 @@ defmodule Cympho.RuntimeOperations do
 
   defp ceo_agent_name(%Agent{name: name}, _id) when is_binary(name) and name != "", do: name
   defp ceo_agent_name(_agent, id), do: "CEO #{short_id(id)}"
+
+  defp agent_role_atom(%Agent{role: role}), do: role
+  defp agent_role_atom(_agent), do: nil
 
   defp agent_role(%Agent{role: role}), do: to_string(role)
   defp agent_role(_agent), do: nil
@@ -1805,7 +3031,7 @@ defmodule Cympho.RuntimeOperations do
     "Reduce local CLI-backed concurrency or move workers to a larger host before starting more agents."
   end
 
-  defp health_summary(agents) do
+  defp health_summary(agents, secret_summary_by_agent) do
     tracked = HealthChecker.get_all_health_statuses()
 
     agents
@@ -1815,7 +3041,7 @@ defmodule Cympho.RuntimeOperations do
         |> Map.get(agent.id, agent.health_status || :healthy)
         |> normalize_health_status()
 
-      preflight = agent_launch_preflight(agent)
+      preflight = agent_launch_preflight(agent, secret_summary_by_agent)
 
       %{
         id: agent.id,
@@ -1857,18 +3083,15 @@ defmodule Cympho.RuntimeOperations do
     |> Enum.take(5)
   end
 
-  defp agent_launch_preflight(agent) do
-    secrets = agent_secrets(agent)
+  defp agent_launch_preflight(agent, secret_summary_by_agent) do
+    secret_summary = Map.get(secret_summary_by_agent, agent.id, %{count: 0, keys: []})
 
     Cympho.RuntimePreflight.for_agent(agent,
       autonomy_enabled?: true,
-      secret_count: length(secrets),
-      secret_keys: Enum.map(secrets, & &1.key)
+      secret_count: secret_summary.count,
+      secret_keys: secret_summary.keys
     )
   end
-
-  defp agent_secrets(%{id: id}) when is_binary(id), do: Secrets.list_secrets_for_agent(id)
-  defp agent_secrets(_agent), do: []
 
   defp launch_ready_health_warning?(%{status: status, launch_ready?: true}) do
     status != :healthy
@@ -2090,7 +3313,7 @@ defmodule Cympho.RuntimeOperations do
     |> limit(8)
     |> Repo.all()
     |> Enum.map(fn run ->
-      error = AdapterError.from_run(run)
+      error = run_failure_diagnosis(run)
 
       %{
         id: run.id,
@@ -2103,10 +3326,26 @@ defmodule Cympho.RuntimeOperations do
         error: error,
         category: if(error, do: error.category, else: :unknown),
         title: if(error, do: error.title, else: run.error_reason || "Run failed"),
-        hint: if(error, do: error.hint, else: "Open the run details and inspect adapter logs.")
+        hint: if(error, do: error.hint, else: "Open the run details and inspect adapter logs."),
+        target_path: recent_failure_target_path(run),
+        focused_command: recent_failure_focused_command(run)
       }
     end)
   end
+
+  defp recent_failure_target_path(%Run{issue: %Issue{id: id}}) when is_binary(id),
+    do: "/issues/#{id}"
+
+  defp recent_failure_target_path(%Run{agent: %Agent{id: id}, id: run_id})
+       when is_binary(id) and is_binary(run_id),
+       do: "/agents/#{id}?tab=runs&run_id=#{run_id}"
+
+  defp recent_failure_target_path(_run), do: nil
+
+  defp recent_failure_focused_command(%Run{issue: %Issue{id: id}}) when is_binary(id),
+    do: focused_runtime_launch_command(id)
+
+  defp recent_failure_focused_command(_run), do: nil
 
   defp review_nudge_snapshot(nil) do
     %{
@@ -2304,6 +3543,112 @@ defmodule Cympho.RuntimeOperations do
     |> Enum.take(6)
   end
 
+  defp wake_queue_snapshot(nil) do
+    %{
+      stale_after_minutes: @stale_comment_wake_minutes,
+      summary: "No company selected.",
+      counts: %{pending_comments: 0, stale_comments: 0, shown: 0},
+      by_agent: [],
+      entries: []
+    }
+  end
+
+  defp wake_queue_snapshot(company_id) do
+    entries =
+      Wakes.list_stale_comment_wakes(company_id,
+        older_than_minutes: @stale_comment_wake_minutes,
+        limit: @wake_backlog_display_limit
+      )
+      |> Enum.map(&wake_queue_entry/1)
+
+    stale_comments =
+      Wakes.count_stale_comment_wakes(company_id,
+        older_than_minutes: @stale_comment_wake_minutes
+      )
+
+    pending_comments = pending_comment_wake_count(company_id)
+
+    %{
+      stale_after_minutes: @stale_comment_wake_minutes,
+      summary: wake_queue_summary(pending_comments, stale_comments),
+      counts: %{
+        pending_comments: pending_comments,
+        stale_comments: stale_comments,
+        shown: length(entries)
+      },
+      by_agent: group_wake_queue_by_agent(entries),
+      entries: entries
+    }
+  end
+
+  defp pending_comment_wake_count(company_id) when is_binary(company_id) do
+    reasons = Wakes.comment_wake_reasons()
+
+    AgentWake
+    |> join(:inner, [w], i in assoc(w, :issue))
+    |> where(
+      [w, i],
+      i.company_id == ^company_id and w.status == "pending" and w.reason in ^reasons
+    )
+    |> where([w, _i], fragment("coalesce(?->>'source', '') <> ?", w.metadata, "review_nudge"))
+    |> select([w, _i], count(w.id))
+    |> Repo.one()
+  end
+
+  defp pending_comment_wake_count(_company_id), do: 0
+
+  defp wake_queue_entry(%AgentWake{} = wake) do
+    issue = wake.issue
+
+    %{
+      id: wake.id,
+      agent_id: wake.agent_id,
+      agent: wake.agent,
+      agent_name: wake_agent_name(wake.agent, wake.agent_id),
+      issue_id: wake.issue_id,
+      issue: issue,
+      issue_identifier: issue && (issue.identifier || short_id(issue.id)),
+      issue_title: issue && issue.title,
+      reason: wake.reason,
+      reason_label: wake_reason_label(wake.reason),
+      age_seconds: age_seconds(wake.inserted_at),
+      inserted_at: wake.inserted_at
+    }
+  end
+
+  defp wake_queue_summary(_pending_comments, stale_comments) when stale_comments > 0 do
+    "#{stale_comments} stale comment #{plural_noun(stale_comments, "wake")} can be cleared from the agent queue. The comments remain on their issues."
+  end
+
+  defp wake_queue_summary(pending_comments, _stale_comments) when pending_comments > 0 do
+    "#{pending_comments} comment #{plural_noun(pending_comments, "wake")} are queued; none are past the stale threshold."
+  end
+
+  defp wake_queue_summary(_pending_comments, _stale_comments),
+    do: "No pending comment wakes are waiting in the agent queue."
+
+  defp group_wake_queue_by_agent(entries) do
+    entries
+    |> Enum.group_by(& &1.agent_id)
+    |> Enum.map(fn {_agent_id, grouped} ->
+      %{
+        label: List.first(grouped).agent_name,
+        count: length(grouped),
+        oldest_seconds: grouped |> Enum.map(& &1.age_seconds) |> Enum.max(fn -> 0 end)
+      }
+    end)
+    |> Enum.sort_by(fn group -> {-group.count, -group.oldest_seconds, group.label} end)
+    |> Enum.take(6)
+  end
+
+  defp wake_agent_name(%Agent{name: name}, _id) when is_binary(name) and name != "", do: name
+  defp wake_agent_name(_agent, id) when is_binary(id), do: "Agent #{short_id(id)}"
+  defp wake_agent_name(_agent, _id), do: "Agent"
+
+  defp wake_reason_label("issue_comment_mentioned"), do: "Mention"
+  defp wake_reason_label("issue_commented"), do: "Comment"
+  defp wake_reason_label(reason), do: role_label(reason)
+
   defp contract_failure_snapshot(nil, _agents), do: empty_contract_failure_snapshot()
 
   defp contract_failure_snapshot(company_id, agents) do
@@ -2312,6 +3657,7 @@ defmodule Cympho.RuntimeOperations do
     runs_by_issue = runs_by_issue(issue_ids)
     work_products_by_issue = work_products_by_issue(issue_ids)
     child_issues_by_parent = child_issues_by_parent(issue_ids)
+    active_review_wakes_by_issue = active_review_wakes_by_issue(issue_ids, child_issues_by_parent)
     agents_by_role = Enum.group_by(agents, & &1.role)
 
     entries =
@@ -2320,6 +3666,9 @@ defmodule Cympho.RuntimeOperations do
         runs = Map.get(runs_by_issue, issue.id, [])
         work_products = Map.get(work_products_by_issue, issue.id, [])
         child_issues = Map.get(child_issues_by_parent, issue.id, [])
+
+        active_review_wakes =
+          review_wakes_for_issue(issue, child_issues, active_review_wakes_by_issue)
 
         digest =
           IssueDigest.build(
@@ -2336,7 +3685,8 @@ defmodule Cympho.RuntimeOperations do
             agents: agents,
             runs: runs,
             work_products: work_products,
-            child_issues: child_issues
+            child_issues: child_issues,
+            wakes: active_review_wakes
           )
           |> Map.new(&{&1.contract_key, &1})
 
@@ -2422,6 +3772,28 @@ defmodule Cympho.RuntimeOperations do
     |> preload([:assignee])
     |> Repo.all()
     |> Enum.group_by(& &1.parent_id)
+  end
+
+  defp active_review_wakes_by_issue([], _child_issues_by_parent), do: %{}
+
+  defp active_review_wakes_by_issue(issue_ids, child_issues_by_parent) do
+    child_issue_ids =
+      child_issues_by_parent
+      |> Map.values()
+      |> List.flatten()
+      |> Enum.map(& &1.id)
+
+    (issue_ids ++ child_issue_ids)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Wakes.list_review_nudges()
+    |> Enum.group_by(& &1.issue_id)
+  end
+
+  defp review_wakes_for_issue(%Issue{} = issue, child_issues, wakes_by_issue) do
+    [issue.id | Enum.map(child_issues, & &1.id)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.flat_map(&Map.get(wakes_by_issue, &1, []))
   end
 
   defp contract_failure_entry(issue, contract, agents_by_role, nudges_by_contract) do
@@ -2673,21 +4045,26 @@ defmodule Cympho.RuntimeOperations do
          services,
          capacity,
          host,
+         org_health,
          health,
          pressure_agents,
          prompt_radar,
          review_nudges,
+         wake_queue,
          contract_failures,
          recent_failures
        ) do
     findings =
       [
         stale_review_nudge_finding(review_nudges),
+        stale_comment_wake_finding(wake_queue),
         contract_failure_finding(contract_failures),
         prompt_radar_finding(prompt_radar),
         review_mode_finding(runtime_mode),
         not_running_service_finding(services),
         blocking_runtime_failure_finding(recent_failures),
+        org_staffing_finding(org_health),
+        repo_delivery_finding(Map.get(capacity, :repo_delivery)),
         capacity_finding(capacity, pressure_agents),
         host_finding(host),
         adapter_health_finding(health)
@@ -2741,6 +4118,23 @@ defmodule Cympho.RuntimeOperations do
   end
 
   defp stale_review_nudge_finding(_review_nudges), do: nil
+
+  defp stale_comment_wake_finding(%{counts: %{stale_comments: stale}}) when stale > 0 do
+    %{
+      severity: :warning,
+      label: "Queue",
+      title: "Stale comment wakes",
+      body: stale_comment_wake_message(stale),
+      why:
+        "Pending comment wakes still count against the agent queue cap even when the original issue comment is already available in the issue timeline.",
+      fix:
+        "Open the wake backlog, inspect the oldest comments if needed, then clear stale comment wakes to free agent queue room.",
+      target_path: "#wake-backlog",
+      target_label: "Open wake backlog"
+    }
+  end
+
+  defp stale_comment_wake_finding(_wake_queue), do: nil
 
   defp contract_failure_finding(%{counts: %{entries: entries}} = contract_failures)
        when entries > 0 do
@@ -2843,6 +4237,49 @@ defmodule Cympho.RuntimeOperations do
         }
     end
   end
+
+  defp org_staffing_finding(%{role_demand_gaps: gaps, metrics: metrics})
+       when is_list(gaps) and gaps != [] do
+    issue_count = Map.get(metrics, :unstaffed_role_issues, 0)
+    role_names = gaps |> Enum.map(& &1.label) |> Enum.take(3) |> Enum.join(", ")
+
+    %{
+      severity: :warning,
+      label: "Staffing",
+      title: "Delegated roles have no active agent",
+      body:
+        "#{length(gaps)} unstaffed #{plural_noun(length(gaps), "role")} across #{issue_count} open #{plural_noun(issue_count, "issue")}: #{role_names}.",
+      why:
+        "CEO and CTO decomposition can create useful child issues, but dispatch cannot route a delegated role that has no active agent.",
+      fix:
+        "Open the staffing gaps card, hire the missing role, or reassign the issue to an active role before broad dispatch.",
+      target_path: "#runtime-staffing-gaps",
+      target_label: "Review staffing gaps"
+    }
+  end
+
+  defp org_staffing_finding(_org_health), do: nil
+
+  defp repo_delivery_finding(%{status: :ready}), do: nil
+
+  defp repo_delivery_finding(%{status: status} = repo_delivery)
+       when status in [:missing, :text_only] do
+    %{
+      severity: :warning,
+      label: repo_delivery.label,
+      title: "Repo delivery runtime is missing",
+      body: repo_delivery.summary,
+      why:
+        "CEO and CTO agents can plan and delegate, but software issues need at least one delivery runtime that can edit files, run tests, create branches, and produce PR evidence.",
+      fix: repo_delivery.hint,
+      target_path: repo_delivery_primary_target_path(repo_delivery),
+      target_label: repo_delivery_primary_target_label(repo_delivery),
+      secondary_target_path: repo_delivery_secondary_target_path(repo_delivery),
+      secondary_target_label: repo_delivery_secondary_target_label(repo_delivery)
+    }
+  end
+
+  defp repo_delivery_finding(_repo_delivery), do: nil
 
   defp capacity_finding(%{} = capacity, _pressure_agents)
        when capacity.stale_checked_out_issues > 0 do
@@ -2985,13 +4422,19 @@ defmodule Cympho.RuntimeOperations do
          pressure_agents,
          prompt_radar,
          review_nudges,
+         wake_queue,
          contract_failures,
+         ceo_outcomes,
          owner_signoffs,
+         org_health,
          delegated_work
        ) do
     [
       owner_signoff_next_action(owner_signoffs),
       delegated_work_next_action(delegated_work),
+      org_staffing_next_action(org_health),
+      repo_delivery_next_action(Map.get(capacity, :repo_delivery)),
+      ceo_receipt_next_action(ceo_outcomes),
       if(prompt_radar.counts.watchlist > 0,
         do: %{
           tone:
@@ -3015,6 +4458,7 @@ defmodule Cympho.RuntimeOperations do
         }
       ),
       review_nudge_next_action(review_nudges),
+      stale_comment_wake_next_action(wake_queue),
       if(capacity.stale_checked_out_issues > 0,
         do: %{
           tone: :danger,
@@ -3094,6 +4538,22 @@ defmodule Cympho.RuntimeOperations do
     end
   end
 
+  defp org_staffing_next_action(%{role_demand_gaps: gaps, metrics: metrics})
+       when is_list(gaps) and gaps != [] do
+    issue_count = Map.get(metrics, :unstaffed_role_issues, 0)
+
+    %{
+      tone: :attention,
+      title: "Staff delegated role gaps",
+      body:
+        "#{length(gaps)} unstaffed #{plural_noun(length(gaps), "role")} across #{issue_count} open #{plural_noun(issue_count, "issue")} will not route cleanly until you hire or reassign coverage.",
+      target_path: "#runtime-staffing-gaps",
+      target_label: "Review staffing gaps"
+    }
+  end
+
+  defp org_staffing_next_action(_org_health), do: nil
+
   defp review_nudge_next_action(%{counts: %{stale_pre_runtime: stale_pre_runtime, stale: stale}})
        when stale_pre_runtime > 0 and stale > 0 do
     %{
@@ -3143,6 +4603,61 @@ defmodule Cympho.RuntimeOperations do
 
   defp review_nudge_next_action(_review_nudges), do: nil
 
+  defp stale_comment_wake_next_action(%{counts: %{stale_comments: stale}}) when stale > 0 do
+    %{
+      tone: :attention,
+      title: "Clear stale comment wakes",
+      body: stale_comment_wake_message(stale),
+      target_path: "#wake-backlog",
+      target_label: "Open wake backlog"
+    }
+  end
+
+  defp stale_comment_wake_next_action(_wake_queue), do: nil
+
+  defp repo_delivery_next_action(%{status: :ready}), do: nil
+
+  defp repo_delivery_next_action(%{status: status} = repo_delivery)
+       when status in [:missing, :text_only] do
+    %{
+      tone: :attention,
+      title: "Provision repo delivery runtime",
+      body: repo_delivery.summary,
+      target_path: repo_delivery_primary_target_path(repo_delivery),
+      target_label: repo_delivery_primary_target_label(repo_delivery),
+      secondary_target_path: repo_delivery_secondary_target_path(repo_delivery),
+      secondary_target_label: repo_delivery_secondary_target_label(repo_delivery)
+    }
+  end
+
+  defp repo_delivery_next_action(_repo_delivery), do: nil
+
+  defp repo_delivery_primary_target_path(%{hire_target_path: path}) when is_binary(path),
+    do: path
+
+  defp repo_delivery_primary_target_path(%{target_path: path}) when is_binary(path), do: path
+  defp repo_delivery_primary_target_path(_repo_delivery), do: nil
+
+  defp repo_delivery_primary_target_label(%{hire_target_label: label}) when is_binary(label),
+    do: label
+
+  defp repo_delivery_primary_target_label(%{target_label: label}) when is_binary(label), do: label
+  defp repo_delivery_primary_target_label(_repo_delivery), do: nil
+
+  defp repo_delivery_secondary_target_path(%{
+         status: :text_only,
+         target_path: target_path,
+         hire_target_path: hire_target_path
+       })
+       when is_binary(target_path) and target_path != hire_target_path do
+    target_path
+  end
+
+  defp repo_delivery_secondary_target_path(_repo_delivery), do: nil
+
+  defp repo_delivery_secondary_target_label(%{status: :text_only}), do: "Convert existing agent"
+  defp repo_delivery_secondary_target_label(_repo_delivery), do: nil
+
   defp owner_signoff_next_action(%{count: count}) when count > 0 do
     %{
       tone: :attention,
@@ -3155,6 +4670,29 @@ defmodule Cympho.RuntimeOperations do
   end
 
   defp owner_signoff_next_action(_owner_signoffs), do: nil
+
+  defp ceo_receipt_next_action(%{
+         counts: %{receipt_incomplete: count},
+         entries: entries
+       })
+       when count > 0 do
+    first_gap =
+      Enum.find(entries, fn entry ->
+        get_in(entry, [:receipt, :status]) == :attention
+      end)
+
+    %{
+      tone: :attention,
+      title: "Repair CEO receipt gaps",
+      body:
+        "#{count} CEO #{plural_noun(count, "outcome")} need a complete action, evidence, verification, risk, and next-decision receipt.",
+      target_path: "#ceo-outcome-monitor",
+      target_label: "Open CEO receipts",
+      command: first_gap && first_gap.focused_command
+    }
+  end
+
+  defp ceo_receipt_next_action(_ceo_outcomes), do: nil
 
   defp delegated_work_next_action(%{count: count}) when count > 0 do
     %{
@@ -3293,7 +4831,7 @@ defmodule Cympho.RuntimeOperations do
   defp health_target_label(_), do: "Review adapter health"
 
   defp failure_target_path(%{agent: %{id: id}}), do: "/agents/#{id}?tab=configuration"
-  defp failure_target_path(_failure), do: "#recent-failures"
+  defp failure_target_path(_failure), do: "#runtime-failures"
 
   defp failure_target_label(%{agent: %{name: name}}), do: "Fix #{name}"
   defp failure_target_label(_failure), do: "Review failures"
@@ -3322,6 +4860,10 @@ defmodule Cympho.RuntimeOperations do
     end
   end
 
+  defp stale_comment_wake_message(count) do
+    "#{count} stale comment #{plural_noun(count, "wake")} #{has_have(count)} waited more than #{@stale_comment_wake_minutes} minutes and can be cleared without deleting issue comments."
+  end
+
   defp role_label(nil), do: "Unknown"
   defp role_label(role), do: Agent.role_label(role)
 
@@ -3348,6 +4890,17 @@ defmodule Cympho.RuntimeOperations do
 
   defp needs_need(1), do: "needs"
   defp needs_need(_), do: "need"
+
+  defp positive_int(value, _fallback) when is_integer(value) and value > 0, do: value
+
+  defp positive_int(value, fallback) when is_binary(value) do
+    case Integer.parse(value) do
+      {int, _} when int > 0 -> int
+      _ -> fallback
+    end
+  end
+
+  defp positive_int(_value, fallback), do: fallback
 
   defp plural(1), do: ""
   defp plural(_), do: "s"

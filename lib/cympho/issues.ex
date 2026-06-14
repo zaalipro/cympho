@@ -42,7 +42,7 @@ defmodule Cympho.Issues do
     |> maybe_filter_by_labels(opts)
     |> limit(^cap)
     |> Repo.all()
-    |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels])
+    |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels, :goal])
   end
 
   @doc """
@@ -85,7 +85,7 @@ defmodule Cympho.Issues do
       cursor_fields: [{:updated_at, :desc}, {:id, :desc}]
     )
     |> then(fn page ->
-      %{page | entries: Repo.preload(page.entries, [:assignee, :project, :labels])}
+      %{page | entries: Repo.preload(page.entries, [:assignee, :project, :labels, :goal])}
     end)
   end
 
@@ -358,7 +358,7 @@ defmodule Cympho.Issues do
       |> limit(^per_page)
       |> offset(^offset)
       |> Repo.all()
-      |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels, :project])
+      |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels, :project, :goal])
 
     %{
       issues: issues,
@@ -572,7 +572,7 @@ defmodule Cympho.Issues do
   def get_issue!(id),
     do:
       Repo.get!(Issue, id)
-      |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels, :project])
+      |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels, :project, :goal])
 
   def get_issue(id) do
     case Repo.get(Issue, id) do
@@ -581,7 +581,15 @@ defmodule Cympho.Issues do
 
       issue ->
         {:ok,
-         Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee, :labels, :project])}
+         Repo.preload(issue, [
+           :comments,
+           :blocked_by,
+           :blocks,
+           :assignee,
+           :labels,
+           :project,
+           :goal
+         ])}
     end
   end
 
@@ -598,7 +606,15 @@ defmodule Cympho.Issues do
 
       issue ->
         {:ok,
-         Repo.preload(issue, [:comments, :blocked_by, :blocks, :assignee, :labels, :project])}
+         Repo.preload(issue, [
+           :comments,
+           :blocked_by,
+           :blocks,
+           :assignee,
+           :labels,
+           :project,
+           :goal
+         ])}
     end
   end
 
@@ -702,6 +718,27 @@ defmodule Cympho.Issues do
 
     update_issue(issue, %{monitor_state: monitor_state})
   end
+
+  def clear_company_dispatch_focus(company_id) when is_binary(company_id) do
+    pinned_issues =
+      Issue
+      |> where([i], i.company_id == ^company_id)
+      |> where([i], fragment("(? -> 'dispatch' ->> 'pinned_at') IS NOT NULL", i.monitor_state))
+      |> Repo.all()
+
+    results = Enum.map(pinned_issues, &clear_dispatch_focus/1)
+    cleared = Enum.count(results, &match?({:ok, _issue}, &1))
+    failed = length(results) - cleared
+    summary = %{cleared: cleared, failed: failed}
+
+    if failed == 0 do
+      {:ok, summary}
+    else
+      {:error, summary}
+    end
+  end
+
+  def clear_company_dispatch_focus(_company_id), do: {:error, :invalid_company}
 
   @doc """
   Returns true when a blocked issue is waiting on owner verification of a CEO
@@ -853,7 +890,7 @@ defmodule Cympho.Issues do
       author_type: author_type,
       author_id: author_id,
       body:
-        "[review] Verdict: accepted. What happened: owner accepted the CEO verification update. Verification: CEO runtime completed and posted an owner update. Gaps: none for this owner-verification handoff. Follow-up issues: none. Next decision: close."
+        "[review] Verdict: accepted. What happened: owner accepted the CEO verification update. Evidence inspected: CEO owner update, completed runtime, and owner verification blocker. Verification: CEO runtime completed and posted an owner update. Gaps: none for this owner-verification handoff. Follow-up issues: none. Next decision: close. Restart packet: issue is accepted; no next runtime turn is needed unless the owner reopens it."
     }
   end
 
@@ -869,7 +906,7 @@ defmodule Cympho.Issues do
       author_type: author_type,
       author_id: author_id,
       body:
-        "[review] Verdict: changes requested. What happened: owner reopened the CEO verification update for revision. Verification: owner did not accept the current CEO update. Gaps: revised CEO owner update required. Follow-up issues: none. Next decision: CEO revises the owner update, delegates missing work, or explains the blocker."
+        "[review] Verdict: changes requested. What happened: owner reopened the CEO verification update for revision. Evidence inspected: prior CEO owner update and owner revision request. Verification: owner did not accept the current CEO update. Gaps: revised CEO owner update required. Follow-up issues: none. Next decision: CEO revises the owner update, delegates missing work, or explains the blocker. Restart packet: CEO should inspect the owner revision request, prior CEO update, and missing business decision before revising."
     }
   end
 

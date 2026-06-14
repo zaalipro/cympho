@@ -10,16 +10,25 @@ defmodule Cympho.RuntimeOperationsTest do
   alias Cympho.Projects
   alias Cympho.Repo
   alias Cympho.RuntimeOperations
+  alias Cympho.Secrets
   alias Cympho.Wakes
   alias Cympho.Wakes.AgentWake
   alias Cympho.WorkProducts
 
   describe "runtime launch commands" do
+    test "builds broad dispatch command with the configured Phoenix port" do
+      port = configured_endpoint_port()
+
+      assert RuntimeOperations.runtime_launch_command() ==
+               "PORT=#{port} CYMPHO_ORCHESTRATOR_ENABLED=1 CYMPHO_START_HEARTBEAT_WATCHDOG=1 CYMPHO_START_HEALTH_CHECKER=1 mise exec -- mix phx.server"
+    end
+
     test "builds focused dispatch command for a single issue" do
       issue_id = Ecto.UUID.generate()
+      port = configured_endpoint_port()
 
       assert RuntimeOperations.focused_runtime_launch_command(issue_id) ==
-               "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue_id} CYMPHO_ORCHESTRATOR_ENABLED=1 CYMPHO_START_HEARTBEAT_WATCHDOG=1 CYMPHO_START_HEALTH_CHECKER=1 mise exec -- mix phx.server"
+               "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue_id} PORT=#{port} CYMPHO_ORCHESTRATOR_ENABLED=1 CYMPHO_START_HEARTBEAT_WATCHDOG=1 CYMPHO_START_HEALTH_CHECKER=1 mise exec -- mix phx.server"
     end
   end
 
@@ -69,6 +78,10 @@ defmodule Cympho.RuntimeOperationsTest do
       refute snapshot.runtime_enablement.command =~ "CYMPHO_START_BACKLOG_PLANNER"
       assert snapshot.capacity.total_agents == 1
       assert snapshot.capacity.local_slots == 6
+      assert snapshot.capacity.repo_delivery.status == :ready
+      assert snapshot.capacity.repo_delivery.repo_capable_slots == 6
+      assert snapshot.capacity.repo_delivery.text_only_slots == 0
+      assert snapshot.capacity.repo_delivery.label == "Repo-ready"
       assert [%{name: "Ops Engineer", pressure: %{level: :high}}] = snapshot.pressure_agents
 
       assert [
@@ -113,6 +126,224 @@ defmodule Cympho.RuntimeOperationsTest do
                snapshot.doctor.findings,
                &(&1.title == "Local concurrency needs attention" and
                    &1.target_label == "Tune Ops Engineer")
+             )
+    end
+
+    test "flags delivery lanes that only have text/action runtime capacity" do
+      {:ok, company} =
+        Companies.create_company(%{name: "Text Only Delivery Co", slug: unique_slug()})
+
+      {:ok, chat_engineer} =
+        Agents.create_agent(%{
+          name: "Planning Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :openai_chat,
+          max_concurrent_jobs: 2,
+          company_id: company.id
+        })
+
+      snapshot = RuntimeOperations.snapshot(company.id)
+
+      assert snapshot.capacity.repo_delivery.status == :text_only
+      assert snapshot.capacity.repo_delivery.repo_capable_slots == 0
+      assert snapshot.capacity.repo_delivery.text_only_slots == 2
+
+      assert snapshot.capacity.repo_delivery.target_path ==
+               "/agents/#{chat_engineer.id}?tab=configuration#agent-runtime-profile"
+
+      assert snapshot.capacity.repo_delivery.hire_target_label == "Hire repo engineer"
+      assert snapshot.capacity.repo_delivery.hire_target_path =~ "role=engineer"
+      assert snapshot.capacity.repo_delivery.hire_target_path =~ "name=Repo-capable+Engineer"
+
+      assert snapshot.capacity.repo_delivery.hire_target_path =~
+               "runtime_profile_id=process-codex"
+
+      assert Enum.any?(
+               snapshot.next_actions,
+               &(&1.title == "Provision repo delivery runtime" and
+                   &1.target_label == "Hire repo engineer" and
+                   &1.target_path =~ "runtime_profile_id=process-codex" and
+                   &1.secondary_target_label == "Convert existing agent" and
+                   &1.secondary_target_path ==
+                     "/agents/#{chat_engineer.id}?tab=configuration#agent-runtime-profile")
+             )
+
+      assert Enum.any?(
+               snapshot.doctor.findings,
+               &(&1.title == "Repo delivery runtime is missing" and
+                   &1.target_label == "Hire repo engineer" and
+                   &1.target_path =~ "runtime_profile_id=process-codex" and
+                   &1.secondary_target_label == "Convert existing agent" and
+                   &1.secondary_target_path ==
+                     "/agents/#{chat_engineer.id}?tab=configuration#agent-runtime-profile")
+             )
+    end
+
+    test "prefills a coding runtime profile when no repo delivery lane exists" do
+      {:ok, company} =
+        Companies.create_company(%{name: "Missing Repo Delivery Co", slug: unique_slug()})
+
+      snapshot = RuntimeOperations.snapshot(company.id)
+
+      assert snapshot.capacity.repo_delivery.status == :missing
+      assert snapshot.capacity.repo_delivery.repo_capable_slots == 0
+      assert snapshot.capacity.repo_delivery.text_only_slots == 0
+      assert snapshot.capacity.repo_delivery.target_label == "Add engineer"
+      assert snapshot.capacity.repo_delivery.target_path =~ "/agents/new?"
+      assert snapshot.capacity.repo_delivery.target_path =~ "role=engineer"
+      assert snapshot.capacity.repo_delivery.target_path =~ "name=Repo-capable+Engineer"
+      assert snapshot.capacity.repo_delivery.target_path =~ "runtime_profile_id=process-codex"
+
+      assert snapshot.capacity.repo_delivery.target_path =~
+               "return_to=%2Foperations%23runtime-capacity"
+
+      assert snapshot.capacity.repo_delivery.hire_target_path ==
+               snapshot.capacity.repo_delivery.target_path
+    end
+
+    test "does not count no-op custom process commands as repo delivery capacity" do
+      {:ok, company} =
+        Companies.create_company(%{name: "Noop Process Delivery Co", slug: unique_slug()})
+
+      {:ok, process_engineer} =
+        Agents.create_agent(%{
+          name: "Echo Process Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          max_concurrent_jobs: 2,
+          company_id: company.id
+        })
+
+      snapshot = RuntimeOperations.snapshot(company.id)
+
+      assert snapshot.capacity.repo_delivery.status == :text_only
+      assert snapshot.capacity.repo_delivery.repo_capable_slots == 0
+      assert snapshot.capacity.repo_delivery.text_only_slots == 2
+
+      assert snapshot.capacity.repo_delivery.target_path ==
+               "/agents/#{process_engineer.id}?tab=configuration#agent-runtime-profile"
+    end
+
+    test "does not count Agrenting output mode as repo delivery capacity" do
+      {:ok, company} =
+        Companies.create_company(%{name: "Output Agrenting Delivery Co", slug: unique_slug()})
+
+      {:ok, remote_engineer} =
+        Agents.create_agent(%{
+          name: "Output Remote Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :agrenting,
+          config: %{
+            "agent_did" => "did:example:output-remote-engineer",
+            "capability" => "implementation",
+            "max_price" => "1.00"
+          },
+          max_concurrent_jobs: 2,
+          company_id: company.id
+        })
+
+      snapshot = RuntimeOperations.snapshot(company.id)
+
+      assert snapshot.capacity.repo_delivery.status == :text_only
+      assert snapshot.capacity.repo_delivery.repo_capable_slots == 0
+      assert snapshot.capacity.repo_delivery.text_only_slots == 2
+
+      assert snapshot.capacity.repo_delivery.target_path ==
+               "/agents/#{remote_engineer.id}?tab=configuration#agent-runtime-profile"
+    end
+
+    test "counts Agrenting push mode with repo-token secret as repo delivery capacity" do
+      {:ok, company} =
+        Companies.create_company(%{name: "Push Agrenting Delivery Co", slug: unique_slug()})
+
+      {:ok, _remote_engineer} =
+        Agents.create_agent(%{
+          name: "Push Remote Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :agrenting,
+          config: %{
+            "agent_did" => "did:example:push-remote-engineer",
+            "capability" => "implementation",
+            "delivery_mode" => "push",
+            "max_price" => "1.00"
+          },
+          max_concurrent_jobs: 2,
+          company_id: company.id
+        })
+
+      {:ok, _secret} =
+        Secrets.create_secret(%{
+          company_id: company.id,
+          scope: "company",
+          key: "AGRENTING_REPO_ACCESS_TOKEN",
+          value: "repo-token",
+          description: "Agrenting repo access token"
+        })
+
+      snapshot = RuntimeOperations.snapshot(company.id)
+
+      assert snapshot.capacity.repo_delivery.status == :ready
+      assert snapshot.capacity.repo_delivery.repo_capable_slots == 2
+      assert snapshot.capacity.repo_delivery.text_only_slots == 0
+    end
+
+    test "includes staffing demand gaps for delegated roles without active agents" do
+      {:ok, company} =
+        Companies.create_company(%{name: "Ops Staffing Co", slug: unique_slug()})
+
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "Ops Staffing CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Define activation funnel spec",
+          description: "Product work should be delegated before engineering starts.",
+          status: :todo,
+          priority: :high,
+          assigned_role: "product_manager",
+          company_id: company.id
+        })
+
+      snapshot = RuntimeOperations.snapshot(company.id)
+
+      assert snapshot.org_health.metrics.role_demand_gaps == 1
+      assert snapshot.org_health.metrics.unstaffed_role_issues == 1
+
+      assert [
+               %{
+                 role: :product_manager,
+                 label: "Product Manager",
+                 open_issues: 1,
+                 suggested_parent: %{id: ceo_id, name: "Ops Staffing CEO"},
+                 examples: [%{id: issue_id}]
+               }
+             ] = snapshot.org_health.role_demand_gaps
+
+      assert ceo_id == ceo.id
+      assert issue_id == issue.id
+
+      assert Enum.any?(
+               snapshot.next_actions,
+               &(&1.title == "Staff delegated role gaps" and
+                   &1.target_path == "#runtime-staffing-gaps")
+             )
+
+      assert Enum.any?(
+               snapshot.doctor.findings,
+               &(&1.title == "Delegated roles have no active agent" and
+                   &1.target_path == "#runtime-staffing-gaps" and
+                   &1.body =~ "Product Manager")
              )
     end
 
@@ -164,7 +395,7 @@ defmodule Cympho.RuntimeOperationsTest do
              ] = snapshot.launch_preview.candidates
 
       assert detail =~ "__missing_cympho_test_command__ was not found"
-      assert target_path == "/agents/#{agent.id}#agent-process-command"
+      assert target_path == "/agents/#{agent.id}?tab=configuration#agent-process-command"
     end
 
     test "launch preview shows Claude-compatible model and gateway endpoint" do
@@ -201,6 +432,9 @@ defmodule Cympho.RuntimeOperationsTest do
       snapshot = RuntimeOperations.snapshot(company.id)
       issue_id = issue.id
 
+      repair_path =
+        "/issues/#{issue_id}?edit=description&repair=owner_brief&return_to=%2Foperations%23runtime-launch-checklist#issue-description"
+
       assert [
                %{
                  id: ^issue_id,
@@ -218,12 +452,68 @@ defmodule Cympho.RuntimeOperationsTest do
       assert brief =~ "Define company strategy"
       assert brief =~ "Target: Qwen CEO · Claude Code"
       assert brief =~ "Provider model: qwen3.7-plus"
+      assert brief =~ "Owner brief readiness: Too thin for autonomy (1/6 signals)"
+
+      assert brief =~
+               "Next brief prompt: Context: Add the facts that would change the CEO's decision."
+
+      assert brief =~ "Brief repair scaffold:"
+      assert brief =~ "Goal: Define company strategy"
+
+      assert brief =~
+               "Missing signals: Context, Risk/constraint, Done signal, First CEO signal, Evidence."
 
       assert brief =~
                "Gateway endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1"
 
       assert brief =~ "Focused command: CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue_id}"
       assert brief =~ "No provider call"
+      assert brief =~ "First turn: Return `[owner_update]`, `[handoff]`, or `[blocked]`"
+      assert brief =~ "waiting on delegated sub-work"
+      assert snapshot.ceo_flow.primary_candidate.brief == brief
+      assert snapshot.ceo_flow.primary_candidate.brief_readiness_label == "Too thin for autonomy"
+      assert snapshot.ceo_flow.primary_candidate.brief_readiness_score == "1/6"
+      assert snapshot.ceo_flow.primary_candidate.brief_readiness_status == :thin
+
+      assert snapshot.ceo_flow.primary_candidate.brief_readiness_next =~
+               "Context: Add the facts"
+
+      assert snapshot.ceo_flow.primary_candidate.brief_repair_scaffold =~
+               "Goal: Define company strategy"
+
+      assert snapshot.ceo_flow.primary_candidate.brief_repair_scaffold =~
+               "Missing signals: Context, Risk/constraint, Done signal, First CEO signal, Evidence."
+
+      assert snapshot.ceo_flow.primary_candidate.first_turn =~
+               "Return `[owner_update]`, `[handoff]`, or `[blocked]`"
+
+      assert snapshot.ceo_flow.primary_candidate.focused_command =~
+               "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue_id}"
+
+      assert snapshot.launch_plan.status == :ceo_brief_repair
+      assert snapshot.launch_plan.label == "Repair CEO owner brief"
+      assert is_nil(snapshot.launch_plan.command)
+      assert snapshot.launch_plan.repair_scaffold =~ "Goal: Define company strategy"
+      assert snapshot.launch_plan.target_label == "Repair brief"
+
+      assert snapshot.launch_plan.target_path ==
+               repair_path
+
+      assert snapshot.launch_plan.summary =~
+               "needs a stronger owner brief before a useful CEO turn"
+
+      assert snapshot.launch_plan.summary =~
+               "Context: Add the facts that would change the CEO's decision."
+
+      assert snapshot.launch_plan.issue.identifier
+      assert snapshot.launch_plan.issue.title == "Define company strategy"
+      assert Enum.any?(snapshot.launch_plan.steps, &(&1.label == "Repair brief"))
+      assert Enum.any?(snapshot.launch_plan.steps, &(&1.label == "Launch"))
+      assert snapshot.ceo_flow.stage == :brief_repair
+      assert snapshot.ceo_flow.label == "Brief repair"
+      assert snapshot.ceo_flow.next_action.label == "Repair owner brief"
+
+      assert snapshot.ceo_flow.next_action.path == repair_path
 
       assert Enum.any?(items, &(&1.label == "Provider model" and &1.detail == "qwen3.7-plus"))
 
@@ -483,14 +773,22 @@ defmodule Cympho.RuntimeOperationsTest do
                  %{
                    "type" => "comment",
                    "body" =>
-                     "[owner_update] What happened: strategy is framed. Business status: not shipped. Current state: ready to split. Next decision: delegate implementation. Owner decision needed: none."
+                     "[owner_update] What happened: strategy is framed. Business status: not shipped. Evidence inspected: owner request and company context. Verification: checked this needs delegated execution. Remaining risk: implementation scope may change after engineering discovery. Current state: ready to split. Next decision: delegate implementation. Owner decision needed: none."
                  },
                  %{
                    "type" => "create_issue",
                    "title" => "Implement investor dashboard",
                    "description" => "Build the owner-visible investor dashboard.",
                    "role" => "engineer",
-                   "priority" => "high"
+                   "priority" => "high",
+                   "acceptance_criteria" =>
+                     "Investor dashboard shows the owner-visible update clearly.",
+                   "evidence_required" =>
+                     "Dashboard implementation evidence and final delivery note.",
+                   "verification_required" =>
+                     "Run a focused dashboard smoke check or name the blocker.",
+                   "definition_of_done" =>
+                     "Dashboard is ready for review with evidence and risk named."
                  }
                ])
 
@@ -573,7 +871,10 @@ defmodule Cympho.RuntimeOperationsTest do
       assert snapshot.ceo_outcomes.counts.decompositions == 1
       assert snapshot.ceo_outcomes.counts.silent == 1
       assert snapshot.ceo_outcomes.counts.failed == 3
-      assert snapshot.ceo_outcomes.counts.attention == 4
+      assert snapshot.ceo_outcomes.counts.attention == 5
+      assert snapshot.ceo_outcomes.counts.receipt_checked == 2
+      assert snapshot.ceo_outcomes.counts.receipt_complete == 1
+      assert snapshot.ceo_outcomes.counts.receipt_incomplete == 1
       assert snapshot.ceo_outcomes.counts.comments == 0
       assert snapshot.ceo_outcomes.scanned == 7
       assert snapshot.ceo_outcomes.groups == 6
@@ -582,10 +883,31 @@ defmodule Cympho.RuntimeOperationsTest do
       assert snapshot.ceo_outcomes.summary =~ "1 decomposition"
       assert snapshot.ceo_outcomes.summary =~ "1 no-action run"
       assert snapshot.ceo_outcomes.summary =~ "3 failed runs"
+      assert snapshot.ceo_outcomes.summary =~ "1 incomplete receipt"
+
+      assert Enum.any?(
+               snapshot.next_actions,
+               &(&1.title == "Repair CEO receipt gaps" and
+                   &1.target_path == "#ceo-outcome-monitor" and
+                   &1.target_label == "Open CEO receipts" and
+                   &1.command =~
+                     "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{action_after_run_issue.id}")
+             )
 
       assert Enum.any?(
                snapshot.ceo_outcomes.entries,
-               &(&1.outcome == :owner_update and &1.detail =~ "strategy is framed")
+               &(&1.outcome == :owner_update and &1.detail =~ "strategy is framed" and
+                   &1.receipt.status == :ok and
+                   &1.receipt.summary =~ "complete last-action receipt")
+             )
+
+      assert Enum.any?(
+               snapshot.ceo_outcomes.entries,
+               &(&1.outcome == :owner_update and &1.detail =~ "run produced an accepted action" and
+                   &1.receipt.status == :attention and
+                   &1.receipt.repair_prompt =~ "Focused relaunch should revise" and
+                   "Verification" in &1.receipt.missing_fields and
+                   "Remaining risk" in &1.receipt.missing_fields)
              )
 
       assert Enum.any?(
@@ -620,6 +942,109 @@ defmodule Cympho.RuntimeOperationsTest do
       refute Enum.any?(
                snapshot.ceo_outcomes.entries,
                &(&1.issue_title == "CEO run with accepted action" and &1.outcome == :silent)
+             )
+    end
+
+    test "normalizes CEO action execution feedback into recovery detail" do
+      {:ok, company} =
+        Companies.create_company(%{name: "CEO Action Feedback Co", slug: unique_slug()})
+
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "Action Feedback CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "CEO active dependency feedback",
+          status: :in_progress,
+          priority: :high,
+          assigned_role: "ceo",
+          assignee_id: ceo.id,
+          company_id: company.id
+        })
+
+      {:ok, legacy_issue} =
+        Issues.create_issue(%{
+          title: "CEO legacy dependency feedback",
+          status: :in_progress,
+          priority: :high,
+          assigned_role: "ceo",
+          assignee_id: ceo.id,
+          company_id: company.id
+        })
+
+      old_run_time =
+        DateTime.utc_now()
+        |> DateTime.add(-20, :second)
+        |> DateTime.truncate(:second)
+
+      legacy_run_time =
+        DateTime.utc_now()
+        |> DateTime.add(-10, :second)
+        |> DateTime.truncate(:second)
+
+      Repo.insert!(%Run{
+        company_id: company.id,
+        agent_id: ceo.id,
+        issue_id: issue.id,
+        adapter: "process",
+        status: "completed",
+        inserted_at: old_run_time,
+        started_at: old_run_time,
+        completed_at: old_run_time
+      })
+
+      Repo.insert!(%Run{
+        company_id: company.id,
+        agent_id: ceo.id,
+        issue_id: legacy_issue.id,
+        adapter: "process",
+        status: "completed",
+        inserted_at: legacy_run_time,
+        started_at: legacy_run_time,
+        completed_at: legacy_run_time
+      })
+
+      assert {:ok, _comment} =
+               Comments.create_comment(%{
+                 body:
+                   "Agent cympho-actions block parsed, but action execution failed: :blocked_by_active_issues",
+                 author_type: "system",
+                 author_id: "00000000-0000-0000-0000-000000000000",
+                 issue_id: issue.id
+               })
+
+      assert {:ok, _comment} =
+               Comments.create_comment(%{
+                 body:
+                   "Agent response did not include a valid cympho-actions block: :blocked_by_active_issues",
+                 author_type: "system",
+                 author_id: "00000000-0000-0000-0000-000000000000",
+                 issue_id: legacy_issue.id
+               })
+
+      snapshot = RuntimeOperations.snapshot(company.id)
+
+      assert Enum.any?(
+               snapshot.ceo_outcomes.entries,
+               &(&1.issue_title == "CEO active dependency feedback" and
+                   &1.detail =~ "Action execution failed: active child issues" and
+                   &1.detail =~ "Inspect delegated work before approving or closing" and
+                   not String.contains?(&1.detail, ":blocked_by_active_issues"))
+             )
+
+      assert Enum.any?(
+               snapshot.ceo_outcomes.entries,
+               &(&1.issue_title == "CEO legacy dependency feedback" and
+                   &1.detail =~ "Action execution failed: active child issues" and
+                   &1.detail =~ "Inspect delegated work before approving or closing" and
+                   not String.contains?(&1.detail, "Invalid cympho-actions block"))
              )
     end
 
@@ -715,6 +1140,11 @@ defmodule Cympho.RuntimeOperationsTest do
 
       assert snapshot.owner_signoffs.count == 1
       assert snapshot.owner_signoffs.summary =~ "1 CEO owner update needs owner acceptance"
+      assert snapshot.ceo_flow.stage == :owner_signoff
+      assert snapshot.ceo_flow.label == "Owner signoff"
+      assert snapshot.ceo_flow.owner_signoff_count == 1
+      assert snapshot.ceo_flow.summary =~ "1 CEO owner update needs owner acceptance"
+      assert snapshot.ceo_flow.next_action.path == "#owner-signoff-queue"
 
       assert [
                %{
@@ -926,13 +1356,26 @@ defmodule Cympho.RuntimeOperationsTest do
           role: :engineer,
           status: :idle,
           adapter: :process,
-          config: %{"command" => "echo", "model" => "custom"},
+          config: %{"command" => "echo", "model" => "custom", "repo_capable" => true},
           company_id: company.id
         })
 
       {:ok, issue} =
         Issues.create_issue(%{
           title: "Implement auto route preview",
+          description: """
+          Acceptance criteria:
+          - Auto-route preview identifies the routed engineer.
+
+          Evidence required:
+          - RuntimeOperations snapshot includes routed agent preflight.
+
+          Verification required:
+          - Focused RuntimeOperations launch preview test passes.
+
+          Definition of done:
+          - Preview remains in review mode with routed agent details visible.
+          """,
           status: :todo,
           priority: :high,
           assigned_role: "engineer",
@@ -1136,7 +1579,7 @@ defmodule Cympho.RuntimeOperationsTest do
           status: :idle,
           adapter: :codex,
           instructions:
-            "Before review include Files changed, Verification, Risks, current state, next decision, and PR task list.",
+            "Before review include Files changed, Evidence produced, Verification, Risks, current state, next decision, and PR task list.",
           company_id: company.id
         })
 
@@ -1220,11 +1663,70 @@ defmodule Cympho.RuntimeOperationsTest do
 
       assert failure.category == :missing_credentials
       assert failure.title == "Credentials missing"
+      assert failure.target_path == "/issues/#{issue.id}"
+      assert failure.focused_command =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue.id}"
 
       assert Enum.any?(
                snapshot.doctor.findings,
                &(&1.title == "Adapter setup is blocking runs" and
                    &1.target_label == "Fix Failing Agent")
+             )
+    end
+
+    test "diagnoses failed CEO runs even when no error reason was recorded" do
+      {:ok, company} =
+        Companies.create_company(%{name: "Blank Failure Co", slug: unique_slug()})
+
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "Blank Failure CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"},
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Blank failed CEO run",
+          status: :todo,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: ceo.id
+        })
+
+      Repo.insert!(%Run{
+        company_id: company.id,
+        agent_id: ceo.id,
+        issue_id: issue.id,
+        status: "failed",
+        adapter: "process",
+        error_reason: nil,
+        log_excerpt: nil
+      })
+
+      snapshot = RuntimeOperations.snapshot(company.id)
+
+      assert [
+               %{
+                 category: :no_output,
+                 title: "No adapter output",
+                 hint: "Check the CLI logs and wrapper stdout/stderr.",
+                 target_path: target_path,
+                 focused_command: focused_command
+               }
+             ] = snapshot.recent_failures
+
+      assert target_path == "/issues/#{issue.id}"
+      assert focused_command =~ "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue.id}"
+
+      assert Enum.any?(
+               snapshot.ceo_outcomes.entries,
+               &(&1.issue_title == "Blank failed CEO run" and
+                   &1.outcome == :failed and
+                   &1.detail =~ "No adapter output" and
+                   &1.detail =~ "Check the CLI logs")
              )
     end
 
@@ -1329,6 +1831,93 @@ defmodule Cympho.RuntimeOperationsTest do
                snapshot.doctor.findings,
                &(&1.title == "Stale review nudges" and
                    &1.body == "1 review nudge has waited more than 30 minutes.")
+             )
+    end
+
+    test "summarizes stale comment wake backlog" do
+      {:ok, company} =
+        Companies.create_company(%{name: "Wake Backlog Co", slug: unique_slug()})
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Backlog Owner",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"},
+          company_id: company.id
+        })
+
+      {:ok, stale_issue} =
+        Issues.create_issue(%{
+          title: "Old comment needs cleanup",
+          description: "A comment wake got stuck.",
+          status: :in_progress,
+          priority: :high,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, recent_issue} =
+        Issues.create_issue(%{
+          title: "Recent comment should stay",
+          status: :in_progress,
+          priority: :medium,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, stale_wake} =
+        Wakes.do_wake_agent(agent.id, stale_issue.id, "issue_commented", "user", "test", %{})
+
+      {:ok, _recent_wake} =
+        Wakes.do_wake_agent(
+          agent.id,
+          recent_issue.id,
+          "issue_comment_mentioned",
+          "user",
+          "test",
+          %{}
+        )
+
+      stale_time =
+        DateTime.utc_now()
+        |> DateTime.add(-3 * 60 * 60, :second)
+        |> DateTime.truncate(:second)
+
+      Repo.update_all(from(w in AgentWake, where: w.id == ^stale_wake.id),
+        set: [inserted_at: stale_time]
+      )
+
+      snapshot = RuntimeOperations.snapshot(company.id)
+
+      assert snapshot.wake_queue.counts.pending_comments == 2
+      assert snapshot.wake_queue.counts.stale_comments == 1
+      assert snapshot.wake_queue.stale_after_minutes == 120
+      assert snapshot.wake_queue.summary =~ "1 stale comment wake"
+
+      assert [
+               %{
+                 agent_name: "Backlog Owner",
+                 issue_title: "Old comment needs cleanup",
+                 reason_label: "Comment"
+               }
+             ] = snapshot.wake_queue.entries
+
+      assert [%{label: "Backlog Owner", count: 1}] = snapshot.wake_queue.by_agent
+
+      assert Enum.any?(
+               snapshot.next_actions,
+               &(&1.title == "Clear stale comment wakes" and
+                   &1.target_path == "#wake-backlog" and
+                   &1.body =~ "1 stale comment wake")
+             )
+
+      assert Enum.any?(
+               snapshot.doctor.findings,
+               &(&1.title == "Stale comment wakes" and
+                   &1.target_path == "#wake-backlog" and
+                   &1.body =~ "1 stale comment wake")
              )
     end
 
@@ -1618,6 +2207,12 @@ defmodule Cympho.RuntimeOperationsTest do
   end
 
   defp unique_slug, do: "ops-#{System.unique_integer([:positive])}"
+
+  defp configured_endpoint_port do
+    :cympho
+    |> Application.get_env(CymphoWeb.Endpoint)
+    |> get_in([:http, :port])
+  end
 
   defp unique_prefix(prefix) do
     suffix =

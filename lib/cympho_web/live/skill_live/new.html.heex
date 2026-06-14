@@ -1,4 +1,4 @@
-<.page size="form">
+<.page size="wide">
   <.header title="New Skill" subtitle="Create a reusable capability for autonomous agents.">
     <:actions>
       <.app_link
@@ -10,44 +10,182 @@
     </:actions>
   </.header>
 
-  <.panel>
-    <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-5 p-5">
-      <input
-        :if={@current_company}
-        type="hidden"
-        name="skill[company_id]"
-        value={@current_company.id}
-      />
-
-      <div class="grid gap-5 sm:grid-cols-2">
-        <.input field={@form[:name]} label="Name" required placeholder="Repository Auditor" />
-        <.input field={@form[:identifier]} label="Identifier" required placeholder="repo_auditor" />
+  <.form
+    for={@form}
+    phx-change="validate"
+    phx-submit="save"
+    class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
+  >
+    <.panel class="overflow-hidden">
+      <div class="border-b border-border px-5 py-4">
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Skill launch plan
+        </p>
+        <h2 class="mt-1 text-lg font-590 text-text-primary">Create an agent-ready capability</h2>
+        <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
+          Define what the skill does, where it can be used, and the manifest fields agents need for
+          auditable capability routing.
+        </p>
       </div>
 
-      <.input
-        field={@form[:description]}
-        label="Description"
-        type="textarea"
-        rows={5}
-        placeholder="Summarize what this skill enables agents to do."
-      />
+      <div class="space-y-6 p-5">
+        <section class="space-y-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Capability brief
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              Keep this narrow enough that an agent knows exactly when to use it.
+            </p>
+          </div>
 
-      <div class="grid gap-5 sm:grid-cols-2">
-        <.input field={@form[:version]} label="Version" placeholder="0.1.0" />
-        <.input field={@form[:author]} label="Author" placeholder="Cympho Labs" />
+          <div class="grid gap-5 sm:grid-cols-2">
+            <.input field={@form[:name]} label="Name" required placeholder="Repository Auditor" />
+            <.input
+              field={@form[:identifier]}
+              label="Identifier"
+              required
+              placeholder="repo_auditor"
+            />
+          </div>
+
+          <.input
+            field={@form[:description]}
+            label="Usage brief"
+            type="textarea"
+            rows={5}
+            placeholder="What this skill enables, what input it expects, and what evidence it should return."
+          />
+        </section>
+
+        <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Runtime manifest
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              These fields build the manifest that skill health checks and agent prompts inspect.
+            </p>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-2">
+            <.input
+              name="skill[entrypoint]"
+              label="Entrypoint"
+              value={CymphoWeb.SkillLive.FormHelpers.manifest_entrypoint(@form[:manifest].value)}
+              placeholder="Cympho.Skills.CustomSkill"
+              required
+            />
+            <.input
+              name="skill[capabilities]"
+              label="Capabilities"
+              value={CymphoWeb.SkillLive.FormHelpers.capabilities_value(@form[:manifest].value)}
+              placeholder="repo_audit, test_plan"
+            />
+          </div>
+        </section>
+
+        <section class="space-y-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Scope and ownership
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              Scope the skill before assigning it to agents so capability access remains deliberate.
+            </p>
+          </div>
+
+          <div class="grid gap-5 sm:grid-cols-2">
+            <.input field={@form[:version]} label="Version" placeholder="0.1.0" />
+            <.input field={@form[:author]} label="Author" placeholder="Cympho Labs" />
+            <.input
+              type="select"
+              field={@form[:project_id]}
+              label="Project scope"
+              value={@form[:project_id].value || ""}
+              options={@project_options}
+            />
+            <.input
+              type="select"
+              field={@form[:enabled]}
+              label="Availability"
+              value={
+                to_string(if is_nil(@form[:enabled].value), do: true, else: @form[:enabled].value)
+              }
+              options={[{"Enabled", "true"}, {"Disabled", "false"}]}
+            />
+          </div>
+        </section>
       </div>
+    </.panel>
 
-      <:actions>
-        <div class="flex items-center justify-end gap-2 border-t border-border pt-5">
-          <.app_link
-            navigate={~p"/skills"}
-            class="rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-          >
-            Cancel
-          </.app_link>
-          <.button type="submit" variant="primary">Create Skill</.button>
+    <aside class="space-y-4">
+      <section
+        data-testid="skill-setup-checklist"
+        class="rounded-xl border border-border bg-panel p-4 shadow-card"
+      >
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Setup checklist
+        </p>
+        <div class="mt-4 space-y-3">
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
+              1
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Name one capability</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Skills work best when the trigger condition is obvious.
+              </p>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
+              2
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Declare runtime fields</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Entrypoint and capabilities keep manifest health green.
+              </p>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
+              3
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Assign after save</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Add it to the agents whose prompts explain when to use it.
+              </p>
+            </div>
+          </div>
         </div>
-      </:actions>
-    </.simple_form>
-  </.panel>
+      </section>
+
+      <section class="rounded-xl border border-brand/25 bg-brand/10 p-4">
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
+          Create behavior
+        </p>
+        <p class="mt-2 text-sm font-590 text-text-primary">Creates a valid manifest</p>
+        <p class="mt-1 text-xs leading-5 text-text-tertiary">
+          Metadata, entrypoint, and capabilities are saved into the manifest map used by health
+          checks and skill routing.
+        </p>
+      </section>
+    </aside>
+
+    <div class="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end lg:col-span-2">
+      <.app_link
+        navigate={~p"/skills"}
+        class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+      >
+        Cancel
+      </.app_link>
+      <.button type="submit" variant="primary" class="min-h-[40px] w-full sm:w-auto">
+        Create Skill
+      </.button>
+    </div>
+  </.form>
 </.page>

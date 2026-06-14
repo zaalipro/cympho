@@ -52,6 +52,53 @@ defmodule Cympho.AgentPromptTest do
 
       assert prompt =~ "Your role: Chief Executive Officer (ceo)"
       assert prompt =~ "Mandate"
+      assert prompt =~ "Operating loop"
+      assert prompt =~ "Orient: read the goal"
+      assert prompt =~ "Decide: choose the single highest-leverage next move"
+      assert prompt =~ "Act: use `cympho-actions`"
+      assert prompt =~ "Verify: check whether delegated children"
+      assert prompt =~ "Report: leave `[owner_update]`"
+      assert prompt =~ "Runtime drill"
+      assert prompt =~ "Brief clarity"
+      assert prompt =~ "Confirm the owner request names outcome"
+      assert prompt =~ "One exit path"
+      assert prompt =~ "Do not mix strategy prose with multiple competing action bundles"
+      assert prompt =~ "Owner evidence"
+      assert prompt =~ "Turn contract"
+      assert prompt =~ "First move: Restate the business outcome"
+      assert prompt =~ "choose exactly one first-turn exit"
+      assert prompt =~ "Signal: [owner_update] / [handoff] / [blocked]."
+      assert prompt =~ "Stop condition"
+      assert prompt =~ "Stop after one durable state-changing bundle"
+      assert prompt =~ "Do not keep narrating after the action bundle"
+      assert prompt =~ "Owner-ready evidence"
+      assert prompt =~ "Before asking the owner to accept work"
+      assert prompt =~ "Name the evidence you inspected"
+      assert prompt =~ "Turn ledger"
+      assert prompt =~ "Evidence inspected: Name the child issues"
+      assert prompt =~ "Restart context: Leave enough current state"
+      assert prompt =~ "Durable signal: current state + next decision"
+      assert prompt =~ "Last action receipt"
+      assert prompt =~ "Role signal to preserve: [owner_update] / [handoff] / [blocked]."
+      assert prompt =~ "Action taken: Name the durable action bundle"
+      assert prompt =~ "Evidence/artifact: Point to the child issue"
+      assert prompt =~ "Remaining risk: State the known risk"
+      assert prompt =~ "Restart packet"
+      assert prompt =~ "Decision made: State whether the CEO answered"
+      assert prompt =~ "Resume scope: Name the child issues"
+      assert prompt =~ "Signal: owner/CTO/agent next action"
+      assert prompt =~ "First CEO runtime turn: produce one durable signal before you stop"
+      assert prompt =~ "create 2-5 scoped child issues with acceptance criteria"
+      assert prompt =~ "block_issue` the parent as waiting on delegated sub-work"
+      assert prompt =~ "evidence required, verification required, owner role"
+      assert prompt =~ "uses existing idle capacity before hiring"
+      assert prompt =~ "Manager coordination packet"
+      assert prompt =~ "compact fan-out summary"
+      assert prompt =~ "child title, target role or exact agent id, dependency order"
+      assert prompt =~ "estimated minutes, evidence gate, verification gate, review owner"
+      assert prompt =~ "send technical planning to CTO when staffed"
+      assert prompt =~ "Completion signal: Leave an owner-readable status"
+      assert prompt =~ "Signal: [owner_update]."
       assert prompt =~ "You are at the top of the org"
       # CEO must NOT see submit_review as an allowed action
       assert prompt =~ "MUST NOT emit"
@@ -67,10 +114,128 @@ defmodule Cympho.AgentPromptTest do
 
       assert prompt =~ "Your role: Software Engineer (engineer)"
       assert prompt =~ "You report to: #{cto.name}"
+      assert prompt =~ "Operating loop"
+      assert prompt =~ "Decide: choose the smallest complete implementation step"
+      assert prompt =~ "Report: leave `[delivery]` or `[blocked]` before `submit_review`"
+      assert prompt =~ "Runtime drill"
+      assert prompt =~ "Scope the next action"
+      assert prompt =~ "Attach evidence"
+      assert prompt =~ "No completion claim without a verification line"
+      assert prompt =~ "Review handoff"
+      assert prompt =~ "Turn contract"
+      assert prompt =~ "Evidence to produce: Attach the artifact"
+      assert prompt =~ "Signal: artifact / PR / evidence."
+      assert prompt =~ "Stop only after reviewable evidence exists"
+      assert prompt =~ "Before submitting for review, leave an evidence packet"
+      assert prompt =~ "State the exact next decision the reviewer should make"
+      assert prompt =~ "Turn ledger"
+      assert prompt =~ "Evidence produced: Attach or reference the artifact"
+      assert prompt =~ "Durable signal: attach_work_product / set_pr_url / submit_review"
+      assert prompt =~ "Restart context: Leave files or artifacts changed"
+      assert prompt =~ "Last action receipt"
+      assert prompt =~ "Action taken: Name the durable action bundle"
+      assert prompt =~ "Verification: Name the test"
+      assert prompt =~ "Signal: [delivery] or [blocked]"
+      assert prompt =~ "Restart packet"
+      assert prompt =~ "Delivery state: State whether the artifact is ready for review"
+      assert prompt =~ "Resume scope: Name the files, artifacts, PR"
+      assert prompt =~ "Signal: reviewer next action"
       assert prompt =~ "When you emit `submit_review`"
       # Engineer must be told governance actions are forbidden
       assert prompt =~ "approve_issue"
       assert prompt =~ "unauthorized_action"
+    end
+
+    test "CEO and CTO prompts surface external MCP intake requirements", %{
+      issue: issue,
+      ceo: ceo,
+      cto: cto,
+      engineer: engineer
+    } do
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          origin_type: "mcp",
+          origin_id: ceo.id,
+          created_by_agent_id: ceo.id
+        })
+
+      ceo_prompt = AgentPrompt.build(issue, ceo.id)
+      cto_prompt = AgentPrompt.build(issue, cto.id)
+      engineer_prompt = AgentPrompt.build(issue, engineer.id)
+
+      assert ceo_prompt =~ "## External intake"
+      assert ceo_prompt =~ "created through the MCP/API intake path"
+      assert ceo_prompt =~ "clear business outcome, project/goal context"
+      assert cto_prompt =~ "Preserve any explicit `assigned_role` or `assignee_id` routing"
+      refute engineer_prompt =~ "## External intake"
+    end
+
+    test "CEO and CTO prompts surface owner brief readiness while engineers do not", %{
+      issue: issue,
+      ceo: ceo,
+      cto: cto,
+      engineer: engineer
+    } do
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          title: "Thin",
+          description: "Do it.",
+          assigned_role: "ceo",
+          assignee_id: ceo.id
+        })
+
+      ceo_prompt = AgentPrompt.build(Issues.get_issue!(issue.id), ceo.id)
+      cto_prompt = AgentPrompt.build(Issues.get_issue!(issue.id), cto.id)
+      engineer_prompt = AgentPrompt.build(Issues.get_issue!(issue.id), engineer.id)
+
+      assert ceo_prompt =~ "Owner brief readiness"
+      assert ceo_prompt =~ "Too thin for autonomy (0/6 signals)."
+      assert ceo_prompt =~ "[missing] Outcome"
+      assert ceo_prompt =~ "[missing] Context"
+      assert ceo_prompt =~ "[missing] Risk/constraint"
+      assert ceo_prompt =~ "do not create broad child work from a weak brief"
+      assert ceo_prompt =~ "block_issue"
+      assert ceo_prompt =~ "Brief repair scaffold:"
+      assert ceo_prompt =~ "Goal: <the business outcome the owner wants>"
+
+      assert ceo_prompt =~
+               "Missing signals: Outcome, Context, Risk/constraint, Done signal, First CEO signal, Evidence."
+
+      assert cto_prompt =~ "Owner brief readiness"
+      assert cto_prompt =~ "do not route vague execution to engineers"
+      assert cto_prompt =~ "Brief repair scaffold:"
+
+      refute engineer_prompt =~ "Owner brief readiness"
+    end
+
+    test "CEO prompt marks complete owner briefs ready for the first-turn contract", %{
+      issue: issue,
+      ceo: ceo
+    } do
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          title: "Improve onboarding activation",
+          description: """
+          Goal: improve onboarding activation.
+          Context: setup drops after project creation.
+          Constraints / risks: must not slow first project creation.
+          Definition of done: CEO creates a plan or handoff with acceptance criteria.
+          CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`): handoff if execution is needed.
+          Evidence to inspect after the run: scoped child issues and verification notes.
+          """,
+          assigned_role: "ceo",
+          assignee_id: ceo.id
+        })
+
+      prompt = AgentPrompt.build(Issues.get_issue!(issue.id), ceo.id)
+
+      assert prompt =~ "Owner brief readiness"
+      assert prompt =~ "Ready for CEO launch (6/6 signals)."
+      assert prompt =~ "[ok] Outcome"
+      assert prompt =~ "[ok] Risk/constraint"
+      assert prompt =~ "[ok] Evidence"
+      assert prompt =~ "proceed with the first-turn contract"
+      assert prompt =~ "scoped child issues with acceptance criteria"
     end
 
     test "business-function prompt has real playbook and artifact delivery contract", %{
@@ -96,6 +261,7 @@ defmodule Cympho.AgentPromptTest do
       assert prompt =~ "Marketer artifact"
       assert prompt =~ "attach_work_product"
       assert prompt =~ "[delivery] What happened:"
+      assert prompt =~ "thin escalation reasons are rejected"
       refute prompt =~ "Pull request contract"
       refute prompt =~ "Branch name must include the issue id"
     end
@@ -105,6 +271,140 @@ defmodule Cympho.AgentPromptTest do
 
       assert prompt =~ "Your role: Chief Technology Officer (cto)"
       assert prompt =~ "Your direct reports: #{engineer.name}"
+      assert prompt =~ "thin directives are rejected"
+      assert prompt =~ "The server rejects thin engineering children"
+      assert prompt =~ "`acceptance_criteria`: list of observable conditions"
+      assert prompt =~ "`evidence_required`: PR/work product/test evidence"
+      assert prompt =~ "`verification_required`: exact test command"
+      assert prompt =~ "`definition_of_done`: final state required"
+      assert prompt =~ "`risks`: constraints or edge cases"
+      assert prompt =~ "First move: Decide whether this turn should split work"
+      assert prompt =~ "Signal: [handoff] / [review] / [blocked]."
+      assert prompt =~ "Role signal to preserve: [review] / [handoff] / [blocked]."
+    end
+
+    test "CTO prompt names existing eligible engineers before hiring", %{
+      issue: issue,
+      cto: cto,
+      engineer: engineer
+    } do
+      prompt = AgentPrompt.build(issue, cto.id)
+
+      assert prompt =~ "## Team status"
+
+      assert prompt =~
+               "Staffing rule: use an eligible idle candidate already listed here before hiring."
+
+      assert prompt =~
+               "If an eligible idle name appears for a role, do not spawn that role in this turn"
+
+      assert prompt =~ "Split technical work across engineer, QA, and release lanes"
+      assert prompt =~ "copying the full `id:` UUID into `delegate.to_agent_id`"
+      assert prompt =~ "Manager coordination packet"
+      assert prompt =~ "compact fan-out summary"
+      assert prompt =~ "child title, target role or exact agent id, dependency order"
+      assert prompt =~ "first file/artifact/test area to inspect"
+      assert prompt =~ "Split packet"
+      assert prompt =~ "estimated size, and review order"
+      assert prompt =~ "Reuse named idle delivery capacity before spawning new engineers"
+
+      assert prompt =~ "use `spawn_agent` only when the required role is absent, at capacity"
+      assert prompt =~ "- engineer: 1 agents (1 idle, 0 working) — 0 active assignments"
+
+      assert prompt =~
+               "eligible idle: #{engineer.name} (id: #{engineer.id}, load: 0/1)"
+
+      assert prompt =~ "- qa_engineer: 0 agents (0 idle, 0 working) — 0 active assignments"
+      assert prompt =~ "- release_engineer: 0 agents (0 idle, 0 working) — 0 active assignments"
+      assert prompt =~ "no agents in role; spawn only if the work truly belongs here"
+    end
+
+    test "CEO prompt names the CTO and core delegation lanes before hiring", %{
+      issue: issue,
+      ceo: ceo,
+      cto: cto,
+      engineer: engineer
+    } do
+      prompt = AgentPrompt.build(issue, ceo.id)
+
+      assert prompt =~ "## Team status"
+      assert prompt =~ "Route technical planning through CTO when staffed"
+      assert prompt =~ "route product criteria to Product Manager"
+
+      assert prompt =~
+               "Cympho assigns the Process Codex runtime profile (`process-codex`) by default"
+
+      refute prompt =~ "prefer `adapter: \"codex\"`"
+
+      assert prompt =~
+               "If an eligible idle name appears for a role, do not spawn that role in this turn"
+
+      assert prompt =~ "copying the full `id:` UUID into `delegate.to_agent_id`"
+      assert prompt =~ "- cto: 1 agents (1 idle, 0 working) — 0 active assignments"
+
+      assert prompt =~
+               "eligible idle: #{cto.name} (id: #{cto.id}, load: 0/2)"
+
+      assert prompt =~ "- engineer: 1 agents (1 idle, 0 working) — 0 active assignments"
+
+      assert prompt =~
+               "eligible idle: #{engineer.name} (id: #{engineer.id}, load: 0/1)"
+
+      assert prompt =~ "- qa_engineer: 0 agents (0 idle, 0 working) — 0 active assignments"
+      assert prompt =~ "spawn only if the work truly belongs here"
+    end
+
+    test "CTO prompt calls out saturated existing engineers before spawn_agent", %{
+      issue: issue,
+      cto: cto,
+      engineer: engineer
+    } do
+      {:ok, engineer} = Agents.update_agent(engineer, %{max_concurrent_jobs: 1})
+
+      {:ok, _active} =
+        Issues.create_issue(%{
+          title: "Engineer capacity probe",
+          description: "Consumes the only engineer slot.",
+          status: :in_progress,
+          priority: :medium,
+          company_id: engineer.company_id,
+          assignee_id: engineer.id,
+          assigned_role: "engineer"
+        })
+
+      prompt = AgentPrompt.build(issue, cto.id)
+
+      assert prompt =~ "- engineer: 1 agents (1 idle, 0 working) — 1 active assignments"
+
+      assert prompt =~
+               "no repo-capable idle candidate; spawn a repo-capable engineer or configure an existing delivery agent before creating implementation work"
+
+      assert prompt =~ "### When to use `spawn_agent`"
+      assert prompt =~ "when engineering capacity is exhausted"
+      assert prompt =~ "omit `adapter` unless you have a specific repo-capable runtime reason"
+
+      assert prompt =~
+               "Cympho assigns the Process Codex runtime profile (`process-codex`) by default"
+
+      refute prompt =~ "prefer `adapter: \"codex\"`"
+    end
+
+    test "CTO prompt does not list text-only engineers as eligible delivery capacity", %{
+      issue: issue,
+      cto: cto,
+      engineer: engineer
+    } do
+      {:ok, engineer} = Agents.update_agent(engineer, %{adapter: :openai_chat})
+
+      prompt = AgentPrompt.build(issue, cto.id)
+
+      assert prompt =~ "- engineer: 1 agents (1 idle, 0 working) — 0 active assignments"
+
+      refute prompt =~
+               "eligible idle: #{engineer.name} (id: #{engineer.id}, load: 0/1)"
+
+      assert prompt =~
+               "no repo-capable idle candidate; spawn a repo-capable engineer or configure an existing delivery agent before creating implementation work"
     end
   end
 
@@ -149,6 +449,9 @@ defmodule Cympho.AgentPromptTest do
       assert prompt =~ "[blocked] Cause:"
       assert prompt =~ "Attempted fix"
       assert prompt =~ "Needs:"
+      assert prompt =~ "Thin `block_issue` reasons are rejected"
+      assert prompt =~ "the server validates `block_issue.reason` directly"
+      assert prompt =~ "thin escalation reasons are rejected"
       assert prompt =~ "Pull request contract"
       assert prompt =~ "Branch name must include the issue id"
       assert prompt =~ "PR title must include the issue id"
@@ -183,15 +486,77 @@ defmodule Cympho.AgentPromptTest do
       assert ceo_prompt =~ "owner-visible business update"
       assert ceo_prompt =~ "add `[owner_update] What happened:"
       assert ceo_prompt =~ "Business status: shipped/not shipped"
+      assert ceo_prompt =~ "ready for owner signoff"
       assert ceo_prompt =~ "Owner decision needed"
+      assert ceo_prompt =~ "Restart packet"
       assert ceo_prompt =~ "owner acceptance is required"
+      assert ceo_prompt =~ "not `shipped`"
       assert ceo_prompt =~ "owner requests a revision"
       assert ceo_prompt =~ "do not repeat the prior update"
+      assert ceo_prompt =~ "Manager fan-out must be machine-routable"
+      assert ceo_prompt =~ "exact `assigned_role` or `assignee_id`"
+      assert ceo_prompt =~ "copy the exact UUID"
+      assert ceo_prompt =~ "do not invent assignee names"
+      assert ceo_prompt =~ "thin directives are rejected"
+      assert ceo_prompt =~ "`reassign` / `force_handoff` / `unblock`"
+      assert ceo_prompt =~ "thin recovery directives are rejected"
+      assert ceo_prompt =~ "Thin review feedback is rejected"
+      assert ceo_prompt =~ "`Evidence inspected:`"
+      assert ceo_prompt =~ "`Required changes:` bullets"
+      assert ceo_prompt =~ "The server rejects thin delivery children"
+      assert ceo_prompt =~ "`acceptance_criteria`: string or list"
+      assert ceo_prompt =~ "`evidence_required`: string or list"
+      assert ceo_prompt =~ "`verification_required`: string or list"
+      assert ceo_prompt =~ "`definition_of_done`: string or list"
+      assert ceo_prompt =~ "`risks`: string or list"
       assert cto_prompt =~ "technical decomposition and review"
       assert cto_prompt =~ "leave `[review] Verdict:"
+      assert cto_prompt =~ "Technical fan-out must be machine-routable"
+      assert cto_prompt =~ "first file/artifact/test area"
+      assert cto_prompt =~ "create_issue / approve_issue / request_changes / block_issue"
+      assert cto_prompt =~ "Completion signal: Leave the technical verdict"
+      assert cto_prompt =~ "Signal: [review] / [handoff]."
       assert cto_prompt =~ "Gaps"
       assert cto_prompt =~ "Follow-up issues"
       assert cto_prompt =~ "Verification"
+      assert cto_prompt =~ "Evidence inspected"
+      assert cto_prompt =~ "Restart packet"
+      assert cto_prompt =~ "text-only runtime delivery"
+      assert cto_prompt =~ "A `create_issue`-only response is incomplete"
+      assert cto_prompt =~ "Do not approve from agent claims alone"
+      assert cto_prompt =~ "`reassign` / `force_handoff` / `unblock`"
+      assert cto_prompt =~ "thin recovery directives are rejected"
+      assert cto_prompt =~ "Thin review feedback is rejected"
+      assert cto_prompt =~ "`request_changes.reason`"
+      assert cto_prompt =~ "`force_fix_pr.reason`"
+      assert cto_prompt =~ "do not \"just implement\" it even when it is tiny"
+      assert cto_prompt =~ "thin escalation reasons are rejected"
+      assert ceo_prompt =~ "Evidence inspected"
+    end
+
+    test "stalled-work wakes give supervisors status-specific recovery guidance", %{
+      issue: issue,
+      cto: cto
+    } do
+      prompt =
+        AgentPrompt.build(issue, cto.id,
+          wake_context:
+            {"issue_stalled_in_progress",
+             %{
+               "stuck_status" => "in_review",
+               "stale_minutes" => 90,
+               "assignee_id" => cto.id
+             }}
+        )
+
+      assert prompt =~ "If stuck status is `:in_review`"
+      assert prompt =~ "approve_issue"
+      assert prompt =~ "request_changes"
+      assert prompt =~ "Use `intervene` only when the review owner/lane is wrong"
+      assert prompt =~ "If stuck status is `:in_progress` or `:blocked`"
+      assert prompt =~ "Do not just `comment` and exit"
+      assert prompt =~ "`reassign` / `force_handoff` / `unblock`"
+      assert prompt =~ "thin recovery directives are rejected"
     end
 
     test "CEO prompt surfaces owner revision requests from the latest comments", %{
@@ -225,7 +590,7 @@ defmodule Cympho.AgentPromptTest do
       {:ok, revision} =
         Comments.create_comment(%{
           body:
-            "[review] Verdict: changes requested. What happened: owner reopened the CEO verification update for revision. Verification: owner spotted a missing business decision. Gaps: revised CEO owner update required. Follow-up issues: none. Next decision: CEO revises the owner update.",
+            "[review] Verdict: changes requested. What happened: owner reopened the CEO verification update for revision. Evidence inspected: CEO owner update and owner revision request. Verification: owner spotted a missing business decision. Gaps: revised CEO owner update required. Follow-up issues: none. Next decision: CEO revises the owner update. Restart packet: CEO should inspect the owner revision request and missing business decision before revising.",
           author_type: "user",
           author_id: "owner-user",
           issue_id: issue.id
@@ -262,7 +627,8 @@ defmodule Cympho.AgentPromptTest do
 
       assert ceo_prompt =~ "Business status: not shipped yet"
       assert ceo_prompt =~ "Owner decision needed: none"
-      assert cto_prompt =~ "Follow-up issues: onboarding progress tracking"
+      assert cto_prompt =~ "Evidence/artifact: scoped child issue and definition of done"
+      assert cto_prompt =~ "Review order: implementation before release"
 
       for prompt <- [
             engineer_prompt,
@@ -299,9 +665,43 @@ defmodule Cympho.AgentPromptTest do
       refute example =~ ~s("type": "submit_review")
       assert example =~ ~s("role": "product_manager")
       assert example =~ ~s("role": "cto")
+      assert example =~ ~s("acceptance_criteria")
+      assert example =~ ~s("evidence_required")
+      assert example =~ ~s("verification_required")
+      assert example =~ ~s("definition_of_done")
+      assert example =~ ~s("risks")
+      assert example =~ ~s("estimated_minutes")
       assert example =~ ~s("type": "block_issue")
       assert example =~ "waiting for delegated product and CTO sub-issues"
       assert example =~ "[owner_update]"
+      assert example =~ "Restart packet"
+    end
+
+    test "CTO's create_issue example demonstrates a full engineer delivery packet", %{
+      issue: issue,
+      cto: cto
+    } do
+      prompt = AgentPrompt.build(issue, cto.id)
+      [_before_example, example] = String.split(prompt, "### JSON shape and example", parts: 2)
+
+      assert example =~ ~s("type": "create_issue")
+      assert example =~ ~s("role": "engineer")
+      assert example =~ ~s("acceptance_criteria")
+      assert example =~ ~s("dependencies")
+      assert example =~ ~s("evidence_required")
+      assert example =~ ~s("verification_required")
+      assert example =~ ~s("definition_of_done")
+      assert example =~ ~s("risks")
+      assert example =~ ~s("estimated_minutes")
+      assert example =~ ~s("type": "block_issue")
+      assert example =~ ~s("reason": "[blocked] Cause:)
+      assert example =~ "Attempted fix:"
+      assert example =~ "Needs:"
+      assert example =~ "Current state:"
+      assert example =~ "Next decision:"
+      assert example =~ "manual browser reload check"
+      assert example =~ "[handoff]"
+      assert example =~ "Restart packet"
     end
 
     test "product and design examples demonstrate owner-facing comments", %{
@@ -314,6 +714,8 @@ defmodule Cympho.AgentPromptTest do
         [_before_example, example] = String.split(prompt, "### JSON shape and example", parts: 2)
 
         assert example =~ ~s("type": "comment")
+        assert example =~ "Evidence produced"
+        assert example =~ "Restart packet"
       end
     end
   end
@@ -327,16 +729,22 @@ defmodule Cympho.AgentPromptTest do
       assert engineer.status == :good
       assert engineer.required_template =~ "[delivery]"
       assert engineer.required_template =~ "Files changed"
+      assert engineer.required_template =~ "Evidence produced"
       assert engineer.required_template =~ "Risks"
+      assert engineer.required_template =~ "Restart packet"
       assert Enum.any?(engineer.snippets, &(&1.tag == "[blocked]"))
 
       assert cto.required_template =~ "[review]"
       assert cto.required_template =~ "Verdict"
+      assert cto.required_template =~ "Evidence inspected"
       assert cto.required_template =~ "Follow-up issues"
+      assert cto.required_template =~ "Restart packet"
 
       assert ceo.required_template =~ "[owner_update]"
       assert ceo.required_template =~ "Business status"
+      assert ceo.required_template =~ "Evidence inspected"
       assert ceo.required_template =~ "Owner decision needed"
+      assert ceo.required_template =~ "Restart packet"
     end
 
     test "flags weak and conflicting custom overrides" do
@@ -382,7 +790,7 @@ defmodule Cympho.AgentPromptTest do
       {:ok, _comment} =
         Comments.create_comment(%{
           body:
-            "Implemented the change, attached the work product, and verified the focused test.",
+            "[delivery] What happened: implemented the change and attached the work product. Files changed: implementation files. Evidence produced: code-change work product and PR link. Verification: focused test passed. Risks: none known. Current state: ready for review. Next decision: CTO reviews. Restart packet: CTO should inspect the work product, PR link, and focused test output before deciding.",
           author_type: "agent",
           author_id: engineer.id,
           issue_id: issue.id
@@ -418,6 +826,64 @@ defmodule Cympho.AgentPromptTest do
       assert prompt =~ "[ok] Code reference"
     end
 
+    test "prompt excludes the current runtime run from active-run blockers", %{
+      engineer: engineer
+    } do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Current run prompt issue",
+          description: "Implement and verify the thing.",
+          status: :in_progress,
+          priority: :medium
+        })
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      Repo.insert!(%Run{
+        agent_id: engineer.id,
+        issue_id: issue.id,
+        status: "completed",
+        adapter: "openai_chat",
+        continuation_summary: "Previous runtime passed.",
+        inserted_at: now,
+        completed_at: now
+      })
+
+      current_run =
+        Repo.insert!(%Run{
+          agent_id: engineer.id,
+          issue_id: issue.id,
+          status: "running",
+          adapter: "openai_chat",
+          inserted_at: now,
+          started_at: now,
+          last_heartbeat_at: now
+        })
+
+      prompt =
+        AgentPrompt.build(Issues.get_issue!(issue.id), engineer.id,
+          runtime_context: %Cympho.RuntimeContext{
+            run_id: current_run.id,
+            issue_id: issue.id,
+            agent_id: engineer.id,
+            adapter: :openai_chat,
+            adapter_config: %{},
+            cwd: "/tmp/cympho/test"
+          }
+        )
+
+      assert prompt =~ "Current run note: this run is the turn you are executing now."
+      assert prompt =~ "Adapter capability: OpenAI-compatible chat"
+      assert prompt =~ "cannot edit files, run tests, create branches, open real PRs"
+
+      assert prompt =~
+               "do not emit `submit_review`, `attach_work_product` with kind `code_change`"
+
+      assert prompt =~ "Delegate with a full agent UUID"
+      assert prompt =~ "[ok] Runtime verification"
+      refute prompt =~ "still active"
+    end
+
     test "prompt includes recent comments and sub-issues", %{
       issue: issue,
       ceo: ceo,
@@ -430,7 +896,12 @@ defmodule Cympho.AgentPromptTest do
                  %{
                    "type" => "create_issue",
                    "title" => "Visible sub-task",
-                   "role" => "engineer"
+                   "role" => "engineer",
+                   "acceptance_criteria" => "The visible sub-task appears in issue history.",
+                   "evidence_required" =>
+                     "Child issue and parent comment are visible in the prompt.",
+                   "verification_required" => "Build the prompt and inspect the history block.",
+                   "definition_of_done" => "Prompt includes recent comments and sub-issues."
                  }
                ])
 

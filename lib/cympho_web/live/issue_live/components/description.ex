@@ -12,10 +12,12 @@ defmodule CymphoWeb.IssueLive.Show.Description do
 
   attr :issue, :map, required: true
   attr :editing, :any, default: nil
+  attr :description_draft, :string, default: nil
+  attr :delivery_brief_readiness, :map, default: nil
 
   def description(assigns) do
     ~H"""
-    <div class="px-4 lg:px-6 pb-5">
+    <div id="issue-description" class="px-4 lg:px-6 pb-5 scroll-mt-4">
       <div
         :if={@editing != "description"}
         class="group rounded-lg border border-hairline bg-surface-1/40 px-4 py-3.5 hover:border-hairline-strong transition-colors duration-100"
@@ -49,6 +51,45 @@ defmodule CymphoWeb.IssueLive.Show.Description do
         </div>
       </div>
 
+      <div
+        :if={delivery_brief_needs_repair?(@delivery_brief_readiness) and @editing != "description"}
+        id="issue-delivery-brief-repair"
+        class="mt-3 rounded-md border border-amber-500/25 bg-amber-500/[0.08] px-3 py-2.5"
+      >
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div class="min-w-0">
+            <p class="text-[10px] font-510 uppercase tracking-[0.1em] text-amber-300">
+              Delivery brief repair
+            </p>
+            <p class="mt-1 text-sm leading-5 text-amber-100">
+              Add the missing execution signals before dispatch: acceptance, evidence, verification, and done state.
+            </p>
+            <p class="mt-1 text-caption leading-4 text-amber-100/75">
+              {@delivery_brief_readiness.next_prompt}
+            </p>
+          </div>
+          <div class="flex shrink-0 flex-wrap gap-2">
+            <button
+              type="button"
+              data-copy-text={@delivery_brief_readiness.repair_scaffold}
+              data-copy-label="Copy delivery scaffold"
+              data-copy-success-label="Copied"
+              class="inline-flex items-center justify-center rounded-md border border-amber-500/25 bg-panel px-2.5 py-1.5 text-xs font-510 text-amber-100 transition hover:bg-amber-500/15"
+            >
+              Copy scaffold
+            </button>
+            <button
+              type="button"
+              phx-click="draft_delivery_brief_repair"
+              class="inline-flex items-center justify-center rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-xs font-510 text-amber-100 transition hover:bg-amber-500/15"
+            >
+              Use scaffold
+            </button>
+          </div>
+        </div>
+        <pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border border-amber-500/15 bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-amber-100/90"><%= @delivery_brief_readiness.repair_scaffold %></pre>
+      </div>
+
       <form
         :if={@editing == "description"}
         phx-submit="save_description"
@@ -58,7 +99,7 @@ defmodule CymphoWeb.IssueLive.Show.Description do
           name="description"
           class="w-full bg-transparent text-body text-ink placeholder:text-ink-tertiary focus:outline-none min-h-[140px] resize-y"
           autofocus
-        ><%= @issue.description %></textarea>
+        ><%= @description_draft || @issue.description %></textarea>
         <div class="flex items-center gap-2 border-t border-hairline pt-3">
           <.button type="submit" size="sm">Save</.button>
           <.button type="button" variant="ghost" size="sm" phx-click="cancel_editing">
@@ -69,4 +110,10 @@ defmodule CymphoWeb.IssueLive.Show.Description do
     </div>
     """
   end
+
+  defp delivery_brief_needs_repair?(%{status: status, repair_scaffold: scaffold})
+       when status in [:thin, :draft] and is_binary(scaffold) and scaffold != "",
+       do: true
+
+  defp delivery_brief_needs_repair?(_readiness), do: false
 end

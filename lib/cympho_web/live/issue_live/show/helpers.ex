@@ -1242,7 +1242,8 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
       Enum.any?(comments, &(IssueDigest.comment_category(&1) != :routine)) ->
         %{
           label: "Next",
-          body: "Use this owner-ready note as the handoff context for the next decision."
+          body:
+            "Use this owner-ready note as the handoff context for the next decision and restart packet."
         }
 
       true ->
@@ -1576,9 +1577,16 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
         |> Enum.map(&annotate_gate_action(&1, blocker))
       end)
 
-    [owner_verification_acceptance_action(issue) | blocker_actions]
+    (owner_verification_actions(issue) ++ blocker_actions)
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq_by(& &1.label)
+  end
+
+  def owner_verification_actions(issue) do
+    [
+      owner_verification_acceptance_action(issue),
+      owner_verification_revision_action(issue)
+    ]
   end
 
   def owner_verification_acceptance_action(issue) do
@@ -1594,6 +1602,26 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
           "Shown because the CEO produced an owner update, runtime completed, and the blocker is waiting on owner verification.",
         evidence_prompt:
           "Records an owner acceptance review comment, clears the owner-verification blocker, and closes the issue."
+      }
+    end
+  end
+
+  def owner_verification_revision_action(issue) do
+    if Issues.owner_verification_closeable?(issue) do
+      %{
+        type: :live_event,
+        event: "request_owner_revision",
+        label: "Request revision",
+        detail:
+          "Reopen this CEO owner update, record an owner review, and queue focused relaunch.",
+        tone: :attention,
+        enabled?: true,
+        confirm:
+          "Request a CEO revision, reopen this issue to To Do, and queue focused dispatch?",
+        reason_body:
+          "Shown because the CEO owner update can either be accepted or reopened for a focused revision.",
+        evidence_prompt:
+          "Records an owner revision review comment, reopens the issue to To Do, and queues focused CEO dispatch."
       }
     end
   end
@@ -1648,7 +1676,7 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
         reason_body:
           "Shown because this issue needs a focused CEO/runtime pass before manual delivery evidence is useful.",
         evidence_prompt:
-          "Run this command in the app shell, then refresh the issue for the first CEO owner update or handoff."
+          "Run this command in the app shell, then refresh the issue for the first CEO owner update, handoff, or blocker."
       },
       %{
         type: :anchor,
@@ -1782,11 +1810,11 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
   end
 
   def next_owner_reason(_issue, %{key: :agent_note}, owner, _assigns) do
-    "#{owner.name} should leave a tagged delivery note explaining what changed, how it was verified, and what happens next."
+    "#{owner.name} should leave a tagged delivery note explaining what changed, how it was verified, what happens next, and the restart packet."
   end
 
   def next_owner_reason(_issue, %{key: :delivery_comment}, owner, _assigns) do
-    "#{owner.name} should leave `[delivery]` with what changed, verification evidence, and who owns the next decision."
+    "#{owner.name} should leave `[delivery]` with what changed, verification evidence, who owns the next decision, and the restart packet."
   end
 
   def next_owner_reason(_issue, %{key: :work_product}, owner, _assigns) do
@@ -2134,13 +2162,15 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
         key: "blocked",
         label: "Blocked",
         hint: "Needs action",
-        body: "[blocked] What happened: \nCurrent state: \nNext decision: \nBlocker: "
+        body:
+          "[blocked] Cause: \nAttempted fix: \nNeeds: \nCurrent state: \nNext decision: \nRestart packet: "
       },
       %{
         key: "handoff",
         label: "Handoff",
         hint: "Next owner",
-        body: "[handoff] What happened: \nCurrent state: \nNext decision: \nNext owner: "
+        body:
+          "[handoff] What happened: \nEvidence/artifact: \nVerification: \nRemaining risk: \nCurrent state: \nNext decision: \nNext owner: \nRestart packet: "
       }
     ]
   end

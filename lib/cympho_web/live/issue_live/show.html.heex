@@ -1,3 +1,5 @@
+<% issue_preflight = issue_preflight(@issue, @orchestrator_enabled?) %>
+
 <div
   id="issue-show"
   data-clean-url={@gate_clean_url}
@@ -23,7 +25,12 @@
       {@flash["error"]}
     </div>
 
-    <CymphoWeb.IssueLive.Show.Description.description issue={@issue} editing={@editing} />
+    <CymphoWeb.IssueLive.Show.Description.description
+      issue={@issue}
+      editing={@editing}
+      description_draft={@description_draft}
+      delivery_brief_readiness={delivery_brief_readiness(@issue, issue_preflight)}
+    />
 
     <% gate_resolution = review_gate_resolution(assigns) %>
 
@@ -85,5 +92,6 @@
     show_agent_panel={@show_agent_panel}
     agents={@agents}
     documents={@documents}
+    issue_preflight={issue_preflight}
   />
 </div>

@@ -24,6 +24,8 @@ defmodule CymphoWeb.InboxLive.Index do
       |> assign(:infinite_scroll, %{})
       |> assign(:inbox_counts, %{})
       |> assign(:agent_counts, %{})
+      |> assign(:inbox_command, empty_inbox_command())
+      |> assign(:inbox_action_queue, [])
 
     if connected?(socket) do
       if socket.assigns.selected_agent_id do
@@ -364,7 +366,315 @@ defmodule CymphoWeb.InboxLive.Index do
     socket
     |> assign(:inbox_counts, normalize_counts(counts))
     |> assign(:agent_counts, agent_counts)
+    |> assign_inbox_command()
   end
+
+  defp assign_inbox_command(socket) do
+    nudge_items = review_nudge_items(socket)
+
+    socket
+    |> assign(:inbox_command, build_inbox_command(socket, nudge_items))
+    |> assign(:inbox_action_queue, build_inbox_action_queue(socket, nudge_items))
+  end
+
+  defp empty_inbox_command do
+    %{
+      tone: :clear,
+      badge: "Clear",
+      heading: "Inbox is clear",
+      detail:
+        "No handoffs, review decisions, or unread agent signals need attention in this scope.",
+      action_label: "Open issues",
+      action_path: "/issues",
+      focus_label: nil,
+      focus_detail: nil,
+      unread_count: 0,
+      review_count: 0,
+      nudge_count: 0,
+      deferred_count: 0,
+      total_count: 0
+    }
+  end
+
+  defp build_inbox_command(socket, nudge_items) do
+    counts = socket.assigns.inbox_counts
+    unread_count = count_for(counts, "unread")
+    review_count = count_for(counts, "review")
+    deferred_count = count_for(counts, "dismissed") + count_for(counts, "archived")
+    total = total_count(counts)
+    nudge_item = List.first(nudge_items)
+    review_item = first_review_queue_item(socket)
+
+    command =
+      cond do
+        review_count > 0 and review_item ->
+          %{
+            tone: :review,
+            badge: "Review due",
+            heading: "Decide review queue",
+            detail:
+              "#{review_count} review #{pluralize(review_count, "decision")} need approve, changes, or evidence follow-up.",
+            action_label: "Open review queue",
+            action_path:
+              inbox_url(
+                socket.assigns.selected_agent_id,
+                socket.assigns.current_status,
+                socket.assigns.digest_density,
+                %{
+                  status: "review"
+                }
+              ),
+            focus_label: inbox_item_label(review_item),
+            focus_detail: target_agent_name(review_item, socket.assigns.selected_agent)
+          }
+
+        nudge_item && nudge_item.review_nudge && nudge_item.review_nudge.target_path ->
+          %{
+            tone: :attention,
+            badge: nudge_item.review_nudge.label || "Launch needed",
+            heading: "Start runtime before evidence",
+            detail: nudge_item.review_nudge.summary,
+            action_label: nudge_item.review_nudge.target_label || "Open launch checklist",
+            action_path: nudge_item.review_nudge.target_path,
+            focus_label: inbox_item_label(nudge_item),
+            focus_detail: target_agent_name(nudge_item, socket.assigns.selected_agent)
+          }
+
+        nudge_item && nudge_item.review_nudge ->
+          %{
+            tone: :attention,
+            badge: nudge_item.review_nudge.label || "Evidence needed",
+            heading: "Repair evidence request",
+            detail: nudge_item.review_nudge.summary,
+            action_label: "Open issue",
+            action_path: issue_link(nudge_item.issue),
+            focus_label: inbox_item_label(nudge_item),
+            focus_detail: target_agent_name(nudge_item, socket.assigns.selected_agent)
+          }
+
+        unread_count > 0 ->
+          %{
+            tone: :unread,
+            badge: "Unread",
+            heading: "Clear unread handoffs",
+            detail:
+              "#{unread_count} unread #{pluralize(unread_count, "item")} need triage in #{inbox_scope_label(socket.assigns.selected_agent_id, socket.assigns.selected_agent)}.",
+            action_label: "Show unread",
+            action_path:
+              inbox_url(
+                socket.assigns.selected_agent_id,
+                socket.assigns.current_status,
+                socket.assigns.digest_density,
+                %{
+                  status: "unread"
+                }
+              ),
+            focus_label:
+              inbox_scope_label(socket.assigns.selected_agent_id, socket.assigns.selected_agent),
+            focus_detail: "#{total} total #{pluralize(total, "item")}"
+          }
+
+        deferred_count > 0 ->
+          %{
+            tone: :deferred,
+            badge: "Deferred",
+            heading: "Review deferred inbox work",
+            detail:
+              "#{deferred_count} dismissed or archived #{pluralize(deferred_count, "item")} may need cleanup before the next operating cycle.",
+            action_label: "Show dismissed",
+            action_path:
+              inbox_url(
+                socket.assigns.selected_agent_id,
+                socket.assigns.current_status,
+                socket.assigns.digest_density,
+                %{
+                  status: "dismissed"
+                }
+              ),
+            focus_label:
+              inbox_scope_label(socket.assigns.selected_agent_id, socket.assigns.selected_agent),
+            focus_detail: "#{deferred_count} deferred"
+          }
+
+        true ->
+          empty_inbox_command()
+      end
+
+    command
+    |> Map.put(:unread_count, unread_count)
+    |> Map.put(:review_count, review_count)
+    |> Map.put(:nudge_count, length(nudge_items))
+    |> Map.put(:deferred_count, deferred_count)
+    |> Map.put(:total_count, total)
+  end
+
+  defp build_inbox_action_queue(socket, nudge_items) do
+    counts = socket.assigns.inbox_counts
+    unread_count = count_for(counts, "unread")
+    review_count = count_for(counts, "review")
+    deferred_count = count_for(counts, "dismissed") + count_for(counts, "archived")
+    nudge_count = length(nudge_items)
+    nudge_item = List.first(nudge_items)
+
+    [
+      inbox_queue_item(
+        :review,
+        "Review decisions",
+        review_count,
+        "Approve, request changes, or inspect missing review evidence.",
+        "Open reviews",
+        inbox_url(
+          socket.assigns.selected_agent_id,
+          socket.assigns.current_status,
+          socket.assigns.digest_density,
+          %{status: "review"}
+        ),
+        if(review_count > 0, do: :urgent, else: :clear)
+      ),
+      inbox_queue_item(
+        :evidence,
+        "Runtime / evidence",
+        nudge_count,
+        nudge_queue_summary(nudge_item),
+        nudge_queue_action_label(nudge_item),
+        nudge_queue_action_path(socket, nudge_item),
+        if(nudge_count > 0, do: :attention, else: :clear)
+      ),
+      inbox_queue_item(
+        :unread,
+        "Unread handoffs",
+        unread_count,
+        "Read new agent handoffs before they age into stale work.",
+        "Show unread",
+        inbox_url(
+          socket.assigns.selected_agent_id,
+          socket.assigns.current_status,
+          socket.assigns.digest_density,
+          %{status: "unread"}
+        ),
+        if(unread_count > 0, do: :unread, else: :clear)
+      ),
+      inbox_queue_item(
+        :deferred,
+        "Deferred cleanup",
+        deferred_count,
+        "Review dismissed or archived signals before the next operating cycle.",
+        "Show dismissed",
+        inbox_url(
+          socket.assigns.selected_agent_id,
+          socket.assigns.current_status,
+          socket.assigns.digest_density,
+          %{status: "dismissed"}
+        ),
+        if(deferred_count > 0, do: :deferred, else: :clear)
+      )
+    ]
+  end
+
+  defp inbox_queue_item(key, label, count, summary, action_label, action_path, tone) do
+    %{
+      key: key,
+      label: label,
+      count: count,
+      summary: summary,
+      action_label: action_label,
+      action_path: action_path,
+      tone: tone,
+      state_label: inbox_queue_state_label(tone)
+    }
+  end
+
+  defp inbox_queue_state_label(:urgent), do: "Act now"
+  defp inbox_queue_state_label(:attention), do: "Needs evidence"
+  defp inbox_queue_state_label(:unread), do: "Read"
+  defp inbox_queue_state_label(:deferred), do: "Cleanup"
+  defp inbox_queue_state_label(:clear), do: "Clear"
+
+  defp nudge_queue_summary(%{review_nudge: %{summary: summary}}) when summary not in [nil, ""] do
+    summary
+  end
+
+  defp nudge_queue_summary(_nudge_item) do
+    "No runtime launch or review-evidence repair request is waiting."
+  end
+
+  defp nudge_queue_action_label(%{review_nudge: %{target_label: label}})
+       when label not in [nil, ""] do
+    label
+  end
+
+  defp nudge_queue_action_label(%{review_nudge: %{target_path: path}})
+       when path not in [nil, ""] do
+    "Open launch checklist"
+  end
+
+  defp nudge_queue_action_label(_nudge_item), do: "Open issues"
+
+  defp nudge_queue_action_path(_socket, %{review_nudge: %{target_path: path}})
+       when path not in [nil, ""] do
+    path
+  end
+
+  defp nudge_queue_action_path(_socket, %{issue: issue}) when not is_nil(issue) do
+    issue_link(issue)
+  end
+
+  defp nudge_queue_action_path(_socket, _nudge_item), do: "/issues"
+
+  defp first_review_queue_item(socket) do
+    socket.assigns.selected_agent_id
+    |> review_scope(socket.assigns[:current_company] && socket.assigns.current_company.id)
+    |> Cympho.Wakes.list_review_queue(limit: 1)
+    |> case do
+      [%{wake: wake, issue: issue} | _] ->
+        %{
+          id: wake.id,
+          kind: :review_queue,
+          wake_id: wake.id,
+          issue: issue,
+          issue_id: issue.id,
+          agent: wake.agent,
+          agent_id: wake.agent_id,
+          status: "review",
+          review_nudge: nil,
+          inserted_at: wake.inserted_at
+        }
+
+      [] ->
+        nil
+    end
+  end
+
+  defp review_nudge_items(socket) do
+    socket
+    |> preview_items_for_command()
+    |> Enum.filter(& &1.review_nudge)
+  end
+
+  defp preview_items_for_command(socket) do
+    agent_id = socket.assigns.selected_agent_id
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+
+    cond do
+      agent_id == "all" and company_id ->
+        Inbox.list_recent_for_company(company_id, limit: 100)
+
+      agent_id in [nil, "", "all"] ->
+        []
+
+      true ->
+        Inbox.list_inbox_for_agent(agent_id, limit: 100)
+    end
+  end
+
+  defp inbox_item_label(%{issue: %{identifier: identifier, title: title}}) do
+    [identifier, title]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" · ")
+  end
+
+  defp inbox_item_label(%{issue: %{title: title}}), do: title
+  defp inbox_item_label(_item), do: "Inbox item"
 
   # Returns the "Awaiting my review" pseudo-items: wake-driven entries that
   # share the inbox row shape so the existing template can render them.
@@ -594,6 +904,65 @@ defmodule CymphoWeb.InboxLive.Index do
 
   defp issue_link(issue) when is_nil(issue), do: "#"
   defp issue_link(issue), do: ~p"/issues/#{issue.id}"
+
+  defp pluralize(1, word), do: word
+  defp pluralize(_, word), do: word <> "s"
+
+  defp inbox_command_badge(:review), do: "border-brand/25 bg-brand/10 text-brand"
+  defp inbox_command_badge(:attention), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  defp inbox_command_badge(:unread), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
+  defp inbox_command_badge(:deferred), do: "border-slate-500/25 bg-slate-500/10 text-slate-300"
+
+  defp inbox_command_badge(:clear),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp inbox_command_badge(_), do: "border-border bg-surface text-text-tertiary"
+
+  defp inbox_command_action(:review),
+    do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
+
+  defp inbox_command_action(:attention),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300 hover:bg-amber-500/15"
+
+  defp inbox_command_action(:unread),
+    do: "border-blue-500/25 bg-blue-500/10 text-blue-300 hover:bg-blue-500/15"
+
+  defp inbox_command_action(:deferred),
+    do: "border-slate-500/25 bg-slate-500/10 text-slate-300 hover:bg-slate-500/15"
+
+  defp inbox_command_action(:clear),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15"
+
+  defp inbox_command_action(_),
+    do:
+      "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+
+  defp inbox_queue_card_class(:urgent), do: "border-l-2 border-l-brand/70"
+  defp inbox_queue_card_class(:attention), do: "border-l-2 border-l-amber-400/70"
+  defp inbox_queue_card_class(:unread), do: "border-l-2 border-l-blue-400/70"
+  defp inbox_queue_card_class(:deferred), do: "border-l-2 border-l-slate-400/70"
+  defp inbox_queue_card_class(_), do: ""
+
+  defp inbox_queue_count_class(:urgent), do: "text-brand"
+  defp inbox_queue_count_class(:attention), do: "text-amber-300"
+  defp inbox_queue_count_class(:unread), do: "text-blue-300"
+  defp inbox_queue_count_class(:deferred), do: "text-slate-300"
+  defp inbox_queue_count_class(_), do: "text-text-primary"
+
+  defp inbox_queue_badge_class(:urgent), do: "border-brand/25 bg-brand/10 text-brand"
+
+  defp inbox_queue_badge_class(:attention),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  defp inbox_queue_badge_class(:unread), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
+
+  defp inbox_queue_badge_class(:deferred),
+    do: "border-slate-500/25 bg-slate-500/10 text-slate-300"
+
+  defp inbox_queue_badge_class(:clear),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp inbox_queue_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
   defp format_timestamp(nil), do: "-"
   defp format_timestamp(dt), do: Calendar.strftime(dt, "%b %d, %H:%M")

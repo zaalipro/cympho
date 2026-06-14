@@ -1,4 +1,4 @@
-<.page size="form">
+<.page size="wide">
   <.header
     title="New Issue"
     subtitle="Capture a clear unit of autonomous work and route it into the execution board."
@@ -13,142 +13,587 @@
     </:actions>
   </.header>
 
-  <.panel>
-    <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-5 p-5">
-      <div
-        :if={@intake_route}
-        class="rounded-lg border border-brand/25 bg-brand/10 px-4 py-3"
-      >
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div class="min-w-0">
-            <p class="text-xs font-590 uppercase tracking-[0.08em] text-brand">Owner intake</p>
-            <p class="mt-1 text-sm text-text-secondary">
-              First stop:
-              <span class="font-590 text-text-primary">
-                {if @intake_route.agent, do: @intake_route.agent.name, else: "CEO lane"}
-              </span>
-              <span class="text-text-quaternary">({@intake_route.role})</span>
-            </p>
-            <p class="mt-2 max-w-2xl text-xs leading-5 text-text-tertiary">
-              CEO first turn must return
-              <span class="font-590 text-text-secondary">[owner_update]</span>
-              or <span class="font-590 text-text-secondary">[handoff]</span>. If the request needs
-              execution, the CEO should split it into 2-5 scoped issues with acceptance criteria.
-            </p>
-          </div>
-          <div class="flex flex-wrap items-center gap-2 text-xs">
-            <span class="rounded-full border border-border bg-panel px-2.5 py-1 text-text-secondary">
-              To Do
-            </span>
-            <span class="rounded-full border border-border bg-panel px-2.5 py-1 text-text-secondary">
-              Medium
-            </span>
-            <span
-              :if={@intake_route[:missing?]}
-              class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-1 text-amber-300"
-            >
-              CEO agent missing
-            </span>
-            <span class={[
-              "rounded-full border px-2.5 py-1",
-              if(@runtime_enabled?,
-                do: "border-success/25 bg-success/10 text-success",
-                else: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-              )
-            ]}>
-              {if @runtime_enabled?, do: "Runtime active", else: "Review mode"}
-            </span>
-          </div>
-        </div>
+  <.panel class="overflow-hidden">
+    <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-5 p-5 sm:p-6">
+      <% launch_state =
+        create_launch_state(@brief_readiness, @queue_dispatch_focus?, @intake_route) %>
+      <% queue_focus_disabled? = queue_focus_disabled?(@brief_readiness) %>
+      <% queue_focus_checked? = queue_focus_checked?(@brief_readiness, @queue_dispatch_focus?) %>
 
-        <div class="mt-3 grid gap-2 border-t border-brand/15 pt-3 sm:grid-cols-3">
-          <div class="rounded-md border border-brand/15 bg-panel/60 px-3 py-2">
-            <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Route
-            </p>
-            <p class="mt-1 text-xs text-text-secondary">Owner request -> CEO lane</p>
-          </div>
-          <div class="rounded-md border border-brand/15 bg-panel/60 px-3 py-2">
-            <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Save effect
-            </p>
-            <p class="mt-1 text-xs text-text-secondary">
-              {if @intake_route[:missing?],
-                do: "Creates a CEO-role To Do issue; no provider call.",
-                else: "Creates a To Do issue; no provider call."}
-            </p>
-          </div>
-          <div class="rounded-md border border-brand/15 bg-panel/60 px-3 py-2">
-            <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Next screen
-            </p>
-            <p class="mt-1 text-xs text-text-secondary">
-              {if @intake_route[:missing?],
-                do: "Opens the issue with the CEO setup blocker visible.",
-                else: "Opens the issue with CEO flow status."}
-            </p>
-          </div>
-        </div>
-
-        <div
-          :if={@intake_route[:missing?]}
-          class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2"
-        >
-          <p class="text-xs leading-5 text-amber-100">
-            No CEO agent is configured yet. The issue will stay in the CEO lane until a CEO agent
-            exists.
-          </p>
-          <.app_link
-            navigate={~p"/agents/new"}
-            class="shrink-0 rounded-md border border-amber-500/25 bg-black/15 px-2.5 py-1.5 text-xs font-510 text-amber-50 hover:bg-amber-500/15"
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+        <div class="space-y-5">
+          <div
+            id="issue-intake-composer"
+            data-testid="issue-intake-composer"
+            class="rounded-lg border border-border bg-surface/70 px-4 py-4"
           >
-            Add CEO agent
-          </.app_link>
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div class="min-w-0">
+                <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                  Owner brief
+                </p>
+                <h2 class="mt-1 text-base font-590 text-text-primary">Define the work first</h2>
+                <p class="mt-1 max-w-2xl text-sm leading-6 text-text-tertiary">
+                  Write the request the CEO should decide, decompose, or hand off.
+                </p>
+              </div>
+              <div class="shrink-0 rounded-md border border-border bg-panel px-3 py-2 text-right">
+                <p class={[
+                  "text-sm font-590",
+                  case @brief_readiness.status do
+                    :ready -> "text-success"
+                    :draft -> "text-amber-300"
+                    _ -> "text-text-secondary"
+                  end
+                ]}>
+                  {@brief_readiness.passed_count}/{@brief_readiness.total}
+                </p>
+                <p class="mt-0.5 text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+                  Launch signals
+                </p>
+              </div>
+            </div>
+
+            <div class="mt-4 grid gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
+              <.input
+                field={@form[:title]}
+                label="Title"
+                required
+                placeholder="Describe the outcome in one sentence"
+              />
+
+              <div class="rounded-lg border border-border bg-panel px-3 py-2.5">
+                <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+                  Routing lock
+                </p>
+                <p class="mt-1 text-xs leading-5 text-text-secondary">
+                  New owner requests start in To Do, medium priority, and the CEO lane.
+                </p>
+              </div>
+            </div>
+
+            <div class="mt-5">
+              <.input
+                field={@form[:description]}
+                label="Description"
+                type="textarea"
+                rows={10}
+                placeholder={@description_placeholder}
+              />
+            </div>
+
+            <div class="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+              <.input
+                :if={!Enum.empty?(@goals)}
+                field={@form[:goal_id]}
+                type="select"
+                label="Goal"
+                options={goal_options(@goals)}
+              />
+              <.input
+                :if={!Enum.empty?(@projects)}
+                field={@form[:project_id]}
+                type="select"
+                label="Project"
+                required
+                options={project_options(@projects)}
+              />
+              <.input
+                field={@form[:status]}
+                type="select"
+                label="Status"
+                required
+                options={status_options()}
+              />
+              <.input
+                field={@form[:priority]}
+                type="select"
+                label="Priority"
+                required
+                options={priority_options()}
+              />
+              <.input field={@form[:due_on]} type="date" label="Due date" />
+            </div>
+          </div>
+
+          <div
+            id="issue-create-mobile-summary"
+            data-testid="issue-create-mobile-summary"
+            class={[
+              "rounded-lg border px-4 py-3 md:hidden",
+              launch_state_class(launch_state.tone)
+            ]}
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-[10px] font-590 uppercase tracking-[0.1em] opacity-70">
+                  Create behavior
+                </p>
+                <p class="mt-1 text-sm font-590">{launch_state.label}</p>
+                <p class="mt-1 text-xs leading-5 opacity-80">{launch_state.detail}</p>
+              </div>
+              <span class="shrink-0 rounded-full border border-current/20 bg-black/10 px-2.5 py-1 text-[10px] font-590 uppercase tracking-[0.08em]">
+                {@brief_readiness.passed_count}/{@brief_readiness.total}
+              </span>
+            </div>
+
+            <.button type="submit" variant="primary" class="mt-3 w-full">
+              {submit_label(@brief_readiness, @queue_dispatch_focus?, @intake_route)}
+            </.button>
+          </div>
+
+          <div
+            :if={@intake_route}
+            id="issue-owner-intake"
+            data-testid="issue-owner-intake"
+            class="rounded-lg border border-brand/25 bg-brand/10 px-4 py-3"
+          >
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div class="min-w-0">
+                <p class="text-xs font-590 uppercase tracking-[0.08em] text-brand">
+                  Owner intake
+                </p>
+                <p class="mt-1 text-sm text-text-secondary">
+                  First stop:
+                  <span class="font-590 text-text-primary">
+                    {if @intake_route.agent, do: @intake_route.agent.name, else: "CEO lane"}
+                  </span>
+                  <span class="text-text-quaternary">({@intake_route.role})</span>
+                </p>
+                <p class="mt-2 max-w-2xl text-xs leading-5 text-text-tertiary">
+                  CEO first turn must return
+                  <span class="font-590 text-text-secondary">[owner_update]</span>
+                  , <span class="font-590 text-text-secondary">[handoff]</span>, or <span class="font-590 text-text-secondary">[blocked]</span>. If the request needs
+                  execution, the CEO should split it into 2-5 scoped issues with acceptance criteria;
+                  if it cannot proceed, the CEO should name the blocker.
+                </p>
+              </div>
+              <div class="flex flex-wrap items-center gap-2 text-xs">
+                <span class="rounded-full border border-border bg-panel px-2.5 py-1 text-text-secondary">
+                  To Do
+                </span>
+                <span class="rounded-full border border-border bg-panel px-2.5 py-1 text-text-secondary">
+                  Medium
+                </span>
+                <span
+                  :if={@intake_route[:missing?]}
+                  class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-1 text-amber-300"
+                >
+                  CEO agent missing
+                </span>
+                <span class={[
+                  "rounded-full border px-2.5 py-1",
+                  if(@runtime_enabled?,
+                    do: "border-success/25 bg-success/10 text-success",
+                    else: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+                  )
+                ]}>
+                  {if @runtime_enabled?, do: "Runtime active", else: "Review mode"}
+                </span>
+              </div>
+            </div>
+
+            <div class="mt-3 grid gap-2 border-t border-brand/15 pt-3 sm:grid-cols-3">
+              <div class="rounded-md border border-brand/15 bg-panel/60 px-3 py-2">
+                <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+                  Route
+                </p>
+                <p class="mt-1 text-xs text-text-secondary">Owner request -> CEO lane</p>
+              </div>
+              <div class="rounded-md border border-brand/15 bg-panel/60 px-3 py-2">
+                <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+                  Save effect
+                </p>
+                <p class="mt-1 text-xs text-text-secondary">
+                  {if @intake_route[:missing?],
+                    do: "Creates a CEO-role To Do issue; no provider call.",
+                    else: "Creates a To Do issue; no provider call."}
+                </p>
+              </div>
+              <div class="rounded-md border border-brand/15 bg-panel/60 px-3 py-2">
+                <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+                  Next screen
+                </p>
+                <p class="mt-1 text-xs text-text-secondary">
+                  {if @intake_route[:missing?],
+                    do: "Opens the issue with the CEO setup blocker visible.",
+                    else: "Opens the issue with CEO flow status."}
+                </p>
+              </div>
+            </div>
+
+            <div
+              :if={@intake_route[:missing?]}
+              class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2"
+            >
+              <p class="text-xs leading-5 text-amber-100">
+                No CEO agent is configured yet. The issue will stay in the CEO lane until a CEO agent
+                exists.
+              </p>
+              <.app_link
+                navigate={~p"/agents/new"}
+                class="shrink-0 rounded-md border border-amber-500/25 bg-black/15 px-2.5 py-1.5 text-xs font-510 text-amber-50 hover:bg-amber-500/15"
+              >
+                Add CEO agent
+              </.app_link>
+            </div>
+          </div>
+
+          <% selected_goal = selected_goal_context(@form, @goals) %>
+          <div
+            :if={!Enum.empty?(@goals)}
+            id="issue-mission-context"
+            data-testid="issue-mission-context"
+            class="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3"
+          >
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div class="min-w-0">
+                <p class="text-xs font-590 uppercase tracking-[0.08em] text-emerald-200">
+                  Mission context
+                </p>
+                <p class="mt-1 text-sm text-text-secondary">
+                  {if selected_goal,
+                    do: "#{selected_goal.title} will be attached to this issue.",
+                    else: "Choose a goal when this work should move a mission forward."}
+                </p>
+                <p class="mt-1 max-w-2xl text-xs leading-5 text-text-tertiary">
+                  Goal-linked issues carry lineage into CEO decomposition, child issues, cost rollups,
+                  and owner review so agents can optimize against the business outcome.
+                </p>
+              </div>
+              <span class="shrink-0 rounded-full border border-emerald-500/25 bg-black/10 px-2.5 py-1 text-xs font-510 text-emerald-100">
+                {if selected_goal, do: goal_type_label(selected_goal.goal_type), else: "Optional"}
+              </span>
+            </div>
+          </div>
+
+          <div
+            id="issue-launch-packet"
+            class="rounded-lg border border-border bg-surface/70 px-4 py-4"
+          >
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div class="min-w-0">
+                <p class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                  Launch packet
+                </p>
+                <h2 class="mt-1 text-base font-590 text-text-primary">
+                  Make the CEO turn useful
+                </h2>
+                <p class="mt-1 max-w-2xl text-sm leading-6 text-text-tertiary">
+                  A strong owner request gives the CEO enough context to decide, decompose, or hand
+                  off without a clarification loop.
+                </p>
+              </div>
+              <div class="flex shrink-0 flex-wrap gap-1.5 text-[11px]">
+                <span class="rounded-full border border-brand/25 bg-brand/10 px-2.5 py-1 text-brand">
+                  Create
+                </span>
+                <span class="rounded-full border border-border bg-panel px-2.5 py-1 text-text-tertiary">
+                  CEO flow
+                </span>
+                <span class="rounded-full border border-border bg-panel px-2.5 py-1 text-text-tertiary">
+                  Observe
+                </span>
+              </div>
+            </div>
+
+            <div class="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              <div
+                :for={step <- @launch_packet_steps}
+                class="rounded-md border border-border bg-panel/70 px-3 py-2.5"
+              >
+                <p class="text-xs font-590 text-text-primary">{step.label}</p>
+                <p class="mt-1 text-[11px] leading-4 text-text-tertiary">{step.detail}</p>
+              </div>
+            </div>
+
+            <div class="mt-3 grid gap-2 border-t border-border pt-3 sm:grid-cols-3">
+              <div class="min-w-0 rounded-md border border-border bg-canvas px-3 py-2">
+                <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+                  Define
+                </p>
+                <p class="mt-1 text-xs text-text-secondary">Write the owner brief below.</p>
+              </div>
+              <div class="min-w-0 rounded-md border border-border bg-canvas px-3 py-2">
+                <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+                  Launch
+                </p>
+                <p class="mt-1 text-xs text-text-secondary">
+                  Open the CEO flow on the issue page.
+                </p>
+              </div>
+              <div class="min-w-0 rounded-md border border-border bg-canvas px-3 py-2">
+                <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+                  Inspect
+                </p>
+                <p class="mt-1 text-xs text-text-secondary">
+                  Watch for the first owner update, handoff, or blocker.
+                </p>
+              </div>
+            </div>
+
+            <label
+              :if={!@intake_route[:missing?]}
+              for="queue-dispatch-focus"
+              class={[
+                "mt-3 flex items-start gap-3 rounded-md border px-3 py-2.5",
+                queue_focus_control_class(@brief_readiness),
+                if(queue_focus_disabled?, do: "cursor-not-allowed", else: "cursor-pointer")
+              ]}
+            >
+              <input type="hidden" name="queue_dispatch_focus" value="false" />
+              <input
+                id="queue-dispatch-focus"
+                type="checkbox"
+                name="queue_dispatch_focus"
+                value="true"
+                checked={queue_focus_checked?}
+                disabled={queue_focus_disabled?}
+                class="mt-0.5 h-4 w-4 rounded border-border bg-canvas text-brand focus:ring-brand/40 disabled:cursor-not-allowed disabled:opacity-45"
+              />
+              <span class="min-w-0">
+                <span class={[
+                  "block text-sm font-590",
+                  if(queue_focus_disabled?, do: "text-text-secondary", else: "text-sky-100")
+                ]}>
+                  {queue_focus_label(@brief_readiness)}
+                </span>
+                <span class="mt-0.5 block text-xs leading-5 text-text-tertiary">
+                  {queue_focus_detail(@brief_readiness)}
+                </span>
+              </span>
+            </label>
+
+            <div
+              id="owner-brief-readiness"
+              data-testid="owner-brief-readiness"
+              class="mt-3 rounded-md border border-border bg-canvas px-3 py-3"
+            >
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div class="min-w-0">
+                  <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+                    Owner brief readiness
+                  </p>
+                  <p class={[
+                    "mt-1 text-sm font-590",
+                    case @brief_readiness.status do
+                      :ready -> "text-success"
+                      :draft -> "text-amber-300"
+                      _ -> "text-text-secondary"
+                    end
+                  ]}>
+                    {@brief_readiness.label}
+                  </p>
+                  <p class="mt-1 max-w-2xl text-xs leading-5 text-text-tertiary">
+                    {@brief_readiness.summary}
+                  </p>
+                </div>
+                <div class="shrink-0 rounded-md border border-border bg-panel px-3 py-2 text-right">
+                  <p class="text-lg font-590 text-text-primary">
+                    {@brief_readiness.passed_count}/{@brief_readiness.total}
+                  </p>
+                  <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+                    Signals
+                  </p>
+                </div>
+              </div>
+
+              <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-surface">
+                <div
+                  class={[
+                    "h-full rounded-full",
+                    case @brief_readiness.status do
+                      :ready -> "bg-success"
+                      :draft -> "bg-amber-400"
+                      _ -> "bg-text-quaternary"
+                    end
+                  ]}
+                  style={"width: #{@brief_readiness.percent}%"}
+                >
+                </div>
+              </div>
+
+              <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                <div
+                  :for={check <- @brief_readiness.checks}
+                  class={[
+                    "min-w-0 rounded-md border px-2.5 py-2",
+                    if(check.passed?,
+                      do: "border-success/20 bg-success/10",
+                      else: "border-border bg-panel/70"
+                    )
+                  ]}
+                >
+                  <p class="flex items-center justify-between gap-2 text-xs font-590">
+                    <span class={
+                      if(check.passed?, do: "text-success", else: "text-text-secondary")
+                    }>
+                      {check.label}
+                    </span>
+                    <span class="shrink-0 text-[10px] uppercase tracking-[0.08em] text-text-quaternary">
+                      {if check.passed?, do: "Ready", else: "Needed"}
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              <p class="mt-3 rounded-md border border-border bg-panel/70 px-3 py-2 text-xs leading-5 text-text-tertiary">
+                Next prompt:
+                <span class="text-text-secondary">{@brief_readiness.next_prompt}</span>
+              </p>
+
+              <div
+                id="issue-create-launch-state"
+                class={[
+                  "mt-3 rounded-md border px-3 py-2.5",
+                  launch_state_class(launch_state.tone)
+                ]}
+              >
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div class="min-w-0">
+                    <p class="text-[10px] font-590 uppercase tracking-[0.1em] opacity-70">
+                      Create behavior
+                    </p>
+                    <p class="mt-1 text-sm font-590">{launch_state.label}</p>
+                    <p class="mt-1 text-xs leading-5 opacity-80">{launch_state.detail}</p>
+                  </div>
+                  <span class="shrink-0 rounded-full border border-current/20 bg-black/10 px-2.5 py-1 text-[10px] font-590 uppercase tracking-[0.08em]">
+                    {launch_state.badge}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                id="owner-brief-scaffold-copy"
+                phx-hook="CopyToClipboard"
+                class="mt-3 rounded-md border border-border bg-panel/70"
+              >
+                <div class="flex flex-col gap-2 border-b border-border px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p class="text-xs font-590 text-text-primary">Launch scaffold</p>
+                    <p class="mt-0.5 text-[11px] leading-4 text-text-tertiary">
+                      Complete these lines to make the first CEO turn decision-grade.
+                    </p>
+                  </div>
+                  <div class="flex shrink-0 flex-wrap items-center gap-2">
+                    <button
+                      :if={@brief_readiness.status != :ready}
+                      type="button"
+                      phx-click="use_launch_scaffold"
+                      class="inline-flex items-center justify-center gap-1.5 rounded-md border border-brand/30 bg-brand/10 px-2.5 py-1.5 text-xs font-510 text-brand hover:bg-brand/15"
+                    >
+                      <.icon name="hero-arrow-down-mini" class="h-3.5 w-3.5" /> Use scaffold
+                    </button>
+                    <button
+                      type="button"
+                      data-copy-text={@brief_readiness.launch_scaffold}
+                      data-copy-label="Copy scaffold"
+                      data-copy-success-label="Copied"
+                      data-copy-error-label="Copy failed"
+                      class="inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-canvas px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                    >
+                      <.icon name="hero-clipboard-document-list-mini" class="h-3.5 w-3.5" />
+                      Copy scaffold
+                    </button>
+                  </div>
+                </div>
+                <pre class="whitespace-pre-wrap break-words px-3 py-2.5 text-xs leading-5 text-text-secondary"><%= @brief_readiness.launch_scaffold %></pre>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <.input
-        field={@form[:title]}
-        label="Title"
-        required
-        placeholder="Describe the outcome in one sentence"
-      />
+        <aside
+          data-testid="issue-create-launch-rail"
+          class="hidden space-y-4 md:block lg:sticky lg:top-6"
+        >
+          <section class={[
+            "rounded-xl border p-4 shadow-card",
+            launch_state_class(launch_state.tone)
+          ]}>
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-[11px] font-590 uppercase tracking-[0.14em] opacity-70">
+                  Create behavior
+                </p>
+                <p class="mt-2 text-sm font-590">{launch_state.label}</p>
+                <p class="mt-1 text-xs leading-5 opacity-80">{launch_state.detail}</p>
+              </div>
+              <span class="shrink-0 rounded-full border border-current/20 bg-black/10 px-2.5 py-1 text-[10px] font-590 uppercase tracking-[0.08em]">
+                {launch_state.badge}
+              </span>
+            </div>
 
-      <.input
-        field={@form[:description]}
-        label="Description"
-        type="textarea"
-        rows={8}
-        placeholder={@description_placeholder}
-      />
+            <.button type="submit" variant="primary" class="mt-4 min-h-[40px] w-full">
+              {submit_label(@brief_readiness, @queue_dispatch_focus?, @intake_route)}
+            </.button>
+          </section>
 
-      <div class={[
-        "grid gap-5",
-        if(Enum.empty?(@projects), do: "sm:grid-cols-2", else: "sm:grid-cols-3")
-      ]}>
-        <.input
-          :if={!Enum.empty?(@projects)}
-          field={@form[:project_id]}
-          type="select"
-          label="Project"
-          required
-          options={project_options(@projects)}
-        />
-        <.input
-          field={@form[:status]}
-          type="select"
-          label="Status"
-          required
-          options={status_options()}
-        />
-        <.input
-          field={@form[:priority]}
-          type="select"
-          label="Priority"
-          required
-          options={priority_options()}
-        />
-        <.input field={@form[:due_on]} type="date" label="Due date" />
+          <section class="rounded-xl border border-border bg-panel p-4 shadow-card">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                  Brief readiness
+                </p>
+                <p class={[
+                  "mt-2 text-sm font-590",
+                  case @brief_readiness.status do
+                    :ready -> "text-success"
+                    :draft -> "text-amber-300"
+                    _ -> "text-text-secondary"
+                  end
+                ]}>
+                  {@brief_readiness.label}
+                </p>
+              </div>
+              <div class="shrink-0 rounded-md border border-border bg-canvas px-3 py-2 text-right">
+                <p class="text-sm font-590 text-text-primary">
+                  {@brief_readiness.passed_count}/{@brief_readiness.total}
+                </p>
+                <p class="mt-0.5 text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+                  Signals
+                </p>
+              </div>
+            </div>
+
+            <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-surface">
+              <div
+                class={[
+                  "h-full rounded-full",
+                  case @brief_readiness.status do
+                    :ready -> "bg-success"
+                    :draft -> "bg-amber-400"
+                    _ -> "bg-text-quaternary"
+                  end
+                ]}
+                style={"width: #{@brief_readiness.percent}%"}
+              >
+              </div>
+            </div>
+
+            <p class="mt-3 text-xs leading-5 text-text-tertiary">
+              {@brief_readiness.next_prompt}
+            </p>
+          </section>
+
+          <section class="rounded-xl border border-border bg-panel p-4 shadow-card">
+            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+              First run route
+            </p>
+            <div class="mt-3 space-y-2 text-xs leading-5 text-text-tertiary">
+              <p>
+                <span class="font-590 text-text-secondary">Owner request -> CEO lane.</span>
+                The first turn should produce an owner update, handoff, or blocker.
+              </p>
+              <p :if={!@intake_route[:missing?]}>
+                Focused dispatch becomes available only when all launch signals are present.
+              </p>
+              <p :if={@intake_route[:missing?]} class="text-amber-200">
+                Create the CEO issue now, then add a CEO agent before runtime launch.
+              </p>
+            </div>
+          </section>
+        </aside>
       </div>
 
       <:actions>
@@ -159,7 +604,9 @@
           >
             Cancel
           </.app_link>
-          <.button type="submit" variant="primary">Create Issue</.button>
+          <.button type="submit" variant="primary">
+            {submit_label(@brief_readiness, @queue_dispatch_focus?, @intake_route)}
+          </.button>
         </div>
       </:actions>
     </.simple_form>

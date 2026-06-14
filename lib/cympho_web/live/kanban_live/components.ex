@@ -12,6 +12,7 @@ defmodule CymphoWeb.KanbanLive.Components do
   attr :pending_wake, :any, default: nil
   attr :editing_card_id, :any, default: nil
   attr :card_action_open, :any, default: nil
+  attr :launch_readiness, :map, default: nil
 
   def issue_card(assigns) do
     ~H"""
@@ -48,6 +49,17 @@ defmodule CymphoWeb.KanbanLive.Components do
         variant={if @digest_density == "compact", do: "inline", else: "card"}
         class="mt-2"
       />
+
+      <.link
+        :if={@launch_readiness}
+        navigate={@launch_readiness.path}
+        data-no-drag
+        title={@launch_readiness.summary}
+        class={launch_readiness_chip_class(@launch_readiness)}
+      >
+        <span class="shrink-0">{@launch_readiness.label}</span>
+        <span class="min-w-0 truncate opacity-80">{@launch_readiness.target}</span>
+      </.link>
 
       <div class="mt-2.5 flex flex-wrap items-center gap-3 text-[11px] text-text-quaternary">
         <span class="flex items-center gap-1">
@@ -192,6 +204,11 @@ defmodule CymphoWeb.KanbanLive.Components do
   def priority_class(:medium), do: "bg-yellow-500/20 text-yellow-400"
   def priority_class(:low), do: "bg-emerald-500/20 text-emerald-400"
   def priority_class(_), do: "bg-surface text-text-quaternary"
+
+  defp launch_readiness_chip_class(%{class: class}) do
+    "mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-510 transition-colors hover:border-brand/40 hover:bg-brand/10 " <>
+      to_string(class)
+  end
 
   defp heartbeat_dot_color(:idle), do: "bg-emerald-400"
   defp heartbeat_dot_color(:running), do: "bg-yellow-400 animate-pulse"

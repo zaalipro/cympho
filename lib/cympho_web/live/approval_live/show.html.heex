@@ -1,102 +1,188 @@
-<div class="p-6 lg:p-8 max-w-3xl">
-  <.header title={"Approval " <> String.slice(@approval.id, 0..7)}>
-    <:actions>
-      <.link
-        navigate={~p"/approvals"}
-        class="text-sm text-text-secondary hover:text-text-primary transition-colors"
-      >
-        Back to Approvals
-      </.link>
-    </:actions>
-  </.header>
+<div class="p-6 lg:p-8">
+  <div class="mx-auto max-w-5xl">
+    <.header
+      title={"Approval " <> String.slice(@approval.id, 0..7)}
+      subtitle="Review the request, linked work, payload, and owner decision before agents proceed."
+    >
+      <:actions>
+        <.app_link
+          navigate={~p"/approvals"}
+          class="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+        >
+          <.icon name="hero-arrow-left-mini" class="h-4 w-4" />
+          <span>Approvals</span>
+        </.app_link>
+      </:actions>
+    </.header>
 
-  <div class="mt-6 space-y-6">
-    <div class="bg-panel border border-border rounded-xl p-6 space-y-4">
-      <div class="flex items-center justify-between">
-        <h3 class="font-serif text-sm font-510 text-text-secondary">Type</h3>
-        <span class="text-sm text-text-primary">{@approval.type}</span>
-      </div>
-
-      <div class="flex items-center justify-between">
-        <h3 class="font-serif text-sm font-510 text-text-secondary">Status</h3>
-        <span class={"text-xs font-510 px-2 py-0.5 rounded-full " <> status_badge_class(@approval.status)}>
-          {@approval.status}
-        </span>
-      </div>
-
-      <div class="flex items-center justify-between">
-        <h3 class="font-serif text-sm font-510 text-text-secondary">Requested By</h3>
-        <span class="text-sm text-text-primary">
-          {if @approval.requested_by, do: @approval.requested_by.name, else: "-"}
-        </span>
-      </div>
-
-      <div class="flex items-center justify-between">
-        <h3 class="font-serif text-sm font-510 text-text-secondary">Created</h3>
-        <span class="text-xs text-text-quaternary">
-          {Calendar.strftime(@approval.inserted_at, "%b %d, %Y %H:%M")}
-        </span>
-      </div>
-
-      <%= if @approval.resolved_by do %>
-        <div class="flex items-center justify-between">
-          <h3 class="font-serif text-sm font-510 text-text-secondary">Resolved By</h3>
-          <span class="text-sm text-text-primary">{@approval.resolved_by.email}</span>
+    <div
+      id="approval-decision-packet"
+      data-testid="approval-decision-packet"
+      class={[
+        "overflow-hidden rounded-xl border",
+        decision_packet_tone(@approval.status)
+      ]}
+    >
+      <div class="border-b border-border/70 px-5 py-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-eyebrow uppercase text-text-quaternary">Decision packet</p>
+            <h2 class="mt-1 text-card-title text-text-primary">
+              {@decision_packet.stance}
+            </h2>
+            <p class="mt-2 max-w-3xl text-sm leading-6 text-text-secondary">
+              {@decision_packet.recommendation}
+            </p>
+          </div>
+          <span class={[
+            "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-510",
+            decision_packet_status_class(@approval.status)
+          ]}>
+            {@decision_packet.status_label}
+          </span>
         </div>
-      <% end %>
+      </div>
 
-      <%= if @approval.resolution_reason do %>
-        <div>
-          <h3 class="font-serif text-sm font-510 text-text-secondary mb-1">Resolution Reason</h3>
-          <p class="text-sm text-text-primary">{@approval.resolution_reason}</p>
+      <div class="grid gap-3 px-5 py-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div class={detail_stat_class()}>
+          <p class="text-eyebrow uppercase text-text-quaternary">Requested by</p>
+          <p class="mt-2 truncate text-sm font-590 text-text-primary">
+            {@decision_packet.requested_by}
+          </p>
         </div>
-      <% end %>
-
-      <%= if @approval.payload do %>
-        <div>
-          <h3 class="font-serif text-sm font-510 text-text-secondary mb-1">Payload</h3>
-          <pre class="text-xs text-text-quaternary bg-subtle rounded-lg p-3 overflow-x-auto"><%= Jason.encode!(@approval.payload, pretty: true) %></pre>
+        <div class={detail_stat_class()}>
+          <p class="text-eyebrow uppercase text-text-quaternary">Linked issues</p>
+          <p class="mt-2 font-mono text-2xl font-590 text-text-primary">
+            {@decision_packet.linked_issue_count}
+          </p>
         </div>
-      <% end %>
+        <div class={detail_stat_class()}>
+          <p class="text-eyebrow uppercase text-text-quaternary">Request age</p>
+          <p class="mt-2 text-sm font-590 text-text-primary">{@decision_packet.age}</p>
+        </div>
+        <div class={detail_stat_class()}>
+          <p class="text-eyebrow uppercase text-text-quaternary">Resolved by</p>
+          <p class="mt-2 truncate text-sm font-590 text-text-primary">
+            {@decision_packet.resolved_by}
+          </p>
+        </div>
+      </div>
     </div>
 
-    <div class="bg-panel border border-border rounded-xl p-6">
-      <h3 class="font-serif text-sm font-510 text-text-secondary mb-3">Linked Issues</h3>
-      <%= if Enum.empty?(@approval.issues) do %>
-        <p class="text-sm text-text-quaternary">No linked issues.</p>
-      <% else %>
-        <ul class="space-y-2">
-          <%= for issue <- @approval.issues do %>
-            <li>
-              <.link
-                navigate={~p"/issues/#{issue.id}"}
-                class="text-sm text-accent hover:text-accent-hover"
+    <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div class="space-y-6">
+        <div class="rounded-xl border border-border bg-panel p-5">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p class="text-eyebrow uppercase text-text-quaternary">Request</p>
+              <h3 class="mt-1 text-card-title text-text-primary">{@approval.type}</h3>
+            </div>
+            <span class={"rounded-full px-2.5 py-1 text-xs font-510 capitalize " <> status_badge_class(@approval.status)}>
+              {@approval.status}
+            </span>
+          </div>
+
+          <div class="mt-5 grid gap-3 sm:grid-cols-2">
+            <div class={detail_stat_class()}>
+              <p class="text-eyebrow uppercase text-text-quaternary">Created</p>
+              <p class="mt-2 text-sm text-text-primary">
+                {Calendar.strftime(@approval.inserted_at, "%b %d, %Y %H:%M")}
+              </p>
+            </div>
+            <div class={detail_stat_class()}>
+              <p class="text-eyebrow uppercase text-text-quaternary">Resolution</p>
+              <p class="mt-2 text-sm text-text-primary">{@decision_packet.resolution}</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-xl border border-border bg-panel p-5">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-eyebrow uppercase text-text-quaternary">Linked work</p>
+              <h3 class="mt-1 text-card-title text-text-primary">
+                Issues waiting on this decision
+              </h3>
+            </div>
+          </div>
+
+          <div
+            :if={Enum.empty?(@approval.issues)}
+            class="mt-4 rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-text-tertiary"
+          >
+            No linked issues.
+          </div>
+
+          <div :if={!Enum.empty?(@approval.issues)} class="mt-4 space-y-2">
+            <.app_link
+              :for={issue <- @approval.issues}
+              navigate={~p"/issues/#{issue.id}"}
+              class="block rounded-lg border border-border bg-surface-1 px-4 py-3 transition-colors hover:bg-surface-2"
+            >
+              <div class="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-590 text-text-primary">{issue.title}</p>
+                  <p class="mt-1 text-xs text-text-tertiary">
+                    {if issue.identifier, do: issue.identifier <> " / ", else: ""}{issue.status}
+                  </p>
+                </div>
+                <.icon name="hero-arrow-right-mini" class="h-4 w-4 shrink-0 text-text-quaternary" />
+              </div>
+            </.app_link>
+          </div>
+        </div>
+      </div>
+
+      <aside class="space-y-6">
+        <div class="rounded-xl border border-border bg-panel p-5">
+          <p class="text-eyebrow uppercase text-text-quaternary">Decision actions</p>
+          <%= if @approval.status == :pending do %>
+            <div class="mt-4 grid gap-2">
+              <button
+                type="button"
+                phx-click="approve"
+                class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-510 text-white transition-colors hover:bg-emerald-700"
               >
-                {issue.title}
-              </.link>
-            </li>
+                <.icon name="hero-check-mini" class="h-4 w-4" /> Approve
+              </button>
+              <button
+                type="button"
+                phx-click="deny"
+                class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-sm font-510 text-white transition-colors hover:bg-brand/90"
+              >
+                <.icon name="hero-x-mark-mini" class="h-4 w-4" /> Deny
+              </button>
+            </div>
+          <% else %>
+            <p class="mt-3 text-sm leading-6 text-text-tertiary">
+              This approval is already resolved. The decision trail is preserved below.
+            </p>
           <% end %>
-        </ul>
-      <% end %>
-    </div>
+        </div>
 
-    <%= if @approval.status == :pending do %>
-      <div class="flex gap-3">
-        <button
-          type="button"
-          phx-click="approve"
-          class="bg-green-600 hover:bg-green-700 text-white font-510 text-sm px-4 py-2 rounded-lg transition-colors"
-        >
-          Approve
-        </button>
-        <button
-          type="button"
-          phx-click="deny"
-          class="bg-red-600 hover:bg-red-700 text-white font-510 text-sm px-4 py-2 rounded-lg transition-colors"
-        >
-          Deny
-        </button>
-      </div>
-    <% end %>
+        <div class="rounded-xl border border-border bg-panel p-5">
+          <p class="text-eyebrow uppercase text-text-quaternary">Payload keys</p>
+          <div
+            :if={@decision_packet.payload_keys == []}
+            class="mt-3 rounded-lg border border-dashed border-border px-3 py-4 text-sm text-text-tertiary"
+          >
+            No payload keys.
+          </div>
+          <div :if={@decision_packet.payload_keys != []} class="mt-3 flex flex-wrap gap-2">
+            <span
+              :for={key <- @decision_packet.payload_keys}
+              class="rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-510 text-text-secondary"
+            >
+              {key}
+            </span>
+          </div>
+        </div>
+
+        <div :if={@approval.payload} class="rounded-xl border border-border bg-panel p-5">
+          <p class="text-eyebrow uppercase text-text-quaternary">Payload</p>
+          <pre class="mt-3 max-h-72 overflow-auto rounded-lg border border-border bg-surface p-3 text-xs text-text-tertiary"><%= Jason.encode!(@approval.payload, pretty: true) %></pre>
+        </div>
+      </aside>
+    </div>
   </div>
 </div>

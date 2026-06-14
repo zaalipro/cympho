@@ -1,4 +1,4 @@
-<div class="p-6 lg:p-8 max-w-3xl mx-auto w-full min-w-0">
+<.page size="wide">
   <.header title="New Routine" subtitle="Schedule recurring autonomous work.">
     <:actions>
       <.app_link
@@ -13,67 +13,200 @@
   <.form
     for={@form}
     phx-submit="save"
-    class="space-y-5 rounded-xl border border-border bg-surface p-5"
+    class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
   >
-    <.input field={@form[:name]} label="Name" required />
-    <.input field={@form[:description]} label="Description" type="textarea" rows={4} />
+    <.panel class="overflow-hidden">
+      <div class="border-b border-border px-5 py-4">
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Routine launch plan
+        </p>
+        <h2 class="mt-1 text-lg font-590 text-text-primary">Create the recurring work packet</h2>
+        <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
+          Give the routine enough owner and project context that each run creates useful,
+          reviewable work instead of floating tasks.
+        </p>
+      </div>
 
-    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <.input
-        type="select"
-        field={@form[:priority]}
-        label="Priority"
-        value={@form[:priority].value || :medium}
-        options={[
-          {"Critical", "critical"},
-          {"High", "high"},
-          {"Medium", "medium"},
-          {"Low", "low"}
-        ]}
-      />
-      <.input
-        type="select"
-        field={@form[:concurrency_policy]}
-        label="Concurrency Policy"
-        value={@form[:concurrency_policy].value || :coalesce_if_active}
-        options={[
-          {"Coalesce if active", "coalesce_if_active"},
-          {"Skip if active", "skip_if_active"},
-          {"Always enqueue", "always_enqueue"}
-        ]}
-      />
-      <.input
-        type="select"
-        field={@form[:catch_up_policy]}
-        label="Catch-up Policy"
-        value={@form[:catch_up_policy].value || :skip_missed}
-        options={[
-          {"Skip missed", "skip_missed"},
-          {"Enqueue missed with cap", "enqueue_missed_with_cap"}
-        ]}
-      />
-      <.input
-        type="number"
-        field={@form[:catch_up_cap]}
-        label="Catch-up Cap"
-        value={@form[:catch_up_cap].value || 5}
-        min="1"
-      />
-    </div>
+      <div class="space-y-6 p-5">
+        <section class="space-y-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Work packet
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              This becomes the issue brief every time the routine fires.
+            </p>
+          </div>
 
-    <div class="flex items-center justify-end gap-2 border-t border-border pt-4">
+          <.input
+            field={@form[:name]}
+            label="Name"
+            required
+            placeholder="Weekly release readiness"
+          />
+          <.input
+            field={@form[:description]}
+            label="Run brief"
+            type="textarea"
+            rows={5}
+            placeholder="Check release blockers, update the owner, and create follow-up issues for unresolved risks."
+          />
+        </section>
+
+        <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Ownership
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              Pick the default agent and project context for work created by this routine.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <.input
+              type="select"
+              field={@form[:agent_id]}
+              label="Default owner"
+              value={@form[:agent_id].value || ""}
+              options={@agent_options}
+            />
+            <.input
+              type="select"
+              field={@form[:project_id]}
+              label="Project context"
+              value={@form[:project_id].value || ""}
+              options={@project_options}
+            />
+          </div>
+        </section>
+
+        <section class="space-y-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Run policy
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              Decide how the routine behaves when a previous run is still active.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <.input
+              type="select"
+              field={@form[:priority]}
+              label="Priority"
+              value={@form[:priority].value || :medium}
+              options={[
+                {"Critical", "critical"},
+                {"High", "high"},
+                {"Medium", "medium"},
+                {"Low", "low"}
+              ]}
+            />
+            <.input
+              type="select"
+              field={@form[:concurrency_policy]}
+              label="Concurrency policy"
+              value={@form[:concurrency_policy].value || :coalesce_if_active}
+              options={[
+                {"Coalesce if active", "coalesce_if_active"},
+                {"Skip if active", "skip_if_active"},
+                {"Always enqueue", "always_enqueue"}
+              ]}
+            />
+            <.input
+              type="select"
+              field={@form[:catch_up_policy]}
+              label="Catch-up policy"
+              value={@form[:catch_up_policy].value || :skip_missed}
+              options={[
+                {"Skip missed", "skip_missed"},
+                {"Enqueue missed with cap", "enqueue_missed_with_cap"}
+              ]}
+            />
+            <.input
+              type="number"
+              field={@form[:catch_up_cap]}
+              label="Catch-up cap"
+              value={@form[:catch_up_cap].value || 5}
+              min="1"
+            />
+          </div>
+        </section>
+      </div>
+    </.panel>
+
+    <aside class="space-y-4">
+      <section
+        data-testid="routine-setup-checklist"
+        class="rounded-xl border border-border bg-panel p-4 shadow-card"
+      >
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Setup checklist
+        </p>
+        <div class="mt-4 space-y-3">
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
+              1
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Define the work packet</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Name the recurring outcome and the evidence each run should produce.
+              </p>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
+              2
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Assign owner context</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Keep generated work out of the floating backlog.
+              </p>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
+              3
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Attach a trigger after save</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                A routine is only automatic once it has a schedule or webhook trigger.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="rounded-xl border border-brand/25 bg-brand/10 p-4">
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
+          Create behavior
+        </p>
+        <p class="mt-2 text-sm font-590 text-text-primary">Starts active, needs a trigger</p>
+        <p class="mt-1 text-xs leading-5 text-text-tertiary">
+          Save the routine, open its detail page, then attach the schedule or webhook that should
+          create work.
+        </p>
+      </section>
+    </aside>
+
+    <div class="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end lg:col-span-2">
       <.app_link
         navigate={~p"/routines"}
-        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+        class="inline-flex min-h-[40px] items-center justify-center rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
       >
         Cancel
       </.app_link>
       <button
         type="submit"
-        class="rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+        class="inline-flex min-h-[40px] items-center justify-center rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
       >
         Create Routine
       </button>
     </div>
   </.form>
-</div>
+</.page>

@@ -6,8 +6,12 @@ defmodule Cympho.Routines do
   @stale_run_after_seconds 2 * 60 * 60
   @recent_failure_window_seconds 24 * 60 * 60
 
-  def list_routines do
-    Repo.all(from r in Routine, order_by: [desc: r.inserted_at, desc: r.id])
+  def list_routines(opts \\ []) do
+    opts
+    |> Keyword.get(:company_id)
+    |> routines_scope_query()
+    |> order_by([r], desc: r.inserted_at, desc: r.id)
+    |> Repo.all()
   end
 
   @doc """
@@ -17,7 +21,9 @@ defmodule Cympho.Routines do
   display order of `list_routines/0`.
   """
   def list_routines_page(opts \\ []) do
-    Routine
+    opts
+    |> Keyword.get(:company_id)
+    |> routines_scope_query()
     |> Cympho.Pagination.page(
       limit: Keyword.get(opts, :limit, 50),
       after: Keyword.get(opts, :after),
@@ -47,7 +53,8 @@ defmodule Cympho.Routines do
         left_join: project in assoc(r, :project),
         where:
           r.id == ^id and
-            (agent.company_id == ^company_id or project.company_id == ^company_id)
+            (r.company_id == ^company_id or agent.company_id == ^company_id or
+               project.company_id == ^company_id)
       )
 
     case Repo.one(query) do
@@ -123,8 +130,22 @@ defmodule Cympho.Routines do
       label: routine_health_label(level),
       summary: routine_health_summary(metrics),
       metrics: metrics,
-      recommendations: recommendations
+      recommendations: recommendations,
+      next_action: routine_health_next_action(level, recommendations)
     }
+  end
+
+  defp routines_scope_query(nil), do: from(r in Routine)
+
+  defp routines_scope_query(company_id) do
+    from(r in Routine,
+      left_join: agent in assoc(r, :agent),
+      left_join: project in assoc(r, :project),
+      where:
+        r.company_id == ^company_id or agent.company_id == ^company_id or
+          project.company_id == ^company_id,
+      distinct: r.id
+    )
   end
 
   defp routines_health_query(nil) do
@@ -135,7 +156,10 @@ defmodule Cympho.Routines do
     from(r in Routine,
       left_join: agent in assoc(r, :agent),
       left_join: project in assoc(r, :project),
-      where: agent.company_id == ^company_id or project.company_id == ^company_id,
+      where:
+        r.company_id == ^company_id or agent.company_id == ^company_id or
+          project.company_id == ^company_id,
+      distinct: r.id,
       order_by: [desc: r.inserted_at, desc: r.id]
     )
   end
@@ -190,35 +214,106 @@ defmodule Cympho.Routines do
     []
     |> maybe_recommend(
       metrics.active_without_triggers > 0,
+      :add_triggers,
       :critical,
       "Add triggers",
       "#{metrics.active_without_triggers} active routine(s) cannot run automatically because no enabled trigger is attached."
     )
     |> maybe_recommend(
       metrics.stale_runs > 0,
+      :clear_stuck_runs,
       :critical,
       "Clear stuck runs",
       "#{metrics.stale_runs} run(s) have been pending or running for more than 2 hours."
     )
     |> maybe_recommend(
       metrics.recent_failures > 0,
+      :review_failures,
       :warning,
       "Review failures",
       "#{metrics.recent_failures} run(s) failed in the last 24 hours."
     )
     |> maybe_recommend(
       metrics.paused_routines > 0,
+      :audit_paused_work,
       :info,
       "Audit paused work",
       "#{metrics.paused_routines} routine(s) are paused and will not create work."
     )
   end
 
-  defp maybe_recommend(recommendations, false, _severity, _label, _detail), do: recommendations
+  defp maybe_recommend(recommendations, false, _key, _severity, _label, _detail),
+    do: recommendations
 
-  defp maybe_recommend(recommendations, true, severity, label, detail) do
-    recommendations ++ [%{severity: severity, label: label, detail: detail}]
+  defp maybe_recommend(recommendations, true, key, severity, label, detail) do
+    recommendations ++ [%{key: key, severity: severity, label: label, detail: detail}]
   end
+
+  defp routine_health_next_action(:empty, _recommendations) do
+    %{
+      key: :create_first_routine,
+      tone: :neutral,
+      label: "Create first routine",
+      detail:
+        "Start with one narrow recurring workflow that creates reviewable work on a schedule or webhook.",
+      cta: "New routine"
+    }
+  end
+
+  defp routine_health_next_action(:healthy, []) do
+    %{
+      key: :review_run_history,
+      tone: :ok,
+      label: "Review run history",
+      detail:
+        "Routine automation is active. Inspect recent runs before adding more recurring work.",
+      cta: "Open routines"
+    }
+  end
+
+  defp routine_health_next_action(_level, [recommendation | _]) do
+    %{
+      key: recommendation.key,
+      tone: recommendation.severity,
+      label: recommendation.label,
+      detail: next_action_detail(recommendation),
+      cta: next_action_cta(recommendation.key)
+    }
+  end
+
+  defp routine_health_next_action(_level, _recommendations) do
+    %{
+      key: :review_routines,
+      tone: :neutral,
+      label: "Review routines",
+      detail: "Inspect recurring work before increasing autonomous intake.",
+      cta: "Open routines"
+    }
+  end
+
+  defp next_action_detail(%{key: :add_triggers, detail: detail}) do
+    "#{detail} Attach a schedule or webhook before trusting this routine to create work."
+  end
+
+  defp next_action_detail(%{key: :clear_stuck_runs, detail: detail}) do
+    "#{detail} Resolve the stale execution so future runs do not pile up behind it."
+  end
+
+  defp next_action_detail(%{key: :review_failures, detail: detail}) do
+    "#{detail} Inspect the latest failure and repair the routine before it repeats."
+  end
+
+  defp next_action_detail(%{key: :audit_paused_work, detail: detail}) do
+    "#{detail} Resume routines that should still create work or archive the stale ones."
+  end
+
+  defp next_action_detail(%{detail: detail}), do: detail
+
+  defp next_action_cta(:add_triggers), do: "Open trigger gaps"
+  defp next_action_cta(:clear_stuck_runs), do: "Review stuck runs"
+  defp next_action_cta(:review_failures), do: "Review failures"
+  defp next_action_cta(:audit_paused_work), do: "Audit paused"
+  defp next_action_cta(_key), do: "Open routines"
 
   defp routine_health_level(%{total_routines: 0}), do: :empty
 

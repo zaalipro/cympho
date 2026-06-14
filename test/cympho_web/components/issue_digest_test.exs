@@ -4,6 +4,7 @@ defmodule CymphoWeb.Components.IssueDigestTest do
 
   alias Cympho.Agents.Agent
   alias Cympho.Comments.Comment
+  alias Cympho.Goals.Goal
   alias Cympho.Issues.Issue
   alias Cympho.WorkProducts.IssueWorkProduct
 
@@ -25,6 +26,59 @@ defmodule CymphoWeb.Components.IssueDigestTest do
     )
   end
 
+  defp render_digest_card(issue, assigns \\ []) do
+    render_component(
+      &CymphoWeb.Components.IssueDigest.issue_digest_card/1,
+      Keyword.merge(
+        [
+          issue: issue,
+          density: "compact",
+          variant: "inline"
+        ],
+        assigns
+      )
+    )
+  end
+
+  test "renders linked mission context on compact digest cards" do
+    html =
+      render_digest_card(%Issue{
+        title: "Mission card",
+        status: :todo,
+        priority: :medium,
+        comments: [],
+        goal_id: Ecto.UUID.generate(),
+        goal: %Goal{title: "Raise activation quality", goal_type: :mission}
+      })
+
+    assert html =~ "Mission: Raise activation quality"
+    assert html =~ "Mission context: Raise activation quality"
+  end
+
+  test "renders project-only and floating mission context fallbacks" do
+    project_only =
+      render_digest_card(%Issue{
+        title: "Project card",
+        status: :todo,
+        priority: :medium,
+        comments: [],
+        project_id: Ecto.UUID.generate()
+      })
+
+    floating =
+      render_digest_card(%Issue{
+        title: "Floating card",
+        status: :todo,
+        priority: :medium,
+        comments: []
+      })
+
+    assert project_only =~ "Project only"
+    assert project_only =~ "No mission goal is linked"
+    assert floating =~ "Floating"
+    assert floating =~ "No mission goal or project is linked"
+  end
+
   test "renders missing-url artifacts without placeholder links" do
     agent_id = Ecto.UUID.generate()
     now = DateTime.utc_now() |> DateTime.truncate(:second)
@@ -41,7 +95,7 @@ defmodule CymphoWeb.Components.IssueDigestTest do
               author_type: "agent",
               author_id: agent_id,
               body:
-                "[delivery] What happened: produced evidence. Files changed: app. Verification: checked manually. Risks: none known. Current state: ready. Next decision: review.",
+                "[delivery] What happened: produced evidence. Files changed: app. Verification: checked manually. Risks: none known. Current state: ready. Next decision: review. Restart packet: reviewer should inspect the app evidence and manual check.",
               inserted_at: now
             }
           ]
@@ -87,7 +141,7 @@ defmodule CymphoWeb.Components.IssueDigestTest do
               author_type: "agent",
               author_id: agent_id,
               body:
-                "[delivery] What happened: implemented the handoff packet. Files changed: issue_memory.ex. Verification: tests passed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
+                "[delivery] What happened: implemented the handoff packet. Files changed: issue_memory.ex. Verification: tests passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect issue_memory.ex and the passing tests.",
               inserted_at: now
             }
           ]
@@ -109,6 +163,11 @@ defmodule CymphoWeb.Components.IssueDigestTest do
     assert html =~ "Issue handoff context"
     assert html =~ "# Issue handoff: CYM-99 - Handoff issue"
     assert html =~ "- Actions taken: implemented the handoff packet."
+    assert html =~ "Current state"
+    assert html =~ "ready for review."
     assert html =~ "- Next decision: CTO review."
+    assert html =~ "Restart packet"
+    assert html =~ "CTO should inspect issue_memory.ex and the passing tests."
+    assert html =~ "- Restart packet: CTO should inspect issue_memory.ex and the passing tests."
   end
 end

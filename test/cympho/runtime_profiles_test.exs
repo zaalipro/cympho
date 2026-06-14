@@ -28,6 +28,37 @@ defmodule Cympho.RuntimeProfilesTest do
       assert profile.config["endpoint"] ==
                "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
+      assert profile.description =~ "Add DASHSCOPE_API_KEY"
+      assert profile.description =~ "accepted aliases"
+      refute Map.has_key?(profile.config, "api_key")
+      assert RuntimeProfiles.summary_value(profile) == "Model qwen3.7-plus"
+    end
+
+    test "exposes non-secret low-cost DashScope Qwen flash defaults" do
+      profile = RuntimeProfiles.get!("openai-chat-qwen-dashscope-flash")
+
+      assert profile.adapter == "openai_chat"
+      assert profile.posture == "Low-cost gateway"
+      assert profile.config["model"] == "qwen3.6-flash"
+
+      assert profile.config["endpoint"] ==
+               "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+      assert profile.description =~ "cheap CEO smoke tests"
+      assert profile.description =~ "Add DASHSCOPE_API_KEY"
+      refute Map.has_key?(profile.config, "api_key")
+      assert RuntimeProfiles.summary_value(profile) == "Model qwen3.6-flash"
+    end
+
+    test "exposes non-secret DashScope international Qwen defaults" do
+      profile = RuntimeProfiles.get!("openai-chat-qwen-dashscope-intl")
+
+      assert profile.adapter == "openai_chat"
+      assert profile.config["model"] == "qwen3.7-plus"
+
+      assert profile.config["endpoint"] ==
+               "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+
       refute Map.has_key?(profile.config, "api_key")
       assert RuntimeProfiles.summary_value(profile) == "Model qwen3.7-plus"
     end
@@ -50,13 +81,30 @@ defmodule Cympho.RuntimeProfilesTest do
       assert %{profile_id: "codex-mini", max_concurrent_jobs: 1} =
                RuntimeProfiles.quick_preset("low_ram")
 
+      assert %{profile_id: "openai-chat-qwen-dashscope-flash", max_concurrent_jobs: 1} =
+               RuntimeProfiles.quick_preset("qwen_dashscope_flash")
+
+      assert RuntimeProfiles.max_concurrent_jobs_for_profile("openai-chat-qwen-dashscope-flash") ==
+               1
+
       assert %{profile_id: "openai-chat-qwen-dashscope", max_concurrent_jobs: 1} =
                RuntimeProfiles.quick_preset("qwen_dashscope")
+
+      assert RuntimeProfiles.max_concurrent_jobs_for_profile("openai-chat-qwen-dashscope") == 1
+
+      assert %{profile_id: "openai-chat-qwen-dashscope-intl", max_concurrent_jobs: 1} =
+               RuntimeProfiles.quick_preset("qwen_dashscope_intl")
+
+      assert RuntimeProfiles.max_concurrent_jobs_for_profile("openai-chat-qwen-dashscope-intl") ==
+               1
 
       assert %{profile_id: "process-codex", max_concurrent_jobs: 1} =
                RuntimeProfiles.quick_preset("provider_test")
 
+      assert RuntimeProfiles.get!("process-codex").config["model"] == "gpt-5.4-mini"
+
       assert is_nil(RuntimeProfiles.quick_preset("missing"))
+      assert RuntimeProfiles.max_concurrent_jobs_for_profile("custom", 3) == 3
     end
   end
 end

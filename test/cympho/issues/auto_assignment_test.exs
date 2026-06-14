@@ -40,6 +40,7 @@ defmodule Cympho.Issues.AutoAssignmentTest do
           name: "Test Engineer",
           role: :engineer,
           status: :idle,
+          adapter: :codex,
           max_concurrent_jobs: 3,
           company_id: test_company_id()
         })
@@ -103,6 +104,7 @@ defmodule Cympho.Issues.AutoAssignmentTest do
           name: "Busier Agent",
           role: :engineer,
           status: :idle,
+          adapter: :codex,
           max_concurrent_jobs: 5,
           company_id: test_company_id()
         })
@@ -112,6 +114,7 @@ defmodule Cympho.Issues.AutoAssignmentTest do
           name: "Freer Agent",
           role: :engineer,
           status: :idle,
+          adapter: :codex,
           max_concurrent_jobs: 5,
           company_id: test_company_id()
         })
@@ -137,6 +140,29 @@ defmodule Cympho.Issues.AutoAssignmentTest do
 
       {:ok, assigned} = AutoAssignment.assign_issue(issue)
       assert assigned.assignee_id == freer.id
+    end
+
+    test "does not checkout repo delivery work to fallback CTO", %{agent: agent} do
+      {:ok, _agent} = Agents.update_agent(agent, %{status: :error})
+
+      {:ok, _cto} =
+        Agents.create_agent(%{
+          name: "Checkout Fallback CTO",
+          role: :cto,
+          status: :idle,
+          adapter: :openai_chat,
+          max_concurrent_jobs: 3,
+          company_id: test_company_id()
+        })
+
+      issue =
+        create_issue_direct(%{
+          title: "Implement login feature",
+          description: "Build the login flow",
+          assigned_role: "engineer"
+        })
+
+      assert {:error, :no_eligible_agent, ^issue} = AutoAssignment.assign_issue(issue)
     end
 
     test "routes strategic issue to CEO" do
@@ -248,6 +274,87 @@ defmodule Cympho.Issues.AutoAssignmentTest do
       assert assigned.status == :todo
       assert assigned.assigned_role == "product_manager"
     end
+
+    test "prefers repo-capable owner over chat-only owner for implementation dispatch" do
+      {:ok, _chat_only} =
+        Agents.create_agent(%{
+          name: "AAA Dispatch Chat Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :openai_chat,
+          max_concurrent_jobs: 3,
+          company_id: test_company_id()
+        })
+
+      {:ok, repo_capable} =
+        Agents.create_agent(%{
+          name: "ZZZ Dispatch Codex Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :codex,
+          max_concurrent_jobs: 3,
+          company_id: test_company_id()
+        })
+
+      issue =
+        create_issue_direct(%{
+          title: "Implement import retry handling",
+          status: :todo,
+          assigned_role: "engineer"
+        })
+
+      assert is_nil(issue.assignee_id)
+
+      {:ok, assigned} = AutoAssignment.assign_owner_for_dispatch(issue)
+
+      assert assigned.assignee_id == repo_capable.id
+      assert assigned.status == :todo
+      assert assigned.assigned_role == "engineer"
+    end
+
+    test "leaves implementation dispatch unassigned when only chat-only owners exist" do
+      {:ok, _chat_only} =
+        Agents.create_agent(%{
+          name: "Only Dispatch Chat Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :openai_chat,
+          max_concurrent_jobs: 3,
+          company_id: test_company_id()
+        })
+
+      issue =
+        create_issue_direct(%{
+          title: "Implement import retry handling",
+          status: :todo,
+          assigned_role: "engineer"
+        })
+
+      assert {:error, :no_eligible_agent, ^issue} =
+               AutoAssignment.assign_owner_for_dispatch(issue)
+    end
+
+    test "does not fall back to CTO ownership for repo delivery work" do
+      {:ok, _cto} =
+        Agents.create_agent(%{
+          name: "Dispatch Fallback CTO",
+          role: :cto,
+          status: :idle,
+          adapter: :openai_chat,
+          max_concurrent_jobs: 3,
+          company_id: test_company_id()
+        })
+
+      issue =
+        create_issue_direct(%{
+          title: "Implement import retry handling",
+          status: :todo,
+          assigned_role: "engineer"
+        })
+
+      assert {:error, :no_eligible_agent, ^issue} =
+               AutoAssignment.assign_owner_for_dispatch(issue)
+    end
   end
 
   describe "reassign_backlog/0" do
@@ -257,6 +364,7 @@ defmodule Cympho.Issues.AutoAssignmentTest do
           name: "Backlog Agent",
           role: :engineer,
           status: :idle,
+          adapter: :codex,
           max_concurrent_jobs: 3,
           company_id: test_company_id()
         })
@@ -289,6 +397,46 @@ defmodule Cympho.Issues.AutoAssignmentTest do
     end
   end
 
+  describe "assign_waiting_role_work/2" do
+    test "assigns matching waiting issues without starting unrelated work" do
+      {:ok, marketer} =
+        Agents.create_agent(%{
+          name: "Growth Marketer",
+          role: :marketer,
+          status: :idle,
+          max_concurrent_jobs: 3,
+          company_id: test_company_id()
+        })
+
+      marketer_issue =
+        create_issue_direct(%{
+          title: "Plan SEO launch campaign",
+          status: :todo,
+          assigned_role: "marketer"
+        })
+
+      product_issue =
+        create_issue_direct(%{
+          title: "Define onboarding acceptance criteria",
+          status: :todo,
+          assigned_role: "product_manager"
+        })
+
+      assert {:ok, [assigned_issue], 0} =
+               AutoAssignment.assign_waiting_role_work_with_issues(test_company_id(), :marketer)
+
+      assert assigned_issue.id == marketer_issue.id
+      assert {:ok, 0, 0} = AutoAssignment.assign_waiting_role_work(test_company_id(), :marketer)
+
+      marketer_issue = Repo.get!(Issue, marketer_issue.id)
+      product_issue = Repo.get!(Issue, product_issue.id)
+
+      assert marketer_issue.assignee_id == marketer.id
+      assert marketer_issue.status == :todo
+      assert product_issue.assignee_id == nil
+    end
+  end
+
   describe "queue_for_assignment/1" do
     test "creates a system comment on the issue" do
       issue =
@@ -311,6 +459,7 @@ defmodule Cympho.Issues.AutoAssignmentTest do
           name: "Engineer For Create",
           role: :engineer,
           status: :idle,
+          adapter: :codex,
           max_concurrent_jobs: 3,
           company_id: test_company_id()
         })

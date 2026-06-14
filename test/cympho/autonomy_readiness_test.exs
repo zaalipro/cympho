@@ -1,9 +1,11 @@
 defmodule Cympho.AutonomyReadinessTest do
-  use Cympho.DataCase, async: true
+  use Cympho.DataCase, async: false
 
   alias Cympho.Agents
   alias Cympho.AutonomyReadiness
   alias Cympho.Companies
+  alias Cympho.Finances
+  alias Cympho.Goals
   alias Cympho.Projects
   alias Cympho.RoutineTriggers
   alias Cympho.Routines
@@ -20,8 +22,106 @@ defmodule Cympho.AutonomyReadinessTest do
       assert snapshot.label == "Blocked"
       assert snapshot.score < 50
       assert snapshot.summary =~ "critical"
-      assert Enum.map(snapshot.signals, & &1.key) == [:org, :plugins, :workspaces, :routines]
+
+      assert Enum.map(snapshot.signals, & &1.key) == [
+               :org,
+               :plugins,
+               :workspaces,
+               :routines,
+               :runtime,
+               :agent_guides
+             ]
+
       assert Enum.any?(snapshot.signals, &(&1.key == :org and &1.level == :critical))
+      assert Enum.any?(snapshot.signals, &(&1.key == :runtime))
+      assert Enum.any?(snapshot.signals, &(&1.key == :agent_guides))
+    end
+
+    test "exposes operating primitive readiness" do
+      company = create_company("operating-primitives")
+
+      snapshot = AutonomyReadiness.snapshot(company.id)
+
+      assert snapshot.paperclip.label in [
+               "Operating loop blocked",
+               "Operating loop setup",
+               "Operating loop needs review"
+             ]
+
+      assert snapshot.paperclip.summary =~ "operating primitives"
+      refute snapshot.paperclip.summary =~ "Paperclip"
+      refute snapshot.paperclip.summary =~ "parity"
+
+      assert Enum.map(snapshot.paperclip.primitives, & &1.key) == [
+               :mission_links,
+               :org,
+               :runtime,
+               :cost_guardrails,
+               :agent_guides,
+               :extension_surface
+             ]
+
+      assert snapshot.paperclip.ready_count + snapshot.paperclip.attention_count +
+               snapshot.paperclip.missing_count == 6
+
+      mission = Enum.find(snapshot.paperclip.primitives, &(&1.key == :mission_links))
+      budget = Enum.find(snapshot.paperclip.primitives, &(&1.key == :cost_guardrails))
+
+      assert mission.health_label == "No mission"
+      assert mission.summary =~ "Create an active mission"
+      assert mission.path == "/goals"
+      assert mission.action_label == "Create mission"
+      assert budget.health_label == "No budget"
+      assert budget.summary =~ "Add a company or scoped budget"
+      assert budget.path == "/budgets/new"
+      assert budget.action_label == "Create budget"
+    end
+
+    test "operating primitive rollup recognizes mission links and budget guardrails" do
+      company = create_company("operating-ready")
+      project = create_project(company, "Operating Ready Project")
+
+      {:ok, mission} =
+        Goals.create_goal(%{
+          title: "Operating loop mission",
+          company_id: company.id,
+          project_id: project.id,
+          goal_type: :mission,
+          status: "active"
+        })
+
+      {:ok, _issue} =
+        Cympho.Issues.create_issue(%{
+          title: "Mission-linked work",
+          status: :todo,
+          company_id: company.id,
+          project_id: project.id,
+          goal_id: mission.id
+        })
+
+      {:ok, _budget} =
+        Finances.create_budget_policy(%{
+          company_id: company.id,
+          scope: "company",
+          period: "monthly",
+          budget_limit_usd: Decimal.new("100.00"),
+          warning_threshold_pct: Decimal.new("80.0")
+        })
+
+      snapshot = AutonomyReadiness.snapshot(company.id)
+      mission_primitive = Enum.find(snapshot.paperclip.primitives, &(&1.key == :mission_links))
+      budget_primitive = Enum.find(snapshot.paperclip.primitives, &(&1.key == :cost_guardrails))
+
+      assert mission_primitive.level == :healthy
+      assert mission_primitive.metric == 100
+      assert mission_primitive.summary =~ "100% of open work"
+      assert mission_primitive.path == "/goals"
+      assert mission_primitive.action_label == "Open goals"
+      assert budget_primitive.level == :healthy
+      assert budget_primitive.health_label in ["On track", "Scoped controls", "Guarded"]
+      assert budget_primitive.summary =~ "budget guardrail"
+      assert budget_primitive.path == "/budgets"
+      assert budget_primitive.action_label == "Open budgets"
     end
 
     test "summarizes warning and setup gaps with readable copy" do
@@ -59,12 +159,12 @@ defmodule Cympho.AutonomyReadinessTest do
       snapshot = AutonomyReadiness.snapshot(company.id)
 
       assert snapshot.level == :warning
-      assert snapshot.summary =~ "1 readiness area needs review"
+      assert snapshot.summary =~ "3 readiness areas need review"
       assert snapshot.summary =~ "3 setup areas still need configuration"
       refute snapshot.summary =~ "area need review"
     end
 
-    test "reports ready when org, plugins, workspaces, and routines are healthy" do
+    test "keeps readiness in review when runtime or agent guides are not ready" do
       company = create_company("ready")
       project = create_project(company, "Ready Project")
 
@@ -131,13 +231,59 @@ defmodule Cympho.AutonomyReadinessTest do
 
       snapshot = AutonomyReadiness.snapshot(company.id)
 
-      assert snapshot.level == :healthy
-      assert snapshot.label == "Ready"
-      assert snapshot.score == 100
-      assert Enum.all?(snapshot.signals, &(&1.level == :healthy))
+      assert snapshot.level == :warning
+      assert snapshot.label == "Needs review"
+      assert snapshot.score < 100
+
+      for key <- [:org, :plugins, :workspaces, :routines] do
+        assert Enum.any?(snapshot.signals, &(&1.key == key and &1.level == :healthy))
+      end
+
+      assert Enum.any?(snapshot.signals, &(&1.key == :runtime and &1.level == :warning))
+      assert Enum.any?(snapshot.signals, &(&1.key == :agent_guides and &1.level == :warning))
       assert Enum.any?(snapshot.signals, &(&1.key == :workspaces and &1.metric == 0))
       assert Enum.any?(snapshot.signals, &(&1.key == :routines and &1.metric == 1))
       assert workspace.company_id == company.id
+    end
+
+    test "agent guide signal prioritizes contract gaps over prompt all-clear copy" do
+      company = create_company("guide-contract")
+
+      {:ok, engineer} =
+        Agents.create_agent(%{
+          name: "Guide Engineer",
+          role: :engineer,
+          status: :idle,
+          health_status: :healthy,
+          instructions:
+            "Orient, decide, act, verify, and report with [delivery] What happened, Files changed, Evidence produced, Verification, Risks, Current state, Next decision.",
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Cympho.Issues.create_issue(%{
+          title: "Guide contract gap",
+          description: "Needs a delivery note before readiness can be safe.",
+          status: :in_review,
+          assignee_id: engineer.id,
+          company_id: company.id
+        })
+
+      {:ok, _comment} =
+        Cympho.Comments.create_comment(%{
+          issue_id: issue.id,
+          author_type: "agent",
+          author_id: engineer.id,
+          body: "[delivery] What happened: changed the implementation."
+        })
+
+      snapshot = AutonomyReadiness.snapshot(company.id)
+      guide = Enum.find(snapshot.signals, &(&1.key == :agent_guides))
+
+      assert guide.level in [:warning, :critical]
+      assert guide.path == "/operations#prompt-contract-health"
+      assert guide.summary =~ "contract gap"
+      refute String.starts_with?(guide.summary, "All ")
     end
   end
 

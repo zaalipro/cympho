@@ -92,13 +92,14 @@ defmodule Cympho.AgentPromptContract do
     ## Role completion contract
     You are accountable for the owner-visible business update.
 
-    - When you delegate or split work, include a `[handoff]` or `[owner_update]` comment explaining the plan, current state, and who owns each next decision.
+    - When you delegate or split work, include a `[handoff]` or `[owner_update]` comment explaining the action taken, evidence/artifact, verification, remaining risk, current state, who owns each next decision, and the restart packet a fresh turn should use.
+    - Manager fan-out must be machine-routable: each child issue or handoff needs an exact `assigned_role` or `assignee_id`, dependency order or `depends_on`, `estimated_minutes`, acceptance criteria, evidence required, verification required, definition of done, and review owner. If you use a named idle agent from Team status, copy the exact UUID; otherwise route by role and do not invent assignee names.
     - Tie every delegation to the active mission/goal when one exists. If the request is floating, say which mission or goal should be created or selected before large work starts.
-    - When CTO/product/design/engineering evidence is clear, add `[owner_update] What happened: ... Business status: shipped/not shipped. Current state: ... Next decision: ... Owner decision needed: ...` before closing parent work.
-    - When no agent work remains but owner acceptance is required, pair the `[owner_update]` with `block_issue` using a `[blocked]` note that says the owner must verify the CEO update before closure.
+    - When CTO/product/design/engineering evidence is clear, add `[owner_update] What happened: ... Business status: shipped/not shipped/ready for owner signoff. Evidence inspected: ... Verification: ... Remaining risk: ... Current state: ... Next decision: ... Owner decision needed: ... Restart packet: ...` before closing parent work.
+    - When no agent work remains but owner acceptance is required, pair the `[owner_update]` with `block_issue` using a `[blocked]` note that says the owner must verify the CEO update before closure and includes a restart packet. The owner update's Business status must be `ready for owner signoff`, not `shipped`.
     - When the owner requests a revision, do not repeat the prior update. Address the review gap with a revised `[owner_update]`, delegate missing work, or explain the new blocker.
     - Parent issues with child work must not close silently. The owner should understand the final status without reading raw runs.
-    - If the work is blocked, add `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ...`.
+    - If the work is blocked, add `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ... Restart packet: ...`.
     """
     |> String.trim()
   end
@@ -108,11 +109,12 @@ defmodule Cympho.AgentPromptContract do
     ## Role completion contract
     You are accountable for technical decomposition and review.
 
-    - When you split work, leave `[handoff]` with the child issue plan, dependencies, acceptance criteria, and review order.
+    - When you split work, leave `[handoff]` with the child issue plan, dependencies, acceptance criteria, evidence/artifact, verification, remaining risk, review order, and restart packet.
+    - Technical fan-out must be machine-routable: each engineer, QA, or release child needs an exact `assigned_role` or `assignee_id`, `depends_on` when sequencing matters, `estimated_minutes`, acceptance criteria, evidence required, verification required, definition of done, first file/artifact/test area, and review owner.
     - Preserve project and goal context on child issues. If a parent has no goal link, call that out before dispatching a broad implementation queue.
-    - When engineers submit work, leave `[review] Verdict: accepted/request changes/blocked. What happened: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ...` before approving or requesting changes.
+    - When engineers submit work, leave `[review] Verdict: accepted/request changes/blocked. What happened: ... Evidence inspected: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ... Restart packet: ...` before approving or requesting changes.
     - If evidence is missing, use `[blocked]` or `[review]` to say exactly which child issue, artifact, PR, or test is missing.
-    - If the work is blocked, add `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ...`.
+    - If the work is blocked, add `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ... Restart packet: ...`.
     """
     |> String.trim()
   end
@@ -137,10 +139,10 @@ defmodule Cympho.AgentPromptContract do
     ## Role completion contract
     You are accountable for #{label} delivery evidence.
 
-    - Before `submit_review`, add `[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ...`.
+    - Before `submit_review`, add `[delivery] What happened: ... Files changed: ... Evidence produced: ... Verification: ... Risks: ... Current state: ... Next decision: ... Restart packet: ...`.
     - Name the goal, mission, or business outcome the delivery advances; if no goal is linked, say so in the final comment.
     - Attach a work product or PR/reference when the work creates anything reviewable.
-    - If you cannot finish, add `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ...`.
+    - If you cannot finish, add `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ... Restart packet: ...`.
     """
     |> String.trim()
   end
@@ -148,25 +150,25 @@ defmodule Cympho.AgentPromptContract do
   def prompt_block(_role) do
     """
     ## Role completion contract
-    Leave a tagged owner-readable comment whenever you move work forward: `[delivery]`, `[review]`, `[handoff]`, `[blocked]`, `[decision]`, or `[owner_update]`. Blocked notes must include Cause, Attempted fix, Needs, Current state, and Next decision.
+    Leave a tagged owner-readable comment whenever you move work forward: `[delivery]`, `[review]`, `[handoff]`, `[blocked]`, `[decision]`, or `[owner_update]`. Blocked notes must include Cause, Attempted fix, Needs, Current state, Next decision, and Restart packet.
     """
     |> String.trim()
   end
 
   def required_template(:ceo) do
-    "[owner_update] What happened: ... Business status: shipped/not shipped. Current state: ... Next decision: ... Owner decision needed: ..."
+    "[owner_update] What happened: ... Business status: shipped/not shipped/ready for owner signoff. Evidence inspected: ... Verification: ... Remaining risk: ... Current state: ... Next decision: ... Owner decision needed: ... Restart packet: ..."
   end
 
   def required_template(:cto) do
-    "[review] Verdict: accepted/request changes/blocked. What happened: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ..."
+    "[review] Verdict: accepted/request changes/blocked. What happened: ... Evidence inspected: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ... Restart packet: ..."
   end
 
   def required_template(role) when role in @delivery_roles do
-    "[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ..."
+    "[delivery] What happened: ... Files changed: ... Evidence produced: ... Verification: ... Risks: ... Current state: ... Next decision: ... Restart packet: ..."
   end
 
   def required_template(_role) do
-    "[delivery] What happened: ... Current state: ... Next decision: ... Evidence: ..."
+    "[delivery] What happened: ... Current state: ... Next decision: ... Evidence: ... Restart packet: ..."
   end
 
   defp required_fields(:ceo) do
@@ -174,9 +176,13 @@ defmodule Cympho.AgentPromptContract do
       "[owner_update]",
       "What happened",
       "Business status",
+      "Evidence inspected",
+      "Verification",
+      "Remaining risk",
       "Current state",
       "Next decision",
-      "Owner decision needed"
+      "Owner decision needed",
+      "Restart packet"
     ]
   end
 
@@ -185,10 +191,12 @@ defmodule Cympho.AgentPromptContract do
       "[review]",
       "Verdict",
       "What happened",
+      "Evidence inspected",
       "Verification",
       "Gaps",
       "Follow-up issues",
-      "Next decision"
+      "Next decision",
+      "Restart packet"
     ]
   end
 
@@ -197,15 +205,17 @@ defmodule Cympho.AgentPromptContract do
       "[delivery]",
       "What happened",
       "Files changed",
+      "Evidence produced",
       "Verification",
       "Risks",
       "Current state",
-      "Next decision"
+      "Next decision",
+      "Restart packet"
     ]
   end
 
   defp required_fields(_role) do
-    ["What happened", "Current state", "Next decision"]
+    ["What happened", "Current state", "Next decision", "Restart packet"]
   end
 
   defp snippets(role) do
@@ -214,7 +224,7 @@ defmodule Cympho.AgentPromptContract do
         label: "Blocked",
         tag: "[blocked]",
         body:
-          "[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ..."
+          "[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ... Restart packet: ..."
       }
     ]
 
@@ -224,10 +234,16 @@ defmodule Cympho.AgentPromptContract do
           [
             %{label: "Owner update", tag: "[owner_update]", body: required_template(:ceo)},
             %{
+              label: "Handoff",
+              tag: "[handoff]",
+              body:
+                "[handoff] What happened: ... Child issues: ... Routing targets: assigned_role or assignee_id ... Dependencies: ... Estimated minutes: ... Acceptance criteria: ... Evidence/artifact: ... Verification: ... Definition of done: ... Review owner: ... Remaining risk: ... Next decision: ... Restart packet: ..."
+            },
+            %{
               label: "Decision",
               tag: "[decision]",
               body:
-                "[decision] What happened: ... Decision: ... Tradeoff: ... Current state: ... Next decision: ..."
+                "[decision] What happened: ... Decision: ... Evidence/artifact: ... Verification: ... Remaining risk: ... Tradeoff: ... Current state: ... Next decision: ... Restart packet: ..."
             }
           ]
 
@@ -238,7 +254,7 @@ defmodule Cympho.AgentPromptContract do
               label: "Handoff",
               tag: "[handoff]",
               body:
-                "[handoff] What happened: ... Child issues: ... Dependencies: ... Acceptance criteria: ... Review order: ..."
+                "[handoff] What happened: ... Child issues: ... Dependencies: ... Acceptance criteria: ... Evidence/artifact: ... Verification: ... Remaining risk: ... Next decision: ... Review order: ... Restart packet: ..."
             }
           ]
 

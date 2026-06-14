@@ -2,6 +2,7 @@ defmodule CymphoWeb.DashboardLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Dashboard
   alias Cympho.Companies
+  alias Cympho.Issues
   alias Cympho.Orchestrator.Dispatcher
   alias Cympho.RuntimeOperations
   alias CymphoWeb.Events
@@ -138,6 +139,72 @@ defmodule CymphoWeb.DashboardLive.Index do
     end
   end
 
+  def handle_event("accept_owner_verification", %{"issue-id" => issue_id}, socket) do
+    with {:ok, issue} <- scoped_issue(socket, issue_id),
+         {:ok, _issue} <-
+           Issues.accept_owner_verification(issue, actor: socket.assigns[:current_user]) do
+      {:noreply,
+       socket
+       |> assign_metrics()
+       |> push_event("toast", %{message: "CEO owner update accepted", type: "success"})}
+    else
+      {:error, :blocked_by_active_issues} ->
+        {:noreply,
+         push_event(socket, "toast", %{
+           message: "Issue is blocked by active work",
+           type: "error"
+         })}
+
+      {:error, :not_owner_verification} ->
+        {:noreply,
+         push_event(socket, "toast", %{
+           message: "Issue is not waiting on owner verification",
+           type: "error"
+         })}
+
+      {:error, :not_found} ->
+        {:noreply,
+         push_event(socket, "toast", %{message: "Issue not found for this company", type: "error"})}
+
+      _ ->
+        {:noreply,
+         push_event(socket, "toast", %{message: "Could not accept CEO update", type: "error"})}
+    end
+  end
+
+  def handle_event("request_owner_revision", %{"issue-id" => issue_id}, socket) do
+    with {:ok, issue} <- scoped_issue(socket, issue_id),
+         {:ok, _issue} <-
+           Issues.request_owner_verification_revision(issue, actor: socket.assigns[:current_user]) do
+      {:noreply,
+       socket
+       |> assign_metrics()
+       |> push_event("toast", %{message: "CEO revision queued", type: "success"})}
+    else
+      {:error, :blocked_by_active_issues} ->
+        {:noreply,
+         push_event(socket, "toast", %{
+           message: "Issue is blocked by active work",
+           type: "error"
+         })}
+
+      {:error, :not_owner_verification} ->
+        {:noreply,
+         push_event(socket, "toast", %{
+           message: "Issue is not waiting on owner verification",
+           type: "error"
+         })}
+
+      {:error, :not_found} ->
+        {:noreply,
+         push_event(socket, "toast", %{message: "Issue not found for this company", type: "error"})}
+
+      _ ->
+        {:noreply,
+         push_event(socket, "toast", %{message: "Could not request CEO revision", type: "error"})}
+    end
+  end
+
   defp assign_metrics(socket) do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
     summary = if company_id, do: Dashboard.summary(company_id), else: Dashboard.empty_summary()
@@ -150,13 +217,18 @@ defmodule CymphoWeb.DashboardLive.Index do
 
     running = status_count(summary.issue_status_counts, :in_progress)
     blocked = status_count(summary.issue_status_counts, :blocked)
+    next_actions = next_actions(summary, company, operations)
 
     socket
     |> assign(:company, company)
     |> assign(:autonomy_status, autonomy_status(company))
     |> assign(:runtime_enabled?, Dispatcher.enabled?())
     |> assign(:operating_mode, operating_mode(company))
-    |> assign(:next_actions, next_actions(summary, company, operations))
+    |> assign(:next_actions, next_actions)
+    |> assign(:primary_next_action, List.first(next_actions))
+    |> assign(:secondary_next_actions, Enum.drop(next_actions, 1))
+    |> assign(:ceo_command_lane, ceo_command_lane(operations.ceo_flow))
+    |> assign(:owner_signoff_decision, owner_signoff_decision(operations.owner_signoffs))
     |> assign(:execution_health, execution_health(summary, operations))
     |> assign(:queued_work, queued)
     |> assign(:running_work, running)
@@ -175,6 +247,7 @@ defmodule CymphoWeb.DashboardLive.Index do
     |> assign(:runtime_capacity, summary.runtime_capacity)
     |> assign(:goal_alignment, summary.goal_alignment)
     |> assign(:autonomy_readiness, summary.autonomy_readiness)
+    |> assign(:patrol_summary, summary.patrol_summary)
   end
 
   defp current_company(socket) do
@@ -188,6 +261,13 @@ defmodule CymphoWeb.DashboardLive.Index do
 
       _ ->
         nil
+    end
+  end
+
+  defp scoped_issue(socket, issue_id) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} -> Issues.get_company_issue(company_id, issue_id)
+      _ -> {:error, :not_found}
     end
   end
 
@@ -233,17 +313,20 @@ defmodule CymphoWeb.DashboardLive.Index do
     alignment = summary.goal_alignment
 
     [
+      owner_signoff_action(operations.owner_signoffs),
       ceo_outcome_attention_action(operations.ceo_outcomes),
       stale_review_nudge_action(operations.review_nudges),
       goal_alignment_action(alignment),
       cost_control_action(summary.cost_summary),
+      paperclip_readiness_action(summary.autonomy_readiness),
       if(length(operations.recent_failures) > 0,
         do: %{
           label: "Runtime failures need inspection",
           detail:
             "#{length(operations.recent_failures)} recent #{pluralize(length(operations.recent_failures), "run")} failed across the company.",
           action: "Open failures",
-          path: "/operations#runtime-failures"
+          path: "/operations#runtime-failures",
+          tone: :danger
         }
       ),
       if(!runtime_enabled?,
@@ -251,7 +334,8 @@ defmodule CymphoWeb.DashboardLive.Index do
           label: "Review mode is on",
           detail: "Agent execution is disabled, so it is safe to inspect and edit the company.",
           action: "Enable runtime when ready",
-          path: "/operations#runtime-launch-checklist"
+          path: "/operations#runtime-launch-checklist",
+          tone: :attention
         }
       ),
       if(company_status == :unconfigured,
@@ -259,7 +343,8 @@ defmodule CymphoWeb.DashboardLive.Index do
           label: "Finish company setup",
           detail: "Create the operating company, initial goal, and agent roster.",
           action: "Open setup",
-          path: "/onboarding"
+          path: "/onboarding",
+          tone: :attention
         }
       ),
       if(agents == 0,
@@ -267,7 +352,8 @@ defmodule CymphoWeb.DashboardLive.Index do
           label: "Hire your first agents",
           detail: "A CEO, CTO, and engineer team make the board actionable.",
           action: "Create agents",
-          path: "/agents/new"
+          path: "/agents/new",
+          tone: :attention
         }
       ),
       if(blocked > 0,
@@ -275,7 +361,8 @@ defmodule CymphoWeb.DashboardLive.Index do
           label: "#{blocked} blocked #{pluralize(blocked, "issue")}",
           detail: "Blocked work needs an owner decision before agents can continue.",
           action: "Review blockers",
-          path: "/kanban"
+          path: "/kanban",
+          tone: :danger
         }
       ),
       if(runtime_enabled? and queued > 0 and running == 0,
@@ -283,7 +370,8 @@ defmodule CymphoWeb.DashboardLive.Index do
           label: "Queued work is waiting",
           detail: "#{queued} #{pluralize(queued, "issue")} can be picked up by available agents.",
           action: "Open board",
-          path: "/kanban"
+          path: "/kanban",
+          tone: :brand
         }
       )
     ]
@@ -296,7 +384,8 @@ defmodule CymphoWeb.DashboardLive.Index do
             detail:
               "No urgent bottlenecks detected. Review priorities or inspect recent activity.",
             action: "Scan board",
-            path: "/kanban"
+            path: "/kanban",
+            tone: :ok
           }
         ]
 
@@ -305,6 +394,56 @@ defmodule CymphoWeb.DashboardLive.Index do
     end
   end
 
+  defp ceo_command_lane(%{next_action: next_action} = flow) do
+    next_action = next_action || %{}
+    stage = Map.get(flow, :stage)
+
+    %{
+      stage: stage,
+      label: Map.get(flow, :label, "CEO flow"),
+      summary: Map.get(flow, :summary, "Open Operations to inspect the CEO flow."),
+      action_label: Map.get(next_action, :label, "Open Operations"),
+      action_path: dashboard_operations_path(Map.get(next_action, :path)),
+      action_tone: Map.get(next_action, :tone, :ok),
+      candidate: dashboard_ceo_command_candidate(stage, flow),
+      steps: flow |> Map.get(:steps, []) |> Enum.take(4)
+    }
+  end
+
+  defp ceo_command_lane(_flow), do: nil
+
+  defp dashboard_ceo_command_candidate(stage, flow)
+       when stage in [:brief_repair, :launch_ready, :blocked] do
+    Map.get(flow, :primary_candidate)
+  end
+
+  defp dashboard_ceo_command_candidate(:attention, flow) do
+    candidate = Map.get(flow, :primary_candidate)
+
+    if Map.get(flow, :attention_count, 0) == 0 and
+         get_in(candidate || %{}, [:preflight_status]) == :attention do
+      candidate
+    else
+      nil
+    end
+  end
+
+  defp dashboard_ceo_command_candidate(_stage, _flow), do: nil
+
+  defp dashboard_operations_path(nil), do: "/operations"
+  defp dashboard_operations_path("#" <> _ = path), do: "/operations#{path}"
+  defp dashboard_operations_path(path) when is_binary(path), do: path
+  defp dashboard_operations_path(_path), do: "/operations"
+
+  defp owner_signoff_decision(%{entries: [entry | _]}), do: entry
+  defp owner_signoff_decision(_owner_signoffs), do: nil
+
+  defp primary_action_badge(%{path: "/operations#owner-signoff-queue"}), do: "Owner decision"
+  defp primary_action_badge(%{tone: :danger}), do: "Fix first"
+  defp primary_action_badge(%{tone: :attention}), do: "Needs setup"
+  defp primary_action_badge(%{tone: :brand}), do: "Ready to run"
+  defp primary_action_badge(_action), do: "Next move"
+
   defp ceo_outcome_attention_action(%{counts: %{attention: attention}})
        when is_integer(attention) and attention > 0 do
     %{
@@ -312,11 +451,29 @@ defmodule CymphoWeb.DashboardLive.Index do
       detail:
         "#{attention} CEO #{pluralize(attention, "outcome")} #{if attention == 1, do: "needs", else: "need"} owner follow-up after failed or silent turns.",
       action: "Open CEO monitor",
-      path: "/operations#ceo-outcome-monitor"
+      path: "/operations#ceo-outcome-monitor",
+      tone: :danger
     }
   end
 
   defp ceo_outcome_attention_action(_ceo_outcomes), do: nil
+
+  defp owner_signoff_action(%{count: count}) when is_integer(count) and count > 0 do
+    %{
+      label:
+        if(count == 1,
+          do: "CEO owner update needs decision",
+          else: "CEO owner updates need decisions"
+        ),
+      detail:
+        "#{count} CEO owner #{pluralize(count, "update")} #{if count == 1, do: "is", else: "are"} ready for acceptance or revision.",
+      action: "Review signoff",
+      path: "/operations#owner-signoff-queue",
+      tone: :success
+    }
+  end
+
+  defp owner_signoff_action(_owner_signoffs), do: nil
 
   defp goal_alignment_action(%{floating: floating}) when is_integer(floating) and floating > 0 do
     %{
@@ -324,7 +481,8 @@ defmodule CymphoWeb.DashboardLive.Index do
       detail:
         "#{floating} open #{pluralize(floating, "issue")} #{if floating == 1, do: "has", else: "have"} no project or goal.",
       action: "Open goals",
-      path: "/goals"
+      path: "/goals",
+      tone: :attention
     }
   end
 
@@ -334,7 +492,8 @@ defmodule CymphoWeb.DashboardLive.Index do
       label: "Open work has no goal links",
       detail: "#{total} open #{pluralize(total, "issue")} should be tied to an active goal.",
       action: "Open goals",
-      path: "/goals"
+      path: "/goals",
+      tone: :attention
     }
   end
 
@@ -344,7 +503,8 @@ defmodule CymphoWeb.DashboardLive.Index do
       label: "No active mission anchors work",
       detail: "Create a mission so new agent work can inherit strategic context.",
       action: "Open goals",
-      path: "/goals"
+      path: "/goals",
+      tone: :attention
     }
   end
 
@@ -355,7 +515,8 @@ defmodule CymphoWeb.DashboardLive.Index do
       label: "Budget is over limit",
       detail: cost_budget_detail(cost, "Spend has crossed the active budget limit."),
       action: "Open budgets",
-      path: "/budgets"
+      path: "/budgets",
+      tone: :danger
     }
   end
 
@@ -364,7 +525,8 @@ defmodule CymphoWeb.DashboardLive.Index do
       label: "Budget spend needs review",
       detail: cost_budget_detail(cost, "Spend is near the configured warning threshold."),
       action: "Review budget",
-      path: "/budgets"
+      path: "/budgets",
+      tone: :attention
     }
   end
 
@@ -375,12 +537,41 @@ defmodule CymphoWeb.DashboardLive.Index do
         detail:
           "#{cost_period_label(cost)} is #{format_cost(Map.get(cost, :period_cost))}. Add a company or agent budget before autonomy scales.",
         action: "Create budget",
-        path: "/budgets/new"
+        path: "/budgets/new",
+        tone: :attention
       }
     end
   end
 
   defp cost_control_action(_cost), do: nil
+
+  defp paperclip_readiness_action(%{paperclip: %{level: :healthy}}), do: nil
+
+  defp paperclip_readiness_action(%{paperclip: paperclip}) when is_map(paperclip) do
+    primitive =
+      paperclip
+      |> Map.get(:primitives, [])
+      |> Enum.find(&(Map.get(&1, :level) != :healthy))
+
+    if primitive do
+      %{
+        label: paperclip_action_label(Map.get(paperclip, :level)),
+        detail: "#{primitive.label}: #{primitive.summary}",
+        action: "Fix #{primitive.label}",
+        path: primitive.path,
+        tone: paperclip_action_tone(Map.get(paperclip, :level))
+      }
+    end
+  end
+
+  defp paperclip_readiness_action(_readiness), do: nil
+
+  defp paperclip_action_label(:critical), do: "Autonomous operating readiness is blocked"
+  defp paperclip_action_label(:setup), do: "Autonomous operating readiness needs setup"
+  defp paperclip_action_label(_), do: "Autonomous operating readiness needs review"
+
+  defp paperclip_action_tone(:critical), do: :danger
+  defp paperclip_action_tone(_), do: :attention
 
   defp cost_budget_detail(cost, fallback) do
     spend = Map.get(cost, :budget_spend) || Map.get(cost, :period_cost)
@@ -406,9 +597,10 @@ defmodule CymphoWeb.DashboardLive.Index do
 
   defp execution_health(summary, operations) do
     review_nudges = operations.review_nudges
+    owner_signoffs = Map.get(operations, :owner_signoffs, %{count: 0})
     pre_runtime_nudges = pre_runtime_review_nudge_count(review_nudges)
     cto_review = status_count(summary.issue_status_counts, :in_review)
-    owner_updates = owner_update_count(review_nudges)
+    owner_updates = Map.get(owner_signoffs, :count, 0) + owner_update_count(review_nudges)
     runtime_failures = length(operations.recent_failures)
     overloaded_agents = Enum.count(operations.pressure_agents, &(&1.pressure.level == :high))
 
@@ -457,8 +649,16 @@ defmodule CymphoWeb.DashboardLive.Index do
       %{
         label: "Owner updates",
         value: owner_updates,
-        hint: "CEO/customer updates queued",
-        path: "/operations#review-nudges",
+        hint:
+          if(Map.get(owner_signoffs, :count, 0) > 0,
+            do: "Awaiting acceptance",
+            else: "CEO/customer updates queued"
+          ),
+        path:
+          if(Map.get(owner_signoffs, :count, 0) > 0,
+            do: "/operations#owner-signoff-queue",
+            else: "/operations#review-nudges"
+          ),
         tone: if(owner_updates > 0, do: :attention, else: :ok)
       },
       %{
@@ -493,7 +693,8 @@ defmodule CymphoWeb.DashboardLive.Index do
         detail:
           "#{pre_runtime_stale_count} pre-runtime #{pluralize(pre_runtime_stale_count, "issue")} need focused dispatch before evidence can land.",
         action: "Open launch checklist",
-        path: "/operations#runtime-launch-checklist"
+        path: "/operations#runtime-launch-checklist",
+        tone: :attention
       }
     else
       %{
@@ -501,7 +702,8 @@ defmodule CymphoWeb.DashboardLive.Index do
         detail:
           "#{stale_count} evidence #{pluralize(stale_count, "request")} need owner follow-up.",
         action: "Open Operations",
-        path: "/operations#review-nudges"
+        path: "/operations#review-nudges",
+        tone: :attention
       }
     end
   end
@@ -620,6 +822,62 @@ defmodule CymphoWeb.DashboardLive.Index do
   def readiness_signal_text(:critical), do: "text-brand"
   def readiness_signal_text(:setup), do: "text-text-tertiary"
   def readiness_signal_text(_), do: "text-text-primary"
+
+  def next_action_card_class(:danger), do: "border-brand/35 bg-brand/[0.07]"
+  def next_action_card_class(:attention), do: "border-amber-400/25 bg-amber-400/[0.06]"
+  def next_action_card_class(:brand), do: "border-teal-500/25 bg-teal-500/[0.06]"
+  def next_action_card_class(:success), do: "border-teal-500/25 bg-teal-500/[0.06]"
+  def next_action_card_class(:ok), do: "border-border bg-surface/40"
+  def next_action_card_class(_tone), do: "border-border bg-surface/40"
+
+  def next_action_pill_class(:danger), do: "border-brand/35 bg-brand/10 text-brand"
+
+  def next_action_pill_class(:attention),
+    do: "border-amber-400/25 bg-amber-400/10 text-amber-300"
+
+  def next_action_pill_class(:brand), do: "border-teal-500/25 bg-teal-500/10 text-teal-300"
+  def next_action_pill_class(:success), do: "border-teal-500/25 bg-teal-500/10 text-teal-300"
+  def next_action_pill_class(:ok), do: "border-border bg-canvas text-text-tertiary"
+  def next_action_pill_class(_tone), do: "border-border bg-canvas text-text-tertiary"
+
+  def ceo_command_stage_class(:setup), do: "border-amber-400/25 bg-amber-400/10 text-amber-300"
+
+  def ceo_command_stage_class(:needs_issue),
+    do: "border-amber-400/25 bg-amber-400/10 text-amber-300"
+
+  def ceo_command_stage_class(:attention), do: "border-brand/35 bg-brand/10 text-brand"
+  def ceo_command_stage_class(:blocked), do: "border-brand/35 bg-brand/10 text-brand"
+  def ceo_command_stage_class(:running), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+
+  def ceo_command_stage_class(:launch_ready),
+    do: "border-teal-500/25 bg-teal-500/10 text-teal-300"
+
+  def ceo_command_stage_class(:ready), do: "border-teal-500/25 bg-teal-500/10 text-teal-300"
+  def ceo_command_stage_class(:review_mode), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+  def ceo_command_stage_class(:draft), do: "border-amber-400/25 bg-amber-400/10 text-amber-300"
+  def ceo_command_stage_class(:thin), do: "border-brand/35 bg-brand/10 text-brand"
+
+  def ceo_command_stage_class(:delegated_work),
+    do: "border-amber-400/25 bg-amber-400/10 text-amber-300"
+
+  def ceo_command_stage_class(:owner_signoff),
+    do: "border-teal-500/25 bg-teal-500/10 text-teal-300"
+
+  def ceo_command_stage_class(:observed), do: "border-teal-500/25 bg-teal-500/10 text-teal-300"
+  def ceo_command_stage_class(_stage), do: "border-border bg-surface text-text-tertiary"
+
+  def ceo_command_step_class(:complete), do: "border-teal-500/25 bg-teal-500/[0.06]"
+  def ceo_command_step_class(:active), do: "border-sky-500/25 bg-sky-500/[0.06]"
+  def ceo_command_step_class(:attention), do: "border-amber-400/25 bg-amber-400/[0.06]"
+  def ceo_command_step_class(:blocked), do: "border-brand/35 bg-brand/[0.07]"
+  def ceo_command_step_class(:missing), do: "border-border bg-surface/40"
+  def ceo_command_step_class(_state), do: "border-border bg-surface/40"
+
+  def ceo_command_step_dot(:complete), do: "bg-teal-300"
+  def ceo_command_step_dot(:active), do: "bg-sky-300"
+  def ceo_command_step_dot(:attention), do: "bg-amber-300"
+  def ceo_command_step_dot(:blocked), do: "bg-brand"
+  def ceo_command_step_dot(_state), do: "bg-text-quaternary"
 
   def autonomy_text_class(:active), do: "text-green-300"
   def autonomy_text_class(:paused), do: "text-yellow-300"
@@ -825,6 +1083,39 @@ defmodule CymphoWeb.DashboardLive.Index do
   def health_tone_icon(:brand), do: "sparkles"
   def health_tone_icon(:ok), do: "check-circle"
   def health_tone_icon(_), do: "minus-circle"
+
+  def patrol_badge_class(:attention), do: "border-brand/35 bg-brand/10 text-brand"
+  def patrol_badge_class(:queued), do: "border-amber-400/25 bg-amber-400/10 text-amber-300"
+  def patrol_badge_class(:clear), do: "border-teal-500/25 bg-teal-500/10 text-teal-300"
+  def patrol_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  def patrol_metric_text(:attention), do: "text-brand"
+  def patrol_metric_text(:queued), do: "text-amber-300"
+  def patrol_metric_text(:clear), do: "text-teal-300"
+  def patrol_metric_text(_), do: "text-text-tertiary"
+
+  def patrol_issue_class(:blocked), do: "border-brand/35 bg-brand/[0.07]"
+  def patrol_issue_class(:in_review), do: "border-purple-400/25 bg-purple-400/[0.06]"
+  def patrol_issue_class(:in_progress), do: "border-amber-400/25 bg-amber-400/[0.06]"
+  def patrol_issue_class(_), do: "border-border bg-surface/40"
+
+  def patrol_route_label(%{supervisor_role: role, supervisor_name: name})
+      when is_binary(role) and is_binary(name),
+      do: "Wake #{role}: #{name}"
+
+  def patrol_route_label(%{supervisor_role: role}) when is_binary(role), do: "Wake #{role}"
+  def patrol_route_label(_), do: "No supervisor route"
+
+  def patrol_age(%{stale_minutes: minutes}) when is_integer(minutes) do
+    cond do
+      minutes >= 60 * 24 -> "#{div(minutes, 60 * 24)}d"
+      minutes >= 60 -> "#{div(minutes, 60)}h"
+      minutes > 0 -> "#{minutes}m"
+      true -> "now"
+    end
+  end
+
+  def patrol_age(_), do: "-"
 
   # Autonomy pulse colors used by the header status dot via inline CSS var.
   def autonomy_pulse_color(:active), do: "rgba(74, 222, 128, 0.55)"

@@ -89,26 +89,35 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="mb-6 p-4 bg-subtle border border-border rounded-lg">
+    <section
+      id="secret-form-panel"
+      class="mb-6 overflow-hidden rounded-lg border border-border bg-panel"
+    >
       <div
         :if={@runtime_hint}
-        class="mb-4 rounded-lg border border-brand/25 bg-brand/10 px-3 py-3"
+        id="runtime-secret-setup-guide"
+        data-testid="runtime-secret-setup-guide"
+        class="border-b border-brand/20 bg-brand/[0.08] px-5 py-4"
       >
         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div class="min-w-0">
-            <p class="text-xs font-590 uppercase tracking-[0.08em] text-brand">
+            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
               {@runtime_hint.title}
             </p>
-            <p class="mt-1 text-sm text-text-secondary">{@runtime_hint.summary}</p>
+            <p class="mt-2 max-w-2xl text-sm leading-5 text-text-secondary">
+              {@runtime_hint.summary}
+            </p>
           </div>
-          <span class="shrink-0 rounded-full border border-border bg-panel px-2.5 py-1 text-xs text-text-secondary">
+          <span class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-brand/25 bg-panel/80 px-2.5 py-1 text-xs font-510 text-brand">
+            <.icon name="hero-shield-check" class="h-3.5 w-3.5" />
             {@runtime_hint.profile}
           </span>
         </div>
-        <dl class="mt-3 grid gap-2 border-t border-brand/15 pt-3 sm:grid-cols-2">
+
+        <dl class="mt-4 grid gap-2 border-t border-brand/15 pt-3 sm:grid-cols-2">
           <div
             :for={item <- @runtime_hint.items}
-            class="rounded-md border border-brand/15 bg-panel/60 px-3 py-2"
+            class="min-w-0 rounded-md border border-brand/15 bg-panel/75 px-3 py-2"
           >
             <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
               {item.label}
@@ -116,73 +125,127 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
             <dd class="mt-1 break-words text-xs text-text-secondary">{item.value}</dd>
           </div>
         </dl>
+
+        <div class="mt-3 grid gap-2 sm:grid-cols-3">
+          <div class="rounded-md border border-brand/15 bg-panel/70 px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Save effect
+            </p>
+            <p class="mt-1 text-xs leading-5 text-text-secondary">
+              {@runtime_hint.save_effect}
+            </p>
+          </div>
+          <div class="rounded-md border border-brand/15 bg-panel/70 px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Security
+            </p>
+            <p class="mt-1 text-xs leading-5 text-text-secondary">
+              Encrypted at rest; the value is never shown after save.
+            </p>
+          </div>
+          <div class="rounded-md border border-brand/15 bg-panel/70 px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Next
+            </p>
+            <p class="mt-1 text-xs leading-5 text-text-secondary">
+              {@runtime_hint.next_step}
+            </p>
+          </div>
+        </div>
+
+        <p
+          :if={@return_to}
+          class="mt-3 inline-flex rounded-md border border-brand/15 bg-panel/60 px-3 py-1.5 text-xs text-text-secondary"
+        >
+          After saving, Cympho returns to the runtime page that requested this credential.
+        </p>
       </div>
 
-      <.form for={@form} phx-target={@myself} phx-change="validate" phx-submit="save" id="secret-form">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <.input
-            field={@form[:key]}
-            label="Key"
-            placeholder="API_KEY, DATABASE_URL, etc."
-            disabled={@form_mode in [:edit, :rotate]}
-            required
-          />
-
-          <.select
-            name={@form[:scope].name}
-            label="Scope"
-            options={[
-              {"Company", "company"},
-              {"Instance", "instance"},
-              {"Agent", "agent"},
-              {"Project", "project"}
-            ]}
-            value={@form[:scope].value}
-            required
-          />
-
-          <div :if={@form[:scope].value in ["agent", "project"]}>
-            <.input
-              field={@form[:scope_id]}
-              label="Scope ID"
-              placeholder="Agent or Project ID"
-            />
+      <div class="px-5 py-4">
+        <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p class="text-sm font-590 text-text-primary">{form_title(@form_mode)}</p>
+            <p class="mt-1 text-xs leading-5 text-text-tertiary">
+              Use company scope for provider keys unless a single agent or project needs a separate quota.
+            </p>
           </div>
-
-          <.input
-            field={@form[:value]}
-            label={if @form_mode == :rotate, do: "New Value", else: "Value"}
-            type="password"
-            placeholder="Secret value"
-            required={@form_mode in [:create, :rotate]}
-          />
-
-          <div class="md:col-span-2">
-            <.input
-              field={@form[:description]}
-              label="Description"
-              placeholder="Optional description of what this secret is for"
-            />
-          </div>
+          <span class="inline-flex w-fit rounded-full border border-border bg-surface px-2.5 py-1 text-[11px] font-510 text-text-tertiary">
+            No provider call on save
+          </span>
         </div>
 
-        <div class="flex items-center justify-end gap-3 mt-4">
-          <button
-            type="button"
-            phx-click={@on_cancel}
-            class="px-4 py-2 bg-surface hover:bg-surface-hover text-text-secondary rounded-lg text-sm font-medium transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
-          >
-            {submit_label(@form_mode)}
-          </button>
-        </div>
-      </.form>
-    </div>
+        <.form
+          for={@form}
+          phx-target={@myself}
+          phx-change="validate"
+          phx-submit="save"
+          id="secret-form"
+        >
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <.input
+              field={@form[:key]}
+              label="Key"
+              placeholder="API_KEY, DATABASE_URL, etc."
+              disabled={@form_mode in [:edit, :rotate]}
+              required
+            />
+
+            <.select
+              name={@form[:scope].name}
+              label="Scope"
+              options={[
+                {"Company", "company"},
+                {"Instance", "instance"},
+                {"Agent", "agent"},
+                {"Project", "project"}
+              ]}
+              value={@form[:scope].value}
+              required
+            />
+
+            <div :if={@form[:scope].value in ["agent", "project"]}>
+              <.input
+                field={@form[:scope_id]}
+                label="Scope ID"
+                placeholder="Agent or Project ID"
+              />
+            </div>
+
+            <.input
+              field={@form[:value]}
+              label={if @form_mode == :rotate, do: "New Value", else: "Value"}
+              type="password"
+              placeholder="Secret value"
+              required={@form_mode in [:create, :rotate]}
+            />
+
+            <div class="md:col-span-2">
+              <.input
+                field={@form[:description]}
+                label="Description"
+                placeholder="Optional description of what this secret is for"
+              />
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-3 mt-4">
+            <button
+              type="button"
+              phx-click={@on_cancel}
+              class="px-4 py-2 bg-surface hover:bg-surface-hover text-text-secondary rounded-lg text-sm font-medium transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              {submit_label(@form_mode)}
+            </button>
+          </div>
+        </.form>
+      </div>
+    </section>
     """
   end
 
@@ -190,13 +253,22 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
     %{
       title: "Runtime credential setup",
       summary:
-        "This secret can unlock compatible chat-completions execution. Pair it with the OpenAI Chat Qwen DashScope profile for the CEO runtime.",
-      profile: "OpenAI Chat Qwen DashScope",
+        "ANTHROPIC_API_KEY can supply Claude-compatible wrappers and compatible gateway profiles. For DashScope direct chat, DASHSCOPE_API_KEY is the clearest primary key, but this alias is still accepted by preflight.",
+      profile: "Claude-compatible / Qwen gateway",
+      save_effect:
+        "Runtime preflight can use this credential for Claude-compatible commands or compatible chat gateways.",
+      next_step:
+        "Verify the CEO agent profile, model, and endpoint before launching the first turn.",
       items: [
-        %{label: "Model", value: "qwen3.7-plus"},
+        %{label: "Credential key", value: "ANTHROPIC_API_KEY"},
+        %{label: "Accepted by", value: "Claude Code wrappers; compatible chat gateways"},
         %{
-          label: "Chat endpoint",
-          value: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+          label: "Qwen profile",
+          value: "OpenAI Chat Qwen DashScope Flash / Plus / Intl"
+        },
+        %{
+          label: "Qwen models",
+          value: "qwen3.6-flash for cheap smoke; qwen3.7-plus for stronger planning"
         }
       ]
     }
@@ -204,15 +276,25 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
 
   defp runtime_hint(%{"key" => "DASHSCOPE_API_KEY"}) do
     %{
-      title: "Runtime credential setup",
+      title: "DashScope Qwen runtime setup",
       summary:
-        "This secret unlocks DashScope compatible-mode chat completions for OpenAI Chat agents.",
-      profile: "OpenAI Chat Qwen DashScope",
+        "This secret unlocks DashScope compatible-mode chat completions for OpenAI Chat agents, including the CEO first-turn flow.",
+      profile: "OpenAI Chat Qwen DashScope Flash / Plus / Intl",
+      save_effect:
+        "Runtime preflight marks DashScope Qwen profiles ready without exposing the token.",
+      next_step:
+        "Use qwen3.6-flash for low-cost smoke runs or qwen3.7-plus for stronger CEO planning.",
       items: [
-        %{label: "Model", value: "qwen3.7-plus"},
+        %{label: "Credential key", value: "DASHSCOPE_API_KEY"},
+        %{label: "Cheap smoke model", value: "qwen3.6-flash"},
+        %{label: "Planning model", value: "qwen3.7-plus"},
         %{
-          label: "Chat endpoint",
+          label: "DashScope endpoint",
           value: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        },
+        %{
+          label: "DashScope Intl endpoint",
+          value: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
         }
       ]
     }
@@ -221,9 +303,16 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
   defp runtime_hint(%{"key" => key}) when key in ["OPENAI_API_KEY", "CODEX_API_KEY"] do
     %{
       title: "Runtime credential setup",
-      summary: "This secret unlocks Codex runtime execution for agents using Codex profiles.",
-      profile: "Codex runtime",
-      items: [%{label: "Credential key", value: key}]
+      summary:
+        "This secret unlocks Codex runtime execution and OpenAI-compatible hosted agents when their profiles use #{key}.",
+      profile: "Codex / OpenAI-compatible runtime",
+      save_effect:
+        "Codex and compatible runtime preflight can resolve this key from company secrets.",
+      next_step: "Check the target agent model and adapter before dispatching repo work.",
+      items: [
+        %{label: "Credential key", value: key},
+        %{label: "Used by", value: "Codex agents and compatible chat providers"}
+      ]
     }
   end
 
@@ -232,11 +321,17 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
       title: "Runtime credential setup",
       summary: "This secret unlocks remote Agrenting agents and marketplace hires.",
       profile: "Agrenting remote runtime",
+      save_effect: "Remote hire preflight can verify marketplace credentials before assignment.",
+      next_step: "Configure remote agent DID, capability, and max price on the agent profile.",
       items: [%{label: "Credential key", value: "AGRENTING_API_KEY"}]
     }
   end
 
   defp runtime_hint(_prefill), do: nil
+
+  defp form_title(:rotate), do: "Rotate encrypted secret"
+  defp form_title(:edit), do: "Edit secret metadata"
+  defp form_title(_), do: "Store encrypted runtime secret"
 
   defp submit_label(:create), do: "Create Secret"
   defp submit_label(:rotate), do: "Rotate Secret"

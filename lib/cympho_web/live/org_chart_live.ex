@@ -232,6 +232,7 @@ defmodule CymphoWeb.OrgChartLive do
 
           <div
             :if={@org_health.role_demand_gaps != []}
+            id="org-demand-staffing"
             data-testid="org-demand-staffing"
             class="mt-4 divide-y divide-border overflow-hidden rounded-md border border-border bg-surface/50"
           >
@@ -657,7 +658,12 @@ defmodule CymphoWeb.OrgChartLive do
   defp org_recommendation_class(_), do: "border-border bg-surface text-text-secondary"
 
   defp new_agent_query_for_gap(gap) do
-    %{role: to_string(gap.role), name: gap.label}
+    %{
+      role: to_string(gap.role),
+      name: gap.label,
+      runtime_profile_id: "openai-chat-qwen-dashscope-flash",
+      return_to: "/org-chart#org-demand-staffing"
+    }
     |> maybe_put_parent_query(gap.suggested_parent)
   end
 

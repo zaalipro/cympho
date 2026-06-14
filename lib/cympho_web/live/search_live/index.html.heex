@@ -49,148 +49,171 @@
           </button>
         </div>
 
-        <form
-          phx-change="filter"
-          phx-submit="filter"
-          class="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-5"
-        >
-          <div>
-            <label class="mb-1 block text-xs text-text-tertiary">Issue status</label>
-            <.select_menu
-              name="filter[status]"
-              value={@filters["status"] || ""}
-              options={[
-                {"All", ""},
-                {"Backlog", "backlog"},
-                {"To do", "todo"},
-                {"In progress", "in_progress"},
-                {"In review", "in_review"},
-                {"Done", "done"},
-                {"Blocked", "blocked"},
-                {"Cancelled", "cancelled"}
-              ]}
-            />
+        <form phx-change="filter" phx-submit="filter" class="space-y-3">
+          <div
+            data-testid="search-core-filters"
+            class="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-5"
+          >
+            <div>
+              <label class="mb-1 block text-xs text-text-tertiary">Issue status</label>
+              <.select_menu
+                name="filter[status]"
+                value={@filters["status"] || ""}
+                options={[
+                  {"All", ""},
+                  {"Backlog", "backlog"},
+                  {"To do", "todo"},
+                  {"In progress", "in_progress"},
+                  {"In review", "in_review"},
+                  {"Done", "done"},
+                  {"Blocked", "blocked"},
+                  {"Cancelled", "cancelled"}
+                ]}
+              />
+            </div>
+
+            <div>
+              <label class="mb-1 block text-xs text-text-tertiary">Project</label>
+              <.select_menu
+                name="filter[project_id]"
+                value={@filters["project_id"] || ""}
+                options={[{"All", ""} | Enum.map(@projects, &{&1.name, &1.id})]}
+              />
+            </div>
+
+            <div>
+              <label class="mb-1 block text-xs text-text-tertiary">Assignee</label>
+              <.select_menu
+                name="filter[assignee_id]"
+                value={@filters["assignee_id"] || ""}
+                options={[{"All", ""} | Enum.map(@agents, &{&1.name, &1.id})]}
+              />
+            </div>
+
+            <div>
+              <label class="mb-1 block text-xs text-text-tertiary">From</label>
+              <input
+                type="date"
+                name="filter[date_from]"
+                value={@filters["date_from"] || ""}
+                class="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+
+            <div>
+              <label class="mb-1 block text-xs text-text-tertiary">To</label>
+              <input
+                type="date"
+                name="filter[date_to]"
+                value={@filters["date_to"] || ""}
+                class="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
           </div>
 
-          <div>
-            <label class="mb-1 block text-xs text-text-tertiary">Project</label>
-            <.select_menu
-              name="filter[project_id]"
-              value={@filters["project_id"] || ""}
-              options={[{"All", ""} | Enum.map(@projects, &{&1.name, &1.id})]}
-            />
-          </div>
+          <details
+            data-testid="search-advanced-filters"
+            open={advanced_filters_active?(@filters)}
+            class="rounded-lg border border-border bg-surface-1/50"
+          >
+            <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary">
+              <span class="inline-flex min-w-0 items-center gap-2">
+                <.icon name="hero-adjustments-horizontal-mini" class="h-4 w-4 shrink-0" />
+                <span class="font-510">Advanced filters</span>
+              </span>
+              <span class="shrink-0 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-510 text-text-tertiary">
+                <%= if advanced_filter_count(@filters) > 0 do %>
+                  {advanced_filter_count(@filters)} active advanced
+                <% else %>
+                  Optional
+                <% end %>
+              </span>
+            </summary>
 
-          <div>
-            <label class="mb-1 block text-xs text-text-tertiary">Goal</label>
-            <.select_menu
-              name="filter[goal_id]"
-              value={@filters["goal_id"] || ""}
-              options={[{"All", ""} | Enum.map(@goals, &{&1.title, &1.id})]}
-            />
-          </div>
+            <div class="grid grid-cols-1 gap-3 border-t border-border px-3 py-3 md:grid-cols-3 xl:grid-cols-4">
+              <div>
+                <label class="mb-1 block text-xs text-text-tertiary">Goal</label>
+                <.select_menu
+                  name="filter[goal_id]"
+                  value={@filters["goal_id"] || ""}
+                  options={[{"All", ""} | Enum.map(@goals, &{&1.title, &1.id})]}
+                />
+              </div>
 
-          <div>
-            <label class="mb-1 block text-xs text-text-tertiary">Assignee</label>
-            <.select_menu
-              name="filter[assignee_id]"
-              value={@filters["assignee_id"] || ""}
-              options={[{"All", ""} | Enum.map(@agents, &{&1.name, &1.id})]}
-            />
-          </div>
+              <div>
+                <label class="mb-1 block text-xs text-text-tertiary">Label</label>
+                <.select_menu
+                  name="filter[label_id]"
+                  value={@filters["label_id"] || ""}
+                  options={[{"All", ""} | Enum.map(@labels, &{&1.name, &1.id})]}
+                />
+              </div>
 
-          <div>
-            <label class="mb-1 block text-xs text-text-tertiary">Label</label>
-            <.select_menu
-              name="filter[label_id]"
-              value={@filters["label_id"] || ""}
-              options={[{"All", ""} | Enum.map(@labels, &{&1.name, &1.id})]}
-            />
-          </div>
+              <div>
+                <label class="mb-1 block text-xs text-text-tertiary">Agent role</label>
+                <.select_menu
+                  name="filter[role]"
+                  value={@filters["role"] || ""}
+                  options={[{"All", ""} | @role_options]}
+                />
+              </div>
 
-          <div>
-            <label class="mb-1 block text-xs text-text-tertiary">Agent role</label>
-            <.select_menu
-              name="filter[role]"
-              value={@filters["role"] || ""}
-              options={[{"All", ""} | @role_options]}
-            />
-          </div>
+              <div>
+                <label class="mb-1 block text-xs text-text-tertiary">Agent status</label>
+                <.select_menu
+                  name="filter[agent_status]"
+                  value={@filters["agent_status"] || ""}
+                  options={[
+                    {"All", ""},
+                    {"Idle", "idle"},
+                    {"Running", "running"},
+                    {"Error", "error"},
+                    {"Sleeping", "sleeping"},
+                    {"Offline", "offline"},
+                    {"Terminated", "terminated"}
+                  ]}
+                />
+              </div>
 
-          <div>
-            <label class="mb-1 block text-xs text-text-tertiary">Agent status</label>
-            <.select_menu
-              name="filter[agent_status]"
-              value={@filters["agent_status"] || ""}
-              options={[
-                {"All", ""},
-                {"Idle", "idle"},
-                {"Running", "running"},
-                {"Error", "error"},
-                {"Sleeping", "sleeping"},
-                {"Offline", "offline"},
-                {"Terminated", "terminated"}
-              ]}
-            />
-          </div>
+              <div>
+                <label class="mb-1 block text-xs text-text-tertiary">Project status</label>
+                <.select_menu
+                  name="filter[project_status]"
+                  value={@filters["project_status"] || ""}
+                  options={[{"All", ""}, {"Active", "active"}, {"Archived", "archived"}]}
+                />
+              </div>
 
-          <div>
-            <label class="mb-1 block text-xs text-text-tertiary">Project status</label>
-            <.select_menu
-              name="filter[project_status]"
-              value={@filters["project_status"] || ""}
-              options={[{"All", ""}, {"Active", "active"}, {"Archived", "archived"}]}
-            />
-          </div>
+              <div>
+                <label class="mb-1 block text-xs text-text-tertiary">Goal status</label>
+                <.select_menu
+                  name="filter[goal_status]"
+                  value={@filters["goal_status"] || ""}
+                  options={[
+                    {"All", ""},
+                    {"Active", "active"},
+                    {"Completed", "completed"},
+                    {"Cancelled", "cancelled"}
+                  ]}
+                />
+              </div>
 
-          <div>
-            <label class="mb-1 block text-xs text-text-tertiary">Goal status</label>
-            <.select_menu
-              name="filter[goal_status]"
-              value={@filters["goal_status"] || ""}
-              options={[
-                {"All", ""},
-                {"Active", "active"},
-                {"Completed", "completed"},
-                {"Cancelled", "cancelled"}
-              ]}
-            />
-          </div>
-
-          <div>
-            <label class="mb-1 block text-xs text-text-tertiary">Goal priority</label>
-            <.select_menu
-              name="filter[goal_priority]"
-              value={@filters["goal_priority"] || ""}
-              options={[
-                {"All", ""},
-                {"Critical", "critical"},
-                {"High", "high"},
-                {"Medium", "medium"},
-                {"Low", "low"}
-              ]}
-            />
-          </div>
-
-          <div>
-            <label class="mb-1 block text-xs text-text-tertiary">From</label>
-            <input
-              type="date"
-              name="filter[date_from]"
-              value={@filters["date_from"] || ""}
-              class="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-            />
-          </div>
-
-          <div>
-            <label class="mb-1 block text-xs text-text-tertiary">To</label>
-            <input
-              type="date"
-              name="filter[date_to]"
-              value={@filters["date_to"] || ""}
-              class="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-            />
-          </div>
+              <div>
+                <label class="mb-1 block text-xs text-text-tertiary">Goal priority</label>
+                <.select_menu
+                  name="filter[goal_priority]"
+                  value={@filters["goal_priority"] || ""}
+                  options={[
+                    {"All", ""},
+                    {"Critical", "critical"},
+                    {"High", "high"},
+                    {"Medium", "medium"},
+                    {"Low", "low"}
+                  ]}
+                />
+              </div>
+            </div>
+          </details>
         </form>
       </div>
 
@@ -225,6 +248,69 @@
             <span class="max-w-[180px] truncate">{recent_search.query}</span>
             <span class="font-mono text-text-quaternary">{recent_search.search_count}</span>
           </button>
+        </div>
+      </div>
+    </div>
+  </.panel>
+
+  <.panel id="search-command" data-testid="search-command" class="mb-5 overflow-hidden">
+    <div class="border-b border-border px-5 py-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-eyebrow uppercase text-text-quaternary">Search command</p>
+          <h2 class="mt-1 text-card-title text-text-primary">
+            {@search_command.summary}
+          </h2>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <.app_link
+            :for={action <- @search_command.actions}
+            navigate={action.url}
+            class={search_command_action_class(action.tone)}
+          >
+            <.icon name={action.icon} class="h-4 w-4" />
+            <span>{action.label}</span>
+          </.app_link>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid min-w-0 gap-3 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div class="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-4">
+        <.link
+          :for={mix <- @search_command.result_mix}
+          patch={mix.url}
+          class={search_mix_card_class(mix.count)}
+        >
+          <span class="text-eyebrow uppercase text-text-quaternary">{mix.label}</span>
+          <span class={search_mix_count_class(mix.count)}>{mix.count}</span>
+        </.link>
+      </div>
+
+      <div class="min-w-0 rounded-lg border border-border bg-surface-1 px-4 py-3">
+        <p class="text-eyebrow uppercase text-text-quaternary">Top match</p>
+        <.app_link
+          :if={@search_command.top_result}
+          navigate={@search_command.top_result.url}
+          class="mt-2 flex min-w-0 items-start gap-3 rounded-md border border-border/70 bg-surface px-3 py-2 hover:bg-surface-hover"
+        >
+          <span class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+            <.icon name={@search_command.top_result.icon} class="h-4 w-4" />
+          </span>
+          <span class="min-w-0">
+            <span class="block truncate text-sm font-590 text-text-primary">
+              {@search_command.top_result.title}
+            </span>
+            <span class="mt-0.5 block truncate text-xs text-text-tertiary">
+              {@search_command.top_result.kind} / {@search_command.top_result.subtitle}
+            </span>
+          </span>
+        </.app_link>
+        <div
+          :if={!@search_command.top_result}
+          class="mt-2 rounded-md border border-dashed border-border px-3 py-3 text-sm text-text-tertiary"
+        >
+          No top match.
         </div>
       </div>
     </div>
@@ -272,22 +358,36 @@
     </div>
 
     <div class="p-5">
-      <div
-        :if={@query == ""}
-        class="rounded-lg border border-dashed border-border px-4 py-12 text-center"
-      >
-        <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-surface-1 text-text-tertiary">
-          <.icon name="hero-magnifying-glass-mini" class="h-6 w-6" />
-        </div>
-        <p class="text-sm font-510 text-text-primary">Enter a query to search this company.</p>
-      </div>
+      <% empty_state =
+        result_empty_state(
+          @query,
+          @total_count,
+          @filters,
+          @search_command.actions
+        ) %>
 
       <div
-        :if={@query != "" and @total_count == 0}
-        class="rounded-lg border border-dashed border-border px-4 py-12 text-center"
+        :if={empty_state}
+        data-testid="search-results-empty"
+        class="rounded-lg border border-dashed border-border bg-surface-1/50 px-4 py-10 text-center"
       >
-        <p class="text-sm font-510 text-text-primary">No results found for "{@query}".</p>
-        <p class="mt-1 text-sm text-text-tertiary">Adjust the query or clear filters.</p>
+        <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-border bg-surface text-text-tertiary">
+          <.icon name={empty_state.icon} class="h-6 w-6" />
+        </div>
+        <p class="text-sm font-590 text-text-primary">{empty_state.title}</p>
+        <p class="mx-auto mt-1 max-w-md text-sm leading-5 text-text-tertiary">
+          {empty_state.detail}
+        </p>
+        <div class="mt-5 flex flex-wrap justify-center gap-2">
+          <.app_link
+            :for={action <- empty_state.actions}
+            navigate={action.url}
+            class={search_command_action_class(action.tone)}
+          >
+            <.icon name={action.icon} class="h-4 w-4" />
+            <span>{action.label}</span>
+          </.app_link>
+        </div>
       </div>
 
       <div :if={@query != "" and @total_count > 0}>

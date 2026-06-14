@@ -14,6 +14,15 @@ defmodule Cympho.RoutineHealthTest do
                metrics: %{total_routines: 0},
                summary: "No routines are configured yet."
              } = Routines.health_summary()
+
+      assert Routines.health_summary().next_action == %{
+               key: :create_first_routine,
+               tone: :neutral,
+               label: "Create first routine",
+               detail:
+                 "Start with one narrow recurring workflow that creates reviewable work on a schedule or webhook.",
+               cta: "New routine"
+             }
     end
 
     test "detects trigger gaps, stale runs, recent failures, and paused work" do
@@ -56,6 +65,8 @@ defmodule Cympho.RoutineHealthTest do
       assert Enum.any?(summary.recommendations, &(&1.label == "Clear stuck runs"))
       assert Enum.any?(summary.recommendations, &(&1.label == "Review failures"))
       assert Enum.any?(summary.recommendations, &(&1.label == "Audit paused work"))
+      assert summary.next_action.key == :add_triggers
+      assert summary.next_action.cta == "Open trigger gaps"
       assert paused.status == :paused
     end
 
@@ -74,6 +85,8 @@ defmodule Cympho.RoutineHealthTest do
                metrics: %{active_routines: 1, active_without_triggers: 0},
                recommendations: []
              } = Routines.health_summary()
+
+      assert Routines.health_summary().next_action.key == :review_run_history
     end
   end
 

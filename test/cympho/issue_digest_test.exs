@@ -164,7 +164,7 @@ defmodule Cympho.IssueDigestTest do
             %Comment{
               author_type: "agent",
               body:
-                "[delivery] What happened: implemented the feature. Files changed: feature modules. Verification: tests passed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
+                "[delivery] What happened: implemented the feature. Files changed: feature modules. Evidence produced: code diff and focused test output. Verification: tests passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the code diff, PR, and focused test output.",
               inserted_at: now
             }
           ]
@@ -195,6 +195,17 @@ defmodule Cympho.IssueDigestTest do
     assert digest.metrics.owner_relevant_comments == 1
     assert Enum.any?(digest.activity_summary.comment_mix, &(&1.category == :delivery))
     assert digest.activity_summary.current_state =~ "Ready for review"
+    assert digest.receipt_audit.status == :ok
+
+    assert digest.receipt_audit.present_fields == [
+             "Action taken",
+             "Evidence/artifact",
+             "Verification",
+             "Remaining risk",
+             "Next decision",
+             "Restart packet"
+           ]
+
     assert digest.quality.ready?
     assert digest.quality.gaps == []
     assert Enum.find(digest.completion_contract, &(&1.key == :delivery_contract)).status == :ok
@@ -225,7 +236,7 @@ defmodule Cympho.IssueDigestTest do
             %Comment{
               author_type: "agent",
               body:
-                "[delivery] What happened: implemented. Files changed: app. Verification: tests. Risks: low. Current state: ready. Next decision: review."
+                "[delivery] What happened: implemented. Files changed: app. Evidence produced: code diff and test output. Verification: tests. Risks: low. Current state: ready. Next decision: review."
             }
           ]
         },
@@ -259,21 +270,21 @@ defmodule Cympho.IssueDigestTest do
               author_type: "agent",
               author_id: delivery_id,
               body:
-                "[delivery] What happened: implemented the feature. Files changed: feature modules. Verification: tests passed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
+                "[delivery] What happened: implemented the feature. Files changed: feature modules. Evidence produced: code diff and focused test output. Verification: tests passed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
               inserted_at: now
             },
             %Comment{
               author_type: "agent",
               author_id: cto_id,
               body:
-                "[review] Verdict: accepted. What happened: verified the evidence. Verification: tests passed. Gaps: none. Follow-up issues: none. Next decision: owner update.",
+                "[review] Verdict: accepted. What happened: verified the evidence. Evidence inspected: delivery work product and test output. Verification: tests passed. Gaps: none. Follow-up issues: none. Next decision: owner update.",
               inserted_at: DateTime.add(now, 2, :second)
             },
             %Comment{
               author_type: "agent",
               author_id: ceo_id,
               body:
-                "[owner_update] What happened: owner-facing launch status is ready. Business status: not shipped. Current state: reviewed. Next decision: close. Owner decision needed: none.",
+                "[owner_update] What happened: owner-facing launch status is ready. Business status: not shipped. Evidence inspected: delivery artifact and CTO review. Current state: reviewed. Next decision: close. Owner decision needed: none.",
               inserted_at: DateTime.add(now, 3, :second)
             }
           ]
@@ -351,38 +362,40 @@ defmodule Cympho.IssueDigestTest do
 
     assert Enum.any?(digest.review_readiness.blockers, &(&1.key == :delivery_comment))
 
-    assert [%{key: :delivery_comment}] =
-             IssueDigest.review_status_blockers(
-               %Issue{
-                 title: "Untagged delivery",
-                 status: :in_progress,
-                 description: "Implement the feature.",
-                 comments: [
-                   %Comment{
-                     author_type: "agent",
-                     body: "Implemented the feature and verified tests.",
-                     inserted_at: now
-                   }
-                 ]
-               },
-               :in_review,
-               [
-                 %Run{
-                   status: "completed",
-                   adapter: "codex",
-                   inserted_at: now,
-                   completed_at: now
-                 }
-               ],
-               [
-                 %IssueWorkProduct{
-                   kind: "document",
-                   title: "Implementation notes",
-                   inserted_at: now
-                 }
-               ],
-               []
-             )
+    blockers =
+      IssueDigest.review_status_blockers(
+        %Issue{
+          title: "Untagged delivery",
+          status: :in_progress,
+          description: "Implement the feature.",
+          comments: [
+            %Comment{
+              author_type: "agent",
+              body: "Implemented the feature and verified tests.",
+              inserted_at: now
+            }
+          ]
+        },
+        :in_review,
+        [
+          %Run{
+            status: "completed",
+            adapter: "codex",
+            inserted_at: now,
+            completed_at: now
+          }
+        ],
+        [
+          %IssueWorkProduct{
+            kind: "document",
+            title: "Implementation notes",
+            inserted_at: now
+          }
+        ],
+        []
+      )
+
+    assert Enum.map(blockers, & &1.key) == [:last_action_receipt, :delivery_comment]
   end
 
   test "tagged delivery comments must include required handoff fields" do
@@ -421,6 +434,129 @@ defmodule Cympho.IssueDigestTest do
     assert Enum.any?(digest.review_readiness.blockers, &(&1.key == :delivery_comment))
   end
 
+  test "flags thin latest agent notes that miss the last-action receipt" do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    digest =
+      IssueDigest.build(
+        %Issue{
+          title: "Thin receipt",
+          status: :in_review,
+          description: "Review a thin handoff.",
+          comments: [
+            %Comment{
+              author_type: "agent",
+              body:
+                "[delivery] What happened: implemented the change. Files changed: app. Evidence produced: code diff. Verification: tests passed. Risks: none. Current state: ready. Next decision: CTO review.",
+              inserted_at: DateTime.add(now, -2, :minute)
+            },
+            %Comment{
+              author_type: "agent",
+              body: "[handoff] Done.",
+              inserted_at: now
+            }
+          ]
+        },
+        [
+          %Run{
+            status: "completed",
+            adapter: "codex",
+            inserted_at: now,
+            completed_at: now
+          }
+        ],
+        [%IssueWorkProduct{kind: "document", title: "Evidence", inserted_at: now}],
+        []
+      )
+
+    assert digest.receipt_audit.status == :attention
+    assert digest.receipt_audit.category == :handoff
+    assert "Evidence/artifact" in digest.receipt_audit.missing_fields
+    assert "Verification" in digest.receipt_audit.missing_fields
+    assert "Remaining risk" in digest.receipt_audit.missing_fields
+    assert "Restart packet" in digest.receipt_audit.missing_fields
+    assert digest.receipt_audit.summary =~ "Latest handoff is missing"
+
+    assert Enum.any?(
+             digest.quality.gaps,
+             &(&1.key == :last_action_receipt and &1.status == :attention)
+           )
+
+    assert Enum.any?(
+             digest.review_readiness.blockers,
+             &(&1.key == :last_action_receipt and
+                 &1.prompt =~ "Latest handoff is missing receipt fields")
+           )
+  end
+
+  test "audits the later list entry when agent comments share a timestamp" do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    thin_receipt = %Comment{
+      author_type: "agent",
+      body: "[handoff] Done.",
+      inserted_at: now
+    }
+
+    complete_receipt = %Comment{
+      author_type: "agent",
+      body:
+        "[delivery] What happened: round two is ready. Files changed: lib/foo.ex. Evidence produced: code diff and test output. Verification: focused tests passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the diff and tests.",
+      inserted_at: now
+    }
+
+    assert %{status: :ok, latest_comment: latest, summary: summary} =
+             IssueDigest.audit_last_action_receipt([thin_receipt, complete_receipt])
+
+    assert latest.category == :delivery
+    assert latest.body =~ "round two is ready"
+    assert summary =~ "complete last-action receipt"
+
+    assert %{status: :attention, latest_comment: %{category: :handoff}} =
+             IssueDigest.audit_last_action_receipt([complete_receipt, thin_receipt])
+  end
+
+  test "flags otherwise complete receipts without restart context" do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    digest =
+      IssueDigest.build(
+        %Issue{
+          title: "Needs restart packet",
+          status: :in_review,
+          description: "Review a delivery note without resume context.",
+          comments: [
+            %Comment{
+              author_type: "agent",
+              body:
+                "[delivery] What happened: implemented the change. Files changed: app. Evidence produced: code diff. Verification: tests passed. Risks: none known. Next decision: CTO review.",
+              inserted_at: now
+            }
+          ]
+        },
+        [
+          %Run{
+            status: "completed",
+            adapter: "codex",
+            inserted_at: now,
+            completed_at: now
+          }
+        ],
+        [%IssueWorkProduct{kind: "document", title: "Evidence", inserted_at: now}],
+        []
+      )
+
+    assert digest.receipt_audit.status == :attention
+    assert digest.receipt_audit.category == :delivery
+    assert digest.receipt_audit.missing_fields == ["Restart packet"]
+
+    assert Enum.any?(
+             digest.review_readiness.blockers,
+             &(&1.key == :last_action_receipt and
+                 &1.prompt =~ "Restart packet")
+           )
+  end
+
   test "requires CEO owner update before closing delegated parent work" do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
@@ -432,13 +568,13 @@ defmodule Cympho.IssueDigestTest do
         %Comment{
           author_type: "agent",
           body:
-            "[delivery] What happened: child work completed. Files changed: child issue artifacts. Verification: checked completed child work. Risks: none known. Current state: ready for review. Next decision: CTO review.",
+            "[delivery] What happened: child work completed. Files changed: child issue artifacts. Evidence produced: completed child artifacts and notes. Verification: checked completed child work. Risks: none known. Current state: ready for review. Next decision: CTO review.",
           inserted_at: DateTime.add(now, -2, :minute)
         },
         %Comment{
           author_type: "agent",
           body:
-            "[review] Verdict: accepted. What happened: CTO reviewed the delegated work. Verification: child work is closed. Gaps: none. Follow-up issues: none. Next decision: CEO owner update.",
+            "[review] Verdict: accepted. What happened: CTO reviewed the delegated work. Evidence inspected: closed child issues and delivery artifacts. Verification: child work is closed. Gaps: none. Follow-up issues: none. Next decision: CEO owner update.",
           inserted_at: DateTime.add(now, -1, :minute)
         }
       ]
@@ -478,13 +614,13 @@ defmodule Cympho.IssueDigestTest do
             %Comment{
               author_type: "agent",
               body:
-                "[delivery] What happened: implemented the change. Files changed: feature modules. Verification: tests passed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
+                "[delivery] What happened: implemented the change. Files changed: feature modules. Evidence produced: code diff and focused test output. Verification: tests passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the code diff, PR, and focused test output.",
               inserted_at: DateTime.add(now, -2, :minute)
             },
             %Comment{
               author_type: "agent",
               body:
-                "[review] Verdict: accepted. What happened: CTO verified the PR and tests. Verification: tests passed. Gaps: none. Follow-up issues: none. Next decision: approval.",
+                "[review] Verdict: accepted. What happened: CTO verified the PR and tests. Evidence inspected: PR body, work product, and test output. Verification: tests passed. Gaps: none. Follow-up issues: none. Next decision: approval. Restart packet: CEO should inspect the accepted review, PR body, and test output before closing.",
               inserted_at: DateTime.add(now, -1, :minute)
             }
           ]

@@ -59,11 +59,15 @@ defmodule CymphoWeb.Components.SettingsLayout do
     ~H"""
     <.page size="wide">
       <div class="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8">
-        <nav class="lg:sticky lg:top-6 lg:self-start" aria-label="Settings sections">
-          <p class="mb-4 px-3 text-card-title text-text-primary">Settings</p>
-          <div class="space-y-5">
-            <div :for={{group, items} <- @groups} class="space-y-0.5">
-              <p class="px-3 pb-1 text-eyebrow uppercase text-text-quaternary">{group}</p>
+        <nav class="min-w-0 lg:sticky lg:top-6 lg:self-start" aria-label="Settings sections">
+          <p class="mb-3 px-1 text-sm font-590 text-text-primary lg:mb-4 lg:px-3 lg:text-card-title">
+            Settings
+          </p>
+          <div class="flex gap-2 overflow-x-auto pb-2 lg:block lg:space-y-5 lg:overflow-visible lg:pb-0">
+            <div :for={{group, items} <- @groups} class="contents lg:block lg:space-y-0.5">
+              <p class="hidden px-3 pb-1 text-eyebrow uppercase text-text-quaternary lg:block">
+                {group}
+              </p>
               <.link
                 :for={{key, label, path, icon} <- items}
                 navigate={path}
@@ -93,9 +97,10 @@ defmodule CymphoWeb.Components.SettingsLayout do
 
   defp settings_nav_class(active?) do
     [
-      "group flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-[13px] font-510 transition-colors",
-      (active? && "bg-surface-3 text-text-primary") ||
-        "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+      "group flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg border px-3 py-2 text-[13px] font-510 transition-colors lg:border-transparent lg:py-1.5",
+      (active? &&
+         "order-first border-border bg-surface-3 text-text-primary lg:order-none lg:border-transparent") ||
+        "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary lg:bg-transparent"
     ]
   end
 end

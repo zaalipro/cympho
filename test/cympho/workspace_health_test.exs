@@ -132,6 +132,51 @@ defmodule Cympho.WorkspaceHealthTest do
                recommendations: []
              } = Workspaces.health_summary(company.id, now: now)
     end
+
+    test "builds per-workspace inventory from execution and runtime health" do
+      now = ~U[2026-06-10 12:00:00Z]
+      company = create_company("inventory")
+      project = create_project(company, "Inventory Project")
+      workspace = create_project_workspace(company, project, "Inventory Workspace")
+
+      {:ok, execution_workspace} =
+        Workspaces.create_execution_workspace(%{
+          name: "Preview Lane",
+          status: "open",
+          project_id: project.id,
+          company_id: company.id,
+          project_workspace_id: workspace.id,
+          opened_at: DateTime.add(now, -10 * 60, :second),
+          last_used_at: DateTime.add(now, -5 * 60, :second)
+        })
+
+      {:ok, _service} =
+        Workspaces.create_runtime_service(%{
+          service_name: "Preview",
+          status: "running",
+          health_status: "healthy",
+          company_id: company.id,
+          project_id: project.id,
+          project_workspace_id: workspace.id,
+          execution_workspace_id: execution_workspace.id
+        })
+
+      assert [
+               %{
+                 workspace: %{id: workspace_id},
+                 label: "Inspect",
+                 level: :warning,
+                 metrics: %{
+                   open_execution_workspaces: 1,
+                   running_services: 1,
+                   previewless_services: 1,
+                   unhealthy_services: 0
+                 }
+               }
+             ] = Workspaces.workspace_inventory(company.id, now: now)
+
+      assert workspace_id == workspace.id
+    end
   end
 
   defp create_company(label) do

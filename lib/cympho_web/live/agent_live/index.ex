@@ -3,6 +3,7 @@ defmodule CymphoWeb.AgentLive.Index do
   alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Agents.RuntimeEnv
+  alias Cympho.OrgHealth
 
   import CymphoWeb.Format, only: [status_pill_class: 1]
 
@@ -22,6 +23,7 @@ defmodule CymphoWeb.AgentLive.Index do
       |> assign(:current_agent_role, current_agent && current_agent.role)
       |> assign(:current_agent, full_agent)
       |> assign(:status_counts, status_counts(company_id))
+      |> assign(:org_health, org_health_snapshot(company_id))
       |> assign(:session_progress, %{})
 
     if connected?(socket) do
@@ -57,7 +59,8 @@ defmodule CymphoWeb.AgentLive.Index do
      |> update(:agents, fn agents -> [agent | agents] end)
      |> update(:status_counts, fn counts ->
        Map.update(counts, agent.status, 1, &(&1 + 1))
-     end)}
+     end)
+     |> refresh_org_health()}
   end
 
   def handle_info({:agent_updated, updated_agent}, socket) do
@@ -79,7 +82,8 @@ defmodule CymphoWeb.AgentLive.Index do
        else
          counts
        end
-     end)}
+     end)
+     |> refresh_org_health()}
   end
 
   def handle_info({:agent_deleted, deleted_id}, socket) do
@@ -97,7 +101,8 @@ defmodule CymphoWeb.AgentLive.Index do
        else
          counts
        end
-     end)}
+     end)
+     |> refresh_org_health()}
   end
 
   def handle_info(:update_progress, socket) do
@@ -220,6 +225,22 @@ defmodule CymphoWeb.AgentLive.Index do
   def health_pill_class(:unavailable), do: "border-brand/25 bg-brand/10 text-brand"
   def health_pill_class(_), do: "border-border bg-surface text-text-secondary"
 
+  def org_health_badge_class(:critical), do: "border-red-500/25 bg-red-500/10 text-red-300"
+
+  def org_health_badge_class(:warning),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
+
+  def org_health_badge_class(:healthy), do: "border-success/25 bg-success/10 text-success"
+  def org_health_badge_class(_), do: "border-border bg-surface text-text-secondary"
+
+  def org_metric_tone_class(:critical), do: "border-red-500/20 bg-red-500/[0.08] text-red-200"
+
+  def org_metric_tone_class(:warning),
+    do: "border-amber-500/20 bg-amber-500/[0.08] text-amber-100"
+
+  def org_metric_tone_class(:healthy), do: "border-success/20 bg-success/[0.08] text-success"
+  def org_metric_tone_class(_), do: "border-border bg-panel text-text-secondary"
+
   def format_heartbeat(%{last_heartbeat_at: nil}), do: "Never"
 
   def format_heartbeat(%{last_heartbeat_at: datetime}),
@@ -333,6 +354,13 @@ defmodule CymphoWeb.AgentLive.Index do
   defp status_counts(nil), do: Agents.count_by_status()
   defp status_counts(company_id), do: Agents.count_by_status(company_id)
 
+  defp org_health_snapshot(nil), do: OrgHealth.snapshot(nil)
+  defp org_health_snapshot(company_id), do: OrgHealth.snapshot(company_id)
+
+  defp refresh_org_health(socket) do
+    assign(socket, :org_health, org_health_snapshot(current_company_id(socket)))
+  end
+
   defp get_scoped_agent(socket, id) do
     case current_company_id(socket) do
       nil -> Agents.get_agent(id)
@@ -362,6 +390,34 @@ defmodule CymphoWeb.AgentLive.Index do
       Map.get(config || %{}, key) ||
       Map.get(config || %{}, String.to_atom(key))
   end
+
+  defp first_staffing_gap_label(%{role_demand_gaps: [gap | _]}), do: "Hire #{gap.label}"
+  defp first_staffing_gap_label(_), do: "Hire role"
+
+  defp new_agent_query_for_gap(gap) do
+    %{
+      role: to_string(gap.role),
+      name: gap.label,
+      runtime_profile_id: "openai-chat-qwen-dashscope-flash",
+      return_to: "/agents#agent-role-coverage"
+    }
+    |> maybe_put_parent_query(gap.suggested_parent)
+  end
+
+  defp maybe_put_parent_query(query, %{id: id}) when is_binary(id),
+    do: Map.put(query, :parent_id, id)
+
+  defp maybe_put_parent_query(query, _), do: query
+
+  defp issue_example_label(%{identifier: identifier, title: title})
+       when is_binary(identifier) and identifier != "" do
+    "#{identifier} · #{title}"
+  end
+
+  defp issue_example_label(%{title: title}), do: title || "Untitled issue"
+
+  defp plural_noun(1, singular), do: singular
+  defp plural_noun(_count, singular), do: singular <> "s"
 
   defp group_key(%{role: role}) do
     if role in Agent.role_options(), do: role, else: :other

@@ -657,7 +657,7 @@ defmodule Cympho.Adapters.UnitTest do
 
       assert is_reference(ref)
 
-      assert_receive {:session_started, ^ref}
+      assert_receive {:session_started, ^ref}, 1_000
       assert_receive {:turn_completed, ^ref, result}, 1_000
       assert result.output =~ "hello"
     end
@@ -685,7 +685,7 @@ defmodule Cympho.Adapters.UnitTest do
 
       assert is_reference(ref)
 
-      assert_receive {:session_started, ^ref}
+      assert_receive {:session_started, ^ref}, 1_000
       assert_receive {:turn_completed, ^ref, result}, 1_000
 
       # Verify basic output works
@@ -701,7 +701,7 @@ defmodule Cympho.Adapters.UnitTest do
 
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
 
-      assert_receive {:session_started, ^ref}
+      assert_receive {:session_started, ^ref}, 1_000
       assert_receive {:turn_completed, ^ref, result}, 1_000
 
       # Verify that issue payload was passed in JSON format
@@ -727,7 +727,7 @@ defmodule Cympho.Adapters.UnitTest do
 
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
 
-      assert_receive {:session_started, ^ref}
+      assert_receive {:session_started, ^ref}, 1_000
       assert_receive {:turn_completed, ^ref, result}, 1_000
 
       # JSON should be parsed into a map
@@ -749,12 +749,31 @@ defmodule Cympho.Adapters.UnitTest do
 
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
 
-      assert_receive {:session_started, ^ref}
+      assert_receive {:session_started, ^ref}, 1_000
       assert_receive {:turn_completed, ^ref, result}, 1_000
 
       # Non-JSON output should be returned as-is
       assert result.output =~ "plain text output"
       assert result.raw =~ "plain text output"
+    end
+
+    test "run/4 passes the assembled agent prompt to stdin" do
+      issue = %{id: "ISSUE-1", title: "Prompted work", description: "Do the prompted task."}
+      agent_id = "agent-1"
+
+      parent = self()
+
+      config = %{
+        command: "/bin/sh",
+        args: ["-c", "IFS= read -r first_line; printf '%s' \"$first_line\""]
+      }
+
+      ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
+
+      assert_receive {:session_started, ^ref}, 1_000
+      assert_receive {:turn_completed, ^ref, result}, 1_000
+
+      assert result.output =~ "Issue ID: ISSUE-1"
     end
 
     test "run/4 handles command errors" do
@@ -770,7 +789,7 @@ defmodule Cympho.Adapters.UnitTest do
 
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
 
-      assert_receive {:session_started, ^ref}
+      assert_receive {:session_started, ^ref}, 1_000
       assert_receive {:turn_ended_with_error, ^ref, {:exit_code, _code, _output}}, 1_000
     end
 

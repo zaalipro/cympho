@@ -27,13 +27,24 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
   attr :show_agent_panel, :boolean, default: false
   attr :agents, :list, default: []
   attr :documents, :list, default: []
+  attr :issue_preflight, :map, default: nil
 
   def sidebar(assigns) do
-    ceo_launch_preview = ceo_launch_preview(assigns.issue, assigns.orchestrator_enabled?)
+    issue_preflight =
+      assigns.issue_preflight ||
+        Cympho.RuntimePreflight.for_issue(
+          assigns.issue,
+          autonomy_enabled?: assigns.orchestrator_enabled?
+        )
+
+    ceo_launch_preview =
+      ceo_launch_preview(assigns.issue, assigns.orchestrator_enabled?, issue_preflight)
+
     ceo_outcome_card = ceo_outcome_card(assigns.issue, assigns.runs, assigns.all_agents)
 
     assigns =
       assigns
+      |> assign(:issue_preflight, issue_preflight)
       |> assign(:ceo_launch_preview, ceo_launch_preview)
       |> assign(:ceo_outcome_card, ceo_outcome_card)
       |> assign(
@@ -95,6 +106,53 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           </div>
         </div>
 
+        <% mission_goal = issue_goal(@issue) %>
+        <div
+          id="issue-mission-context"
+          data-testid="issue-mission-context"
+          class={mission_context_class(@issue)}
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-eyebrow uppercase opacity-70">Mission context</p>
+              <p class="mt-1 truncate text-sm font-510">
+                {mission_context_title(@issue)}
+              </p>
+            </div>
+            <span class="shrink-0 rounded-full border border-current/20 bg-black/10 px-2 py-0.5 text-[10px] font-510 uppercase tracking-[0.08em]">
+              {mission_context_badge(@issue)}
+            </span>
+          </div>
+
+          <p class="mt-2 text-[11px] leading-4 opacity-80">
+            {mission_context_detail(@issue)}
+          </p>
+
+          <div class="mt-3 flex flex-wrap gap-1.5">
+            <.app_link
+              :if={mission_goal}
+              navigate={~p"/goals/#{mission_goal.id}"}
+              class="rounded border border-current/20 bg-black/10 px-2 py-1 text-[10px] font-510 hover:bg-black/15"
+            >
+              Open goal
+            </.app_link>
+            <.app_link
+              :if={@issue.project}
+              navigate={~p"/projects/#{@issue.project.id}"}
+              class="rounded border border-current/20 bg-black/10 px-2 py-1 text-[10px] font-510 hover:bg-black/15"
+            >
+              Open project
+            </.app_link>
+            <.app_link
+              :if={!mission_goal}
+              navigate={~p"/goals"}
+              class="rounded border border-current/20 bg-black/10 px-2 py-1 text-[10px] font-510 hover:bg-black/15"
+            >
+              Link in Goals
+            </.app_link>
+          </div>
+        </div>
+
         <hr class="border-hairline" />
 
         <div id="issue-agent-panel" class="space-y-2">
@@ -105,7 +163,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             <p>
               Review mode is on. Restart the server with
               <code class="rounded bg-black/20 px-1 py-0.5 text-[11px] text-amber-50">
-                CYMPHO_ORCHESTRATOR_ENABLED=1
+                {Cympho.RuntimeOperations.runtime_launch_command()}
               </code>
               to run agents.
             </p>
@@ -178,6 +236,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
               size="sm"
               variant="secondary"
               disabled={!@orchestrator_enabled?}
+              title={start_agent_disabled_reason(@orchestrator_enabled?)}
             >
               {(@show_agent_panel && "Hide") || "Start"} agent
             </.button>
@@ -191,6 +250,13 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
               Release
             </.button>
           </div>
+          <p
+            :if={start_agent_disabled_reason(@orchestrator_enabled?)}
+            data-testid="start-agent-disabled-reason"
+            class="rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-2 py-1.5 text-[11px] leading-4 text-amber-100"
+          >
+            {start_agent_disabled_reason(@orchestrator_enabled?)}
+          </p>
 
           <div :if={@show_agent_panel} class="space-y-2">
             <p :if={Enum.empty?(@agents)} class="text-caption text-ink-tertiary">
@@ -319,6 +385,14 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             >
               Draft handoff
             </button>
+            <button
+              type="button"
+              phx-click="use_comment_template"
+              phx-value-template="blocked"
+              class="rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+            >
+              Draft blocker
+            </button>
           </div>
         </div>
 
@@ -327,7 +401,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           id="issue-ceo-outcome-card"
           class="rounded-md border border-hairline bg-surface-1/55 p-3"
         >
-          <% relaunch_setup_action = relaunch_setup_action(@issue, @orchestrator_enabled?) %>
+          <% relaunch_setup_action = relaunch_setup_action(@issue_preflight) %>
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <p class="text-eyebrow text-ink-tertiary uppercase">CEO outcome</p>
@@ -419,7 +493,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           class="rounded-md border border-hairline bg-surface-1/55 p-3"
         >
           <% agent = assigned_agent(@issue) %>
-          <% readiness = agent_readiness(@issue, agent, @orchestrator_enabled?) %>
+          <% readiness = agent_readiness(@issue, agent, @orchestrator_enabled?, @issue_preflight) %>
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <p class="text-eyebrow text-ink-tertiary uppercase">Agent readiness</p>
@@ -484,6 +558,47 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           >
             Open agent config
           </.app_link>
+        </div>
+
+        <div
+          :if={auto_route_readiness(@issue, @issue_preflight)}
+          id="issue-auto-route-readiness"
+          class="rounded-md border border-hairline bg-surface-1/55 p-3"
+        >
+          <% readiness = auto_route_readiness(@issue, @issue_preflight) %>
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-eyebrow text-ink-tertiary uppercase">Auto-route readiness</p>
+              <p class="mt-1 truncate text-sm font-510 text-ink">
+                {readiness.agent_name}
+              </p>
+              <p class="mt-0.5 text-caption text-ink-tertiary">
+                {readiness.adapter_label} · routed by dispatcher
+              </p>
+            </div>
+            <span class={preflight_badge_class(readiness.preflight.status)}>
+              {readiness.preflight.label}
+            </span>
+          </div>
+          <p class="mt-3 rounded border border-hairline bg-canvas px-2 py-2 text-caption text-ink-muted">
+            {readiness.preflight.summary}
+          </p>
+          <ul class="mt-3 space-y-1.5">
+            <li :for={item <- readiness.preflight.items} class="flex items-start gap-2">
+              <span class={preflight_dot_class(item.status)}></span>
+              <div class="min-w-0">
+                <p class="truncate text-[11px] font-510 text-ink-muted">{item.label}</p>
+                <p class="text-[10px] leading-4 text-ink-tertiary">{item.detail}</p>
+                <.app_link
+                  :if={preflight_item_target_path(item, readiness.agent)}
+                  navigate={preflight_item_target_path(item, readiness.agent)}
+                  class="mt-1 inline-flex text-[10px] font-510 text-primary hover:underline"
+                >
+                  {preflight_item_target_label(item)}
+                </.app_link>
+              </div>
+            </li>
+          </ul>
         </div>
 
         <hr class="border-hairline" />
@@ -648,11 +763,8 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
     """
   end
 
-  defp ceo_launch_preview(issue, orchestrator_enabled?) do
+  defp ceo_launch_preview(issue, orchestrator_enabled?, preflight) do
     if dispatchable_issue?(issue) do
-      preflight =
-        Cympho.RuntimePreflight.for_issue(issue, autonomy_enabled?: orchestrator_enabled?)
-
       if ceo_role?(Map.get(preflight, :agent_role)) do
         target = ceo_launch_target(preflight)
         launch_mode = ceo_launch_mode(issue, orchestrator_enabled?)
@@ -698,7 +810,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
   defp ceo_role?(role), do: role in [:ceo, "ceo"]
 
   defp ceo_first_turn_contract do
-    "Return `[owner_update]` or `[handoff]`; when decomposition is needed, create 2-5 scoped sub-issues with acceptance criteria."
+    "Return `[owner_update]`, `[handoff]`, or `[blocked]`; when decomposition is needed, create 2-5 scoped sub-issues with acceptance criteria, evidence required, verification required, definition of done, and dependencies."
   end
 
   defp ceo_launch_brief(issue, preflight, target, launch_mode, first_turn) do
@@ -740,13 +852,19 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
 
   defp focused_runtime_command(_issue), do: nil
 
+  defp start_agent_disabled_reason(false) do
+    "Inline agent start is disabled in review mode. Use the focused command above or open Operations to launch runtime."
+  end
+
+  defp start_agent_disabled_reason(_orchestrator_enabled?), do: nil
+
   defp relaunch_focus_button_label(%{status: status}) when status in [:blocked, "blocked"],
     do: "Reopen and prioritize relaunch"
 
   defp relaunch_focus_button_label(_issue), do: "Prioritize relaunch"
 
-  defp relaunch_setup_action(issue, orchestrator_enabled?) do
-    case Cympho.RuntimePreflight.for_issue(issue, autonomy_enabled?: orchestrator_enabled?) do
+  defp relaunch_setup_action(preflight) do
+    case preflight do
       %{first_action: action} when is_map(action) -> action
       _ -> nil
     end
@@ -771,7 +889,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           title: "Waiting for first CEO turn",
           detail: "No CEO run or tagged CEO comment has been recorded yet.",
           next:
-            "Use the focused command above to start the CEO turn, then require an owner update or handoff.",
+            "Use the focused command above to start the CEO turn, then require an owner update, handoff, or blocker.",
           timestamp: nil,
           timestamp_label: "No CEO activity yet"
         }
@@ -966,7 +1084,8 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
   defp ceo_flow_signal_step(_outcome_card) do
     %{
       title: "Waiting for owner signal",
-      detail: "CEO should leave `[owner_update]` or `[handoff]` as the first useful result.",
+      detail:
+        "CEO should leave `[owner_update]`, `[handoff]`, or `[blocked]` as the first useful result.",
       status: :waiting,
       status_label: "Waiting"
     }
@@ -1041,7 +1160,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
 
         _ ->
           {:active, "CEO note", "CEO left a note",
-           "If this is not an owner update or handoff, ask the CEO for a tagged follow-up."}
+           "If this is not an owner update, handoff, or blocker, ask the CEO for a tagged follow-up."}
       end
 
     %{
@@ -1179,11 +1298,15 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
   defp assigned_agent(%{assignee: %{id: id} = agent}) when is_binary(id), do: agent
   defp assigned_agent(_issue), do: nil
 
-  defp agent_readiness(issue, agent, orchestrator_enabled?) do
+  defp agent_readiness(issue, agent, orchestrator_enabled?, preflight) do
     profile = Cympho.RuntimeProfiles.get(Cympho.RuntimeProfiles.from_agent(agent))
     pressure = Cympho.RuntimeCapacity.agent(agent, 0)
     health = agent_health_status(agent.health_status)
-    preflight = Cympho.RuntimePreflight.for_issue(issue, autonomy_enabled?: orchestrator_enabled?)
+
+    preflight =
+      preflight ||
+        Cympho.RuntimePreflight.for_issue(issue, autonomy_enabled?: orchestrator_enabled?)
+
     status = agent_readiness_status(preflight.status)
 
     %{
@@ -1197,6 +1320,22 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
       preflight: preflight
     }
   end
+
+  defp auto_route_readiness(%{assignee_id: assignee_id}, _preflight)
+       when not is_nil(assignee_id),
+       do: nil
+
+  defp auto_route_readiness(_issue, %{agent_id: agent_id, agent_name: agent_name} = preflight)
+       when is_binary(agent_id) and is_binary(agent_name) do
+    %{
+      agent: %{id: agent_id},
+      agent_name: agent_name,
+      adapter_label: adapter_label(preflight.adapter),
+      preflight: preflight
+    }
+  end
+
+  defp auto_route_readiness(_issue, _preflight), do: nil
 
   defp runtime_command(%{adapter: adapter} = agent)
        when adapter in [:claude_code, "claude_code"] do
@@ -1418,6 +1557,73 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
 
   defp preflight_dot_class(_),
     do: "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-ink-tertiary"
+
+  defp issue_goal(%{goal: %Ecto.Association.NotLoaded{}}), do: nil
+  defp issue_goal(%{goal: nil}), do: nil
+  defp issue_goal(%{goal: goal}), do: goal
+  defp issue_goal(_issue), do: nil
+
+  defp mission_context_class(issue) do
+    if issue_goal(issue) do
+      "rounded-md border border-emerald-500/20 bg-emerald-500/[0.07] p-3 text-emerald-100"
+    else
+      "rounded-md border border-amber-500/25 bg-amber-500/[0.08] p-3 text-amber-100"
+    end
+  end
+
+  defp mission_context_title(issue) do
+    case issue_goal(issue) do
+      %{title: title} when is_binary(title) and title != "" -> title
+      _ -> "No goal linked"
+    end
+  end
+
+  defp mission_context_badge(issue) do
+    case issue_goal(issue) do
+      %{goal_type: goal_type} -> goal_type_label(goal_type)
+      _ -> "Floating"
+    end
+  end
+
+  defp mission_context_detail(issue) do
+    case issue_goal(issue) do
+      nil ->
+        "This work is not tied to a mission. Link it from Goals so CEO decomposition, child issues, cost rollups, and owner review keep the business outcome."
+
+      goal ->
+        project = issue_project_name(issue)
+        lineage = lineage_goal_label(issue, goal)
+
+        [
+          "#{lineage} context is attached to this issue",
+          project && "inside #{project}",
+          "and will carry into delegated work."
+        ]
+        |> Enum.reject(&is_nil/1)
+        |> Enum.join(" ")
+    end
+  end
+
+  defp issue_project_name(%{project: %Ecto.Association.NotLoaded{}}), do: nil
+  defp issue_project_name(%{project: %{name: name}}) when is_binary(name) and name != "", do: name
+  defp issue_project_name(_issue), do: nil
+
+  defp lineage_goal_label(%{lineage: %{"mission_id" => mission_id}}, %{id: mission_id}),
+    do: "Mission"
+
+  defp lineage_goal_label(%{lineage: %{"initiative_id" => initiative_id}}, %{id: initiative_id}),
+    do: "Initiative"
+
+  defp lineage_goal_label(%{lineage: %{"milestone_id" => milestone_id}}, %{id: milestone_id}),
+    do: "Milestone"
+
+  defp lineage_goal_label(_issue, %{goal_type: goal_type}), do: goal_type_label(goal_type)
+  defp lineage_goal_label(_issue, _goal), do: "Goal"
+
+  defp goal_type_label(:mission), do: "Mission"
+  defp goal_type_label(:initiative), do: "Initiative"
+  defp goal_type_label(:milestone), do: "Milestone"
+  defp goal_type_label(goal_type), do: goal_type |> to_string() |> String.capitalize()
 
   defp adapter_label(nil), do: "No adapter"
   defp adapter_label(:openai_chat), do: "OpenAI Chat"

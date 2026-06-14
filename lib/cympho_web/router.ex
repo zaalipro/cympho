@@ -107,7 +107,6 @@ defmodule CymphoWeb.Router do
       live "/settings/audit", AuditTrailLive.Index
       live "/companies", CompanyLive.Index
       live "/companies/new", CompanyLive.Index, :new
-      live "/companies/:id", CompanyLive.Show
       live "/costs", CostLive.Index
       live "/skills", SkillLive.Index
       live "/skills/new", SkillLive.New
@@ -143,6 +142,11 @@ defmodule CymphoWeb.Router do
       live "/companies/:id/edit", CompanyLive.Show, :edit
       live "/companies/:id/export", CompanyExportLive
       live "/companies/import", CompanyImportLive
+    end
+
+    live_session :authenticated_company_show,
+      on_mount: [{CymphoWeb.UserAuth, :default}] do
+      live "/companies/:id", CompanyLive.Show
     end
 
     # Legacy URLs → Settings hub (kept so old bookmarks/deep-links resolve).

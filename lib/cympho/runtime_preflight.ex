@@ -10,8 +10,11 @@ defmodule Cympho.RuntimePreflight do
   alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Agents.RuntimeEnv
+  alias Cympho.DeliveryBriefReadiness
   alias Cympho.Issues.Issue
   alias Cympho.Secrets
+
+  @repo_delivery_roles Agent.pr_delivery_roles()
 
   @type item_status :: :ok | :info | :attention | :blocked
   @type status :: :ready | :review_mode | :attention | :blocked
@@ -54,16 +57,8 @@ defmodule Cympho.RuntimePreflight do
         readiness_items(adapter, runtime) ++
         [execution_mode_item(autonomy_enabled?)]
 
-    blocked_count = Enum.count(items, &(&1.status == :blocked))
+    status = status_for_items(items, autonomy_enabled?)
     attention_count = Enum.count(items, &(&1.status == :attention))
-
-    status =
-      cond do
-        blocked_count > 0 -> :blocked
-        attention_count > 0 -> :attention
-        not autonomy_enabled? -> :review_mode
-        true -> :ready
-      end
 
     %{
       status: status,
@@ -83,25 +78,44 @@ defmodule Cympho.RuntimePreflight do
   This uses the dispatcher's read-only routing preview, so assigned agents that
   are not idle/capacity-eligible and auto-route candidates are evaluated the
   same way the dispatcher will evaluate them.
+
+  Options:
+    * `:secret_summary_by_agent` - optional `%{agent_id => %{count: n, keys: [...]}}`
+      cache for callers that preloaded non-secret secret metadata.
   """
   @spec for_issue(Issue.t(), keyword()) :: map()
   def for_issue(%Issue{} = issue, opts \\ []) do
     case Cympho.Orchestrator.Dispatcher.preview_agent_for_issue(issue) do
       {:ok, agent} ->
+        agent_opts =
+          opts
+          |> Keyword.put_new(:return_to, issue_return_to(issue))
+          |> put_secret_count(agent)
+
         preflight =
-          for_agent(
+          for_agent(agent, agent_opts)
+
+        issue_items =
+          issue_readiness_items(
+            issue,
             agent,
-            opts
-            |> Keyword.put_new(:return_to, issue_return_to(issue))
-            |> put_secret_count(agent)
+            preflight.adapter,
+            Keyword.get(agent_opts, :secret_keys, [])
           )
 
+        items = preflight.items ++ issue_items
+        status = status_for_items(items, preflight.status != :review_mode)
+        attention_count = Enum.count(items, &(&1.status == :attention))
+        summary = summary(preflight.adapter, status, attention_count)
         routed? = is_nil(map_value(issue, :assignee_id))
 
         %{
           preflight
-          | summary: issue_summary(issue, agent, preflight),
-            first_action: first_action(preflight.items)
+          | status: status,
+            label: status_label(status, attention_count),
+            summary: issue_summary(issue, agent, %{preflight | status: status, summary: summary}),
+            items: items,
+            first_action: first_action(items)
         }
         |> Map.merge(%{
           agent_id: agent.id,
@@ -139,14 +153,26 @@ defmodule Cympho.RuntimePreflight do
   end
 
   defp put_secret_count(opts, agent) do
-    if Keyword.has_key?(opts, :secret_count) and Keyword.has_key?(opts, :secret_keys) do
-      opts
-    else
-      secrets = agent |> map_value(:id) |> list_agent_secrets()
+    secret_summary = Keyword.get(opts, :secret_summary_by_agent)
+    agent_id = map_value(agent, :id)
 
-      opts
-      |> Keyword.put_new(:secret_count, length(secrets))
-      |> Keyword.put_new(:secret_keys, Enum.map(secrets, & &1.key))
+    cond do
+      Keyword.has_key?(opts, :secret_count) and Keyword.has_key?(opts, :secret_keys) ->
+        opts
+
+      is_map(secret_summary) and is_binary(agent_id) and Map.has_key?(secret_summary, agent_id) ->
+        summary = Map.get(secret_summary, agent_id) || %{}
+
+        opts
+        |> Keyword.put_new(:secret_count, Map.get(summary, :count, 0))
+        |> Keyword.put_new(:secret_keys, Map.get(summary, :keys, []))
+
+      true ->
+        secrets = agent_id |> list_agent_secrets()
+
+        opts
+        |> Keyword.put_new(:secret_count, length(secrets))
+        |> Keyword.put_new(:secret_keys, Enum.map(secrets, & &1.key))
     end
   end
 
@@ -168,6 +194,50 @@ defmodule Cympho.RuntimePreflight do
       target_label: "Open service gates"
     )
   end
+
+  defp issue_readiness_items(%Issue{} = issue, %Agent{} = agent, adapter, secret_keys) do
+    [
+      repo_delivery_runtime_item(issue, agent, adapter, secret_keys),
+      delivery_brief_item(issue, agent)
+    ]
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp repo_delivery_runtime_item(_issue, %Agent{role: role} = agent, adapter, secret_keys)
+       when role in @repo_delivery_roles do
+    if Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(agent, secret_keys: secret_keys) do
+      nil
+    else
+      item(
+        :attention,
+        "Repo-capable runtime",
+        "#{adapter_label(adapter)} is not configured for repo-delivery capability. Assign this issue to Codex, Claude Code, Cursor, a coding Process preset, Agrenting push delivery, or another remote coding runtime before expecting file changes, tests, branches, or PRs.",
+        target_path: agent_config_path(%{agent: agent}, "agent-runtime-profile"),
+        target_label: "Open runtime profile"
+      )
+    end
+  end
+
+  defp repo_delivery_runtime_item(_issue, _agent, _adapter, _secret_keys), do: nil
+
+  defp delivery_brief_item(%Issue{} = issue, %Agent{role: role})
+       when role in @repo_delivery_roles do
+    case DeliveryBriefReadiness.evaluate(issue) do
+      %{status: :ready} ->
+        nil
+
+      %{label: label, passed_count: passed, total: total, next_prompt: next_prompt} ->
+        item(
+          :attention,
+          "Delivery brief",
+          "#{label} (#{passed}/#{total} signals). #{next_prompt}",
+          target_path: issue_description_path(issue),
+          target_label: "Edit issue brief"
+        )
+    end
+  end
+
+  defp delivery_brief_item(_issue, _agent), do: nil
 
   defp readiness_items("claude_code", runtime) do
     command = first_present([runtime.command, "claude"])
@@ -249,7 +319,7 @@ defmodule Cympho.RuntimePreflight do
     [
       credentials_item(
         runtime,
-        ["OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY"],
+        openai_chat_credential_keys(runtime),
         "Chat completion key"
       ),
       model_item("Chat model", runtime.model,
@@ -259,8 +329,9 @@ defmodule Cympho.RuntimePreflight do
       openai_chat_endpoint_item(runtime.endpoint,
         target_path: agent_config_path(runtime, "agent-openai-chat-endpoint"),
         target_label: "Set endpoint"
-      )
-    ]
+      ),
+      openai_chat_capability_item()
+    ] ++ openai_chat_request_url_items(runtime.endpoint)
   end
 
   defp readiness_items("agrenting", runtime) do
@@ -279,12 +350,24 @@ defmodule Cympho.RuntimePreflight do
       required_config_item(config, "max_price", "Max price per run",
         target_path: agent_config_path(runtime, "agent-runtime-profile"),
         target_label: "Open agent config"
-      )
+      ),
+      agrenting_delivery_item(runtime)
     ]
   end
 
   defp readiness_items(_adapter, _runtime) do
     [item(:attention, "Adapter contract", "This adapter does not expose readiness checks yet.")]
+  end
+
+  defp openai_chat_credential_keys(runtime) do
+    endpoint = runtime.endpoint |> to_string() |> String.downcase()
+    model = runtime.model |> to_string() |> String.downcase()
+
+    if String.contains?(endpoint, "dashscope") or String.starts_with?(model, "qwen") do
+      ["DASHSCOPE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+    else
+      ["OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY"]
+    end
   end
 
   defp claude_credentials_item(command, runtime) do
@@ -371,13 +454,33 @@ defmodule Cympho.RuntimePreflight do
   defp openai_chat_endpoint_item(endpoint, opts) when endpoint in [nil, ""] do
     item(
       :attention,
-      "Chat endpoint",
+      "Configured endpoint",
       "Add the chat completions URL before autonomous runs.",
       opts
     )
   end
 
-  defp openai_chat_endpoint_item(endpoint, _opts), do: item(:ok, "Chat endpoint", endpoint)
+  defp openai_chat_endpoint_item(endpoint, _opts), do: item(:ok, "Configured endpoint", endpoint)
+
+  defp openai_chat_capability_item do
+    item(
+      :info,
+      "Execution capability",
+      "Chat adapters can emit Cympho actions, but cannot edit files, run tests, create branches, or open real PRs without a repo-capable runtime."
+    )
+  end
+
+  defp openai_chat_request_url_items(endpoint) when endpoint in [nil, ""], do: []
+
+  defp openai_chat_request_url_items(endpoint) do
+    [
+      item(
+        :ok,
+        "Request URL",
+        Cympho.Adapters.OpenAIChatAdapter.normalize_chat_url(endpoint)
+      )
+    ]
+  end
 
   defp claude_model_item(%{model: model}) when model in [nil, ""] do
     item(:ok, "Provider model", "Default from Claude, ANTHROPIC_MODEL, or wrapper routing.")
@@ -398,6 +501,56 @@ defmodule Cympho.RuntimePreflight do
     end
   end
 
+  defp agrenting_delivery_item(runtime) do
+    case agrenting_delivery_mode(runtime.agent) do
+      "push" ->
+        if agrenting_repo_token_present?(runtime) do
+          item(:ok, "Delivery mode", "Push delivery has a repo token source configured.")
+        else
+          item(
+            :attention,
+            "Repo push token",
+            "Add AGRENTING_REPO_ACCESS_TOKEN or GITHUB_TOKEN before using Agrenting push delivery for repo work.",
+            target_path:
+              secret_setup_path(
+                "AGRENTING_REPO_ACCESS_TOKEN",
+                "Agrenting repo access token for push delivery",
+                Map.get(runtime, :return_to)
+              ),
+            target_label: "Add repo token"
+          )
+        end
+
+      _ ->
+        item(
+          :info,
+          "Delivery mode",
+          "Output mode can return text and artifacts, but is not counted as repo delivery until push mode and a repo token are configured."
+        )
+    end
+  end
+
+  defp agrenting_delivery_mode(agent) do
+    value =
+      runtime_config_value(agent, "delivery_mode") ||
+        config_value(agent, "delivery_mode") ||
+        "output"
+
+    value
+    |> to_string()
+    |> String.trim()
+    |> String.downcase()
+  end
+
+  defp agrenting_repo_token_present?(runtime) do
+    repo_token =
+      runtime_config_value(runtime.agent, "repo_access_token") ||
+        config_value(runtime.agent, "repo_access_token")
+
+    present?(repo_token) or
+      credentials_present?(runtime, ["AGRENTING_REPO_ACCESS_TOKEN", "GITHUB_TOKEN"])
+  end
+
   defp item(status, label, detail, opts \\ []) do
     target =
       opts
@@ -409,7 +562,21 @@ defmodule Cympho.RuntimePreflight do
   end
 
   defp first_action(items) do
-    Enum.find(items, &(&1.status in [:blocked, :attention, :info]))
+    Enum.find(items, &(&1.status == :blocked)) ||
+      Enum.find(items, &(&1.status == :attention)) ||
+      Enum.find(items, &(&1.status == :info))
+  end
+
+  defp status_for_items(items, autonomy_enabled?) do
+    blocked_count = Enum.count(items, &(&1.status == :blocked))
+    attention_count = Enum.count(items, &(&1.status == :attention))
+
+    cond do
+      blocked_count > 0 -> :blocked
+      attention_count > 0 -> :attention
+      not autonomy_enabled? -> :review_mode
+      true -> :ready
+    end
   end
 
   defp command_available?(command, opts) do
@@ -463,13 +630,18 @@ defmodule Cympho.RuntimePreflight do
 
   defp agent_config_path(%{agent: agent}, anchor) do
     case map_value(agent, :id) do
-      id when is_binary(id) and id != "" -> "/agents/#{id}##{anchor}"
+      id when is_binary(id) and id != "" -> "/agents/#{id}?tab=configuration##{anchor}"
       _ -> nil
     end
   end
 
   defp issue_return_to(%Issue{id: id}) when is_binary(id), do: "/issues/#{id}"
   defp issue_return_to(_issue), do: nil
+
+  defp issue_description_path(%Issue{id: id}) when is_binary(id),
+    do: "/issues/#{id}#issue-description"
+
+  defp issue_description_path(_issue), do: nil
 
   defp secret_setup_path(key, description, return_to) when is_binary(key) and key != "" do
     query =

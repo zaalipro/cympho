@@ -76,6 +76,8 @@ defmodule CymphoWeb.OrgChartLiveTest do
     assert html =~ issue.identifier
     assert html =~ "role=marketer"
     assert html =~ "name=Marketer"
+    assert html =~ "runtime_profile_id=openai-chat-qwen-dashscope-flash"
+    assert html =~ "return_to=%2Forg-chart%23org-demand-staffing"
     assert html =~ "parent_id=#{ceo.id}"
   end
 end

@@ -3,6 +3,7 @@ defmodule Cympho.Routines.Routine do
   import Ecto.Changeset
 
   alias Cympho.Agents.Agent
+  alias Cympho.Companies.Company
   alias Cympho.Projects.Project
 
   @primary_key {:id, :binary_id, autogenerate: true}
@@ -30,6 +31,7 @@ defmodule Cympho.Routines.Routine do
       values: [:critical, :high, :medium, :low],
       default: :medium
 
+    belongs_to :company, Company
     belongs_to :agent, Agent
     belongs_to :project, Project
 
@@ -63,6 +65,7 @@ defmodule Cympho.Routines.Routine do
       :catch_up_policy,
       :catch_up_cap,
       :priority,
+      :company_id,
       :agent_id,
       :project_id
     ])

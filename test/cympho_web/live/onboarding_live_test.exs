@@ -10,6 +10,8 @@ defmodule CymphoWeb.OnboardingLiveTest do
       {:ok, view, html} = live(conn, "/onboarding")
 
       assert html =~ "Start an autonomous company"
+      assert html =~ "Cympho turns a company goal into an operating loop"
+      refute html =~ "Cympho runs like Paperclip"
 
       html =
         view

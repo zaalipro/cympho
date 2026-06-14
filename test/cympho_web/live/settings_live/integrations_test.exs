@@ -4,6 +4,8 @@ defmodule CymphoWeb.SettingsLive.IntegrationsTest do
   import Phoenix.LiveViewTest
 
   alias Cympho.Agrenting
+  alias Cympho.Agents
+  alias Cympho.Authentication
   alias Cympho.Secrets
 
   describe "Agrenting integration" do
@@ -11,9 +13,63 @@ defmodule CymphoWeb.SettingsLive.IntegrationsTest do
       {:ok, _view, html} = live(conn, "/settings/integrations")
 
       assert html =~ "Integrations"
+      assert html =~ "External AI control"
+      assert html =~ "GET /api/mcp/tools"
+      assert html =~ "POST /api/mcp/call"
+      assert html =~ "Next operator move"
+      assert html =~ "MCP setup checklist"
+      assert html =~ "Agent identity"
+      assert html =~ "Scoped API key"
+      assert html =~ "CEO routing"
+      assert html =~ "Tool catalog"
+      assert html =~ "The shortest path from external AI client to CEO-owned work."
+      assert html =~ "CEO intake recipe"
+      assert html =~ "Copy recipe"
+      assert html =~ ~s(data-testid="mcp-tool-catalog")
+      assert html =~ "Expand when you need the full company-scoped tool catalog."
+      assert html =~ ~s(&quot;assigned_role&quot;: &quot;ceo&quot;)
+      assert html =~ "No agents"
       assert html =~ "Agrenting"
       assert html =~ "Not connected"
       assert html =~ "Save connection"
+    end
+
+    test "creates a scoped MCP API key for an agent", %{conn: conn, current_company: company} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "MCP Bridge",
+          role: :ceo,
+          status: :idle
+        })
+
+      {:ok, view, html} = live(conn, "/settings/integrations")
+
+      assert html =~ "External AI control"
+      assert html =~ "Key required"
+      assert html =~ "MCP Bridge"
+      assert html =~ "Create a scoped API key"
+      assert html =~ "1 company agent identity can own external calls."
+      assert html =~ "External requests can land directly in CEO review."
+
+      html =
+        view
+        |> form("form[phx-submit='create_mcp_key']",
+          mcp_key: %{
+            agent_id: agent.id,
+            name: "Owner MCP client"
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "Copy this key now"
+      assert html =~ "MCP Bridge"
+      assert html =~ "X-API-Key"
+      assert html =~ "Use create_issue with assigned_role"
+      assert html =~ "1 scoped key can authenticate MCP clients."
+
+      [api_key] = Authentication.list_agent_api_keys(agent.id)
+      assert api_key.name == "Owner MCP client"
     end
 
     test "saves company-scoped Agrenting secrets", %{conn: conn, current_company: company} do

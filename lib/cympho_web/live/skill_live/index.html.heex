@@ -1,96 +1,218 @@
-<.page size="wide">
-  <.header title="Skills" subtitle="Reusable capabilities available to agents and plugins.">
+<div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0">
+  <.header title={@page_title} subtitle="Inspect and govern reusable agent capabilities.">
     <:actions>
       <.app_link
         navigate={~p"/skills/new"}
-        class="inline-flex items-center gap-2 rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+        class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 min-h-[40px] rounded-button transition-colors inline-flex items-center gap-2"
       >
-        <.icon name="hero-plus" class="h-4 w-4" /> New Skill
+        <.icon name="hero-plus-mini" class="h-4 w-4" /> New Skill
       </.app_link>
     </:actions>
   </.header>
 
-  <.panel class="mb-4 p-4">
-    <form phx-change="filter_company" class="grid gap-4 sm:grid-cols-2">
-      <div>
-        <label class="mb-1.5 block text-xs font-510 text-text-secondary">Company</label>
-        <.select_menu
-          name="company_id"
-          value={@selected_company_id || ""}
-          options={[{"All companies", ""} | Enum.map(@companies, &{&1.name, &1.id})]}
+  <section
+    data-testid="skill-health"
+    class="mb-5 rounded-lg border border-border bg-panel px-5 py-4"
+  >
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="text-sm font-590 text-text-primary">Skill Health</h2>
+          <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{skill_health_badge(@skill_health.level)}"}>
+            {@skill_health.label}
+          </span>
+        </div>
+        <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
+          {@skill_health.summary}
+        </p>
+      </div>
+
+      <div class="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:min-w-[440px] sm:grid-cols-5">
+        <.skill_health_metric
+          label="Enabled"
+          value={@skill_health.metrics.enabled_skills}
+          tone={if @skill_health.metrics.enabled_skills > 0, do: :ok, else: :neutral}
+        />
+        <.skill_health_metric
+          label="Manifest"
+          value={@skill_health.metrics.invalid_manifest_skills}
+          tone={if @skill_health.metrics.invalid_manifest_skills > 0, do: :critical, else: :ok}
+        />
+        <.skill_health_metric
+          label="Cap gaps"
+          value={@skill_health.metrics.capabilityless_enabled_skills}
+          tone={
+            if @skill_health.metrics.capabilityless_enabled_skills > 0,
+              do: :warning,
+              else: :ok
+          }
+        />
+        <.skill_health_metric
+          label="Disabled"
+          value={@skill_health.metrics.disabled_skills}
+          tone={if @skill_health.metrics.disabled_skills > 0, do: :warning, else: :ok}
+        />
+        <.skill_health_metric
+          label="Watcher"
+          value={if @skill_health.metrics.hot_reloader_running?, do: "on", else: "off"}
+          tone={if @skill_health.metrics.hot_reloader_running?, do: :ok, else: :warning}
         />
       </div>
-    </form>
-  </.panel>
-
-  <.panel class="overflow-hidden">
-    <div class="grid grid-cols-[1fr_140px_120px_48px] gap-4 border-b border-border px-5 py-3 text-xs font-510 uppercase tracking-wide text-text-quaternary">
-      <span>Skill</span>
-      <span>Scope</span>
-      <span>Status</span>
-      <span class="text-right">Actions</span>
     </div>
 
-    <.infinite_scroll
-      id="skill"
-      has_more={@infinite_scroll[:skill][:has_more?] || false}
-      container_class="divide-y divide-border"
-    >
-      <:empty>
-        <div class="p-8">
-          <.empty_state
-            title="No skills found"
-            message="Create a skill to expose repeatable capabilities to autonomous agents."
-          >
-            <:icon_slot>
-              <.icon name="hero-sparkles" class="h-5 w-5" />
-            </:icon_slot>
-          </.empty_state>
+    <div class="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div :if={@skill_health.recommendations != []} class="grid gap-2 lg:grid-cols-2">
+        <div
+          :for={recommendation <- @skill_health.recommendations}
+          class={"rounded-md border px-3 py-2 #{skill_recommendation_class(recommendation.severity)}"}
+        >
+          <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
+            {recommendation.label}
+          </p>
+          <p class="mt-1 text-xs leading-5 opacity-85">{recommendation.detail}</p>
         </div>
-      </:empty>
+      </div>
 
       <div
-        :for={{dom_id, skill} <- @streams.skill}
-        id={dom_id}
-        class="grid grid-cols-[1fr_140px_120px_48px] items-center gap-4 px-5 py-4 transition-colors hover:bg-surface-hover/60"
+        :if={@skill_health.recommendations == []}
+        class="rounded-md border border-border bg-surface px-3 py-2"
       >
-        <.app_link navigate={~p"/skills/#{skill.id}"} class="min-w-0">
-          <div class="flex items-center gap-2">
-            <span class="truncate text-sm font-510 text-text-primary">{skill.name}</span>
-            <span class="rounded border border-border bg-subtle px-1.5 py-0.5 text-[11px] text-text-tertiary">
-              {skill.version || "0.0.0"}
+        <p class="text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+          {skill_posture_label(@skill_health.level)}
+        </p>
+        <p class="mt-1 text-xs leading-5 text-text-tertiary">
+          {skill_posture_text(@skill_health.level)}
+        </p>
+      </div>
+
+      <div
+        data-testid="skill-next-action"
+        class={"rounded-md border px-3 py-3 #{skill_next_action_class(@skill_health.next_action.tone)}"}
+      >
+        <p class="text-[11px] font-590 uppercase tracking-[0.1em] opacity-75">
+          Next operator move
+        </p>
+        <p class="mt-1 text-sm font-590">{@skill_health.next_action.label}</p>
+        <p class="mt-1 text-xs leading-5 opacity-85">{@skill_health.next_action.detail}</p>
+        <.app_link
+          navigate={skill_next_action_path(@skill_health.next_action)}
+          class="mt-3 inline-flex min-h-[32px] items-center gap-1.5 rounded-md border border-current/20 px-2.5 py-1.5 text-xs font-590 opacity-90 transition hover:opacity-100"
+        >
+          {@skill_health.next_action.cta}
+          <.icon name="hero-arrow-right-mini" class="h-3.5 w-3.5" />
+        </.app_link>
+      </div>
+    </div>
+  </section>
+
+  <form
+    phx-change="filter_company"
+    phx-submit="filter_company"
+    class="mb-6 rounded-xl border border-border bg-surface p-4"
+  >
+    <.input
+      type="select"
+      name="company_id"
+      label="Company"
+      value={@selected_company_id || ""}
+      options={Enum.map(@companies, &{&1.name, &1.id})}
+    />
+  </form>
+
+  <.infinite_scroll
+    id="skill"
+    has_more={@infinite_scroll[:skill][:has_more?] || false}
+    container_class="grid grid-cols-1 gap-3"
+  >
+    <:empty>
+      <div
+        data-testid="skills-empty"
+        class="rounded-xl border border-border bg-surface px-6 py-16 text-center"
+      >
+        <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-subtle text-text-tertiary">
+          <.icon name="hero-sparkles-mini" class="h-5 w-5" />
+        </div>
+        <h2 class="text-sm font-590 text-text-primary">
+          {skill_empty_title(@selected_company_id)}
+        </h2>
+        <p class="mx-auto mt-1 max-w-md text-sm leading-5 text-text-tertiary">
+          {skill_empty_detail(@selected_company_id)}
+        </p>
+        <div class="mt-5 flex flex-wrap justify-center gap-2">
+          <.app_link navigate={~p"/skills/new"} class={skill_empty_action_class(:primary)}>
+            New skill
+          </.app_link>
+          <.app_link
+            navigate={~p"/operations#runtime-launch-checklist"}
+            class={skill_empty_action_class(:neutral)}
+          >
+            Runtime checklist
+          </.app_link>
+        </div>
+      </div>
+    </:empty>
+
+    <div
+      :for={{dom_id, skill} <- @streams.skill}
+      id={dom_id}
+      class="group rounded-xl border border-border bg-surface p-4 transition-colors hover:border-border-hover hover:bg-surface-hover"
+    >
+      <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div class="min-w-0 flex-1">
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <.app_link
+              navigate={~p"/skills/#{skill.id}"}
+              class="truncate text-sm font-590 text-text-primary hover:text-brand"
+            >
+              {skill.name}
+            </.app_link>
+            <span class={"inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510 #{status_class(skill.enabled)}"}>
+              {status_label(skill.enabled)}
+            </span>
+            <span class={"inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510 #{manifest_class(skill)}"}>
+              {manifest_label(skill)}
             </span>
           </div>
-          <p class="mt-1 truncate text-xs text-text-tertiary">
-            {skill.description || skill.identifier}
+
+          <p class="line-clamp-2 max-w-3xl text-sm leading-5 text-text-tertiary">
+            {skill.description || "No description provided."}
           </p>
-        </.app_link>
 
-        <span class="truncate text-sm text-text-secondary">
-          {(skill.company && skill.company.name) || "Global"}
-        </span>
+          <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
+            <span>{skill.identifier}</span>
+            <span>v{skill.version || "0.0.0"}</span>
+            <span>{scope_label(skill)}</span>
+            <span>{capability_count(skill)} capabilities</span>
+            <span>{manifest_entrypoint(skill)}</span>
+          </div>
+        </div>
 
-        <span class={[
-          "w-fit rounded-full border px-2 py-0.5 text-xs font-510",
-          if(skill.enabled,
-            do: "border-green-500/20 bg-green-500/10 text-green-400",
-            else: "border-border bg-subtle text-text-tertiary"
-          )
-        ]}>
-          {if skill.enabled, do: "Enabled", else: "Disabled"}
-        </span>
-
-        <.overflow_menu label={"Actions for #{skill.name}"}>
-          <.menu_item navigate={~p"/skills/#{skill.id}"}>Open</.menu_item>
-          <.menu_item navigate={~p"/skills/#{skill.id}/edit"}>Edit</.menu_item>
-          <.menu_item phx-click="toggle_skill" phx-value-id={skill.id}>
+        <div class="flex shrink-0 flex-wrap items-center gap-2">
+          <button
+            type="button"
+            phx-click="toggle_skill"
+            phx-value-id={skill.id}
+            class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+          >
             {if skill.enabled, do: "Disable", else: "Enable"}
-          </.menu_item>
-          <.menu_item phx-click="delete" phx-value-id={skill.id} data-confirm="Delete this skill?">
+          </button>
+          <.app_link
+            navigate={~p"/skills/#{skill.id}/edit"}
+            class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+          >
+            Edit
+          </.app_link>
+          <button
+            type="button"
+            phx-click="delete"
+            phx-value-id={skill.id}
+            data-confirm="Delete this skill?"
+            class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-510 text-red-400 transition-colors hover:bg-red-500/15"
+          >
             Delete
-          </.menu_item>
-        </.overflow_menu>
+          </button>
+        </div>
       </div>
-    </.infinite_scroll>
-  </.panel>
-</.page>
+    </div>
+  </.infinite_scroll>
+</div>

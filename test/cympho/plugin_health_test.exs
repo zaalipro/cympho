@@ -17,6 +17,15 @@ defmodule Cympho.PluginHealthTest do
                metrics: %{total_plugins: 0},
                summary: "No plugins are installed yet."
              } = Plugins.health_summary(company.id, supervisor_running?: true)
+
+      assert Plugins.health_summary(company.id, supervisor_running?: true).next_action == %{
+               key: :install_first_plugin,
+               tone: :neutral,
+               label: "Install first plugin",
+               detail:
+                 "Open the marketplace and add one tightly scoped extension before expanding automation.",
+               cta: "Browse marketplace"
+             }
     end
 
     test "detects manifest errors, recent error logs, failing webhooks, and capability gaps" do
@@ -74,6 +83,8 @@ defmodule Cympho.PluginHealthTest do
       assert Enum.any?(summary.recommendations, &(&1.label == "Inspect error logs"))
       assert Enum.any?(summary.recommendations, &(&1.label == "Fix webhooks"))
       assert Enum.any?(summary.recommendations, &(&1.label == "Scope capabilities"))
+      assert summary.next_action.key == :repair_manifests
+      assert summary.next_action.cta == "Review errored plugins"
     end
 
     test "reports healthy when enabled plugins are capability-scoped and quiet" do
@@ -101,6 +112,9 @@ defmodule Cympho.PluginHealthTest do
                },
                recommendations: []
              } = Plugins.health_summary(company.id, supervisor_running?: true)
+
+      assert Plugins.health_summary(company.id, supervisor_running?: true).next_action.key ==
+               :review_marketplace
     end
   end
 

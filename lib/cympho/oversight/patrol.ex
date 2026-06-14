@@ -109,6 +109,25 @@ defmodule Cympho.Oversight.Patrol do
   end
 
   @doc """
+  Returns the stuck-work candidates a patrol sweep would inspect without
+  enqueuing any wakes.
+  """
+  @spec preview_company(binary(), keyword()) :: [
+          %{issue: Issue.t(), supervisor: Agent.t() | nil, stale_minutes: integer() | nil}
+        ]
+  def preview_company(company_id, opts \\ []) when is_binary(company_id) do
+    company_id
+    |> Issues.list_stuck_issues(opts)
+    |> Enum.map(fn issue ->
+      %{
+        issue: issue,
+        supervisor: resolve_supervisor(issue),
+        stale_minutes: stale_minutes(issue)
+      }
+    end)
+  end
+
+  @doc """
   Resolves the supervisor agent for a stuck issue and enqueues an
   `issue_stalled_in_progress` wake. Returns:
     `:ok` — wake enqueued

@@ -195,7 +195,7 @@ defmodule Cympho.QualityGatesTest do
           name: "Agent",
           role: :engineer,
           adapter: :process,
-          config: %{"command" => "echo"},
+          config: %{"command" => "echo", "repo_capable" => true},
           company_id: company.id,
           status: :idle
         })
@@ -220,7 +220,7 @@ defmodule Cympho.QualityGatesTest do
           name: "Agent",
           role: :engineer,
           adapter: :process,
-          config: %{"command" => "echo"},
+          config: %{"command" => "echo", "repo_capable" => true},
           company_id: company.id,
           status: :idle
         })

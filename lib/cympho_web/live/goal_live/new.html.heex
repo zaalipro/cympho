@@ -1,4 +1,4 @@
-<.page size="form">
+<.page size="wide">
   <.header
     title="New goal"
     subtitle="Define an outcome the company is working toward. Issues link back to a goal."
@@ -13,41 +13,187 @@
     </:actions>
   </.header>
 
-  <.panel>
-    <.simple_form for={@form} phx-submit="save" class="space-y-5 p-5">
-      <.input field={@form[:title]} label="Title" required placeholder="Ship Q3 launch" />
-      <.input
-        field={@form[:description]}
-        label="Description"
-        type="textarea"
-        rows={4}
-        placeholder="Why this goal matters and what success looks like."
-      />
-      <div class="grid gap-5 sm:grid-cols-2">
-        <.select
-          name="goal[status]"
-          label="Status"
-          options={[Active: "active", Completed: "completed", Cancelled: "cancelled"]}
-        />
-        <.select
-          name="goal[priority]"
-          label="Priority"
-          options={[Critical: "critical", High: "high", Medium: "medium", Low: "low"]}
-        />
-        <.input field={@form[:target_date]} type="date" label="Target date" />
+  <.form
+    for={@form}
+    phx-submit="save"
+    class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
+  >
+    <.panel class="overflow-hidden">
+      <div class="border-b border-border px-5 py-4">
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Goal alignment plan
+        </p>
+        <h2 class="mt-1 text-lg font-590 text-text-primary">Anchor work to an outcome</h2>
+        <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
+          Create a goal with enough hierarchy and project context that new issues can inherit the
+          right strategic target.
+        </p>
       </div>
 
-      <:actions>
-        <div class="flex items-center justify-end gap-2 border-t border-hairline pt-5">
-          <.app_link
-            navigate={~p"/goals"}
-            class="rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-          >
-            Cancel
-          </.app_link>
-          <.button type="submit" variant="primary">Create goal</.button>
+      <div class="space-y-6 p-5">
+        <section class="space-y-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Outcome brief
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              Write this like the owner-visible result agents should optimize for.
+            </p>
+          </div>
+
+          <.input field={@form[:title]} label="Title" required placeholder="Ship Q3 launch" />
+          <.input
+            field={@form[:description]}
+            label="Success criteria"
+            type="textarea"
+            rows={5}
+            placeholder="Why this goal matters, what must be true when it is done, and what evidence should prove it."
+          />
+        </section>
+
+        <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Strategy hierarchy
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              Missions sit at the top. Initiatives and milestones can sit under an active parent
+              goal and inherit its project when left blank.
+            </p>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-3">
+            <.input
+              type="select"
+              field={@form[:goal_type]}
+              label="Goal type"
+              value={@form[:goal_type].value || :mission}
+              options={@goal_type_options}
+            />
+            <.input
+              type="select"
+              field={@form[:parent_id]}
+              label="Parent goal"
+              value={@form[:parent_id].value || ""}
+              options={@parent_goal_options}
+            />
+            <.input
+              type="select"
+              field={@form[:project_id]}
+              label="Project context"
+              value={@form[:project_id].value || ""}
+              options={@project_options}
+            />
+          </div>
+        </section>
+
+        <section class="space-y-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Operating posture
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              Set priority and target timing so the board and agents can triage work correctly.
+            </p>
+          </div>
+
+          <div class="grid gap-4 sm:grid-cols-3">
+            <.input
+              type="select"
+              field={@form[:status]}
+              label="Status"
+              value={@form[:status].value || "active"}
+              options={[
+                {"Active", "active"},
+                {"Completed", "completed"},
+                {"Cancelled", "cancelled"}
+              ]}
+            />
+            <.input
+              type="select"
+              field={@form[:priority]}
+              label="Priority"
+              value={@form[:priority].value || "medium"}
+              options={[
+                {"Critical", "critical"},
+                {"High", "high"},
+                {"Medium", "medium"},
+                {"Low", "low"}
+              ]}
+            />
+            <.input field={@form[:target_date]} type="date" label="Target date" />
+          </div>
+        </section>
+      </div>
+    </.panel>
+
+    <aside class="space-y-4">
+      <section
+        data-testid="goal-setup-checklist"
+        class="rounded-xl border border-border bg-panel p-4 shadow-card"
+      >
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Setup checklist
+        </p>
+        <div class="mt-4 space-y-3">
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
+              1
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Name the outcome</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                The title should describe the result, not the task list.
+              </p>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
+              2
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Place it in the hierarchy</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Parent goals keep initiatives and milestones tied to mission context.
+              </p>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
+              3
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Link work after save</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Attach issues from the goal board so agents inherit the target.
+              </p>
+            </div>
+          </div>
         </div>
-      </:actions>
-    </.simple_form>
-  </.panel>
+      </section>
+
+      <section class="rounded-xl border border-brand/25 bg-brand/10 p-4">
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
+          Create behavior
+        </p>
+        <p class="mt-2 text-sm font-590 text-text-primary">Root goals become missions</p>
+        <p class="mt-1 text-xs leading-5 text-text-tertiary">
+          Choose a parent goal when creating an initiative or milestone. If project context is
+          blank, child goals inherit the parent project.
+        </p>
+      </section>
+    </aside>
+
+    <div class="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end lg:col-span-2">
+      <.app_link
+        navigate={~p"/goals"}
+        class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+      >
+        Cancel
+      </.app_link>
+      <.button type="submit" variant="primary" class="min-h-[40px] w-full sm:w-auto">
+        Create goal
+      </.button>
+    </div>
+  </.form>
 </.page>

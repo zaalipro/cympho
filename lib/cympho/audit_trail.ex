@@ -49,70 +49,12 @@ defmodule Cympho.AuditTrail do
 
   """
   def list_company_events(company_id, opts \\ []) do
-    event_type = Keyword.get(opts, :event_type)
-    actor_type = Keyword.get(opts, :actor_type)
-    actor_id = Keyword.get(opts, :actor_id)
-    resource_type = Keyword.get(opts, :resource_type)
-    resource_id = Keyword.get(opts, :resource_id)
-    start_date = Keyword.get(opts, :start_date)
-    end_date = Keyword.get(opts, :end_date)
     limit = Keyword.get(opts, :limit, 50)
     offset = Keyword.get(opts, :offset, 0)
 
     query =
-      from(e in AuditEvent,
-        where: e.company_id == ^company_id,
-        order_by: [desc: e.inserted_at]
-      )
-
-    query =
-      if event_type && event_type != "" do
-        where(query, event_type: ^event_type)
-      else
-        query
-      end
-
-    query =
-      if actor_type && actor_type != "" do
-        where(query, actor_type: ^actor_type)
-      else
-        query
-      end
-
-    query =
-      if actor_id && actor_id != "" do
-        where(query, actor_id: ^actor_id)
-      else
-        query
-      end
-
-    query =
-      if resource_type && resource_type != "" do
-        where(query, resource_type: ^resource_type)
-      else
-        query
-      end
-
-    query =
-      if resource_id && resource_id != "" do
-        where(query, resource_id: ^resource_id)
-      else
-        query
-      end
-
-    query =
-      if start_date do
-        where(query, [e], e.inserted_at >= ^start_date)
-      else
-        query
-      end
-
-    query =
-      if end_date do
-        where(query, [e], e.inserted_at <= ^end_date)
-      else
-        query
-      end
+      audit_events_query(company_id, opts)
+      |> order_by([e], desc: e.inserted_at)
 
     total =
       query
@@ -129,6 +71,42 @@ defmodule Cympho.AuditTrail do
     {events, total || 0}
   end
 
+  def company_audit_snapshot(company_id, opts \\ []) do
+    query = audit_events_query(company_id, opts)
+
+    total =
+      query
+      |> select([e], count(e.id))
+      |> Repo.one()
+
+    by_event_type =
+      query
+      |> group_by([e], e.event_type)
+      |> select([e], {e.event_type, count(e.id)})
+      |> Repo.all()
+      |> Map.new()
+
+    by_actor_type =
+      query
+      |> group_by([e], e.actor_type)
+      |> select([e], {e.actor_type, count(e.id)})
+      |> Repo.all()
+      |> Map.new()
+
+    latest =
+      query
+      |> order_by([e], desc: e.inserted_at)
+      |> limit(1)
+      |> Repo.one()
+
+    %{
+      total: total || 0,
+      by_event_type: by_event_type,
+      by_actor_type: by_actor_type,
+      latest: latest
+    }
+  end
+
   @doc """
   Keyset (infinite-scroll) page of a company's audit events, newest first.
 
@@ -137,14 +115,7 @@ defmodule Cympho.AuditTrail do
   `Cympho.Pagination.Page`.
   """
   def list_company_events_page(company_id, opts \\ []) do
-    from(e in AuditEvent, where: e.company_id == ^company_id)
-    |> maybe_eq(:event_type, Keyword.get(opts, :event_type))
-    |> maybe_eq(:actor_type, Keyword.get(opts, :actor_type))
-    |> maybe_eq(:actor_id, Keyword.get(opts, :actor_id))
-    |> maybe_eq(:resource_type, Keyword.get(opts, :resource_type))
-    |> maybe_eq(:resource_id, Keyword.get(opts, :resource_id))
-    |> maybe_after_date(Keyword.get(opts, :start_date))
-    |> maybe_before_date(Keyword.get(opts, :end_date))
+    audit_events_query(company_id, opts)
     |> Cympho.Pagination.page(
       limit: Keyword.get(opts, :limit, 50),
       after: Keyword.get(opts, :after),
@@ -160,6 +131,17 @@ defmodule Cympho.AuditTrail do
 
   defp maybe_before_date(query, nil), do: query
   defp maybe_before_date(query, dt), do: where(query, [e], e.inserted_at <= ^dt)
+
+  defp audit_events_query(company_id, opts) do
+    from(e in AuditEvent, where: e.company_id == ^company_id)
+    |> maybe_eq(:event_type, Keyword.get(opts, :event_type))
+    |> maybe_eq(:actor_type, Keyword.get(opts, :actor_type))
+    |> maybe_eq(:actor_id, Keyword.get(opts, :actor_id))
+    |> maybe_eq(:resource_type, Keyword.get(opts, :resource_type))
+    |> maybe_eq(:resource_id, Keyword.get(opts, :resource_id))
+    |> maybe_after_date(Keyword.get(opts, :start_date))
+    |> maybe_before_date(Keyword.get(opts, :end_date))
+  end
 
   @doc """
   Lists audit events for a specific resource.

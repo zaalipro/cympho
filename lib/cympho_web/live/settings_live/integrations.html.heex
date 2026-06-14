@@ -13,6 +13,273 @@
     </:actions>
   </.header>
 
+  <.panel class="mb-4 overflow-hidden" data-testid="mcp-command">
+    <div class={[
+      "h-px bg-gradient-to-r from-transparent to-transparent",
+      if(@mcp_status.status.tone == :ready, do: "via-success/40", else: "via-brand/30")
+    ]}>
+    </div>
+    <div class="grid gap-0 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
+      <div class="p-5">
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div class="flex min-w-0 gap-3">
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-brand/25 bg-brand/10 text-brand">
+              <.icon name="hero-command-line" class="h-5 w-5" />
+            </div>
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="text-card-title text-text-primary">External AI control</h2>
+                <span class={"inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-510 #{mcp_tone_class(@mcp_status.status.tone)}"}>
+                  <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
+                  {@mcp_status.status.label}
+                </span>
+              </div>
+              <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
+                Connect external AI clients through Cympho's MCP server. Calls are authenticated as an agent and scoped to this company.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div class="rounded-md border border-border bg-surface px-3 py-2">
+            <div class="font-mono text-lg font-510 leading-none text-text-primary">
+              {@mcp_status.tool_count}
+            </div>
+            <div class="mt-1 text-[10px] font-510 uppercase tracking-wider text-text-tertiary">
+              MCP tools
+            </div>
+          </div>
+          <div class="rounded-md border border-border bg-surface px-3 py-2">
+            <div class="font-mono text-lg font-510 leading-none text-text-primary">
+              {@mcp_status.agent_count}
+            </div>
+            <div class="mt-1 text-[10px] font-510 uppercase tracking-wider text-text-tertiary">
+              Agents
+            </div>
+          </div>
+          <div class="rounded-md border border-border bg-surface px-3 py-2">
+            <div class="font-mono text-lg font-510 leading-none text-text-primary">
+              {@mcp_status.ceo_count}
+            </div>
+            <div class="mt-1 text-[10px] font-510 uppercase tracking-wider text-text-tertiary">
+              CEOs
+            </div>
+          </div>
+          <div class="rounded-md border border-border bg-surface px-3 py-2">
+            <div class="font-mono text-lg font-510 leading-none text-text-primary">
+              {@mcp_status.api_key_count}
+            </div>
+            <div class="mt-1 text-[10px] font-510 uppercase tracking-wider text-text-tertiary">
+              API keys
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 rounded-lg border border-border bg-surface p-4">
+          <div class="flex items-start gap-3">
+            <div class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-brand/25 bg-brand/10 text-brand">
+              <.icon name="hero-arrow-turn-down-right" class="h-4 w-4" />
+            </div>
+            <div class="min-w-0">
+              <div class="text-xs font-590 uppercase tracking-wider text-text-tertiary">
+                Next operator move
+              </div>
+              <p class="mt-1 text-sm leading-5 text-text-primary">
+                {@mcp_status.next_action}
+              </p>
+              <p class="mt-1 line-clamp-2 text-xs leading-5 text-text-tertiary">
+                {@mcp_status.status.detail}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 rounded-lg border border-border bg-surface p-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="text-sm font-590 text-text-primary">MCP setup checklist</h3>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                The shortest path from external AI client to CEO-owned work.
+              </p>
+            </div>
+            <span class={"rounded-full border px-2 py-0.5 text-xs font-510 #{mcp_tone_class(@mcp_status.status.tone)}"}>
+              {@mcp_status.status.label}
+            </span>
+          </div>
+
+          <div class="mt-3 space-y-2">
+            <div
+              :for={step <- @mcp_status.setup_steps}
+              class={"rounded-md border px-3 py-2 #{mcp_step_card_class(step.tone)}"}
+            >
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <p class="text-xs font-590 text-text-primary">{step.label}</p>
+                  <p class="mt-0.5 line-clamp-1 text-xs leading-5 text-text-tertiary">
+                    {step.detail}
+                  </p>
+                </div>
+                <span class={"shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-510 #{mcp_tone_class(step.tone)}"}>
+                  {step.state}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-5 rounded-lg border border-border bg-surface p-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs font-510 uppercase tracking-wider text-text-tertiary">
+              MCP routes
+            </span>
+            <code class="break-all rounded bg-black/20 px-2.5 py-1.5 text-xs text-text-primary">
+              GET /api/mcp/tools
+            </code>
+            <code class="break-all rounded bg-black/20 px-2.5 py-1.5 text-xs text-text-primary">
+              POST /api/mcp/call
+            </code>
+          </div>
+        </div>
+
+        <div class="mt-5 rounded-lg border border-border bg-surface p-4">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-590 text-text-primary">CEO intake recipe</h3>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Route external requests into CEO review instead of leaving them as unowned backlog.
+              </p>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+              <span class="rounded-full border border-border bg-subtle px-2 py-1 text-xs text-text-tertiary">
+                create_issue
+              </span>
+              <div id="mcp-intake-copy" phx-hook="CopyToClipboard">
+                <button
+                  type="button"
+                  data-copy-text={@mcp_status.intake_example}
+                  data-copy-label="Copy recipe"
+                  class="inline-flex items-center gap-1.5 rounded-md border border-border bg-button px-2 py-1 text-xs font-510 text-text-secondary hover:bg-button-hover hover:text-text-primary"
+                >
+                  <.icon name="hero-clipboard-document" class="h-3.5 w-3.5" /> Copy
+                </button>
+              </div>
+            </div>
+          </div>
+          <code class="block max-h-36 overflow-auto whitespace-pre-wrap break-words rounded bg-black/20 px-3 py-2 text-xs leading-5 text-text-primary">
+            {@mcp_status.intake_example}
+          </code>
+        </div>
+
+        <details
+          class="group mt-5 rounded-lg border border-border bg-surface p-4"
+          data-testid="mcp-tool-catalog"
+        >
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+            <div>
+              <h3 class="text-sm font-590 text-text-primary">Available tools</h3>
+              <p class="mt-1 text-xs text-text-tertiary">
+                Expand when you need the full company-scoped tool catalog.
+              </p>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+              <span class="rounded-full border border-border bg-subtle px-2 py-1 text-xs text-text-tertiary">
+                {@mcp_status.tool_count} tools
+              </span>
+              <span class="rounded-full border border-border bg-subtle px-2 py-1 text-xs text-text-tertiary">
+                X-API-Key
+              </span>
+              <.icon
+                name="hero-chevron-down"
+                class="h-4 w-4 text-text-quaternary transition-transform group-open:rotate-180"
+              />
+            </div>
+          </summary>
+
+          <div class="mt-3 grid gap-2 sm:grid-cols-2">
+            <div
+              :for={tool <- @mcp_status.tools}
+              class="rounded-md border border-border bg-subtle px-3 py-2"
+            >
+              <div class="font-mono text-xs text-text-primary">{tool.name}</div>
+              <div class="mt-1 line-clamp-2 text-xs leading-5 text-text-tertiary">
+                {tool.description}
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div class="border-t border-border bg-subtle/60 p-5 xl:border-l xl:border-t-0">
+        <h3 class="text-sm font-590 text-text-primary">Create MCP API key</h3>
+        <p class="mt-2 text-sm leading-5 text-text-tertiary">
+          Keys are bound to one agent. Use the agent identity that should own imported issues, comments, and tool calls.
+        </p>
+
+        <form phx-submit="create_mcp_key" class="mt-4 space-y-4">
+          <label class="space-y-1.5">
+            <span class="text-xs font-510 text-text-secondary">Agent identity</span>
+            <select
+              name="mcp_key[agent_id]"
+              disabled={@mcp_status.agent_count == 0}
+              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand disabled:cursor-not-allowed disabled:text-text-quaternary"
+            >
+              <option :if={@mcp_status.agent_count == 0} value="">No agents available</option>
+              <option
+                :for={agent <- @mcp_status.agents}
+                value={agent.id}
+                selected={@mcp_key_form[:agent_id].value == agent.id}
+              >
+                {agent.name} ({agent.role})
+              </option>
+            </select>
+          </label>
+
+          <label class="space-y-1.5">
+            <span class="text-xs font-510 text-text-secondary">Key name</span>
+            <input
+              name="mcp_key[name]"
+              value={@mcp_key_form[:name].value}
+              disabled={@mcp_status.agent_count == 0}
+              class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand disabled:cursor-not-allowed disabled:text-text-quaternary"
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={@mcp_status.agent_count == 0}
+            class={[
+              "inline-flex w-full items-center justify-center gap-2 rounded-button px-4 py-2 text-sm font-510 transition-colors",
+              if(@mcp_status.agent_count == 0,
+                do: "cursor-not-allowed bg-surface text-text-quaternary",
+                else: "bg-brand text-on-primary hover:bg-accent-hover"
+              )
+            ]}
+          >
+            <.icon name="hero-key" class="h-4 w-4" /> Create key
+          </button>
+        </form>
+
+        <div
+          :if={@mcp_key_result}
+          data-testid="mcp-key-result"
+          class="mt-5 rounded-lg border border-amber-500/25 bg-amber-500/10 p-4"
+        >
+          <div class="text-sm font-590 text-amber-200">Copy this key now</div>
+          <p class="mt-1 text-xs leading-5 text-amber-100/80">
+            It authenticates as {@mcp_key_result.agent.name} and will not be shown again.
+          </p>
+          <code class="mt-3 block break-all rounded bg-black/30 px-3 py-2 text-xs text-amber-50">
+            {@mcp_key_result.plain_text_key}
+          </code>
+          <code class="mt-3 block whitespace-pre-wrap rounded bg-black/30 px-3 py-2 text-xs text-amber-50">
+            curl -H "X-API-Key: &lt;key&gt;" /api/mcp/tools
+          </code>
+        </div>
+      </div>
+    </div>
+  </.panel>
+
   <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
     <.panel class="overflow-hidden">
       <div class={[

@@ -78,10 +78,14 @@ defmodule Cympho.AgentActions.PrLifecycleActionsTest do
       actions = [
         %{
           "type" => "force_fix_pr",
-          "reason" => "Tests fail and the null check is missing.",
+          "reason" => force_fix_reason(),
           "comments" => [
-            %{"path" => "lib/x.ex", "line" => 42, "body" => "missing nil check"},
-            %{"path" => "test/x_test.exs", "line" => 10, "body" => "test missing"}
+            %{"path" => "lib/x.ex", "line" => 42, "body" => "Required change: add nil check."},
+            %{
+              "path" => "test/x_test.exs",
+              "line" => 10,
+              "body" => "Required change: add regression test."
+            }
           ]
         }
       ]
@@ -107,6 +111,35 @@ defmodule Cympho.AgentActions.PrLifecycleActionsTest do
              )
     end
 
+    test "rejects thin force_fix_pr feedback before waking engineer", %{
+      cto: cto,
+      engineer: engineer,
+      issue: issue
+    } do
+      actions = [
+        %{
+          "type" => "force_fix_pr",
+          "reason" => "again",
+          "comments" => []
+        }
+      ]
+
+      assert {:error, {:force_fix_pr_feedback_too_thin, missing, scaffold}} =
+               AgentActions.execute(issue, cto, actions)
+
+      assert "Evidence inspected" in missing
+      assert "Required changes" in missing
+      assert "Verification required" in missing
+      assert "Next action" in missing
+      assert scaffold =~ "Required changes:"
+
+      reloaded = Issues.get_issue!(issue.id)
+      assert reloaded.status == :in_review
+      assert reloaded.monitor_state["pr_iteration_count"] in [nil, 0]
+
+      assert pending_wakes(engineer.id, "pr_review_changes_requested") == []
+    end
+
     test "engineer cannot force_fix_pr (governance/release tier only)", %{
       engineer: engineer,
       issue: issue
@@ -124,7 +157,7 @@ defmodule Cympho.AgentActions.PrLifecycleActionsTest do
       issue: issue
     } do
       action = fn ->
-        %{"type" => "force_fix_pr", "reason" => "again", "comments" => []}
+        %{"type" => "force_fix_pr", "reason" => force_fix_reason(), "comments" => []}
       end
 
       # Iteration 1
@@ -240,5 +273,17 @@ defmodule Cympho.AgentActions.PrLifecycleActionsTest do
       from w in AgentWake,
         where: w.agent_id == ^agent_id and w.reason == ^reason and w.status == "pending"
     )
+  end
+
+  defp force_fix_reason do
+    """
+    Evidence inspected: PR diff, failing CI output, and current test coverage.
+    Required changes:
+    - Add the missing nil check in lib/x.ex.
+    - Add regression coverage in test/x_test.exs.
+    Verification required: run mix test test/x_test.exs and confirm CI is green.
+    Next action: push a new commit, attach evidence, and submit_review again.
+    """
+    |> String.trim()
   end
 end

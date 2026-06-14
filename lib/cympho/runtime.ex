@@ -31,6 +31,7 @@ defmodule Cympho.Runtime do
 
   @allowed_idle_statuses [:idle]
   @allowed_owned_statuses [:idle, :running]
+  @repo_delivery_roles Agent.pr_delivery_roles()
 
   @type preflight_error ::
           :not_found
@@ -43,6 +44,7 @@ defmodule Cympho.Runtime do
           | {:budget_blocked, map()}
           | {:workspace_unavailable, String.t()}
           | {:workspace_error, term()}
+          | {:repo_delivery_runtime_unavailable, atom()}
           | {:stage_gate_blocked, atom()}
 
   @spec preflight(Issue.t(), Agent.t() | binary(), keyword()) ::
@@ -52,6 +54,7 @@ defmodule Cympho.Runtime do
   def preflight(%Issue{} = issue, %Agent{} = agent, opts) do
     with :ok <- verify_company(issue, agent),
          :ok <- verify_agent(agent, issue, opts),
+         :ok <- verify_repo_delivery_runtime(issue, agent),
          :ok <- verify_stage_gate(issue, agent),
          {:ok, env} <- resolve_env(agent),
          {:ok, adapter, adapter_config} <- resolve_adapter(agent, env, opts),
@@ -195,6 +198,19 @@ defmodule Cympho.Runtime do
 
       true ->
         {:error, {:agent_unavailable, status}}
+    end
+  end
+
+  defp verify_repo_delivery_runtime(%Issue{} = issue, %Agent{} = agent) do
+    role = Cympho.Orchestrator.Dispatcher.Router.infer_role(issue)
+
+    if role in @repo_delivery_roles and
+         not Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(agent,
+           load_secret_keys?: true
+         ) do
+      {:error, {:repo_delivery_runtime_unavailable, role}}
+    else
+      :ok
     end
   end
 

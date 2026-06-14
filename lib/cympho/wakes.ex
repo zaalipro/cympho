@@ -9,6 +9,8 @@ defmodule Cympho.Wakes do
   """
 
   import Ecto.Query, warn: false
+  alias Cympho.Agents
+  alias Cympho.Agents.Agent
   alias Cympho.Repo
   alias Cympho.Wakes.AgentWake
   alias Cympho.Issues.Issue
@@ -117,25 +119,24 @@ defmodule Cympho.Wakes do
     else
       parent = Repo.get!(Issue, child_issue.parent_id) |> Repo.preload([:assignee, :children])
 
-      cond do
-        is_nil(parent.assignee_id) ->
-          {:error, :no_assignee}
+      with {:ok, target_agent_id} <- parent_wake_target(parent) do
+        cond do
+          not all_children_done?(parent) ->
+            {:error, :children_not_all_done}
 
-        not all_children_done?(parent) ->
-          {:error, :children_not_all_done}
+          parent.status not in [:in_progress, :blocked, :todo] ->
+            {:error, :parent_not_active}
 
-        parent.status not in [:in_progress, :blocked, :todo] ->
-          {:error, :parent_not_active}
-
-        true ->
-          do_wake_agent(
-            parent.assignee_id,
-            parent.id,
-            "issue_children_completed",
-            "system",
-            child_issue.id,
-            %{child_id: child_issue.id}
-          )
+          true ->
+            do_wake_agent(
+              target_agent_id,
+              parent.id,
+              "issue_children_completed",
+              "system",
+              child_issue.id,
+              %{child_id: child_issue.id}
+            )
+        end
       end
     end
   end
@@ -154,25 +155,24 @@ defmodule Cympho.Wakes do
   def notify_child_in_review(%Issue{} = child_issue) do
     parent = Repo.get!(Issue, child_issue.parent_id)
 
-    cond do
-      is_nil(parent.assignee_id) ->
-        {:error, :no_assignee}
+    with {:ok, target_agent_id} <- parent_wake_target(parent) do
+      cond do
+        parent.status in [:done, :cancelled] ->
+          {:error, :parent_closed}
 
-      parent.status in [:done, :cancelled] ->
-        {:error, :parent_closed}
+        recent_wake?(target_agent_id, parent.id, "child_status_changed", 60) ->
+          {:error, :deduped}
 
-      recent_wake?(parent.assignee_id, parent.id, "child_status_changed", 60) ->
-        {:error, :deduped}
-
-      true ->
-        do_wake_agent(
-          parent.assignee_id,
-          parent.id,
-          "child_status_changed",
-          "system",
-          child_issue.id,
-          %{child_id: child_issue.id, child_status: to_string(child_issue.status)}
-        )
+        true ->
+          do_wake_agent(
+            target_agent_id,
+            parent.id,
+            "child_status_changed",
+            "system",
+            child_issue.id,
+            %{child_id: child_issue.id, child_status: to_string(child_issue.status)}
+          )
+      end
     end
   end
 
@@ -184,18 +184,49 @@ defmodule Cympho.Wakes do
   """
   @spec wake_for_final_review(Issue.t()) ::
           {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
-  def wake_for_final_review(%Issue{assignee_id: nil}), do: {:error, :no_assignee}
-
   def wake_for_final_review(%Issue{} = issue) do
-    do_wake_agent(
-      issue.assignee_id,
-      issue.id,
-      "final_review_required",
-      "system",
-      issue.id,
-      %{}
-    )
+    with {:ok, target_agent_id} <- parent_wake_target(issue) do
+      do_wake_agent(
+        target_agent_id,
+        issue.id,
+        "final_review_required",
+        "system",
+        issue.id,
+        %{}
+      )
+    end
   end
+
+  defp parent_wake_target(%Issue{assignee_id: agent_id}) when is_binary(agent_id),
+    do: {:ok, agent_id}
+
+  defp parent_wake_target(%Issue{assigned_role: role, company_id: company_id})
+       when is_binary(company_id) do
+    case Agent.normalize_role(role) do
+      :ceo ->
+        case Agents.get_company_ceo(company_id) do
+          {:ok, %Agent{id: id}} -> {:ok, id}
+          _ -> {:error, :no_assignee}
+        end
+
+      role when is_atom(role) ->
+        role
+        |> Agents.list_agents_by_role(company_id)
+        |> Enum.reject(&(&1.governance_status == "terminated"))
+        |> Enum.sort_by(fn agent ->
+          {agent.status != :idle, agent.inserted_at || ~U[1970-01-01 00:00:00Z], agent.id}
+        end)
+        |> case do
+          [%Agent{id: id} | _] -> {:ok, id}
+          _ -> {:error, :no_assignee}
+        end
+
+      _ ->
+        {:error, :no_assignee}
+    end
+  end
+
+  defp parent_wake_target(_issue), do: {:error, :no_assignee}
 
   defp recent_wake?(agent_id, issue_id, reason, seconds) do
     cutoff = DateTime.utc_now() |> DateTime.add(-seconds, :second)
@@ -492,7 +523,10 @@ defmodule Cympho.Wakes do
 
   def most_recent_pending_for_issues(_), do: %{}
 
+  @comment_wake_reasons ~w(issue_commented issue_comment_mentioned)
   @review_queue_reasons ~w(final_review_required child_status_changed issue_children_completed)
+
+  def comment_wake_reasons, do: @comment_wake_reasons
 
   @doc """
   Returns active "Awaiting your review" wakes for an inbox-style queue.
@@ -595,6 +629,80 @@ defmodule Cympho.Wakes do
   queue entry directly.
   """
   def consume_wake(%AgentWake{} = wake), do: WakeupQueue.mark_consumed(wake)
+
+  @doc """
+  Counts stale pending comment wakes for a company.
+
+  This intentionally only targets comment/mention wakes. Other wake reasons
+  can carry dispatch, retry, review, or manager intent and should stay visible
+  until their owning workflow consumes them.
+  """
+  @spec count_stale_comment_wakes(String.t() | nil, keyword()) :: non_neg_integer()
+  def count_stale_comment_wakes(company_id, opts \\ [])
+
+  def count_stale_comment_wakes(company_id, opts) when is_binary(company_id) do
+    company_id
+    |> stale_comment_wake_query(stale_comment_wake_cutoff(opts))
+    |> select([w, _i], count(w.id))
+    |> Repo.one()
+  end
+
+  def count_stale_comment_wakes(_company_id, _opts), do: 0
+
+  @doc """
+  Lists stale pending comment wakes for a company.
+  """
+  @spec list_stale_comment_wakes(String.t() | nil, keyword()) :: [AgentWake.t()]
+  def list_stale_comment_wakes(company_id, opts \\ [])
+
+  def list_stale_comment_wakes(company_id, opts) when is_binary(company_id) do
+    limit = Keyword.get(opts, :limit, 20)
+
+    company_id
+    |> stale_comment_wake_query(stale_comment_wake_cutoff(opts))
+    |> order_by([w, _i], asc: w.inserted_at, asc: w.id)
+    |> limit(^limit)
+    |> preload([:agent, :issue])
+    |> Repo.all()
+  end
+
+  def list_stale_comment_wakes(_company_id, _opts), do: []
+
+  @doc """
+  Marks stale pending comment wakes consumed for a company.
+  """
+  @spec consume_stale_comment_wakes(String.t() | nil, keyword()) :: {:ok, non_neg_integer()}
+  def consume_stale_comment_wakes(company_id, opts \\ [])
+
+  def consume_stale_comment_wakes(company_id, opts) when is_binary(company_id) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {count, _} =
+      company_id
+      |> stale_comment_wake_query(stale_comment_wake_cutoff(opts))
+      |> Repo.update_all(set: [status: "consumed", consumed_at: now])
+
+    {:ok, count}
+  end
+
+  def consume_stale_comment_wakes(_company_id, _opts), do: {:ok, 0}
+
+  defp stale_comment_wake_query(company_id, cutoff) do
+    from w in AgentWake,
+      join: i in assoc(w, :issue),
+      where:
+        i.company_id == ^company_id and w.status == "pending" and
+          w.reason in ^@comment_wake_reasons and w.inserted_at < ^cutoff,
+      where: fragment("coalesce(?->>'source', '') <> ?", w.metadata, "review_nudge")
+  end
+
+  defp stale_comment_wake_cutoff(opts) do
+    minutes = Keyword.get(opts, :older_than_minutes, 120)
+
+    DateTime.utc_now()
+    |> DateTime.add(-minutes * 60, :second)
+    |> DateTime.truncate(:second)
+  end
 
   @doc """
   Gets a single agent wake by id.

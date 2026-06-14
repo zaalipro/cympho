@@ -5,7 +5,7 @@ defmodule Cympho.Companies do
   alias Cympho.Companies.CompanyMembership
   alias Cympho.Companies.CompanyInvite
   alias Cympho.Companies.JoinRequest
-  alias Cympho.Agents.Agent
+  alias Cympho.Agents.{Agent, RolePlaybook}
   alias Cympho.BoardApprovals
   alias Cympho.GovernanceAuditLogs
   alias Cympho.Goals.Goal
@@ -1975,6 +1975,16 @@ defmodule Cympho.Companies do
   end
 
   defp create_template_agent!(attrs) do
+    role = attrs[:role] || attrs["role"]
+
+    attrs =
+      Map.update(
+        attrs,
+        :instructions,
+        RolePlaybook.default_overrides_template(role),
+        &RolePlaybook.starter_overrides(role, &1)
+      )
+
     %Agent{}
     |> Agent.changeset(
       Map.merge(attrs, %{
@@ -2587,42 +2597,36 @@ defmodule Cympho.Companies do
 
   # Returns map of old_user_id -> new_user_id
   defp import_users(users, company_id) do
-    result =
-      Enum.reduce(users, %{}, fn user_data, acc ->
-        # Check if user with this email already exists
-        existing_user = Repo.get_by(Cympho.Users.User, email: get_export_field(user_data, :email))
+    Enum.reduce(users, %{}, fn user_data, acc ->
+      # Check if user with this email already exists
+      existing_user = Repo.get_by(Cympho.Users.User, email: get_export_field(user_data, :email))
 
-        if existing_user do
-          # Link to existing user - the membership will use the existing user
-          {:ok, Map.put(acc, get_export_field(user_data, :id), existing_user.id)}
-        else
-          # Create new user with a random password they must reset
-          random_password = :crypto.strong_rand_bytes(16) |> Base.encode64()
+      if existing_user do
+        # Link to existing user - the membership will use the existing user
+        Map.put(acc, get_export_field(user_data, :id), existing_user.id)
+      else
+        # Create new user with a random password they must reset
+        random_password = :crypto.strong_rand_bytes(16) |> Base.encode64()
 
-          attrs = %{
-            email: get_export_field(user_data, :email),
-            name: get_export_field(user_data, :name),
-            password: random_password,
-            company_id: company_id
-          }
+        attrs = %{
+          email: get_export_field(user_data, :email),
+          name: get_export_field(user_data, :name),
+          password: random_password,
+          company_id: company_id
+        }
 
-          case Repo.insert(
-                 %Cympho.Users.User{}
-                 |> Cympho.Users.User.registration_changeset(attrs)
-               ) do
-            {:ok, user} -> {:ok, Map.put(acc, get_export_field(user_data, :id), user.id)}
-            {:error, changeset} -> {:error, changeset}
-          end
+        case Repo.insert(
+               %Cympho.Users.User{}
+               |> Cympho.Users.User.registration_changeset(attrs)
+             ) do
+          {:ok, user} ->
+            Map.put(acc, get_export_field(user_data, :id), user.id)
+
+          {:error, changeset} ->
+            raise "User import failed: #{inspect(changeset.errors)}"
         end
-      end)
-
-    case result do
-      {:error, changeset} ->
-        raise "User import failed: #{inspect(changeset.errors)}"
-
-      id_map when is_map(id_map) ->
-        id_map
-    end
+      end
+    end)
   end
 
   defp import_memberships(memberships, company_id, user_id_map) do

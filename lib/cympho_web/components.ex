@@ -287,14 +287,21 @@ defmodule CymphoWeb.Components do
   attr :label, :string, default: "Actions"
   attr :align, :string, default: "right"
   attr :class, :any, default: nil
+  attr :trigger_text, :string, default: nil
+  attr :rest, :global
   slot :inner_block, required: true
 
   def overflow_menu(assigns) do
     ~H"""
     <details class={["linear-menu relative", @class]}>
       <summary
-        class="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md text-text-quaternary transition-colors hover:bg-surface-hover hover:text-text-primary"
+        class={[
+          "flex h-8 cursor-pointer list-none items-center justify-center rounded-md text-text-quaternary transition-colors hover:bg-surface-hover hover:text-text-primary",
+          if(@trigger_text, do: "gap-1.5 px-2.5 text-xs font-510", else: "w-8")
+        ]}
         aria-label={@label}
+        title={@label}
+        {@rest}
       >
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -304,6 +311,7 @@ defmodule CymphoWeb.Components do
             d="M12 5h.01M12 12h.01M12 19h.01"
           />
         </svg>
+        <span :if={@trigger_text}>{@trigger_text}</span>
       </summary>
       <div class={[
         "linear-menu-panel absolute z-30 mt-2 min-w-44 rounded-xl border border-border bg-panel p-1 shadow-dialog",
@@ -575,6 +583,7 @@ defmodule CymphoWeb.Components do
   attr :variant, :string, default: nil
   attr :size, :string, default: nil
   attr :disabled, :boolean, default: false
+  attr :class, :any, default: nil
   attr :rest, :global
   slot :inner_block, required: true
 
@@ -587,6 +596,7 @@ defmodule CymphoWeb.Components do
         "inline-flex items-center justify-center gap-2 font-medium transition-colors rounded-button btn-press",
         button_variant(@variant),
         button_size(@size),
+        @class,
         @disabled && "cursor-not-allowed opacity-50"
       ]}
       {@rest}

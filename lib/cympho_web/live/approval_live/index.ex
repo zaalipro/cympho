@@ -1,6 +1,7 @@
 defmodule CymphoWeb.ApprovalLive.Index do
   use CymphoWeb, :live_view
   alias Cympho.Approvals
+  alias Cympho.Approvals.Approval
 
   @impl true
   def mount(_params, _session, socket) do
@@ -12,26 +13,27 @@ defmodule CymphoWeb.ApprovalLive.Index do
      assign(socket,
        page_title: "Approvals",
        status_filter: nil,
+       approval_command: empty_approval_command(),
        infinite_scroll: %{}
      )}
   end
 
   @impl true
   def handle_params(params, _url, socket) do
-    status =
-      case Map.get(params, "status") do
-        nil -> nil
-        "" -> nil
-        s -> String.to_existing_atom(s)
-      end
+    status = parse_status(Map.get(params, "status"))
 
     {:noreply,
      socket
      |> assign(:status_filter, status)
+     |> assign(:approval_command, build_approval_command(socket, status))
      |> init_stream(:approvals, &fetch_approvals(socket, &1, status))}
   end
 
   @impl true
+  def handle_event("filter_status", %{"status" => status}, socket) do
+    {:noreply, push_patch(socket, to: approval_filter_path(parse_status(status)))}
+  end
+
   def handle_event("next-page", _params, socket) do
     status = socket.assigns.status_filter
     {:reply, %{}, load_next(socket, :approvals, &fetch_approvals(socket, &1, status))}
@@ -54,7 +56,10 @@ defmodule CymphoWeb.ApprovalLive.Index do
 
   defp reload_approvals(socket) do
     status = socket.assigns.status_filter
-    reset_stream(socket, :approvals, &fetch_approvals(socket, &1, status))
+
+    socket
+    |> assign(:approval_command, build_approval_command(socket, status))
+    |> reset_stream(:approvals, &fetch_approvals(socket, &1, status))
   end
 
   defp fetch_approvals(socket, cursor, status) do
@@ -69,6 +74,256 @@ defmodule CymphoWeb.ApprovalLive.Index do
           after: cursor
         })
     end
+  end
+
+  defp build_approval_command(socket, active_status) do
+    approvals = company_approvals(socket)
+    counts = approval_counts(approvals)
+    pending = Map.get(counts, :pending, 0)
+    resolved = Map.get(counts, :approved, 0) + Map.get(counts, :denied, 0)
+    oldest_pending = oldest_pending(approvals)
+
+    %{
+      counts: counts,
+      pending_count: pending,
+      resolved_count: resolved,
+      linked_issue_count: linked_issue_count(approvals),
+      oldest_pending: oldest_pending,
+      summary: approval_command_summary(pending, resolved, oldest_pending, active_status),
+      lanes: approval_lanes(counts, active_status),
+      actions: approval_command_actions(pending, active_status)
+    }
+  end
+
+  defp empty_approval_command do
+    %{
+      counts: %{},
+      pending_count: 0,
+      resolved_count: 0,
+      linked_issue_count: 0,
+      oldest_pending: nil,
+      summary: "No approvals queued.",
+      lanes: approval_lanes(%{}, nil),
+      actions: [
+        %{
+          label: "All approvals",
+          url: ~p"/approvals",
+          tone: :primary,
+          icon: "hero-queue-list-mini"
+        },
+        %{
+          label: "Activity",
+          url: ~p"/activity?filter_action=approval_created",
+          tone: :neutral,
+          icon: "hero-clock-mini"
+        }
+      ]
+    }
+  end
+
+  defp company_approvals(socket) do
+    case socket.assigns[:current_company] do
+      nil -> []
+      company -> Approvals.list_approvals(%{company_id: company.id})
+    end
+  end
+
+  defp approval_counts(approvals) do
+    base = Map.new(Approval.status_values(), &{&1, 0})
+
+    Enum.reduce(approvals, base, fn approval, acc ->
+      Map.update(acc, approval.status, 1, &(&1 + 1))
+    end)
+  end
+
+  defp linked_issue_count(approvals) do
+    approvals
+    |> Enum.flat_map(& &1.issues)
+    |> Enum.map(& &1.id)
+    |> Enum.uniq()
+    |> length()
+  end
+
+  defp oldest_pending(approvals) do
+    approvals
+    |> Enum.filter(&(&1.status == :pending))
+    |> Enum.sort_by(&DateTime.to_unix(&1.inserted_at), :asc)
+    |> List.first()
+  end
+
+  defp approval_command_summary(0, 0, _oldest_pending, nil), do: "No approvals queued."
+
+  defp approval_command_summary(0, resolved, _oldest_pending, nil),
+    do: "No pending approvals. #{resolved} resolved decisions remain in the audit trail."
+
+  defp approval_command_summary(pending, resolved, oldest_pending, nil) do
+    "Resolve #{pending} pending #{pluralize(pending, "approval")} before agents proceed. Oldest: #{approval_type_label(oldest_pending)}. #{resolved} resolved."
+  end
+
+  defp approval_command_summary(_pending, _resolved, _oldest_pending, active_status) do
+    "Filtered to #{format_status(active_status)} approvals."
+  end
+
+  defp approval_lanes(counts, active_status) do
+    [
+      approval_lane(:pending, "Pending", counts, active_status),
+      approval_lane(:approved, "Approved", counts, active_status),
+      approval_lane(:denied, "Denied", counts, active_status),
+      approval_lane(:cancelled, "Cancelled", counts, active_status)
+    ]
+  end
+
+  defp approval_lane(status, label, counts, active_status) do
+    count = Map.get(counts, status, 0)
+
+    %{
+      status: status,
+      label: label,
+      count: count,
+      url: approval_filter_path(status),
+      active?: status == active_status,
+      state: approval_lane_state(status, count)
+    }
+  end
+
+  defp approval_lane_state(:pending, 0), do: "Clear"
+  defp approval_lane_state(:pending, _count), do: "Needs decision"
+  defp approval_lane_state(:approved, _count), do: "Approved path"
+  defp approval_lane_state(:denied, _count), do: "Rejected path"
+  defp approval_lane_state(:cancelled, _count), do: "Stopped path"
+
+  defp approval_command_actions(pending, active_status) do
+    [
+      pending > 0 &&
+        %{
+          label: "Review pending",
+          url: approval_filter_path(:pending),
+          tone: :primary,
+          icon: "hero-bolt-mini"
+        },
+      active_status &&
+        %{
+          label: "Clear filter",
+          url: approval_filter_path(nil),
+          tone: :neutral,
+          icon: "hero-x-mark-mini"
+        },
+      %{
+        label: "Activity",
+        url: ~p"/activity?filter_action=approval_created",
+        tone: :neutral,
+        icon: "hero-clock-mini"
+      }
+    ]
+    |> Enum.reject(&(&1 in [nil, false]))
+  end
+
+  defp approval_filter_path(nil), do: ~p"/approvals"
+  defp approval_filter_path(status), do: ~p"/approvals?status=#{status}"
+
+  defp parse_status(nil), do: nil
+  defp parse_status(""), do: nil
+
+  defp parse_status(status) when is_binary(status) do
+    parsed = String.to_existing_atom(status)
+
+    if parsed in Approval.status_values(), do: parsed, else: nil
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp parse_status(status) when status in [:pending, :approved, :denied, :cancelled], do: status
+  defp parse_status(_), do: nil
+
+  defp approval_type_label(nil), do: "none"
+  defp approval_type_label(approval), do: approval.type || "approval"
+
+  defp format_status(nil), do: "All"
+
+  defp format_status(status) do
+    status
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.capitalize()
+  end
+
+  defp pluralize(1, word), do: word
+  defp pluralize(_count, word), do: word <> "s"
+
+  def approval_action_class(:primary) do
+    "inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
+  end
+
+  def approval_action_class(_tone) do
+    "inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+  end
+
+  def approval_lane_class(%{active?: true}) do
+    "rounded-lg border border-primary/35 bg-primary/10 px-4 py-3 transition-colors"
+  end
+
+  def approval_lane_class(%{count: count}) when count > 0 do
+    "rounded-lg border border-border bg-surface-1 px-4 py-3 transition-colors hover:bg-surface-2"
+  end
+
+  def approval_lane_class(_lane) do
+    "rounded-lg border border-border bg-surface/60 px-4 py-3 transition-colors hover:bg-surface-hover"
+  end
+
+  def approval_lane_count_class(%{active?: true}),
+    do: "mt-3 font-mono text-2xl font-590 text-primary"
+
+  def approval_lane_count_class(%{count: count}) when count > 0,
+    do: "mt-3 font-mono text-2xl font-590 text-text-primary"
+
+  def approval_lane_count_class(_lane),
+    do: "mt-3 font-mono text-2xl font-590 text-text-quaternary"
+
+  def approval_row_note(%{status: :pending, issues: issues}) do
+    issue_count = length(issues)
+
+    if issue_count > 0 do
+      "Blocks #{issue_count} linked #{pluralize(issue_count, "issue")}"
+    else
+      "Decision needed before the agent proceeds"
+    end
+  end
+
+  def approval_row_note(%{status: status}) do
+    "#{format_status(status)} decision record"
+  end
+
+  def approval_row_action_label(:pending), do: "Review decision"
+  def approval_row_action_label(_status), do: "View record"
+
+  def approval_row_action_class(:pending) do
+    "inline-flex h-8 w-full items-center justify-center rounded-lg bg-primary px-3 text-xs font-510 text-white transition-colors hover:bg-primary-hover md:w-auto"
+  end
+
+  def approval_row_action_class(_status) do
+    "inline-flex h-8 w-full items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary md:w-auto"
+  end
+
+  def approval_empty_title(nil), do: "No approvals queued"
+
+  def approval_empty_title(status) do
+    "No #{status |> format_status() |> String.downcase()} approvals in this lane"
+  end
+
+  def approval_empty_detail(nil) do
+    "When agents request budget, deployment, hiring, or external-access approval, the decision packet will land here."
+  end
+
+  def approval_empty_detail(_status) do
+    "Clear the filter to inspect the full decision trail, or open Activity if you expected an approval event."
+  end
+
+  def approval_empty_action_class(:primary) do
+    "inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-510 text-white transition-colors hover:bg-primary-hover"
+  end
+
+  def approval_empty_action_class(_tone) do
+    "inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
   end
 
   def status_badge_class(:pending), do: "bg-yellow-500/20 text-yellow-400"

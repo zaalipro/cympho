@@ -14,9 +14,13 @@ defmodule Cympho.Issues.AutoAssignment do
   import Ecto.Query, warn: false
   alias Cympho.Issues.Issue
   alias Cympho.Agents
+  alias Cympho.Agents.Agent
   alias Cympho.Orchestrator.Dispatcher.Router
   alias Cympho.Comments
   alias Cympho.Repo
+
+  @waiting_owner_statuses [:backlog, :todo]
+  @repo_delivery_roles Agent.pr_delivery_roles()
 
   @doc """
   Attempts to auto-assign an issue to the most suitable eligible agent within
@@ -51,10 +55,8 @@ defmodule Cympho.Issues.AutoAssignment do
 
   def assign_owner_for_dispatch(%Issue{} = issue) do
     primary_role = Router.infer_role(issue)
-    fallback_roles = Router.fallback_chain(primary_role)
-    all_roles = [primary_role | fallback_roles]
 
-    case find_agent_for_roles(all_roles, issue.company_id) do
+    case find_agent_for_roles(assignment_roles(primary_role), issue.company_id) do
       {:ok, agent} ->
         Cympho.Issues.update_issue(issue, %{
           assignee_id: agent.id,
@@ -68,10 +70,8 @@ defmodule Cympho.Issues.AutoAssignment do
 
   defp do_assign_issue(%Issue{} = issue) do
     primary_role = Router.infer_role(issue)
-    fallback_roles = Router.fallback_chain(primary_role)
-    all_roles = [primary_role | fallback_roles]
 
-    case find_agent_for_roles(all_roles, issue.company_id) do
+    case find_agent_for_roles(assignment_roles(primary_role), issue.company_id) do
       {:ok, agent} ->
         required_role = primary_role
         {:ok, assigned} = Cympho.Issues.checkout_issue(issue, agent.id, required_role)
@@ -81,6 +81,9 @@ defmodule Cympho.Issues.AutoAssignment do
         {:error, :no_eligible_agent, issue}
     end
   end
+
+  defp assignment_roles(role) when role in @repo_delivery_roles, do: [role]
+  defp assignment_roles(role), do: [role | Router.fallback_chain(role)]
 
   defp find_agent_for_roles([], _company_id), do: {:error, :no_agent_available}
 
@@ -93,18 +96,12 @@ defmodule Cympho.Issues.AutoAssignment do
     end
   end
 
-  # Issue-without-company_id and the test path: scan all agents.
-  # Issue-with-company_id: look in that company first, fall back to the
-  # unscoped pool only if the company has no eligible agents at all (which
-  # in production should never happen; in test fixtures it's common).
+  # Issue-without-company_id and legacy test paths scan all agents. Once an
+  # issue is company-scoped, assignment must stay inside that company.
   defp eligible_agents(role, nil), do: Agents.list_eligible_agents(role)
 
-  defp eligible_agents(role, company_id) when is_binary(company_id) do
-    case Agents.list_eligible_agents(role, company_id) do
-      [] -> Agents.list_eligible_agents(role)
-      agents -> agents
-    end
-  end
+  defp eligible_agents(role, company_id) when is_binary(company_id),
+    do: Agents.list_eligible_agents(role, company_id)
 
   @doc """
   Re-evaluates backlog issues for one company and attempts to assign them.
@@ -128,6 +125,58 @@ defmodule Cympho.Issues.AutoAssignment do
       end)
 
     {:ok, assigned, queued}
+  end
+
+  @doc """
+  Assigns unowned waiting issues for a specific role without starting them.
+
+  Staffing-gap hire flows use this after a new agent is created. It connects
+  visible queued work to the new owner immediately, while preserving the issue's
+  current board state until runtime dispatch is explicitly started.
+  """
+  @spec assign_waiting_role_work(binary() | nil, atom() | String.t()) ::
+          {:ok, non_neg_integer(), non_neg_integer()}
+  def assign_waiting_role_work(company_id, role) do
+    with {:ok, assigned_issues, queued} <- assign_waiting_role_work_with_issues(company_id, role) do
+      {:ok, length(assigned_issues), queued}
+    end
+  end
+
+  @doc """
+  Assigns unowned waiting issues for a specific role and returns the assigned issues.
+
+  Use this when the caller needs to enqueue wakes or render exact assignment
+  receipts after a staffing action.
+  """
+  @spec assign_waiting_role_work_with_issues(binary() | nil, atom() | String.t()) ::
+          {:ok, [Issue.t()], non_neg_integer()}
+  def assign_waiting_role_work_with_issues(company_id, role) do
+    case Agent.normalize_role(role) do
+      nil ->
+        {:ok, [], 0}
+
+      normalized_role ->
+        waiting_issues =
+          Issue
+          |> where(
+            [i],
+            i.status in ^@waiting_owner_statuses and is_nil(i.assignee_id) and
+              is_nil(i.hidden_at)
+          )
+          |> maybe_filter_company(company_id)
+          |> Repo.all()
+          |> Enum.filter(&(Router.infer_role(&1) == normalized_role))
+
+        {assigned_issues, queued} =
+          Enum.reduce(waiting_issues, {[], 0}, fn issue, {assigned, q} ->
+            case assign_owner_for_dispatch(issue) do
+              {:ok, assigned_issue} -> {[assigned_issue | assigned], q}
+              {:error, :no_eligible_agent, _} -> {assigned, q + 1}
+            end
+          end)
+
+        {:ok, Enum.reverse(assigned_issues), queued}
+    end
   end
 
   defp maybe_filter_company(query, nil), do: query

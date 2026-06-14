@@ -97,13 +97,15 @@ defmodule Cympho.AutonomyLoopTest do
         "initiatives" => [
           %{
             "title" => "Build the onboarding flow",
-            "description" => "Make new users hit the aha moment.",
+            "description" =>
+              "Context: activation depends on users reaching the aha moment.\nDefinition of done: onboarding implementation brief is ready for CTO spec review.\nEvidence to inspect: target funnel, success signal, and launch risk.",
             "role" => "engineer",
             "priority" => "high"
           },
           %{
             "title" => "Plan the architecture",
-            "description" => "Pick the data model and modules.",
+            "description" =>
+              "Context: onboarding needs a data model and module plan before build.\nDefinition of done: technical architecture is ready for CTO spec review.\nEvidence to inspect: module split, data model, and sequencing risk.",
             "role" => "cto",
             "priority" => "high"
           }
@@ -141,7 +143,8 @@ defmodule Cympho.AutonomyLoopTest do
              AgentActions.execute(pending_eng_initiative, cto, [
                %{
                  "type" => "approve_issue",
-                 "notes" => "Spec is clear; engineering can take this on."
+                 "notes" =>
+                   "Acceptance criteria: onboarding flow implementation can start from this initiative. Evidence required: code change or work product plus delivery note. Verification required: focused onboarding smoke check. Definition of done: ready for CTO review with evidence and risk named."
                }
              ])
 
@@ -194,8 +197,15 @@ defmodule Cympho.AutonomyLoopTest do
           [
             %{
               "type" => "force_fix_pr",
-              "reason" => "needs more tests",
-              "comments" => [%{"path" => "lib/x.ex", "line" => 10, "body" => "missing"}]
+              "reason" =>
+                "Evidence inspected: PR diff and failing test output. Required changes: add the missing nil guard in lib/x.ex and regression coverage. Verification required: run mix test test/x_test.exs. Next action: push a new commit and submit_review again.",
+              "comments" => [
+                %{
+                  "path" => "lib/x.ex",
+                  "line" => 10,
+                  "body" => "Required change: add the missing nil guard."
+                }
+              ]
             }
           ]
         end

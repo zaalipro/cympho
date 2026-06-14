@@ -35,6 +35,7 @@ defmodule CymphoWeb.Components.IssueDigest do
       |> assign(:digest, digest)
       |> assign(:digest_action, digest_primary_action(digest))
       |> assign(:memory, memory)
+      |> assign(:ceo_flow_snapshot, ceo_flow_snapshot(assigns.issue, digest.metrics))
       |> assign(
         :contract_rows,
         completion_contract_rows(digest.completion_contract, assigns.review_nudges)
@@ -90,6 +91,53 @@ defmodule CymphoWeb.Components.IssueDigest do
           </div>
         </div>
 
+        <div
+          :if={@ceo_flow_snapshot}
+          id="issue-ceo-flow-snapshot"
+          data-testid="issue-ceo-flow-snapshot"
+          class="mt-4 rounded-md border border-brand/20 bg-brand/[0.06] px-3 py-3"
+        >
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="text-eyebrow uppercase text-brand">CEO flow snapshot</p>
+                <span class={ceo_flow_snapshot_badge_class(@ceo_flow_snapshot.status)}>
+                  {@ceo_flow_snapshot.status_label}
+                </span>
+              </div>
+              <p class="mt-2 text-sm leading-5 text-ink-muted">
+                {@ceo_flow_snapshot.next}
+              </p>
+            </div>
+            <div class="flex shrink-0 flex-wrap gap-2">
+              <a
+                href="#issue-ceo-flow-checklist"
+                class="inline-flex items-center gap-1.5 rounded-md border border-brand/30 bg-brand/10 px-2.5 py-1.5 text-xs font-510 text-brand transition-colors hover:bg-brand/15"
+              >
+                <span class="hero-arrow-down-mini h-3.5 w-3.5"></span> Open CEO checklist
+              </a>
+              <a
+                :if={@ceo_flow_snapshot.operations_path}
+                href={@ceo_flow_snapshot.operations_path}
+                class="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-canvas px-2.5 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+              >
+                <span class="hero-arrow-up-right-mini h-3.5 w-3.5"></span> Open delegated queue
+              </a>
+            </div>
+          </div>
+
+          <div class="mt-3 grid gap-2 md:grid-cols-3">
+            <div
+              :for={item <- @ceo_flow_snapshot.items}
+              class="rounded-md border border-brand/15 bg-canvas px-3 py-2"
+            >
+              <p class="text-[10px] font-590 uppercase text-ink-tertiary">{item.label}</p>
+              <p class="mt-1 text-sm font-590 text-ink">{item.value}</p>
+              <p class="mt-1 text-[11px] leading-4 text-ink-tertiary">{item.detail}</p>
+            </div>
+          </div>
+        </div>
+
         <div class="mt-4 rounded-md border border-hairline bg-canvas px-3 py-3">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div class="min-w-0">
@@ -122,6 +170,7 @@ defmodule CymphoWeb.Components.IssueDigest do
                     title={action.detail}
                     phx-click={action.event}
                     disabled={!action.enabled?}
+                    data-confirm={Map.get(action, :confirm)}
                     class={quick_action_class(action.tone, action.enabled?)}
                   >
                     {action.label}
@@ -192,7 +241,9 @@ defmodule CymphoWeb.Components.IssueDigest do
             <.memory_field label="Files / artifacts" value={@memory.files_changed} />
             <.memory_field label="Validation" value={@memory.validation} />
             <.memory_field label="Risks / gaps" value={@memory.risks} />
+            <.memory_field label="Current state" value={@memory.current_state} />
             <.memory_field label="Next decision" value={@memory.next_decision} />
+            <.memory_field label="Restart packet" value={@memory.restart_packet} />
           </div>
 
           <div class="border-t border-hairline px-3 py-3">
@@ -624,6 +675,188 @@ defmodule CymphoWeb.Components.IssueDigest do
     """
   end
 
+  defp ceo_flow_snapshot(issue, metrics) do
+    if ceo_flow_snapshot_relevant?(issue, metrics) do
+      status = ceo_flow_snapshot_status(metrics)
+
+      %{
+        status: status,
+        status_label: ceo_flow_snapshot_status_label(status),
+        next: ceo_flow_snapshot_next(status),
+        items: ceo_flow_snapshot_items(metrics),
+        operations_path: ceo_flow_operations_path(issue, metrics)
+      }
+    end
+  end
+
+  defp ceo_flow_snapshot_relevant?(issue, metrics) do
+    ceo_owned_issue?(issue) or metrics.tagged_owner_update_comments > 0 or
+      metrics.tagged_handoff_comments > 0
+  end
+
+  defp ceo_owned_issue?(%{assigned_role: role}) when role in [:ceo, "ceo"], do: true
+  defp ceo_owned_issue?(%{assignee: %{role: role}}) when role in [:ceo, "ceo"], do: true
+  defp ceo_owned_issue?(_issue), do: false
+
+  defp ceo_flow_snapshot_status(metrics) do
+    cond do
+      metrics.failed_runs > 0 -> :attention
+      metrics.active_runs > 0 -> :running
+      metrics.tagged_owner_update_comments > 0 -> :owner_update
+      metrics.tagged_handoff_comments > 0 or metrics.child_issues > 0 -> :delegated
+      metrics.successful_runs > 0 -> :needs_signal
+      true -> :launch_needed
+    end
+  end
+
+  defp ceo_flow_snapshot_status_label(:owner_update), do: "Owner update captured"
+  defp ceo_flow_snapshot_status_label(:delegated), do: "Delegation underway"
+  defp ceo_flow_snapshot_status_label(:running), do: "CEO running"
+  defp ceo_flow_snapshot_status_label(:attention), do: "Needs attention"
+  defp ceo_flow_snapshot_status_label(:needs_signal), do: "Needs CEO signal"
+  defp ceo_flow_snapshot_status_label(:launch_needed), do: "Launch needed"
+
+  defp ceo_flow_snapshot_next(:owner_update) do
+    "Review the CEO owner update, then accept it, request revision, or keep delegated work moving."
+  end
+
+  defp ceo_flow_snapshot_next(:delegated) do
+    "Track delegated child issues until review evidence is ready, then ask the CEO for the owner update."
+  end
+
+  defp ceo_flow_snapshot_next(:running) do
+    "Wait for the first tagged CEO result: `[owner_update]`, `[handoff]`, or `[blocked]`."
+  end
+
+  defp ceo_flow_snapshot_next(:attention) do
+    "Fix the runtime or provider failure, then relaunch the focused CEO turn."
+  end
+
+  defp ceo_flow_snapshot_next(:needs_signal) do
+    "Runtime completed, but the owner still needs a tagged CEO output before acting on the flow."
+  end
+
+  defp ceo_flow_snapshot_next(:launch_needed) do
+    "Start the first CEO turn and require an owner update, handoff, or blocker before delivery proceeds."
+  end
+
+  defp ceo_flow_snapshot_items(metrics) do
+    [
+      %{
+        label: "CEO signal",
+        value: ceo_flow_signal_value(metrics),
+        detail: ceo_flow_signal_detail(metrics)
+      },
+      %{
+        label: "Runtime",
+        value: ceo_flow_runtime_value(metrics),
+        detail: ceo_flow_runtime_detail(metrics)
+      },
+      %{
+        label: "Delegation",
+        value: ceo_flow_delegation_value(metrics),
+        detail: ceo_flow_delegation_detail(metrics)
+      }
+    ]
+  end
+
+  defp ceo_flow_signal_value(%{tagged_owner_update_comments: count}) when count > 0 do
+    "#{count} owner update#{count_suffix(count)}"
+  end
+
+  defp ceo_flow_signal_value(%{tagged_handoff_comments: count}) when count > 0 do
+    "#{count} handoff#{count_suffix(count)}"
+  end
+
+  defp ceo_flow_signal_value(_metrics), do: "Waiting"
+
+  defp ceo_flow_signal_detail(%{tagged_owner_update_comments: count}) when count > 0 do
+    "#{count} tagged CEO owner update#{count_suffix(count)} can drive owner signoff."
+  end
+
+  defp ceo_flow_signal_detail(%{tagged_handoff_comments: count}) when count > 0 do
+    "#{count} tagged handoff#{count_suffix(count)} can seed the next owner."
+  end
+
+  defp ceo_flow_signal_detail(_metrics) do
+    "Expected first useful output is `[owner_update]`, `[handoff]`, or `[blocked]`."
+  end
+
+  defp ceo_flow_runtime_value(metrics) do
+    cond do
+      metrics.active_runs > 0 -> "#{metrics.active_runs} active"
+      metrics.failed_runs > 0 -> "#{metrics.failed_runs} failed"
+      metrics.successful_runs > 0 -> "#{metrics.successful_runs} completed"
+      true -> "Not started"
+    end
+  end
+
+  defp ceo_flow_runtime_detail(metrics) do
+    cond do
+      metrics.active_runs > 0 ->
+        "CEO runtime is in flight; observe the first tagged result."
+
+      metrics.failed_runs > 0 ->
+        "Resolve setup before judging CEO output quality."
+
+      metrics.successful_runs > 0 ->
+        "Completed runtime still needs a clear owner-readable result."
+
+      true ->
+        "Use the focused command from the full checklist or sidebar."
+    end
+  end
+
+  defp ceo_flow_delegation_value(metrics) do
+    if metrics.child_issues > 0 do
+      "#{metrics.closed_child_issues}/#{metrics.child_issues} closed"
+    else
+      "No child issues"
+    end
+  end
+
+  defp ceo_flow_delegation_detail(metrics) do
+    cond do
+      metrics.open_child_issues > 0 ->
+        "#{metrics.open_child_issues} delegated child issue#{count_suffix(metrics.open_child_issues)} still need execution or review."
+
+      metrics.child_issues > 0 ->
+        "Delegated work is closed; ask the CEO for the final owner update."
+
+      true ->
+        "If execution is needed, CEO should split it into scoped child issues."
+    end
+  end
+
+  defp ceo_flow_operations_path(%{id: issue_id}, %{child_issues: count}) when count > 0 do
+    "/operations?parent_issue_id=#{issue_id}#delegated-work-queue"
+  end
+
+  defp ceo_flow_operations_path(_issue, _metrics), do: nil
+
+  defp count_suffix(1), do: ""
+  defp count_suffix(_count), do: "s"
+
+  defp ceo_flow_snapshot_badge_class(:owner_update),
+    do:
+      "rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-emerald-300"
+
+  defp ceo_flow_snapshot_badge_class(:delegated),
+    do:
+      "rounded-full border border-blue-500/25 bg-blue-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-blue-300"
+
+  defp ceo_flow_snapshot_badge_class(:running),
+    do:
+      "rounded-full border border-brand/30 bg-brand/10 px-2 py-0.5 text-[10px] font-510 uppercase text-brand"
+
+  defp ceo_flow_snapshot_badge_class(:attention),
+    do:
+      "rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-amber-200"
+
+  defp ceo_flow_snapshot_badge_class(_status),
+    do:
+      "rounded-full border border-hairline bg-canvas px-2 py-0.5 text-[10px] font-510 uppercase text-ink-tertiary"
+
   attr :label, :string, required: true
   attr :value, :string, required: true
 
@@ -687,6 +920,7 @@ defmodule CymphoWeb.Components.IssueDigest do
     assigns =
       assigns
       |> assign(:digest, IssueDigest.build(assigns.issue))
+      |> assign(:mission_context, issue_mission_context(assigns.issue))
       |> assign(:compact?, assigns.density == "compact")
       |> assign(:inline?, assigns.variant == "inline")
       |> then(fn assigns ->
@@ -699,6 +933,15 @@ defmodule CymphoWeb.Components.IssueDigest do
     <div :if={@inline?} class={["flex min-w-0 items-center gap-1.5", @class]}>
       <span class={"shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-510 #{digest_state_class(@digest.state)}"}>
         {@digest.label}
+      </span>
+      <span
+        title={@mission_context.title}
+        class={[
+          "inline-flex min-w-0 max-w-[9rem] shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] font-510",
+          @mission_context.class
+        ]}
+      >
+        <span class="truncate">{@mission_context.label}</span>
       </span>
       <span class="line-clamp-1 text-[11px] leading-4 text-text-tertiary">{@digest.headline}</span>
     </div>
@@ -713,6 +956,15 @@ defmodule CymphoWeb.Components.IssueDigest do
       <div class="flex flex-wrap items-center gap-1.5">
         <span class={"rounded-full border px-1.5 py-0.5 text-[10px] font-510 #{digest_state_class(@digest.state)}"}>
           {@digest.label}
+        </span>
+        <span
+          title={@mission_context.title}
+          class={[
+            "inline-flex min-w-0 max-w-[11rem] items-center rounded-full border px-1.5 py-0.5 text-[10px] font-510",
+            @mission_context.class
+          ]}
+        >
+          <span class="truncate">{@mission_context.label}</span>
         </span>
         <span class={[
           "font-510 text-text-secondary",
@@ -749,6 +1001,57 @@ defmodule CymphoWeb.Components.IssueDigest do
   end
 
   defp digest_primary_action(_digest), do: nil
+
+  defp issue_mission_context(issue) do
+    cond do
+      goal = loaded_goal(issue) ->
+        %{
+          label: "#{goal_type_label(Map.get(goal, :goal_type))}: #{Map.get(goal, :title)}",
+          title: "Mission context: #{Map.get(goal, :title)}",
+          class: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+        }
+
+      goal_id_present?(issue) ->
+        %{
+          label: "Goal linked",
+          title: "Goal context is linked but not loaded in this view.",
+          class: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+        }
+
+      project_id_present?(issue) ->
+        %{
+          label: "Project only",
+          title: "No mission goal is linked to this issue.",
+          class: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+        }
+
+      true ->
+        %{
+          label: "Floating",
+          title: "No mission goal or project is linked to this issue.",
+          class: "border-amber-500/25 bg-amber-500/10 text-amber-200"
+        }
+    end
+  end
+
+  defp loaded_goal(%{goal: %Ecto.Association.NotLoaded{}}), do: nil
+
+  defp loaded_goal(%{goal: %{title: title} = goal}) when is_binary(title) and title != "",
+    do: goal
+
+  defp loaded_goal(_issue), do: nil
+
+  defp goal_id_present?(%{goal_id: id}) when is_binary(id) and id != "", do: true
+  defp goal_id_present?(_issue), do: false
+
+  defp project_id_present?(%{project_id: id}) when is_binary(id) and id != "", do: true
+  defp project_id_present?(_issue), do: false
+
+  defp goal_type_label(:mission), do: "Mission"
+  defp goal_type_label("mission"), do: "Mission"
+  defp goal_type_label(:milestone), do: "Milestone"
+  defp goal_type_label("milestone"), do: "Milestone"
+  defp goal_type_label(_), do: "Initiative"
 
   def digest_state_class(:closed), do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
   def digest_state_class(:needs_attention), do: "border-brand/25 bg-brand/10 text-brand"
@@ -961,7 +1264,8 @@ defmodule CymphoWeb.Components.IssueDigest do
         Map.get(action, :reason_body) ||
           "Shown because this issue can be advanced from the current digest state.",
       evidence_prompt: gate_prompt,
-      disabled_reason: Map.get(action, :disabled_reason)
+      disabled_reason: Map.get(action, :disabled_reason),
+      confirm: Map.get(action, :confirm)
     }
   end
 

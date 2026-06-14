@@ -82,6 +82,38 @@ defmodule Cympho.Oversight.PatrolTest do
   end
 
   describe "patrol_company/2" do
+    test "previews stuck work and supervisor route without enqueueing wakes", %{
+      company: company,
+      cto: cto,
+      engineer: engineer,
+      issue: issue
+    } do
+      stale_at =
+        DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
+
+      {:ok, _} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: engineer.id,
+          checked_out_at: stale_at,
+          updated_at: stale_at
+        })
+
+      assert [
+               %{
+                 issue: %{id: issue_id},
+                 supervisor: %{id: supervisor_id},
+                 stale_minutes: stale_minutes
+               }
+             ] =
+               Patrol.preview_company(company.id, in_progress_minutes: 60)
+
+      assert issue_id == issue.id
+      assert supervisor_id == cto.id
+      assert stale_minutes >= 180
+      assert pending_wakes(cto.id, "issue_stalled_in_progress") == []
+    end
+
     test "wakes the engineer's parent (CTO) for stalled in_progress work", %{
       company: company,
       cto: cto,

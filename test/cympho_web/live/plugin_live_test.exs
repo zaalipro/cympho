@@ -24,6 +24,17 @@ defmodule CymphoWeb.PluginLiveTest do
   end
 
   describe "PluginLive.Index" do
+    test "renders an actionable empty state before plugins are installed", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/plugins")
+
+      assert html =~ ~s(data-testid="plugins-empty")
+      assert html =~ "No runtime plugins installed yet"
+      assert html =~ "Install one tightly scoped extension"
+      assert html =~ "Browse marketplace"
+      assert html =~ "New plugin"
+      refute html =~ "Clear filters"
+    end
+
     test "mounts and lists plugins for the current company", %{
       conn: conn,
       current_company: company
@@ -42,10 +53,13 @@ defmodule CymphoWeb.PluginLiveTest do
       {:ok, view, html} = live(conn, "/plugins")
 
       assert has_element?(view, "[data-testid='plugin-health']")
+      assert has_element?(view, "[data-testid='plugin-next-action']")
       assert html =~ "Plugin Health"
       assert html =~ "Watch"
       assert html =~ "Cap gaps"
       assert html =~ "Scope capabilities"
+      assert html =~ "Next operator move"
+      assert html =~ "Open plugin settings"
     end
 
     test "filter event narrows the list by status", %{conn: conn, current_company: company} do
@@ -60,6 +74,30 @@ defmodule CymphoWeb.PluginLiveTest do
 
       assert html =~ "Active Only"
       refute html =~ "Installed Only"
+    end
+
+    test "query status filter narrows the initial list", %{conn: conn, current_company: company} do
+      _installed = insert_plugin(company.id, %{name: "Query Installed", status: "installed"})
+      _error = insert_plugin(company.id, %{name: "Query Error", status: "error"})
+
+      {:ok, _view, html} = live(conn, "/plugins?status=error")
+
+      assert html =~ "Query Error"
+      refute html =~ "Query Installed"
+    end
+
+    test "filtered empty state explains how to recover", %{conn: conn, current_company: company} do
+      _installed = insert_plugin(company.id, %{name: "Installed But Hidden", status: "installed"})
+
+      {:ok, _view, html} = live(conn, "/plugins?status=error")
+
+      assert html =~ ~s(data-testid="plugins-empty")
+      assert html =~ "No plugins match these filters"
+      assert html =~ "Clear filters to return to the full extension inventory"
+      assert html =~ "Clear filters"
+      assert html =~ "Browse marketplace"
+      assert html =~ "New plugin"
+      refute html =~ "Installed But Hidden"
     end
   end
 
@@ -114,9 +152,14 @@ defmodule CymphoWeb.PluginLiveTest do
       {:ok, _view, html} = live(conn, "/plugins/new")
 
       assert html =~ "New Plugin"
+      assert html =~ "Plugin launch plan"
+      assert html =~ "Runtime manifest"
+      assert html =~ "Project scope"
+      assert html =~ "Advanced manifest JSON"
+      assert html =~ ~s(data-testid="plugin-setup-checklist")
     end
 
-    test "submitting a valid form creates a plugin and redirects to its show page",
+    test "submitting a guided form creates a company-scoped plugin and redirects to its show page",
          %{conn: conn, current_company: company} do
       identifier = "form-create-#{System.unique_integer([:positive])}"
 
@@ -126,10 +169,11 @@ defmodule CymphoWeb.PluginLiveTest do
         "identifier" => identifier,
         "name" => "Form Created",
         "version" => "1.0.0",
-        "manifest_json" => ~s({"entrypoint":"noop"}),
-        "settings_json" => "{}",
-        "capabilities" => "",
-        "company_id" => company.id
+        "entrypoint" => "Cympho.Plugins.FormCreated",
+        "manifest_json" => ~s({"host_services":["issues"]}),
+        "settings_json" => ~s({"mode":"review"}),
+        "capabilities" => "tool_access, issue_write",
+        "project_id" => ""
       }
 
       assert {:error, {:live_redirect, %{to: redirect_path}}} =
@@ -137,8 +181,16 @@ defmodule CymphoWeb.PluginLiveTest do
 
       assert redirect_path =~ "/plugins/"
 
-      assert {:ok, %Plugin{name: "Form Created", manifest: %{"entrypoint" => "noop"}}} =
+      assert {:ok, %Plugin{} = plugin} =
                Cympho.Skills.get_plugin_by_identifier(identifier, company.id)
+
+      assert plugin.name == "Form Created"
+      assert plugin.company_id == company.id
+      assert plugin.manifest["entrypoint"] == "Cympho.Plugins.FormCreated"
+      assert plugin.manifest["host_services"] == ["issues"]
+      assert plugin.manifest["capabilities"] == ["tool_access", "issue_write"]
+      assert plugin.settings == %{"mode" => "review"}
+      assert plugin.capabilities == ["tool_access", "issue_write"]
     end
 
     test "submitting an invalid form re-renders with errors, no row created",
@@ -168,11 +220,14 @@ defmodule CymphoWeb.PluginLiveTest do
       {:ok, _view, html} = live(conn, "/plugins/#{plugin.id}/edit")
 
       assert html =~ "Original"
+      assert html =~ "Plugin capability plan"
+      assert html =~ "Advanced manifest JSON"
+      assert html =~ ~s(data-testid="plugin-setup-checklist")
     end
 
-    test "submitting a valid edit form updates the plugin and redirects",
+    test "submitting a valid edit form updates manifest, capabilities, and redirects",
          %{conn: conn, current_company: company} do
-      plugin = insert_plugin(company.id, %{name: "Before"})
+      plugin = insert_plugin(company.id, %{name: "Before", manifest: %{"entrypoint" => "old"}})
 
       {:ok, view, _html} = live(conn, "/plugins/#{plugin.id}/edit")
 
@@ -180,9 +235,10 @@ defmodule CymphoWeb.PluginLiveTest do
         "identifier" => plugin.identifier,
         "name" => "After",
         "version" => plugin.version,
-        "manifest_json" => ~s({"entrypoint":"noop"}),
+        "entrypoint" => "Cympho.Plugins.After",
+        "manifest_json" => ~s({"host_services":["documents"]}),
         "settings_json" => "{}",
-        "capabilities" => ""
+        "capabilities" => "document_write"
       }
 
       assert {:error, {:live_redirect, %{to: redirect_path}}} =
@@ -190,7 +246,11 @@ defmodule CymphoWeb.PluginLiveTest do
 
       assert redirect_path == "/plugins/#{plugin.id}"
 
-      assert Repo.get!(Plugin, plugin.id).name == "After"
+      updated = Repo.get!(Plugin, plugin.id)
+      assert updated.name == "After"
+      assert updated.manifest["entrypoint"] == "Cympho.Plugins.After"
+      assert updated.manifest["host_services"] == ["documents"]
+      assert updated.capabilities == ["document_write"]
     end
 
     test "submitting an invalid edit form re-renders with errors",

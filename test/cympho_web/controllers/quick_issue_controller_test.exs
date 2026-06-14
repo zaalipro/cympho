@@ -4,6 +4,7 @@ defmodule CymphoWeb.QuickIssueControllerTest do
   import Ecto.Query
 
   alias Cympho.Agents
+  alias Cympho.Goals
   alias Cympho.Issues.Issue
   alias Cympho.Projects
   alias Cympho.Repo
@@ -53,6 +54,45 @@ defmodule CymphoWeb.QuickIssueControllerTest do
       assert issue.assignee_id == agent.id
       assert issue.assigned_role == "ceo"
       assert issue.status == :todo
+    end
+
+    test "creates a mission-linked issue and inherits the goal project", %{conn: conn} do
+      {conn, _user, company} = register_and_log_in_user(conn)
+      unique = System.unique_integer([:positive])
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Quick Goal Project #{unique}",
+          prefix: unique_prefix("QG", unique),
+          company_id: company.id
+        })
+
+      {:ok, mission} =
+        Goals.create_goal(%{
+          title: "Quick Goal Mission #{unique}",
+          goal_type: :mission,
+          status: "active",
+          company_id: company.id,
+          project_id: project.id
+        })
+
+      title = "Quick goal-linked issue #{unique}"
+
+      conn =
+        post(conn, "/issues/quick-create", %{
+          "title" => title,
+          "goal_id" => mission.id,
+          "project_id" => "",
+          "status" => "todo"
+        })
+
+      issue = Repo.one!(from i in Issue, where: i.title == ^title)
+      assert redirected_to(conn) == ~p"/issues/#{issue.id}"
+      assert issue.company_id == company.id
+      assert issue.goal_id == mission.id
+      assert issue.project_id == project.id
+      assert issue.lineage["goal_id"] == mission.id
+      assert issue.lineage["mission_id"] == mission.id
     end
 
     test "defaults a blank assignee to the company CEO and opens the issue", %{conn: conn} do
@@ -116,6 +156,41 @@ defmodule CymphoWeb.QuickIssueControllerTest do
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
                "Choose a project from this company."
+
+      refute Repo.exists?(from i in Issue, where: i.title == ^title)
+    end
+
+    test "rejects cross-company quick-create goals", %{conn: conn} do
+      {conn, _user, _company} = register_and_log_in_user(conn)
+      unique = System.unique_integer([:positive])
+
+      {:ok, other_company} =
+        Cympho.Companies.create_company(%{
+          name: "Other Quick Goal Co #{unique}",
+          slug: "other-quick-goal-co-#{unique}"
+        })
+
+      {:ok, other_goal} =
+        Goals.create_goal(%{
+          title: "Other Company Mission #{unique}",
+          goal_type: :mission,
+          status: "active",
+          company_id: other_company.id
+        })
+
+      title = "Forbidden quick modal goal issue #{unique}"
+
+      conn =
+        post(conn, "/issues/quick-create", %{
+          "title" => title,
+          "goal_id" => other_goal.id,
+          "status" => "todo"
+        })
+
+      assert redirected_to(conn) == "/issues"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Choose a goal from this company."
 
       refute Repo.exists?(from i in Issue, where: i.title == ^title)
     end

@@ -12,29 +12,66 @@ defmodule Cympho.DashboardTest do
 
   describe "active_agents_count/0" do
     test "returns 0 when no agents exist" do
-      assert Dashboard.active_agents_count() == 0
+      company = create_company!("Dashboard Empty Agents")
+
+      assert Dashboard.active_agents_count(company.id) == 0
     end
 
     test "counts agents with idle or running status" do
-      {:ok, _} =
-        Agents.create_agent(%{name: "Agent A", role: :engineer, status: :idle, url_key: "a1"})
+      company = create_company!("Dashboard Active Agents")
 
       {:ok, _} =
-        Agents.create_agent(%{name: "Agent B", role: :engineer, status: :running, url_key: "b2"})
+        Agents.create_agent(%{
+          name: "Agent A",
+          role: :engineer,
+          status: :idle,
+          url_key: "a1",
+          company_id: company.id
+        })
 
       {:ok, _} =
-        Agents.create_agent(%{name: "Agent C", role: :engineer, status: :error, url_key: "c3"})
+        Agents.create_agent(%{
+          name: "Agent B",
+          role: :engineer,
+          status: :running,
+          url_key: "b2",
+          company_id: company.id
+        })
 
-      assert Dashboard.active_agents_count() == 2
+      {:ok, _} =
+        Agents.create_agent(%{
+          name: "Agent C",
+          role: :engineer,
+          status: :error,
+          url_key: "c3",
+          company_id: company.id
+        })
+
+      assert Dashboard.active_agents_count(company.id) == 2
     end
   end
 
   describe "total_agents_count/0" do
     test "returns total count of all agents" do
-      {:ok, _} = Agents.create_agent(%{name: "Agent A", role: :engineer, url_key: "a1"})
-      {:ok, _} = Agents.create_agent(%{name: "Agent B", role: :ceo, url_key: "b2"})
+      company = create_company!("Dashboard Total Agents")
 
-      assert Dashboard.total_agents_count() == 2
+      {:ok, _} =
+        Agents.create_agent(%{
+          name: "Agent A",
+          role: :engineer,
+          url_key: "a1",
+          company_id: company.id
+        })
+
+      {:ok, _} =
+        Agents.create_agent(%{
+          name: "Agent B",
+          role: :ceo,
+          url_key: "b2",
+          company_id: company.id
+        })
+
+      assert Dashboard.total_agents_count(company.id) == 2
     end
   end
 
@@ -55,10 +92,27 @@ defmodule Cympho.DashboardTest do
 
   describe "agent_status_counts/0" do
     test "returns counts grouped by status" do
-      {:ok, _} = Agents.create_agent(%{name: "A", role: :engineer, status: :idle, url_key: "a1"})
-      {:ok, _} = Agents.create_agent(%{name: "B", role: :engineer, status: :idle, url_key: "b2"})
+      company = create_company!("Dashboard Agent Status")
 
-      counts = Dashboard.agent_status_counts()
+      {:ok, _} =
+        Agents.create_agent(%{
+          name: "A",
+          role: :engineer,
+          status: :idle,
+          url_key: "a1",
+          company_id: company.id
+        })
+
+      {:ok, _} =
+        Agents.create_agent(%{
+          name: "B",
+          role: :engineer,
+          status: :idle,
+          url_key: "b2",
+          company_id: company.id
+        })
+
+      counts = Dashboard.agent_status_counts(company.id)
       idle = Enum.find(counts, &(&1.status == :idle))
       assert idle.count == 2
     end
@@ -262,5 +316,17 @@ defmodule Cympho.DashboardTest do
       output_tokens: 50,
       completed_at: now
     })
+  end
+
+  defp create_company!(name) do
+    unique = System.unique_integer([:positive])
+
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "#{name} #{unique}",
+        slug: "#{String.downcase(String.replace(name, " ", "-"))}-#{unique}"
+      })
+
+    company
   end
 end

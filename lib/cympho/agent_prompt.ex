@@ -22,7 +22,7 @@ defmodule Cympho.AgentPrompt do
 
   import Ecto.Query, warn: false
 
-  alias Cympho.{Agents, IssueDigest, PullRequestContract, Repo}
+  alias Cympho.{Agents, IssueBriefReadiness, IssueDigest, PullRequestContract, Repo}
   alias Cympho.Agents.{Agent, RolePlaybook}
   alias Cympho.AgentPromptContract
   alias Cympho.Comments.Comment
@@ -38,6 +38,8 @@ defmodule Cympho.AgentPrompt do
   @open_review_comment_limit 20
   @open_review_query_limit 60
   @owner_revision_marker "owner reopened the ceo verification update"
+  @ceo_core_delegation_roles [:cto, :product_manager, :designer, :engineer, :qa_engineer]
+  @cto_core_delegation_roles [:engineer, :qa_engineer, :release_engineer]
   @delivery_role_pool Agent.delivery_roles()
   @business_delivery_roles Agent.business_delivery_roles()
   @pr_role_pool Agent.pr_delivery_roles()
@@ -48,15 +50,18 @@ defmodule Cympho.AgentPrompt do
   def build(issue, agent_or_id \\ nil, opts \\ []) do
     skills = Keyword.get(opts, :skills, [])
     agent = resolve_agent(agent_or_id)
-    history = load_history(issue)
+    history = load_history(issue, current_run_id(opts))
 
     [
       wake_context_block(Keyword.get(opts, :wake_context), agent),
       issue_block(issue),
+      external_intake_block(issue, role_of(agent)),
+      owner_brief_readiness_block(issue, role_of(agent)),
       agent_block(agent_or_id, agent),
       context_block(issue),
       decomposition_depth_block(issue, role_of(agent)),
       team_status_block(issue, role_of(agent)),
+      manager_coordination_packet_block(role_of(agent)),
       budget_block(issue, agent),
       history_block(history),
       owner_revision_block(history, role_of(agent)),
@@ -84,15 +89,18 @@ defmodule Cympho.AgentPrompt do
       # company, then look up per agent — instead of one count query per agent.
       assignments = Cympho.Agents.count_active_assignments_by_company(company_id)
 
-      lines =
-        @delivery_role_pool
-        |> Enum.map(&team_status_line(&1, company_id, assignments))
-        |> Enum.reject(&is_nil/1)
+      lines = Enum.map(team_status_roles(role), &team_status_line(&1, company_id, assignments))
 
       if lines == [] do
         nil
       else
-        "## Team status\n" <> Enum.join(lines, "\n")
+        """
+        ## Team status
+        #{team_status_rule(role)}
+
+        #{Enum.join(lines, "\n")}
+        """
+        |> String.trim()
       end
     else
       nil
@@ -101,24 +109,77 @@ defmodule Cympho.AgentPrompt do
 
   defp team_status_block(_issue, _role), do: nil
 
+  defp team_status_roles(:ceo), do: Enum.uniq(@ceo_core_delegation_roles ++ @delivery_role_pool)
+  defp team_status_roles(:cto), do: @cto_core_delegation_roles
+
+  defp team_status_rule(:ceo) do
+    "Staffing rule: use an eligible idle candidate already listed here before hiring. For engineer, QA, and release work, eligible means repo-capable, not merely text/chat-capable. If an eligible idle name appears for a role, do not spawn that role in this turn unless you explain why the listed capacity cannot take the work. Route technical planning through CTO when staffed; route product criteria to Product Manager, experience work to Designer, and implementation/QA/release work to the matching delivery lane. Use `delegate` when a specific agent has relevant context, copying the full `id:` UUID into `delegate.to_agent_id`; use role-based `create_issue`/`handoff` when any eligible candidate can take it, and use `spawn_agent` only when the required role is absent, at capacity, lacks a repo-capable runtime, or a `no_agent_for_role` wake explicitly asks for a hire."
+  end
+
+  defp team_status_rule(:cto) do
+    "Staffing rule: use an eligible idle candidate already listed here before hiring. For engineer, QA, and release work, eligible means repo-capable, not merely text/chat-capable. If an eligible idle name appears for a role, do not spawn that role in this turn unless you explain why the listed capacity cannot take the work. Split technical work across engineer, QA, and release lanes; use `delegate` when a specific agent has relevant context, copying the full `id:` UUID into `delegate.to_agent_id`; use role-based `create_issue`/`handoff` when any eligible candidate can take it, and use `spawn_agent` only when the required role is absent, at capacity, lacks a repo-capable runtime, or a `no_agent_for_role` wake explicitly asks for a hire."
+  end
+
   defp team_status_line(role, company_id, assignments) do
-    case Cympho.Agents.list_agents_by_role(role, company_id) do
-      [] ->
-        nil
+    scoped = Cympho.Agents.list_agents_by_role(role, company_id)
+    idle = Enum.count(scoped, &(&1.status == :idle))
+    working = Enum.count(scoped, &(&1.status == :running))
 
-      scoped ->
-        idle = Enum.count(scoped, &(&1.status == :idle))
-        working = Enum.count(scoped, &(&1.status == :running))
+    total_in_flight =
+      scoped
+      |> Enum.map(fn a -> Map.get(assignments, a.id, 0) end)
+      |> Enum.sum()
 
-        total_in_flight =
-          scoped
-          |> Enum.map(fn a -> Map.get(assignments, a.id, 0) end)
-          |> Enum.sum()
+    base =
+      "- #{role}: #{length(scoped)} agents (#{idle} idle, #{working} working) " <>
+        "— #{total_in_flight} active assignments"
 
-        "- #{role}: #{length(scoped)} agents (#{idle} idle, #{working} working) " <>
-          "— #{total_in_flight} active assignments"
+    "#{base}; #{team_capacity_guidance(role, scoped, assignments)}"
+  end
+
+  defp team_capacity_guidance(role, agents, assignments) do
+    eligible =
+      agents
+      |> Enum.filter(&eligible_for_prompt?(role, &1, assignments))
+      |> Enum.sort_by(fn agent ->
+        {Map.get(assignments, agent.id, 0), String.downcase(agent.name || "")}
+      end)
+      |> Enum.take(3)
+
+    cond do
+      eligible != [] ->
+        "eligible idle: #{Enum.map_join(eligible, ", ", &agent_capacity_label(&1, assignments))}"
+
+      agents == [] ->
+        "no agents in role; spawn only if the work truly belongs here"
+
+      role in Agent.pr_delivery_roles() ->
+        "no repo-capable idle candidate; spawn a repo-capable #{role} or configure an existing delivery agent before creating implementation work"
+
+      true ->
+        "no eligible idle candidate; wait, force-handoff to the role, or spawn only if sustained capacity is missing"
     end
   end
+
+  defp eligible_for_prompt?(role, agent, assignments) do
+    base? =
+      agent.status == :idle and Map.get(assignments, agent.id, 0) < max_concurrent_jobs(agent)
+
+    if role in Agent.pr_delivery_roles() do
+      base? and
+        Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(agent, load_secret_keys?: true)
+    else
+      base?
+    end
+  end
+
+  defp agent_capacity_label(agent, assignments) do
+    load = Map.get(assignments, agent.id, 0)
+    "#{agent.name || "Unnamed"} (id: #{agent.id}, load: #{load}/#{max_concurrent_jobs(agent)})"
+  end
+
+  defp max_concurrent_jobs(%{max_concurrent_jobs: max}) when is_integer(max) and max > 0, do: max
+  defp max_concurrent_jobs(_agent), do: 1
 
   # Show how deep the current issue sits in the decomposition tree, and how
   # many more levels are available before the @max_request_depth guardrail
@@ -139,6 +200,32 @@ defmodule Cympho.AgentPrompt do
   end
 
   defp decomposition_depth_block(_issue, _role), do: nil
+
+  # CEO/CTO turns are most useful when they leave an inspectable coordination
+  # packet instead of a generic "I split the work" comment. This tells the model
+  # exactly which fields the app surfaces in delegated queues and issue digests.
+  defp manager_coordination_packet_block(:ceo) do
+    """
+    ## Manager coordination packet
+    Before creating child issues or stopping after delegation, write a compact fan-out summary in your tagged comment.
+
+    Required for every delegated child: child title, target role or exact agent id, dependency order, estimated minutes, evidence gate, verification gate, review owner, and why this child advances the owner outcome.
+    CEO routing rule: send technical planning to CTO when staffed. Only create engineer/QA/release children directly when the brief is already acceptance-ready and repo-capable capacity is available. If you split work, also `block_issue` the parent with a `[blocked]` restart packet naming the specific child evidence you are waiting for.
+    """
+    |> String.trim()
+  end
+
+  defp manager_coordination_packet_block(:cto) do
+    """
+    ## Manager coordination packet
+    Before creating engineer/QA/release child issues or stopping after a split, write a compact fan-out summary in your tagged comment.
+
+    Required for every delegated child: child title, target role or exact agent id, dependency order, estimated minutes, evidence gate, verification gate, review owner, and the first file/artifact/test area to inspect. Use `depends_on` when sequencing matters and `estimated_minutes` so routing can balance load. If you split work, also `block_issue` the current CTO issue with a `[blocked]` restart packet naming the child evidence needed before CEO review.
+    """
+    |> String.trim()
+  end
+
+  defp manager_coordination_packet_block(_role), do: nil
 
   # Show the agent how much budget they have left at the company and agent
   # scopes so they can self-pace. Without this, agents only learn about
@@ -229,7 +316,7 @@ defmodule Cympho.AgentPrompt do
     """
     The company has #{missions} active mission goal(s) but **zero in-flight initiatives**. You are being run on the synthetic Mission Planning issue so you can pick the next mission to execute and seed its initiatives.
 
-    Required this turn: emit ONE `seed_mission_issues` action against an active mission goal (find it via the company context above), with 3–5 initiatives covering the most-valuable next slice. Pair it with a `[owner_update]` comment explaining which mission you chose and why. Do NOT spam multiple `create_issue` actions — use `seed_mission_issues` for atomic decomposition.
+    Required this turn: emit ONE `seed_mission_issues` action against an active mission goal (find it via the company context above), with 3–5 initiatives covering the most-valuable next slice. Every initiative needs a title plus a strategic description with outcome/context/done/evidence signal so the CTO can review it without guessing. Pair the action with a `[owner_update]` comment explaining which mission you chose and why. Do NOT spam multiple `create_issue` actions — use `seed_mission_issues` for atomic decomposition.
 
     If every mission goal has already been delivered, mark the highest-priority mission `status: completed` (via the goals API the company UI surfaces) and emit only a `[owner_update]` comment reporting mission completion — no new issues.
     """
@@ -266,13 +353,31 @@ defmodule Cympho.AgentPrompt do
     |> String.trim()
   end
 
+  defp wake_preamble("manual_dispatch", %{"source" => "demand_backed_hire"} = metadata, role) do
+    assigned_role = Map.get(metadata, "role") || role_label(role)
+
+    """
+    You were just hired or reactivated because queued #{assigned_role} work had no available owner, and this issue was assigned to you.
+
+    Required this turn: execute the issue brief directly. Produce concrete evidence, run or name the verification that proves the work, and finish with the next lifecycle action (`submit_review`, `handoff`, or `block_issue`). Your update must include what changed, evidence inspected or produced, verification status, risks, and the next owner/review need. Do not only acknowledge the assignment.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("manual_dispatch", _metadata, _role) do
+    """
+    A manual dispatch wake assigned this issue to you now. Inspect the issue brief and latest comments, then advance the workflow with a concrete action (`submit_review`, `handoff`, `approve_issue`, `request_changes`, or `block_issue`) rather than only leaving an acknowledgement.
+    """
+    |> String.trim()
+  end
+
   defp wake_preamble("spec_review_required", metadata, :cto) do
     proposed = Map.get(metadata, "proposed_role") || "engineer"
 
     """
     CEO seeded this initiative and routed it to you for **spec review** before any #{proposed} picks it up. Read the `[needs-tech-spec]` comment, then pick one:
 
-      1. **Refine in place + `approve_issue`** — if the brief is clear enough as-is or after a `comment` with refined acceptance criteria. The issue will flip to `:todo` and assign to the #{proposed} pool.
+      1. **Refine in place + `approve_issue`** — if the brief is clear enough as-is or after a `comment`/approval note with refined acceptance criteria, evidence required, verification required, and definition of done. Repo-bound releases are rejected when the combined initiative brief and CTO approval note are too thin for runtime dispatch. The issue will flip to `:todo` and assign to the #{proposed} pool.
       2. **`create_issue` to split** — if the initiative is too big for one ticket, decompose into smaller children with `role: "#{proposed}"`. The original initiative still gets `approve_issue` once decomposition is complete.
       3. **`request_changes` (role: "ceo")** — if the strategy itself doesn't make sense; CEO needs to rethink the initiative before any sub-ticket is worth creating.
 
@@ -307,7 +412,7 @@ defmodule Cympho.AgentPrompt do
     reason = Map.get(metadata, "reason") || "see the most recent [blocked] comment"
 
     """
-    Your subordinate (#{from}) has escalated this issue: "#{reason}". Read the most recent `[blocked]` comment for their reasoning, then choose: (a) `delegate` to a different agent with context they didn't have, (b) re-decompose with smaller `create_issue` actions, (c) `escalate` further up if even your authority is wrong here, or (d) `block_issue` with a clear external blocker if nothing else applies. Do not just `comment` and exit — the issue is `:blocked` and will sit until you act.
+    Your subordinate (#{from}) has escalated this issue: "#{reason}". Read the most recent `[blocked]` comment for their reasoning, then choose: (a) `delegate` to a different agent with context they didn't have, (b) re-decompose with smaller `create_issue` actions, (c) `escalate` further up if even your authority is wrong here, or (d) `block_issue` with a clear external blocker if nothing else applies. Escalation reasons are required to include cause, attempted fix, needs, current state, next decision, and restart packet, so use that packet directly. Do not just `comment` and exit — the issue is `:blocked` and will sit until you act.
     """
     |> String.trim()
   end
@@ -347,13 +452,19 @@ defmodule Cympho.AgentPrompt do
     """
     This issue has been stuck in `:#{stuck_status}` for ~#{stale_minutes} minutes (assignee: #{assignee}). Patrol detected no meaningful movement past the threshold and woke you to act.
 
-    Required this turn: emit one `intervene` action with the right mode:
+    Required this turn: do not only comment. Pick the smallest decisive recovery:
+      - If stuck status is `:in_review`, inspect the evidence and make the review decision if possible (`approve_issue` or `request_changes`). Use `intervene` only when the review owner/lane is wrong or the issue must be recovered before review.
+      - If stuck status is `:in_progress` or `:blocked`, emit one `intervene` action with the right mode.
+
+    `intervene` modes:
       - `reassign` (with `to_agent_id` or `to_role`) — give it to a different agent who has context.
       - `force_handoff` (with `to_role`) — clear assignee and let the dispatcher route to the least-loaded agent in that role.
       - `unblock` — only if you are confident the blocker no longer applies.
       - `cancel` — last resort; the work is no longer needed.
 
-    Pair with a `[handoff]` or `[review]` comment explaining your decision. Do not just `comment` and exit — the issue will continue to sit and Patrol will re-wake you.
+    For engineer, QA, or release-engineer `reassign` / `force_handoff` / `unblock`, the issue plus `reason` must include acceptance criteria, evidence required, verification required, and definition of done; thin recovery directives are rejected.
+
+    Pair with a `[handoff]`, `[review]`, or `[blocked]` comment explaining why this recovery mode fits the current state. Do not just `comment` and exit — the issue will continue to sit and Patrol will re-wake you.
     """
     |> String.trim()
   end
@@ -462,6 +573,76 @@ defmodule Cympho.AgentPrompt do
     #{field(issue, :description) || "No description provided."}
     """
     |> String.trim()
+  end
+
+  defp external_intake_block(issue, role) when role in [:ceo, :cto] do
+    if field(issue, :origin_type) == "mcp" do
+      """
+      ## External intake
+      This issue was created through the MCP/API intake path by agent #{field(issue, :created_by_agent_id) || field(issue, :origin_id) || "unknown"}. Treat it as externally supplied intent, not as validated strategy.
+
+      Required before delegation or approval:
+      - Confirm the issue has a clear business outcome, project/goal context, priority, and owner-visible acceptance criteria.
+      - If the request is vague, leave `[owner_update]`, `[handoff]`, or `[blocked]` naming the missing context before creating child work.
+      - Preserve any explicit `assigned_role` or `assignee_id` routing unless it conflicts with the actual work needed.
+      """
+      |> String.trim()
+    end
+  end
+
+  defp external_intake_block(_issue, _role), do: nil
+
+  defp owner_brief_readiness_block(issue, role) when role in [:ceo, :cto] do
+    readiness = IssueBriefReadiness.evaluate(issue)
+
+    rows =
+      readiness.checks
+      |> Enum.map(fn check ->
+        marker = if check.passed?, do: "[ok]", else: "[missing]"
+        "- #{marker} #{check.label}: #{check.detail}"
+      end)
+      |> Enum.join("\n")
+
+    """
+    ## Owner brief readiness
+    Status: #{readiness.label} (#{readiness.passed_count}/#{readiness.total} signals).
+    Next missing signal: #{readiness.next_prompt}
+
+    #{rows}
+
+    #{owner_brief_repair_scaffold(readiness)}
+
+    #{owner_brief_readiness_guidance(role, readiness.status)}
+    """
+    |> String.trim()
+  end
+
+  defp owner_brief_readiness_block(_issue, _role), do: nil
+
+  defp owner_brief_repair_scaffold(%{status: :ready}), do: nil
+
+  defp owner_brief_repair_scaffold(%{launch_scaffold: launch_scaffold}) do
+    """
+    Brief repair scaffold:
+    #{launch_scaffold}
+    """
+    |> String.trim()
+  end
+
+  defp owner_brief_readiness_guidance(:ceo, :ready) do
+    "CEO instruction: proceed with the first-turn contract. Return `[owner_update]`, `[handoff]`, or scoped child issues with acceptance criteria and a parent blocker when execution is delegated."
+  end
+
+  defp owner_brief_readiness_guidance(:ceo, status) when status in [:thin, :draft] do
+    "CEO instruction: do not create broad child work from a weak brief. If the missing signal is not unambiguous from issue history, leave a `[blocked]` or `[owner_update]` comment naming the missing owner input and use `block_issue` when the issue must wait for owner clarification."
+  end
+
+  defp owner_brief_readiness_guidance(:cto, :ready) do
+    "CTO instruction: preserve this brief when you decompose or review; keep acceptance criteria and evidence requirements on child work."
+  end
+
+  defp owner_brief_readiness_guidance(:cto, status) when status in [:thin, :draft] do
+    "CTO instruction: do not route vague execution to engineers. Either refine the technical acceptance criteria from available context or hand back to the CEO with a `[blocked]`/`[review]` note naming the missing owner input."
   end
 
   defp agent_block(nil, nil), do: nil
@@ -715,8 +896,8 @@ defmodule Cympho.AgentPrompt do
 
         Required this turn:
         - Read the owner review below and address the gap directly.
-        - If the answer is known, leave a revised `[owner_update]` with Business status, Current state, Next decision, and Owner decision needed.
-        - If more work is needed, create or delegate the missing work, then `block_issue` with a `[blocked]` note that names the dependency.
+        - If the answer is known, leave a revised `[owner_update]` with Business status, Evidence inspected, Verification, Current state, Next decision, Owner decision needed, and Restart packet.
+        - If more work is needed, create or delegate the missing work, then `block_issue` with a `[blocked]` note that names the dependency and Restart packet.
         - Do not repeat the previous owner update unchanged.
 
         Owner review: #{truncate(body, 700)}
@@ -841,7 +1022,9 @@ defmodule Cympho.AgentPrompt do
       [
         context_line("Run", context.run_id),
         context_line("Workspace", context.cwd),
-        context_line("Workspace source", context.metadata["workspace_source"])
+        context_line("Workspace source", context.metadata["workspace_source"]),
+        adapter_execution_guidance(context),
+        current_run_guidance(context.run_id)
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -849,6 +1032,19 @@ defmodule Cympho.AgentPrompt do
   end
 
   defp runtime_block(_context), do: nil
+
+  defp adapter_execution_guidance(%Cympho.RuntimeContext{adapter: adapter})
+       when adapter in [:openai_chat, "openai_chat"] do
+    "Adapter capability: OpenAI-compatible chat can reason and emit cympho-actions, but it cannot edit files, run tests, create branches, open real PRs, or verify browser UI from this turn. For implementation/UI/code/test/PR work, do not emit `submit_review`, `attach_work_product` with kind `code_change`, or `set_pr_url` from this adapter unless those artifacts already exist in issue history. Delegate with a full agent UUID, create a scoped repo-capable child issue, hand off by role, or block with the missing runtime need."
+  end
+
+  defp adapter_execution_guidance(_context), do: nil
+
+  defp current_run_guidance(run_id) when is_binary(run_id) do
+    "Current run note: this run is the turn you are executing now. Do not wait on it or treat it as an external runtime blocker."
+  end
+
+  defp current_run_guidance(_run_id), do: nil
 
   ## ── action contract ───────────────────────────────────────────
 
@@ -870,13 +1066,16 @@ defmodule Cympho.AgentPrompt do
     any requested side effect that is not represented in this block.
 
     Every response that advances, reviews, blocks, delegates, or completes work MUST include a `comment` action. Start the comment body with one purpose tag: `[owner_update]`, `[decision]`, `[handoff]`, `[review]`, `[blocked]`, or `[delivery]`. Then state the fields that match your role:
-    - Delivery agents: `[delivery] What happened: ... Files changed: ... Verification: ... Risks: ... Current state: ... Next decision: ...` (`Files changed` can name documents, campaigns, research artifacts, QA plans, or support assets when no code changed.)
-    - CTO review: `[review] Verdict: accepted/request changes/blocked. What happened: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ...`
-    - CEO owner update: `[owner_update] What happened: ... Business status: shipped/not shipped. Current state: ... Next decision: ... Owner decision needed: ...`
-    - Blocked work: `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ...`
+    - Delivery agents: `[delivery] What happened: ... Files changed: ... Evidence produced: ... Verification: ... Risks: ... Current state: ... Next decision: ... Restart packet: ...` (`Files changed` can name documents, campaigns, research artifacts, QA plans, or support assets when no code changed.)
+    - CTO review: `[review] Verdict: accepted/request changes/blocked. What happened: ... Evidence inspected: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ... Restart packet: ...`
+    - CEO owner update: `[owner_update] What happened: ... Business status: shipped/not shipped/ready for owner signoff. Evidence inspected: ... Verification: ... Remaining risk: ... Current state: ... Next decision: ... Owner decision needed: ... Restart packet: ...`
+      If you will also use `block_issue` only to wait for owner verification, do not call the business status `shipped`; use `ready for owner signoff` or `not shipped until owner accepts`.
+    - Blocked work: `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ... Restart packet: ...`
+      Thin `block_issue` reasons are rejected; include cause, needs, current state, next decision, and restart packet so the issue can recover later.
+      If you emit a `block_issue` action, its JSON `reason` must be the full tagged blocker note with these exact labels: `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ... Restart packet: ...`. Do not rely on the prose summary or a separate `comment` action to satisfy this; the server validates `block_issue.reason` directly.
     Never emit `attach_work_product`, `submit_review`, `approve_issue`, `request_changes`, `block_issue`, `handoff`, or a meaningful `create_issue` without a paired owner-readable `comment`. The issue page uses these comments as the owner-facing execution record and groups noisy activity by those tags.
 
-    Treat your final response summary as run memory. Include objective, actions taken, files changed or artifacts, validation, risks/gaps, current state, and next decision. Avoid vague endings like "done", "fixed", or "tests passed" without the decision context; Cympho folds your summary and tagged comment into the issue memory panel.
+    Treat your final response summary as run memory. Include objective, actions taken, files changed or artifacts, validation, risks/gaps, current state, next decision, and restart packet. Avoid vague endings like "done", "fixed", or "tests passed" without the decision context; Cympho folds your summary and tagged comment into the issue memory panel.
 
     `attach_work_product` has a strict schema: use `title` for the artifact name, optional `description` for artifact contents/summary, optional `kind`, `payload`, `metadata`, and `url`. Valid `kind` values are `code_change`, `document`, `url`, `artifact`, or `other`; for strategy plans/specs, use `document`. If you include `payload`, it must be a JSON object; put long artifact text in `description` or in `payload.text`. Do not use `name` or `content` keys for work products.
 
@@ -897,22 +1096,32 @@ defmodule Cympho.AgentPrompt do
     - `escalate` — you are the top of the org chart; the server rejects this with `:no_supervisor_to_escalate`.
 
     ### When to use `seed_mission_issues`
-    Use this action when a `mission_idle` wake fires or when a fresh mission goal needs decomposition. Required fields: `goal_id` (a mission-type Goal id) and `initiatives` (a list of `{title, description, role, priority?}` objects, max 8). Each initiative becomes a sibling issue under the mission goal and routes immediately to its `role`. Prefer this over emitting many `create_issue` actions: it captures the full plan atomically and the company can run autonomously from one batch.
+    Use this action when a `mission_idle` wake fires or when a fresh mission goal needs decomposition. Required fields: `goal_id` (a mission-type Goal id) and `initiatives` (a list of `{title, description, role, priority?}` objects, max 8). Each initiative description must include enough outcome/context/done/evidence signal for CTO spec review; the server rejects title-only or vague initiatives. Each initiative becomes a sibling issue under the mission goal and routes immediately to CTO for spec review before its proposed role receives it. Prefer this over emitting many `create_issue` actions: it captures the full plan atomically and the company can run autonomously from one batch.
 
     ### When to use `spawn_agent`
-    Hire a new agent when a `no_agent_for_role` wake fires (the dispatcher could not find anyone for an issue's role) or when the team status block above shows a role at zero capacity for upcoming work. Required fields: `name` (display name), `role` (one of: #{Enum.join(Agent.role_strings(), ", ")}). Optional: `title`, `adapter`, `instructions`. The new agent starts polling immediately. Do not spawn duplicates — if a role already has 1+ idle agents, delegate or wait instead.
+    Hire a new agent when a `no_agent_for_role` wake fires (the dispatcher could not find anyone for an issue's role) or when the team status block above shows a role at zero capacity for upcoming work. Required fields: `name` (display name), `role` (one of: #{Enum.join(Agent.role_strings(), ", ")}). Optional: `title`, `adapter`, `instructions`. The new agent starts polling immediately. Do not spawn duplicates — if a role already has 1+ idle agents, delegate or wait instead. For engineering, QA, or release work that must edit a repo, omit `adapter` unless you have a specific repo-capable runtime reason; Cympho assigns the Process Codex runtime profile (`process-codex`) by default. If you do provide `adapter`, it must be repo-capable. Do not pass chat gateway adapters or runtime profile ids as `adapter` values.
 
     ### When to use `delegate`
-    Use `delegate` (not `handoff`) when you specifically know which subordinate should pick up the work. Required fields: `to_agent_id` and `reason`. `handoff` clears the assignee and lets the dispatcher route by role; `delegate` pins the issue to the named agent and wakes them with a `manager_directive`. You must outrank the target — the server rejects equal-or-higher rank delegations.
+    Use `delegate` (not `handoff`) when you specifically know which subordinate should pick up the work. Required fields: `to_agent_id` and `reason`. Copy the full UUID from the Team status `id:` field; short IDs are rejected. `handoff` clears the assignee and lets the dispatcher route by role; `delegate` pins the issue to the named agent and wakes them with a `manager_directive`. You must outrank the target — the server rejects equal-or-higher rank delegations. For engineer, QA, or release-engineer delegation, the current issue plus `reason` must include acceptance criteria, evidence required, verification required, and definition of done; thin directives are rejected.
+
+    ### When to use `request_changes`
+    Use this when submitted work is not ready to approve. For engineer, QA, or release-engineer rework, `reason` must include `Evidence inspected:`, concrete `Required changes:` bullets, `Verification required:`, and `Next action:`. Thin review feedback is rejected because it wastes another delivery run.
 
     ### When to use `intervene`
-    Emit on `issue_stalled_in_progress` wakes when a subordinate's issue has been sitting without movement. Required: `mode` (`reassign` | `force_handoff` | `unblock` | `cancel`) and `reason`. `reassign` requires `to_agent_id` or `to_role`. Pick the cheapest recovery: `unblock` if the blocker no longer applies, `force_handoff` to put it back in the role pool, `reassign` to pin to a specific agent, `cancel` only when the work is no longer wanted.
+    Emit on `issue_stalled_in_progress` wakes when a subordinate's issue has been sitting without movement and needs rerouting or recovery. Required: `mode` (`reassign` | `force_handoff` | `unblock` | `cancel`) and `reason`. `reassign` requires `to_agent_id` or `to_role`. Pick the cheapest recovery: `unblock` if the blocker no longer applies, `force_handoff` to put it back in the role pool, `reassign` to pin to a specific agent, `cancel` only when the work is no longer wanted. For engineer, QA, or release-engineer `reassign` / `force_handoff` / `unblock`, the current issue plus `reason` must include acceptance criteria, evidence required, verification required, and definition of done; thin recovery directives are rejected. For stalled `in_review` work, first inspect the evidence and use `approve_issue` or `request_changes` when a review decision is available; use `intervene` only when the review lane itself is stuck or misrouted.
 
     ### When to use `cancel_issue`
     Strategic cancel: a piece of work is no longer needed because the mission pivoted, scope shrank, or a different approach made it obsolete. Required: `reason`. Distinct from `intervene cancel`, which is the supervisor-driven recovery on stalled work — use `cancel_issue` for proactive scope changes, `intervene` for stuck issues.
 
     ### Decomposition fields on `create_issue`
+    For engineer, QA, or release-engineer child issues, include a real delivery brief before creating the issue. The server rejects thin delivery children that do not provide at least enough acceptance/evidence/verification/done signal for the runtime to start productively.
+
     Optional fields you should use when relevant:
+      - `acceptance_criteria`: string or list. Put the observable done conditions here; the server folds this into the child issue's execution brief.
+      - `evidence_required`: string or list. Name the PR, work product, test report, artifact, or owner-readable proof the child must produce.
+      - `verification_required`: string or list. Name the command, manual scenario, review check, or evidence check the child must run before review.
+      - `definition_of_done`: string or list. State the final reviewable state, including PR/work product/test expectations for repo work.
+      - `risks`: string or list. Name scope, dependency, access, budget, or runtime risks the child owner must preserve.
       - `depends_on`: a list of sibling issue titles or issue ids — the new issue starts `:todo` but the dispatcher won't pick it up until every blocker is `:done`. Prefer this over running children in parallel when ordering matters.
       - `estimated_minutes`: rough size of the work (positive integer). The dispatcher uses this to balance load — a 30-min task and a 3-day task look identical otherwise. Default is 60 when omitted.
     """
@@ -924,25 +1133,30 @@ defmodule Cympho.AgentPrompt do
     ### Allowed actions for your role (CTO)
     - `create_issue`, `submit_review`, `approve_issue`, `request_changes`, `block_issue`, `comment`, `attach_work_product`, `set_pr_url`, `handoff`, `spawn_agent`, `delegate`, `escalate`, `intervene`, `merge_pr`, `force_fix_pr`, `cancel_issue`
 
-    Use `submit_review` (routes to CEO) when you've personally produced a small piece of work; use `approve_issue`/`request_changes` to gate engineering submissions you receive.
+    Use `submit_review` (routes to CEO) when you've personally produced a small non-repo artifact or when a repo-capable runtime actually produced the file/test/PR evidence. If this turn is running through a chat-only adapter and the issue asks for implementation, UI, code, tests, or a PR, do not "just implement" it even when it is tiny — delegate, create a repo-capable child issue, hand off by role, or block with the missing runtime need. Use `approve_issue`/`request_changes` to gate engineering submissions you receive. For engineer, QA, or release-engineer rework, `request_changes.reason` must include `Evidence inspected:`, concrete `Required changes:` bullets, `Verification required:`, and `Next action:`. `force_fix_pr.reason` follows the same concrete feedback contract. Thin review feedback is rejected because it wastes another delivery run.
 
     ### When to use `spawn_agent`
-    Hire an engineer (or another CTO peer) when engineering capacity is exhausted or when a `no_agent_for_role` wake fires for an `engineer` role. Required: `name`, `role`. You may only spawn agents of equal or lower rank.
+    Hire an engineer (or another CTO peer) when engineering capacity is exhausted or when a `no_agent_for_role` wake fires for an `engineer` role. Required: `name`, `role`. You may only spawn agents of equal or lower rank. For repo-writing engineers, omit `adapter` unless you have a specific repo-capable runtime reason; Cympho assigns the Process Codex runtime profile (`process-codex`) by default. If you do provide `adapter`, it must be repo-capable. Chat gateway adapters can plan and emit actions but cannot produce real diffs, tests, branches, or PRs.
 
     ### When to use `delegate`
-    Push a specific issue to a named engineer (`to_agent_id`) — useful when one engineer has context on a related change. Caller must outrank target.
+    Push a specific issue to a named engineer (`to_agent_id`) — useful when one engineer has context on a related change. Caller must outrank target. For engineer, QA, or release-engineer delegation, the current issue plus `reason` must include acceptance criteria, evidence required, verification required, and definition of done; thin directives are rejected.
 
     ### When to use `escalate`
-    Use this when you cannot make progress *and* a higher authority (CEO) needs to make a strategic call. Distinct from `block_issue` (external dependency) — `escalate` actively asks the boss to redirect the work or cancel.
+    Use this when you cannot make progress *and* a higher authority (CEO) needs to make a strategic call. Distinct from `block_issue` (external dependency) — `escalate` actively asks the boss to redirect the work or cancel. `reason` must include cause, attempted fix, needs, current state, next decision, and restart packet; thin escalation reasons are rejected.
 
     ### When to use `intervene`
-    Emit on `issue_stalled_in_progress` wakes for engineering work below you. Same modes as the CEO: `reassign`, `force_handoff`, `unblock`, `cancel`. Pair with a clear `[handoff]` or `[review]` comment so the next owner has context.
+    Emit on `issue_stalled_in_progress` wakes for engineering work below you when it needs rerouting or recovery. Same modes as the CEO: `reassign`, `force_handoff`, `unblock`, `cancel`. For engineer, QA, or release-engineer `reassign` / `force_handoff` / `unblock`, the current issue plus `reason` must include acceptance criteria, evidence required, verification required, and definition of done; thin recovery directives are rejected. For stalled `in_review` work, first inspect the PR/artifact evidence and use `approve_issue` or `request_changes` when a review decision is available; use `intervene` only when the review lane itself is stuck or misrouted. Pair with a clear `[handoff]`, `[review]`, or `[blocked]` comment so the next owner has context.
 
     ### Decomposition: depends_on and estimated_minutes
-    When you `create_issue` for engineers, prefer setting:
+    When you `create_issue` for engineers, include a real delivery brief. A `create_issue`-only response is incomplete: also `block_issue` the current CTO issue with a `[blocked]` comment that says it is waiting for the child issue evidence, or `handoff` if the current issue itself should move to another role. The server rejects thin engineering children that do not provide enough acceptance/evidence/verification/done signal for the runtime to start productively. Prefer setting:
+      - `acceptance_criteria`: list of observable conditions the implementation must satisfy.
+      - `evidence_required`: PR/work product/test evidence the engineer must leave before review.
+      - `verification_required`: exact test command, smoke path, manual browser check, or reviewer inspection required.
+      - `definition_of_done`: final state required before `submit_review`.
+      - `risks`: constraints or edge cases the engineer must preserve.
       - `depends_on`: list of sibling titles or issue ids that must finish first. Use it whenever ordering matters (e.g. database schema before API).
       - `estimated_minutes`: rough size in minutes. The dispatcher load-balances by sum-of-estimates per agent — without it, a 30-min ticket and a 3-day ticket look identical to the router.
-    Use `cancel_issue` (with `reason`) for strategic cancels; use `intervene cancel` only when recovering a stalled issue.
+    When you block after decomposition, the `block_issue.reason` itself must include the exact fields `Cause`, `Attempted fix`, `Needs`, `Current state`, `Next decision`, and `Restart packet`; otherwise the whole action batch rolls back, including child issue creation and spawned agents. Use `cancel_issue` (with `reason`) for strategic cancels; use `intervene cancel` only when recovering a stalled issue.
     """
     |> String.trim()
   end
@@ -955,7 +1169,7 @@ defmodule Cympho.AgentPrompt do
     Your job is to make merges and deploys safe — you don't write features. Wake reasons that should drive your turn:
       - `pr_ready_to_merge` → emit `merge_pr` once you've confirmed CI is green and approvals are in.
       - `merge_conflict_detected` → resolve the conflict on the branch, push, then emit `resolve_conflict` to ack the work.
-      - `ci_failed` → comment with the failure cause and `force_fix_pr` back to the original engineer.
+      - `ci_failed` → comment with the failure cause and `force_fix_pr` back to the original engineer. `force_fix_pr.reason` must include `Evidence inspected:`, concrete `Required changes:` bullets, `Verification required:`, and `Next action:`; thin PR-fix feedback is rejected.
 
     ### MUST NOT emit
     - `approve_issue`, `request_changes`, `block_issue` — those are governance roles' (CEO/CTO) job.
@@ -973,7 +1187,7 @@ defmodule Cympho.AgentPrompt do
     - `handoff` — only when an issue is genuinely the wrong role for you; otherwise complete the work or `submit_review` with a blocked note.
 
     ### When to use `escalate`
-    Use this when you've genuinely tried and the issue is unsolvable as scoped (ambiguous requirements, missing dependencies you cannot resolve, scope larger than this issue can hold). Optional `to_role` defaults to your supervisor's role. The server marks the issue `:blocked`, assigns it to your supervisor, and wakes them with `escalation_from_subordinate`. Do not escalate routine bugs — fix or `submit_review` with a clear blocker note.
+    Use this when you've genuinely tried and the issue is unsolvable as scoped (ambiguous requirements, missing dependencies you cannot resolve, scope larger than this issue can hold). Optional `to_role` defaults to your supervisor's role. The server marks the issue `:blocked`, assigns it to your supervisor, and wakes them with `escalation_from_subordinate`. `reason` must include cause, attempted fix, needs, current state, next decision, and restart packet; thin escalation reasons are rejected. Do not escalate routine bugs — fix or `submit_review` with a clear blocker note.
     """
     |> String.trim()
   end
@@ -1009,6 +1223,7 @@ defmodule Cympho.AgentPrompt do
     - `approve_issue`, `request_changes`, `block_issue` — governance actions reserved for CEO/CTO.
 
     Focus on reproducible evidence: test plan, coverage matrix, failed/passing scenarios, screenshots or logs summarized as artifacts, and concrete follow-up issues for defects.
+    If you escalate, `reason` must include cause, attempted fix, needs, current state, next decision, and restart packet; thin escalation reasons are rejected.
     """
     |> String.trim()
   end
@@ -1022,7 +1237,7 @@ defmodule Cympho.AgentPrompt do
     - `approve_issue`, `request_changes`, `block_issue` — governance actions reserved for CEO/CTO.
     - `set_pr_url` unless your work genuinely produced a pull request.
 
-    Produce reviewable business artifacts: research briefs, campaign plans, copy drafts, outreach lists, support responses, or customer evidence. Attach the artifact and submit review to your supervisor with the next business decision.
+    Produce reviewable business artifacts: research briefs, campaign plans, copy drafts, outreach lists, support responses, or customer evidence. Attach the artifact and submit review to your supervisor with the next business decision. If you escalate, `reason` must include cause, attempted fix, needs, current state, next decision, and restart packet; thin escalation reasons are rejected.
     """
     |> String.trim()
   end
@@ -1047,25 +1262,47 @@ defmodule Cympho.AgentPrompt do
       "actions": [
         {
           "type": "comment",
-          "body": "[owner_update] What happened: I am splitting this into product, design, and technical work before execution. Business status: not shipped yet. Current state: delegated planning. Next decision: review the Product and CTO sub-issues when they report back. Owner decision needed: none until the sub-issues return evidence."
+          "body": "[owner_update] What happened: I am splitting this into product, design, and technical work before execution. Business status: not shipped yet. Evidence inspected: owner request and current issue context. Verification: checked this needs delegated planning before implementation. Remaining risk: sub-issue evidence may change scope. Current state: delegated planning. Next decision: review the Product and CTO sub-issues when they report back. Owner decision needed: none until the sub-issues return evidence. Restart packet: next CEO turn should inspect the Product and CTO sub-issues, their evidence, and this parent issue before approving or requesting changes."
         },
         {
           "type": "create_issue",
           "title": "Define onboarding activation success criteria",
           "description": "Goal: make the owner request measurable before implementation. Role: product_manager. Success criteria: activation metric, launch scope, and definition of done are explicit.",
           "role": "product_manager",
-          "priority": "high"
+          "priority": "high",
+          "acceptance_criteria": [
+            "Activation metric is named with current baseline and target movement.",
+            "Launch scope says which onboarding steps are in and out.",
+            "Definition of done is owner-readable and measurable."
+          ],
+          "evidence_required": "Product spec work product with metric, scope, assumptions, and owner decision.",
+          "verification_required": "Review the spec against the owner request and note unresolved questions.",
+          "definition_of_done": "CEO can approve the scope or route it to CTO without asking what success means.",
+          "risks": ["Metric may need instrumentation before it can be measured."],
+          "estimated_minutes": 45
         },
         {
           "type": "create_issue",
           "title": "Plan onboarding implementation tasks",
           "description": "Goal: turn the approved onboarding scope into engineer-ready work. Role: cto. Success criteria: sub-tickets have acceptance criteria, dependencies, and verification steps.",
           "role": "cto",
-          "priority": "high"
+          "priority": "high",
+          "acceptance_criteria": [
+            "CTO reviews product scope before creating engineer tickets.",
+            "Implementation tickets include dependencies, evidence required, verification required, and review order.",
+            "Repo-capable delivery capacity is reused before hiring."
+          ],
+          "evidence_required": "CTO handoff comment plus child issue plan for engineering work.",
+          "verification_required": "Inspect current agent capacity and dependency order before dispatch.",
+          "definition_of_done": "Engineer-ready child issues exist or CTO blocks with the missing technical input.",
+          "risks": [
+            "Skipping technical review could create broad or unverifiable implementation tickets."
+          ],
+          "estimated_minutes": 60
         },
         {
           "type": "block_issue",
-          "reason": "[blocked] Cause: waiting for delegated product and CTO sub-issues to return evidence. Attempted fix: split the owner request into measurable planning work. Needs: sub-issue completion. Current state: delegated. Next decision: review evidence and approve or request changes.",
+          "reason": "[blocked] Cause: waiting for delegated product and CTO sub-issues to return evidence. Attempted fix: split the owner request into measurable planning work. Needs: sub-issue completion. Current state: delegated. Next decision: review evidence and approve or request changes. Restart packet: resume by reading the child issue evidence, verification notes, and remaining risks before closing the parent.",
           "blocker_kind": "external_dep"
         }
       ]
@@ -1085,14 +1322,33 @@ defmodule Cympho.AgentPrompt do
       "actions": [
         {
           "type": "comment",
-          "body": "[handoff] What happened: I split this into the smallest engineer-owned implementation tickets. Current state: engineers have scoped tasks. Next decision: review their PRs and verification notes. Follow-up issues: onboarding progress tracking."
+          "body": "[handoff] What happened: I split this into the smallest engineer-owned implementation tickets. Child issues: onboarding progress tracking. Dependencies: product acceptance criteria. Acceptance criteria: PR links, tests, and manual verification are recorded. Evidence/artifact: scoped child issue and definition of done. Verification: checked dependencies and review order. Remaining risk: implementation findings may require follow-up scope. Current state: engineers have scoped tasks. Next decision: review their PRs and verification notes. Review order: implementation before release. Restart packet: next CTO turn should inspect child PRs, test output, and the product acceptance criteria before approving."
         },
         {
           "type": "create_issue",
           "title": "Implement onboarding progress tracking",
           "description": "What: add progress state and UI. Acceptance criteria: steps persist, current step is visible, and regression tests cover the flow. Dependencies: product acceptance criteria. Definition of done: PR linked, tests pass, manual verification recorded.",
           "role": "engineer",
-          "priority": "high"
+          "priority": "high",
+          "acceptance_criteria": [
+            "Onboarding progress persists after reload.",
+            "The current step is visible and accessible.",
+            "Regression tests cover the happy path and reload behavior."
+          ],
+          "dependencies": ["Product acceptance criteria approved"],
+          "evidence_required": "Code-change work product, PR link, and focused test output.",
+          "verification_required": "mix test test/cympho_web/live/onboarding_live_test.exs plus a manual browser reload check.",
+          "definition_of_done": "PR is ready for CTO review with files changed, verification, risks, and restart packet named.",
+          "risks": [
+            "Progress state could desync across tabs.",
+            "Mobile layout must not hide the active step."
+          ],
+          "estimated_minutes": 90
+        },
+        {
+          "type": "block_issue",
+          "reason": "[blocked] Cause: waiting for delegated engineer child issue evidence before CTO can review or submit the plan upward. Attempted fix: created the scoped engineer child issue with acceptance criteria, evidence required, verification required, definition of done, dependencies, risks, and estimated minutes. Needs: engineer completes the child issue and submits PR/work-product evidence for CTO review. Current state: engineering work is delegated and this CTO issue is paused until child evidence returns. Next decision: CTO reviews the engineer evidence and approves, requests changes, or escalates any blocker. Restart packet: resume by inspecting the engineer child issue, attached work product or PR, test output, verification notes, and remaining risks before closing this CTO issue.",
+          "blocker_kind": "external_dep"
         }
       ]
     }
@@ -1111,7 +1367,7 @@ defmodule Cympho.AgentPrompt do
       "actions": [
         {
           "type": "comment",
-          "body": "[delivery] What happened: implemented the progress tracking path and added regression coverage. Files changed: onboarding LiveView and focused LiveView tests. Verification: ran the onboarding LiveView test file. Risks: persistence edge cases should be checked in review. Current state: ready for CTO review. Next decision: inspect the PR and test plan."
+          "body": "[delivery] What happened: implemented the progress tracking path and added regression coverage. Files changed: onboarding LiveView and focused LiveView tests. Evidence produced: code-change work product, PR link, and focused test output. Verification: ran the onboarding LiveView test file. Risks: persistence edge cases should be checked in review. Current state: ready for CTO review. Next decision: inspect the PR and test plan. Restart packet: CTO should inspect the PR diff, attached work product, and focused test output before deciding."
         },
         {
           "type": "attach_work_product",
@@ -1145,7 +1401,7 @@ defmodule Cympho.AgentPrompt do
       "actions": [
         {
           "type": "comment",
-          "body": "[delivery] What happened: finalized the product acceptance criteria and marked what the CTO needs before implementation. Files changed: product spec only. Verification: acceptance criteria cover activation metric, scope, and definition of done. Risks: engineering estimates may change scope. Current state: spec attached. Next decision: CEO or CTO should approve scope for implementation."
+          "body": "[delivery] What happened: finalized the product acceptance criteria and marked what the CTO needs before implementation. Files changed: product spec only. Evidence produced: onboarding acceptance criteria document. Verification: acceptance criteria cover activation metric, scope, and definition of done. Risks: engineering estimates may change scope. Current state: spec attached. Next decision: CEO or CTO should approve scope for implementation. Restart packet: reviewer should inspect the acceptance criteria document and scope assumptions before approving implementation."
         },
         {
           "type": "attach_work_product",
@@ -1175,7 +1431,7 @@ defmodule Cympho.AgentPrompt do
       "actions": [
         {
           "type": "comment",
-          "body": "[delivery] What happened: completed the design handoff with states, edge cases, and responsive behavior for engineering. Files changed: design artifact/spec only. Verification: checked empty, loading, error, and mobile states. Risks: implementation must preserve accessibility states. Current state: design artifact attached. Next decision: engineering can implement against the spec."
+          "body": "[delivery] What happened: completed the design handoff with states, edge cases, and responsive behavior for engineering. Files changed: design artifact/spec only. Evidence produced: onboarding flow design spec artifact. Verification: checked empty, loading, error, and mobile states. Risks: implementation must preserve accessibility states. Current state: design artifact attached. Next decision: engineering can implement against the spec. Restart packet: engineer should inspect the design artifact, responsive states, and accessibility notes before implementation."
         },
         {
           "type": "attach_work_product",
@@ -1225,14 +1481,24 @@ defmodule Cympho.AgentPrompt do
       "actions": [
         {
           "type": "comment",
-          "body": "[handoff] What happened: reviewed the issue and delegated the implementation with acceptance criteria. Current state: implementation is assigned. Next decision: CTO reviews delivery evidence."
+          "body": "[handoff] What happened: reviewed the issue and delegated the implementation with acceptance criteria. Evidence/artifact: implementation child issue. Verification: checked scope and owner request. Remaining risk: implementation may uncover technical constraints. Current state: implementation is assigned. Next decision: CTO reviews delivery evidence. Next owner: CTO. Restart packet: CTO should inspect the child issue acceptance criteria, delivered evidence, and remaining implementation risks before review."
         },
         {
           "type": "create_issue",
           "title": "Implement billing usage summary",
           "description": "Add the missing usage cards and tests.",
           "role": "engineer",
-          "priority": "high"
+          "priority": "high",
+          "acceptance_criteria": [
+            "Usage summary cards render spend, limit, remaining budget, and status.",
+            "Cards handle empty and over-budget states without layout overflow.",
+            "Focused tests cover the rendered summary values."
+          ],
+          "evidence_required": "Code-change work product or PR plus focused test output.",
+          "verification_required": "Run the smallest meaningful LiveView or context test and note any manual UI check.",
+          "definition_of_done": "Ready for CTO review with evidence, verification, and remaining risk named.",
+          "risks": ["Budget formatting may vary by currency or missing values."],
+          "estimated_minutes": 75
         },
         {
           "type": "submit_review",
@@ -1256,7 +1522,7 @@ defmodule Cympho.AgentPrompt do
       "actions": [
         {
           "type": "comment",
-          "body": "[delivery] What happened: #{comment_summary} Files changed: #{artifact_title}. Verification: checked the artifact against the issue acceptance criteria. Risks: assumptions are listed in the artifact. Current state: ready for review. Next decision: supervisor accepts, requests changes, or routes follow-up work."
+          "body": "[delivery] What happened: #{comment_summary} Files changed: #{artifact_title}. Evidence produced: #{artifact_title}. Verification: checked the artifact against the issue acceptance criteria. Risks: assumptions are listed in the artifact. Current state: ready for review. Next decision: supervisor accepts, requests changes, or routes follow-up work. Restart packet: reviewer should inspect #{artifact_title}, the issue acceptance criteria, and listed assumptions before deciding."
         },
         {
           "type": "attach_work_product",
@@ -1293,7 +1559,11 @@ defmodule Cympho.AgentPrompt do
     """
     ## Available Skills
 
-    The following skills are available for use in this session:
+    The following skills are available for use in this session. Use a skill only
+    when its declared capabilities fit the current issue, and name the skill
+    identifier in your evidence packet when it produced or verified work. Do not
+    claim skill output you did not actually inspect.
+
     #{Enum.join(skill_fragments, "\n")}
     """
     |> String.trim()
@@ -1372,35 +1642,38 @@ defmodule Cympho.AgentPrompt do
 
   ## ── history loaders ───────────────────────────────────────────
 
-  defp load_history(%{id: nil}), do: empty_history()
-
-  defp load_history(%Issue{id: id} = issue) do
+  defp load_history(%{id: id} = issue, current_run_id) when is_binary(id) do
     %{
       comments: load_recent_comments(id),
       children: load_children(id),
       siblings: load_siblings(issue),
       decisions: load_recent_decisions(field(issue, :company_id), field(issue, :goal_id)),
-      runs: load_recent_runs(id),
+      runs: load_recent_runs(id, current_run_id),
       work_products: load_recent_work_products(id)
     }
   rescue
     _ -> empty_history()
   end
 
-  defp load_history(%{id: id} = issue) when is_binary(id) do
-    %{
-      comments: load_recent_comments(id),
-      children: load_children(id),
-      siblings: load_siblings(issue),
-      decisions: load_recent_decisions(field(issue, :company_id), field(issue, :goal_id)),
-      runs: load_recent_runs(id),
-      work_products: load_recent_work_products(id)
-    }
-  rescue
-    _ -> empty_history()
-  end
+  defp load_history(_, _current_run_id), do: empty_history()
 
-  defp load_history(_), do: empty_history()
+  defp current_run_id(opts) do
+    runtime_context = Keyword.get(opts, :runtime_context)
+
+    cond do
+      is_binary(Keyword.get(opts, :run_id)) ->
+        Keyword.get(opts, :run_id)
+
+      is_map(runtime_context) and is_binary(Map.get(runtime_context, :run_id)) ->
+        Map.get(runtime_context, :run_id)
+
+      is_map(runtime_context) and is_binary(Map.get(runtime_context, "run_id")) ->
+        Map.get(runtime_context, "run_id")
+
+      true ->
+        nil
+    end
+  end
 
   defp empty_history,
     do: %{comments: [], children: [], siblings: [], decisions: [], runs: [], work_products: []}
@@ -1427,15 +1700,21 @@ defmodule Cympho.AgentPrompt do
     _ -> []
   end
 
-  defp load_recent_runs(issue_id) do
+  defp load_recent_runs(issue_id, current_run_id) do
     Run
     |> where([r], r.issue_id == ^issue_id)
+    |> maybe_exclude_run(current_run_id)
     |> order_by([r], desc: r.inserted_at, desc: r.id)
     |> limit(10)
     |> Repo.all()
   rescue
     _ -> []
   end
+
+  defp maybe_exclude_run(query, run_id) when is_binary(run_id),
+    do: where(query, [r], r.id != ^run_id)
+
+  defp maybe_exclude_run(query, _run_id), do: query
 
   defp load_recent_work_products(issue_id) do
     IssueWorkProduct

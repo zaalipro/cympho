@@ -136,8 +136,30 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   @impl true
   def handle_continue(:recover_orphans, %State{} = state) do
+    recover_orphaned_runs()
     recover_orphaned_in_progress()
     {:noreply, state}
+  end
+
+  defp recover_orphaned_runs do
+    Cympho.HeartbeatEngine.find_orphaned_runs()
+    |> Enum.each(fn run ->
+      case Cympho.HeartbeatEngine.recover_orphaned_run(run) do
+        {:ok, recovered} ->
+          Logger.warning(
+            "[Dispatcher] recovered orphaned run #{run.id} (issue=#{run.issue_id}, status=#{run.status}) → #{recovered.status}"
+          )
+
+        {:error, reason} ->
+          Logger.error(
+            "[Dispatcher] failed to recover orphaned run #{run.id}: #{inspect(reason)}"
+          )
+      end
+    end)
+  rescue
+    error ->
+      Logger.error("[Dispatcher] orphan run recovery failed: #{inspect(error)}")
+      :ok
   end
 
   # Find any issue in :in_progress with no live Orchestrator process and

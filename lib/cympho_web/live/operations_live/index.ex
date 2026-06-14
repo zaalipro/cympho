@@ -26,6 +26,16 @@ defmodule CymphoWeb.OperationsLive.Index do
     {:noreply, assign_snapshot(socket)}
   end
 
+  def handle_event("create_ceo_flow_smoke_issue", _params, socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} ->
+        create_ceo_flow_smoke_issue(socket, company_id)
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "No company selected.")}
+    end
+  end
+
   def handle_event("prioritize_dispatch", %{"issue-id" => issue_id}, socket) do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
@@ -54,6 +64,21 @@ defmodule CymphoWeb.OperationsLive.Index do
     else
       _ ->
         {:noreply, put_flash(socket, :error, "Failed to clear dispatch focus.")}
+    end
+  end
+
+  def handle_event("clear_all_dispatch_focus", _params, socket) do
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+
+    case Issues.clear_company_dispatch_focus(company_id) do
+      {:ok, %{cleared: cleared}} ->
+        {:noreply,
+         socket
+         |> assign_snapshot()
+         |> put_flash(:info, clear_all_dispatch_focus_flash(cleared))}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Failed to clear focused dispatch queue.")}
     end
   end
 
@@ -109,6 +134,29 @@ defmodule CymphoWeb.OperationsLive.Index do
     end
   end
 
+  def handle_event("clear_stale_comment_wakes", _params, socket) do
+    company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
+
+    case Wakes.consume_stale_comment_wakes(company_id,
+           older_than_minutes: RuntimeOperations.stale_comment_wake_minutes()
+         ) do
+      {:ok, 0} ->
+        {:noreply,
+         socket
+         |> assign_snapshot()
+         |> put_flash(:info, "No stale comment wakes needed clearing.")}
+
+      {:ok, cleared} ->
+        {:noreply,
+         socket
+         |> assign_snapshot()
+         |> put_flash(
+           :info,
+           "Cleared #{cleared} stale comment #{plural_noun(cleared, "wake")}."
+         )}
+    end
+  end
+
   def handle_event("preview_prompt_plan", %{"agent-id" => agent_id}, socket) do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
@@ -132,6 +180,10 @@ defmodule CymphoWeb.OperationsLive.Index do
     {:noreply, assign(socket, :prompt_plan_preview, nil)}
   end
 
+  def handle_event("close_prompt_receipt", _params, socket) do
+    {:noreply, assign(socket, :prompt_tuning_receipt, nil)}
+  end
+
   def handle_event("apply_prompt_plan", %{"agent-id" => agent_id}, socket) do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
@@ -141,6 +193,7 @@ defmodule CymphoWeb.OperationsLive.Index do
        socket
        |> assign_snapshot()
        |> assign(:prompt_plan_preview, nil)
+       |> assign(:prompt_tuning_receipt, prompt_tuning_receipt([result]))
        |> put_flash(:info, prompt_tuning_flash(result))}
     else
       {:ok, %{status: :noop} = result} ->
@@ -148,6 +201,7 @@ defmodule CymphoWeb.OperationsLive.Index do
          socket
          |> assign_snapshot()
          |> assign(:prompt_plan_preview, nil)
+         |> assign(:prompt_tuning_receipt, nil)
          |> put_flash(:info, prompt_tuning_flash(result))}
 
       {:error, :not_found} ->
@@ -180,6 +234,12 @@ defmodule CymphoWeb.OperationsLive.Index do
 
     failed = Enum.count(results, &match?({:error, _reason}, &1))
 
+    applied_results =
+      Enum.flat_map(results, fn
+        {:ok, %{status: :applied} = result} -> [result]
+        _ -> []
+      end)
+
     message =
       cond do
         applied > 0 and failed == 0 ->
@@ -198,6 +258,7 @@ defmodule CymphoWeb.OperationsLive.Index do
      socket
      |> assign_snapshot()
      |> assign(:prompt_plan_preview, nil)
+     |> assign(:prompt_tuning_receipt, prompt_tuning_receipt(applied_results))
      |> put_flash(flash_kind, message)}
   end
 
@@ -377,6 +438,83 @@ defmodule CymphoWeb.OperationsLive.Index do
     "Failed to queue #{failed} delegated #{plural_noun(failed, "work item")}."
   end
 
+  defp clear_all_dispatch_focus_flash(0), do: "No focused dispatch queue items needed clearing."
+
+  defp clear_all_dispatch_focus_flash(cleared) do
+    "Cleared #{cleared} focused dispatch #{plural_noun(cleared, "item")}."
+  end
+
+  defp create_ceo_flow_smoke_issue(socket, company_id) do
+    with {:ok, ceo} <- Agents.get_company_ceo(company_id),
+         {:ok, issue} <- Issues.create_issue(ceo_flow_smoke_issue_attrs(socket, ceo)) do
+      case Issues.prioritize_for_dispatch(issue, actor: socket.assigns[:current_user]) do
+        {:ok, focused_issue} ->
+          {:noreply,
+           socket
+           |> assign_snapshot(include_launch_issue_id: focused_issue.id)
+           |> put_flash(
+             :info,
+             "CEO to CTO flow smoke test created and queued for focused dispatch."
+           )}
+
+        {:error, _reason} ->
+          {:noreply,
+           socket
+           |> assign_snapshot(include_launch_issue_id: issue.id)
+           |> put_flash(
+             :error,
+             "CEO to CTO flow smoke test created, but dispatch focus could not be queued."
+           )}
+      end
+    else
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Create a CEO agent before running the smoke test.")}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Could not create CEO flow smoke test.")}
+    end
+  end
+
+  defp ceo_flow_smoke_issue_attrs(socket, ceo) do
+    %{
+      title: "CEO to CTO flow smoke test #{smoke_issue_suffix()}",
+      description: ceo_flow_smoke_description(),
+      status: :todo,
+      priority: :high,
+      assigned_role: "ceo",
+      assignee_id: ceo.id,
+      company_id: ceo.company_id,
+      created_by_user_id: current_user_id(socket)
+    }
+  end
+
+  defp smoke_issue_suffix do
+    DateTime.utc_now()
+    |> Calendar.strftime("%Y%m%d-%H%M%S")
+  end
+
+  defp ceo_flow_smoke_description do
+    """
+    Goal:
+    Verify the owner-to-CEO-to-CTO autonomous delegation flow end to end.
+
+    Context:
+    This controlled issue was created from Operations to test whether the CEO can accept an owner request, route technical planning through the CTO, and leave a visible parent outcome that an owner can audit.
+
+    Constraints:
+    Do not modify production code or external systems in the CEO turn. Keep this to planning, delegation, handoff, or governance output. If execution is needed, the CEO should delegate it instead of claiming implementation.
+
+    Definition of done:
+    Create or delegate exactly one CTO-owned child issue for technical planning with acceptance criteria, evidence required, verification required, definition of done, dependency order, estimated minutes, and review owner. Mark this parent blocked as waiting on the delegated CTO evidence and leave a tagged parent comment with the restart packet.
+
+    CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`):
+    Prefer a `[handoff]` outcome: name the CTO child, why it advances this smoke test, the exact routing target, expected evidence, verification gate, remaining risk, next decision, and restart packet. Use `[blocked]` only if the CEO cannot create or route the CTO child.
+
+    Evidence to inspect after the run:
+    Operations CEO flow verification, delegated work queue, CEO outcome monitor, the created CTO child issue, and the parent blocker/restart packet.
+    """
+  end
+
   defp assign_snapshot(socket, opts \\ []) do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
 
@@ -399,19 +537,24 @@ defmodule CymphoWeb.OperationsLive.Index do
     |> assign(:capacity, snapshot.capacity)
     |> assign(:host, snapshot.host)
     |> assign(:runtime_enablement, snapshot.runtime_enablement)
+    |> assign(:launch_plan, snapshot.launch_plan)
     |> assign(:launch_preview, snapshot.launch_preview)
     |> assign(:ceo_outcomes, snapshot.ceo_outcomes)
+    |> assign(:ceo_flow, snapshot.ceo_flow)
     |> assign(:delegated_work, snapshot.delegated_work)
     |> assign(:owner_signoffs, snapshot.owner_signoffs)
     |> assign(:doctor, snapshot.doctor)
+    |> assign(:org_health, snapshot.org_health)
     |> assign(:health, snapshot.health)
     |> assign(:pressure_agents, snapshot.pressure_agents)
     |> assign(:prompt_radar, snapshot.prompt_radar)
     |> assign(:review_nudges, snapshot.review_nudges)
+    |> assign(:wake_queue, snapshot.wake_queue)
     |> assign(:contract_failures, snapshot.contract_failures)
     |> assign(:recent_failures, snapshot.recent_failures)
     |> assign(:next_actions, snapshot.next_actions)
     |> assign_new(:prompt_plan_preview, fn -> nil end)
+    |> assign_new(:prompt_tuning_receipt, fn -> nil end)
   end
 
   defp prompt_watchlist_agents(nil), do: []
@@ -430,20 +573,27 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp apply_prompt_tuning(agent, socket) do
     case AgentInstructionTuner.apply(agent) do
       {:ok, instructions, plan} ->
+        release = prompt_tuning_release(agent, plan)
+
         with {:ok, updated_agent} <- Agents.update_agent(agent, %{instructions: instructions}),
              {:ok, revision} <-
                Agents.create_config_revision(updated_agent, %{
                  source: "prompt_tuning",
-                 created_by_user_id: current_user_id(socket)
+                 created_by_user_id: current_user_id(socket),
+                 studio_audits_extra: %{"tuning_release" => release}
                }) do
           {:ok,
            %{
              status: :applied,
              agent_name: agent.name,
              patch_count: plan.patch_count,
+             patch_titles: Enum.map(plan.patches, & &1.title),
              from_score: plan.current_score,
              to_score: plan.projected_score,
-             revision: revision.version
+             revision: revision.version,
+             expected_effect: release["expected_effect"],
+             validation_checks: release["validation_checks"],
+             rollback: release["rollback"]
            }}
         end
 
@@ -453,10 +603,106 @@ defmodule CymphoWeb.OperationsLive.Index do
            status: :noop,
            agent_name: agent.name,
            patch_count: plan.patch_count,
+           patch_titles: Enum.map(plan.patches, & &1.title),
            from_score: plan.current_score,
-           to_score: plan.projected_score
+           to_score: plan.projected_score,
+           validation_checks: plan.validation_checks
          }}
     end
+  end
+
+  defp prompt_tuning_release(agent, plan) do
+    patch_titles = Enum.map(plan.patches, & &1.title)
+
+    %{
+      "kind" => "prompt_tuning_release",
+      "agent_name" => agent.name,
+      "role" => role_label(agent.role),
+      "adapter" => adapter_label(agent.adapter),
+      "patch_count" => plan.patch_count,
+      "patches" =>
+        Enum.map(plan.patches, fn patch ->
+          %{
+            "id" => patch.id,
+            "title" => patch.title,
+            "reason" => patch.reason
+          }
+        end),
+      "score" => %{
+        "from" => plan.current_score,
+        "to" => plan.projected_score,
+        "from_status" => plan.current_status_label,
+        "to_status" => plan.projected_status_label
+      },
+      "expected_effect" => prompt_tuning_expected_effect(plan.patches),
+      "validation_checks" => plan.validation_checks,
+      "rollback" =>
+        "Use the agent Instruction Studio revision history to restore the previous prompt if the next run regresses."
+    }
+    |> Map.put("summary", prompt_tuning_release_summary(agent.name, patch_titles, plan))
+  end
+
+  defp prompt_tuning_release_summary(agent_name, patch_titles, plan) do
+    "#{agent_name}: #{Enum.join(patch_titles, ", ")} raised prompt guardrails from #{plan.current_score}/100 to #{plan.projected_score}/100."
+  end
+
+  defp prompt_tuning_expected_effect(patches) do
+    effects =
+      patches
+      |> Enum.map(&prompt_tuning_effect(&1.id))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    case effects do
+      [] -> "No behavior change expected."
+      [effect] -> effect
+      effects -> Enum.join(effects, " ")
+    end
+  end
+
+  defp prompt_tuning_effect("owner-memory"),
+    do: "Runs should leave clearer owner-readable issue memory."
+
+  defp prompt_tuning_effect("operating-loop"),
+    do: "Runs should follow a more consistent orient, decide, act, verify, report loop."
+
+  defp prompt_tuning_effect("ceo-delegation"),
+    do: "CEO turns should produce clearer owner updates, handoffs, or blockers."
+
+  defp prompt_tuning_effect("ceo-owner-signoff"),
+    do: "CEO signoff should stay distinct from generic blocked work."
+
+  defp prompt_tuning_effect("cto-review"),
+    do: "CTO turns should split and review work with stronger evidence."
+
+  defp prompt_tuning_effect("delivery-evidence"),
+    do: "Delivery turns should attach more reviewable evidence."
+
+  defp prompt_tuning_effect("mission-alignment"),
+    do: "New work should stay tied to goals and business outcomes."
+
+  defp prompt_tuning_effect("patrol-recovery"),
+    do: "Stalled-work wakes should produce decisive recovery actions."
+
+  defp prompt_tuning_effect("blocked-work"),
+    do: "Blocked turns should name cause, attempted fix, needs, current state, and next decision."
+
+  defp prompt_tuning_effect("pr-quality"),
+    do: "PR work should produce cleaner branch names, titles, bodies, and task lists."
+
+  defp prompt_tuning_effect("stop-condition"),
+    do: "Agents should stop only after durable issue state is recorded."
+
+  defp prompt_tuning_effect(_id), do: nil
+
+  defp prompt_tuning_receipt([]), do: nil
+
+  defp prompt_tuning_receipt(results) do
+    %{
+      agent_count: length(results),
+      patch_count: Enum.reduce(results, 0, &(&1.patch_count + &2)),
+      agents: results
+    }
   end
 
   defp prompt_plan_preview(agents, scope) do
@@ -477,7 +723,8 @@ defmodule CymphoWeb.OperationsLive.Index do
           projected_score: plan.projected_score,
           projected_status_label: plan.projected_status_label,
           patch_count: plan.patch_count,
-          patches: plan.patches
+          patches: plan.patches,
+          validation_checks: plan.validation_checks
         }
       end)
 
@@ -567,6 +814,35 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp capacity_badge_class(:high), do: "border-brand/25 bg-brand/10 text-brand"
   defp capacity_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
+  defp repo_delivery_card_class(:ready), do: "border-emerald-500/20 bg-emerald-500/[0.04]"
+  defp repo_delivery_card_class(:text_only), do: "border-brand/25 bg-brand/[0.06]"
+  defp repo_delivery_card_class(:missing), do: "border-amber-500/25 bg-amber-500/[0.06]"
+  defp repo_delivery_card_class(_), do: "border-border bg-surface/50"
+
+  defp repo_delivery_badge_class(:ready),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp repo_delivery_badge_class(:text_only), do: "border-brand/25 bg-brand/10 text-brand"
+
+  defp repo_delivery_badge_class(:missing),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  defp repo_delivery_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  defp repo_delivery_action_class(:ready),
+    do:
+      "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+
+  defp repo_delivery_action_class(:text_only),
+    do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
+
+  defp repo_delivery_action_class(:missing),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
+
+  defp repo_delivery_action_class(_),
+    do:
+      "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+
   defp action_class(:ok), do: "border-border bg-surface"
   defp action_class(:attention), do: "border-border bg-surface"
   defp action_class(:danger), do: "border-border bg-surface"
@@ -622,6 +898,28 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp enablement_badge_class(:blocked), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   defp enablement_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
+  defp launch_plan_card_class(:danger), do: "border-brand/25 bg-brand/[0.06]"
+  defp launch_plan_card_class(:attention), do: "border-amber-500/25 bg-amber-500/[0.06]"
+  defp launch_plan_card_class(:brand), do: "border-sky-500/25 bg-sky-500/[0.06]"
+  defp launch_plan_card_class(:success), do: "border-emerald-500/25 bg-emerald-500/[0.06]"
+  defp launch_plan_card_class(_), do: "border-border bg-surface/50"
+
+  defp launch_plan_badge_class(:danger), do: "border-brand/25 bg-brand/10 text-brand"
+
+  defp launch_plan_badge_class(:attention),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  defp launch_plan_badge_class(:brand), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+
+  defp launch_plan_badge_class(:success),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp launch_plan_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  defp launch_plan_step_class(:active), do: "border-sky-500/25 bg-sky-500/[0.06]"
+  defp launch_plan_step_class(:pending), do: "border-border bg-canvas/60"
+  defp launch_plan_step_class(_), do: "border-border bg-canvas/60"
+
   defp launch_priority_class(:critical), do: "border-brand/25 bg-brand/10 text-brand"
   defp launch_priority_class(:high), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   defp launch_priority_class(:medium), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
@@ -638,13 +936,24 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp launch_order_class(_), do: "border-border bg-panel text-text-tertiary"
 
   defp launch_preview_summary(%{status: :review}, launch_preview) do
-    "Review mode is on. This preview shows queue order and preflight checks before you start runtime; focused commands still run one issue first."
+    focused_count = Map.get(launch_preview, :focused_count, 0)
+
+    if focused_count > 0 do
+      "Review mode is on. #{focused_dispatch_phrase(focused_count)}; each focused command still runs one issue, and broad launch will take the focused queue first."
+    else
+      "Review mode is on. This preview shows queue order and preflight checks before you start runtime; focused commands still run one issue first."
+    end
     |> maybe_append_launch_limit(launch_preview)
   end
 
   defp launch_preview_summary(_runtime_mode, launch_preview) do
     "Dispatch can start up to #{launch_preview.max_concurrent} #{plural_noun(launch_preview.max_concurrent, "issue")} per poll. This preview mirrors the dispatcher priority order before any agent is started."
   end
+
+  defp focused_dispatch_phrase(1), do: "1 issue is queued for focused dispatch"
+
+  defp focused_dispatch_phrase(count),
+    do: "#{count} #{plural_noun(count, "issue")} are queued for focused dispatch"
 
   defp maybe_append_launch_limit(summary, %{max_concurrent: max_concurrent}) do
     "#{summary} Runtime will take up to #{max_concurrent} #{plural_noun(max_concurrent, "issue")} per poll after launch."
@@ -678,6 +987,31 @@ defmodule CymphoWeb.OperationsLive.Index do
 
   defp preflight_action_target_label(_action), do: "Fix"
 
+  defp delegated_work_setup_action?(work) when is_map(work) do
+    not Map.get(work, :queueable?, false) and
+      (Map.get(work, :setup_blocked?, false) or Map.get(work, :preflight_attention?, false)) and
+      present?(preflight_action_target_path(get_in(work, [:preflight, :first_action])))
+  end
+
+  defp delegated_work_setup_action?(_work), do: false
+
+  defp delegated_work_setup_action_label(%{setup_blocked?: true}), do: "Fix setup first"
+
+  defp delegated_work_setup_action_label(%{preflight: %{first_action: action}}),
+    do: preflight_action_target_label(action)
+
+  defp delegated_work_setup_action_label(_work), do: "Review setup"
+
+  defp delegated_work_setup_action_class(%{setup_blocked?: true}) do
+    "rounded-md border border-brand/25 bg-brand/10 px-2.5 py-1.5 text-[11px] font-510 text-brand transition hover:bg-brand/15"
+  end
+
+  defp delegated_work_setup_action_class(_work) do
+    "rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] font-510 text-amber-200 transition hover:bg-amber-500/15"
+  end
+
+  defp present?(value), do: value not in [nil, ""]
+
   defp preflight_badge_class(:ready),
     do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
 
@@ -689,6 +1023,18 @@ defmodule CymphoWeb.OperationsLive.Index do
 
   defp preflight_badge_class(:blocked), do: "border-brand/25 bg-brand/10 text-brand"
   defp preflight_badge_class(_), do: "border-border bg-panel text-text-tertiary"
+
+  defp owner_brief_readiness_badge_class(:ready),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp owner_brief_readiness_badge_class(:draft),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  defp owner_brief_readiness_badge_class(:thin),
+    do: "border-brand/25 bg-brand/10 text-brand"
+
+  defp owner_brief_readiness_badge_class(_),
+    do: "border-border bg-panel text-text-tertiary"
 
   defp readiness_dot_class(:ok), do: "h-1.5 w-1.5 rounded-full bg-emerald-400"
   defp readiness_dot_class(:info), do: "h-1.5 w-1.5 rounded-full bg-sky-400"
@@ -709,6 +1055,13 @@ defmodule CymphoWeb.OperationsLive.Index do
     do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
 
   defp contract_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  defp contract_queue_card_class(:missing), do: "border-brand/35 bg-brand/[0.07]"
+
+  defp contract_queue_card_class(:attention),
+    do: "border-amber-500/25 bg-amber-500/[0.06]"
+
+  defp contract_queue_card_class(_), do: "border-border bg-surface"
 
   defp prompt_status_badge_class(:ready),
     do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
@@ -770,6 +1123,65 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp health_status_label(:unavailable), do: "Unavailable"
   defp health_status_label(status), do: role_label(status)
 
+  defp ceo_outcome_signal_count(counts) do
+    [
+      :owner_updates,
+      :owner_acceptances,
+      :handoffs,
+      :decompositions,
+      :governance
+    ]
+    |> Enum.map(&Map.get(counts, &1, 0))
+    |> Enum.sum()
+  end
+
+  defp ceo_outcome_metric_cards(counts) do
+    [
+      %{
+        label: "Owner updates",
+        value: Map.get(counts, :owner_updates, 0),
+        detail: "CEO status notes",
+        value_class: "text-emerald-300"
+      },
+      %{
+        label: "Acceptances",
+        value: Map.get(counts, :owner_acceptances, 0),
+        detail: "Owner signoffs",
+        value_class: "text-teal-300"
+      },
+      %{
+        label: "Handoffs",
+        value: Map.get(counts, :handoffs, 0),
+        detail: "Delegated next steps",
+        value_class: "text-sky-300"
+      },
+      %{
+        label: "Splits",
+        value: Map.get(counts, :decompositions, 0),
+        detail: "Child issue plans",
+        value_class: "text-brand"
+      },
+      %{
+        label: "Decisions",
+        value: Map.get(counts, :governance, 0),
+        detail: "Governance moves",
+        value_class: "text-violet-300"
+      },
+      %{
+        label: "Active",
+        value: Map.get(counts, :running, 0),
+        detail: "CEO runs in flight",
+        value_class: "text-sky-300"
+      },
+      %{
+        label: "Attention",
+        value: Map.get(counts, :attention, 0),
+        detail: "Failed or thin turns",
+        value_class: "text-amber-300"
+      }
+    ]
+  end
+
   defp ceo_outcome_badge_class(:owner_update),
     do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
 
@@ -804,6 +1216,77 @@ defmodule CymphoWeb.OperationsLive.Index do
     do: "border-border bg-surface text-text-tertiary"
 
   defp ceo_outcome_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  defp ceo_receipt_badge_class(:ok),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp ceo_receipt_badge_class(:attention),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  defp ceo_receipt_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  defp repairable_ceo_outcome?(%{outcome: outcome}) when outcome in [:silent, :failed], do: true
+  defp repairable_ceo_outcome?(%{receipt: %{status: :attention}}), do: true
+  defp repairable_ceo_outcome?(_outcome), do: false
+
+  defp ceo_outcome_repair_label(%{receipt: %{status: :attention}}),
+    do: "Fix receipt and relaunch"
+
+  defp ceo_outcome_repair_label(_outcome), do: "Fix and relaunch"
+
+  defp ceo_outcome_repair_detail(%{receipt: %{status: :attention} = receipt}) do
+    Map.get(receipt, :repair_prompt) ||
+      "Fix the receipt gap above, then restart runtime focused on this issue."
+  end
+
+  defp ceo_outcome_repair_detail(_outcome) do
+    "Fix the feedback above, then restart runtime focused on this issue."
+  end
+
+  defp ceo_flow_badge_class(:setup), do: "border-brand/25 bg-brand/10 text-brand"
+  defp ceo_flow_badge_class(:blocked), do: "border-brand/25 bg-brand/10 text-brand"
+  defp ceo_flow_badge_class(:attention), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  defp ceo_flow_badge_class(:owner_signoff), do: "border-teal-500/25 bg-teal-500/10 text-teal-300"
+  defp ceo_flow_badge_class(:running), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+  defp ceo_flow_badge_class(:launch_ready), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+
+  defp ceo_flow_badge_class(:delegated_work),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  defp ceo_flow_badge_class(:observed),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp ceo_flow_badge_class(:needs_issue), do: "border-border bg-surface text-text-tertiary"
+  defp ceo_flow_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  defp ceo_flow_action_class(:danger),
+    do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
+
+  defp ceo_flow_action_class(:attention),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
+
+  defp ceo_flow_action_class(:brand),
+    do: "border-sky-500/25 bg-sky-500/10 text-sky-200 hover:bg-sky-500/15"
+
+  defp ceo_flow_action_class(:success),
+    do: "border-teal-500/25 bg-teal-500/10 text-teal-200 hover:bg-teal-500/15"
+
+  defp ceo_flow_action_class(_),
+    do: "border-border bg-surface text-text-secondary hover:bg-surface-hover"
+
+  defp ceo_flow_step_class(:complete), do: "border-emerald-500/25 bg-emerald-500/[0.06]"
+  defp ceo_flow_step_class(:active), do: "border-sky-500/25 bg-sky-500/[0.06]"
+  defp ceo_flow_step_class(:attention), do: "border-amber-500/25 bg-amber-500/[0.06]"
+  defp ceo_flow_step_class(:blocked), do: "border-brand/25 bg-brand/[0.07]"
+  defp ceo_flow_step_class(:missing), do: "border-border bg-surface/45"
+  defp ceo_flow_step_class(_), do: "border-border bg-surface/45"
+
+  defp ceo_flow_step_value_class(:complete), do: "text-emerald-300"
+  defp ceo_flow_step_value_class(:active), do: "text-sky-300"
+  defp ceo_flow_step_value_class(:attention), do: "text-amber-300"
+  defp ceo_flow_step_value_class(:blocked), do: "text-brand"
+  defp ceo_flow_step_value_class(:missing), do: "text-text-quaternary"
+  defp ceo_flow_step_value_class(_), do: "text-text-tertiary"
 
   defp role_label(role), do: Agent.role_label(role)
 
@@ -857,6 +1340,31 @@ defmodule CymphoWeb.OperationsLive.Index do
   end
 
   defp format_memory(_), do: "unknown"
+
+  defp new_agent_query_for_gap(gap) do
+    %{
+      role: to_string(gap.role),
+      name: gap.label,
+      runtime_profile_id: "openai-chat-qwen-dashscope-flash",
+      return_to: "/operations#runtime-staffing-gaps"
+    }
+    |> maybe_put_parent_query(gap.suggested_parent)
+  end
+
+  defp maybe_put_parent_query(query, %{id: id}) when is_binary(id),
+    do: Map.put(query, :parent_id, id)
+
+  defp maybe_put_parent_query(query, _), do: query
+
+  defp first_staffing_gap_label(%{role_demand_gaps: [gap | _]}), do: "Hire #{gap.label}"
+  defp first_staffing_gap_label(_), do: "Hire role"
+
+  defp issue_example_label(%{identifier: identifier, title: title})
+       when is_binary(identifier) and identifier != "" do
+    "#{identifier} · #{title}"
+  end
+
+  defp issue_example_label(%{title: title}), do: title || "Untitled issue"
 
   defp plural_noun(1, singular, _plural), do: singular
   defp plural_noun(_count, _singular, plural), do: plural

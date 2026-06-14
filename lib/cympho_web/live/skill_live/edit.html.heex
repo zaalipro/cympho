@@ -1,4 +1,4 @@
-<.page size="form">
+<.page size="wide">
   <.header title={@page_title} subtitle="Update skill metadata and availability.">
     <:actions>
       <.app_link
@@ -10,33 +10,170 @@
     </:actions>
   </.header>
 
-  <.panel>
-    <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-5 p-5">
-      <div class="grid gap-5 sm:grid-cols-2">
-        <.input field={@form[:name]} label="Name" required />
-        <.input field={@form[:identifier]} label="Identifier" required />
+  <.form
+    for={@form}
+    phx-change="validate"
+    phx-submit="save"
+    class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
+  >
+    <.panel class="overflow-hidden">
+      <div class="border-b border-border px-5 py-4">
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Skill capability plan
+        </p>
+        <h2 class="mt-1 text-lg font-590 text-text-primary">Maintain an agent-ready skill</h2>
+        <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
+          Keep the manifest, scope, and usage brief aligned with how agents should invoke this
+          capability.
+        </p>
       </div>
 
-      <.input field={@form[:description]} label="Description" type="textarea" rows={5} />
+      <div class="space-y-6 p-5">
+        <section class="space-y-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Capability brief
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              Keep the trigger condition and expected evidence clear for agent prompts.
+            </p>
+          </div>
 
-      <div class="grid gap-5 sm:grid-cols-2">
-        <.input field={@form[:version]} label="Version" />
-        <.input field={@form[:author]} label="Author" />
+          <div class="grid gap-5 sm:grid-cols-2">
+            <.input field={@form[:name]} label="Name" required />
+            <.input field={@form[:identifier]} label="Identifier" required />
+          </div>
+
+          <.input field={@form[:description]} label="Usage brief" type="textarea" rows={5} />
+        </section>
+
+        <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Runtime manifest
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              Manifest changes affect health checks and future agent routing.
+            </p>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-2">
+            <.input
+              name="skill[entrypoint]"
+              label="Entrypoint"
+              value={CymphoWeb.SkillLive.FormHelpers.manifest_entrypoint(@form[:manifest].value)}
+              required
+            />
+            <.input
+              name="skill[capabilities]"
+              label="Capabilities"
+              value={CymphoWeb.SkillLive.FormHelpers.capabilities_value(@form[:manifest].value)}
+              placeholder="repo_audit, test_plan"
+            />
+          </div>
+        </section>
+
+        <section class="space-y-4">
+          <div>
+            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              Scope and ownership
+            </p>
+            <p class="mt-1 text-sm text-text-tertiary">
+              Limit the skill to the project where it is safe, or keep it company-wide.
+            </p>
+          </div>
+
+          <div class="grid gap-5 sm:grid-cols-2">
+            <.input field={@form[:version]} label="Version" />
+            <.input field={@form[:author]} label="Author" />
+            <.input
+              type="select"
+              field={@form[:project_id]}
+              label="Project scope"
+              value={@form[:project_id].value || ""}
+              options={@project_options}
+            />
+            <.input
+              type="select"
+              field={@form[:enabled]}
+              label="Availability"
+              value={
+                to_string(if is_nil(@form[:enabled].value), do: true, else: @form[:enabled].value)
+              }
+              options={[{"Enabled", "true"}, {"Disabled", "false"}]}
+            />
+          </div>
+        </section>
       </div>
+    </.panel>
 
-      <.input field={@form[:enabled]} type="checkbox" label="Enabled" />
-
-      <:actions>
-        <div class="flex items-center justify-end gap-2 border-t border-border pt-5">
-          <.app_link
-            navigate={~p"/skills/#{@skill.id}"}
-            class="rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-          >
-            Cancel
-          </.app_link>
-          <.button type="submit" variant="primary">Save Skill</.button>
+    <aside class="space-y-4">
+      <section
+        data-testid="skill-setup-checklist"
+        class="rounded-xl border border-border bg-panel p-4 shadow-card"
+      >
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Maintenance checklist
+        </p>
+        <div class="mt-4 space-y-3">
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
+              1
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Usage brief is current</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Agents need a crisp reason to invoke this skill.
+              </p>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
+              2
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Manifest stays valid</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Entrypoint and capabilities should match the implementation.
+              </p>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
+              3
+            </span>
+            <div>
+              <p class="text-sm font-590 text-text-primary">Assignments still fit</p>
+              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                Review assigned agents after changing scope or capabilities.
+              </p>
+            </div>
+          </div>
         </div>
-      </:actions>
-    </.simple_form>
-  </.panel>
+      </section>
+
+      <section class="rounded-xl border border-brand/25 bg-brand/10 p-4">
+        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
+          Edit behavior
+        </p>
+        <p class="mt-2 text-sm font-590 text-text-primary">Updates manifest metadata</p>
+        <p class="mt-1 text-xs leading-5 text-text-tertiary">
+          Existing settings are preserved while visible manifest fields are refreshed from this
+          form.
+        </p>
+      </section>
+    </aside>
+
+    <div class="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end lg:col-span-2">
+      <.app_link
+        navigate={~p"/skills/#{@skill.id}"}
+        class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+      >
+        Cancel
+      </.app_link>
+      <.button type="submit" variant="primary" class="min-h-[40px] w-full sm:w-auto">
+        Save Skill
+      </.button>
+    </div>
+  </.form>
 </.page>

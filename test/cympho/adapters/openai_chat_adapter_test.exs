@@ -5,6 +5,35 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
 
   alias Cympho.Adapters.OpenAIChatAdapter
 
+  describe "normalize_chat_url/1" do
+    test "accepts base endpoints and full chat completions endpoints" do
+      assert OpenAIChatAdapter.normalize_chat_url(
+               "https://dashscope.example.com/compatible-mode/v1"
+             ) ==
+               "https://dashscope.example.com/compatible-mode/v1/chat/completions"
+
+      assert OpenAIChatAdapter.normalize_chat_url(
+               "https://dashscope.example.com/compatible-mode/v1/"
+             ) ==
+               "https://dashscope.example.com/compatible-mode/v1/chat/completions"
+
+      assert OpenAIChatAdapter.normalize_chat_url(
+               "https://dashscope.example.com/compatible-mode/v1/chat/completions/"
+             ) ==
+               "https://dashscope.example.com/compatible-mode/v1/chat/completions"
+    end
+
+    test "preserves query parameters while normalizing the path" do
+      assert OpenAIChatAdapter.normalize_chat_url("https://example.com/v1?region=intl") ==
+               "https://example.com/v1/chat/completions?region=intl"
+
+      assert OpenAIChatAdapter.normalize_chat_url(
+               "https://example.com/v1/chat/completions?region=intl"
+             ) ==
+               "https://example.com/v1/chat/completions?region=intl"
+    end
+  end
+
   describe "parse_chat_response/1" do
     test "returns orchestrator text content from chat completions response" do
       body =
@@ -100,6 +129,58 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
   end
 
   describe "run/4" do
+    test "uses an evidence-oriented default system prompt" do
+      test_pid = self()
+
+      with_mock Finch,
+        build: fn :post, url, headers, body ->
+          send(test_pid, {:chat_request, url, headers, Jason.decode!(body)})
+          :request
+        end,
+        stream: fn :request, Cympho.Finch, init, fun, receive_timeout: _timeout ->
+          body =
+            Jason.encode!(%{
+              "choices" => [
+                %{"message" => %{"content" => "[owner_update] Evidence recorded."}}
+              ]
+            })
+
+          acc = fun.({:status, 200}, init)
+          acc = fun.({:data, body}, acc)
+          {:ok, acc}
+        end do
+        session_id =
+          OpenAIChatAdapter.run(
+            %{id: "issue-1", title: "Test issue", description: "Test description"},
+            "agent-1",
+            self(),
+            config: %{
+              "endpoint" => "https://dashscope.example.com/compatible-mode/v1",
+              "api_key" => "test-key",
+              "model" => "qwen3.7-plus",
+              "timeout" => 10
+            }
+          )
+
+        assert_receive {:session_started, ^session_id}, 500
+
+        assert_receive {:chat_request, url, headers, payload}, 1_000
+        assert url == "https://dashscope.example.com/compatible-mode/v1/chat/completions"
+        assert {"authorization", "Bearer test-key"} in headers
+
+        system_prompt = payload["messages"] |> hd() |> Map.fetch!("content")
+        assert system_prompt =~ "Evidence produced"
+        assert system_prompt =~ "Evidence inspected"
+        assert system_prompt =~ "Restart packet"
+        assert system_prompt =~ "do not expose secrets"
+        assert system_prompt =~ "cympho-actions JSON only"
+
+        assert_receive {:turn_completed, ^session_id,
+                        %{"content" => [%{"text" => "[owner_update] Evidence recorded."}]}},
+                       1_000
+      end
+    end
+
     test "reports Finch stream transport errors instead of crashing" do
       with_mock Finch,
         build: fn _, _, _, _ -> :request end,

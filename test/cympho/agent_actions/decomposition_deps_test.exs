@@ -1,10 +1,8 @@
 defmodule Cympho.AgentActions.DecompositionDepsTest do
   use Cympho.DataCase, async: false
 
-  alias Cympho.{AgentActions, Agents, Companies, Issues}
-  alias Cympho.Issues.Issue
+  alias Cympho.{AgentActions, Companies, Issues}
   alias Cympho.Repo
-  import Ecto.Query
 
   setup do
     {:ok,
@@ -25,27 +23,54 @@ defmodule Cympho.AgentActions.DecompositionDepsTest do
   end
 
   describe "create_issue with depends_on (by sibling title)" do
+    test "create_issue-only decomposition blocks the parent waiting on delegated work", %{
+      cto: cto,
+      issue: issue
+    } do
+      {:ok, _} = Issues.force_release_issue(issue, :todo)
+      {:ok, cto_issue} = Issues.checkout_issue(issue, cto, :cto)
+
+      assert {:ok,
+              %{issue: final_issue, results: [%{type: "create_issue", identifier: child_ref}]}} =
+               AgentActions.execute(cto_issue, cto, [
+                 delivery_issue_action(%{
+                   "title" => "Implement delegated child",
+                   "estimated_minutes" => 45
+                 })
+               ])
+
+      assert final_issue.status == :blocked
+      assert final_issue.assignee_id == nil
+
+      reloaded = Issues.get_issue!(cto_issue.id)
+      assert reloaded.status == :blocked
+      assert reloaded.assignee_id == nil
+
+      assert Enum.any?(Cympho.Comments.list_comments(cto_issue.id), fn comment ->
+               comment.author_type == "agent" and
+                 comment.body =~ "[blocked]" and
+                 comment.body =~ "Waiting for delegated work" and
+                 comment.body =~ child_ref
+             end)
+    end
+
     test "creates two siblings; second blocked by first", %{cto: cto, issue: issue} do
       # Re-checkout to CTO so unresolved_current_issue? logic is happy.
       {:ok, _} = Issues.force_release_issue(issue, :todo)
       {:ok, cto_issue} = Issues.checkout_issue(issue, cto, :cto)
 
       actions = [
-        %{
-          "type" => "create_issue",
+        delivery_issue_action(%{
           "title" => "Define schema",
           "description" => "DB schema first",
-          "role" => "engineer",
           "estimated_minutes" => 30
-        },
-        %{
-          "type" => "create_issue",
+        }),
+        delivery_issue_action(%{
           "title" => "Build API",
           "description" => "API depends on schema",
-          "role" => "engineer",
           "depends_on" => ["Define schema"],
           "estimated_minutes" => 90
-        }
+        })
       ]
 
       {:ok, %{results: [first, second]}} = AgentActions.execute(cto_issue, cto, actions)
@@ -70,12 +95,10 @@ defmodule Cympho.AgentActions.DecompositionDepsTest do
       {:ok, cto_issue} = Issues.checkout_issue(issue, cto, :cto)
 
       actions = [
-        %{
-          "type" => "create_issue",
+        delivery_issue_action(%{
           "title" => "Standalone",
-          "role" => "engineer",
           "depends_on" => ["Does Not Exist"]
-        }
+        })
       ]
 
       {:ok, %{results: [r]}} = AgentActions.execute(cto_issue, cto, actions)
@@ -130,5 +153,17 @@ defmodule Cympho.AgentActions.DecompositionDepsTest do
 
   ## helpers
 
-  defp _silence_unused_var, do: %Issue{}
+  defp delivery_issue_action(attrs) do
+    Map.merge(
+      %{
+        "type" => "create_issue",
+        "role" => "engineer",
+        "acceptance_criteria" => "Child issue completes the scoped delivery task.",
+        "evidence_required" => "Code diff, work product, or delivery note with evidence.",
+        "verification_required" => "Run a focused verification or name the blocker.",
+        "definition_of_done" => "Ready for review with evidence and risk named."
+      },
+      attrs
+    )
+  end
 end

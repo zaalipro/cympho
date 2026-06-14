@@ -1,7 +1,7 @@
 defmodule Cympho.CompaniesTest do
   use Cympho.DataCase
 
-  alias Cympho.Companies
+  alias Cympho.{AgentInstructionStudio, Companies}
   alias Cympho.Companies.{Company, CompanyInvite, JoinRequest}
   alias Cympho.Goals.Goal
   alias Cympho.Projects
@@ -358,10 +358,22 @@ defmodule Cympho.CompaniesTest do
       assert ceo.role == :ceo
       assert ceo.instructions =~ "Product"
       assert ceo.instructions =~ "Design"
+      assert ceo.instructions =~ "## Owner-readable memory"
+      assert ceo.instructions =~ "## CEO delegation"
+      assert ceo.instructions =~ "## CEO owner signoff loop"
+      assert ceo.instructions =~ "Coordination packet"
+      assert ceo.instructions =~ "target role/agent, dependency order, estimated minutes"
+      assert ceo.instructions =~ "Business status"
       assert cto.role == :cto
       assert cto.parent_id == ceo.id
+      assert cto.instructions =~ "## CTO split and review"
+      assert cto.instructions =~ "Coordination packet"
+      assert cto.instructions =~ "first file/artifact/test area to inspect"
+      assert cto.instructions =~ "[review] Verdict:"
       assert eng1.role == :engineer
       assert eng1.parent_id == cto.id
+      assert eng1.instructions =~ "## Delivery evidence"
+      assert eng1.instructions =~ "[delivery] What happened:"
       assert eng2.role == :engineer
       assert eng2.parent_id == cto.id
       assert product_lead.role == :product_manager
@@ -372,6 +384,13 @@ defmodule Cympho.CompaniesTest do
       assert length(result.seed_issues) == 5
       assert Enum.all?(result.seed_issues, &(&1.goal_id == result.goal.id))
       assert Enum.all?(result.seed_issues, &(&1.origin_type == "onboarding"))
+
+      for agent <- [ceo, cto, eng1, product_lead, design_lead] do
+        studio = AgentInstructionStudio.analyze(agent)
+
+        assert studio.status == :good
+        assert studio.score >= 90
+      end
     end
 
     test "creates go-to-market blueprint with specialized agents and seed work" do

@@ -71,7 +71,7 @@ defmodule Cympho.ReviewNudgesTest do
     {:ok, _comment} =
       Comments.create_comment(%{
         body:
-          "[delivery] What happened: added the missing note. Files changed: none. Verification: reviewed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
+          "[delivery] What happened: added the missing note. Files changed: none. Evidence produced: existing issue context. Verification: reviewed. Risks: none known. Current state: ready for review. Next decision: CTO review.",
         author_type: "agent",
         author_id: engineer.id,
         issue_id: issue.id
@@ -346,7 +346,7 @@ defmodule Cympho.ReviewNudgesTest do
                author_type: "agent",
                author_id: engineer.id,
                body:
-                 "[delivery] What happened: consolidated the run notes. Files changed: evidence bundle. Verification: focused checks passed. Risks: none known. Current state: ready for review. Next decision: CTO review."
+                 "[delivery] What happened: consolidated the run notes. Files changed: evidence bundle. Evidence produced: evidence bundle. Verification: focused checks passed. Risks: none known. Current state: ready for review. Next decision: CTO review."
              })
 
     assert [] = Wakes.list_review_nudges([issue.id])
@@ -424,7 +424,7 @@ defmodule Cympho.ReviewNudgesTest do
                author_type: "agent",
                author_id: engineer.id,
                body:
-                 "[delivery] What happened: shipped the evidence. Files changed: evidence bundle. Verification: tests passed. Risks: none known. Current state: ready. Next decision: review."
+                 "[delivery] What happened: shipped the evidence. Files changed: evidence bundle. Evidence produced: evidence bundle. Verification: tests passed. Risks: none known. Current state: ready. Next decision: review. Restart packet: reviewer should inspect the evidence bundle and test result before deciding."
              })
 
     assert [] = Wakes.list_review_nudges([issue.id])
@@ -584,7 +584,7 @@ defmodule Cympho.ReviewNudgesTest do
                author_type: "agent",
                author_id: cto.id,
                body:
-                 "[review] Verdict: accepted. What happened: evidence inspected. Verification: passed. Gaps: none. Follow-up issues: none. Next decision: close."
+                 "[review] Verdict: accepted. What happened: evidence inspected. Evidence inspected: review evidence packet. Verification: passed. Gaps: none. Follow-up issues: none. Next decision: close. Restart packet: CEO should inspect the accepted review evidence before closing."
              })
 
     assert [] = Wakes.list_review_nudges([issue.id])
