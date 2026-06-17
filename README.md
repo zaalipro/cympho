@@ -312,47 +312,36 @@ The app can source provider environment from `$HOME/.cld` for local wrapper comm
 
 ## Cympho Vs. Paperclip
 
-Paperclip ([paperclipai/paperclip](https://github.com/paperclipai/paperclip)) is a close open-source comparison point for agent orchestration. Paperclip is a Node.js server with a React UI; Cympho is an Elixir/Phoenix BEAM application. The product surface looks similar — both ship org charts, heartbeats, budgets, governance, and ticketed work — but the foundations make different things natural. Cympho ships a `mix cympho.compare` task that introspects the running app and asserts baseline parity rows; it exits non-zero on regressions so feature parity can gate CI.
+Paperclip ([paperclipai/paperclip](https://github.com/paperclipai/paperclip)) is the closest public comparison point: a Node.js server and React UI for coordinating teams of AI agents around goals, org charts, budgets, governance, tickets, heartbeats, workspaces, plugins, secrets, routines, activity, and company portability. Cympho is an Elixir/Phoenix BEAM application aimed at the same company-OS problem, with more emphasis on LiveView operations, supervised runtime processes, issue memory, and the newer swarm/proxy workflow.
 
-### Where We Match
+This comparison is intentionally not a scoreboard. Paperclip is public, heavily adopted, and very polished. Cympho has some deeper BEAM/runtime-control ideas, but it is also a younger and more custom system.
 
-Cympho ships parity with Paperclip on the documented orchestration vocabulary:
+| Area | Paperclip | Cympho | Honest Read |
+| --- | --- | --- | --- |
+| Public maturity | Public GitHub repo, website, docs, releases, large community signal, and a very clear quickstart (`npx paperclipai onboard --yes`). | Phoenix app with local/VPS installer, active feature surface, and repo-local tests/comparison task. | **Paperclip advantage** for public adoption, polish, and first-run story. |
+| Core model | Company-style orchestration: org chart, goals, issues, budgets, governance, heartbeats, workspaces, plugins, secrets, routines, activity, and import/export. | Same company-style primitives: agents, goals, issues, budgets, governance, workspaces, plugins/skills, secrets, routines, activity, and import/export. | **Parity.** Both are trying to be an agent company control plane, not a single-agent wrapper. |
+| Runtime adapters | Bring-your-own-agent model; README highlights OpenClaw, Claude Code, Codex, Cursor, Bash/CLI, and HTTP/web agents. | Built-in adapters for Claude Code, Codex, Cursor, OpenAI Chat, OpenClaw, HTTP, Process, and Agrenting; Process presets include `agy`, Kimi Code, Cline, Gemini, Aider, OpenCode, and custom commands. | **Mixed.** Paperclip's heartbeat model is broader conceptually; Cympho has more explicit built-in presets and provider/runtime profile controls. |
+| UI architecture | React UI over a Node.js server. Paperclip markets mobile management explicitly. | Phoenix LiveView plus dedicated Channels for heartbeats, runs, activity, comments, issue updates, and event replay. | **Mixed.** Paperclip likely wins broad product polish/mobile positioning; Cympho wins on server-pushed operational UI and reconnect replay. |
+| Runtime reliability model | README describes DB-backed wakeups, checkout locks, budget checks, run logs, recovery for orphaned runs, and persistent agent state. | OTP supervisors, per-agent heartbeat supervision, watchdogs, queues, runtime capacity checks, and explicit review-mode startup flags. | **Mixed.** Paperclip documents robust queue semantics; Cympho leans on BEAM supervision and operator-visible runtime diagnostics. |
+| Ticketing and evidence | Ticket-based tasks, threaded conversations, persistent sessions, documents, attachments, work products, labels, inbox state, audit trails. | Issues, comments, runs, work products, child issues, PR evidence, issue digest/memory, review gates, tool traces, and inbox/read state. | **Parity with different emphasis.** Cympho is more opinionated about owner-readable delivery evidence and review gates. |
+| Tool-call tracing and audit | README claims full tool-call tracing and immutable audit log. | `ToolCallTraces`, activities, governance audit logs, event replay, and issue-level execution briefs. | **Parity.** Cympho should not claim Paperclip only has shallow audit logs; Paperclip explicitly documents tracing. |
+| Governance and rollback | Approval gates, execution policies, pause/terminate, config revisioning, rollback language in README. | Board approvals, execution policies, governance audit logs, decision reversal primitives, pause/release controls. | **Parity.** Cympho has explicit decision reversal APIs; Paperclip documents rollback at the governance/config level. |
+| Runtime skill/context injection | README documents runtime skill injection and project/company context. | Skill manifests, hot reload, Instruction Studio, role prompt contracts, and adapter-specific readiness checks. | **Mixed.** Paperclip documents runtime injection clearly; Cympho adds local prompt-quality tooling and BEAM hot reload. |
+| Swarm mode | No first-class swarm mode is documented in the README. | Admin-toggle swarm mode creates temporary non-engineering worker agents, worker child issues, CTO synthesis, CEO handoff blocking, runtime-mix rows, and a live swarm log. | **Cympho advantage** for multi-perspective swarm packets and CTO-mediated synthesis. |
+| Proxy routing | No swarm-specific proxy profile workflow is documented in the README. | Company proxy profiles for HTTP/HTTPS/SOCKS4/SOCKS5 with random, selected, and named routing modes; raw proxy URLs are rejected from swarm launch params. | **Cympho advantage** for managed proxy routing, especially when running many temporary workers. |
+| AI control plane | Paperclip focuses on running agents and exposing operational workflows; MCP is not documented in its README. | Built-in MCP server exposes Cympho tools to external AI clients. | **Cympho advantage** if you want other models/tools to drive the company OS directly. |
+| Cost controls | Monthly budgets, hard stops, token/cost tracking by company, agent, project, goal, issue, provider, and model. | Budgets, hard stops, runtime capacity, provider/model runtime profiles, cost posture, and swarm runtime-mix selection. | **Parity.** Cympho adds cost-aware swarm composition; Paperclip's cost model is better documented publicly. |
+| Mobile/read-only operations | Paperclip explicitly says it is mobile ready and built to manage autonomous businesses from anywhere. | Cympho is responsive dark-mode-first LiveView, but mobile readiness is not the headline claim. | **Paperclip advantage** until Cympho proves and documents mobile management as a first-class workflow. |
+| Best fit today | Teams wanting the more established open-source agent-company platform with broad docs/community and a polished product story. | Teams wanting Phoenix/BEAM supervision, live operational surfaces, issue memory/review gates, explicit runtime profiles, Agrenting, proxy profiles, and swarm orchestration. | Pick **Paperclip** for mature public platform momentum; pick **Cympho** for tighter runtime operations and swarm/proxy experimentation. |
 
-- Bring-your-own-agent adapters, org chart with roles and reporting lines, goal/issue/decomposition, board governance + approvals, per-agent budgets, instance and company secrets, routines on cron and webhooks, workspaces with previews and exec sandboxes, plugin host services.
-- Operating shell: ticketed work with comments, threaded conversations, work products, durable activity log, multi-company isolation, company export/import with secret scrubbing.
-
-### How We Differ
-
-The substantive deltas are grounded in Cympho modules, LiveViews, and tests; baseline orchestration rows are also checked by `mix cympho.compare` at runtime:
-
-| Capability | Paperclip | Cympho |
-| --- | --- | --- |
-| Real-time UI | React + fetch/poll | Phoenix LiveView + 7 dedicated Channels (`heartbeats`, `runs`, `activity`, `comments`, `issue`, `issues`, `company`) + ETS replay buffer (`Cympho.EventStore`); reconnecting clients catch up without losing state |
-| Process model | Single Node.js event loop | OTP per-agent supervision under `Cympho.AgentHeartbeat.Supervisor`; one failing agent cannot take down the company |
-| Swarm orchestration | Not documented as a first-class mode | Admin-toggle swarm mode creates hidden one-time workers, worker child issues, a CTO synthesis gate, CEO handoff blocking, and a durable live swarm log |
-| Runtime mix | Agent/runtime configuration | Swarm rows let admins choose harness + model + reasoning effort by cost; each temporary worker randomly draws from the approved mix |
-| Proxy routing | Not documented as a swarm control | Company proxy profiles with HTTP/HTTPS/SOCKS4/SOCKS5 health checks, random/selected/named routing modes, and no raw proxy URLs in launch params |
-| Tool-call traces | Audit-log entries | First-class `Cympho.ToolCallTraces` context with its own LiveView, filterable + exportable |
-| Decision reversal | "Rollback" mentioned in copy | Explicit primitive: `Cympho.Decisions.reverse_decision/3` with audit log and company-scoped broadcast |
-| AI-driven control plane | Not documented | Built-in MCP server (`Cympho.Mcp.Server`) exposes Cympho as tools so Claude and other models can drive it directly |
-| Skill hot-reload | Redeploy required | `Cympho.Skills.HotReloader` hot-loads skill manifests at runtime via the BEAM |
-| Runtime breadth | Core adapter set | Claude Code, Codex, Cursor, OpenAI Chat, OpenClaw, HTTP, Process, Agrenting, plus Process presets for `agy`, Kimi Code, Cline, Gemini, Aider, and OpenCode |
-| Multi-company safety | `company_id` scoping | `company_id` scoping plus `Cympho.PubSubGuard` runtime guard against cross-tenant event leakage |
-
-Smaller wins that don't need their own row: `Cympho.ReviewNudges` proactively tracks stale evidence requests with a Quantum-driven scanner that re-emits and escalates instead of letting nudges die; per-socket token-bucket rate limiting and broadcast dedup run as supervised GenServers without exposing public ETS handles; runtime profiles make provider swaps, DashScope/Qwen testing, and low-cost harness experiments explicit instead of burying them in ad hoc command strings.
-
-### The Autonomy Gap
-
-The sharpest difference is the autonomous loop itself. Paperclip documents the *ingredients* — heartbeats, governance, decomposition. Cympho ships the *closed loop* that ties them together: new top-level issues auto-ignite to an eligible CEO instead of stranding in `:backlog`; CEO `create_issue` actions emit immediate wakes so engineers pick up children in seconds rather than waiting for a 30-second poll; parent agents are woken on each child entering `:in_review` via `Wakes.notify_child_in_review/1`, so a CTO supervising fan-out sees mid-flight progress without re-reading; CEO-owned root issues route through `:in_review` and a `final_review_required` wake instead of silently auto-completing, so the boss-level quality gate (`ensure_approval_quality`) fires on every shipped deliverable; swarm parents explicitly wait for CTO synthesis before CEO handoff; and `Cympho.ReviewNudges.StaleScanner` re-emits wakes at T1 and escalates across the role-fallback chain at T2 so nudges cannot die silently. With humans only invoked for the goal and the final sign-off, an end-to-end run executes without manual nudges in the dashboard.
-
-### Verify It Yourself
+### Verify Cympho Claims
 
 ```bash
 mix cympho.compare           # text table with per-row evidence
 mix cympho.compare --json    # machine-readable; exits non-zero on any gap
 ```
 
-The task introspects the live OTP tree, the registered adapter list, and exported context functions. Baseline rows are tagged `WIN` (Cympho exceeds) or `PAR` (parity); the newer swarm/proxy claims are grounded in `Cympho.Issues.Swarm`, `Cympho.Issues.SwarmEvents`, `Cympho.Proxies`, the LiveView components, and their tests.
+The task introspects Cympho's live OTP tree, registered adapter list, and exported context functions. Treat it as a Cympho regression guard, not as an independent benchmark of Paperclip. The Paperclip side of the table above is based on Paperclip's public README and should be revisited as that project changes.
 
 ## Architecture
 
