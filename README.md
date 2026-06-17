@@ -11,37 +11,37 @@ When one agent is not enough, **swarm mode** can fan a single owner issue into t
 ### Command Center
 
 <p align="center">
-  <img src="./screens/dashboard.png" alt="Cympho dashboard showing owner action plan, runtime capacity, CEO command lane, and company navigation" width="100%">
+  <img src="./screens/readme-2026-06-17-dashboard.png" alt="Cympho dashboard showing owner action plan, runtime capacity, CEO command lane, and company navigation" width="100%">
 </p>
 
 ### Kanban Board
 
 <p align="center">
-  <img src="./screens/board.png" alt="Cympho Kanban board showing review mode, flow health, focus queue, and status columns" width="100%">
+  <img src="./screens/readme-2026-06-17-board.png" alt="Cympho Kanban board showing review mode, flow health, focus queue, and status columns" width="100%">
 </p>
 
 ### Swarm Issue Log
 
 <p align="center">
-  <img src="./screens/swarm-issue.png" alt="Cympho issue detail page showing swarm orchestration, live swarm log, worker packets, CTO gate, and CEO handoff" width="100%">
+  <img src="./screens/readme-2026-06-17-swarm-issue.png" alt="Cympho issue detail page showing swarm orchestration, live swarm log, worker packets, CTO gate, and CEO handoff" width="100%">
 </p>
 
 ### Swarm Composer
 
 <p align="center">
-  <img src="./screens/new-issue-swarm.png" alt="Cympho new issue swarm composer with temporary worker count, harness, model, reasoning effort choices, and proxy management link" width="100%">
+  <img src="./screens/readme-2026-06-17-new-issue-swarm.png" alt="Cympho new issue swarm composer with temporary worker count, harness, model, reasoning effort choices, and proxy management link" width="100%">
 </p>
 
 ### Operations
 
 <p align="center">
-  <img src="./screens/operations.png" alt="Cympho Operations page showing runtime mode, launch checklist, dispatch commands, and required runtime environment flags" width="100%">
+  <img src="./screens/readme-2026-06-17-operations.png" alt="Cympho Operations page showing runtime mode, launch checklist, dispatch commands, and required runtime environment flags" width="100%">
 </p>
 
 ### Agents
 
 <p align="center">
-  <img src="./screens/agents.png" alt="Cympho Agents page showing role coverage, staffing gaps, agent counts, and remote-hire actions" width="100%">
+  <img src="./screens/readme-2026-06-17-agents.png" alt="Cympho Agents page showing role coverage, staffing gaps, agent counts, and remote-hire actions" width="100%">
 </p>
 
 ## Installation (Local & VPS)
