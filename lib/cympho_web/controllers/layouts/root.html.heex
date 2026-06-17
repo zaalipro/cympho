@@ -214,6 +214,21 @@
     quick_agents = assigns[:nav_agents] || []
     quick_goals = assigns[:nav_goals] || []
     quick_ceo = Enum.find(quick_agents, &(&1.role == :ceo))
+    quick_user = assigns[:current_user]
+    quick_company = assigns[:current_company]
+
+    quick_swarm_admin? =
+      match?(%{id: _}, quick_user) and
+        match?(%{id: _}, quick_company) and
+        (Cympho.Companies.admin?(quick_user.id, quick_company.id) or
+           Cympho.Companies.is_board_member?(quick_user.id, quick_company.id))
+
+    quick_proxy_profiles =
+      if quick_swarm_admin? do
+        Cympho.Proxies.list_proxy_profiles(quick_company.id)
+      else
+        []
+      end
 
     quick_default_goal =
       case quick_goals do
@@ -231,12 +246,12 @@
 <!-- Quick create issue modal (press C) -->
     <div
       id="quick-create-modal"
-      class="hidden fixed inset-0 z-[70] flex items-start justify-center pt-[18vh] bg-black/40"
+      class="hidden fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-6 sm:py-10"
     >
       <form
         action={~p"/issues/quick-create"}
         method="post"
-        class="bg-surface-2 border border-hairline rounded-2xl shadow-dialog w-full max-w-3xl mx-4 overflow-hidden"
+        class="max-h-[calc(100vh-3rem)] w-full max-w-3xl overflow-y-auto rounded-2xl border border-hairline bg-surface-2 shadow-dialog"
         id="quick-create-form"
       >
         <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
@@ -323,6 +338,43 @@
               ]}
             />
           </div>
+        </div>
+        <div :if={quick_swarm_admin?} class="border-b border-hairline px-4 py-3">
+          <input
+            id="quick-create-swarm-enabled"
+            type="checkbox"
+            name="swarm[enabled]"
+            value="true"
+            class="peer float-left mt-0.5 h-4 w-4 rounded border-hairline bg-canvas text-brand focus:ring-brand/40"
+          />
+          <label for="quick-create-swarm-enabled" class="ml-7 block cursor-pointer">
+            <span class="min-w-0">
+              <span class="block text-[11px] font-590 uppercase tracking-[0.08em] text-ink-muted">
+                Swarm mode
+              </span>
+              <span class="mt-0.5 block text-xs leading-5 text-ink-tertiary">
+                Create one-time temporary workers, route synthesis through CTO, then return to CEO.
+              </span>
+            </span>
+          </label>
+
+          <.swarm_configuration
+            id="quick-create-swarm-config"
+            title="Swarm composition"
+            description="Choose harness, model, and effort combinations. CTO and CEO assign worker lenses."
+            compact
+            swarm_params={
+              %{
+                "agent_count" => "3",
+                "mix_rows" => default_mix_rows(),
+                "proxy_mode" => "none",
+                "proxy_profile_ids" => [],
+                "proxy_pool" => []
+              }
+            }
+            proxy_profiles={quick_proxy_profiles}
+            class="clear-both mt-3 hidden peer-checked:block"
+          />
         </div>
         <div class="px-4 py-3 flex items-center justify-end gap-2">
           <button

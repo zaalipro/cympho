@@ -11,6 +11,7 @@ defmodule CymphoWeb.IssueLive.Show do
   alias Cympho.HeartbeatEngine
   alias Cympho.Issues
   alias Cympho.Issues.AutoAssignment
+  alias Cympho.Issues.SwarmEvents
   alias Cympho.IssueBriefReadiness
   alias Cympho.IssueReadStates
   alias Cympho.IssueThreadInteractions
@@ -29,6 +30,7 @@ defmodule CymphoWeb.IssueLive.Show do
       Comments.subscribe(socket.assigns.current_company.id)
       CymphoWeb.Events.subscribe_to_runs(socket.assigns.current_company.id)
       Documents.subscribe(socket.assigns.current_company.id)
+      SwarmEvents.subscribe(socket.assigns.current_company.id)
     end
 
     # Subscribe to read state updates if user is logged in
@@ -52,6 +54,7 @@ defmodule CymphoWeb.IssueLive.Show do
         child_issues = Issues.list_child_issues(issue.id)
         child_tree = Issues.list_descendants_tree(issue.id, 4)
         child_health_cards = child_issue_health_cards(child_issues)
+        swarm_events = SwarmEvents.list_for_issue(issue)
         pending_wake = load_pending_wake_for_issue(issue)
         tool_call_traces = ToolCallTraces.list_tool_call_traces(issue_id: issue.id)
         timeline = build_timeline(issue, runs, interactions, work_products, tool_call_traces)
@@ -80,6 +83,7 @@ defmodule CymphoWeb.IssueLive.Show do
            child_issues: child_issues,
            child_tree: child_tree,
            child_health_cards: child_health_cards,
+           swarm_events: swarm_events,
            pending_wake: pending_wake,
            tool_call_traces: tool_call_traces,
            timeline: timeline,
@@ -121,6 +125,7 @@ defmodule CymphoWeb.IssueLive.Show do
         |> assign(:issue, issue)
         |> assign(:route_issue_id, issue.id)
         |> assign_child_rollup(issue.id)
+        |> assign_swarm_events(issue)
 
       {:error, :not_found} ->
         socket
@@ -1279,6 +1284,14 @@ defmodule CymphoWeb.IssueLive.Show do
     end
   end
 
+  def handle_info({:swarm_event_created, event}, socket) do
+    if event.parent_issue_id == SwarmEvents.parent_issue_id(socket.assigns.issue) do
+      {:noreply, assign_swarm_events(socket)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_info({:document_updated, updated_document}, socket) do
     if socket.assigns.selected_document &&
          socket.assigns.selected_document.id == updated_document.id do
@@ -1325,6 +1338,11 @@ defmodule CymphoWeb.IssueLive.Show do
       pending_wake: pending_wake,
       child_health_cards: child_issue_health_cards(child_issues)
     )
+  end
+
+  defp assign_swarm_events(socket, issue \\ nil) do
+    issue = issue || socket.assigns.issue
+    assign(socket, :swarm_events, SwarmEvents.list_for_issue(issue))
   end
 
   defp load_pending_wake_for_issue(nil), do: nil

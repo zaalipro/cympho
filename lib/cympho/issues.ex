@@ -7,6 +7,7 @@ defmodule Cympho.Issues do
   require Logger
   alias Cympho.Repo
   alias Cympho.Issues.Issue
+  alias Cympho.Issues.Swarm
   alias Cympho.Issues.StateMachine
   alias Cympho.Issues.ExecutionState
   alias Cympho.Agents
@@ -940,6 +941,7 @@ defmodule Cympho.Issues do
 
   def create_issue(attrs \\ %{}) do
     attrs = normalize_attrs(attrs)
+    attrs = Swarm.embed_config(attrs)
     attrs = maybe_generate_identifier(attrs)
 
     insert_result =
@@ -972,11 +974,23 @@ defmodule Cympho.Issues do
 
         CymphoWeb.Events.broadcast_issue_update(issue, :issue_created)
         issue = maybe_classify_role(issue, attrs)
+        issue = maybe_launch_swarm(issue, attrs)
         maybe_auto_ignite(issue, attrs)
         {:ok, Repo.preload(issue, [:comments, :blocked_by, :blocks, :labels])}
 
       {:error, changeset} ->
         {:error, changeset}
+    end
+  end
+
+  defp maybe_launch_swarm(%Issue{} = issue, attrs) do
+    case Swarm.launch(issue, attrs) do
+      {:ok, %Issue{} = launched} ->
+        launched
+
+      {:error, reason} ->
+        Logger.warning("[Swarm] launch failed for issue #{issue.id}: #{inspect(reason)}")
+        issue
     end
   end
 

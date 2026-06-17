@@ -37,6 +37,12 @@ defmodule CymphoWeb.SettingsHubTest do
       assert html =~ "Add runtime secret"
     end
 
+    test "proxies", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/settings/proxies")
+      assert html =~ "Proxy Profiles"
+      assert html =~ "Proxies"
+    end
+
     test "secrets summarizes runtime credential coverage without leaking values", %{
       conn: conn,
       current_company: company

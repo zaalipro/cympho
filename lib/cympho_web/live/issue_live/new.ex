@@ -2,11 +2,17 @@ defmodule CymphoWeb.IssueLive.New do
   use CymphoWeb, :live_view
   alias Cympho.Issues
   alias Cympho.Issues.Issue
+  alias Cympho.Issues.Swarm
   alias Cympho.Agents
+  alias Cympho.Companies
   alias Cympho.Goals
   alias Cympho.IssueBriefReadiness
   alias Cympho.Orchestrator.Dispatcher
+  alias Cympho.Proxies
   alias Cympho.Projects
+  alias CymphoWeb.IssueLive.Components.SwarmConfig
+
+  import CymphoWeb.IssueLive.Components.SwarmConfig, only: [swarm_configuration: 1]
 
   @default_attrs %{"status" => "todo", "priority" => "medium"}
 
@@ -16,6 +22,8 @@ defmodule CymphoWeb.IssueLive.New do
     goals = list_goals(socket)
     scope = issue_scope(socket, params, projects, goals)
     changeset = Issues.change_issue(%Issue{}, Map.merge(@default_attrs, scope))
+    swarm_params = default_swarm_params()
+    swarm_config = normalize_swarm_config(socket, swarm_params)
 
     {:ok,
      socket
@@ -29,6 +37,10 @@ defmodule CymphoWeb.IssueLive.New do
      |> assign(:issue_scope, scope)
      |> assign(:intake_route, intake_route(scope, socket.assigns[:current_company]))
      |> assign(:runtime_enabled?, Dispatcher.enabled?())
+     |> assign(:swarm_admin?, swarm_admin?(socket))
+     |> assign(:proxy_profiles, proxy_profiles(socket))
+     |> assign(:swarm_params, swarm_params)
+     |> assign(:swarm_config, swarm_config)
      |> assign(:queue_dispatch_focus?, queue_dispatch_focus_default(scope))
      |> assign(:form, to_form(changeset))}
   end
@@ -36,6 +48,8 @@ defmodule CymphoWeb.IssueLive.New do
   @impl true
   def handle_event("validate", %{"issue" => issue_params} = params, socket) do
     issue_params = normalize_issue_params(socket, issue_params)
+    swarm_params = normalize_swarm_params(socket, params["swarm"])
+    swarm_config = normalize_swarm_config(socket, swarm_params)
     brief_readiness = IssueBriefReadiness.evaluate(issue_params)
 
     changeset =
@@ -51,9 +65,11 @@ defmodule CymphoWeb.IssueLive.New do
      socket
      |> assign(
        :queue_dispatch_focus?,
-       queue_dispatch_focus_preference(socket, params, brief_readiness)
+       queue_dispatch_focus_preference(socket, params, brief_readiness, swarm_config)
      )
      |> assign(:issue_params, issue_params)
+     |> assign(:swarm_params, swarm_params)
+     |> assign(:swarm_config, swarm_config)
      |> assign(:brief_readiness, brief_readiness)
      |> assign(form: to_form(changeset))}
   end
@@ -95,9 +111,16 @@ defmodule CymphoWeb.IssueLive.New do
   end
 
   def handle_event("save", %{"issue" => issue_params} = params, socket) do
-    queue_focus? = dispatch_focus_checked?(params)
+    swarm_params = normalize_swarm_params(socket, params["swarm"])
+    swarm_config = normalize_swarm_config(socket, swarm_params)
+    queue_focus? = dispatch_focus_checked?(params) and not swarm_config.enabled
     issue_params = normalize_issue_params(socket, issue_params)
-    params = @default_attrs |> Map.merge(socket.assigns.issue_scope) |> Map.merge(issue_params)
+
+    params =
+      @default_attrs
+      |> Map.merge(socket.assigns.issue_scope)
+      |> Map.merge(issue_params)
+      |> Map.put("swarm", swarm_params)
 
     case Issues.create_issue(params) do
       {:ok, issue} ->
@@ -112,7 +135,11 @@ defmodule CymphoWeb.IssueLive.New do
         {:noreply, push_navigate(socket, to: issue_created_path(issue))}
 
       {:error, changeset} ->
-        {:noreply, assign(socket, form: to_form(Map.put(changeset, :action, :insert)))}
+        {:noreply,
+         socket
+         |> assign(:swarm_params, swarm_params)
+         |> assign(:swarm_config, swarm_config)
+         |> assign(form: to_form(Map.put(changeset, :action, :insert)))}
     end
   end
 
@@ -325,7 +352,9 @@ defmodule CymphoWeb.IssueLive.New do
 
   defp dispatch_focus_checked?(_params), do: false
 
-  defp queue_dispatch_focus_preference(socket, params, %{status: :ready}) do
+  defp queue_dispatch_focus_preference(_socket, _params, _readiness, %{enabled: true}), do: false
+
+  defp queue_dispatch_focus_preference(socket, params, %{status: :ready}, _swarm_config) do
     if socket.assigns.brief_readiness.status == :ready do
       dispatch_focus_checked?(params)
     else
@@ -333,7 +362,7 @@ defmodule CymphoWeb.IssueLive.New do
     end
   end
 
-  defp queue_dispatch_focus_preference(socket, _params, _readiness) do
+  defp queue_dispatch_focus_preference(socket, _params, _readiness, _swarm_config) do
     socket.assigns[:queue_dispatch_focus?] || false
   end
 
@@ -355,12 +384,36 @@ defmodule CymphoWeb.IssueLive.New do
 
   defp queue_focus_label(_readiness), do: "Focused CEO run needs a ready brief"
 
+  defp queue_focus_label(_readiness, %{enabled: true}), do: "CEO run waits for swarm synthesis"
+
+  defp queue_focus_label(readiness, _swarm_config), do: queue_focus_label(readiness)
+
   defp queue_focus_detail(%{status: :ready}) do
     "Pins this new issue for the next focused runtime pass. The issue page will show the exact command to start the first CEO turn on port 4329."
   end
 
   defp queue_focus_detail(%{next_prompt: next_prompt}) do
     "Create a draft now, or add the missing signal first: #{next_prompt}"
+  end
+
+  defp queue_focus_detail(_readiness, %{enabled: true}) do
+    "Swarm mode blocks the CEO parent on temporary worker delivery and CTO synthesis before CEO runtime resumes."
+  end
+
+  defp queue_focus_detail(readiness, _swarm_config), do: queue_focus_detail(readiness)
+
+  defp create_launch_state(_readiness, _queue_focus?, _intake_route, %{enabled: true}) do
+    %{
+      tone: :ready,
+      label: "Ready to create swarm",
+      badge: "Swarm",
+      detail:
+        "Save will create the CEO parent, launch temporary non-engineering workers, and route synthesis through CTO before CEO review."
+    }
+  end
+
+  defp create_launch_state(readiness, queue_focus?, intake_route, _swarm_config) do
+    create_launch_state(readiness, queue_focus?, intake_route)
   end
 
   defp create_launch_state(_readiness, _queue_focus?, %{missing?: true}) do
@@ -414,6 +467,132 @@ defmodule CymphoWeb.IssueLive.New do
   defp submit_label(%{status: :ready}, _queue_focus?, _intake_route), do: "Create CEO Issue"
 
   defp submit_label(_readiness, _queue_focus?, _intake_route), do: "Create Draft CEO Issue"
+
+  defp submit_label(_readiness, _queue_focus?, _intake_route, %{enabled: true}),
+    do: "Create Swarm Issue"
+
+  defp submit_label(readiness, queue_focus?, intake_route, _swarm_config),
+    do: submit_label(readiness, queue_focus?, intake_route)
+
+  defp default_swarm_params do
+    %{
+      "enabled" => "false",
+      "agent_count" => "3",
+      "mix_rows" => default_swarm_mix_rows(),
+      "mix" => default_swarm_mix(),
+      "proxy_mode" => "none",
+      "proxy_enabled" => "false",
+      "proxy_profile" => "",
+      "proxy_profile_ids" => [],
+      "proxy_pool" => ""
+    }
+  end
+
+  defp normalize_swarm_params(socket, params) do
+    if socket.assigns[:swarm_admin?] do
+      normalize_swarm_params(params)
+    else
+      default_swarm_params()
+    end
+  end
+
+  defp normalize_swarm_params(nil), do: default_swarm_params()
+
+  defp normalize_swarm_params(params) when is_map(params) do
+    default_swarm_params()
+    |> Map.merge(params)
+    |> Map.put("enabled", checkbox_value(params, "enabled"))
+    |> Map.put("proxy_enabled", checkbox_value(params, "proxy_enabled"))
+    |> Map.put("proxy_mode", normalize_proxy_mode(params["proxy_mode"]))
+    |> Map.put("proxy_profile_ids", normalize_string_list(params["proxy_profile_ids"]))
+    |> Map.put("mix_rows", normalize_mix_rows(params["mix_rows"]))
+  end
+
+  defp normalize_swarm_params(_params), do: default_swarm_params()
+
+  defp checkbox_value(params, key) do
+    if Map.get(params, key) in ["true", "on", "1", true], do: "true", else: "false"
+  end
+
+  defp default_swarm_mix do
+    [
+      "claude_code | sonnet",
+      "codex | gpt-5.3-high-fast",
+      "openai_chat | gpt-5.4-mini"
+    ]
+    |> Enum.join("\n")
+  end
+
+  defp default_swarm_mix_rows do
+    SwarmConfig.default_mix_rows()
+  end
+
+  defp normalize_mix_rows(rows) when is_map(rows) do
+    rows = Map.new(rows, fn {index, row} -> {to_string(index), row} end)
+
+    rows
+    |> Map.new(fn {index, row} ->
+      row = row || %{}
+
+      {index,
+       %{
+         "enabled" => checkbox_value(row, "enabled"),
+         "harness" => row["harness"] || "openai_chat",
+         "model" => row["model"] || "",
+         "reasoning_effort" => normalize_reasoning_effort(row["reasoning_effort"])
+       }}
+    end)
+    |> then(fn normalized ->
+      if map_size(normalized) == 0, do: default_swarm_mix_rows(), else: normalized
+    end)
+  end
+
+  defp normalize_mix_rows(_rows), do: default_swarm_mix_rows()
+
+  defp normalize_proxy_mode(mode) when mode in ["none", "manual", "random", "selected"], do: mode
+  defp normalize_proxy_mode(_mode), do: "none"
+
+  defp normalize_reasoning_effort(effort) when effort in ["auto", "low", "medium", "high"],
+    do: effort
+
+  defp normalize_reasoning_effort(_effort), do: "auto"
+
+  defp normalize_string_list(values) when is_list(values) do
+    values
+    |> Enum.filter(&is_binary/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp normalize_string_list(value) when is_binary(value) and value != "", do: [value]
+  defp normalize_string_list(_values), do: []
+
+  defp swarm_enabled?(%{enabled: enabled}), do: enabled
+  defp swarm_enabled?(_), do: false
+
+  defp swarm_count(%{agent_count: count}), do: count
+  defp swarm_count(_), do: 0
+
+  defp swarm_admin?(%{
+         assigns: %{current_user: %{id: user_id}, current_company: %{id: company_id}}
+       }) do
+    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+  end
+
+  defp swarm_admin?(_socket), do: false
+
+  defp normalize_swarm_config(socket, swarm_params) do
+    Swarm.normalize_config(%{
+      "swarm" => swarm_params,
+      "company_id" => socket.assigns[:current_company] && socket.assigns.current_company.id
+    })
+  end
+
+  defp proxy_profiles(%{assigns: %{current_company: %{id: company_id}}}) do
+    Proxies.list_proxy_profiles(company_id)
+  end
+
+  defp proxy_profiles(_socket), do: []
 
   defp issue_created_path(issue) do
     path = ~p"/issues/#{issue.id}"

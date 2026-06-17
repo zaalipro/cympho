@@ -33,7 +33,7 @@ defmodule CymphoWeb.IssueLive.Show.Header do
     </div>
     <div class="group px-4 lg:px-6 pt-5 pb-4">
       <div :if={@editing != "title"} class="flex items-start gap-3">
-        <h1 class="flex-1 text-headline text-ink leading-tight">
+        <h1 class={title_class(@issue)}>
           {@issue.title}
         </h1>
         <button
@@ -89,4 +89,29 @@ defmodule CymphoWeb.IssueLive.Show.Header do
     </div>
     """
   end
+
+  defp title_class(issue) do
+    if swarm_issue?(issue) do
+      "flex-1 text-2xl font-590 leading-tight text-ink md:text-3xl"
+    else
+      "flex-1 text-headline leading-tight text-ink"
+    end
+  end
+
+  defp swarm_issue?(%{origin_type: origin}) when origin in ["swarm_worker", "swarm_cto_review"],
+    do: true
+
+  defp swarm_issue?(%{monitor_state: monitor_state}) when is_map(monitor_state) do
+    monitor_state
+    |> Map.get("swarm", Map.get(monitor_state, :swarm))
+    |> swarm_state?()
+  end
+
+  defp swarm_issue?(_issue), do: false
+
+  defp swarm_state?(%{"enabled" => enabled}) when enabled in [true, "true"], do: true
+  defp swarm_state?(%{enabled: enabled}) when enabled in [true, "true"], do: true
+  defp swarm_state?(%{"role" => role}) when role in ["worker", "cto_synthesis"], do: true
+  defp swarm_state?(%{role: role}) when role in ["worker", "cto_synthesis"], do: true
+  defp swarm_state?(_), do: false
 end

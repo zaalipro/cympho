@@ -4,20 +4,44 @@
 
 Cympho turns owner requests into coordinated company work. A CEO agent routes priorities, Product and Design shape the brief, the CTO breaks large work into executable issues, and engineer agents produce inspectable changes with comments, runs, work products, PR evidence, and review trails.
 
-<p align="center">
-  <img src="./screens/dashboard.png" alt="Cympho Command Center showing operating mode, runtime capacity, an execution-health brief, a KPI instrument band, the active agent roster, issue and agent status, and recent inbox activity" width="100%">
-</p>
+When one agent is not enough, **swarm mode** can fan a single owner issue into temporary non-engineering worker packets, route synthesis through the CTO, block the CEO parent until the synthesis is ready, and stream the whole chain back into the issue log.
+
+## Product Tour
+
+### Command Center
 
 <p align="center">
-  <img src="./screens/board.png" alt="Cympho Kanban board with status-coded columns (Backlog, To Do, In Progress, In Review), title-first issue cards carrying delivery-evidence signals, plus filters, swimlanes, and review-mode controls" width="100%">
+  <img src="./screens/dashboard.png" alt="Cympho dashboard showing owner action plan, runtime capacity, CEO command lane, and company navigation" width="100%">
 </p>
 
-<p align="center">
-  <img src="./screens/inbox.png" alt="Cympho Inbox showing agent handoffs and review signals as scannable cards with unread markers, evidence requests, issue status, and queue filtering" width="100%">
-</p>
+### Kanban Board
 
 <p align="center">
-  <img src="./screens/project.png" alt="Cympho project page showing repository settings, environment variables, status counts, and recent issues for a project" width="100%">
+  <img src="./screens/board.png" alt="Cympho Kanban board showing review mode, flow health, focus queue, and status columns" width="100%">
+</p>
+
+### Swarm Issue Log
+
+<p align="center">
+  <img src="./screens/swarm-issue.png" alt="Cympho issue detail page showing swarm orchestration, live swarm log, worker packets, CTO gate, and CEO handoff" width="100%">
+</p>
+
+### Swarm Composer
+
+<p align="center">
+  <img src="./screens/new-issue-swarm.png" alt="Cympho new issue swarm composer with temporary worker count, harness, model, reasoning effort choices, and proxy management link" width="100%">
+</p>
+
+### Operations
+
+<p align="center">
+  <img src="./screens/operations.png" alt="Cympho Operations page showing runtime mode, launch checklist, dispatch commands, and required runtime environment flags" width="100%">
+</p>
+
+### Agents
+
+<p align="center">
+  <img src="./screens/agents.png" alt="Cympho Agents page showing role coverage, staffing gaps, agent counts, and remote-hire actions" width="100%">
 </p>
 
 ## Installation (Local & VPS)
@@ -40,12 +64,17 @@ curl -sL https://raw.githubusercontent.com/zaalipro/cympho/main/install.sh | bas
 
 Cympho now has the pieces needed to feel like an operating system for agents, not just an issue tracker with a run button.
 
+- **Swarm mode**: create one-time temporary worker agents from a parent issue, assign independent non-engineering lenses automatically, route synthesis through the CTO, then return the decision path to the CEO.
+- **Live swarm logs**: launch, worker creation, worker completion, CTO synthesis, CEO handoff, blocker state, runtime mix, and proxy routing events are stored and streamed on the issue page.
+- **Runtime mix chooser**: admins choose temporary agent count plus reusable harness/model/reasoning-effort rows; workers randomly draw from that allowed cost/capability mix.
+- **Proxy profiles**: company admins can manage reusable HTTP, HTTPS, SOCKS4, and SOCKS5 profiles, then route swarms through no proxy, random saved proxies, selected profiles, or named managed slots. Raw proxy URLs are ignored by swarm launchers.
 - **Operations console**: monitor runtime mode, agent capacity, adapter health, prompt readiness, blocked work, review nudges, and execution risk from one place.
 - **Instruction Studio**: inspect agent instructions before they run, detect weak prompts, tune role playbooks, and preview contract coverage for CEO, CTO, Product, Design, and Engineering roles.
 - **Issue digest and memory**: issue pages now synthesize comments, runs, work products, child issues, failures, and PR state into an owner-readable brief.
 - **Review gates and nudges**: Cympho detects missing delivery notes, work products, verification, PR references, CTO review, and owner updates, then queues targeted follow-ups for the right agent.
 - **PR quality contract**: agents are guided toward issue-aware branch names, clear PR titles, task-list descriptions, review evidence, and owner-facing status.
-- **Adapter hardening**: Claude Code wrappers, Codex, Cursor, OpenClaw, HTTP, and Process adapters can be configured per agent with safer runtime env handling.
+- **Adapter hardening**: Claude Code wrappers, Codex, Cursor, OpenAI-compatible chat endpoints, OpenClaw, HTTP, Process, and Agrenting adapters can be configured per agent with safer runtime env handling.
+- **CLI harness presets**: Process runtimes can be configured for Codex CLI, Claude-compatible CLIs, Cursor CLI, OpenClaw, Antigravity (`agy`), Kimi Code, Cline, Gemini, Aider, OpenCode, or custom commands.
 - **Agrenting remote agents**: connect an Agrenting API key, browse marketplace agents inside Cympho, and rent remote agents as local Cympho operators.
 - **Multi-tenant auth hardening**: dashboard pages require login, LiveViews and APIs use company-scoped lookups, and test coverage guards against cross-company leaks.
 - **Review mode by default**: run the UI safely without background agent execution or provider spend, then opt into autonomous execution when you are ready.
@@ -59,11 +88,13 @@ Most agent tools run one agent against one ticket and leave humans to infer what
 | Company structure | CEO, CTO, Product, Design, QA, and Engineers with role-specific prompts and handoffs |
 | Owner intake | New issues route through CEO-first triage with project, priority, and owner context |
 | Work decomposition | CTO and specialist roles can split large requests into sub-issues with lineage |
+| Swarm execution | Temporary non-engineering agents produce independent packets, CTO synthesis gates the result, and CEO handoff stays blocked until synthesis exists |
 | Evidence trail | Comments, runs, failures, work products, child issues, tool traces, PR links, and review notes |
+| Live observability | LiveView issue pages stream swarm events, runs, activity, comments, blocker chains, and review signals |
 | Prompt quality | Instruction Studio, deterministic prompt contracts, and role coverage scoring |
 | Runtime operations | Capacity, adapter health, blocked work, review nudges, prompt radar, and execution mode |
-| Safety posture | Review mode, scoped auth, governance gates, budgets, and explicit background-worker flags |
-| Adapter choice | Claude Code, Codex, Cursor, OpenClaw, HTTP, and local process adapters per agent |
+| Safety posture | Review mode, scoped auth, governance gates, budgets, proxy profiles instead of raw URL launch params, and explicit background-worker flags |
+| Adapter choice | Claude Code, Codex, Cursor, OpenAI-compatible chat, OpenClaw, HTTP, Agrenting, and local Process adapters per agent |
 
 ## How The Loop Works
 
@@ -82,11 +113,14 @@ The goal is not just to start an agent. The goal is to make the whole operating 
 
 - **Command Center**: company health, operating mode, queue state, active agents, inbox, issue throughput, and recent activity.
 - **Operations**: runtime capacity, adapter health, prompt readiness, contract gaps, blocked execution, stale runs, and recommended next actions.
-- **Issues**: owner intake, assignment, status, priority, comments, digest, agent runs, sub-issues, work products, PR evidence, review gates, and nudges.
+- **Issues**: owner intake, assignment, status, priority, comments, digest, agent runs, sub-issues, work products, PR evidence, review gates, swarm orchestration, and nudges.
+- **Swarm composer**: admin-only issue controls for temporary worker count plus harness/model/reasoning-effort rows; the protocol, CTO, and CEO assign worker roles instead of asking the owner to micromanage them.
+- **Swarm issue panel**: live swarm log, worker packets, CTO synthesis gate, CEO handoff state, proxy mode, runtime mix, and blocker chain in the same issue view.
 - **Board**: kanban flow across backlog, todo, in progress, review, done, blocked, and cancelled states, with safe review-mode controls.
 - **Inbox**: compact and detailed agent updates grouped by status, assignee, issue context, and review nudge state.
 - **Projects**: repository settings, environment variables, project issues, and workspace metadata in one editable page.
 - **Agents**: role prompts, Instruction Studio, adapter configuration, remote Agrenting hiring, runtime model/command controls, env vars, health, budget, governance, and history.
+- **Proxy settings**: reusable company proxy profiles with health checks; swarm launchers consume saved profile names and selected profile IDs, not pasted raw proxy URLs.
 - **Plugins and Skills**: extension points for tool capabilities and custom agent workflows.
 
 ## Agent Roles
@@ -119,6 +153,21 @@ Cympho summarizes:
 
 When something is missing, Cympho can queue a targeted review nudge for the best agent instead of creating noise for everyone.
 
+## Swarm Mode And Proxies
+
+Swarm mode is designed for work where one agent's answer would be too narrow or too expensive to trust. The owner still writes one issue. An admin can then toggle swarm mode, choose the number of temporary agents, and add the harness/model/reasoning-effort combinations they are willing to pay for. Cympho handles the operating protocol:
+
+1. Create hidden one-time worker agents.
+2. Create independent worker child issues with diverse non-engineering lenses.
+3. Preserve dissent and evidence instead of forcing consensus.
+4. Create a CTO synthesis issue that waits on the worker packets.
+5. Block the CEO parent until the CTO synthesis is ready.
+6. Return the owner-facing decision path to the CEO.
+
+Each swarm emits durable events through `Cympho.Issues.SwarmEvents`: launch started, temporary agents created, worker issues created, CTO gate created, dependency links, worker completion, CTO synthesis, CEO handoff, and error states. The issue page subscribes to those events and renders a live log so owners can watch the swarm move without tailing terminal output.
+
+Proxy support is intentionally profile-based. Company admins can save HTTP, HTTPS, SOCKS4, or SOCKS5 profiles in Settings, test them, and choose no proxy, random saved proxies, selected saved proxies, or named managed slots from the swarm composer. Raw proxy URLs are not accepted by the swarm launcher; credentials should live in company-managed profiles or secret storage, not in issue descriptions or README examples.
+
 ## Instruction Studio
 
 Instruction Studio is a deterministic prompt-quality layer for agent configuration. It helps you catch weak instructions before they burn runtime:
@@ -139,12 +188,13 @@ Cympho supports multiple execution backends:
 - **Claude Code**: command-based runtime for `claude`, `cz`, `cm`, or another compatible CLI wrapper.
 - **Codex**: OpenAI/Codex execution with per-agent model selection.
 - **Cursor**: Cursor agent/CLI automation surface.
+- **OpenAI Chat**: OpenAI-compatible `/chat/completions` endpoints, including DashScope/Qwen runtime profiles.
 - **OpenClaw**: OpenClaw-compatible runtime configuration.
-- **Process**: local command execution for tests and controlled automation.
+- **Process**: local command execution for tests and controlled automation, including presets for Codex CLI, Claude-compatible CLIs, Cursor CLI, OpenClaw, Antigravity (`agy`), Kimi Code, Cline, Gemini, Aider, and OpenCode.
 - **HTTP**: remote adapter integration over an HTTP contract.
 - **Agrenting**: rent marketplace agents and attach them to Cympho as remote operators.
 
-Each agent can carry its own adapter, model/runtime configuration, concurrency limit, budget, instructions, and environment. Claude-compatible wrappers can source provider variables from `$HOME/.cld` in development, while production should use managed environment variables or the app secret store.
+Each agent can carry its own adapter, model/runtime configuration, concurrency limit, budget, instructions, and environment. Claude-compatible wrappers can source provider variables from `$HOME/.cld` in development, while production should use managed environment variables or the app secret store. Runtime profiles let admins switch between expensive local coding agents, cheaper OpenAI-compatible endpoints, and CLI harnesses without rewriting role instructions.
 
 ## Rent Remote Agents From Agrenting
 
@@ -262,7 +312,7 @@ The app can source provider environment from `$HOME/.cld` for local wrapper comm
 
 ## Cympho Vs. Paperclip
 
-Paperclip ([paperclipai/paperclip](https://github.com/paperclipai/paperclip)) is the most-starred open-source agent-orchestration product and the closest competitor to Cympho. Paperclip is a Node.js server with a React UI; Cympho is an Elixir/Phoenix BEAM application. The product surface looks similar — both ship org charts, heartbeats, budgets, governance, and ticketed work — but the foundations make different things natural. Cympho ships a `mix cympho.compare` task that introspects the running app and asserts the comparison below row by row; it exits non-zero on any regression so feature parity can gate CI.
+Paperclip ([paperclipai/paperclip](https://github.com/paperclipai/paperclip)) is a close open-source comparison point for agent orchestration. Paperclip is a Node.js server with a React UI; Cympho is an Elixir/Phoenix BEAM application. The product surface looks similar — both ship org charts, heartbeats, budgets, governance, and ticketed work — but the foundations make different things natural. Cympho ships a `mix cympho.compare` task that introspects the running app and asserts baseline parity rows; it exits non-zero on regressions so feature parity can gate CI.
 
 ### Where We Match
 
@@ -273,23 +323,27 @@ Cympho ships parity with Paperclip on the documented orchestration vocabulary:
 
 ### How We Differ
 
-The substantive deltas — each grounded in a Cympho module or process that `mix cympho.compare` checks at runtime:
+The substantive deltas are grounded in Cympho modules, LiveViews, and tests; baseline orchestration rows are also checked by `mix cympho.compare` at runtime:
 
 | Capability | Paperclip | Cympho |
 | --- | --- | --- |
 | Real-time UI | React + fetch/poll | Phoenix LiveView + 7 dedicated Channels (`heartbeats`, `runs`, `activity`, `comments`, `issue`, `issues`, `company`) + ETS replay buffer (`Cympho.EventStore`); reconnecting clients catch up without losing state |
 | Process model | Single Node.js event loop | OTP per-agent supervision under `Cympho.AgentHeartbeat.Supervisor`; one failing agent cannot take down the company |
+| Swarm orchestration | Not documented as a first-class mode | Admin-toggle swarm mode creates hidden one-time workers, worker child issues, a CTO synthesis gate, CEO handoff blocking, and a durable live swarm log |
+| Runtime mix | Agent/runtime configuration | Swarm rows let admins choose harness + model + reasoning effort by cost; each temporary worker randomly draws from the approved mix |
+| Proxy routing | Not documented as a swarm control | Company proxy profiles with HTTP/HTTPS/SOCKS4/SOCKS5 health checks, random/selected/named routing modes, and no raw proxy URLs in launch params |
 | Tool-call traces | Audit-log entries | First-class `Cympho.ToolCallTraces` context with its own LiveView, filterable + exportable |
 | Decision reversal | "Rollback" mentioned in copy | Explicit primitive: `Cympho.Decisions.reverse_decision/3` with audit log and company-scoped broadcast |
 | AI-driven control plane | Not documented | Built-in MCP server (`Cympho.Mcp.Server`) exposes Cympho as tools so Claude and other models can drive it directly |
 | Skill hot-reload | Redeploy required | `Cympho.Skills.HotReloader` hot-loads skill manifests at runtime via the BEAM |
+| Runtime breadth | Core adapter set | Claude Code, Codex, Cursor, OpenAI Chat, OpenClaw, HTTP, Process, Agrenting, plus Process presets for `agy`, Kimi Code, Cline, Gemini, Aider, and OpenCode |
 | Multi-company safety | `company_id` scoping | `company_id` scoping plus `Cympho.PubSubGuard` runtime guard against cross-tenant event leakage |
 
-Smaller wins that don't need their own row: Cympho ships a 7th adapter (`agrenting`) beyond Paperclip's documented six; `Cympho.ReviewNudges` proactively tracks stale evidence requests with a Quantum-driven scanner that re-emits and escalates instead of letting nudges die; per-socket token-bucket rate limiting and broadcast dedup run as supervised GenServers without exposing public ETS handles.
+Smaller wins that don't need their own row: `Cympho.ReviewNudges` proactively tracks stale evidence requests with a Quantum-driven scanner that re-emits and escalates instead of letting nudges die; per-socket token-bucket rate limiting and broadcast dedup run as supervised GenServers without exposing public ETS handles; runtime profiles make provider swaps, DashScope/Qwen testing, and low-cost harness experiments explicit instead of burying them in ad hoc command strings.
 
 ### The Autonomy Gap
 
-The sharpest difference is the autonomous loop itself. Paperclip documents the *ingredients* — heartbeats, governance, decomposition. Cympho ships the *closed loop* that ties them together: new top-level issues auto-ignite to an eligible CEO instead of stranding in `:backlog`; CEO `create_issue` actions emit immediate wakes so engineers pick up children in seconds rather than waiting for a 30-second poll; parent agents are woken on each child entering `:in_review` via `Wakes.notify_child_in_review/1`, so a CTO supervising fan-out sees mid-flight progress without re-reading; CEO-owned root issues route through `:in_review` and a `final_review_required` wake instead of silently auto-completing, so the boss-level quality gate (`ensure_approval_quality`) fires on every shipped deliverable; and `Cympho.ReviewNudges.StaleScanner` re-emits wakes at T1 and escalates across the role-fallback chain at T2 so nudges cannot die silently. With humans only invoked for the goal and the final sign-off, an end-to-end run executes without manual nudges in the dashboard.
+The sharpest difference is the autonomous loop itself. Paperclip documents the *ingredients* — heartbeats, governance, decomposition. Cympho ships the *closed loop* that ties them together: new top-level issues auto-ignite to an eligible CEO instead of stranding in `:backlog`; CEO `create_issue` actions emit immediate wakes so engineers pick up children in seconds rather than waiting for a 30-second poll; parent agents are woken on each child entering `:in_review` via `Wakes.notify_child_in_review/1`, so a CTO supervising fan-out sees mid-flight progress without re-reading; CEO-owned root issues route through `:in_review` and a `final_review_required` wake instead of silently auto-completing, so the boss-level quality gate (`ensure_approval_quality`) fires on every shipped deliverable; swarm parents explicitly wait for CTO synthesis before CEO handoff; and `Cympho.ReviewNudges.StaleScanner` re-emits wakes at T1 and escalates across the role-fallback chain at T2 so nudges cannot die silently. With humans only invoked for the goal and the final sign-off, an end-to-end run executes without manual nudges in the dashboard.
 
 ### Verify It Yourself
 
@@ -298,7 +352,7 @@ mix cympho.compare           # text table with per-row evidence
 mix cympho.compare --json    # machine-readable; exits non-zero on any gap
 ```
 
-The task introspects the live OTP tree, the registered adapter list, and exported context functions — every claim above maps to a row tagged `WIN` (Cympho exceeds) or `PAR` (parity).
+The task introspects the live OTP tree, the registered adapter list, and exported context functions. Baseline rows are tagged `WIN` (Cympho exceeds) or `PAR` (parity); the newer swarm/proxy claims are grounded in `Cympho.Issues.Swarm`, `Cympho.Issues.SwarmEvents`, `Cympho.Proxies`, the LiveView components, and their tests.
 
 ## Architecture
 
@@ -307,7 +361,7 @@ Cympho is a Phoenix application with LiveView for the primary UI, Ecto/PostgreSQ
 Core domains live under `lib/cympho/`:
 
 - `Issues`, `Agents`, `Companies`, `Projects`, and `Users`
-- `Orchestrator`, `AgentRunner`, and `Adapters` (with `Adapters.Registry`, `Adapters.HealthChecker`, and seven built-in adapters)
+- `Orchestrator`, `AgentRunner`, and `Adapters` (with `Adapters.Registry`, `Adapters.HealthChecker`, built-in adapters, and Process runtime presets)
 - `IssueDigest`, `IssueMemory`, `ReviewNudges`, and `PullRequestContract`
 - `RuntimeOperations`, `RuntimeCapacity`, and `RuntimeProfiles`
 - `Inbox`, `Comments`, `WorkProducts`, `ToolCallTraces`, and `Activities`

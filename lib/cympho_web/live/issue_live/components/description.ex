@@ -20,15 +20,20 @@ defmodule CymphoWeb.IssueLive.Show.Description do
     <div id="issue-description" class="px-4 lg:px-6 pb-5 scroll-mt-4">
       <div
         :if={@editing != "description"}
-        class="group rounded-lg border border-hairline bg-surface-1/40 px-4 py-3.5 hover:border-hairline-strong transition-colors duration-100"
+        class={description_shell_class(@issue)}
       >
         <div class="flex items-start gap-3">
-          <p
-            :if={@issue.description not in [nil, ""]}
-            class="flex-1 text-body text-ink-muted whitespace-pre-wrap leading-relaxed"
-          >
-            {@issue.description}
-          </p>
+          <div :if={@issue.description not in [nil, ""]} class="min-w-0 flex-1">
+            <p
+              :if={swarm_issue?(@issue)}
+              class="mb-2 text-eyebrow uppercase text-ink-tertiary"
+            >
+              Owner brief
+            </p>
+            <p class={description_text_class(@issue)}>
+              {@issue.description}
+            </p>
+          </div>
           <button
             :if={@issue.description in [nil, ""]}
             type="button"
@@ -116,4 +121,37 @@ defmodule CymphoWeb.IssueLive.Show.Description do
        do: true
 
   defp delivery_brief_needs_repair?(_readiness), do: false
+
+  defp description_shell_class(issue) do
+    if swarm_issue?(issue) do
+      "group border-y border-hairline bg-surface-1/20 px-1 py-3.5 hover:border-hairline-strong transition-colors duration-100"
+    else
+      "group rounded-lg border border-hairline bg-surface-1/40 px-4 py-3.5 hover:border-hairline-strong transition-colors duration-100"
+    end
+  end
+
+  defp description_text_class(issue) do
+    if swarm_issue?(issue) do
+      "max-w-4xl whitespace-pre-wrap text-sm leading-6 text-ink-muted"
+    else
+      "whitespace-pre-wrap text-body leading-relaxed text-ink-muted"
+    end
+  end
+
+  defp swarm_issue?(%{origin_type: origin}) when origin in ["swarm_worker", "swarm_cto_review"],
+    do: true
+
+  defp swarm_issue?(%{monitor_state: monitor_state}) when is_map(monitor_state) do
+    monitor_state
+    |> Map.get("swarm", Map.get(monitor_state, :swarm))
+    |> swarm_state?()
+  end
+
+  defp swarm_issue?(_issue), do: false
+
+  defp swarm_state?(%{"enabled" => enabled}) when enabled in [true, "true"], do: true
+  defp swarm_state?(%{enabled: enabled}) when enabled in [true, "true"], do: true
+  defp swarm_state?(%{"role" => role}) when role in ["worker", "cto_synthesis"], do: true
+  defp swarm_state?(%{role: role}) when role in ["worker", "cto_synthesis"], do: true
+  defp swarm_state?(_), do: false
 end

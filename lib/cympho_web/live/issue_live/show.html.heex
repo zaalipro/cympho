@@ -25,6 +25,12 @@
       {@flash["error"]}
     </div>
 
+    <CymphoWeb.IssueLive.Show.SwarmPanel.swarm_panel
+      issue={@issue}
+      child_tree={@child_tree}
+      swarm_events={@swarm_events}
+    />
+
     <CymphoWeb.IssueLive.Show.Description.description
       issue={@issue}
       editing={@editing}

@@ -117,7 +117,20 @@ defmodule Cympho.Search do
 
     base_query =
       from(a in Agent,
-        where: fragment("search_vector @@ plainto_tsquery('english', ?)", ^query),
+        where:
+          fragment("search_vector @@ plainto_tsquery('english', ?)", ^query) and
+            fragment(
+              """
+              COALESCE((?->>'temporary')::boolean, false) = false
+              AND COALESCE((?->>'one_time')::boolean, false) = false
+              AND COALESCE((?->'swarm'->>'temporary')::boolean, false) = false
+              AND COALESCE((?->'swarm'->>'one_time')::boolean, false) = false
+              """,
+              a.config,
+              a.config,
+              a.runtime_config,
+              a.runtime_config
+            ),
         order_by: fragment("ts_rank(search_vector, plainto_tsquery('english', ?)) DESC", ^query)
       )
 

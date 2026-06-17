@@ -2088,8 +2088,7 @@ defmodule Cympho.Companies do
   end
 
   def list_company_agents(company_id) do
-    from(a in Cympho.Agents.Agent, where: a.company_id == ^company_id)
-    |> Repo.all()
+    Cympho.Agents.list_agents_by_company(company_id)
   end
 
   def list_company_issues(company_id) do

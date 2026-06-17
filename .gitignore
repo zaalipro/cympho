@@ -32,6 +32,8 @@ Thumbs.db
 erl_crash.dump
 
 *.png
+!screens/
+!screens/*.png
 
 # Local SQL Databases
 *.db

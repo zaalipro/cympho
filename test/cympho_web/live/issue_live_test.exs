@@ -10,6 +10,7 @@ defmodule CymphoWeb.IssueLiveTest do
   alias Cympho.Goals
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Inbox
+  alias Cympho.Proxies
   alias Cympho.Projects
   alias Cympho.Repo
   alias Cympho.Users
@@ -757,6 +758,182 @@ defmodule CymphoWeb.IssueLiveTest do
       expected_path = "/issues/#{created.id}"
       assert {:error, {:live_redirect, %{to: ^expected_path}}} = result
     end
+
+    test "can create a swarm issue with temporary workers routed through CTO" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Owner Route Swarm Co",
+          slug: "owner-route-swarm-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, user} =
+        Users.create_user(%{
+          email: "owner-route-swarm-#{System.unique_integer([:positive])}@example.com",
+          name: "Owner"
+        })
+
+      {:ok, _membership} =
+        Companies.create_membership(%{
+          user_id: user.id,
+          company_id: company.id,
+          role: "owner",
+          is_board_member: true
+        })
+
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Swarm Intake CEO",
+          role: :ceo,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, cto} =
+        create_agent(%{
+          name: "Swarm Intake CTO",
+          role: :cto,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, proxy_a} =
+        Proxies.create_proxy_profile(%{
+          company_id: company.id,
+          name: "swarm-egress-a",
+          proxy_type: "socks5",
+          host: "127.0.0.1",
+          port: 10_801
+        })
+
+      {:ok, proxy_b} =
+        Proxies.create_proxy_profile(%{
+          company_id: company.id,
+          name: "swarm-egress-b",
+          proxy_type: "http",
+          host: "127.0.0.1",
+          port: 10_802
+        })
+
+      conn =
+        conn()
+        |> Plug.Test.init_test_session(%{})
+        |> Plug.Conn.put_session("user_id", user.id)
+        |> Plug.Conn.put_session("company_id", company.id)
+
+      {:ok, view, html} = live(conn, "/issues/new")
+
+      assert html =~ "Swarm mode"
+      assert html =~ "Temporary workers -&gt; CTO synthesis -&gt; CEO review"
+      refute html =~ ~s(data-testid="issue-swarm-advanced-panel")
+
+      ready_description = """
+      Goal: choose the strongest launch segment.
+      Context: three candidate markets need comparison.
+      Constraints / risks: do not start engineering before CTO synthesis.
+      Definition of done: CEO has a CTO-reviewed recommendation.
+      CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`): use swarm synthesis before final owner update.
+      Evidence to inspect after the run: worker packets and CTO synthesis.
+      """
+
+      swarm_params = %{
+        "enabled" => "true",
+        "agent_count" => "2",
+        "mix_rows" => %{
+          "0" => %{
+            "enabled" => "true",
+            "harness" => "claude_code",
+            "model" => "sonnet",
+            "reasoning_effort" => "medium"
+          },
+          "1" => %{
+            "enabled" => "true",
+            "harness" => "codex",
+            "model" => "gpt-5.3-high-fast",
+            "reasoning_effort" => "high"
+          }
+        },
+        "proxy_mode" => "selected",
+        "proxy_profile_ids" => [proxy_a.id, proxy_b.id]
+      }
+
+      view
+      |> form("form", %{
+        "queue_dispatch_focus" => "false",
+        "swarm" => %{"enabled" => "true"},
+        "issue" => %{
+          "title" => "Owner asks for launch segment swarm",
+          "description" => ready_description
+        }
+      })
+      |> render_change()
+
+      html =
+        view
+        |> form("form", %{
+          "queue_dispatch_focus" => "false",
+          "swarm" => swarm_params,
+          "issue" => %{
+            "title" => "Owner asks for launch segment swarm",
+            "description" => ready_description
+          }
+        })
+        |> render_change()
+
+      assert html =~ "Ready to create swarm"
+      assert html =~ "CEO run waits for swarm synthesis"
+      assert html =~ "Create Swarm Issue"
+      assert html =~ ~s(data-testid="issue-swarm-advanced-panel")
+      assert html =~ "Advanced swarm settings"
+      assert html =~ "swarm-egress-a"
+      assert html =~ "swarm-egress-b"
+      assert html =~ "2 proxy profiles"
+      assert html =~ "Claude code / sonnet / medium"
+      assert html =~ "Codex / gpt-5.3-high-fast / high"
+
+      result =
+        view
+        |> form("form", %{
+          "queue_dispatch_focus" => "false",
+          "swarm" => swarm_params,
+          "issue" => %{
+            "title" => "Owner asks for launch segment swarm",
+            "description" => ready_description
+          }
+        })
+        |> render_submit()
+
+      parent =
+        Issues.list_issues(%{company_id: company.id})
+        |> Enum.find(&(&1.title == "Owner asks for launch segment swarm"))
+
+      assert parent.status == :blocked
+      assert parent.assignee_id == ceo.id
+      assert parent.assigned_role == "ceo"
+      refute Issues.dispatch_pinned?(parent)
+      assert parent.monitor_state["swarm"]["status"] == "launched"
+      assert length(parent.monitor_state["swarm"]["temporary_agent_ids"]) == 2
+      assert parent.monitor_state["swarm"]["proxy"]["mode"] == "selected"
+
+      assert parent.monitor_state["swarm"]["proxy"]["pool"] == [
+               "swarm-egress-a",
+               "swarm-egress-b"
+             ]
+
+      reasoning_efforts = Enum.map(parent.monitor_state["swarm"]["mix"], & &1["reasoning_effort"])
+      assert length(reasoning_efforts) == 2
+      assert Enum.all?(reasoning_efforts, &(&1 in ["medium", "high"]))
+
+      children = Issues.list_child_issues(parent.id)
+      assert Enum.count(children, &(&1.origin_type == "swarm_worker")) == 2
+
+      assert Enum.any?(
+               children,
+               &(&1.origin_type == "swarm_cto_review" and &1.assignee_id == cto.id)
+             )
+
+      expected_path = "/issues/#{parent.id}"
+      assert {:error, {:live_redirect, %{to: ^expected_path}}} = result
+    end
   end
 
   describe "Show - Issue Detail" do
@@ -767,6 +944,100 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ issue.description
       assert html =~ "backlog"
       assert html =~ "high"
+    end
+
+    test "renders swarm issues as an orchestration surface" do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Detail Swarm CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, _cto} =
+        create_agent(%{
+          name: "Detail Swarm CTO",
+          role: :cto,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, parent} =
+        create_issue(%{
+          title: "Design a launch swarm",
+          description: """
+          Goal: compare two launch paths.
+          Context: owner needs a CTO-reviewed recommendation.
+          Constraints / risks: no engineering before synthesis.
+          Definition of done: CEO receives a CTO-ready recommendation.
+          CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`): wait for CTO synthesis.
+          Evidence to inspect after the run: worker packets and CTO gate.
+          """,
+          status: :todo,
+          priority: :medium,
+          assignee_id: ceo.id,
+          assigned_role: "ceo",
+          swarm: %{
+            enabled: true,
+            agent_count: 2,
+            mix: [
+              %{adapter: :claude_code, model: "sonnet"}
+            ],
+            proxy: %{enabled: true, profile: "managed-egress-ui"}
+          }
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{parent.id}")
+
+      assert html =~ ~s(data-testid="issue-swarm-panel")
+      assert html =~ ~s(data-testid="issue-swarm-log")
+      assert html =~ "Swarm orchestration"
+      assert html =~ "Live swarm log"
+      assert html =~ "Launch ready"
+      assert html =~ "Swarm is live"
+      assert html =~ "Workers active"
+      assert html =~ "Independent first pass"
+      assert html =~ "Evidence over consensus"
+      assert html =~ "Preserve dissent"
+      assert html =~ "Worker packets"
+      assert html =~ "0/2 closed"
+      assert html_has_any?(html, worker_role_labels())
+      assert html_has_any?(html, worker_lens_labels())
+      assert html =~ "claude_code"
+      assert html =~ "sonnet"
+      assert html =~ "managed-egress-ui"
+      assert html =~ "CTO gate"
+      assert html =~ "CEO handoff"
+      assert html =~ "Owner brief"
+
+      children = Issues.list_child_issues(parent.id)
+
+      worker =
+        children
+        |> Enum.filter(&(&1.origin_type == "swarm_worker"))
+        |> Enum.sort_by(&(&1.monitor_state["swarm"]["worker_index"] || 999))
+        |> hd()
+
+      cto_issue = Enum.find(children, &(&1.origin_type == "swarm_cto_review"))
+
+      {:ok, _view, worker_html} = live(conn(), "/issues/#{worker.id}")
+
+      assert worker_html =~ ~s(data-testid="issue-swarm-panel")
+      assert worker_html =~ "Swarm worker packet"
+      assert worker_html =~ "This packet feeds CTO synthesis"
+      assert html_has_any?(worker_html, worker_lens_labels())
+      assert worker_html =~ "claude_code"
+
+      {:ok, _view, cto_html} = live(conn(), "/issues/#{cto_issue.id}")
+
+      assert cto_html =~ ~s(data-testid="issue-swarm-panel")
+      assert cto_html =~ "CTO swarm synthesis"
+      assert cto_html =~ "Waiting on packets"
+      assert cto_html =~ "CEO restart"
+      assert cto_html =~ "Worker packets"
     end
 
     test "shows linked mission context in the sidebar" do
@@ -3363,5 +3634,33 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert html =~ "Busy Agent"
     end
+  end
+
+  defp html_has_any?(html, labels) do
+    Enum.any?(labels, &String.contains?(html, &1))
+  end
+
+  defp worker_role_labels do
+    [
+      "Product Manager",
+      "Designer",
+      "Researcher",
+      "Marketer",
+      "Content Strategist",
+      "Sales Development",
+      "Customer Support"
+    ]
+  end
+
+  defp worker_lens_labels do
+    [
+      "Market and prioritization",
+      "User journey and usability",
+      "Evidence and uncertainty",
+      "Positioning and demand",
+      "Narrative and information architecture",
+      "Buyer objections and qualification",
+      "Support burden and failure modes"
+    ]
   end
 end

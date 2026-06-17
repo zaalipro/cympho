@@ -100,6 +100,7 @@ defmodule CymphoWeb.Router do
       live "/settings/adapters", AdapterLive.Index
       live "/settings/adapters/:key", AdapterLive.Show
       live "/settings/secrets", SecretsLive.Index
+      live "/settings/proxies", ProxyLive.Index
       live "/settings/policies", ExecutionPolicyLive.Index
       live "/settings/policies/new", ExecutionPolicyLive.New
       live "/settings/policies/:id", ExecutionPolicyLive.Show

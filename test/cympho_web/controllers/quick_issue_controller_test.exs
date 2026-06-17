@@ -5,7 +5,9 @@ defmodule CymphoWeb.QuickIssueControllerTest do
 
   alias Cympho.Agents
   alias Cympho.Goals
+  alias Cympho.Issues
   alias Cympho.Issues.Issue
+  alias Cympho.Proxies
   alias Cympho.Projects
   alias Cympho.Repo
 
@@ -58,6 +60,7 @@ defmodule CymphoWeb.QuickIssueControllerTest do
 
     test "creates a mission-linked issue and inherits the goal project", %{conn: conn} do
       {conn, _user, company} = register_and_log_in_user(conn)
+
       unique = System.unique_integer([:positive])
 
       {:ok, project} =
@@ -97,6 +100,7 @@ defmodule CymphoWeb.QuickIssueControllerTest do
 
     test "defaults a blank assignee to the company CEO and opens the issue", %{conn: conn} do
       {conn, _user, company} = register_and_log_in_user(conn)
+
       unique = System.unique_integer([:positive])
 
       {:ok, ceo} =
@@ -123,6 +127,100 @@ defmodule CymphoWeb.QuickIssueControllerTest do
       assert issue.assigned_role == "ceo"
       assert issue.status == :todo
       assert issue.priority == :medium
+    end
+
+    test "creates a swarm issue from quick-create and routes through CEO/CTO", %{conn: conn} do
+      {conn, _user, company} =
+        register_and_log_in_user(conn, %{role: "owner", is_board_member: true})
+
+      unique = System.unique_integer([:positive])
+
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "Quick Swarm CEO #{unique}",
+          role: :ceo,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, cto} =
+        Agents.create_agent(%{
+          name: "Quick Swarm CTO #{unique}",
+          role: :cto,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, designer} =
+        Agents.create_agent(%{
+          name: "Quick Swarm Designer #{unique}",
+          role: :designer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, _proxy_a} =
+        Proxies.create_proxy_profile(%{
+          company_id: company.id,
+          name: "quick-egress-a",
+          proxy_type: "socks5",
+          host: "127.0.0.1",
+          port: 10_901
+        })
+
+      {:ok, _proxy_b} =
+        Proxies.create_proxy_profile(%{
+          company_id: company.id,
+          name: "quick-egress-b",
+          proxy_type: "http",
+          host: "127.0.0.1",
+          port: 10_902
+        })
+
+      title = "Quick modal swarm #{unique}"
+
+      conn =
+        post(conn, "/issues/quick-create", %{
+          "title" => title,
+          "assignee_id" => designer.id,
+          "status" => "todo",
+          "swarm" => %{
+            "enabled" => "true",
+            "agent_count" => "3",
+            "mix" => """
+            product_manager | openai_chat | qwen3.6-flash | low
+            designer | codex | gpt-5.3-high-fast | high
+            researcher | claude_code | sonnet | medium
+            """,
+            "proxy_mode" => "random"
+          }
+        })
+
+      parent = Repo.one!(from i in Issue, where: i.title == ^title)
+      assert redirected_to(conn) == ~p"/issues/#{parent.id}"
+      assert parent.status == :blocked
+      assert parent.assignee_id == ceo.id
+      assert parent.assigned_role == "ceo"
+      assert parent.monitor_state["swarm"]["status"] == "launched"
+
+      assert parent.monitor_state["swarm"]["proxy"]["mode"] == "random"
+
+      assert parent.monitor_state["swarm"]["proxy"]["pool"] == [
+               "quick-egress-a",
+               "quick-egress-b"
+             ]
+
+      reasoning_efforts = Enum.map(parent.monitor_state["swarm"]["mix"], & &1["reasoning_effort"])
+      assert length(reasoning_efforts) == 3
+      assert Enum.all?(reasoning_efforts, &(&1 in ["low", "high", "medium"]))
+
+      children = Issues.list_child_issues(parent.id)
+      assert Enum.count(children, &(&1.origin_type == "swarm_worker")) == 3
+
+      assert Enum.any?(
+               children,
+               &(&1.origin_type == "swarm_cto_review" and &1.assignee_id == cto.id)
+             )
     end
 
     test "rejects cross-company quick-create references", %{conn: conn} do

@@ -1060,7 +1060,7 @@ defmodule CymphoWeb.AgentLive.Show do
       })
   end
 
-  defp put_clean(map, _key, value) when value in [nil, ""], do: map
+  defp put_clean(map, _key, value) when value in [nil, "", []], do: map
   defp put_clean(map, key, value), do: Map.put(map, key, value)
 
   defp selected_adapter_from_params(params, agent, profile_id) do
@@ -1119,17 +1119,24 @@ defmodule CymphoWeb.AgentLive.Show do
     fallback = runtime_form_fallback(agent, selected_adapter, profile_id)
 
     if RuntimeProfiles.custom?(profile_id) do
+      process_preset = param_string(params, "process_preset", fallback.process_preset)
+      preset_defaults = RuntimeOptions.process_defaults(process_preset)
+
       provider =
         params
         |> param_string("provider", fallback.provider)
+        |> default_process_value(selected_adapter, fallback.provider, preset_defaults["provider"])
         |> default_runtime_provider(selected_adapter)
 
-      process_preset = param_string(params, "process_preset", fallback.process_preset)
+      command =
+        params
+        |> param_string("runtime_command", fallback.command)
+        |> default_process_value(selected_adapter, fallback.command, preset_defaults["command"])
 
       %{
         model: param_string(params, "model", fallback.model),
         provider: provider,
-        command: param_string(params, "runtime_command", fallback.command),
+        command: command,
         process_preset: process_preset,
         process_args: param_string(params, "process_args", fallback.process_args),
         cwd: param_string(params, "runtime_cwd", fallback.cwd),
@@ -1234,6 +1241,12 @@ defmodule CymphoWeb.AgentLive.Show do
     do: RuntimeOptions.openclaw_default_provider()
 
   defp default_runtime_provider(provider, _adapter), do: provider || ""
+
+  defp default_process_value(value, "process", stale_value, preset_value)
+       when value in [nil, "", stale_value],
+       do: preset_value || value || ""
+
+  defp default_process_value(value, _adapter, _stale_value, _preset_value), do: value || ""
 
   defp default_model("codex", _provider), do: Cympho.Adapters.CodexAdapter.default_model()
   defp default_model("cursor", _provider), do: RuntimeOptions.cursor_default_model()

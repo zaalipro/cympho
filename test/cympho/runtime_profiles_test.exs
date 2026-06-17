@@ -1,6 +1,7 @@
 defmodule Cympho.RuntimeProfilesTest do
   use Cympho.DataCase, async: true
 
+  alias Cympho.Adapters.RuntimeOptions
   alias Cympho.RuntimeProfiles
 
   describe "catalog" do
@@ -75,6 +76,35 @@ defmodule Cympho.RuntimeProfilesTest do
     test "profile adapter overrides stale adapter form values" do
       assert RuntimeProfiles.adapter_for("openclaw-zai", "claude_code") == "openclaw"
       assert RuntimeProfiles.adapter_for("custom", "codex") == "codex"
+    end
+
+    test "process runtime options expose researched CLI presets" do
+      preset_values =
+        RuntimeOptions.process_preset_options()
+        |> Enum.map(fn {_label, value} -> value end)
+
+      assert "antigravity" in preset_values
+      assert "kimi_code" in preset_values
+      assert "cline" in preset_values
+      assert "gemini" in preset_values
+      assert "aider" in preset_values
+      assert "opencode" in preset_values
+
+      assert RuntimeOptions.process_defaults("kimi_code")["prompt_arg_template"] == [
+               "-p",
+               "{{prompt}}",
+               "--output-format",
+               "stream-json"
+             ]
+
+      assert RuntimeOptions.process_defaults("cline")["args"] == ["--json"]
+
+      assert RuntimeOptions.process_defaults("opencode")["args"] == [
+               "run",
+               "--format",
+               "json",
+               "--quiet"
+             ]
     end
 
     test "quick presets map to profiles and safe concurrency" do

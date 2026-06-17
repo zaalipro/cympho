@@ -3,6 +3,7 @@ defmodule Cympho.AgentActionsTest do
 
   alias Cympho.{AgentActions, Agents, Comments, Companies, Issues, Repo, Secrets, WorkProducts}
   alias Cympho.HeartbeatEngine.Run
+  alias Cympho.Issues.SwarmEvents
 
   describe "parse/1" do
     test "parses a valid cympho-actions block" do
@@ -1554,6 +1555,74 @@ defmodule Cympho.AgentActionsTest do
                  String.contains?(c.body, "Action rejected") and
                  String.contains?(c.body, "CEO/CTO")
              end)
+    end
+
+    test "hidden one-time swarm worker can complete only its own packet", %{
+      company: company,
+      project: project,
+      issue: parent,
+      ceo: ceo
+    } do
+      {:ok, temp_agent} =
+        Agents.create_agent(%{
+          name: "Swarm Product Worker",
+          role: :product_manager,
+          status: :idle,
+          company_id: company.id,
+          project_id: project.id,
+          parent_id: ceo.id,
+          adapter: :openai_chat,
+          config: %{"hidden" => true, "one_time" => true, "temporary" => true},
+          runtime_config: %{
+            "swarm" => %{
+              "temporary" => true,
+              "one_time" => true,
+              "parent_issue_id" => parent.id
+            }
+          }
+        })
+
+      {:ok, worker_issue} =
+        Issues.create_issue(%{
+          title: "Swarm worker packet",
+          description: "Prepare a packet for CTO synthesis.",
+          status: :todo,
+          company_id: company.id,
+          project_id: project.id,
+          parent_id: parent.id,
+          assigned_role: "product_manager",
+          origin_type: "swarm_worker",
+          monitor_state: %{"swarm" => %{"agent_id" => temp_agent.id}}
+        })
+
+      {:ok, worker_issue} = Issues.checkout_issue(worker_issue, temp_agent, :product_manager)
+
+      assert {:ok, %{results: [%{type: "swarm_worker_complete"}]}} =
+               AgentActions.execute(worker_issue, temp_agent, [
+                 %{
+                   "type" => "swarm_worker_complete",
+                   "summary" => "Recommended the smallest reversible launch decision."
+                 }
+               ])
+
+      completed = Issues.get_issue!(worker_issue.id)
+      assert completed.status == :done
+      assert is_nil(completed.assignee_id)
+
+      assert Enum.any?(Comments.list_comments(worker_issue.id), fn comment ->
+               comment.author_id == temp_agent.id and
+                 String.contains?(comment.body, "[delivery]") and
+                 String.contains?(comment.body, "smallest reversible launch decision")
+             end)
+
+      [event] =
+        parent
+        |> SwarmEvents.list_for_issue()
+        |> Enum.filter(&(&1.event_type == "worker_completed"))
+
+      assert event.issue_id == worker_issue.id
+      assert event.agent_id == temp_agent.id
+      assert event.metadata["summary"] == "Recommended the smallest reversible launch decision."
     end
   end
 

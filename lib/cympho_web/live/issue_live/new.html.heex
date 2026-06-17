@@ -16,8 +16,14 @@
   <.panel class="overflow-hidden">
     <.simple_form for={@form} phx-change="validate" phx-submit="save" class="space-y-5 p-5 sm:p-6">
       <% launch_state =
-        create_launch_state(@brief_readiness, @queue_dispatch_focus?, @intake_route) %>
-      <% queue_focus_disabled? = queue_focus_disabled?(@brief_readiness) %>
+        create_launch_state(
+          @brief_readiness,
+          @queue_dispatch_focus?,
+          @intake_route,
+          @swarm_config
+        ) %>
+      <% queue_focus_disabled? =
+        queue_focus_disabled?(@brief_readiness) or swarm_enabled?(@swarm_config) %>
       <% queue_focus_checked? = queue_focus_checked?(@brief_readiness, @queue_dispatch_focus?) %>
 
       <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
@@ -138,7 +144,12 @@
             </div>
 
             <.button type="submit" variant="primary" class="mt-3 w-full">
-              {submit_label(@brief_readiness, @queue_dispatch_focus?, @intake_route)}
+              {submit_label(
+                @brief_readiness,
+                @queue_dispatch_focus?,
+                @intake_route,
+                @swarm_config
+              )}
             </.button>
           </div>
 
@@ -356,10 +367,10 @@
                   "block text-sm font-590",
                   if(queue_focus_disabled?, do: "text-text-secondary", else: "text-sky-100")
                 ]}>
-                  {queue_focus_label(@brief_readiness)}
+                  {queue_focus_label(@brief_readiness, @swarm_config)}
                 </span>
                 <span class="mt-0.5 block text-xs leading-5 text-text-tertiary">
-                  {queue_focus_detail(@brief_readiness)}
+                  {queue_focus_detail(@brief_readiness, @swarm_config)}
                 </span>
               </span>
             </label>
@@ -501,6 +512,61 @@
               </div>
             </div>
           </div>
+
+          <div
+            :if={@swarm_admin?}
+            id="issue-swarm-mode"
+            data-testid="issue-swarm-mode"
+            class={[
+              "rounded-lg border px-4 py-4",
+              if(swarm_enabled?(@swarm_config),
+                do: "border-cyan-500/25 bg-cyan-500/[0.07]",
+                else: "border-border bg-surface/70"
+              )
+            ]}
+          >
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <label
+                for="issue-swarm-enabled"
+                class="flex min-w-0 cursor-pointer items-start gap-3"
+              >
+                <input
+                  id="issue-swarm-enabled"
+                  type="checkbox"
+                  name="swarm[enabled]"
+                  value="true"
+                  checked={swarm_enabled?(@swarm_config)}
+                  class="mt-0.5 h-4 w-4 rounded border-border bg-canvas text-brand focus:ring-brand/40"
+                />
+                <span class="min-w-0">
+                  <span class="block text-xs font-590 uppercase tracking-[0.08em] text-cyan-200">
+                    Swarm mode
+                  </span>
+                  <span class="mt-1 block text-sm font-590 text-text-primary">
+                    Temporary workers -> CTO synthesis -> CEO review
+                  </span>
+                  <span class="mt-1 block max-w-2xl text-xs leading-5 text-text-tertiary">
+                    Creates one-time non-engineering agents, blocks the CEO parent, and routes delivery through CTO synthesis.
+                  </span>
+                </span>
+              </label>
+
+              <span class="shrink-0 rounded-full border border-border bg-panel px-2.5 py-1 text-xs font-510 text-text-secondary">
+                {swarm_count(@swarm_config)} workers
+              </span>
+            </div>
+
+            <.swarm_configuration
+              :if={swarm_enabled?(@swarm_config)}
+              id="issue-swarm-advanced-panel"
+              title="Advanced swarm settings"
+              description="Choose temporary worker count, runtime choices, and proxy selection before launch. CTO and CEO assign worker lenses."
+              swarm_params={@swarm_params}
+              swarm_config={@swarm_config}
+              proxy_profiles={@proxy_profiles}
+              class="mt-4"
+            />
+          </div>
         </div>
 
         <aside
@@ -525,7 +591,12 @@
             </div>
 
             <.button type="submit" variant="primary" class="mt-4 min-h-[40px] w-full">
-              {submit_label(@brief_readiness, @queue_dispatch_focus?, @intake_route)}
+              {submit_label(
+                @brief_readiness,
+                @queue_dispatch_focus?,
+                @intake_route,
+                @swarm_config
+              )}
             </.button>
           </section>
 
@@ -605,7 +676,7 @@
             Cancel
           </.app_link>
           <.button type="submit" variant="primary">
-            {submit_label(@brief_readiness, @queue_dispatch_focus?, @intake_route)}
+            {submit_label(@brief_readiness, @queue_dispatch_focus?, @intake_route, @swarm_config)}
           </.button>
         </div>
       </:actions>

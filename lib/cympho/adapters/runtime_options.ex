@@ -74,7 +74,13 @@ defmodule Cympho.Adapters.RuntimeOptions do
     {"Codex CLI", "codex"},
     {"Claude-compatible CLI", "claude_code"},
     {"Cursor CLI", "cursor"},
-    {"OpenClaw CLI", "openclaw"}
+    {"OpenClaw CLI", "openclaw"},
+    {"Antigravity CLI (agy)", "antigravity"},
+    {"Kimi Code CLI", "kimi_code"},
+    {"Cline CLI", "cline"},
+    {"Gemini CLI", "gemini"},
+    {"Aider CLI", "aider"},
+    {"OpenCode CLI", "opencode"}
   ]
 
   @process_provider_options [
@@ -83,6 +89,11 @@ defmodule Cympho.Adapters.RuntimeOptions do
     {"Anthropic-compatible", "anthropic"},
     {"Cursor", "cursor"},
     {"OpenClaw", "openclaw"},
+    {"Google / Gemini", "google"},
+    {"Moonshot / Kimi", "moonshot"},
+    {"Cline", "cline"},
+    {"Aider", "aider"},
+    {"OpenCode", "opencode"},
     {"Custom", "custom"}
   ]
 
@@ -134,12 +145,16 @@ defmodule Cympho.Adapters.RuntimeOptions do
     end)
   end
 
-  def process_model_options(provider) when provider in ["openclaw", "openai", "anthropic"] do
+  def process_model_options(provider)
+      when provider in ["openclaw", "openai", "anthropic", "google", "moonshot", "cursor"] do
     provider
     |> case do
       "openclaw" -> openclaw_model_options(openclaw_default_provider())
       "openai" -> Cympho.Adapters.CodexAdapter.model_options()
       "anthropic" -> [{"Provider default", ""}, {"Sonnet", "sonnet"}, {"Opus", "opus"}]
+      "google" -> [{"Auto", "auto"}, {"Gemini Pro", "pro"}, {"Gemini Flash", "flash"}]
+      "moonshot" -> [{"Provider default", ""}, {"Kimi for Coding", "kimi-code/kimi-for-coding"}]
+      "cursor" -> cursor_model_options()
     end
   end
 
@@ -167,7 +182,9 @@ defmodule Cympho.Adapters.RuntimeOptions do
     %{
       "command" => "agent",
       "provider" => "cursor",
-      "model_arg_template" => ["--model", "{{model}}"]
+      "model_arg_template" => ["--model", "{{model}}"],
+      "prompt_arg_template" => ["-p", "{{prompt}}", "--output-format", "json"],
+      "prompt_stdin" => false
     }
   end
 
@@ -176,6 +193,67 @@ defmodule Cympho.Adapters.RuntimeOptions do
       "command" => "openclaw",
       "provider" => "openclaw",
       "model_arg_template" => ["--model", "{{model}}"]
+    }
+  end
+
+  def process_defaults("antigravity") do
+    %{
+      "command" => "agy",
+      "provider" => "google",
+      "prompt_arg_template" => ["{{prompt}}"],
+      "prompt_stdin" => false
+    }
+  end
+
+  def process_defaults("kimi_code") do
+    %{
+      "command" => "kimi",
+      "provider" => "moonshot",
+      "model_arg_template" => ["-m", "{{model}}"],
+      "prompt_arg_template" => ["-p", "{{prompt}}", "--output-format", "stream-json"],
+      "prompt_stdin" => false
+    }
+  end
+
+  def process_defaults("cline") do
+    %{
+      "command" => "cline",
+      "provider" => "cline",
+      "args" => ["--json"],
+      "model_arg_template" => ["--model", "{{model}}"],
+      "prompt_arg_template" => ["{{prompt}}"],
+      "prompt_stdin" => false
+    }
+  end
+
+  def process_defaults("gemini") do
+    %{
+      "command" => "gemini",
+      "provider" => "google",
+      "model_arg_template" => ["--model", "{{model}}"],
+      "prompt_arg_template" => ["-p", "{{prompt}}", "--output-format", "json"],
+      "prompt_stdin" => false
+    }
+  end
+
+  def process_defaults("aider") do
+    %{
+      "command" => "aider",
+      "provider" => "aider",
+      "model_arg_template" => ["--model", "{{model}}"],
+      "prompt_arg_template" => ["--message", "{{prompt}}"],
+      "prompt_stdin" => false
+    }
+  end
+
+  def process_defaults("opencode") do
+    %{
+      "command" => "opencode",
+      "provider" => "opencode",
+      "args" => ["run", "--format", "json", "--quiet"],
+      "model_arg_template" => ["--model", "{{model}}"],
+      "prompt_arg_template" => ["{{prompt}}"],
+      "prompt_stdin" => false
     }
   end
 

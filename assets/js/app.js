@@ -1716,6 +1716,399 @@ const liveSocket = new LiveSocket("/live", Socket, {
 liveSocket.connect();
 window.liveSocket = liveSocket;
 
+function createSwarmHiddenInput(name, value) {
+  const input = document.createElement('input');
+  input.type = 'hidden';
+  input.name = name;
+  input.value = value || '';
+  return input;
+}
+
+function swarmSelectLabel(select, fallback) {
+  if (!select) return fallback;
+  const option = select.options[select.selectedIndex];
+  return (option?.textContent || select.value || fallback).trim();
+}
+
+function swarmOptionLabel(select, value, fallback) {
+  if (!select) return fallback || value || '';
+  const option = Array.from(select.options).find((option) => option.value === value);
+  return (option?.textContent || fallback || value || '').trim();
+}
+
+function swarmNextIndex(config) {
+  const current = Number.parseInt(config.dataset.swarmNextIndex || '0', 10);
+  if (Number.isFinite(current)) return current;
+  return 0;
+}
+
+function dispatchSwarmCompositionChange(config) {
+  const marker = config.querySelector('[data-swarm-change-marker]');
+  if (!marker) return;
+  marker.value = String(Date.now());
+  marker.dispatchEvent(new Event('input', {bubbles: true}));
+  marker.dispatchEvent(new Event('change', {bubbles: true}));
+}
+
+function updateSwarmCompositionCount(config) {
+  const rows = Array.from(config.querySelectorAll('[data-swarm-choice-row]'));
+  const scope = config.closest('section') || config;
+  scope.querySelectorAll('[data-swarm-count]').forEach((el) => {
+    el.textContent = String(rows.length);
+  });
+  const emptyRow = config.querySelector('[data-swarm-empty-row]');
+  if (emptyRow) emptyRow.classList.toggle('hidden', rows.length > 0);
+}
+
+function swarmRowHiddenInput(row, field) {
+  const byData = row.querySelector(`[data-swarm-row-${field}-input]`);
+  if (byData) return byData;
+
+  const suffix = field === 'reasoning' ? 'reasoning_effort' : field;
+  return row.querySelector(`input[name$="[${suffix}]"]`);
+}
+
+function swarmRowLabel(row, field) {
+  return row.querySelector(`[data-swarm-row-${field}-label]`);
+}
+
+function swarmRowValue(row, field) {
+  const input = swarmRowHiddenInput(row, field);
+  return input ? input.value : '';
+}
+
+function setSwarmRowValue(row, field, value) {
+  const input = swarmRowHiddenInput(row, field);
+  if (input) input.value = value || '';
+}
+
+function updateSwarmRowLabels(config, row) {
+  const harnessSelect = config.querySelector('[data-swarm-choice-harness]');
+  const reasoningSelect = config.querySelector('[data-swarm-choice-reasoning]');
+  const harness = swarmRowValue(row, 'harness') || 'openai_chat';
+  const model = (swarmRowValue(row, 'model') || '').trim();
+  const reasoning = swarmRowValue(row, 'reasoning') || 'auto';
+
+  const harnessLabel = swarmRowLabel(row, 'harness');
+  if (harnessLabel) harnessLabel.textContent = swarmOptionLabel(harnessSelect, harness, harness);
+
+  const modelLabel = swarmRowLabel(row, 'model');
+  if (modelLabel) modelLabel.textContent = model || 'Runtime default';
+
+  const reasoningLabel = swarmRowLabel(row, 'reasoning');
+  if (reasoningLabel) {
+    reasoningLabel.textContent = swarmOptionLabel(reasoningSelect, reasoning, reasoning);
+  }
+}
+
+function createSwarmRemoveButton() {
+  const removeButton = document.createElement('button');
+  removeButton.type = 'button';
+  removeButton.dataset.swarmRemoveRow = '';
+  removeButton.className =
+    'inline-flex h-7 w-7 items-center justify-center rounded-md text-text-tertiary hover:bg-surface-hover hover:text-text-primary';
+  removeButton.setAttribute('aria-label', 'Remove swarm runtime choice');
+  const icon = document.createElement('span');
+  icon.className = 'hero-x-mark-mini h-4 w-4';
+  removeButton.appendChild(icon);
+  return removeButton;
+}
+
+function createSwarmEditButton() {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.swarmEditRow = '';
+  button.className =
+    'inline-flex h-7 w-7 items-center justify-center rounded-md text-text-tertiary hover:bg-surface-hover hover:text-text-primary';
+  button.setAttribute('aria-label', 'Edit swarm runtime choice');
+  const icon = document.createElement('span');
+  icon.className = 'hero-pencil-square-mini h-4 w-4';
+  button.appendChild(icon);
+  return button;
+}
+
+function createSwarmDoneButton() {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.swarmDoneEdit = '';
+  button.className =
+    'inline-flex h-7 items-center justify-center rounded-md border border-cyan-500/25 bg-cyan-500/10 px-2 text-[10px] font-590 uppercase text-cyan-100 hover:bg-cyan-500/15';
+  button.textContent = 'Done';
+  return button;
+}
+
+function createSwarmInlineSelect(sourceSelect, value, dataName) {
+  const select = document.createElement('select');
+  select.className =
+    'block h-7 w-full rounded-md border border-cyan-500/35 bg-canvas px-2 text-xs text-text-primary focus:border-cyan-400 focus:ring-cyan-500/30';
+  select.dataset[dataName] = '';
+
+  if (sourceSelect) {
+    Array.from(sourceSelect.options).forEach((sourceOption) => {
+      const option = document.createElement('option');
+      option.value = sourceOption.value;
+      option.textContent = sourceOption.textContent;
+      select.appendChild(option);
+    });
+  }
+
+  select.value = value || '';
+  return select;
+}
+
+function createSwarmInlineModelInput(sourceInput, value) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = value || '';
+  input.placeholder = 'runtime default or provider model';
+  input.className =
+    'block h-7 w-full rounded-md border border-cyan-500/35 bg-canvas px-2 font-mono text-xs text-text-primary placeholder:font-sans placeholder:text-text-quaternary focus:border-cyan-400 focus:ring-cyan-500/30';
+  input.dataset.swarmInlineModel = '';
+
+  const listId = sourceInput?.getAttribute('list');
+  if (listId) input.setAttribute('list', listId);
+
+  return input;
+}
+
+function exitSwarmRowEdit(config, row) {
+  if (!row || row.dataset.swarmEditing !== 'true') return;
+
+  row
+    .querySelectorAll(
+      '[data-swarm-inline-harness], [data-swarm-inline-model], [data-swarm-inline-reasoning]'
+    )
+    .forEach((control) => control.remove());
+
+  row
+    .querySelectorAll(
+      '[data-swarm-row-harness-label], [data-swarm-row-model-label], [data-swarm-row-reasoning-label]'
+    )
+    .forEach((label) => label.classList.remove('hidden'));
+
+  const actionCell = row.querySelector('[data-swarm-row-actions]');
+  if (actionCell) {
+    actionCell.innerHTML = '';
+    actionCell.appendChild(createSwarmEditButton());
+    actionCell.appendChild(createSwarmRemoveButton());
+  }
+
+  delete row.dataset.swarmEditing;
+  row.classList.remove('bg-cyan-500/10', 'ring-1', 'ring-cyan-500/30');
+  updateSwarmRowLabels(config, row);
+}
+
+function enterSwarmRowEdit(config, row) {
+  if (!config || !row || row.dataset.swarmEditing === 'true') return;
+
+  config.querySelectorAll('[data-swarm-choice-row][data-swarm-editing="true"]').forEach((openRow) => {
+    if (openRow !== row) exitSwarmRowEdit(config, openRow);
+  });
+
+  const harnessSelect = config.querySelector('[data-swarm-choice-harness]');
+  const modelInput = config.querySelector('[data-swarm-choice-model]');
+  const reasoningSelect = config.querySelector('[data-swarm-choice-reasoning]');
+  const harnessLabel = swarmRowLabel(row, 'harness');
+  const modelLabel = swarmRowLabel(row, 'model');
+  const reasoningLabel = swarmRowLabel(row, 'reasoning');
+
+  if (!harnessLabel || !modelLabel || !reasoningLabel) return;
+
+  row.dataset.swarmEditing = 'true';
+  row.classList.add('bg-cyan-500/10', 'ring-1', 'ring-cyan-500/30');
+
+  harnessLabel.classList.add('hidden');
+  modelLabel.classList.add('hidden');
+  reasoningLabel.classList.add('hidden');
+
+  const inlineHarness = createSwarmInlineSelect(
+    harnessSelect,
+    swarmRowValue(row, 'harness'),
+    'swarmInlineHarness'
+  );
+  const inlineModel = createSwarmInlineModelInput(modelInput, swarmRowValue(row, 'model'));
+  const inlineReasoning = createSwarmInlineSelect(
+    reasoningSelect,
+    swarmRowValue(row, 'reasoning'),
+    'swarmInlineReasoning'
+  );
+
+  harnessLabel.insertAdjacentElement('afterend', inlineHarness);
+  modelLabel.insertAdjacentElement('afterend', inlineModel);
+  reasoningLabel.insertAdjacentElement('afterend', inlineReasoning);
+
+  inlineHarness.addEventListener('change', () => {
+    setSwarmRowValue(row, 'harness', inlineHarness.value);
+    updateSwarmRowLabels(config, row);
+  });
+
+  inlineModel.addEventListener('input', () => {
+    setSwarmRowValue(row, 'model', inlineModel.value.trim());
+    updateSwarmRowLabels(config, row);
+  });
+
+  inlineReasoning.addEventListener('change', () => {
+    setSwarmRowValue(row, 'reasoning', inlineReasoning.value);
+    updateSwarmRowLabels(config, row);
+  });
+
+  const actionCell = row.querySelector('[data-swarm-row-actions]');
+  if (actionCell) {
+    actionCell.innerHTML = '';
+    actionCell.appendChild(createSwarmDoneButton());
+    actionCell.appendChild(createSwarmRemoveButton());
+  }
+
+  requestAnimationFrame(() => inlineModel.focus());
+}
+
+function appendSwarmCompositionRow(config) {
+  const harnessSelect = config.querySelector('[data-swarm-choice-harness]');
+  const modelInput = config.querySelector('[data-swarm-choice-model]');
+  const reasoningSelect = config.querySelector('[data-swarm-choice-reasoning]');
+  const tbody = config.querySelector('[data-swarm-rows]');
+  if (!harnessSelect || !modelInput || !reasoningSelect || !tbody) return;
+
+  const index = swarmNextIndex(config);
+  const harness = harnessSelect.value || 'openai_chat';
+  const model = (modelInput.value || '').trim();
+  const reasoning = reasoningSelect.value || 'auto';
+  const row = document.createElement('tr');
+  row.dataset.swarmChoiceRow = '';
+  row.dataset.swarmEditableRow = '';
+  row.tabIndex = 0;
+  row.className =
+    'cursor-pointer transition hover:bg-surface-hover/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/40';
+
+  const harnessCell = document.createElement('td');
+  harnessCell.className = 'px-3 py-2 align-middle font-510 text-text-primary';
+  harnessCell.appendChild(createSwarmHiddenInput(`swarm[mix_rows][${index}][enabled]`, 'true'));
+  const harnessHidden = createSwarmHiddenInput(`swarm[mix_rows][${index}][harness]`, harness);
+  harnessHidden.dataset.swarmRowHarnessInput = '';
+  harnessCell.appendChild(harnessHidden);
+  const harnessLabel = document.createElement('span');
+  harnessLabel.dataset.swarmRowHarnessLabel = '';
+  harnessLabel.textContent = swarmSelectLabel(harnessSelect, harness);
+  harnessCell.appendChild(harnessLabel);
+
+  const modelCell = document.createElement('td');
+  modelCell.className = 'px-3 py-2 align-middle font-mono text-text-secondary';
+  const modelHidden = createSwarmHiddenInput(`swarm[mix_rows][${index}][model]`, model);
+  modelHidden.dataset.swarmRowModelInput = '';
+  modelCell.appendChild(modelHidden);
+  const modelLabel = document.createElement('span');
+  modelLabel.dataset.swarmRowModelLabel = '';
+  modelLabel.textContent = model || 'Runtime default';
+  modelCell.appendChild(modelLabel);
+
+  const reasoningCell = document.createElement('td');
+  reasoningCell.className = 'px-3 py-2 align-middle text-text-secondary';
+  const reasoningHidden = createSwarmHiddenInput(
+    `swarm[mix_rows][${index}][reasoning_effort]`,
+    reasoning
+  );
+  reasoningHidden.dataset.swarmRowReasoningInput = '';
+  reasoningCell.appendChild(reasoningHidden);
+  const reasoningLabel = document.createElement('span');
+  reasoningLabel.dataset.swarmRowReasoningLabel = '';
+  reasoningLabel.textContent = swarmSelectLabel(reasoningSelect, reasoning);
+  reasoningCell.appendChild(reasoningLabel);
+
+  const actionCell = document.createElement('td');
+  actionCell.className =
+    'w-28 min-w-[7rem] whitespace-nowrap px-2 py-2 text-right align-middle';
+  const actionWrap = document.createElement('div');
+  actionWrap.className = 'flex h-7 items-center justify-end gap-1 whitespace-nowrap';
+  actionWrap.dataset.swarmRowActions = '';
+  actionWrap.appendChild(createSwarmEditButton());
+  actionWrap.appendChild(createSwarmRemoveButton());
+  actionCell.appendChild(actionWrap);
+
+  row.appendChild(harnessCell);
+  row.appendChild(modelCell);
+  row.appendChild(reasoningCell);
+  row.appendChild(actionCell);
+
+  const emptyRow = config.querySelector('[data-swarm-empty-row]');
+  tbody.insertBefore(row, emptyRow || null);
+  config.dataset.swarmNextIndex = String(index + 1);
+  updateSwarmCompositionCount(config);
+  enterSwarmRowEdit(config, row);
+}
+
+document.addEventListener('click', (e) => {
+  const addButton = e.target.closest('[data-swarm-add-row]');
+  if (addButton) {
+    e.preventDefault();
+    const config = addButton.closest('[data-swarm-composition]');
+    if (config) appendSwarmCompositionRow(config);
+    return;
+  }
+
+  const doneButton = e.target.closest('[data-swarm-done-edit]');
+  if (doneButton) {
+    e.preventDefault();
+    const config = doneButton.closest('[data-swarm-composition]');
+    const row = doneButton.closest('[data-swarm-choice-row]');
+    if (config && row) {
+      exitSwarmRowEdit(config, row);
+      dispatchSwarmCompositionChange(config);
+    }
+    return;
+  }
+
+  const editButton = e.target.closest('[data-swarm-edit-row]');
+  if (editButton) {
+    e.preventDefault();
+    const config = editButton.closest('[data-swarm-composition]');
+    const row = editButton.closest('[data-swarm-choice-row]');
+    if (config && row) enterSwarmRowEdit(config, row);
+    return;
+  }
+
+  const removeButton = e.target.closest('[data-swarm-remove-row]');
+  if (removeButton) {
+    e.preventDefault();
+    const config = removeButton.closest('[data-swarm-composition]');
+    const row = removeButton.closest('[data-swarm-choice-row]');
+    if (row) row.remove();
+    if (config) {
+      updateSwarmCompositionCount(config);
+      dispatchSwarmCompositionChange(config);
+    }
+    return;
+  }
+
+  const row = e.target.closest('[data-swarm-editable-row]');
+  if (row && !e.target.closest('button, input, select, textarea, a')) {
+    const config = row.closest('[data-swarm-composition]');
+    if (config) enterSwarmRowEdit(config, row);
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  const row = e.target.closest?.('[data-swarm-editable-row]');
+  if (!row) return;
+
+  const config = row.closest('[data-swarm-composition]');
+  if (!config) return;
+
+  if (e.key === 'Escape' && row.dataset.swarmEditing === 'true') {
+    e.preventDefault();
+    exitSwarmRowEdit(config, row);
+    return;
+  }
+
+  if (
+    (e.key === 'Enter' || e.key === ' ') &&
+    e.target === row &&
+    row.dataset.swarmEditing !== 'true'
+  ) {
+    e.preventDefault();
+    enterSwarmRowEdit(config, row);
+  }
+});
+
 // Quick-create issue modal: opened by `C` keystroke. Cancel button and
 // backdrop close it; submit goes through the standard form POST so we
 // don't need a separate AJAX path.

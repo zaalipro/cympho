@@ -1,0 +1,230 @@
+<.settings_layout active={:proxies}>
+  <.header
+    title={@page_title}
+    subtitle="Reusable company proxy profiles for swarm routing and runtime diagnostics."
+  >
+    <:actions>
+      <button
+        :if={@proxy_admin?}
+        type="button"
+        phx-click="show_create_form"
+        class="inline-flex items-center justify-center gap-2 rounded-lg border border-brand/25 bg-brand/15 px-3 py-2 text-sm font-510 text-brand transition hover:bg-brand/20"
+      >
+        <.icon name="hero-plus" class="h-4 w-4" /> Add proxy
+      </button>
+    </:actions>
+  </.header>
+
+  <div
+    :if={@proxy_action_error}
+    data-testid="proxy-action-error"
+    class="mb-4 rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200"
+  >
+    {@proxy_action_error}
+  </div>
+
+  <% stats = profile_stats(@proxy_profiles) %>
+  <section class="mb-4 rounded-lg border border-border bg-panel p-4">
+    <div class="grid gap-3 sm:grid-cols-4">
+      <div class="rounded-md border border-border bg-canvas px-3 py-2">
+        <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+          Profiles
+        </p>
+        <p class="mt-1 font-mono text-lg font-590 text-text-primary">{stats.total}</p>
+      </div>
+      <div class="rounded-md border border-border bg-canvas px-3 py-2">
+        <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+          Online
+        </p>
+        <p class="mt-1 font-mono text-lg font-590 text-emerald-300">{stats.online}</p>
+      </div>
+      <div class="rounded-md border border-border bg-canvas px-3 py-2">
+        <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+          Offline
+        </p>
+        <p class="mt-1 font-mono text-lg font-590 text-red-300">{stats.offline}</p>
+      </div>
+      <div class="rounded-md border border-border bg-canvas px-3 py-2">
+        <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+          Untested
+        </p>
+        <p class="mt-1 font-mono text-lg font-590 text-text-secondary">{stats.untested}</p>
+      </div>
+    </div>
+  </section>
+
+  <section
+    :if={!@proxy_admin?}
+    class="rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+  >
+    Proxy profiles can contain private routing credentials. Ask a company admin or board member to manage them.
+  </section>
+
+  <section
+    :if={@show_form and @proxy_admin?}
+    data-testid="proxy-profile-form"
+    class="mb-4 rounded-lg border border-border bg-panel p-4"
+  >
+    <div class="mb-4 flex items-start justify-between gap-3">
+      <div>
+        <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          {if @form_mode == :edit, do: "Edit proxy", else: "New proxy"}
+        </p>
+        <h2 class="mt-1 text-base font-590 text-text-primary">
+          {if @form_mode == :edit, do: @selected_proxy.name, else: "Add a reusable proxy"}
+        </h2>
+      </div>
+      <button
+        type="button"
+        phx-click="hide_form"
+        class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover"
+      >
+        Cancel
+      </button>
+    </div>
+
+    <.simple_form for={@form} phx-submit="save" class="space-y-4">
+      <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px]">
+        <.input field={@form[:name]} label="Profile name" placeholder="managed-egress-a" />
+        <.input
+          field={@form[:proxy_type]}
+          type="select"
+          label="Type"
+          options={proxy_type_options()}
+        />
+      </div>
+
+      <.input
+        field={@form[:proxy_url]}
+        label="Proxy URL"
+        placeholder="socks5://user:password@proxy.example.com:1080"
+      />
+
+      <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_140px]">
+        <.input field={@form[:host]} label="Host" placeholder="proxy.example.com" />
+        <.input field={@form[:port]} type="number" label="Port" placeholder="1080" />
+      </div>
+
+      <div class="grid gap-4 lg:grid-cols-2">
+        <.input field={@form[:username]} label="Username" placeholder="optional" />
+        <.input
+          field={@form[:password]}
+          type="password"
+          label="Password"
+          placeholder={
+            if @selected_proxy && has_password?(@selected_proxy),
+              do: "Leave blank to keep current password",
+              else: "optional"
+          }
+        />
+      </div>
+
+      <.input
+        field={@form[:description]}
+        type="textarea"
+        rows={2}
+        label="Description"
+        placeholder="Region, provider, or expected use."
+      />
+
+      <:actions>
+        <.button type="submit" variant="primary">
+          {if @form_mode == :edit, do: "Save proxy", else: "Create proxy"}
+        </.button>
+      </:actions>
+    </.simple_form>
+  </section>
+
+  <div
+    :if={@proxy_profiles == []}
+    class="rounded-lg border border-border bg-panel px-4 py-10 text-center"
+  >
+    <p class="text-sm font-590 text-text-primary">No proxy profiles yet</p>
+    <p class="mt-1 text-sm text-text-tertiary">
+      Add HTTP, HTTPS, SOCKS4, or SOCKS5 profiles here, then choose random or selected proxies from the swarm panel.
+    </p>
+  </div>
+
+  <div class="grid gap-3 xl:grid-cols-2">
+    <article
+      :for={proxy <- @proxy_profiles}
+      data-testid={"proxy-profile-#{proxy.id}"}
+      class="rounded-lg border border-border bg-panel p-4"
+    >
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="break-words text-base font-590 text-text-primary">{proxy.name}</h2>
+            <span class={[
+              "rounded-full border px-2 py-0.5 text-[11px] font-510",
+              status_class(proxy.last_status)
+            ]}>
+              {status_label(proxy.last_status)}
+            </span>
+          </div>
+          <p class="mt-1 break-words font-mono text-xs text-text-tertiary">
+            {proxy.proxy_type}://{proxy.host}:{proxy.port}
+          </p>
+          <p :if={proxy.description} class="mt-2 text-sm leading-5 text-text-secondary">
+            {proxy.description}
+          </p>
+        </div>
+
+        <div class="flex shrink-0 gap-2">
+          <button
+            type="button"
+            phx-click="test"
+            phx-value-id={proxy.id}
+            class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+          >
+            Test
+          </button>
+          <button
+            type="button"
+            phx-click="show_edit_form"
+            phx-value-id={proxy.id}
+            class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            phx-click="delete"
+            phx-value-id={proxy.id}
+            data-confirm="Remove this proxy profile?"
+            class="rounded-md border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-xs font-510 text-red-300 hover:bg-red-500/15"
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+
+      <dl class="mt-3 grid gap-2 sm:grid-cols-3">
+        <div class="rounded-md border border-border bg-canvas px-3 py-2">
+          <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+            Ping
+          </dt>
+          <dd class="mt-1 font-mono text-sm text-text-primary">{ping_label(proxy)}</dd>
+        </div>
+        <div class="rounded-md border border-border bg-canvas px-3 py-2">
+          <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+            Checked
+          </dt>
+          <dd class="mt-1 text-sm text-text-secondary">{checked_label(proxy)}</dd>
+        </div>
+        <div class="rounded-md border border-border bg-canvas px-3 py-2">
+          <dt class="text-[10px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+            Auth
+          </dt>
+          <dd class="mt-1 text-sm text-text-secondary">
+            {if proxy.username || has_password?(proxy), do: "Configured", else: "None"}
+          </dd>
+        </div>
+      </dl>
+
+      <p :if={proxy.last_error} class="mt-3 text-xs leading-5 text-red-200">
+        {proxy.last_error}
+      </p>
+    </article>
+  </div>
+</.settings_layout>

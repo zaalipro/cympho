@@ -4,8 +4,31 @@ defmodule Cympho.AgentRuntimeCapabilities do
   """
 
   @repo_delivery_adapters ~w(claude_code codex cursor openclaw)
-  @repo_delivery_process_presets ~w(claude_code codex cursor openclaw)
-  @repo_delivery_process_commands ~w(claude codex cursor cursor-agent openclaw)
+  @repo_delivery_process_presets ~w(
+    antigravity
+    aider
+    claude_code
+    cline
+    codex
+    cursor
+    gemini
+    kimi_code
+    opencode
+    openclaw
+  )
+  @repo_delivery_process_commands ~w(
+    agy
+    aider
+    claude
+    cline
+    codex
+    cursor
+    cursor-agent
+    gemini
+    kimi
+    opencode
+    openclaw
+  )
   @agrenting_repo_token_keys ~w(AGRENTING_REPO_ACCESS_TOKEN GITHUB_TOKEN)
 
   @doc """

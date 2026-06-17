@@ -38,7 +38,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
     if is_nil(command) or command == "" do
       {:error, :no_command}
     else
-      args = build_args(issue, agent_id, config)
+      args = build_args(issue, agent_id, config, prompt)
       env = build_env(issue, agent_id, config)
       cwd = config[:cwd] || config["cwd"]
 
@@ -80,12 +80,12 @@ defmodule Cympho.Adapters.ProcessAdapter do
       |> Jason.encode!()
   end
 
-  defp build_args(_issue, _agent_id, config) do
-    # Return configured args plus optional model forwarding args.
+  defp build_args(_issue, _agent_id, config, prompt) do
+    # Return configured args plus optional model/prompt forwarding args.
     args = config[:args] || config["args"] || []
     model = config[:model] || config["model"]
 
-    args ++ model_args(config, model)
+    args ++ model_args(config, model) ++ prompt_args(config, prompt)
   end
 
   defp model_args(_config, model) when model in [nil, ""], do: []
@@ -94,6 +94,16 @@ defmodule Cympho.Adapters.ProcessAdapter do
     case config[:model_arg_template] || config["model_arg_template"] do
       template when is_list(template) ->
         Enum.map(template, &String.replace(to_string(&1), "{{model}}", to_string(model)))
+
+      _ ->
+        []
+    end
+  end
+
+  defp prompt_args(config, prompt) do
+    case config[:prompt_arg_template] || config["prompt_arg_template"] do
+      template when is_list(template) ->
+        Enum.map(template, &String.replace(to_string(&1), "{{prompt}}", prompt))
 
       _ ->
         []
@@ -177,13 +187,30 @@ defmodule Cympho.Adapters.ProcessAdapter do
           command_charlist = String.to_charlist(command_path)
           opts_with_args = opts ++ [{:args, args}]
           port = Port.open({:spawn_executable, command_charlist}, opts_with_args)
-          write_prompt(port, prompt)
+          maybe_write_prompt(port, prompt, config)
           timeout = config[:timeout] || config["timeout"] || 300_000
           wait_for_process(port, session_id, recipient_pid, timeout, <<>>)
         rescue
           e ->
             send(recipient_pid, {:turn_ended_with_error, session_id, inspect(e)})
         end
+    end
+  end
+
+  defp maybe_write_prompt(port, prompt, config) do
+    if write_prompt_stdin?(config) do
+      write_prompt(port, prompt)
+    else
+      :ok
+    end
+  end
+
+  defp write_prompt_stdin?(config) do
+    case config[:prompt_stdin] || config["prompt_stdin"] do
+      false -> false
+      "false" -> false
+      "0" -> false
+      _ -> true
     end
   end
 
@@ -230,9 +257,42 @@ defmodule Cympho.Adapters.ProcessAdapter do
         %{output: other, raw: trimmed}
 
       {:error, _} ->
-        %{output: trimmed, raw: trimmed}
+        parse_json_lines(trimmed)
     end
   end
+
+  defp parse_json_lines(trimmed) do
+    entries =
+      trimmed
+      |> String.split("\n")
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.map(&Jason.decode/1)
+
+    if entries != [] and Enum.all?(entries, &match?({:ok, _}, &1)) do
+      messages = Enum.map(entries, fn {:ok, entry} -> entry end)
+
+      output =
+        messages
+        |> Enum.map(&message_text/1)
+        |> Enum.reject(&(&1 in [nil, ""]))
+        |> Enum.join("\n")
+
+      %{
+        output: if(output == "", do: trimmed, else: output),
+        messages: messages,
+        raw: trimmed
+      }
+    else
+      %{output: trimmed, raw: trimmed}
+    end
+  end
+
+  defp message_text(%{"text" => text}) when is_binary(text), do: text
+  defp message_text(%{"content" => text}) when is_binary(text), do: text
+  defp message_text(%{"message" => text}) when is_binary(text), do: text
+  defp message_text(%{"result" => text}) when is_binary(text), do: text
+  defp message_text(_), do: nil
 
   @impl true
   def health_check(config) do
@@ -349,6 +409,20 @@ defmodule Cympho.Adapters.ProcessAdapter do
         description: "Argument template, e.g. [\"--model\", \"{{model}}\"]"
       },
       %{
+        key: :prompt_arg_template,
+        type: :list,
+        required: false,
+        default: [],
+        description: "Argument template for prompt-based CLIs, e.g. [\"-p\", \"{{prompt}}\"]"
+      },
+      %{
+        key: :prompt_stdin,
+        type: :boolean,
+        required: false,
+        default: true,
+        description: "Whether to send the generated prompt to stdin after process start"
+      },
+      %{
         key: :model_env_key,
         type: :string,
         required: false,
@@ -409,6 +483,8 @@ defmodule Cympho.Adapters.ProcessAdapter do
          :ok <- validate_string(config["provider"] || config[:provider], "provider"),
          :ok <- validate_string(config["model"] || config[:model], "model"),
          :ok <- validate_args(config["model_arg_template"] || config[:model_arg_template]),
+         :ok <- validate_args(config["prompt_arg_template"] || config[:prompt_arg_template]),
+         :ok <- validate_boolean(config["prompt_stdin"] || config[:prompt_stdin], "prompt_stdin"),
          :ok <-
            validate_string(config["model_env_key"] || config[:model_env_key], "model_env_key"),
          :ok <- validate_timeout(config["timeout"] || config[:timeout]),
@@ -433,6 +509,12 @@ defmodule Cympho.Adapters.ProcessAdapter do
   end
 
   defp validate_args(_), do: {:error, "args must be a list"}
+
+  defp validate_boolean(nil, _field), do: :ok
+  defp validate_boolean(value, _field) when is_boolean(value), do: :ok
+  defp validate_boolean("true", _field), do: :ok
+  defp validate_boolean("false", _field), do: :ok
+  defp validate_boolean(_value, field), do: {:error, "#{field} must be a boolean"}
 
   defp validate_cwd(nil), do: :ok
 

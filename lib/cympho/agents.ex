@@ -16,6 +16,14 @@ defmodule Cympho.Agents do
   # from OOMing the node if data ever grows past expectations.
   @list_agents_safety_cap 5_000
 
+  def temporary?(%Agent{} = agent) do
+    truthy_config?(agent.config, "temporary") or
+      truthy_config?(agent.config, "one_time") or
+      truthy_config?(agent.runtime_config, "temporary") or
+      truthy_config?(agent.runtime_config, "one_time") or
+      truthy_config?(get_in(agent.runtime_config || %{}, ["swarm"]), "temporary")
+  end
+
   @doc """
   Returns the list of all agents, capped at #{@list_agents_safety_cap} rows.
 
@@ -23,6 +31,7 @@ defmodule Cympho.Agents do
   """
   def list_agents do
     Agent
+    |> exclude_temporary()
     |> limit(@list_agents_safety_cap)
     |> Repo.all()
   end
@@ -33,6 +42,7 @@ defmodule Cympho.Agents do
   def list_agents_by_company(company_id) do
     Agent
     |> where(company_id: ^company_id)
+    |> exclude_temporary()
     |> order_by([a],
       asc: fragment("CASE ? WHEN 'ceo' THEN 0 WHEN 'cto' THEN 1 ELSE 2 END", a.role),
       asc: a.inserted_at
@@ -58,6 +68,23 @@ defmodule Cympho.Agents do
   end
 
   @doc """
+  Returns the first active CTO agent for a company.
+  """
+  def get_company_cto(company_id) do
+    case Repo.one(
+           from a in Agent,
+             where:
+               a.company_id == ^company_id and a.role == :cto and
+                 a.governance_status != "terminated",
+             order_by: [asc: a.inserted_at, asc: a.id],
+             limit: 1
+         ) do
+      nil -> {:error, :not_found}
+      agent -> {:ok, agent}
+    end
+  end
+
+  @doc """
   Sidebar projection: id, name, role, status.
   CEO/CTO pinned at top, then alphabetical. Excludes terminated agents.
   """
@@ -67,6 +94,7 @@ defmodule Cympho.Agents do
       [a],
       a.company_id == ^company_id and a.governance_status != "terminated"
     )
+    |> exclude_temporary()
     |> order_by([a],
       asc: fragment("CASE ? WHEN 'ceo' THEN 0 WHEN 'cto' THEN 1 ELSE 2 END", a.role),
       asc: a.name
@@ -81,6 +109,7 @@ defmodule Cympho.Agents do
   def list_agents_by_role(role) when is_atom(role) do
     Agent
     |> where(role: ^role)
+    |> exclude_temporary()
     |> Repo.all()
   end
 
@@ -90,6 +119,7 @@ defmodule Cympho.Agents do
   def list_agents_by_role(role, company_id) when is_atom(role) and is_binary(company_id) do
     Agent
     |> where(role: ^role, company_id: ^company_id)
+    |> exclude_temporary()
     |> Repo.all()
   end
 
@@ -99,12 +129,14 @@ defmodule Cympho.Agents do
   def list_agents_by_status(status) when is_atom(status) do
     Agent
     |> where(status: ^status)
+    |> exclude_temporary()
     |> Repo.all()
   end
 
   def list_agents_by_status(status, company_id) when is_atom(status) do
     Agent
     |> where(status: ^status, company_id: ^company_id)
+    |> exclude_temporary()
     |> Repo.all()
   end
 
@@ -115,6 +147,7 @@ defmodule Cympho.Agents do
       when is_atom(adapter) and is_binary(company_id) do
     Agent
     |> where(adapter: ^adapter, company_id: ^company_id)
+    |> exclude_temporary()
     |> Repo.all()
   end
 
@@ -134,7 +167,7 @@ defmodule Cympho.Agents do
   def get_company_agent(company_id, id) do
     case Repo.one(from a in Agent, where: a.id == ^id and a.company_id == ^company_id) do
       nil -> {:error, :not_found}
-      agent -> {:ok, agent}
+      agent -> if temporary?(agent), do: {:error, :not_found}, else: {:ok, agent}
     end
   end
 
@@ -280,6 +313,7 @@ defmodule Cympho.Agents do
   def list_eligible_agents(role) when is_atom(role) do
     Agent
     |> where(role: ^role, status: :idle)
+    |> exclude_temporary()
     |> Repo.all()
     |> Enum.reject(&is_agent_at_capacity?/1)
   end
@@ -287,6 +321,7 @@ defmodule Cympho.Agents do
   def list_eligible_agents(role, company_id) when is_atom(role) do
     Agent
     |> where(role: ^role, status: :idle, company_id: ^company_id)
+    |> exclude_temporary()
     |> Repo.all()
     |> Enum.reject(&is_agent_at_capacity?/1)
   end
@@ -672,20 +707,20 @@ defmodule Cympho.Agents do
           offline: non_neg_integer()
         }
   def count_by_status do
-    from(a in Agent,
-      group_by: a.status,
-      select: {a.status, count(a.id)}
-    )
+    Agent
+    |> exclude_temporary()
+    |> group_by([a], a.status)
+    |> select([a], {a.status, count(a.id)})
     |> Repo.all()
     |> Enum.into(default_status_counts())
   end
 
   def count_by_status(company_id) do
-    from(a in Agent,
-      where: a.company_id == ^company_id,
-      group_by: a.status,
-      select: {a.status, count(a.id)}
-    )
+    Agent
+    |> where(company_id: ^company_id)
+    |> exclude_temporary()
+    |> group_by([a], a.status)
+    |> select([a], {a.status, count(a.id)})
     |> Repo.all()
     |> Enum.into(default_status_counts())
   end
@@ -813,6 +848,7 @@ defmodule Cympho.Agents do
   """
   def list_agents_with_hierarchy do
     Agent
+    |> exclude_temporary()
     |> preload([:parent, :children])
     |> Repo.all()
   end
@@ -824,6 +860,7 @@ defmodule Cympho.Agents do
     roots =
       Agent
       |> where([a], is_nil(a.parent_id))
+      |> exclude_temporary()
       |> preload([:children])
       |> Repo.all()
 
@@ -834,6 +871,7 @@ defmodule Cympho.Agents do
     roots =
       Agent
       |> where([a], a.company_id == ^company_id and is_nil(a.parent_id))
+      |> exclude_temporary()
       |> preload([:children])
       |> Repo.all()
 
@@ -851,6 +889,8 @@ defmodule Cympho.Agents do
       |> preload([:children, children: [:children]])
       |> Repo.one()
 
+    children = Enum.reject(agent_with_children.children || [], &temporary?/1)
+
     %{
       id: agent_with_children.id,
       name: agent_with_children.name,
@@ -858,7 +898,7 @@ defmodule Cympho.Agents do
       role: agent_with_children.role,
       status: agent_with_children.status,
       adapter: agent_with_children.adapter,
-      children: build_org_tree(agent_with_children.children)
+      children: build_org_tree(children)
     }
   end
 
@@ -1271,6 +1311,31 @@ defmodule Cympho.Agents do
   end
 
   defp get_agent_budget_status(_), do: nil
+
+  defp exclude_temporary(query) do
+    where(
+      query,
+      [a],
+      fragment(
+        """
+        COALESCE((?->>'temporary')::boolean, false) = false
+        AND COALESCE((?->>'one_time')::boolean, false) = false
+        AND COALESCE((?->'swarm'->>'temporary')::boolean, false) = false
+        AND COALESCE((?->'swarm'->>'one_time')::boolean, false) = false
+        """,
+        a.config,
+        a.config,
+        a.runtime_config,
+        a.runtime_config
+      )
+    )
+  end
+
+  defp truthy_config?(map, key) when is_map(map) do
+    Map.get(map, key) in [true, "true", "1", 1]
+  end
+
+  defp truthy_config?(_map, _key), do: false
 
   defp calculate_idle_ratio(agents) when is_list(agents) do
     total = length(agents)

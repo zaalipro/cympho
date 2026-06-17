@@ -13,6 +13,7 @@ defmodule CymphoWeb.QuickIssueController do
   alias Cympho.Goals
   alias Cympho.Issues
   alias Cympho.Issues.Issue
+  alias Cympho.Issues.Swarm
   alias Cympho.Projects
 
   def create(conn, %{"title" => title} = params) when is_binary(title) and title != "" do
@@ -68,12 +69,16 @@ defmodule CymphoWeb.QuickIssueController do
   end
 
   defp quick_issue_attrs(conn, company_id, title, params) do
+    swarm_params = normalize_swarm_params(conn, company_id, Map.get(params, "swarm"))
+    swarm_config = Swarm.normalize_config(%{"swarm" => swarm_params, "company_id" => company_id})
+    assignee_id = if swarm_config.enabled, do: nil, else: Map.get(params, "assignee_id")
+
     with {:ok, status} <- validate_status(Map.get(params, "status", "todo")),
          {:ok, priority} <- validate_priority(Map.get(params, "priority", "medium")),
          {:ok, project_id} <- validate_project(company_id, Map.get(params, "project_id")),
          {:ok, goal} <- validate_goal(company_id, Map.get(params, "goal_id")),
          :ok <- validate_goal_project(goal, project_id),
-         {:ok, assignee} <- resolve_assignee(company_id, Map.get(params, "assignee_id")) do
+         {:ok, assignee} <- resolve_assignee(company_id, assignee_id) do
       attrs =
         %{
           "title" => String.trim(title),
@@ -85,6 +90,7 @@ defmodule CymphoWeb.QuickIssueController do
         |> put_goal(goal)
         |> put_assignee(assignee)
         |> put_created_by(conn.assigns[:current_user])
+        |> put_swarm(swarm_config, swarm_params)
 
       {:ok, attrs}
     end
@@ -177,6 +183,45 @@ defmodule CymphoWeb.QuickIssueController do
 
   defp put_created_by(attrs, %{id: user_id}), do: Map.put(attrs, "created_by_user_id", user_id)
   defp put_created_by(attrs, _user), do: attrs
+
+  defp put_swarm(attrs, %{enabled: true}, swarm_params), do: Map.put(attrs, "swarm", swarm_params)
+  defp put_swarm(attrs, _swarm_config, _swarm_params), do: attrs
+
+  defp normalize_swarm_params(conn, company_id, params) do
+    if swarm_admin?(conn, company_id) do
+      normalize_swarm_params(params)
+    else
+      %{"enabled" => "false"}
+    end
+  end
+
+  defp normalize_swarm_params(params) when is_map(params) do
+    params
+    |> Map.put("enabled", checkbox_value(params, "enabled"))
+    |> Map.put("proxy_enabled", checkbox_value(params, "proxy_enabled"))
+  end
+
+  defp normalize_swarm_params(_params), do: %{"enabled" => "false"}
+
+  defp checkbox_value(params, key) do
+    if Map.get(params, key) in ["true", "on", "1", true], do: "true", else: "false"
+  end
+
+  defp swarm_admin?(conn, company_id) do
+    user_id =
+      case conn.assigns[:current_user] do
+        %{id: id} -> id
+        _ -> get_session(conn, :user_id)
+      end
+
+    case user_id do
+      user_id when is_binary(user_id) ->
+        Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+
+      _ ->
+        false
+    end
+  end
 
   defp current_company_id(conn) do
     company_id = get_session(conn, :company_id)

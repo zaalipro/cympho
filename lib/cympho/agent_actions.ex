@@ -27,6 +27,7 @@ defmodule Cympho.AgentActions do
 
   alias Cympho.Agents.Agent
   alias Cympho.Issues.Issue
+  alias Cympho.Issues.SwarmEvents
   alias Cympho.AuditTrail.Instrumenter
 
   require Logger
@@ -71,6 +72,7 @@ defmodule Cympho.AgentActions do
     force_fix_pr
     resolve_conflict
     cancel_issue
+    swarm_worker_complete
   )
   @roles Agent.role_strings()
   @priorities ~w(low medium high critical)
@@ -264,6 +266,13 @@ defmodule Cympho.AgentActions do
       issue,
       "Action rejected: only CEO/CTO agents may emit approve_issue, request_changes, or block_issue. " <>
         "Use submit_review to escalate, or comment to explain."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(%Issue{} = issue, :unauthorized_swarm_worker_complete) do
+    system_comment(
+      issue,
+      "swarm_worker_complete rejected: only the assigned hidden one-time swarm worker can close its own worker packet issue."
     )
   end
 
@@ -658,6 +667,7 @@ defmodule Cympho.AgentActions do
     block_issue handoff set_pr_url
     seed_mission_issues delegate escalate intervene
     merge_pr force_fix_pr resolve_conflict cancel_issue
+    swarm_worker_complete
   )
   defp mutates_issue?(%{"type" => type}) when type in @mutating_action_types, do: true
   defp mutates_issue?(_), do: false
@@ -1034,6 +1044,11 @@ defmodule Cympho.AgentActions do
         with :ok <- require_string(action, "reason") do
           {:ok, action}
         end
+
+      "swarm_worker_complete" ->
+        with :ok <- require_string(action, "summary") do
+          {:ok, action}
+        end
     end
   end
 
@@ -1256,6 +1271,8 @@ defmodule Cympho.AgentActions do
           %{role_redirect: action["role"]}
         )
 
+      _ = maybe_record_swarm_request_changes(updated, agent, action)
+
       {:ok, %{type: "request_changes", issue_id: updated.id}}
     end
   end
@@ -1287,6 +1304,8 @@ defmodule Cympho.AgentActions do
           %{blocker_kind: Map.get(action, "blocker_kind")}
         )
 
+      _ = maybe_record_swarm_blocked(updated, agent, action)
+
       {:ok, %{type: "block_issue", issue_id: updated.id}}
     end
   end
@@ -1294,6 +1313,34 @@ defmodule Cympho.AgentActions do
   defp execute_action(issue, agent, %{"type" => "comment"} = action) do
     with {:ok, comment} <- maybe_agent_comment(issue, agent, action["body"]) do
       {:ok, %{type: "comment", comment_id: comment.id}}
+    end
+  end
+
+  defp execute_action(issue, agent, %{"type" => "swarm_worker_complete"} = action) do
+    note = tagged_delivery_note("Swarm worker packet complete. #{action["summary"]}")
+
+    with :ok <- ensure_swarm_worker_completion_context(issue, agent),
+         {:ok, _comment} <- maybe_agent_comment(issue, agent, note),
+         {:ok, transitioned} <- Issues.transition_issue(issue, :done),
+         {:ok, released} <- Issues.force_release_issue(transitioned, :done),
+         {:ok, released} <-
+           update_workflow_issue(released, agent, %{
+             assigned_role: nil,
+             last_reviewer_id: nil
+           }) do
+      _ =
+        SwarmEvents.record(released, %{
+          event_type: "worker_completed",
+          status: "success",
+          agent_id: agent.id,
+          message: "Worker packet closed for CTO synthesis.",
+          metadata: %{
+            "summary" => action["summary"],
+            "worker_index" => swarm_value(released, "worker_index")
+          }
+        })
+
+      {:ok, %{type: "swarm_worker_complete", issue_id: released.id}}
     end
   end
 
@@ -1422,6 +1469,7 @@ defmodule Cympho.AgentActions do
          {:ok, _comment} <- maybe_agent_comment(issue, agent, handoff_reason),
          {:ok, _context_comment} <- system_comment(issue, context_body) do
       handle_handoff_wakeup(updated, agent, action)
+      _ = maybe_record_swarm_handoff(updated, agent, action, handoff_reason)
 
       {:ok,
        %{
@@ -1477,6 +1525,8 @@ defmodule Cympho.AgentActions do
                  assigned_role: nil,
                  last_reviewer_id: nil
                }) do
+          _ = maybe_record_swarm_approval(released, agent, action)
+
           {:ok, %{type: "approve_issue", issue_id: released.id}}
         end
 
@@ -1485,6 +1535,108 @@ defmodule Cympho.AgentActions do
         {:error, {:children_not_done, Enum.map(open, & &1.id)}}
     end
   end
+
+  defp maybe_record_swarm_approval(%Issue{} = issue, %Agent{} = agent, action) do
+    case SwarmEvents.swarm_role(issue) do
+      "cto_synthesis" ->
+        SwarmEvents.record(issue, %{
+          event_type: "cto_synthesis_completed",
+          status: "success",
+          agent_id: agent.id,
+          message: "CTO synthesis closed; CEO parent can resume.",
+          metadata: %{"notes" => action["notes"]}
+        })
+
+      "parent" ->
+        SwarmEvents.record(issue, %{
+          event_type: "ceo_delivery_completed",
+          status: "success",
+          agent_id: agent.id,
+          message: "CEO delivery closed the swarm parent.",
+          metadata: %{"notes" => action["notes"]}
+        })
+
+      _role ->
+        :ok
+    end
+  end
+
+  defp maybe_record_swarm_request_changes(%Issue{} = issue, %Agent{} = agent, action) do
+    case SwarmEvents.swarm_role(issue) do
+      "cto_synthesis" ->
+        SwarmEvents.record(issue, %{
+          event_type: "cto_requested_changes",
+          status: "warning",
+          agent_id: agent.id,
+          message: "CTO requested changes before CEO handoff.",
+          metadata: %{"role_redirect" => action["role"], "reason" => action["reason"]}
+        })
+
+      "parent" ->
+        SwarmEvents.record(issue, %{
+          event_type: "ceo_requested_changes",
+          status: "warning",
+          agent_id: agent.id,
+          message: "CEO requested changes after swarm synthesis.",
+          metadata: %{"role_redirect" => action["role"], "reason" => action["reason"]}
+        })
+
+      _role ->
+        :ok
+    end
+  end
+
+  defp maybe_record_swarm_blocked(%Issue{} = issue, %Agent{} = agent, action) do
+    case SwarmEvents.swarm_role(issue) do
+      nil ->
+        :ok
+
+      role ->
+        SwarmEvents.record(issue, %{
+          event_type: "#{role}_blocked",
+          status: "warning",
+          agent_id: agent.id,
+          message: "Swarm #{human_swarm_role(role)} reported a blocker.",
+          metadata: %{
+            "blocker_kind" => action["blocker_kind"],
+            "reason" => action["reason"]
+          }
+        })
+    end
+  end
+
+  defp maybe_record_swarm_handoff(%Issue{} = issue, %Agent{} = agent, action, reason) do
+    case SwarmEvents.swarm_role(issue) do
+      "parent" ->
+        SwarmEvents.record(issue, %{
+          event_type: "ceo_handoff_created",
+          status: "info",
+          agent_id: agent.id,
+          message: "CEO handed swarm delivery to #{human_role(action["role"])}.",
+          metadata: %{"role" => action["role"], "reason" => reason}
+        })
+
+      _role ->
+        :ok
+    end
+  end
+
+  defp human_swarm_role("cto_synthesis"), do: "CTO synthesis"
+  defp human_swarm_role("parent"), do: "CEO parent"
+  defp human_swarm_role("worker"), do: "worker"
+  defp human_swarm_role(role), do: to_string(role)
+
+  defp swarm_value(%Issue{monitor_state: monitor_state}, key) when is_map(monitor_state) do
+    case Map.get(monitor_state, "swarm") || Map.get(monitor_state, :swarm) do
+      swarm when is_map(swarm) -> Map.get(swarm, key) || Map.get(swarm, swarm_atom_key(key))
+      _swarm -> nil
+    end
+  end
+
+  defp swarm_value(_issue, _key), do: nil
+
+  defp swarm_atom_key("worker_index"), do: :worker_index
+  defp swarm_atom_key(_key), do: nil
 
   defp ensure_approval_note_ready(%Agent{role: role}, note) when role in @governance_roles do
     case AgentPromptContract.audit_response(role, note) do
@@ -3162,6 +3314,17 @@ defmodule Cympho.AgentActions do
   defp blank?(value) when is_binary(value), do: String.trim(value) == ""
   defp blank?(_), do: false
 
+  defp truthy?(value) when value in [true, 1], do: true
+
+  defp truthy?(value) when is_binary(value) do
+    value
+    |> String.trim()
+    |> String.downcase()
+    |> then(&(&1 in ["1", "true", "yes", "y"]))
+  end
+
+  defp truthy?(_), do: false
+
   defp get_action_target_agent(target_id, action_name) do
     with :ok <- validate_uuid_string(target_id, "to_agent_id") do
       case Agents.get_agent(target_id) do
@@ -3955,8 +4118,36 @@ defmodule Cympho.AgentActions do
     do_agent_comment(issue, agent, to_string(body))
   end
 
+  defp ensure_swarm_worker_completion_context(%Issue{} = issue, %Agent{} = agent) do
+    issue_swarm = issue.monitor_state |> normalize_map() |> Map.get("swarm") |> normalize_map()
+    agent_swarm = agent.runtime_config |> normalize_map() |> Map.get("swarm") |> normalize_map()
+
+    cond do
+      issue.origin_type != "swarm_worker" ->
+        {:error, :unauthorized_swarm_worker_complete}
+
+      issue.assignee_id != agent.id ->
+        {:error, :unauthorized_swarm_worker_complete}
+
+      issue_swarm["agent_id"] != agent.id ->
+        {:error, :unauthorized_swarm_worker_complete}
+
+      agent_swarm["parent_issue_id"] != issue.parent_id ->
+        {:error, :unauthorized_swarm_worker_complete}
+
+      not truthy?(agent_swarm["temporary"]) or not truthy?(agent_swarm["one_time"]) ->
+        {:error, :unauthorized_swarm_worker_complete}
+
+      true ->
+        :ok
+    end
+  end
+
   defp tagged_submit_review_note(note) when is_binary(note), do: tagged_note("delivery", note)
   defp tagged_submit_review_note(note), do: tagged_submit_review_note(to_string(note))
+
+  defp tagged_delivery_note(note) when is_binary(note), do: tagged_note("delivery", note)
+  defp tagged_delivery_note(note), do: tagged_delivery_note(to_string(note))
 
   defp tagged_approval_note(%Agent{role: :ceo}, note) when is_binary(note) do
     tagged_note("owner_update", note)
