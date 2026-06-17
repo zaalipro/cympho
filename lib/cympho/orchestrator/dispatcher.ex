@@ -25,10 +25,13 @@ defmodule Cympho.Orchestrator.Dispatcher do
   alias Cympho.Orchestrator
   alias Cympho.Issues
   alias Cympho.Agents
+  alias Cympho.HeartbeatEngine
   alias Cympho.Runtime
   alias Cympho.HeartbeatEngine.WakeupQueue
   alias Cympho.Companies.Company
   alias Cympho.Agents.Agent
+  alias Cympho.HeartbeatEngine.Run
+  alias Cympho.Issues.Issue
 
   @poll_interval Application.compile_env(:cympho, [:orchestrator, :poll_interval], 30_000)
   @max_concurrent Application.compile_env(:cympho, [:orchestrator, :max_concurrent_agents], 3)
@@ -90,6 +93,24 @@ defmodule Cympho.Orchestrator.Dispatcher do
         :ok
     end
   end
+
+  @doc """
+  Stops active orchestrator sessions for a company and releases in-progress
+  issues so operators can regain control immediately.
+  """
+  def stop_company(company_id, reason \\ :operator_stop)
+
+  def stop_company(company_id, reason) when is_binary(company_id) do
+    case Process.whereis(__MODULE__) do
+      nil ->
+        {:ok, stop_company_runtime(company_id, reason, MapSet.new())}
+
+      pid ->
+        GenServer.call(pid, {:stop_company, company_id, reason}, 15_000)
+    end
+  end
+
+  def stop_company(_company_id, _reason), do: {:error, :invalid_company_id}
 
   @doc """
   Enqueues a wake for an issue's current assignee, or polls for assignment when
@@ -214,6 +235,19 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   @impl true
+  def handle_call({:stop_company, company_id, reason}, _from, %State{} = state) do
+    result = stop_company_runtime(company_id, reason, state.running_issue_ids)
+
+    new_state = %{
+      state
+      | running_issue_ids:
+          MapSet.difference(state.running_issue_ids, MapSet.new(result.issue_ids))
+    }
+
+    {:reply, {:ok, result}, new_state}
+  end
+
+  @impl true
   def handle_info(:poll, %State{} = state) do
     if enabled?() do
       state = do_poll(state)
@@ -279,6 +313,124 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   defp schedule_poll do
     Process.send_after(self(), :poll, @poll_interval)
+  end
+
+  defp stop_company_runtime(company_id, reason, running_issue_ids) do
+    company_runtime_issues(company_id, running_issue_ids)
+    |> Enum.reduce(empty_stop_result(reason), &stop_runtime_issue/2)
+    |> Map.update!(:issue_ids, &Enum.reverse/1)
+  end
+
+  defp empty_stop_result(reason) do
+    %{
+      reason: to_string(reason),
+      issue_ids: [],
+      orchestrators_stopped: 0,
+      issues_released: 0,
+      runs_cancelled: 0,
+      agents_idled: 0,
+      errors: []
+    }
+  end
+
+  defp company_runtime_issues(company_id, running_issue_ids) do
+    tracked_ids = MapSet.to_list(running_issue_ids)
+
+    query =
+      case tracked_ids do
+        [] ->
+          from i in Issue,
+            where: i.company_id == ^company_id and i.status == ^:in_progress,
+            order_by: [asc: i.updated_at, asc: i.id]
+
+        ids ->
+          from i in Issue,
+            where: i.company_id == ^company_id and (i.status == ^:in_progress or i.id in ^ids),
+            order_by: [asc: i.updated_at, asc: i.id]
+      end
+
+    Cympho.Repo.all(query)
+  end
+
+  defp stop_runtime_issue(%Issue{} = issue, acc) do
+    acc
+    |> track_issue(issue.id)
+    |> maybe_stop_orchestrator(issue.id)
+    |> maybe_release_issue(issue)
+    |> cancel_issue_runs(issue.id)
+    |> idle_agent(issue.assignee_id)
+  end
+
+  defp track_issue(acc, issue_id), do: %{acc | issue_ids: [issue_id | acc.issue_ids]}
+
+  defp maybe_stop_orchestrator(acc, issue_id) do
+    case Orchestrator.whereis(issue_id) do
+      nil ->
+        acc
+
+      _pid ->
+        try do
+          :ok = Orchestrator.stop(issue_id)
+          %{acc | orchestrators_stopped: acc.orchestrators_stopped + 1}
+        catch
+          :exit, reason ->
+            add_stop_error(acc, issue_id, {:orchestrator_stop_failed, reason})
+        end
+    end
+  end
+
+  defp maybe_release_issue(acc, %Issue{status: :in_progress} = issue) do
+    case Issues.force_release_issue(issue, :todo) do
+      {:ok, _updated} ->
+        %{acc | issues_released: acc.issues_released + 1}
+
+      {:error, reason} ->
+        add_stop_error(acc, issue.id, {:issue_release_failed, reason})
+    end
+  end
+
+  defp maybe_release_issue(acc, _issue), do: acc
+
+  defp cancel_issue_runs(acc, issue_id) do
+    runs =
+      Cympho.Repo.all(
+        from r in Run,
+          where: r.issue_id == ^issue_id and r.status in ["pending", "queued", "running"],
+          order_by: [asc: r.inserted_at]
+      )
+
+    Enum.reduce(runs, acc, fn run, acc ->
+      case HeartbeatEngine.cancel_run(run) do
+        {:ok, _updated} ->
+          %{acc | runs_cancelled: acc.runs_cancelled + 1}
+
+        {:error, reason} ->
+          add_stop_error(acc, issue_id, {:run_cancel_failed, run.id, reason})
+      end
+    end)
+  end
+
+  defp idle_agent(acc, nil), do: acc
+
+  defp idle_agent(acc, agent_id) do
+    case Agents.get_agent(agent_id) do
+      {:ok, %{status: :terminated}} ->
+        acc
+
+      {:ok, agent} ->
+        case Agents.update_agent(agent, %{status: :idle}) do
+          {:ok, _updated} -> %{acc | agents_idled: acc.agents_idled + 1}
+          {:error, reason} -> add_stop_error(acc, nil, {:agent_idle_failed, agent_id, reason})
+        end
+
+      {:error, reason} ->
+        add_stop_error(acc, nil, {:agent_lookup_failed, agent_id, reason})
+    end
+  end
+
+  defp add_stop_error(acc, issue_id, reason) do
+    error = %{issue_id: issue_id, reason: inspect(reason)}
+    %{acc | errors: [error | acc.errors]}
   end
 
   defp do_poll(%State{} = state, company_id \\ nil) do

@@ -27,6 +27,8 @@ defmodule CymphoWeb.Components.NavRail do
   attr :projects, :list, default: []
   attr :agents, :list, default: []
   attr :inbox_count, :integer, default: 0
+  attr :current_company, :any, default: nil
+  attr :runtime_controls_allowed, :boolean, default: false
   attr :rest, :global
 
   def nav_rail(assigns) do
@@ -46,6 +48,14 @@ defmodule CymphoWeb.Components.NavRail do
       <.primary_action />
 
       <div class="h-1.5"></div>
+
+      <.runtime_controls
+        :if={@current_company && @runtime_controls_allowed}
+        current_company={@current_company}
+        current_path={@current_path}
+      />
+
+      <div :if={@current_company && @runtime_controls_allowed} class="h-1.5"></div>
 
       <.nav_link
         to={~p"/dashboard"}
@@ -148,6 +158,89 @@ defmodule CymphoWeb.Components.NavRail do
     </nav>
     """
   end
+
+  attr :current_company, :any, required: true
+  attr :current_path, :string, required: true
+
+  defp runtime_controls(assigns) do
+    ~H"""
+    <div
+      data-testid="runtime-controls"
+      class="rounded-xl border border-border bg-surface-2/70 p-2 shadow-card"
+    >
+      <div class="mb-2 flex items-center justify-between gap-2 px-0.5">
+        <span class="flex items-center gap-1.5 text-[11px] font-590 uppercase tracking-[0.08em] text-text-tertiary">
+          <span class="hero-bolt-mini h-3.5 w-3.5 text-brand"></span> Runtime
+        </span>
+        <span class={[
+          "rounded-full border px-2 py-0.5 text-[10px] font-590",
+          if(company_paused?(@current_company),
+            do: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+            else: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+          )
+        ]}>
+          {if company_paused?(@current_company), do: "Paused", else: "Live"}
+        </span>
+      </div>
+      <div class="grid grid-cols-2 gap-1.5">
+        <.runtime_button
+          :if={!company_paused?(@current_company)}
+          action={~p"/runtime-control/pause"}
+          icon="hero-pause-mini"
+          label="Pause"
+          tone="neutral"
+          current_path={@current_path}
+        />
+        <.runtime_button
+          :if={company_paused?(@current_company)}
+          action={~p"/runtime-control/resume"}
+          icon="hero-play-mini"
+          label="Resume"
+          tone="neutral"
+          current_path={@current_path}
+        />
+        <.runtime_button
+          action={~p"/runtime-control/stop"}
+          icon="hero-stop-mini"
+          label="Stop"
+          tone="danger"
+          current_path={@current_path}
+        />
+      </div>
+    </div>
+    """
+  end
+
+  attr :action, :string, required: true
+  attr :icon, :string, required: true
+  attr :label, :string, required: true
+  attr :tone, :string, default: "neutral"
+  attr :current_path, :string, required: true
+
+  defp runtime_button(assigns) do
+    ~H"""
+    <form method="post" action={@action} class="min-w-0">
+      <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+      <input type="hidden" name="return_to" value={@current_path} />
+      <button
+        type="submit"
+        class={[
+          "inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border px-2 text-[12px] font-590 transition-colors",
+          @tone == "danger" &&
+            "border-red-500/25 bg-red-500/10 text-red-300 hover:bg-red-500/15 hover:text-red-200",
+          @tone != "danger" &&
+            "border-border bg-surface-1 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        ]}
+      >
+        <span class={[@icon, "h-3.5 w-3.5 shrink-0"]}></span>
+        <span class="truncate">{@label}</span>
+      </button>
+    </form>
+    """
+  end
+
+  defp company_paused?(%{status: "paused"}), do: true
+  defp company_paused?(_company), do: false
 
   ## ── Sections ───────────────────────────────────────────────────
 

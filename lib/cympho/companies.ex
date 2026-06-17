@@ -58,13 +58,25 @@ defmodule Cympho.Companies do
   end
 
   def pause_company(%Company{} = company, reason \\ "Paused from dashboard") do
+    case do_pause_company(company, reason) do
+      {:ok, updated, _runtime_stop} -> {:ok, updated}
+      error -> error
+    end
+  end
+
+  def stop_company_runtime(%Company{} = company, reason \\ "Stopped from global runtime controls") do
+    do_pause_company(company, reason)
+  end
+
+  defp do_pause_company(%Company{} = company, reason) do
     with {:ok, updated} <-
            execute_company_update(company, %{
              status: "paused",
              paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
              paused_reason: reason
            }) do
-      pause_company_agents(company.id)
+      runtime_stop = stop_company_runtime_sessions(company.id, reason)
+      pause_company_agents(company.id, reason)
 
       Phoenix.PubSub.broadcast(
         Cympho.PubSub,
@@ -72,7 +84,13 @@ defmodule Cympho.Companies do
         {:company_paused, updated}
       )
 
-      {:ok, updated}
+      Phoenix.PubSub.broadcast(
+        Cympho.PubSub,
+        "company:#{updated.id}:company",
+        {:company_runtime_stopped, updated, runtime_stop}
+      )
+
+      {:ok, updated, runtime_stop}
     end
   end
 
@@ -134,14 +152,44 @@ defmodule Cympho.Companies do
 
   def runtime_limit(_, _, default), do: default
 
-  defp pause_company_agents(company_id) do
-    from(a in Agent, where: a.company_id == ^company_id)
-    |> Repo.update_all(set: [governance_status: "paused"])
+  defp stop_company_runtime_sessions(company_id, reason) do
+    case Cympho.Orchestrator.Dispatcher.stop_company(company_id, reason) do
+      {:ok, result} ->
+        result
+
+      {:error, reason} ->
+        %{reason: "dispatcher_stop_failed", errors: [%{reason: inspect(reason)}]}
+    end
+  end
+
+  defp pause_company_agents(company_id, reason) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    from(a in Agent,
+      where: a.company_id == ^company_id and a.governance_status != "terminated"
+    )
+    |> Repo.update_all(
+      set: [
+        governance_status: "paused",
+        status: :paused,
+        paused_at: now,
+        pause_reason: reason
+      ]
+    )
   end
 
   defp resume_company_agents(company_id) do
-    from(a in Agent, where: a.company_id == ^company_id)
-    |> Repo.update_all(set: [governance_status: "active"])
+    from(a in Agent,
+      where: a.company_id == ^company_id and a.governance_status == "paused"
+    )
+    |> Repo.update_all(
+      set: [
+        governance_status: "active",
+        status: :idle,
+        paused_at: nil,
+        pause_reason: nil
+      ]
+    )
   end
 
   defp do_update_company(%Company{} = company, attrs) do

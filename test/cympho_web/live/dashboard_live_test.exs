@@ -74,6 +74,16 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert html =~ ~s(href="/budgets/new")
     end
 
+    test "owner sees global runtime controls in the app shell" do
+      conn = authenticated_conn(%{role: "owner", is_board_member: true})
+      {:ok, _view, html} = live(conn, "/dashboard")
+
+      assert html =~ ~s(data-testid="runtime-controls")
+      assert html =~ "Pause"
+      assert html =~ "Stop"
+      assert html =~ ~s(action="/runtime-control/stop")
+    end
+
     test "renders spend posture and budget next action", %{
       conn: conn,
       current_company: company

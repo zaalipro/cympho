@@ -11,7 +11,7 @@ defmodule CymphoWeb.UserAuth do
   """
 
   import Phoenix.Component, only: [assign: 3]
-  import Ecto.Query
+  alias Cympho.Companies
   alias Cympho.Users
 
   def require_authenticated_user(conn, _opts) do
@@ -21,6 +21,7 @@ defmodule CymphoWeb.UserAuth do
           {:ok, user} ->
             conn
             |> Plug.Conn.assign(:current_user, user)
+            |> assign_browser_company_context(user)
             |> sync_theme(user)
 
           {:error, :not_found} ->
@@ -113,11 +114,14 @@ defmodule CymphoWeb.UserAuth do
   defp assign_sidebar_data(socket) do
     case socket.assigns[:current_company] do
       %{id: company_id} ->
+        inbox_count = Cympho.Inbox.unread_count_for_company(company_id)
+
         socket
         |> assign(:nav_projects, Cympho.Projects.list_for_sidebar(company_id))
         |> assign(:nav_agents, Cympho.Agents.list_for_sidebar(company_id))
         |> assign(:nav_goals, Cympho.Goals.list_for_sidebar(company_id))
-        |> assign(:nav_inbox_count, Cympho.Inbox.unread_count_for_company(company_id))
+        |> assign(:nav_inbox_count, inbox_count)
+        |> assign(:inbox_badge_count, inbox_count)
 
       _ ->
         socket
@@ -125,7 +129,41 @@ defmodule CymphoWeb.UserAuth do
         |> assign(:nav_agents, [])
         |> assign(:nav_goals, [])
         |> assign(:nav_inbox_count, 0)
+        |> assign(:inbox_badge_count, 0)
     end
+  end
+
+  defp assign_browser_company_context(conn, user) do
+    memberships = Companies.list_memberships_for_user(user.id)
+    companies = Enum.map(memberships, &company_map(&1.company))
+    company = resolve_company_for_conn(conn, user, companies)
+
+    conn
+    |> Plug.Conn.assign(:user_companies, companies)
+    |> Plug.Conn.assign(:current_company, company)
+    |> Plug.Conn.assign(:current_company_id, company && company.id)
+    |> Plug.Conn.assign(:runtime_controls_allowed, runtime_control_allowed?(user, company))
+    |> assign_browser_sidebar_data(company)
+  end
+
+  defp assign_browser_sidebar_data(conn, %{id: company_id}) do
+    inbox_count = Cympho.Inbox.unread_count_for_company(company_id)
+
+    conn
+    |> Plug.Conn.assign(:nav_projects, Cympho.Projects.list_for_sidebar(company_id))
+    |> Plug.Conn.assign(:nav_agents, Cympho.Agents.list_for_sidebar(company_id))
+    |> Plug.Conn.assign(:nav_goals, Cympho.Goals.list_for_sidebar(company_id))
+    |> Plug.Conn.assign(:nav_inbox_count, inbox_count)
+    |> Plug.Conn.assign(:inbox_badge_count, inbox_count)
+  end
+
+  defp assign_browser_sidebar_data(conn, _company) do
+    conn
+    |> Plug.Conn.assign(:nav_projects, [])
+    |> Plug.Conn.assign(:nav_agents, [])
+    |> Plug.Conn.assign(:nav_goals, [])
+    |> Plug.Conn.assign(:nav_inbox_count, 0)
+    |> Plug.Conn.assign(:inbox_badge_count, 0)
   end
 
   defp assign_current_user(socket, session) do
@@ -161,16 +199,9 @@ defmodule CymphoWeb.UserAuth do
       if is_nil(user) do
         []
       else
-        query =
-          from(m in Cympho.Companies.CompanyMembership,
-            where: m.user_id == ^user.id,
-            order_by: [asc: m.inserted_at, asc: m.id],
-            preload: :company
-          )
-
-        Cympho.Repo.all(query)
+        Companies.list_memberships_for_user(user.id)
         |> Enum.map(& &1.company)
-        |> Enum.map(fn c -> %{id: c.id, name: c.name, logo_url: c.logo_url} end)
+        |> Enum.map(&company_map/1)
       end
 
     assign(socket, :user_companies, companies)
@@ -206,7 +237,9 @@ defmodule CymphoWeb.UserAuth do
           List.first(companies)
       end
 
-    assign(socket, :current_company, company)
+    socket
+    |> assign(:current_company, company)
+    |> assign(:runtime_controls_allowed, runtime_control_allowed?(user, company))
   end
 
   defp fallback_company(_user, companies) do
@@ -214,4 +247,37 @@ defmodule CymphoWeb.UserAuth do
     # fall back to the first company in their memberships
     List.first(companies)
   end
+
+  defp resolve_company_for_conn(conn, user, companies) do
+    requested = Plug.Conn.get_session(conn, :company_id) || user.company_id
+
+    cond do
+      is_nil(requested) ->
+        List.first(companies)
+
+      company = Enum.find(companies, &(&1.id == requested)) ->
+        company
+
+      true ->
+        List.first(companies)
+    end
+  end
+
+  defp company_map(company) do
+    %{
+      id: company.id,
+      name: company.name,
+      logo_url: company.logo_url,
+      status: company.status,
+      paused_at: company.paused_at,
+      paused_reason: company.paused_reason
+    }
+  end
+
+  defp runtime_control_allowed?(%{id: user_id}, %{id: company_id})
+       when is_binary(user_id) and is_binary(company_id) do
+    Companies.admin?(user_id, company_id) or Companies.is_board_member?(user_id, company_id)
+  end
+
+  defp runtime_control_allowed?(_user, _company), do: false
 end

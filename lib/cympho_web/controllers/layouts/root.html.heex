@@ -49,6 +49,8 @@
           projects={assigns[:nav_projects] || []}
           agents={assigns[:nav_agents] || []}
           inbox_count={assigns[:nav_inbox_count] || 0}
+          current_company={assigns[:current_company]}
+          runtime_controls_allowed={assigns[:runtime_controls_allowed] || false}
         />
         <!-- Bottom user pill -->
         <div class="border-t border-border px-2 py-2">
@@ -109,6 +111,55 @@
             />
           </svg>
         </button>
+        <div
+          :if={assigns[:runtime_controls_allowed] && assigns[:current_company]}
+          class="flex items-center gap-1"
+        >
+          <form
+            :if={Map.get(assigns[:current_company] || %{}, :status) != "paused"}
+            method="post"
+            action={~p"/runtime-control/pause"}
+          >
+            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <input type="hidden" name="return_to" value={@conn.request_path} />
+            <button
+              type="submit"
+              title="Pause runtime"
+              aria-label="Pause runtime"
+              class="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface-2 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
+            >
+              <span class="hero-pause-mini h-4 w-4"></span>
+            </button>
+          </form>
+          <form
+            :if={Map.get(assigns[:current_company] || %{}, :status) == "paused"}
+            method="post"
+            action={~p"/runtime-control/resume"}
+          >
+            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <input type="hidden" name="return_to" value={@conn.request_path} />
+            <button
+              type="submit"
+              title="Resume runtime"
+              aria-label="Resume runtime"
+              class="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface-2 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
+            >
+              <span class="hero-play-mini h-4 w-4"></span>
+            </button>
+          </form>
+          <form method="post" action={~p"/runtime-control/stop"}>
+            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <input type="hidden" name="return_to" value={@conn.request_path} />
+            <button
+              type="submit"
+              title="Stop runtime"
+              aria-label="Stop runtime"
+              class="flex h-9 w-9 items-center justify-center rounded-lg border border-red-500/25 bg-red-500/10 text-red-300 hover:bg-red-500/15 hover:text-red-200 transition-colors"
+            >
+              <span class="hero-stop-mini h-4 w-4"></span>
+            </button>
+          </form>
+        </div>
       </header>
       
 <!-- Main content -->

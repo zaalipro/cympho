@@ -79,13 +79,13 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert evidence =~ "non-secret secret manifest"
     assert evidence =~ "post-import restore checklist"
 
-    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+    assert %{"verdict" => "parity", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "company_blueprints"))
 
     assert evidence =~ "17 executable"
-    assert evidence =~ "exceed Paperclip"
+    assert evidence =~ "Paperclip's public catalog is still larger"
     assert evidence =~ "executable company blueprints"
-    assert evidence =~ "onboarding plus CLI"
+    assert evidence =~ "create live orgs"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "secrets"))

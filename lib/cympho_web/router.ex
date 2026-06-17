@@ -54,6 +54,9 @@ defmodule CymphoWeb.Router do
     get "/switch-company/:id", CompanySwitcherController, :switch
 
     post "/issues/quick-create", QuickIssueController, :create
+    post "/runtime-control/pause", RuntimeControlController, :pause
+    post "/runtime-control/stop", RuntimeControlController, :stop
+    post "/runtime-control/resume", RuntimeControlController, :resume
 
     live_session :default, on_mount: [{CymphoWeb.UserAuth, :default}] do
       live "/", DashboardLive.Index, :home

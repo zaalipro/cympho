@@ -1,18 +1,19 @@
 defmodule Mix.Tasks.Cympho.Compare do
-  @shortdoc "Compare Cympho against Paperclip feature-by-feature with codebase-grounded evidence"
+  @shortdoc "Print a Paperclip comparison with Cympho-side runtime evidence"
 
   @moduledoc """
   Prints a feature comparison of Cympho vs Paperclip (github.com/paperclipai/paperclip).
 
-  Each row is grounded in the codebase via a runtime check — a module/function
-  exists, an Ecto schema is loaded, an OTP child is supervised. The task fails
-  with a non-zero exit code if Cympho is missing a feature Paperclip's README
-  lists as a differentiator.
+  Each Cympho row is grounded in the codebase via a runtime check — a
+  module/function exists, an Ecto schema is loaded, an OTP child is supervised.
+  The task fails with a non-zero exit code if Cympho is missing local coverage
+  for a feature class Paperclip's public README lists as a differentiator.
+  It is not an independent benchmark of Paperclip.
 
       mix cympho.compare           # text table
       mix cympho.compare --json    # machine-readable
 
-  Use this in CI to assert feature parity stays intact.
+  Use this in CI to assert Cympho's claimed comparison surface stays intact.
   """
 
   use Mix.Task
@@ -78,8 +79,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     %{
       slug: "tool_call_tracing",
       paperclip: "Full tool-call tracing and immutable audit log",
-      cympho:
-        "ToolCallTraces context with its own LiveView (Cympho exceeds — exposed as a first-class browsable resource)",
+      cympho: "ToolCallTraces context, LiveView, activities, and governance audit logs",
       check: &__MODULE__.check_tool_traces/0
     },
     %{
@@ -129,7 +129,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     %{
       slug: "decision_reversal",
       paperclip:
-        "(not mentioned — Paperclip says approval changes can be 'rolled back' but no first-class decision-reversal primitive)",
+        "Decision tracking and rollback language; no separate reversible-decision API called out in the public README",
       cympho: "Decisions context with explicit reversal events, scoped per company",
       check: &__MODULE__.check_decisions/0
     },
@@ -142,20 +142,21 @@ defmodule Mix.Tasks.Cympho.Compare do
     },
     %{
       slug: "live_skill_hot_reload",
-      paperclip: "Runtime skill injection (require redeploy)",
+      paperclip: "Skills Manager plus runtime/context injection in the public feature list",
       cympho: "Skills.HotReloader — BEAM hot-reloads skill manifests without restart",
       check: &__MODULE__.check_hot_reloader/0
     },
     %{
       slug: "realtime_collab",
-      paperclip: "React UI (state via fetch/poll)",
+      paperclip: "React UI; public README does not spell out channel/replay internals",
       cympho:
         "Phoenix LiveView + Channels: diff-pushed UI + dedicated channels for heartbeats/runs/activity/comments/issues with EventStore replay",
       check: &__MODULE__.check_realtime/0
     },
     %{
       slug: "supervision_isolation",
-      paperclip: "Node.js single event loop",
+      paperclip:
+        "Node.js server and plugin workers; public README does not claim BEAM-style OTP supervision",
       cympho: "OTP supervision: per-agent processes, fault isolation, automatic restarts",
       check: &__MODULE__.check_supervision/0
     },
@@ -250,7 +251,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     Enum.each(results, fn row ->
       tag =
         case row.verdict do
-          :exceeds -> IO.ANSI.green() <> "WIN " <> IO.ANSI.reset()
+          :exceeds -> IO.ANSI.green() <> "ADV " <> IO.ANSI.reset()
           :parity -> IO.ANSI.cyan() <> "PAR " <> IO.ANSI.reset()
           :gap -> IO.ANSI.red() <> "GAP " <> IO.ANSI.reset()
         end
@@ -267,7 +268,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     IO.puts(
       "Summary: " <>
         IO.ANSI.green() <>
-        "#{exceeds} wins" <>
+        "#{exceeds} Cympho-specific advantages" <>
         IO.ANSI.reset() <>
         " · " <>
         IO.ANSI.cyan() <>
@@ -282,7 +283,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     if gaps == 0 do
       IO.puts(
         IO.ANSI.green() <>
-          "✓ Cympho ≥ Paperclip on every documented feature." <>
+          "✓ No Cympho-side gaps detected against the selected Paperclip claims." <>
           IO.ANSI.reset()
       )
     else
@@ -302,7 +303,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     cond do
       length(present) == length(expected) ->
         {:exceeds,
-         "#{length(registered)} registered adapter types (#{Enum.join(registered, ", ")}) — Paperclip lists 6, Cympho covers those and adds openai_chat plus agrenting"}
+         "#{length(registered)} registered adapter types (#{Enum.join(registered, ", ")}) — Cympho covers the common local/CLI/HTTP adapter classes and adds openai_chat plus agrenting"}
 
       length(present) > 0 ->
         {:gap, "only #{length(present)}/#{length(expected)} adapters registered"}
@@ -439,7 +440,7 @@ defmodule Mix.Tasks.Cympho.Compare do
 
   def check_tool_traces do
     if module_with_fun?(Cympho.ToolCallTraces, :__info__, 1) do
-      {:exceeds, "First-class ToolCallTraces context — browsable, not just an audit log"}
+      {:parity, "ToolCallTraces context present with browsable Cympho UI surfaces"}
     else
       {:gap, "ToolCallTraces context missing"}
     end
@@ -598,8 +599,8 @@ defmodule Mix.Tasks.Cympho.Compare do
     cond do
       has_list and has_create and length(blueprints) > paperclip_blueprint_count and
           Enum.all?(expected_keys, &(&1 in keys)) ->
-        {:exceeds,
-         "#{length(blueprints)} executable company blueprints exceed Paperclip's 16 pre-built-company catalog and create live orgs, goals, projects, agents, and seed work through onboarding plus CLI"}
+        {:parity,
+         "#{length(blueprints)} executable company blueprints create live orgs, goals, projects, agents, and seed work; Paperclip's public catalog is still larger by agent/skill ecosystem scale"}
 
       has_list and has_create and length(blueprints) >= length(expected_keys) and
           Enum.all?(expected_keys, &(&1 in keys)) ->
@@ -649,7 +650,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     loaded = Enum.count(channels, &Code.ensure_loaded?/1)
 
     if loaded == length(channels) and Code.ensure_loaded?(CymphoWeb.DashboardLive.Index),
-      do: {:exceeds, "#{loaded} Phoenix Channels + LiveView UI (vs React+fetch)"},
+      do: {:exceeds, "#{loaded} Phoenix Channels + LiveView UI with EventStore replay"},
       else: {:gap, "only #{loaded}/#{length(channels)} channels loaded"}
   end
 
@@ -668,7 +669,7 @@ defmodule Mix.Tasks.Cympho.Compare do
     if module_with_fun?(Cympho.ReviewNudges, :__info__, 1),
       do:
         {:exceeds,
-         "Cympho.ReviewNudges — proactive evidence-request tracker (no Paperclip equivalent)"},
+         "Cympho.ReviewNudges — proactive evidence-request tracker; no specific equivalent is called out in Paperclip's public README"},
       else: {:gap, "ReviewNudges missing"}
   end
 
