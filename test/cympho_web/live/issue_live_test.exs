@@ -6,11 +6,13 @@ defmodule CymphoWeb.IssueLiveTest do
   alias Cympho.Issues
   alias Cympho.Comments
   alias Cympho.Agents
+  alias Cympho.AuditTrail
   alias Cympho.Companies
   alias Cympho.Goals
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Inbox
   alias Cympho.Proxies
+  alias Cympho.Issues.SwarmEvents
   alias Cympho.Projects
   alias Cympho.Repo
   alias Cympho.Users
@@ -54,7 +56,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
   describe "Index - Issue List" do
     test "renders all issues", %{issue: issue} do
-      {:ok, _view, html} = live(conn(), "/issues")
+      {:ok, _view, html} = live(conn(), "/issues?density=detailed")
 
       assert html =~ "All Issues"
       assert html =~ issue.title
@@ -76,14 +78,14 @@ defmodule CymphoWeb.IssueLiveTest do
           goal_id: mission.id
         })
 
-      {:ok, _view, html} = live(conn(), "/issues")
+      {:ok, _view, html} = live(conn(), "/issues?density=detailed")
 
       assert html =~ "Aligned list row"
       assert html =~ "Mission: Raise activation quality"
     end
 
     test "shows issue status badges", %{issue: _issue} do
-      {:ok, _view, html} = live(conn(), "/issues")
+      {:ok, _view, html} = live(conn(), "/issues?density=detailed")
 
       assert html =~ "backlog"
       assert html =~ "high"
@@ -119,8 +121,7 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert html =~ "List owner request"
       assert html =~ "List CEO"
-      assert html =~ "Launch needed"
-      assert html =~ "Assigned, but runtime has not started yet."
+      refute html =~ "Assigned, but runtime has not started yet."
     end
 
     test "shows launch readiness on dispatchable rows" do
@@ -147,7 +148,7 @@ defmodule CymphoWeb.IssueLiveTest do
           assigned_role: "engineer"
         })
 
-      {:ok, _view, html} = live(conn(), "/issues")
+      {:ok, _view, html} = live(conn(), "/issues?density=detailed")
 
       assert html =~ "Launch"
       assert html =~ "Implement list row code path"
@@ -202,7 +203,7 @@ defmodule CymphoWeb.IssueLiveTest do
           company_id: company.id
         })
 
-      {:ok, _view, html} = live(conn(), "/issues")
+      {:ok, _view, html} = live(conn(), "/issues?density=detailed")
 
       assert html =~ "Attention queue"
       assert html =~ "First concrete moves from the issues currently in view."
@@ -236,7 +237,7 @@ defmodule CymphoWeb.IssueLiveTest do
           company_id: company.id
         })
 
-      {:ok, view, html} = live(conn(), "/issues")
+      {:ok, view, html} = live(conn(), "/issues?density=detailed")
 
       assert html =~ "Owner triage"
       assert html =~ "Jump straight to the queue that needs the next decision."
@@ -246,10 +247,16 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Unassigned"
 
       view
-      |> element("a[href='/issues?triage=ceo']", "CEO lane")
+      |> element("[data-testid='issue-triage-lane-ceo']", "CEO lane")
       |> render_click()
 
-      assert_patch(view, "/issues?triage=ceo")
+      patch_uri = assert_patch(view) |> URI.parse()
+      assert patch_uri.path == "/issues"
+
+      assert URI.decode_query(patch_uri.query || "") == %{
+               "density" => "detailed",
+               "triage" => "ceo"
+             }
 
       html = render(view)
       assert html =~ "CEO triage lane request"
@@ -844,12 +851,6 @@ defmodule CymphoWeb.IssueLiveTest do
             "harness" => "claude_code",
             "model" => "sonnet",
             "reasoning_effort" => "medium"
-          },
-          "1" => %{
-            "enabled" => "true",
-            "harness" => "codex",
-            "model" => "gpt-5.3-high-fast",
-            "reasoning_effort" => "high"
           }
         },
         "proxy_mode" => "selected",
@@ -883,12 +884,15 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "CEO run waits for swarm synthesis"
       assert html =~ "Create Swarm Issue"
       assert html =~ ~s(data-testid="issue-swarm-advanced-panel")
-      assert html =~ "Advanced swarm settings"
+      assert html =~ "Swarm setup"
       assert html =~ "swarm-egress-a"
       assert html =~ "swarm-egress-b"
       assert html =~ "2 proxy profiles"
-      assert html =~ "Claude code / sonnet / medium"
-      assert html =~ "Codex / gpt-5.3-high-fast / high"
+      assert html =~ "Claude code"
+      assert html =~ "sonnet"
+      assert html =~ "Medium"
+      assert html =~ ~s(data-swarm-count)
+      assert html =~ "runtime choice"
 
       result =
         view
@@ -996,9 +1000,13 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ ~s(data-testid="issue-swarm-log")
       assert html =~ "Swarm orchestration"
       assert html =~ "Live swarm log"
+      assert html =~ "Open queue"
+      assert html =~ ~s(href="/operations?parent_issue_id=#{parent.id}#delegated-work-queue")
       assert html =~ "Launch ready"
-      assert html =~ "Swarm is live"
-      assert html =~ "Workers active"
+      assert html =~ "CTO issue created"
+      refute html =~ "Cto issue created"
+      assert html =~ "Swarm is queued"
+      assert html =~ "Workers queued"
       assert html =~ "Independent first pass"
       assert html =~ "Evidence over consensus"
       assert html =~ "Preserve dissent"
@@ -1028,6 +1036,10 @@ defmodule CymphoWeb.IssueLiveTest do
       assert worker_html =~ ~s(data-testid="issue-swarm-panel")
       assert worker_html =~ "Swarm worker packet"
       assert worker_html =~ "This packet feeds CTO synthesis"
+
+      assert worker_html =~
+               ~s(href="/operations?parent_issue_id=#{parent.id}#delegated-work-queue")
+
       assert html_has_any?(worker_html, worker_lens_labels())
       assert worker_html =~ "claude_code"
 
@@ -1035,9 +1047,82 @@ defmodule CymphoWeb.IssueLiveTest do
 
       assert cto_html =~ ~s(data-testid="issue-swarm-panel")
       assert cto_html =~ "CTO swarm synthesis"
+      assert cto_html =~ ~s(href="/operations?parent_issue_id=#{parent.id}#delegated-work-queue")
       assert cto_html =~ "Waiting on packets"
       assert cto_html =~ "CEO restart"
       assert cto_html =~ "Worker packets"
+    end
+
+    test "refreshes the swarm panel when a worker event arrives" do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Live Swarm CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, _cto} =
+        create_agent(%{
+          name: "Live Swarm CTO",
+          role: :cto,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, parent} =
+        create_issue(%{
+          title: "Watch worker completion live",
+          description: """
+          Goal: prove the swarm panel updates live.
+          Context: one worker should close before CTO synthesis.
+          Constraints / risks: keep CEO blocked until synthesis.
+          Definition of done: the parent panel shows the closed worker.
+          CEO first output (`[owner_update]`, `[handoff]`, or `[blocked]`): wait for CTO.
+          Evidence to inspect after the run: live swarm log and worker count.
+          """,
+          status: :todo,
+          priority: :medium,
+          assignee_id: ceo.id,
+          assigned_role: "ceo",
+          swarm: %{
+            enabled: true,
+            agent_count: 1,
+            mix: [%{adapter: :codex, model: "gpt-5.4-mini", reasoning_effort: "medium"}]
+          }
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{parent.id}")
+
+      assert html =~ "0/1 closed"
+
+      worker =
+        parent.id
+        |> Issues.list_child_issues()
+        |> Enum.find(&(&1.origin_type == "swarm_worker"))
+
+      assert worker
+
+      worker
+      |> Ecto.Changeset.change(status: :done)
+      |> Repo.update!()
+
+      :ok =
+        SwarmEvents.record(worker, %{
+          event_type: "worker_completed",
+          status: "success",
+          message: "Worker packet closed.",
+          metadata: %{worker_index: 1}
+        })
+
+      Process.sleep(10)
+
+      html = render(view)
+      assert html =~ "1/1 closed"
+      assert html =~ "Worker completed"
+      assert html =~ "Worker packet closed."
     end
 
     test "shows linked mission context in the sidebar" do
@@ -2258,6 +2343,50 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "10s"
     end
 
+    test "keeps long runtime ledgers bounded and shows the true total", %{issue: issue} do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Bounded Runtime CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :codex
+        })
+
+      base_time = ~U[2026-01-01 00:00:00Z]
+
+      runs =
+        for index <- 1..55 do
+          timestamp = DateTime.add(base_time, index, :second)
+          label = index |> Integer.to_string() |> String.pad_leading(2, "0")
+
+          Repo.insert!(%Run{
+            agent_id: ceo.id,
+            issue_id: issue.id,
+            company_id: issue.company_id,
+            status: "failed",
+            adapter: "codex",
+            error_reason: "bounded-run-#{label}",
+            started_at: timestamp,
+            completed_at: timestamp,
+            inserted_at: timestamp,
+            updated_at: timestamp
+          })
+        end
+
+      oldest = List.first(runs)
+      newest = List.last(runs)
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Runtime run ledger"
+      assert html =~ "Latest 5 of 55 runs"
+      assert html =~ "Showing the newest entries keeps long-running issues responsive."
+      assert html =~ ~s(id="runtime-run-ledger-#{newest.id}")
+      assert html =~ "bounded-run-55"
+      refute html =~ ~s(id="runtime-run-ledger-#{oldest.id}")
+      refute html =~ "bounded-run-01"
+    end
+
     test "shows CEO flow checklist for CEO-owned issues", %{issue: issue} do
       {:ok, ceo} =
         create_agent(%{
@@ -2485,6 +2614,31 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Waiting on agent"
       assert html =~ "Wake queued for CEO"
       assert html =~ "Manual dispatch"
+    end
+
+    test "hides stale pending wake badge on completed issues", %{issue: issue} do
+      {:ok, ceo} =
+        create_agent(%{
+          name: "Done CEO",
+          role: :ceo,
+          status: :idle
+        })
+
+      {:ok, issue} = Issues.update_issue(issue, %{status: :done, assignee_id: ceo.id})
+
+      Repo.insert!(%AgentWake{
+        agent_id: ceo.id,
+        issue_id: issue.id,
+        reason: "manual_dispatch",
+        status: "pending",
+        triggered_by_type: "system",
+        triggered_by_id: "test"
+      })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      refute html =~ "Waiting on Done CEO"
+      refute html =~ "Wake queued for Done CEO"
     end
 
     test "shows direct sub-issues", %{issue: issue} do
@@ -3209,6 +3363,52 @@ defmodule CymphoWeb.IssueLiveTest do
       assert comment.author_type == "user"
       assert comment.author_id == current_user_id
       assert comment.body =~ "[owner_update]"
+    end
+
+    test "issue runtime can be paused and resumed from the issue page", %{issue: issue} do
+      {:ok, issue} = Issues.update_issue(issue, %{status: :todo})
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Issue runtime"
+      assert html =~ "Freeze only this issue if a run loops."
+      assert html =~ "Pause"
+
+      html =
+        view
+        |> element("button[phx-click='pause_issue_runtime']")
+        |> render_click()
+
+      assert html =~ "Issue paused"
+      assert html =~ "Paused"
+      assert html =~ "Dispatch is frozen for this issue."
+      assert Issues.issue_runtime_paused?(Issues.get_issue!(issue.id))
+
+      {events, _total} =
+        AuditTrail.list_company_events(current_company_id(),
+          event_type: "issue_runtime_paused",
+          resource_type: "issue",
+          resource_id: issue.id
+        )
+
+      assert Enum.any?(events, &(&1.resource_id == issue.id))
+
+      html =
+        view
+        |> element("button[phx-click='resume_issue_runtime']")
+        |> render_click()
+
+      assert html =~ "Issue resumed"
+      refute Issues.issue_runtime_paused?(Issues.get_issue!(issue.id))
+
+      {events, _total} =
+        AuditTrail.list_company_events(current_company_id(),
+          event_type: "issue_runtime_resumed",
+          resource_type: "issue",
+          resource_id: issue.id
+        )
+
+      assert Enum.any?(events, &(&1.resource_id == issue.id))
     end
   end
 

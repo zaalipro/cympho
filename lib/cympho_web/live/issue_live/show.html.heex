@@ -2,6 +2,7 @@
 
 <div
   id="issue-show"
+  data-ui-complex-page
   data-clean-url={@gate_clean_url}
   class="flex flex-col lg:flex-row min-h-screen bg-canvas"
 >
@@ -40,49 +41,58 @@
 
     <% gate_resolution = review_gate_resolution(assigns) %>
 
-    <.issue_digest_panel
-      issue={@issue}
-      runs={@runs}
-      work_products={@work_products}
-      child_issues={@child_issues}
-      agents={@all_agents}
-      review_gate_actions={gate_resolution.actions}
-      review_nudges={gate_resolution.nudges}
-    />
+    <div class="ui-advanced-only">
+      <.issue_digest_panel
+        issue={@issue}
+        runs={@runs}
+        work_products={@work_products}
+        child_issues={@child_issues}
+        agents={@all_agents}
+        review_gate_actions={gate_resolution.actions}
+        review_nudges={gate_resolution.nudges}
+      />
+    </div>
 
-    <CymphoWeb.IssueLive.Show.ReviewGates.review_gates
-      issue={@issue}
-      runs={@runs}
-      work_products={@work_products}
-      child_issues={@child_issues}
-      all_agents={@all_agents}
-      orchestrator_enabled?={@orchestrator_enabled?}
-      show_work_product_form={@show_work_product_form}
-      work_product_form={@work_product_form}
-    />
+    <div class="ui-advanced-only">
+      <CymphoWeb.IssueLive.Show.ReviewGates.review_gates
+        issue={@issue}
+        runs={@runs}
+        work_products={@work_products}
+        child_issues={@child_issues}
+        all_agents={@all_agents}
+        orchestrator_enabled?={@orchestrator_enabled?}
+        show_work_product_form={@show_work_product_form}
+        work_product_form={@work_product_form}
+      />
+    </div>
 
-    <CymphoWeb.IssueLive.Show.ExecutionBrief.execution_brief
-      issue={@issue}
-      runs={@runs}
-      pending_wake={@pending_wake}
-      work_products={@work_products}
-      child_issues={@child_issues}
-      tool_call_traces={@tool_call_traces}
-      all_agents={@all_agents}
-      child_health_cards={@child_health_cards}
-      orchestrator_enabled?={@orchestrator_enabled?}
-    />
+    <div class="ui-advanced-only">
+      <CymphoWeb.IssueLive.Show.ExecutionBrief.execution_brief
+        issue={@issue}
+        runs={@runs}
+        run_history={@run_history}
+        pending_wake={@pending_wake}
+        work_products={@work_products}
+        child_issues={@child_issues}
+        tool_call_traces={@tool_call_traces}
+        all_agents={@all_agents}
+        child_health_cards={@child_health_cards}
+        orchestrator_enabled?={@orchestrator_enabled?}
+      />
+    </div>
 
     <CymphoWeb.IssueLive.Show.ChildIssues.child_issues
       child_tree={@child_tree}
       child_health_cards={@child_health_cards}
     />
 
-    <CymphoWeb.IssueLive.Show.ActivityTimeline.activity_timeline
-      timeline={@timeline}
-      timeline_filter={@timeline_filter}
-      all_agents={@all_agents}
-    />
+    <div class="ui-advanced-only">
+      <CymphoWeb.IssueLive.Show.ActivityTimeline.activity_timeline
+        timeline={@timeline}
+        timeline_filter={@timeline_filter}
+        all_agents={@all_agents}
+      />
+    </div>
 
     <CymphoWeb.IssueLive.Show.Comments.comments
       comment_form={@comment_form}

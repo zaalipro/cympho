@@ -9,26 +9,37 @@ defmodule Cympho.Adapters.CursorAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  alias Cympho.Adapters.RuntimeTimeout
+
   @default_timeout 300_000
+  @max_timeout 3_600_000
 
   @impl true
   def run(issue, agent_id, recipient_pid, opts) when is_pid(recipient_pid) do
     session_id = make_ref()
     config = opts[:config] || %{}
 
-    spawn(fn ->
-      do_run(session_id, issue, agent_id, recipient_pid, config)
-    end)
+    worker =
+      spawn(fn ->
+        try do
+          do_run(session_id, issue, agent_id, recipient_pid, config, opts)
+        after
+          Cympho.AdapterSessions.unregister(session_id)
+        end
+      end)
+
+    Cympho.AdapterSessions.register(session_id, worker)
 
     session_id
   end
 
-  defp do_run(session_id, issue, agent_id, recipient_pid, config) do
+  defp do_run(session_id, issue, agent_id, recipient_pid, config, opts) do
     send(recipient_pid, {:session_started, session_id})
 
-    prompt = build_prompt(issue, agent_id)
+    prompt = build_prompt(issue, agent_id, opts)
+    Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "cursor"})
 
-    case run_cursor(prompt, config) do
+    case run_cursor(session_id, prompt, config) do
       {:ok, output} ->
         send(recipient_pid, {:turn_completed, session_id, output})
 
@@ -37,7 +48,18 @@ defmodule Cympho.Adapters.CursorAdapter do
     end
   end
 
-  defp build_prompt(issue, agent_id) do
+  defp build_prompt(issue, agent_id, opts) do
+    Cympho.AgentPrompt.build(issue, agent_id,
+      skills: Keyword.get(opts, :skills, []),
+      runtime_context: Keyword.get(opts, :runtime_context),
+      wake_context: Keyword.get(opts, :wake_context)
+    )
+  rescue
+    _ ->
+      fallback_prompt(issue, agent_id)
+  end
+
+  defp fallback_prompt(issue, agent_id) do
     id = (is_map(issue) && Map.get(issue, :id)) || Map.get(issue, "id") || issue.id
     title = (is_map(issue) && Map.get(issue, :title)) || Map.get(issue, "title") || issue.title
 
@@ -58,10 +80,10 @@ defmodule Cympho.Adapters.CursorAdapter do
     |> String.trim()
   end
 
-  defp run_cursor(prompt, config) do
+  defp run_cursor(session_id, prompt, config) do
     try do
       cursor_bin = find_cursor_binary(config)
-      timeout = config[:timeout] || config["timeout"] || @default_timeout
+      timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
       {args, stdin} = build_cursor_invocation(prompt, cursor_bin, config)
 
       env = config |> build_env() |> port_env()
@@ -75,9 +97,15 @@ defmodule Cympho.Adapters.CursorAdapter do
           write_stdin(port, stdin)
         end
 
-        case collect_output(port, "", timeout) do
-          {:ok, raw} -> parse_cursor_output(raw)
-          {:error, _} = err -> err
+        case collect_output(port, "", timeout, session_id) do
+          {:ok, raw} ->
+            case Cympho.Adapters.ProviderFailure.detect(raw) do
+              :ok -> parse_cursor_output(raw)
+              {:error, _} = err -> err
+            end
+
+          {:error, _} = err ->
+            err
         end
       end)
     rescue
@@ -97,11 +125,7 @@ defmodule Cympho.Adapters.CursorAdapter do
   end
 
   defp close_port(port) when is_port(port) do
-    try do
-      Port.close(port)
-    rescue
-      ArgumentError -> :ok
-    end
+    Cympho.PortKiller.close(port)
   end
 
   defp close_port(_port), do: :ok
@@ -145,22 +169,26 @@ defmodule Cympho.Adapters.CursorAdapter do
   end
 
   defp cursor_cwd_opt(config) do
-    case config[:workspace_path] || config["workspace_path"] do
+    case config[:workspace_path] || config["workspace_path"] || config[:cwd] || config["cwd"] do
       nil -> []
       path -> [{:cd, path}]
     end
   end
 
-  defp collect_output(port, acc, timeout) do
+  defp collect_output(port, acc, timeout, session_id) do
     receive do
       {^port, {:data, data}} ->
-        collect_output(port, acc <> data, timeout)
+        collect_output(port, acc <> data, timeout, session_id)
 
       {^port, {:exit_status, 0}} ->
         {:ok, acc}
 
       {^port, {:exit_status, code}} ->
         {:error, "Cursor exited with status #{code}: #{acc}"}
+
+      {:cancel_session, ^session_id, reason} ->
+        close_port(port)
+        {:error, {:cancelled, reason}}
     after
       timeout ->
         close_port(port)
@@ -222,9 +250,16 @@ defmodule Cympho.Adapters.CursorAdapter do
     end
   end
 
-  defp build_env(_config) do
-    [{"TERM", "dumb"}]
+  defp build_env(config) do
+    runtime_env = config[:env] || config["env"] || %{}
+    [{"TERM", "dumb"} | normalize_env(runtime_env)]
   end
+
+  defp normalize_env(env) when is_map(env) do
+    Enum.map(env, fn {key, value} -> {env_string(key), env_string(value)} end)
+  end
+
+  defp normalize_env(_env), do: []
 
   defp port_env(env) do
     Enum.map(env, fn {key, value} ->
@@ -318,7 +353,16 @@ defmodule Cympho.Adapters.CursorAdapter do
         type: :integer,
         required: false,
         default: @default_timeout,
-        description: "CLI process timeout (ms)"
+        description:
+          "CLI process timeout in milliseconds. Prefer timeout_sec for human-entered values."
+      },
+      %{
+        key: :timeout_sec,
+        type: :integer,
+        required: false,
+        default: div(@default_timeout, 1_000),
+        description:
+          "CLI process timeout in seconds; conflicts with timeout/timeout_ms are rejected."
       }
     ]
   end
@@ -348,7 +392,7 @@ defmodule Cympho.Adapters.CursorAdapter do
          :ok <- validate_model(config_value(config, :model)),
          :ok <- validate_mode(config_value(config, :mode)),
          :ok <- validate_force(config_value(config, :force)),
-         :ok <- validate_timeout(config_value(config, :timeout)),
+         :ok <- validate_timeout(config),
          :ok <- validate_headless(config_value(config, :headless)) do
       :ok
     end
@@ -414,15 +458,8 @@ defmodule Cympho.Adapters.CursorAdapter do
   defp validate_force(force) when is_boolean(force), do: :ok
   defp validate_force(_), do: {:error, "force must be a boolean"}
 
-  defp validate_timeout(nil), do: :ok
-
-  defp validate_timeout(timeout) when is_integer(timeout) do
-    if timeout > 0 and timeout <= 3_600_000,
-      do: :ok,
-      else: {:error, "timeout must be between 1 and 3600000ms"}
-  end
-
-  defp validate_timeout(_), do: {:error, "timeout must be an integer"}
+  defp validate_timeout(config),
+    do: RuntimeTimeout.validate(config, max_ms: @max_timeout, field: "timeout")
 
   defp validate_headless(nil), do: :ok
 

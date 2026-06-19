@@ -31,6 +31,7 @@ module.exports = {
     "hero-eye-mini",
     "hero-play-mini",
     "hero-pause-mini",
+    "hero-moon-mini",
     "hero-exclamation-triangle-mini",
     "hero-bell-alert-mini",
     "hero-information-circle-mini",

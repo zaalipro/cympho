@@ -203,6 +203,26 @@ defmodule Cympho.ApprovalsTest do
     end
   end
 
+  describe "count_pending_for_company/1" do
+    test "counts only pending approvals requested inside the company" do
+      company = insert_company()
+      other_company = insert_company()
+      agent = insert_agent(company_id: company.id)
+      other_agent = insert_agent(company_id: other_company.id)
+
+      {:ok, pending} = create_test_approval(agent)
+      {:ok, resolved} = create_test_approval(agent)
+      {:ok, _other} = create_test_approval(other_agent)
+      {:ok, _} = Approvals.resolve_approval(resolved.id, :approved, %{})
+
+      assert Approvals.count_pending_for_company(company.id) == 1
+      assert Approvals.count_pending_for_company(other_company.id) == 1
+
+      {:ok, _} = Approvals.resolve_approval(pending.id, :denied, %{})
+      assert Approvals.count_pending_for_company(company.id) == 0
+    end
+  end
+
   describe "get_approval/1" do
     test "returns the approval with preloads" do
       agent = insert_agent()

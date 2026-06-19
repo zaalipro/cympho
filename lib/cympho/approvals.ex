@@ -59,6 +59,17 @@ defmodule Cympho.Approvals do
     |> then(fn p -> %{p | entries: Repo.preload(p.entries, [:requested_by, :issues])} end)
   end
 
+  def count_pending_for_company(company_id) when is_binary(company_id) do
+    from(a in Approval,
+      join: agent in assoc(a, :requested_by),
+      where: agent.company_id == ^company_id and a.status == :pending,
+      select: count(a.id)
+    )
+    |> Repo.one()
+  end
+
+  def count_pending_for_company(_company_id), do: 0
+
   def get_approval!(id) do
     Repo.get!(Approval, id)
     |> Repo.preload([:requested_by, :resolved_by, :issues])

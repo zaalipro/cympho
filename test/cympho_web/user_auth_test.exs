@@ -4,7 +4,7 @@ defmodule CymphoWeb.UserAuthTest do
   import Phoenix.LiveViewTest
   import Phoenix.ConnTest
 
-  alias Cympho.{Companies, Repo}
+  alias Cympho.{Agents, Approvals, BoardApprovals, Companies, Repo}
   alias Cympho.Users.User
 
   setup do
@@ -231,6 +231,43 @@ defmodule CymphoWeb.UserAuthTest do
       {:ok, view, _html} = live(conn, "/issues")
 
       assert length(live_assigns(view).user_companies) == 2
+    end
+
+    test "sidebar exposes pending approval work with a badge", %{
+      user: user,
+      company1: company
+    } do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Approval Badge Agent",
+          role: :ceo,
+          company_id: company.id
+        })
+
+      {:ok, _approval} =
+        Approvals.create_approval(%{
+          type: "launch_gate",
+          requested_by_agent_id: agent.id
+        })
+
+      {:ok, _board_approval} =
+        BoardApprovals.create_board_approval(%{
+          title: "Hire runtime owner",
+          category: "agent_hire",
+          company_id: company.id
+        })
+
+      conn =
+        build_conn()
+        |> Plug.Test.init_test_session(%{})
+        |> Plug.Conn.put_session("user_id", user.id)
+
+      {:ok, view, html} = live(conn, "/issues")
+
+      assert live_assigns(view).nav_approval_count == 2
+      assert html =~ ~s(href="/approvals?status=pending")
+      assert html =~ ~s(data-testid="nav-badge-approvals")
+      assert html =~ ~r/<span[^>]*data-testid="nav-badge-approvals"[^>]*>\s*2\s*<\/span>/s
     end
   end
 

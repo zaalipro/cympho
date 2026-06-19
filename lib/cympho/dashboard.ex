@@ -240,13 +240,21 @@ defmodule Cympho.Dashboard do
           Decimal.add(acc, cost)
         end)
 
+      total_unpriced = unpriced_run_summary(runs)
+      period_unpriced = unpriced_run_summary(period_runs)
+
       %{
         total_cost: total_cost,
         total_input_tokens: total_input,
         total_output_tokens: total_output,
         total_runs: length(runs),
+        total_unpriced_tokens: total_unpriced.tokens,
+        total_unpriced_request_count: total_unpriced.request_count,
         period_cost: period_cost,
         period_runs: length(period_runs),
+        period_unpriced_tokens: period_unpriced.tokens,
+        period_unpriced_request_count: period_unpriced.request_count,
+        has_unpriced_usage?: period_unpriced.tokens > 0,
         period_days: spend_period.days,
         period_started_at: spend_period.started_at
       }
@@ -262,8 +270,13 @@ defmodule Cympho.Dashboard do
       total_input_tokens: 0,
       total_output_tokens: 0,
       total_runs: 0,
+      total_unpriced_tokens: 0,
+      total_unpriced_request_count: 0,
       period_cost: Decimal.new(0),
       period_runs: 0,
+      period_unpriced_tokens: 0,
+      period_unpriced_request_count: 0,
+      has_unpriced_usage?: false,
       period_days: 30,
       period_started_at: nil,
       budget_spend: Decimal.new(0),
@@ -285,6 +298,24 @@ defmodule Cympho.Dashboard do
   defp run_timestamp(%{completed_at: %DateTime{} = completed_at}), do: completed_at
   defp run_timestamp(%{inserted_at: %DateTime{} = inserted_at}), do: inserted_at
   defp run_timestamp(_), do: nil
+
+  defp unpriced_run_summary(runs) do
+    Enum.reduce(runs, %{tokens: 0, request_count: 0}, fn run, acc ->
+      tokens = (run.input_tokens || 0) + (run.output_tokens || 0)
+
+      if tokens > 0 and zero_cost?(run.cost_usd) do
+        %{acc | tokens: acc.tokens + tokens, request_count: acc.request_count + 1}
+      else
+        acc
+      end
+    end)
+  end
+
+  defp zero_cost?(nil), do: true
+
+  defp zero_cost?(%Decimal{} = cost), do: Decimal.compare(cost, Decimal.new(0)) == :eq
+
+  defp zero_cost?(_cost), do: false
 
   def patrol_summary(nil), do: empty_patrol_summary()
 

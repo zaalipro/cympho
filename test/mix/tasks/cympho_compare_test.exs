@@ -36,9 +36,28 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert evidence =~ "owner-visible spend posture"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "adapter_circuit_breaker"))
+
+    assert evidence =~ "adapter circuit breaker"
+    assert evidence =~ "3 consecutive adapter-resolution failures"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "no_progress_circuit_breaker"))
+
+    assert evidence =~ "No-progress circuit breaker"
+    assert evidence =~ "3 consecutive unresolved action-contract failures"
+    assert evidence =~ "cancels queued wakes"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "ticket_system"))
 
     assert evidence =~ "issue-memory handoff packets"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "server_inbox_badge_counts"))
+
+    assert evidence =~ "unread_count_for_company"
+    assert evidence =~ "company PubSub updates"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "governance"))
@@ -49,6 +68,13 @@ defmodule Mix.Tasks.CymphoCompareTest do
              Enum.find(rows, &(&1["slug"] == "org_chart"))
 
     assert evidence =~ "org health diagnostics"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "tool_call_tracing"))
+
+    assert evidence =~ "SHA-256 content hashes"
+    assert evidence =~ "content+chain verification"
+    assert evidence =~ "stale or tampered traces"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "routines_schedules"))
@@ -74,18 +100,173 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert evidence =~ "alignment coverage"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "zero_token_idle_heartbeats"))
+
+    assert evidence =~ "keeps no-work timer heartbeats idle"
+    assert evidence =~ "only marks running after a todo issue is checked out"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "stale_lock_recovery"))
+
+    assert evidence =~ "preserves assignee ownership"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "closed_issue_runtime_cleanup"))
+
+    assert evidence =~ "Terminal issue cleanup"
+    assert evidence =~ "pending/running issue wakes"
+    assert evidence =~ "pending/queued/running run rows"
+    assert evidence =~ "closed work from restarting"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "blocked_issue_routing_guard"))
+
+    assert evidence =~ "Blocked issue routing guard"
+    assert evidence =~ "parked blocked work"
+    assert evidence =~ "automatic dispatcher selection"
+    assert evidence =~ "cancelled blockers"
+    assert evidence =~ "dependent issues reopen"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "global_runtime_controls"))
+
+    assert evidence =~ "Pause/Resume/Stop"
+    assert evidence =~ "AdapterSessions"
+    assert evidence =~ "requested/confirmed/still-registered adapter cancellation counts"
+    assert evidence =~ "preserved"
+    assert evidence =~ "runtime audit events"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "issue_runtime_pause"))
+
+    assert evidence =~ "Issue-level Pause/Resume"
+    assert evidence =~ "blocks checkout"
+    assert evidence =~ "dispatcher selection"
+    assert evidence =~ "issue-scoped runtime audit events"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "low_power_runtime_mode"))
+
+    assert evidence =~ "keeps the company active"
+    assert evidence =~ "runtime_mode=low_power"
+    assert evidence =~ "high/critical priority work"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "keyboard_first_view_modes"))
+
+    assert evidence =~ "accessible Compact/Detailed state"
+    assert evidence =~ "V toggles"
+    assert evidence =~ "U toggles"
+    assert evidence =~ "shortcuts modal"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "comment_mention_delivery"))
+
+    assert evidence =~ "exact assignee/agent mentions"
+    assert evidence =~ "suppress assigned-agent self-comments"
+    assert evidence =~ "blocked/done/cancelled"
+    assert evidence =~ "comment author metadata"
+    assert evidence =~ "prompt preamble"
+    assert evidence =~ "triggering comment body"
+    assert evidence =~ "fresh turns"
+    assert evidence =~ "stale CLI sessions"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "current_task_prompt_contract"))
+
+    assert evidence =~ "current-task block"
+    assert evidence =~ "company operating context"
+    assert evidence =~ "instruction files"
+    assert evidence =~ "triggering comment body"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "attachment_context_visibility"))
+
+    assert evidence =~ "inline small text content"
+    assert evidence =~ "base64 data URIs"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "runtime_timeout_policy"))
+
+    assert evidence =~ "timeout_sec"
+    assert evidence =~ "no timeoutSec: 0"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "runtime_workspace_env_contract"))
+
+    assert evidence =~ "single workspace/env contract"
+    assert evidence =~ "CYMPHO_RUN_ID"
+    assert evidence =~ "Cursor consumes runtime env/cwd"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "workspace_isolation_preflight"))
+
+    assert evidence =~ "Local repo-delivery preflight"
+    assert evidence =~ "shared project workspace"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "bounded_run_observability"))
+
+    assert evidence =~ "Bounded run history"
+    assert evidence =~ "server-side total run counts"
+    assert evidence =~ "latest-N-of-total ledger feedback"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "wake_queue_context_integrity"))
+
+    assert evidence =~ "Wake queue context integrity"
+    assert evidence =~ "duplicate pending wakes bounded"
+    assert evidence =~ "coalesced comment/review ids"
+    assert evidence =~ "triggering comment body"
+    assert evidence =~ "stale queue snapshot"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "activity_incremental_cursor"))
+
+    assert evidence =~ "Activity incremental cursor"
+    assert evidence =~ "ISO8601 since"
+    assert evidence =~ "clamps pagination"
+    assert evidence =~ "rejects invalid cursors"
+    assert evidence =~ "replay full history"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "outbound_webhook_notifications"))
+
+    assert evidence =~ "Outbound webhook notifications"
+    assert evidence =~ "HMAC signatures"
+    assert evidence =~ "event_type payloads"
+    assert evidence =~ "not forced to poll"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "clipboard_copy_resilience"))
+
+    assert evidence =~ "Clipboard API"
+    assert evidence =~ "self-hosted HTTP"
+    assert evidence =~ "failure feedback"
+    assert evidence =~ "button/icon markup"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "process_output_utf8_integrity"))
+
+    assert evidence =~ "Process output UTF-8 integrity"
+    assert evidence =~ "valid multilingual CLI output"
+    assert evidence =~ "malformed subprocess bytes"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "company_portability"))
 
     assert evidence =~ "non-secret secret manifest"
     assert evidence =~ "post-import restore checklist"
 
-    assert %{"verdict" => "parity", "evidence" => evidence} =
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "company_blueprints"))
 
     assert evidence =~ "17 executable"
     assert evidence =~ "Paperclip's public catalog is still larger"
-    assert evidence =~ "executable company blueprints"
-    assert evidence =~ "create live orgs"
+    assert evidence =~ "launch manifests"
+    assert evidence =~ "default agents"
+    assert evidence =~ "unique capability tags"
+    assert evidence =~ "created companies store the manifest"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "secrets"))

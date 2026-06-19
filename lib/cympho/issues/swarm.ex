@@ -29,7 +29,6 @@ defmodule Cympho.Issues.Swarm do
     :sales_development,
     :customer_support
   ]
-  @default_worker_roles [:product_manager, :designer, :researcher]
   @reasoning_efforts ~w(auto low medium high)
   @protocol_rules [
     independent: "Independent first pass",
@@ -245,25 +244,45 @@ defmodule Cympho.Issues.Swarm do
                worker_issues,
                blocked_cto
              ) do
-        enqueue_worker_wakes(worker_issues)
+        case enqueue_worker_wakes(worker_issues) do
+          {:ok, wakes} ->
+            SwarmEvents.record(updated_parent, %{
+              event_type: "worker_wakes_enqueued",
+              status: "success",
+              message: "Queued #{length(wakes)} worker wakes for dispatch.",
+              metadata: %{
+                "queued_count" => length(wakes),
+                "worker_issue_ids" => Enum.map(worker_issues, & &1.id),
+                "wake_ids" => Enum.map(wakes, & &1.id)
+              }
+            })
 
-        SwarmEvents.record(updated_parent, %{
-          event_type: "worker_wakes_enqueued",
-          status: "success",
-          message: "Queued #{length(worker_issues)} worker wakes for dispatch.",
-          metadata: %{"worker_issue_ids" => Enum.map(worker_issues, & &1.id)}
-        })
+            SwarmEvents.record(updated_parent, %{
+              event_type: "launch_ready",
+              status: "success",
+              message: "Swarm is queued: workers feed CTO synthesis, then CEO handoff.",
+              metadata: %{
+                "agent_count" => config.agent_count,
+                "cto_issue_id" => blocked_cto.id,
+                "worker_issue_ids" => Enum.map(worker_issues, & &1.id)
+              }
+            })
 
-        SwarmEvents.record(updated_parent, %{
-          event_type: "launch_ready",
-          status: "success",
-          message: "Swarm is live: workers feed CTO synthesis, then CEO handoff.",
-          metadata: %{
-            "agent_count" => config.agent_count,
-            "cto_issue_id" => blocked_cto.id,
-            "worker_issue_ids" => Enum.map(worker_issues, & &1.id)
-          }
-        })
+          {:error, wakes, errors} ->
+            SwarmEvents.record(updated_parent, %{
+              event_type: "worker_wakes_attention_required",
+              status: "warning",
+              message:
+                "Queued #{length(wakes)} of #{length(worker_issues)} worker wakes; retry failed packets from Operations.",
+              metadata: %{
+                "queued_count" => length(wakes),
+                "failed_count" => length(errors),
+                "worker_issue_ids" => Enum.map(worker_issues, & &1.id),
+                "wake_ids" => Enum.map(wakes, & &1.id),
+                "errors" => format_enqueue_errors(errors)
+              }
+            })
+        end
 
         {:ok, updated_parent}
       end
@@ -545,13 +564,63 @@ defmodule Cympho.Issues.Swarm do
   end
 
   defp enqueue_worker_wakes(worker_issues) do
-    Enum.each(worker_issues, fn issue ->
-      _ =
-        Cympho.Orchestrator.Dispatcher.enqueue_wake(issue.id, "swarm_worker_created", %{
+    results =
+      Enum.map(worker_issues, fn issue ->
+        metadata = %{
           "source" => "swarm",
-          "parent_issue_id" => issue.parent_id
-        })
+          "parent_issue_id" => issue.parent_id,
+          "worker_issue_id" => issue.id,
+          "worker_index" => issue_swarm_value(issue, :worker_index),
+          "role" => issue.assigned_role
+        }
+
+        {issue,
+         Cympho.Orchestrator.Dispatcher.enqueue_wake(
+           issue.id,
+           "swarm_worker_created",
+           metadata
+         )}
+      end)
+
+    wakes =
+      results
+      |> Enum.flat_map(fn
+        {_issue, {:ok, %Cympho.Wakes.AgentWake{} = wake}} -> [wake]
+        _other -> []
+      end)
+
+    errors =
+      results
+      |> Enum.flat_map(fn
+        {_issue, {:ok, %Cympho.Wakes.AgentWake{}}} -> []
+        {issue, {:ok, other}} -> [{issue, {:unexpected_success, other}}]
+        {issue, {:error, reason}} -> [{issue, reason}]
+        {issue, other} -> [{issue, other}]
+      end)
+
+    if errors == [] do
+      {:ok, wakes}
+    else
+      {:error, wakes, errors}
+    end
+  end
+
+  defp format_enqueue_errors(errors) do
+    Enum.map(errors, fn {issue, reason} ->
+      %{
+        "issue_id" => issue.id,
+        "identifier" => issue.identifier,
+        "reason" => inspect(reason)
+      }
     end)
+  end
+
+  defp issue_swarm_value(%Issue{monitor_state: monitor_state}, key) when is_atom(key) do
+    monitor_state
+    |> normalize_map()
+    |> get_param(:swarm)
+    |> normalize_map()
+    |> get_param(key)
   end
 
   defp maybe_start_agent_heartbeat(%Agent{} = agent) do
@@ -979,29 +1048,13 @@ defmodule Cympho.Issues.Swarm do
         role: nil,
         adapter: Cympho.Adapters.Registry.default_adapter(),
         process_preset: nil,
-        model: nil,
-        reasoning_effort: "medium",
-        proxy_profile: nil
-      },
-      %{
-        role: nil,
-        adapter: :codex,
-        process_preset: nil,
-        model: "gpt-5.3-high-fast",
-        reasoning_effort: "high",
-        proxy_profile: nil
-      },
-      %{
-        role: nil,
-        adapter: :openai_chat,
-        process_preset: nil,
-        model: "gpt-5.4-mini",
+        model: "sonnet",
         reasoning_effort: "medium",
         proxy_profile: nil
       }
     ]
     |> Stream.cycle()
-    |> Enum.take(min(agent_count, length(@default_worker_roles)))
+    |> Enum.take(agent_count)
   end
 
   defp normalize_mix(nil), do: []

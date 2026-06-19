@@ -6,6 +6,8 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
 
   alias Cympho.Agents.Agent
 
+  @event_acronyms ~w(api ceo cli cto mcp pr qa ui url)
+
   attr :issue, :map, required: true
   attr :child_tree, :list, default: []
   attr :swarm_events, :list, default: []
@@ -35,10 +37,10 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
               <p class="text-eyebrow uppercase text-ink-tertiary">{@panel.eyebrow}</p>
               <span class={phase_badge_class(@panel.phase_state)}>{@panel.phase_label}</span>
             </div>
-            <p class="mt-2 max-w-3xl text-sm leading-6 text-ink-secondary">
+            <p class="ui-advanced-only mt-2 max-w-3xl text-sm leading-6 text-ink-secondary">
               {@panel.summary}
             </p>
-            <div :if={@panel.protocol != []} class="mt-3 flex flex-wrap gap-1.5">
+            <div :if={@panel.protocol != []} class="ui-advanced-only mt-3 flex flex-wrap gap-1.5">
               <span
                 :for={rule <- @panel.protocol}
                 class="rounded-full border border-hairline bg-canvas px-2 py-0.5 text-[10px] font-510 uppercase tracking-[0.04em] text-ink-tertiary"
@@ -72,7 +74,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
           data-testid="issue-swarm-log"
           class="mt-4 overflow-hidden rounded-md border border-hairline bg-canvas"
         >
-          <div class="flex items-center justify-between gap-3 border-b border-hairline px-3 py-2.5">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-hairline px-3 py-2.5">
             <div class="flex min-w-0 items-center gap-2">
               <span class="inline-flex h-6 w-6 items-center justify-center rounded-md border border-teal-500/20 bg-teal-500/10 text-teal-300">
                 <.icon name="hero-signal-mini" class="h-3.5 w-3.5" />
@@ -84,9 +86,21 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
                 </p>
               </div>
             </div>
-            <span class="shrink-0 rounded-full border border-hairline bg-surface-1 px-2 py-0.5 text-[10px] font-590 uppercase text-ink-tertiary">
-              {length(@panel.events)} events
-            </span>
+            <div class="flex shrink-0 items-center gap-2">
+              <span class="rounded-full border border-hairline bg-surface-1 px-2 py-0.5 text-[10px] font-590 uppercase text-ink-tertiary">
+                Latest first
+              </span>
+              <span class="rounded-full border border-hairline bg-surface-1 px-2 py-0.5 text-[10px] font-590 uppercase text-ink-tertiary">
+                {length(@panel.events)} events
+              </span>
+              <a
+                :if={@panel.queue_path}
+                href={@panel.queue_path}
+                class="inline-flex min-h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-surface-1 px-2 py-1 text-[11px] font-510 text-ink-secondary transition hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+              >
+                <.icon name="hero-list-bullet-mini" class="h-3.5 w-3.5" /> Open queue
+              </a>
+            </div>
           </div>
 
           <div :if={@panel.events == []} class="px-3 py-3 text-xs text-ink-tertiary">
@@ -124,7 +138,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
 
         <div
           :if={show_detail_grid?(@panel)}
-          class="mt-4 grid gap-4 border-t border-hairline pt-4 xl:grid-cols-[minmax(0,1fr)_22rem]"
+          class="ui-advanced-only mt-4 grid gap-4 border-t border-hairline pt-4 xl:grid-cols-[minmax(0,1fr)_22rem]"
         >
           <div :if={@panel.workers != []} class="min-w-0">
             <div class="flex items-center justify-between gap-3">
@@ -264,7 +278,12 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
   defp attach_events(nil, _swarm_events), do: nil
 
   defp attach_events(panel, swarm_events) do
-    Map.put(panel, :events, Enum.map(swarm_events, &event_row/1))
+    events =
+      swarm_events
+      |> Enum.reverse()
+      |> Enum.map(&event_row/1)
+
+    Map.put(panel, :events, events)
   end
 
   defp event_row(event) do
@@ -280,11 +299,21 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
 
   defp event_type_label(type) when is_binary(type) do
     type
-    |> String.replace("_", " ")
-    |> String.capitalize()
+    |> String.split("_")
+    |> Enum.with_index()
+    |> Enum.map(fn {word, index} -> event_type_word_label(word, index) end)
+    |> Enum.join(" ")
   end
 
   defp event_type_label(_type), do: "Event"
+
+  defp event_type_word_label(word, _index) when word in @event_acronyms do
+    String.upcase(word)
+  end
+
+  defp event_type_word_label(word, 0), do: String.capitalize(word)
+
+  defp event_type_word_label(word, _index), do: word
 
   defp event_time(%DateTime{} = time) do
     time
@@ -310,7 +339,9 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
       prefixed_value_chip(metadata, "worker_index", "worker"),
       prefixed_value_chip(metadata, "role", "role"),
       short_value_chip(metadata, "summary"),
-      short_value_chip(metadata, "reason")
+      short_value_chip(metadata, "reason"),
+      value_chip(metadata, "queued_count", "queued"),
+      value_chip(metadata, "failed_count", "failed")
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
@@ -385,6 +416,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
       ],
       protocol: protocol_chips(swarm),
       steps: parent_steps(issue, worker_done, worker_total, cto),
+      queue_path: swarm_queue_path(issue),
       workers: Enum.map(workers, &worker_card(&1, proxy)),
       worker_done: worker_done,
       worker_total: worker_total,
@@ -418,6 +450,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
       ],
       protocol: protocol_chips(swarm),
       steps: cto_steps(issue, worker_done, worker_total),
+      queue_path: swarm_queue_path(issue),
       workers: Enum.map(workers, &worker_card(&1, proxy)),
       worker_done: worker_done,
       worker_total: worker_total,
@@ -459,6 +492,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
         },
         %{title: "CEO review", detail: "CEO waits for CTO synthesis.", state: :waiting}
       ],
+      queue_path: swarm_queue_path(issue),
       workers: [],
       worker_done: 0,
       worker_total: 0,
@@ -466,6 +500,16 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
       handoff: nil
     }
   end
+
+  defp swarm_queue_path(%{parent_id: parent_id}) when is_binary(parent_id) do
+    "/operations?parent_issue_id=#{parent_id}#delegated-work-queue"
+  end
+
+  defp swarm_queue_path(%{id: id}) when is_binary(id) do
+    "/operations?parent_issue_id=#{id}#delegated-work-queue"
+  end
+
+  defp swarm_queue_path(_issue), do: nil
 
   defp parent_steps(issue, worker_done, worker_total, cto) do
     workers_complete? = worker_total > 0 and worker_done >= worker_total
@@ -533,7 +577,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
         %{key: :cto_ready, label: "CTO synthesis ready", state: :active}
 
       true ->
-        %{key: :workers_active, label: "Workers active", state: :waiting}
+        %{key: :workers_active, label: "Workers queued", state: :waiting}
     end
   end
 
@@ -556,7 +600,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
     do: "Temporary packets are closed; CTO synthesis is the next gate."
 
   defp parent_summary(:workers_active),
-    do: "Temporary non-engineering agents are preparing packets before CTO synthesis."
+    do: "Temporary non-engineering workers are queued to prepare packets before CTO synthesis."
 
   defp cto_summary(:closed), do: "CTO synthesis is closed and ready for CEO review."
 

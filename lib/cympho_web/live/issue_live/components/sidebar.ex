@@ -124,7 +124,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             </span>
           </div>
 
-          <p class="mt-2 text-[11px] leading-4 opacity-80">
+          <p class="ui-advanced-only mt-2 text-[11px] leading-4 opacity-80">
             {mission_context_detail(@issue)}
           </p>
 
@@ -157,8 +157,41 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
 
         <div id="issue-agent-panel" class="space-y-2">
           <div
+            :if={!terminal_issue?(@issue)}
+            class={issue_runtime_control_class(@issue)}
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-tertiary">
+                  Issue runtime
+                </p>
+                <p class="mt-0.5 text-caption text-ink-muted">
+                  {issue_runtime_control_detail(@issue)}
+                </p>
+              </div>
+              <button
+                :if={Cympho.Issues.issue_runtime_paused?(@issue)}
+                type="button"
+                phx-click="resume_issue_runtime"
+                class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-emerald-400/30 bg-emerald-400/10 px-2.5 text-xs font-590 text-emerald-100 transition hover:bg-emerald-400/15"
+              >
+                <.icon name="hero-play-mini" class="h-3.5 w-3.5 text-white" /> Resume
+              </button>
+              <button
+                :if={!Cympho.Issues.issue_runtime_paused?(@issue)}
+                type="button"
+                phx-click="pause_issue_runtime"
+                data-confirm="Pause this issue? Active harness work for this issue will stop and future dispatch is suppressed until resumed."
+                class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-amber-400/30 bg-amber-400/10 px-2.5 text-xs font-590 text-amber-100 transition hover:bg-amber-400/15"
+              >
+                <.icon name="hero-pause-mini" class="h-3.5 w-3.5 text-white" /> Pause
+              </button>
+            </div>
+          </div>
+
+          <div
             :if={!@orchestrator_enabled?}
-            class="rounded-md border border-amber-500/25 bg-amber-500/10 p-2 text-caption text-amber-100"
+            class="ui-advanced-only rounded-md border border-amber-500/25 bg-amber-500/10 p-2 text-caption text-amber-100"
           >
             <p>
               Review mode is on. Restart the server with
@@ -200,7 +233,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           </div>
           <div
             :if={dispatchable_issue?(@issue)}
-            class="rounded-md border border-hairline bg-surface-1/55 p-2"
+            class="ui-advanced-only rounded-md border border-hairline bg-surface-1/55 p-2"
           >
             <div class="flex items-center justify-between gap-2">
               <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-tertiary">
@@ -229,14 +262,14 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
               </.button>
             </div>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="ui-advanced-only flex items-center gap-2">
             <.button
               type="button"
               phx-click="toggle_agent_panel"
               size="sm"
               variant="secondary"
-              disabled={!@orchestrator_enabled?}
-              title={start_agent_disabled_reason(@orchestrator_enabled?)}
+              disabled={!@orchestrator_enabled? || Cympho.Issues.issue_runtime_paused?(@issue)}
+              title={start_agent_disabled_reason(@orchestrator_enabled?, @issue)}
             >
               {(@show_agent_panel && "Hide") || "Start"} agent
             </.button>
@@ -251,14 +284,14 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             </.button>
           </div>
           <p
-            :if={start_agent_disabled_reason(@orchestrator_enabled?)}
+            :if={start_agent_disabled_reason(@orchestrator_enabled?, @issue)}
             data-testid="start-agent-disabled-reason"
-            class="rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-2 py-1.5 text-[11px] leading-4 text-amber-100"
+            class="ui-advanced-only rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-2 py-1.5 text-[11px] leading-4 text-amber-100"
           >
-            {start_agent_disabled_reason(@orchestrator_enabled?)}
+            {start_agent_disabled_reason(@orchestrator_enabled?, @issue)}
           </p>
 
-          <div :if={@show_agent_panel} class="space-y-2">
+          <div :if={@show_agent_panel} class="ui-advanced-only space-y-2">
             <p :if={Enum.empty?(@agents)} class="text-caption text-ink-tertiary">
               No idle agents available.
             </p>
@@ -278,7 +311,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
         <div
           :if={@ceo_flow_steps != []}
           id="issue-ceo-flow"
-          class="rounded-md border border-hairline bg-surface-1/55 p-3"
+          class="ui-advanced-only rounded-md border border-hairline bg-surface-1/55 p-3"
         >
           <div class="flex items-start justify-between gap-3">
             <div>
@@ -307,7 +340,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           :if={@ceo_launch_preview}
           id="issue-ceo-launch-preview"
           phx-hook="CopyToClipboard"
-          class="rounded-md border border-hairline bg-surface-1/55 p-3"
+          class="ui-advanced-only rounded-md border border-hairline bg-surface-1/55 p-3"
         >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
@@ -399,7 +432,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
         <div
           :if={@ceo_outcome_card}
           id="issue-ceo-outcome-card"
-          class="rounded-md border border-hairline bg-surface-1/55 p-3"
+          class="ui-advanced-only rounded-md border border-hairline bg-surface-1/55 p-3"
         >
           <% relaunch_setup_action = relaunch_setup_action(@issue_preflight) %>
           <div class="flex items-start justify-between gap-3">
@@ -490,7 +523,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
 
         <div
           :if={assigned_agent(@issue)}
-          class="rounded-md border border-hairline bg-surface-1/55 p-3"
+          class="ui-advanced-only rounded-md border border-hairline bg-surface-1/55 p-3"
         >
           <% agent = assigned_agent(@issue) %>
           <% readiness = agent_readiness(@issue, agent, @orchestrator_enabled?, @issue_preflight) %>
@@ -563,7 +596,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
         <div
           :if={auto_route_readiness(@issue, @issue_preflight)}
           id="issue-auto-route-readiness"
-          class="rounded-md border border-hairline bg-surface-1/55 p-3"
+          class="ui-advanced-only rounded-md border border-hairline bg-surface-1/55 p-3"
         >
           <% readiness = auto_route_readiness(@issue, @issue_preflight) %>
           <div class="flex items-start justify-between gap-3">
@@ -601,11 +634,11 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           </ul>
         </div>
 
-        <hr class="border-hairline" />
+        <hr class="ui-advanced-only border-hairline" />
 
         <details
           id="issue-github-pr"
-          class="group"
+          class="ui-advanced-only group"
           open={@issue.github_pr_number not in [nil, 0] or @issue.github_pr_url not in [nil, ""]}
         >
           <summary class="flex items-center justify-between gap-2 cursor-pointer text-eyebrow text-ink-tertiary uppercase list-none">
@@ -852,11 +885,18 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
 
   defp focused_runtime_command(_issue), do: nil
 
-  defp start_agent_disabled_reason(false) do
-    "Inline agent start is disabled in review mode. Use the focused command above or open Operations to launch runtime."
-  end
+  defp start_agent_disabled_reason(orchestrator_enabled?, issue) do
+    cond do
+      Cympho.Issues.issue_runtime_paused?(issue) ->
+        "This issue is paused. Resume it before starting agent runtime."
 
-  defp start_agent_disabled_reason(_orchestrator_enabled?), do: nil
+      not orchestrator_enabled? ->
+        "Inline agent start is disabled in review mode. Use the focused command above or open Operations to launch runtime."
+
+      true ->
+        nil
+    end
+  end
 
   defp relaunch_focus_button_label(%{status: status}) when status in [:blocked, "blocked"],
     do: "Reopen and prioritize relaunch"
@@ -1287,13 +1327,40 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
     do:
       "shrink-0 rounded-full border border-hairline bg-canvas px-1.5 py-0.5 text-[9px] font-510 uppercase text-ink-tertiary"
 
-  defp dispatchable_issue?(%{status: status})
+  defp dispatchable_issue?(issue) do
+    dispatchable_status?(issue) and not Cympho.Issues.issue_runtime_paused?(issue)
+  end
+
+  defp dispatchable_status?(%{status: status})
        when status in [:todo, :in_review, "todo", "in_review"],
        do: true
 
-  defp dispatchable_issue?(_issue), do: false
+  defp dispatchable_status?(_issue), do: false
 
   defp dispatch_pinned?(issue), do: Cympho.Issues.dispatch_pinned?(issue)
+
+  defp terminal_issue?(%{status: status}) when status in [:done, :cancelled, "done", "cancelled"],
+    do: true
+
+  defp terminal_issue?(_issue), do: false
+
+  defp issue_runtime_control_class(issue) do
+    base = "rounded-md border p-2"
+
+    if Cympho.Issues.issue_runtime_paused?(issue) do
+      base <> " border-amber-400/25 bg-amber-400/10"
+    else
+      base <> " border-hairline bg-surface-1/55"
+    end
+  end
+
+  defp issue_runtime_control_detail(issue) do
+    if Cympho.Issues.issue_runtime_paused?(issue) do
+      "Dispatch is frozen for this issue."
+    else
+      "Freeze only this issue if a run loops."
+    end
+  end
 
   defp assigned_agent(%{assignee: %{id: id} = agent}) when is_binary(id), do: agent
   defp assigned_agent(_issue), do: nil

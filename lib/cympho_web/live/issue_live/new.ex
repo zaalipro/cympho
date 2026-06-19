@@ -516,9 +516,7 @@ defmodule CymphoWeb.IssueLive.New do
 
   defp default_swarm_mix do
     [
-      "claude_code | sonnet",
-      "codex | gpt-5.3-high-fast",
-      "openai_chat | gpt-5.4-mini"
+      "claude_code | sonnet | medium"
     ]
     |> Enum.join("\n")
   end

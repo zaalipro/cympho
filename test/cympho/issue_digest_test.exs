@@ -115,6 +115,69 @@ defmodule Cympho.IssueDigestTest do
     refute digest.next_action =~ "from the sidebar"
   end
 
+  test "summarizes swarm CTO gates as synthesis-ready instead of generic runtime launch" do
+    cto_id = Ecto.UUID.generate()
+
+    digest =
+      IssueDigest.build(%Issue{
+        title: "Synthesize swarm delivery",
+        status: :todo,
+        priority: :medium,
+        origin_type: "swarm_cto_review",
+        assignee_id: cto_id,
+        assigned_role: "cto",
+        assignee: %Agent{id: cto_id, name: "CTO", role: :cto},
+        monitor_state: %{"swarm" => %{"role" => "cto_synthesis"}},
+        comments: []
+      })
+
+    assert digest.state == :swarm_cto_ready
+    assert digest.label == "CTO review ready"
+    assert digest.headline == "Worker packets are ready for CTO synthesis."
+    assert digest.summary =~ "publish the CEO restart packet"
+    assert digest.next_action =~ "Add a tagged `[review]` synthesis"
+    refute digest.next_action =~ "Operations launch checklist"
+    refute digest.next_action =~ "focused dispatch"
+
+    review = Enum.find(digest.role_run_summaries, &(&1.key == :review))
+    runtime = Enum.find(digest.role_run_summaries, &(&1.key == :runtime))
+
+    assert review.status == :missing
+    assert review.next_action =~ "Add `[review] Verdict"
+    assert runtime.title == "Swarm evidence"
+    assert runtime.status == :waiting
+    assert runtime.summary =~ "Worker packets are closed"
+    assert runtime.next_action =~ "do not start another generic runtime pass"
+  end
+
+  test "summarizes swarm workers as packet work instead of owner/runtime launch" do
+    worker_id = Ecto.UUID.generate()
+
+    digest =
+      IssueDigest.build(%Issue{
+        title: "Swarm worker packet",
+        status: :todo,
+        priority: :medium,
+        origin_type: "swarm_worker",
+        assignee_id: worker_id,
+        assigned_role: "researcher",
+        assignee: %Agent{id: worker_id, name: "Temporary Researcher", role: :researcher},
+        monitor_state: %{"swarm" => %{"role" => "worker", "worker_index" => 1}},
+        comments: []
+      })
+
+    assert digest.state == :swarm_worker_pending
+    assert digest.label == "Worker packet"
+    assert digest.headline =~ "Temporary worker packet"
+    assert digest.next_action =~ "swarm_worker_complete"
+    refute digest.next_action =~ "Operations launch checklist"
+
+    runtime = Enum.find(digest.role_run_summaries, &(&1.key == :runtime))
+    assert runtime.title == "Swarm packet"
+    assert runtime.status == :waiting
+    assert runtime.next_action =~ "one-time worker"
+  end
+
   test "surfaces failed runs as the highest-priority signal" do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
@@ -597,6 +660,50 @@ defmodule Cympho.IssueDigestTest do
       )
 
     assert Enum.any?(blockers, &(&1.key == :ceo_owner_update))
+  end
+
+  test "delegated parent owner update satisfies closure packet without duplicate delivery tag" do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    issue = %Issue{
+      title: "Delegated parent",
+      status: :in_review,
+      description: "Parent issue with completed child work.",
+      comments: [
+        %Comment{
+          author_type: "agent",
+          body:
+            "[owner_update] What happened: delegated child work was reviewed and accepted. Business status: shipped. Evidence inspected: closed child issue and CTO review. Verification: child issue is done and owner update is complete. Remaining risk: none known. Current state: ready to close. Next decision: no further action. Owner decision needed: none. Restart packet: reopen only if the owner asks for follow-up.",
+          inserted_at: now
+        },
+        %Comment{
+          author_type: "system",
+          body:
+            "approve_issue rejected: Tagged `[delivery]` comment is missing required fields: What happened, Files changed, Evidence produced.",
+          inserted_at: DateTime.add(now, 1, :second)
+        }
+      ]
+    }
+
+    blockers =
+      IssueDigest.review_status_blockers(
+        issue,
+        :done,
+        [
+          %Run{
+            status: "completed",
+            adapter: "codex",
+            inserted_at: now,
+            completed_at: now
+          }
+        ],
+        [],
+        [%Issue{status: :done, title: "Closed child"}]
+      )
+
+    refute Enum.any?(blockers, &(&1.key == :work_product))
+    refute Enum.any?(blockers, &(&1.key == :delivery_comment))
+    refute Enum.any?(blockers, &(&1.key == :ceo_owner_update))
   end
 
   test "marks review readiness ready when evidence and CTO/CEO review exist" do

@@ -437,6 +437,46 @@ defmodule Cympho.ToolCallTracesTest do
 
       assert updated.status == "success"
       assert updated.tool_result == "result data"
+      assert :ok = ToolCallTraces.verify_content_hash(updated)
+      assert :ok = ToolCallTraces.verify_chain_integrity(company.id)
+    end
+
+    test "rehashes downstream chain links after a sanctioned status update", %{company: company} do
+      actor_id = Ecto.UUID.generate()
+
+      {:ok, first} =
+        ToolCallTraces.create_tool_call_trace(%{
+          trace_type: "llm_tool_call",
+          tool_name: "web_search",
+          tool_arguments: %{"query" => "first"},
+          status: "pending",
+          company_id: company.id,
+          actor_type: "agent",
+          actor_id: actor_id
+        })
+
+      {:ok, second} =
+        ToolCallTraces.create_tool_call_trace(%{
+          trace_type: "llm_tool_call",
+          tool_name: "read_file",
+          tool_arguments: %{"path" => "README.md"},
+          status: "pending",
+          company_id: company.id,
+          actor_type: "agent",
+          actor_id: actor_id
+        })
+
+      assert {:ok, updated_first} =
+               ToolCallTraces.update_tool_call_trace_status(first, "success", "search ok")
+
+      reloaded_second = Repo.get!(ToolCallTrace, second.id)
+
+      assert updated_first.content_hash != first.content_hash
+      assert reloaded_second.prev_hash == updated_first.chain_hash
+      assert reloaded_second.chain_hash != second.chain_hash
+      assert :ok = ToolCallTraces.verify_content_hash(updated_first)
+      assert :ok = ToolCallTraces.verify_content_hash(reloaded_second)
+      assert :ok = ToolCallTraces.verify_chain_integrity(company.id)
     end
   end
 
@@ -523,6 +563,9 @@ defmodule Cympho.ToolCallTracesTest do
 
       # Verify should detect the tampering
       assert {:error, :content_hash_mismatch} = ToolCallTraces.verify_content_hash(trace)
+
+      assert {:error, :content_hash_mismatch, 1} =
+               ToolCallTraces.verify_chain_integrity(company.id)
     end
 
     test "detects broken chain integrity", %{company: company} do

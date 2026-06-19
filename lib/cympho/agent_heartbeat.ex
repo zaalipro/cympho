@@ -14,7 +14,7 @@ defmodule Cympho.AgentHeartbeat do
   require Logger
 
   alias Cympho.AgentHeartbeat.Supervisor
-  alias Cympho.{Orchestrator, Issues, Agents, Activities, Skills}
+  alias Cympho.{Orchestrator, Issues, Agents, Activities, Skills, Companies}
   alias Cympho.Orchestrator.Dispatcher
   alias Cympho.Issues.Issue
   alias Cympho.Repo
@@ -237,7 +237,7 @@ defmodule Cympho.AgentHeartbeat do
     agent_id = state.agent_id
 
     cond do
-      Process.whereis(Dispatcher) ->
+      delegate_to_dispatcher?() and Process.whereis(Dispatcher) ->
         _ = Dispatcher.poll_now()
         timer_ref = schedule_heartbeat(agent_id)
         {:noreply, %{state | timer_ref: timer_ref}}
@@ -265,21 +265,32 @@ defmodule Cympho.AgentHeartbeat do
   defp do_heartbeat(state) do
     agent_id = state.agent_id
 
-    # Update agent status to running if idle
-    _ = maybe_update_agent_status(agent_id, :running)
+    with {:ok, agent} <- Agents.get_agent(agent_id),
+         :ok <- check_agent_runtime_available(agent) do
+      do_heartbeat_for_available_agent(state, agent)
+    else
+      {:skip, _reason} ->
+        timer_ref = schedule_heartbeat(agent_id)
+        {:noreply, %{state | timer_ref: timer_ref}}
 
-    # Query for todo issues assigned to this agent
-    issue = fetch_next_todo_issue(agent_id)
+      {:error, _} ->
+        timer_ref = schedule_heartbeat(agent_id)
+        {:noreply, %{state | timer_ref: timer_ref}}
+    end
+  end
+
+  defp do_heartbeat_for_available_agent(state, agent) do
+    agent_id = state.agent_id
+    issue = fetch_next_todo_issue(agent)
 
     if issue do
       # Checkout the issue
       case Issues.checkout_issue(issue, agent_id) do
         {:ok, checked_out_issue} ->
-          # Set heartbeat to working
-          _ = set_working(agent_id, checked_out_issue.id)
-
           # Fetch available skills for this agent
           available_skills = Skills.available_for_agent(agent_id)
+          started_at = DateTime.utc_now()
+          _ = maybe_update_agent_status(agent_id, :running)
 
           # Start orchestrator - it handles the session and posts completion comment
           case Orchestrator.start_and_run(checked_out_issue, agent_id, skills: available_skills) do
@@ -301,7 +312,7 @@ defmodule Cympho.AgentHeartbeat do
                  state
                  | status: :running,
                    current_issue_id: checked_out_issue.id,
-                   started_at: DateTime.utc_now(),
+                   started_at: started_at,
                    timer_ref: timer_ref,
                    available_skills: available_skills
                }}
@@ -330,13 +341,17 @@ defmodule Cympho.AgentHeartbeat do
 
         {:error, _reason} ->
           # No issue available or couldn't checkout
+          _ = maybe_update_agent_status(agent_id, :idle)
           timer_ref = schedule_heartbeat(agent_id)
           {:noreply, %{state | timer_ref: timer_ref}}
       end
     else
       # No work available, stay idle
+      _ = maybe_update_agent_status(agent_id, :idle)
       timer_ref = schedule_heartbeat(agent_id)
-      {:noreply, %{state | timer_ref: timer_ref}}
+
+      {:noreply,
+       %{state | status: :idle, current_issue_id: nil, started_at: nil, timer_ref: timer_ref}}
     end
   end
 
@@ -423,6 +438,12 @@ defmodule Cympho.AgentHeartbeat do
     Process.send_after(self(), :heartbeat, interval)
   end
 
+  defp delegate_to_dispatcher? do
+    :cympho
+    |> Application.get_env(:agent_heartbeat, [])
+    |> Keyword.get(:delegate_to_dispatcher, true)
+  end
+
   defp heartbeat_interval(agent_id) do
     case Agents.get_agent(agent_id) do
       {:ok, agent} ->
@@ -437,24 +458,51 @@ defmodule Cympho.AgentHeartbeat do
       @default_heartbeat_interval
   end
 
-  defp fetch_next_todo_issue(agent_id) do
-    case Agents.get_agent(agent_id) do
-      {:ok, agent} ->
-        project_id = agent.project_id
+  defp fetch_next_todo_issue(agent) do
+    project_id = agent.project_id
 
-        Issue
-        |> where(assignee_id: ^agent_id, status: :todo)
-        |> maybe_filter_by_project(project_id)
-        |> first()
-        |> Repo.one()
-
-      {:error, _} ->
-        nil
-    end
+    Issue
+    |> where(assignee_id: ^agent.id, status: :todo)
+    |> where(
+      [i],
+      fragment(
+        "COALESCE((?->'issue_runtime'->>'paused')::boolean, false) = false",
+        i.monitor_state
+      )
+    )
+    |> maybe_filter_by_project(project_id)
+    |> first()
+    |> Repo.one()
   end
 
   defp maybe_filter_by_project(query, nil), do: query
   defp maybe_filter_by_project(query, project_id), do: where(query, project_id: ^project_id)
+
+  defp check_agent_runtime_available(agent) do
+    cond do
+      agent.status in [:paused, :terminated, :offline, :error, :pending_approval, :sleeping] ->
+        {:skip, {:agent_status, agent.status}}
+
+      agent.governance_status in ["paused", "terminated", "pending_approval"] ->
+        {:skip, {:governance_status, agent.governance_status}}
+
+      not company_active?(agent.company_id) ->
+        {:skip, :company_inactive}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp company_active?(nil), do: true
+
+  defp company_active?(company_id) do
+    company_id
+    |> Companies.get_company!()
+    |> Companies.active?()
+  rescue
+    _ -> false
+  end
 
   defp maybe_update_agent_status(agent_id, new_status) do
     case Agents.get_agent(agent_id) do

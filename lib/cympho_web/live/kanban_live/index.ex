@@ -53,7 +53,7 @@ defmodule CymphoWeb.KanbanLive.Index do
       )
       |> assign(:collapsed_columns, MapSet.new())
       |> assign(:swimlane_mode, false)
-      |> assign(:digest_density, "detailed")
+      |> assign(:digest_density, "compact")
       |> assign(:filter_assignee_id, nil)
       |> assign(:filter_priority, nil)
       |> assign(:filter_search, "")
@@ -819,7 +819,7 @@ defmodule CymphoWeb.KanbanLive.Index do
     query =
       %{
         project_id: project_id,
-        density: density
+        density: if(density == "detailed", do: density)
       }
       |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
       |> Enum.into(%{})
@@ -829,15 +829,7 @@ defmodule CymphoWeb.KanbanLive.Index do
 
   defp normalize_digest_density("compact"), do: "compact"
   defp normalize_digest_density("detailed"), do: "detailed"
-  defp normalize_digest_density(_), do: "detailed"
-
-  def density_tab_class(current, density) do
-    if current == density do
-      "bg-brand text-on-primary"
-    else
-      "text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-    end
-  end
+  defp normalize_digest_density(_), do: "compact"
 
   def wip_limit(nil, _status), do: nil
 

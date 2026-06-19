@@ -32,6 +32,7 @@ defmodule Cympho.Application do
       {Finch, name: Cympho.Finch},
       # Adapter system
       Cympho.Adapters.Registry,
+      Cympho.AdapterSessions,
       health_checker_child(),
       # Plugin system
       Cympho.Plugins.Registry,

@@ -41,6 +41,7 @@ defmodule Cympho.Runtime do
           | :no_adapter_available
           | :unknown_adapter
           | {:config_invalid, term()}
+          | {:adapter_model_mismatch, String.t()}
           | {:budget_blocked, map()}
           | {:workspace_unavailable, String.t()}
           | {:workspace_error, term()}
@@ -56,10 +57,12 @@ defmodule Cympho.Runtime do
          :ok <- verify_agent(agent, issue, opts),
          :ok <- verify_repo_delivery_runtime(issue, agent),
          :ok <- verify_stage_gate(issue, agent),
-         {:ok, env} <- resolve_env(agent),
+         {:ok, env} <- resolve_env(agent, opts),
          {:ok, adapter, adapter_config} <- resolve_adapter(agent, env, opts),
          {:ok, budget} <- verify_budget(issue, agent),
          {:ok, workspace} <- resolve_workspace(issue, opts) do
+      runtime_env = Map.merge(env, runtime_identity_env(issue, agent, workspace, opts))
+
       {:ok,
        %RuntimeContext{
          run_id: Keyword.get(opts, :run_id),
@@ -69,14 +72,15 @@ defmodule Cympho.Runtime do
          issue_id: issue.id,
          agent_id: agent.id,
          adapter: adapter,
-         adapter_config: put_runtime_config(adapter_config, workspace.cwd, env),
+         adapter_config: put_runtime_config(adapter_config, workspace.cwd, runtime_env),
          project_workspace: workspace.project_workspace,
          execution_workspace: workspace.execution_workspace,
          cwd: workspace.cwd,
-         env: env,
+         env: runtime_env,
          skills: Keyword.get(opts, :skills, []),
          budget: budget,
          metadata: %{
+           "runtime_profile_id" => Keyword.get(opts, :runtime_profile_id),
            "workspace_source" => workspace.source,
            "preflight_at" => DateTime.utc_now() |> DateTime.to_iso8601()
          }
@@ -116,7 +120,7 @@ defmodule Cympho.Runtime do
   @spec resolve_adapter_config(Agent.t(), keyword()) ::
           {:ok, module(), map()} | {:error, term()}
   def resolve_adapter_config(%Agent{} = agent, opts \\ []) do
-    with {:ok, env} <- resolve_env(agent),
+    with {:ok, env} <- resolve_env(agent, opts),
          {:ok, adapter, adapter_config} <- resolve_adapter(agent, env, opts) do
       {:ok, adapter, adapter_config}
     end
@@ -214,11 +218,18 @@ defmodule Cympho.Runtime do
     end
   end
 
-  defp resolve_env(%Agent{} = agent) do
+  defp resolve_env(%Agent{} = agent, opts) do
+    profile_env = normalize_env(Keyword.get(opts, :runtime_env, %{}))
     config_env = Cympho.Agents.RuntimeEnv.from_agent(agent)
     secrets_env = safe_resolve_secrets_env(agent.id)
-    {:ok, Map.merge(config_env, secrets_env)}
+    {:ok, profile_env |> Map.merge(config_env) |> Map.merge(secrets_env)}
   end
+
+  defp normalize_env(env) when is_map(env) do
+    Map.new(env, fn {key, value} -> {to_string(key), to_string(value)} end)
+  end
+
+  defp normalize_env(_), do: %{}
 
   defp safe_resolve_secrets_env(agent_id) do
     Secrets.resolve_env_for_agent(agent_id)
@@ -245,8 +256,14 @@ defmodule Cympho.Runtime do
 
     if Keyword.get(opts, :validate_config?, true) do
       case Adapters.resolve(%{adapter: adapter, config: config}) do
-        {:ok, module, resolved_config} -> {:ok, module, resolved_config}
-        {:error, reason} -> {:error, reason}
+        {:ok, module, resolved_config} ->
+          case Adapters.ModelCompatibility.validate(module, resolved_config) do
+            :ok -> {:ok, module, resolved_config}
+            {:error, message} -> {:error, {:adapter_model_mismatch, message}}
+          end
+
+        {:error, reason} ->
+          {:error, reason}
       end
     else
       case Adapters.Registry.resolve_agent(%{adapter: adapter, config: config}) do
@@ -407,7 +424,7 @@ defmodule Cympho.Runtime do
         end
 
       issue.project_id ->
-        case primary_project_workspace(issue.project_id) do
+        case Workspaces.primary_project_workspace(issue.project_id) do
           %ProjectWorkspace{} = project_workspace ->
             ensure_configured_cwd(
               project_workspace.cwd,
@@ -423,14 +440,6 @@ defmodule Cympho.Runtime do
       true ->
         fallback_workspace(issue)
     end
-  end
-
-  defp primary_project_workspace(project_id) do
-    ProjectWorkspace
-    |> where([pw], pw.project_id == ^project_id)
-    |> order_by([pw], desc: pw.is_primary, asc: pw.inserted_at)
-    |> limit(1)
-    |> Repo.one()
   end
 
   defp maybe_get_project_workspace(nil), do: nil
@@ -477,9 +486,25 @@ defmodule Cympho.Runtime do
     end
   end
 
+  defp runtime_identity_env(%Issue{} = issue, %Agent{} = agent, workspace, opts) do
+    [
+      {"CYMPHO_RUN_ID", Keyword.get(opts, :run_id)},
+      {"CYMPHO_COMPANY_ID", issue.company_id || agent.company_id},
+      {"CYMPHO_PROJECT_ID", issue.project_id || agent.project_id},
+      {"CYMPHO_GOAL_ID", issue.goal_id},
+      {"CYMPHO_ISSUE_ID", issue.id},
+      {"CYMPHO_AGENT_ID", agent.id},
+      {"CYMPHO_WORKSPACE", workspace.cwd},
+      {"AGENT_HOME", workspace.cwd}
+    ]
+    |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+    |> Map.new(fn {key, value} -> {key, to_string(value)} end)
+  end
+
   defp put_runtime_config(config, cwd, env) do
     config
     |> Map.put_new("cwd", cwd)
+    |> Map.put_new("workspace_path", cwd)
     |> Map.update("env", env, fn existing -> Map.merge(existing || %{}, env) end)
   end
 end

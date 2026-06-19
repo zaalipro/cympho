@@ -54,6 +54,7 @@ defmodule CymphoWeb.Router do
     get "/switch-company/:id", CompanySwitcherController, :switch
 
     post "/issues/quick-create", QuickIssueController, :create
+    post "/runtime-control/low-power", RuntimeControlController, :low_power
     post "/runtime-control/pause", RuntimeControlController, :pause
     post "/runtime-control/stop", RuntimeControlController, :stop
     post "/runtime-control/resume", RuntimeControlController, :resume
@@ -327,7 +328,7 @@ defmodule CymphoWeb.Router do
     pipe_through [:api, :api_mcp_auth]
 
     get "/mcp/tools", McpController, :tools
-    post "/mcp/call", McpController, :call
+    post "/mcp/call", McpController, :invoke
   end
 
   # ── Board-governed governance mutations ──

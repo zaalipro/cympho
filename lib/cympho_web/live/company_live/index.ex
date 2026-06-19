@@ -80,6 +80,12 @@ defmodule CymphoWeb.CompanyLive.Index do
       active_companies: active_count,
       paused_companies: paused_count,
       blueprint_count: length(blueprints),
+      default_agent_count: Enum.reduce(blueprints, 0, &(&1.default_agent_count + &2)),
+      capability_count:
+        blueprints
+        |> Enum.flat_map(& &1.capability_tags)
+        |> Enum.uniq()
+        |> length(),
       seed_issue_count: Enum.reduce(blueprints, 0, &(&1.seed_issue_count + &2)),
       launch_posture: launch_posture(length(companies), active_count, paused_count)
     }

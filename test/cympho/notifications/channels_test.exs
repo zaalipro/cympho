@@ -1,5 +1,7 @@
 defmodule Cympho.Notifications.ChannelsTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
+
+  import Mock
 
   alias Cympho.Notifications.Message
   alias Cympho.Notifications.WebhookChannel
@@ -18,6 +20,11 @@ defmodule Cympho.Notifications.ChannelsTest do
 
     test "available? returns true when URL is valid http" do
       config = %{url: "http://example.com/webhook"}
+      assert WebhookChannel.available?(config) == true
+    end
+
+    test "available? accepts persisted string-key URL config" do
+      config = %{"url" => "https://example.com/webhook"}
       assert WebhookChannel.available?(config) == true
     end
 
@@ -46,6 +53,53 @@ defmodule Cympho.Notifications.ChannelsTest do
       message = Message.new("Subject", "Body", "user-123")
       config = %{url: ""}
       assert WebhookChannel.deliver(message, config) == {:error, :invalid_url}
+    end
+
+    test "deliver sends persisted string-key config with signature and event type" do
+      test_pid = self()
+
+      with_mock Finch,
+        build: fn :post, url, headers, body ->
+          send(test_pid, {:webhook_request, url, headers, body})
+          :webhook_request
+        end,
+        request: fn :webhook_request, Cympho.Finch ->
+          {:ok, %Finch.Response{status: 202, body: "", headers: []}}
+        end do
+        message =
+          Message.new(
+            "Blocked issue",
+            "Human input required",
+            "user-123",
+            %{"type" => "issue.blocked"},
+            "issue.blocked"
+          )
+
+        config = %{
+          "url" => "https://example.com/webhook",
+          "hmac_secret" => "test-secret"
+        }
+
+        assert :ok = WebhookChannel.deliver(message, config)
+
+        assert_receive {:webhook_request, "https://example.com/webhook", headers, body}
+
+        assert {"Content-Type", "application/json"} in headers
+
+        signature =
+          :crypto.mac(:hmac, :sha256, "test-secret", body)
+          |> Base.encode16(case: :lower)
+
+        assert {"X-Cympho-Signature", "sha256=#{signature}"} in headers
+
+        payload = Jason.decode!(body)
+        assert payload["event_type"] == "issue.blocked"
+        assert payload["subject"] == "Blocked issue"
+        assert payload["body"] == "Human input required"
+        assert payload["user_id"] == "user-123"
+        assert payload["metadata"] == %{"type" => "issue.blocked"}
+        assert is_binary(payload["timestamp"])
+      end
     end
   end
 

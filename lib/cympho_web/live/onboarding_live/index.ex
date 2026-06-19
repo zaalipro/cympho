@@ -149,7 +149,10 @@ defmodule CymphoWeb.OnboardingLive.Index do
         blueprint.name,
         blueprint.description,
         blueprint.default_goal,
-        blueprint.role_summary
+        blueprint.role_summary,
+        Enum.join(blueprint.roles, " "),
+        Enum.join(blueprint.capability_tags, " "),
+        Enum.join(blueprint.seed_issue_titles, " ")
       ]
       |> Enum.join(" ")
       |> String.downcase()

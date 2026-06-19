@@ -1,5 +1,5 @@
 defmodule CymphoWeb.CompanyLiveTest do
-  use CymphoWeb.LiveCase, async: true
+  use CymphoWeb.LiveCase, async: false
 
   import Phoenix.LiveViewTest
 
@@ -22,6 +22,8 @@ defmodule CymphoWeb.CompanyLiveTest do
       assert html =~ "Import company"
       assert html =~ "#{blueprint_count}"
       assert html =~ "Blueprint catalog"
+      assert html =~ "Default agents"
+      assert html =~ "Capabilities"
       assert html =~ "Company fleet"
       assert html =~ company.name
       assert html =~ ~s(href="/onboarding")

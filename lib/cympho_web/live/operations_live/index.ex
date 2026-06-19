@@ -7,18 +7,26 @@ defmodule CymphoWeb.OperationsLive.Index do
   alias Cympho.HeartbeatEngine
   alias Cympho.Inbox
   alias Cympho.Issues
+  alias Cympho.Issues.SwarmEvents
   alias Cympho.ReviewNudges
   alias Cympho.RuntimeOperations
   alias Cympho.Wakes
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign_snapshot(socket)}
+    if connected?(socket) && socket.assigns[:current_company] do
+      SwarmEvents.subscribe(socket.assigns.current_company.id)
+    end
+
+    {:ok, socket |> assign(:digest_density, "compact") |> assign_snapshot()}
   end
 
   @impl true
   def handle_params(params, _url, socket) do
-    {:noreply, assign_snapshot(socket, parent_issue_id: Map.get(params, "parent_issue_id"))}
+    {:noreply,
+     socket
+     |> assign(:digest_density, normalize_digest_density(params["density"]))
+     |> assign_snapshot(parent_issue_id: Map.get(params, "parent_issue_id"))}
   end
 
   @impl true
@@ -117,7 +125,7 @@ defmodule CymphoWeb.OperationsLive.Index do
          |> assign_snapshot()
          |> put_flash(
            :info,
-           "Recovered #{recovered} stale/orphaned #{plural_noun(recovered, "run")}, cancelled #{cancelled} stale waiting #{plural_noun(cancelled, "run")}, and released #{released} stale checked-out #{plural_noun(released, "issue", "issues")}. Checked #{stale} stale, #{orphaned} orphaned, #{waiting} waiting, and #{stale_checkouts} checked-out candidates."
+           "Recovered #{recovered} stale/orphaned #{plural_noun(recovered, "run")}, cancelled #{cancelled} stale waiting #{plural_noun(cancelled, "run")}, and cleared #{released} stale checkout #{plural_noun(released, "lock")}. Checked #{stale} stale, #{orphaned} orphaned, #{waiting} waiting, and #{stale_checkouts} checked-out candidates."
          )}
 
       {:ok, %{recovered: recovered, cancelled: cancelled, released: released, failed: failed}} ->
@@ -126,7 +134,7 @@ defmodule CymphoWeb.OperationsLive.Index do
          |> assign_snapshot()
          |> put_flash(
            :error,
-           "Recovered #{recovered}, cancelled #{cancelled}, and released #{released}; #{failed} failed to update."
+           "Recovered #{recovered}, cancelled #{cancelled}, and cleared #{released} checkout #{plural_noun(released, "lock")}; #{failed} failed to update."
          )}
 
       {:error, :no_company} ->
@@ -372,6 +380,20 @@ defmodule CymphoWeb.OperationsLive.Index do
     end
   end
 
+  @impl true
+  def handle_info({:swarm_event_created, event}, socket) do
+    case socket.assigns[:delegated_parent_issue_id] do
+      nil ->
+        {:noreply, assign_snapshot(socket)}
+
+      parent_issue_id when parent_issue_id == event.parent_issue_id ->
+        {:noreply, assign_snapshot(socket, parent_issue_id: event.parent_issue_id)}
+
+      _parent_issue_id ->
+        {:noreply, socket}
+    end
+  end
+
   defp scoped_issue(socket, issue_id) do
     case socket.assigns[:current_company] do
       %{id: company_id} -> Issues.get_company_issue(company_id, issue_id)
@@ -531,6 +553,7 @@ defmodule CymphoWeb.OperationsLive.Index do
     socket
     |> assign(:page_title, "Operations")
     |> assign(:delegated_parent_issue_id, parent_issue_id)
+    |> assign_swarm_events(parent_issue_id)
     |> assign(:snapshot, snapshot)
     |> assign(:runtime_mode, snapshot.runtime_mode)
     |> assign(:services, snapshot.services)
@@ -556,6 +579,175 @@ defmodule CymphoWeb.OperationsLive.Index do
     |> assign_new(:prompt_plan_preview, fn -> nil end)
     |> assign_new(:prompt_tuning_receipt, fn -> nil end)
   end
+
+  defp assign_swarm_events(socket, parent_issue_id) do
+    events = SwarmEvents.list_for_parent(parent_issue_id, limit: 20)
+
+    assign(socket,
+      swarm_events: events,
+      swarm_event_rows: events |> Enum.reverse() |> Enum.map(&swarm_event_row/1)
+    )
+  end
+
+  defp operations_url(density, parent_issue_id) do
+    params =
+      %{
+        density: if(density == "detailed", do: "detailed"),
+        parent_issue_id: parent_issue_id
+      }
+      |> Enum.reject(fn {_key, value} -> is_nil(value) or value == "" end)
+      |> Map.new()
+
+    if map_size(params) == 0 do
+      ~p"/operations"
+    else
+      ~p"/operations?#{params}"
+    end
+  end
+
+  defp normalize_digest_density("compact"), do: "compact"
+  defp normalize_digest_density("detailed"), do: "detailed"
+  defp normalize_digest_density(_), do: "compact"
+
+  defp show_operations_swarm_log?(delegated_work, swarm_event_rows) do
+    Map.get(delegated_work || %{}, :filtered?, false) and
+      (Map.get(delegated_work || %{}, :swarm_count, 0) > 0 or swarm_event_rows != [])
+  end
+
+  defp swarm_event_row(event) do
+    %{
+      id: event.id,
+      type_label: swarm_event_type_label(event.event_type),
+      status: event.status || "info",
+      message: event.message,
+      time: swarm_event_time(event.occurred_at || event.inserted_at),
+      chips: swarm_event_chips(event.metadata || %{})
+    }
+  end
+
+  defp swarm_event_type_label(type) when is_binary(type) do
+    type
+    |> String.split("_")
+    |> Enum.with_index()
+    |> Enum.map(fn {word, index} -> swarm_event_type_word(word, index) end)
+    |> Enum.join(" ")
+  end
+
+  defp swarm_event_type_label(_type), do: "Event"
+
+  defp swarm_event_type_word(word, _index) when word in ["ceo", "cto"],
+    do: String.upcase(word)
+
+  defp swarm_event_type_word(word, 0), do: String.capitalize(word)
+  defp swarm_event_type_word(word, _index), do: word
+
+  defp swarm_event_time(%DateTime{} = time) do
+    time
+    |> DateTime.to_iso8601()
+    |> String.slice(11, 8)
+  end
+
+  defp swarm_event_time(%NaiveDateTime{} = time) do
+    time
+    |> NaiveDateTime.to_iso8601()
+    |> String.slice(11, 8)
+  end
+
+  defp swarm_event_time(_time), do: "--:--:--"
+
+  defp swarm_event_chips(metadata) when is_map(metadata) do
+    [
+      swarm_count_chip(metadata, "agent_ids", "agents"),
+      swarm_count_chip(metadata, "worker_issue_ids", "workers"),
+      swarm_value_chip(metadata, "agent_count", "workers"),
+      swarm_value_chip(metadata, "mix_rows", "mix rows"),
+      swarm_prefixed_chip(metadata, "proxy_mode", "proxy"),
+      swarm_prefixed_chip(metadata, "worker_index", "worker"),
+      swarm_prefixed_chip(metadata, "role", "role"),
+      swarm_short_chip(metadata, "summary"),
+      swarm_short_chip(metadata, "reason"),
+      swarm_value_chip(metadata, "queued_count", "queued"),
+      swarm_value_chip(metadata, "failed_count", "failed")
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Enum.take(4)
+  end
+
+  defp swarm_event_chips(_metadata), do: []
+
+  defp swarm_count_chip(metadata, key, label) do
+    case swarm_metadata_value(metadata, key) do
+      values when is_list(values) -> "#{length(values)} #{label}"
+      _value -> nil
+    end
+  end
+
+  defp swarm_value_chip(metadata, key, label) do
+    case swarm_metadata_value(metadata, key) do
+      value when is_integer(value) -> "#{value} #{label}"
+      value when is_binary(value) and value != "" -> "#{value} #{label}"
+      _value -> nil
+    end
+  end
+
+  defp swarm_prefixed_chip(metadata, key, label) do
+    case swarm_metadata_value(metadata, key) do
+      value when is_integer(value) -> "#{label} #{value}"
+      value when is_binary(value) and value != "" -> "#{label} #{value}"
+      _value -> nil
+    end
+  end
+
+  defp swarm_short_chip(metadata, key) do
+    case swarm_metadata_value(metadata, key) do
+      value when is_binary(value) and value != "" ->
+        value
+        |> String.replace(~r/\s+/, " ")
+        |> String.slice(0, 90)
+
+      _value ->
+        nil
+    end
+  end
+
+  defp swarm_metadata_value(metadata, key) do
+    Map.get(metadata, key) || Map.get(metadata, swarm_metadata_atom_key(key))
+  end
+
+  defp swarm_metadata_atom_key("agent_ids"), do: :agent_ids
+  defp swarm_metadata_atom_key("worker_issue_ids"), do: :worker_issue_ids
+  defp swarm_metadata_atom_key("agent_count"), do: :agent_count
+  defp swarm_metadata_atom_key("mix_rows"), do: :mix_rows
+  defp swarm_metadata_atom_key("proxy_mode"), do: :proxy_mode
+  defp swarm_metadata_atom_key("worker_index"), do: :worker_index
+  defp swarm_metadata_atom_key("role"), do: :role
+  defp swarm_metadata_atom_key("summary"), do: :summary
+  defp swarm_metadata_atom_key("reason"), do: :reason
+  defp swarm_metadata_atom_key("queued_count"), do: :queued_count
+  defp swarm_metadata_atom_key("failed_count"), do: :failed_count
+  defp swarm_metadata_atom_key(_key), do: nil
+
+  defp swarm_event_dot_class("success"), do: "h-2 w-2 rounded-full bg-emerald-300"
+  defp swarm_event_dot_class("warning"), do: "h-2 w-2 rounded-full bg-amber-300"
+  defp swarm_event_dot_class("error"), do: "h-2 w-2 rounded-full bg-red-300"
+  defp swarm_event_dot_class(_status), do: "h-2 w-2 rounded-full bg-sky-300"
+
+  defp swarm_event_badge_class("success"),
+    do:
+      "shrink-0 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-590 uppercase text-emerald-300"
+
+  defp swarm_event_badge_class("warning"),
+    do:
+      "shrink-0 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-590 uppercase text-amber-200"
+
+  defp swarm_event_badge_class("error"),
+    do:
+      "shrink-0 rounded-full border border-red-500/25 bg-red-500/10 px-2 py-0.5 text-[10px] font-590 uppercase text-red-300"
+
+  defp swarm_event_badge_class(_status),
+    do:
+      "shrink-0 rounded-full border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-590 uppercase text-sky-200"
 
   defp prompt_watchlist_agents(nil), do: []
 
@@ -848,6 +1040,15 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp action_class(:danger), do: "border-border bg-surface"
   defp action_class(_), do: "border-border bg-surface"
 
+  defp action_badge_class(:ok),
+    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+
+  defp action_badge_class(:attention),
+    do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+
+  defp action_badge_class(:danger), do: "border-brand/25 bg-brand/10 text-brand"
+  defp action_badge_class(_), do: "border-border bg-surface text-text-tertiary"
+
   defp doctor_badge_class(:critical),
     do: "border-brand/25 bg-brand/10 text-brand"
 
@@ -1023,6 +1224,12 @@ defmodule CymphoWeb.OperationsLive.Index do
 
   defp preflight_badge_class(:blocked), do: "border-brand/25 bg-brand/10 text-brand"
   defp preflight_badge_class(_), do: "border-border bg-panel text-text-tertiary"
+
+  defp preflight_icon_class(:ready), do: "hero-check-circle-mini"
+  defp preflight_icon_class(:review_mode), do: "hero-eye-mini"
+  defp preflight_icon_class(:attention), do: "hero-exclamation-triangle-mini"
+  defp preflight_icon_class(:blocked), do: "hero-no-symbol-mini"
+  defp preflight_icon_class(_), do: "hero-question-mark-circle-mini"
 
   defp owner_brief_readiness_badge_class(:ready),
     do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"

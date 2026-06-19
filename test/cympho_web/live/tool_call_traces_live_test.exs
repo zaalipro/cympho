@@ -155,6 +155,36 @@ defmodule CymphoWeb.ToolCallTracesLiveTest do
     assert html =~ "Tool evidence is audit-ready"
   end
 
+  test "verify integrity flags stale content hashes", %{
+    conn: conn,
+    current_company: company
+  } do
+    {:ok, trace} =
+      ToolCallTraces.create_tool_call_trace(%{
+        company_id: company.id,
+        trace_type: "tool_call",
+        tool_name: "read_file",
+        tool_arguments: %{"path" => "README.md"},
+        tool_result: "ok",
+        status: "success",
+        actor_type: "system"
+      })
+
+    trace
+    |> Ecto.Changeset.change(%{tool_name: "tampered_tool"})
+    |> Repo.update!()
+
+    {:ok, view, _html} = live(conn, "/tool-call-traces")
+
+    html =
+      view
+      |> element("button[phx-click='verify_integrity']", "Verify integrity")
+      |> render_click()
+
+    assert html =~ "Content hash mismatch at sequence 1"
+    assert html =~ "stale or tampered content hash"
+  end
+
   test "streams the traces table and appends the next page", %{
     conn: conn,
     current_company: company

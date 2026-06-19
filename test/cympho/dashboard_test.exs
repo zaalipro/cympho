@@ -258,6 +258,27 @@ defmodule Cympho.DashboardTest do
       assert Decimal.eq?(cost.budget_remaining, Decimal.new("15.00"))
     end
 
+    test "surfaces token-bearing zero-cost runs as unpriced usage" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Dashboard Unpriced Co",
+          slug: "dashboard-unpriced-#{System.unique_integer([:positive])}"
+        })
+
+      _priced = insert_completed_run(company, Decimal.new("2.00"))
+      _unpriced = insert_completed_run(company, Decimal.new("0.00"))
+
+      cost = Dashboard.cost_summary(company.id)
+
+      assert Decimal.eq?(cost.total_cost, Decimal.new("2.00"))
+      assert Decimal.eq?(cost.period_cost, Decimal.new("2.00"))
+      assert cost.has_unpriced_usage?
+      assert cost.total_unpriced_tokens == 150
+      assert cost.total_unpriced_request_count == 1
+      assert cost.period_unpriced_tokens == 150
+      assert cost.period_unpriced_request_count == 1
+    end
+
     test "includes recent inbox items without requiring aggregate fields" do
       {:ok, company} =
         Companies.create_company(%{

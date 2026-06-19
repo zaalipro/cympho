@@ -84,7 +84,8 @@ defmodule Cympho.Adapters.ClaudeCodeAdapter do
         type: :boolean,
         required: false,
         default: false,
-        description: "Resume a multi-turn session"
+        description:
+          "Resume a multi-turn session only when the run cwd is scoped to this issue workspace"
       }
     ]
   end

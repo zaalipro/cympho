@@ -30,7 +30,10 @@ defmodule CymphoWeb.IssueLive.Show.Description do
             >
               Owner brief
             </p>
-            <p class={description_text_class(@issue)}>
+            <p class="ui-simple-only max-w-4xl text-sm leading-6 text-ink-muted">
+              {compact_description(@issue.description, simple_description_limit(@issue))}
+            </p>
+            <p class={["ui-advanced-only", description_text_class(@issue)]}>
               {@issue.description}
             </p>
           </div>
@@ -154,4 +157,25 @@ defmodule CymphoWeb.IssueLive.Show.Description do
   defp swarm_state?(%{"role" => role}) when role in ["worker", "cto_synthesis"], do: true
   defp swarm_state?(%{role: role}) when role in ["worker", "cto_synthesis"], do: true
   defp swarm_state?(_), do: false
+
+  defp simple_description_limit(issue) do
+    if swarm_issue?(issue), do: 260, else: 220
+  end
+
+  defp compact_description(description, max) do
+    description
+    |> to_string()
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+    |> truncate(max)
+  end
+
+  defp truncate(text, max) when byte_size(text) <= max, do: text
+
+  defp truncate(text, max) do
+    text
+    |> String.slice(0, max)
+    |> String.trim_trailing()
+    |> Kernel.<>("...")
+  end
 end

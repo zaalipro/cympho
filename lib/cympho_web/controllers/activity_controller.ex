@@ -5,9 +5,12 @@ defmodule CymphoWeb.ActivityController do
 
   action_fallback CymphoWeb.FallbackController
 
+  @default_company_timeline_limit 50
+  @max_company_timeline_limit 200
+
   def index(conn, %{"issue_id" => issue_id}) do
     with {:ok, issue} <- scoped_issue(conn, issue_id) do
-      activities = Activities.list_activities(issue.id)
+      activities = issue.id |> Activities.list_activities() |> Enum.map(&activity_json/1)
       json(conn, %{data: activities})
     end
   end
@@ -22,7 +25,7 @@ defmodule CymphoWeb.ActivityController do
              where: a.id == ^id and i.company_id == ^company_id
          ) do
       nil -> {:error, :not_found}
-      activity -> json(conn, %{data: activity})
+      activity -> json(conn, %{data: activity_json(activity)})
     end
   end
 
@@ -35,32 +38,39 @@ defmodule CymphoWeb.ActivityController do
 
   def company_timeline(conn, %{"company_id" => company_id} = params) do
     if conn.assigns.current_company.id == company_id do
-      limit = Map.get(params, "limit", "50") |> String.to_integer()
-      offset = Map.get(params, "offset", "0") |> String.to_integer()
+      with {:ok, since} <- parse_since(params["since"]) do
+        limit =
+          parse_bounded_integer(
+            params["limit"],
+            @default_company_timeline_limit,
+            1,
+            @max_company_timeline_limit
+          )
 
-      activities =
-        from(a in Activities.Activity,
-          join: i in "issues",
-          on: a.issue_id == i.id,
-          where: i.company_id == ^company_id,
-          order_by: [desc: a.inserted_at],
-          limit: ^limit,
-          offset: ^offset
-        )
-        |> Repo.all()
+        offset = parse_bounded_integer(params["offset"], 0, 0, 1_000_000)
 
-      total =
-        from(a in Activities.Activity,
-          join: i in "issues",
-          on: a.issue_id == i.id,
-          where: i.company_id == ^company_id
-        )
-        |> Repo.aggregate(:count)
+        {activities, total} =
+          Activities.list_company_activities(company_id,
+            limit: limit,
+            offset: offset,
+            since: since
+          )
 
-      json(conn, %{
-        data: activities,
-        pagination: %{total: total, limit: limit, offset: offset}
-      })
+        json(conn, %{
+          data: Enum.map(activities, &activity_json/1),
+          pagination: %{
+            total: total,
+            limit: limit,
+            offset: offset,
+            since: format_since(since)
+          }
+        })
+      else
+        {:error, :invalid_since} ->
+          conn
+          |> put_status(:bad_request)
+          |> json(%{errors: [%{detail: "Invalid since timestamp. Use ISO 8601 UTC datetime."}]})
+      end
     else
       {:error, :forbidden}
     end
@@ -68,5 +78,46 @@ defmodule CymphoWeb.ActivityController do
 
   defp scoped_issue(conn, issue_id) do
     Issues.get_company_issue(conn.assigns.current_company.id, issue_id)
+  end
+
+  defp parse_since(value) when value in [nil, ""], do: {:ok, nil}
+
+  defp parse_since(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, datetime, _offset} -> {:ok, datetime}
+      {:error, _reason} -> {:error, :invalid_since}
+    end
+  end
+
+  defp parse_since(_value), do: {:error, :invalid_since}
+
+  defp parse_bounded_integer(nil, default, _min, _max), do: default
+
+  defp parse_bounded_integer(value, default, min, max) when is_binary(value) do
+    case Integer.parse(value) do
+      {parsed, ""} -> parsed |> max(min) |> min(max)
+      _ -> default
+    end
+  end
+
+  defp parse_bounded_integer(value, _default, min, max) when is_integer(value),
+    do: value |> max(min) |> min(max)
+
+  defp parse_bounded_integer(_value, default, _min, _max), do: default
+
+  defp format_since(nil), do: nil
+  defp format_since(%DateTime{} = since), do: DateTime.to_iso8601(since)
+
+  defp activity_json(activity) do
+    %{
+      id: activity.id,
+      issue_id: activity.issue_id,
+      company_id: activity.company_id,
+      actor_type: activity.actor_type,
+      actor_id: activity.actor_id,
+      action: activity.action,
+      metadata: activity.metadata || %{},
+      inserted_at: DateTime.to_iso8601(activity.inserted_at)
+    }
   end
 end

@@ -4,6 +4,7 @@ defmodule Cympho.OrchestratorTest do
   import Mock
 
   alias Cympho.{
+    Adapters.MockAdapter,
     Agents,
     Comments,
     Companies,
@@ -57,6 +58,160 @@ defmodule Cympho.OrchestratorTest do
   end
 
   describe "adapter resolution success path" do
+    test "company runtime stop cancels the live adapter session", %{
+      company: company,
+      agent: agent,
+      issue: issue
+    } do
+      session_id = "session-company-stop"
+      run_id = Ecto.UUID.generate()
+      parent = self()
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {:ok, checked_out} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: agent.id,
+          checked_out_at: now,
+          started_at: now
+        })
+
+      trap_exit? = Process.flag(:trap_exit, true)
+
+      try do
+        with_mocks([
+          {Cympho.Adapters, [],
+           [
+             resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+           ]},
+          {Cympho.HeartbeatEngine, [],
+           [
+             create_run: fn _ -> {:ok, %{id: run_id}} end,
+             get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+             start_run: fn _ -> :ok end,
+             cancel_run: fn run -> {:ok, Map.put(run, :status, "cancelled")} end
+           ]},
+          {Cympho.AgentRunner, [],
+           [
+             run: fn _issue, _agent_id, recipient_pid, _opts ->
+               worker =
+                 spawn(fn ->
+                   receive do
+                     {:cancel_session, ^session_id, reason} ->
+                       send(parent, {:adapter_session_cancelled, reason})
+                   end
+                 end)
+
+               Cympho.AdapterSessions.register(session_id, worker)
+               send(recipient_pid, {:session_started, session_id})
+               session_id
+             end
+           ]}
+        ]) do
+          assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent.id)
+          assert is_pid(pid)
+          assert eventually_adapter_session_registered?(session_id)
+
+          assert {:ok, _updated, runtime_stop} =
+                   Companies.stop_company_runtime(company, "operator stop")
+
+          assert runtime_stop.orchestrators_stopped == 1
+          assert runtime_stop.adapter_sessions_cancel_requested == 1
+          assert runtime_stop.adapter_sessions_cancel_confirmed == 1
+          assert runtime_stop.adapter_sessions_still_registered == 0
+          assert_receive {:adapter_session_cancelled, {:runtime_stop, "operator stop"}}, 1_000
+          assert_receive {:EXIT, ^pid, {:runtime_stop, "operator stop"}}, 1_000
+          refute Process.alive?(pid)
+        end
+      after
+        Process.flag(:trap_exit, trap_exit?)
+      end
+    end
+
+    test "company runtime stop reports adapter sessions that remain registered", %{
+      company: company,
+      agent: agent,
+      issue: issue
+    } do
+      session_id = "session-still-registered-stop"
+      run_id = Ecto.UUID.generate()
+      parent = self()
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {:ok, checked_out} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: agent.id,
+          checked_out_at: now,
+          started_at: now
+        })
+
+      trap_exit? = Process.flag(:trap_exit, true)
+
+      try do
+        with_mocks([
+          {Cympho.Adapters, [],
+           [
+             resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+           ]},
+          {Cympho.HeartbeatEngine, [],
+           [
+             create_run: fn _ -> {:ok, %{id: run_id}} end,
+             get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+             start_run: fn _ -> :ok end,
+             cancel_run: fn run -> {:ok, Map.put(run, :status, "cancelled")} end
+           ]},
+          {Cympho.AgentRunner, [],
+           [
+             run: fn _issue, _agent_id, recipient_pid, _opts ->
+               worker =
+                 spawn(fn ->
+                   receive do
+                     {:cancel_session, ^session_id, reason} ->
+                       send(parent, {:adapter_session_cancelled, reason})
+
+                       receive do
+                         :shutdown -> :ok
+                       end
+                   end
+                 end)
+
+               send(parent, {:adapter_worker_started, worker})
+               Cympho.AdapterSessions.register(session_id, worker)
+               send(recipient_pid, {:session_started, session_id})
+               session_id
+             end
+           ]}
+        ]) do
+          assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent.id)
+          assert_receive {:adapter_worker_started, worker}, 1_000
+          assert eventually_adapter_session_registered?(session_id)
+
+          assert {:ok, _updated, runtime_stop} =
+                   Companies.stop_company_runtime(company, "operator stop")
+
+          assert runtime_stop.orchestrators_stopped == 1
+          assert runtime_stop.adapter_sessions_cancel_requested == 1
+          assert runtime_stop.adapter_sessions_cancel_confirmed == 0
+          assert runtime_stop.adapter_sessions_still_registered == 1
+
+          assert Enum.any?(
+                   runtime_stop.errors,
+                   &String.contains?(&1.reason, "adapter_session_still_registered")
+                 )
+
+          assert_receive {:adapter_session_cancelled, {:runtime_stop, "operator stop"}}, 1_000
+          assert_receive {:EXIT, ^pid, {:runtime_stop, "operator stop"}}, 1_000
+          assert Process.alive?(worker)
+
+          send(worker, :shutdown)
+          Cympho.AdapterSessions.unregister(session_id)
+        end
+      after
+        Process.flag(:trap_exit, trap_exit?)
+      end
+    end
+
     test "starts session when adapter resolves successfully", %{
       issue_id: issue_id,
       agent_id: agent_id,
@@ -147,7 +302,7 @@ defmodule Cympho.OrchestratorTest do
            create_run: fn _ -> {:ok, %{id: run_id}} end,
            get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
            start_run: fn _ -> :ok end,
-           complete_run: fn _run, _attrs -> {:ok, %{id: run_id}} end
+           fail_run: fn _run, _reason -> {:ok, %{id: run_id}} end
          ]},
         {Cympho.AgentRunner, [],
          [
@@ -241,6 +396,352 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
+    test "retries provider limit failures with the next runtime profile", %{
+      agent: agent,
+      agent_id: agent_id,
+      issue: issue
+    } do
+      test_pid = self()
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      {:ok, _agent} =
+        Agents.update_agent(agent, %{
+          runtime_config: %{
+            "profile_id" => "codex-gpt-5.5",
+            "fallback_profile_ids" => ["codex-mini"]
+          }
+        })
+
+      fallback_result = %{
+        "content" => [
+          %{
+            "type" => "text",
+            "text" => """
+            Fallback completed.
+
+            ```cympho-actions
+            {"actions":[{"type":"comment","body":"Fallback profile completed the turn."}]}
+            ```
+            """
+          }
+        ]
+      }
+
+      MockAdapter.script(agent_id, issue.id, [
+        %{error: {:provider_failure, :rate_limited, "HTTP 429 Too Many Requests"}},
+        %{result: fallback_result}
+      ])
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn %{adapter: adapter, config: config} ->
+             send(test_pid, {:resolved_runtime, adapter, config})
+             {:ok, MockAdapter, config}
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        wait_until_stopped(pid)
+
+        assert_received {:resolved_runtime, :claude_code, _primary_config}
+        assert_received {:resolved_runtime, :codex, fallback_config}
+        assert fallback_config["model"] == "gpt-5.4-mini"
+
+        comments = Comments.list_comments(issue.id)
+
+        assert Enum.any?(comments, &(&1.body =~ "retrying with runtime profile Codex mini"))
+        assert Enum.any?(comments, &(&1.body =~ "Fallback completed."))
+
+        refute Enum.any?(comments, &(&1.body =~ "Provider rate limited"))
+      end
+    end
+
+    test "retries transient provider outages with the next runtime profile without pausing", %{
+      agent: agent,
+      agent_id: agent_id,
+      issue: issue
+    } do
+      test_pid = self()
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      {:ok, _agent} =
+        Agents.update_agent(agent, %{
+          runtime_config: %{
+            "profile_id" => "codex-gpt-5.5",
+            "fallback_profile_ids" => ["codex-mini"]
+          }
+        })
+
+      fallback_result = %{
+        "content" => [
+          %{
+            "type" => "text",
+            "text" => """
+            Fallback completed after provider outage.
+
+            ```cympho-actions
+            {"actions":[{"type":"comment","body":"Fallback profile recovered from provider outage."}]}
+            ```
+            """
+          }
+        ]
+      }
+
+      MockAdapter.script(agent_id, issue.id, [
+        %{error: {:http_error, 503, "service unavailable"}},
+        %{result: fallback_result}
+      ])
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn %{adapter: adapter, config: config} ->
+             send(test_pid, {:resolved_runtime, adapter, config})
+             {:ok, MockAdapter, config}
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        wait_until_stopped(pid)
+
+        assert_received {:resolved_runtime, :claude_code, _primary_config}
+        assert_received {:resolved_runtime, :codex, fallback_config}
+        assert fallback_config["model"] == "gpt-5.4-mini"
+
+        comments = Comments.list_comments(issue.id)
+
+        assert Enum.any?(comments, &(&1.body =~ "Provider temporarily unavailable"))
+        assert Enum.any?(comments, &(&1.body =~ "retrying with runtime profile Codex mini"))
+        assert Enum.any?(comments, &(&1.body =~ "Fallback completed after provider outage."))
+
+        reloaded_agent = Repo.get!(Agent, agent_id)
+        refute reloaded_agent.status == :paused
+        refute (reloaded_agent.pause_reason || "") =~ "Provider circuit breaker"
+      end
+    end
+
+    test "blocks visibly when provider fallback profiles are exhausted", %{
+      agent: agent,
+      agent_id: agent_id,
+      issue: issue
+    } do
+      test_pid = self()
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      {:ok, _agent} =
+        Agents.update_agent(agent, %{
+          runtime_config: %{
+            "profile_id" => "codex-gpt-5.5",
+            "fallback_profile_ids" => ["codex-mini"]
+          }
+        })
+
+      MockAdapter.script(agent_id, issue.id, [
+        %{error: {:provider_failure, :quota_exceeded, "insufficient_quota"}}
+      ])
+
+      {:ok, queued_issue} =
+        Issues.create_issue(%{
+          title: "Queued provider work",
+          description: "Should not keep waking after provider breaker trips.",
+          company_id: issue.company_id,
+          status: :todo,
+          assignee_id: agent_id,
+          assigned_role: "engineer"
+        })
+
+      {:ok, queued_wake} =
+        Wakes.do_wake_agent(agent_id, queued_issue.id, "manual_dispatch", "system", nil, %{
+          "source" => "test"
+        })
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn
+             %{adapter: :claude_code, config: config} ->
+               send(test_pid, {:resolved_runtime, :claude_code, config})
+               {:ok, MockAdapter, config}
+
+             %{adapter: :codex} ->
+               send(test_pid, {:resolved_runtime, :codex, %{}})
+               {:error, :no_adapter_available}
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        wait_until_stopped(pid)
+
+        assert_received {:resolved_runtime, :claude_code, _primary_config}
+        assert_received {:resolved_runtime, :codex, _fallback_config}
+
+        comments = Comments.list_comments(issue.id)
+
+        assert Enum.any?(comments, &(&1.body =~ "Provider quota exceeded"))
+        refute Enum.any?(comments, &(&1.body =~ "retrying with runtime profile"))
+        assert Issues.get_issue!(issue.id).status == :blocked
+
+        reloaded_agent = Repo.get!(Agent, agent_id)
+        assert reloaded_agent.status == :paused
+        assert reloaded_agent.governance_status == "paused"
+        assert reloaded_agent.pause_reason =~ "Provider circuit breaker paused this agent"
+
+        reloaded_wake = Wakes.get_agent_wake!(queued_wake.id)
+        assert reloaded_wake.status == "cancelled"
+        assert reloaded_wake.last_error =~ "Provider circuit breaker paused this agent"
+
+        comments = Comments.list_comments(issue.id)
+        assert Enum.any?(comments, &(&1.body =~ "cancelled 1 queued wake"))
+      end
+    end
+
+    test "retries no-output failures once with the same runtime", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      test_pid = self()
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      retry_result = %{
+        "content" => [
+          %{
+            "type" => "text",
+            "text" => """
+            Retry completed.
+
+            ```cympho-actions
+            {"actions":[{"type":"comment","body":"Retry run produced useful work."}]}
+            ```
+            """
+          }
+        ]
+      }
+
+      MockAdapter.script(agent_id, issue.id, [
+        %{error: :no_output},
+        %{result: retry_result}
+      ])
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn %{adapter: adapter, config: config} ->
+             send(test_pid, {:resolved_runtime, adapter, config})
+             {:ok, MockAdapter, config}
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert :ok = wait_until_stopped(pid)
+
+        assert_received {:resolved_runtime, :claude_code, _primary_config}
+        assert_received {:resolved_runtime, :claude_code, _retry_config}
+
+        comments = Comments.list_comments(issue.id)
+
+        assert Enum.any?(comments, &(&1.body =~ "No usable adapter output"))
+        assert Enum.any?(comments, &(&1.body =~ "retrying once with the same runtime"))
+        assert Enum.any?(comments, &(&1.body =~ "Retry completed."))
+        refute Enum.any?(comments, &(&1.body =~ "No adapter output"))
+
+        runs = Cympho.HeartbeatEngine.list_runs_for_issue(issue.id)
+        assert length(runs) == 2
+        assert Enum.count(runs, &(&1.status == "failed")) == 1
+        assert Enum.count(runs, &(&1.status == "completed")) == 1
+      end
+    end
+
+    test "blocks after one malformed-output retry is exhausted", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      test_pid = self()
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      MockAdapter.script(agent_id, issue.id, [
+        %{error: {:parse_error, "missing text content"}},
+        %{error: {:parse_error, "missing text content"}}
+      ])
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn %{adapter: adapter, config: config} ->
+             send(test_pid, {:resolved_runtime, adapter, config})
+             {:ok, MockAdapter, config}
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert :ok = wait_until_stopped(pid)
+
+        assert_received {:resolved_runtime, :claude_code, _primary_config}
+        assert_received {:resolved_runtime, :claude_code, _retry_config}
+        refute_received {:resolved_runtime, :claude_code, _third_config}
+
+        comments = Comments.list_comments(issue.id)
+
+        assert Enum.any?(comments, &(&1.body =~ "No usable adapter output"))
+        assert Enum.any?(comments, &(&1.body =~ "malformed adapter output"))
+        assert Enum.any?(comments, &(&1.body =~ "Malformed adapter output"))
+
+        runs = Cympho.HeartbeatEngine.list_runs_for_issue(issue.id)
+        assert length(runs) == 2
+        assert Enum.all?(runs, &(&1.status == "failed"))
+        assert Issues.get_issue!(issue.id).status == :blocked
+      end
+    end
+
+    test "blocks runtime failures after the issue row changes concurrently", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      session_id = "session-stale-runtime-failure"
+      run_id = Ecto.UUID.generate()
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+         ]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+           start_run: fn _ -> :ok end,
+           fail_run: fn run, _reason -> {:ok, Map.put(run, :status, "failed")} end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert wait_for_session_id(pid, session_id)
+
+        {:ok, _updated} = Issues.update_issue(issue, %{description: "Concurrent owner edit"})
+
+        send(
+          pid,
+          {:turn_ended_with_error, session_id,
+           {:runtime_failure, :permission_blocked, "Commands require approval"}}
+        )
+
+        assert :ok = wait_until_stopped(pid)
+        assert Issues.get_issue!(issue.id).status == :blocked
+
+        assert Enum.any?(Comments.list_comments(issue.id), fn comment ->
+                 comment.body =~ "Runtime blocked"
+               end)
+      end
+    end
+
     test "labels parsed action execution failures separately from invalid action blocks", %{
       agent_id: agent_id,
       issue: issue
@@ -300,6 +801,198 @@ defmodule Cympho.OrchestratorTest do
         assert Issues.get_issue!(issue.id).status == :blocked
       end
     end
+
+    test "marks no-progress action-contract turns as failed runs", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: agent_id
+        })
+
+      result = %{
+        "content" => [
+          %{
+            "type" => "text",
+            "text" => """
+            I added a note and will keep working.
+
+            ```cympho-actions
+            {"actions":[{"type":"comment","body":"Still working; no handoff or blocker yet."}]}
+            ```
+            """
+          }
+        ]
+      }
+
+      MockAdapter.script(agent_id, issue.id, [%{result: result}])
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn %{config: config} -> {:ok, MockAdapter, config} end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert :ok = wait_until_stopped(pid)
+
+        [run] = Cympho.HeartbeatEngine.list_runs_for_issue(issue.id)
+
+        assert run.status == "failed"
+        assert run.error_reason == "Agent action contract failed"
+        assert run.log_excerpt == ":unresolved_current_issue"
+        assert run.run_metadata["adapter_error"]["category"] == "action_contract_failed"
+        assert Issues.get_issue!(issue.id).status == :blocked
+        assert Repo.get!(Agent, agent_id).no_progress_failure_count == 1
+
+        assert Enum.any?(Comments.list_comments(issue.id), fn comment ->
+                 comment.author_type == "system" and
+                   comment.body =~ "Agent actions did not resolve the current issue." and
+                   comment.body =~ "Emit a resolving action"
+               end)
+      end
+    end
+
+    test "pauses agent after repeated no-progress action-contract failures", %{
+      agent_id: agent_id,
+      company: company
+    } do
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      no_progress_result = %{
+        "content" => [
+          %{
+            "type" => "text",
+            "text" => """
+            I left a note and will keep going.
+
+            ```cympho-actions
+            {"actions":[{"type":"comment","body":"Still working; no resolving action yet."}]}
+            ```
+            """
+          }
+        ]
+      }
+
+      {:ok, queued_issue} =
+        Issues.create_issue(%{
+          title: "Queued no-progress work",
+          description: "Should not keep waking after no-progress breaker trips.",
+          company_id: company.id,
+          status: :todo,
+          assignee_id: agent_id,
+          assigned_role: "engineer"
+        })
+
+      {:ok, queued_wake} =
+        Wakes.do_wake_agent(agent_id, queued_issue.id, "manual_dispatch", "system", nil, %{
+          "source" => "no-progress-test"
+        })
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn %{config: config} -> {:ok, MockAdapter, config} end
+         ]}
+      ]) do
+        last_issue =
+          for i <- 1..3 do
+            {:ok, issue_i} =
+              Issues.create_issue(%{
+                title: "No-progress issue #{i}",
+                description: "Test no-progress circuit breaker",
+                company_id: company.id,
+                assigned_role: "engineer"
+              })
+
+            {:ok, issue_i} =
+              Issues.update_issue(issue_i, %{
+                status: :in_progress,
+                assignee_id: agent_id
+              })
+
+            MockAdapter.script(agent_id, issue_i.id, [%{result: no_progress_result}])
+
+            assert {:ok, pid} = Orchestrator.start_and_run(issue_i, agent_id)
+            assert :ok = wait_until_stopped(pid)
+
+            issue_i
+          end
+          |> List.last()
+
+        reloaded_agent = Repo.get!(Agent, agent_id)
+        assert reloaded_agent.no_progress_failure_count == 0
+        assert reloaded_agent.status == :paused
+        assert reloaded_agent.governance_status == "paused"
+        assert reloaded_agent.pause_reason =~ "No-progress circuit breaker paused this agent"
+        assert reloaded_agent.pause_reason =~ "3 consecutive action-contract failures"
+
+        reloaded_wake = Wakes.get_agent_wake!(queued_wake.id)
+        assert reloaded_wake.status == "cancelled"
+        assert reloaded_wake.last_error =~ "No-progress circuit breaker paused this agent"
+
+        assert Enum.any?(Comments.list_comments(last_issue.id), fn comment ->
+                 comment.author_type == "system" and
+                   comment.body =~ "No-progress circuit breaker paused this agent" and
+                   comment.body =~ "cancelled" and comment.body =~ "queued wake"
+               end)
+      end
+    end
+
+    test "resolving action resets no-progress failure count", %{
+      agent: agent,
+      agent_id: agent_id,
+      issue: issue
+    } do
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      {:ok, _agent} = Agents.update_agent(agent, %{no_progress_failure_count: 2})
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: agent_id
+        })
+
+      result = %{
+        "content" => [
+          %{
+            "type" => "text",
+            "text" => """
+            I found this needs CTO review and routed it cleanly.
+
+            ```cympho-actions
+            {"actions":[{"type":"handoff","role":"cto","reason":"Needs CTO synthesis before more delivery work continues."}]}
+            ```
+            """
+          }
+        ]
+      }
+
+      MockAdapter.script(agent_id, issue.id, [%{result: result}])
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn %{config: config} -> {:ok, MockAdapter, config} end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert :ok = wait_until_stopped(pid)
+
+        reloaded_agent = Repo.get!(Agent, agent_id)
+        assert reloaded_agent.no_progress_failure_count == 0
+        assert reloaded_agent.status == :idle
+        assert reloaded_agent.governance_status == "active"
+      end
+    end
   end
 
   describe "no_adapter_available error path" do
@@ -332,7 +1025,7 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
-    test "resets adapter failure counter after reaching 3 consecutive failures", %{
+    test "pauses agent after reaching 3 consecutive adapter resolution failures", %{
       agent_id: agent_id,
       company: company
     } do
@@ -367,8 +1060,11 @@ defmodule Cympho.OrchestratorTest do
         end
 
         agent = Repo.get!(Agent, agent_id)
-        # Counter resets to 0 after hitting threshold
         assert agent.adapter_failure_count == 0
+        assert agent.status == :paused
+        assert agent.governance_status == "paused"
+        assert agent.pause_reason =~ "Adapter circuit breaker paused this agent"
+        assert agent.pause_reason =~ "3 consecutive adapter resolution failures"
       end
     end
   end
@@ -539,4 +1235,47 @@ defmodule Cympho.OrchestratorTest do
   end
 
   defp wait_for_review_nudges(_issue_id, 0), do: []
+
+  defp wait_until_stopped(pid, attempts \\ 40)
+
+  defp wait_until_stopped(pid, attempts) when attempts > 0 do
+    if Process.alive?(pid) do
+      Process.sleep(50)
+      wait_until_stopped(pid, attempts - 1)
+    else
+      :ok
+    end
+  end
+
+  defp wait_until_stopped(_pid, 0), do: :timeout
+
+  defp wait_for_session_id(pid, session_id, attempts \\ 20)
+
+  defp wait_for_session_id(pid, session_id, attempts) when attempts > 0 do
+    case :sys.get_state(pid) do
+      %{session_id: ^session_id} ->
+        true
+
+      _ ->
+        Process.sleep(10)
+        wait_for_session_id(pid, session_id, attempts - 1)
+    end
+  rescue
+    _ -> false
+  end
+
+  defp wait_for_session_id(_pid, _session_id, 0), do: false
+
+  defp eventually_adapter_session_registered?(session_id, attempts \\ 20)
+
+  defp eventually_adapter_session_registered?(_session_id, 0), do: false
+
+  defp eventually_adapter_session_registered?(session_id, attempts) do
+    if Cympho.AdapterSessions.registered?(session_id) do
+      true
+    else
+      Process.sleep(10)
+      eventually_adapter_session_registered?(session_id, attempts - 1)
+    end
+  end
 end

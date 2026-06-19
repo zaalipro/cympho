@@ -1,6 +1,8 @@
 defmodule Cympho.Adapters.HttpAdapterTest do
   use Cympho.DataCase, async: false
 
+  import Mock
+
   alias Cympho.Adapters.HttpAdapter
 
   describe "config_schema/0" do
@@ -14,6 +16,7 @@ defmodule Cympho.Adapters.HttpAdapterTest do
       assert :headers in keys
       assert :auth_token in keys
       assert :timeout in keys
+      assert :timeout_sec in keys
       assert :payload_template in keys
       assert :health_endpoint in keys
       assert :health_timeout in keys
@@ -92,15 +95,30 @@ defmodule Cympho.Adapters.HttpAdapterTest do
       assert HttpAdapter.validate_config(config) == {:error, "headers must be a map"}
     end
 
-    test "validates timeout range" do
-      config_too_large = %{"url" => "https://example.com", "timeout" => 500_000}
+    test "validates timeout range and human-facing seconds" do
+      config_long = %{"url" => "https://example.com", "timeout_sec" => 900}
+      config_too_large = %{"url" => "https://example.com", "timeout_sec" => 3_601}
       config_negative = %{"url" => "https://example.com", "timeout" => -100}
 
+      assert HttpAdapter.validate_config(config_long) == :ok
+
       assert HttpAdapter.validate_config(config_too_large) ==
-               {:error, "timeout must be between 1 and 300000 milliseconds"}
+               {:error, "timeout must be less than or equal to 3600000 milliseconds"}
 
       assert HttpAdapter.validate_config(config_negative) ==
-               {:error, "timeout must be between 1 and 300000 milliseconds"}
+               {:error, "timeout must be positive; use a bounded value instead of 0"}
+    end
+
+    test "rejects disagreeing timeout units" do
+      config = %{
+        "url" => "https://example.com",
+        "timeout" => 30_000,
+        "timeout_sec" => 60
+      }
+
+      assert HttpAdapter.validate_config(config) ==
+               {:error,
+                "timeout, timeout_ms, and timeout_sec disagree; keep only one timeout unit"}
     end
 
     test "validates auth_token" do
@@ -185,6 +203,69 @@ defmodule Cympho.Adapters.HttpAdapterTest do
       _session_id = HttpAdapter.run(issue, "agent-2", recipient_pid, opts)
 
       assert_receive {:session_started, _ref}
+    end
+
+    test "passes timeout_sec to the HTTP request as milliseconds" do
+      test_pid = self()
+
+      issue = %{
+        id: "test-issue-timeout-sec",
+        title: "Slow local gateway",
+        description: "Allow a deliberately long compatible-provider request."
+      }
+
+      with_mock Finch,
+        build: fn _, _, _, _ -> :request end,
+        stream: fn :request, Cympho.Finch, init, _fun, receive_timeout: timeout ->
+          send(test_pid, {:receive_timeout, timeout})
+          {:ok, %{init | status: 200, body: ["{}"]}}
+        end do
+        session_id =
+          HttpAdapter.run(issue, "agent-1", self(),
+            config: %{"url" => "https://example.com/webhook", "timeout_sec" => 900}
+          )
+
+        assert_receive {:session_started, ^session_id}, 500
+        assert_receive {:receive_timeout, 900_000}, 1_000
+        assert_receive {:turn_completed, ^session_id, %{status: 200, body: "{}"}}, 1_000
+      end
+    end
+
+    test "cancels an in-flight HTTP request through adapter sessions" do
+      test_pid = self()
+
+      issue = %{
+        id: "test-issue-cancel",
+        title: "Cancel HTTP request",
+        description: "Stop should interrupt the request worker"
+      }
+
+      with_mock Finch,
+        build: fn _, _, _, _ -> :request end,
+        stream: fn :request, Cympho.Finch, _init, _fun, receive_timeout: _timeout ->
+          send(test_pid, {:http_request_started, self()})
+
+          receive do
+            :finish -> {:ok, %{status: 200, headers: [], body: []}}
+          end
+        end do
+        session_id =
+          HttpAdapter.run(issue, "agent-1", self(),
+            config: %{"url" => "https://example.com/webhook", "timeout" => 30_000}
+          )
+
+        assert_receive {:session_started, ^session_id}, 500
+        assert_receive {:http_request_started, request_pid}, 1_000
+        assert Cympho.AdapterSessions.registered?(session_id)
+
+        assert :ok = Cympho.AdapterSessions.cancel(session_id, :operator_stop)
+
+        assert_receive {:turn_ended_with_error, ^session_id, {:cancelled, :operator_stop}},
+                       1_000
+
+        refute Process.alive?(request_pid)
+        refute_receive {:turn_completed, ^session_id, _result}, 100
+      end
     end
   end
 end

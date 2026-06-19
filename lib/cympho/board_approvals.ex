@@ -77,6 +77,16 @@ defmodule Cympho.BoardApprovals do
     |> Repo.preload([:requested_by, :votes, :company])
   end
 
+  def count_pending_for_company(company_id) when is_binary(company_id) do
+    from(ba in BoardApproval,
+      where: ba.company_id == ^company_id and ba.status == "pending",
+      select: count(ba.id)
+    )
+    |> Repo.one()
+  end
+
+  def count_pending_for_company(_company_id), do: 0
+
   @doc """
   Gets a single board approval.
   """

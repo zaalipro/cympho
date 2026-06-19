@@ -7,8 +7,13 @@ defmodule Cympho.Adapters.Error do
     missing_binary
     missing_credentials
     auth_failed
+    quota_exceeded
+    rate_limited
+    provider_unavailable
     timeout
+    runtime_blocked
     malformed_output
+    action_contract_failed
     no_output
     nonzero_exit
     unknown
@@ -18,8 +23,13 @@ defmodule Cympho.Adapters.Error do
           :missing_binary
           | :missing_credentials
           | :auth_failed
+          | :quota_exceeded
+          | :rate_limited
+          | :provider_unavailable
           | :timeout
+          | :runtime_blocked
           | :malformed_output
+          | :action_contract_failed
           | :no_output
           | :nonzero_exit
           | :unknown
@@ -191,8 +201,30 @@ defmodule Cympho.Adapters.Error do
     category_tuple(:malformed_output, nil, output)
   end
 
+  defp classify({:agent_action_failed, reason}, _raw, _adapter) do
+    category_tuple(:action_contract_failed, nil, inspect(reason))
+  end
+
   defp classify({:http_error, status, body}, _raw, _adapter) when status in [401, 403] do
     category_tuple(:auth_failed, "The provider rejected the configured credential.", body)
+  end
+
+  defp classify({:http_error, 429, body}, _raw, _adapter) do
+    category_tuple(:rate_limited, category_message(:rate_limited, nil), body)
+  end
+
+  defp classify({:http_error, status, body}, _raw, _adapter)
+       when status in [500, 502, 503, 504, 529] do
+    category_tuple(:provider_unavailable, category_message(:provider_unavailable, nil), body)
+  end
+
+  defp classify({:provider_failure, category, detail}, _raw, _adapter)
+       when category in [:quota_exceeded, :rate_limited, :provider_unavailable] do
+    category_tuple(category, category_message(category, nil), detail)
+  end
+
+  defp classify({:runtime_failure, :permission_blocked, detail}, _raw, _adapter) do
+    category_tuple(:runtime_blocked, category_message(:runtime_blocked, nil), detail)
   end
 
   defp classify({:http_error, reason}, raw, adapter), do: classify(reason, raw, adapter)
@@ -232,6 +264,47 @@ defmodule Cympho.Adapters.Error do
             :no_output
 
           contains_any?(lower, [
+            "insufficient_quota",
+            "quota exceeded",
+            "exceeded your current quota",
+            "billing hard limit",
+            "out of credits",
+            "credits exhausted"
+          ]) ->
+            :quota_exceeded
+
+          contains_any?(lower, [
+            "rate_limit_exceeded",
+            "rate limit exceeded",
+            "too many requests",
+            "status code 429",
+            "http 429",
+            "429 too many requests"
+          ]) ->
+            :rate_limited
+
+          contains_any?(lower, [
+            "status code 500",
+            "status code 502",
+            "status code 503",
+            "status code 504",
+            "status code 529",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+            "http 529",
+            "529 overloaded",
+            "overloaded_error",
+            "model is overloaded",
+            "server overloaded",
+            "provider overloaded",
+            "service unavailable",
+            "gateway timeout"
+          ]) ->
+            :provider_unavailable
+
+          contains_any?(lower, [
             "command not found",
             "binary not found",
             "not found in path",
@@ -268,6 +341,9 @@ defmodule Cympho.Adapters.Error do
           contains_any?(lower, ["timeout", "timed out", "stall_timeout"]) ->
             :timeout
 
+          runtime_blocked_text?(lower) ->
+            :runtime_blocked
+
           contains_any?(lower, [
             "parse_error",
             "parse error",
@@ -277,6 +353,15 @@ defmodule Cympho.Adapters.Error do
             "could not parse"
           ]) ->
             :malformed_output
+
+          contains_any?(lower, [
+            "agent_action_failed",
+            "unresolved_current_issue",
+            "invalid cympho-actions",
+            "empty_actions",
+            "unauthorized_action"
+          ]) ->
+            :action_contract_failed
 
           contains_any?(lower, ["no output", "empty output"]) ->
             :no_output
@@ -308,7 +393,12 @@ defmodule Cympho.Adapters.Error do
        do: text
 
   defp detail_from_string(:malformed_output, text), do: text
+  defp detail_from_string(:action_contract_failed, text), do: text
   defp detail_from_string(:auth_failed, text), do: text
+  defp detail_from_string(:quota_exceeded, text), do: text
+  defp detail_from_string(:rate_limited, text), do: text
+  defp detail_from_string(:provider_unavailable, text), do: text
+  defp detail_from_string(:runtime_blocked, text), do: text
   defp detail_from_string(:timeout, _text), do: nil
   defp detail_from_string(:no_output, _text), do: nil
 
@@ -325,8 +415,13 @@ defmodule Cympho.Adapters.Error do
   defp category_title(:missing_binary), do: "Runtime command not found"
   defp category_title(:missing_credentials), do: "Credentials missing"
   defp category_title(:auth_failed), do: "Provider authentication failed"
+  defp category_title(:quota_exceeded), do: "Provider quota exceeded"
+  defp category_title(:rate_limited), do: "Provider rate limited"
+  defp category_title(:provider_unavailable), do: "Provider unavailable"
   defp category_title(:timeout), do: "Run timed out"
+  defp category_title(:runtime_blocked), do: "Runtime blocked"
   defp category_title(:malformed_output), do: "Malformed adapter output"
+  defp category_title(:action_contract_failed), do: "Agent action contract failed"
   defp category_title(:no_output), do: "No adapter output"
   defp category_title(:nonzero_exit), do: "Runtime exited with an error"
   defp category_title(:unknown), do: "Unclassified failure"
@@ -340,11 +435,28 @@ defmodule Cympho.Adapters.Error do
   defp category_message(:auth_failed, _adapter),
     do: "The provider rejected the configured credential."
 
+  defp category_message(:quota_exceeded, _adapter),
+    do: "The provider reported that the configured account has exhausted its quota or credits."
+
+  defp category_message(:rate_limited, _adapter),
+    do: "The provider rejected the run because a rate limit was exceeded."
+
+  defp category_message(:provider_unavailable, _adapter),
+    do: "The provider or upstream model service was temporarily unavailable."
+
   defp category_message(:timeout, adapter),
     do: "#{adapter_label(adapter)} did not finish before the timeout window."
 
+  defp category_message(:runtime_blocked, _adapter),
+    do:
+      "The adapter exited without doing the work because runtime permissions or approvals blocked its tools."
+
   defp category_message(:malformed_output, _adapter),
     do: "The adapter returned output Cympho could not parse as a structured turn."
+
+  defp category_message(:action_contract_failed, _adapter),
+    do:
+      "The agent returned output, but its cympho-actions block did not complete a valid state transition."
 
   defp category_message(:no_output, _adapter),
     do: "The adapter finished without producing usable output."
@@ -364,12 +476,31 @@ defmodule Cympho.Adapters.Error do
   defp category_hint(:auth_failed),
     do: "Verify the API key, base URL, model, and provider account access."
 
+  defp category_hint(:quota_exceeded),
+    do: "Add provider credits, raise the quota, or switch this agent to another runtime profile."
+
+  defp category_hint(:rate_limited),
+    do:
+      "Wait for the provider limit window to reset or switch this agent to another runtime profile."
+
+  defp category_hint(:provider_unavailable),
+    do:
+      "Retry with a fallback runtime profile, then rerun later if the provider is still unavailable."
+
   defp category_hint(:timeout),
     do:
       "Increase the timeout, reduce the issue scope, or check whether the CLI is waiting for input."
 
+  defp category_hint(:runtime_blocked),
+    do:
+      "Fix the runtime permission policy, approval mode, or wrapper flags, then rerun the issue."
+
   defp category_hint(:malformed_output),
     do: "Confirm the CLI is running in JSON/output mode and that wrappers do not print banners."
+
+  defp category_hint(:action_contract_failed),
+    do:
+      "Review the rejection comment, then rerun after the agent emits a resolving action such as handoff, block_issue, submit_review, approve_issue, or swarm_worker_complete."
 
   defp category_hint(:no_output), do: "Check the CLI logs and wrapper stdout/stderr."
 
@@ -435,6 +566,31 @@ defmodule Cympho.Adapters.Error do
 
   defp contains_any?(text, needles), do: Enum.any?(needles, &String.contains?(text, &1))
 
+  defp runtime_blocked_text?(text) do
+    contains_any?(text, [
+      "unable to proceed",
+      "can't proceed",
+      "cannot proceed",
+      "i need approval",
+      "need user approval",
+      "requires user approval",
+      "approval is required",
+      "commands are being blocked",
+      "blocked by permission",
+      "blocked by permissions",
+      "permission settings"
+    ]) and
+      contains_any?(text, [
+        "approval",
+        "blocked",
+        "command",
+        "permission",
+        "permissions",
+        "not allowed",
+        "not permitted"
+      ])
+  end
+
   defp reason_to_string(nil), do: ""
   defp reason_to_string(reason) when is_binary(reason), do: reason
   defp reason_to_string(reason) when is_atom(reason), do: Atom.to_string(reason)
@@ -489,8 +645,13 @@ defmodule Cympho.Adapters.Error do
         :missing_binary,
         :missing_credentials,
         :auth_failed,
+        :quota_exceeded,
+        :rate_limited,
+        :provider_unavailable,
         :timeout,
-        :malformed_output
+        :runtime_blocked,
+        :malformed_output,
+        :action_contract_failed
       ]
 
   defp actionable_log_error?(_), do: false

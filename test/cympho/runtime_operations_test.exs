@@ -661,6 +661,132 @@ defmodule Cympho.RuntimeOperationsTest do
              )
     end
 
+    test "prioritizes a filtered swarm CTO gate over unrelated CEO launch candidates" do
+      {:ok, company} =
+        Companies.create_company(%{name: "Filtered Swarm Ops Co", slug: unique_slug()})
+
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "Filtered Swarm CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          company_id: company.id
+        })
+
+      {:ok, _cto} =
+        Agents.create_agent(%{
+          name: "Filtered Swarm CTO",
+          role: :cto,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          company_id: company.id
+        })
+
+      {:ok, parent_issue} =
+        Issues.create_issue(%{
+          title: "Filtered swarm delivery",
+          description: "Goal: verify CTO synthesis is the next visible handoff.",
+          status: :todo,
+          priority: :high,
+          assigned_role: "ceo",
+          company_id: company.id,
+          assignee_id: ceo.id,
+          swarm: %{
+            "enabled" => "true",
+            "agent_count" => "1",
+            "mix_rows" => %{
+              "0" => %{
+                "enabled" => "true",
+                "harness" => "process",
+                "model" => "custom",
+                "reasoning_effort" => "medium"
+              }
+            }
+          }
+        })
+
+      children =
+        Repo.all(
+          from i in Cympho.Issues.Issue,
+            where: i.parent_id == ^parent_issue.id
+        )
+
+      worker_issues = Enum.filter(children, &(&1.origin_type == "swarm_worker"))
+      [cto_issue] = Enum.filter(children, &(&1.origin_type == "swarm_cto_review"))
+
+      for worker_issue <- worker_issues do
+        assert {:ok, _worker_issue} = Issues.update_issue(worker_issue, %{status: :done})
+      end
+
+      assert {:ok, _cto_issue} = Issues.update_issue(cto_issue, %{status: :todo})
+
+      {:ok, _unrelated_ceo_issue} =
+        Issues.create_issue(%{
+          title: "Unrelated CEO launch candidate",
+          description: "Goal: prove filtered swarm work wins this page.",
+          status: :todo,
+          priority: :critical,
+          assigned_role: "ceo",
+          company_id: company.id,
+          assignee_id: ceo.id
+        })
+
+      {:ok, signoff_issue} =
+        Issues.create_issue(%{
+          title: "Unrelated owner signoff",
+          status: :in_progress,
+          priority: :critical,
+          assigned_role: "ceo",
+          company_id: company.id,
+          assignee_id: ceo.id
+        })
+
+      Repo.insert!(%Run{
+        company_id: company.id,
+        agent_id: ceo.id,
+        issue_id: signoff_issue.id,
+        adapter: "process",
+        status: "completed"
+      })
+
+      assert {:ok, _comment} =
+               Comments.create_comment(%{
+                 body:
+                   "[owner_update] What happened: CEO verified an unrelated business outcome. Business status: ready for owner signoff. Current state: waiting for owner verification. Next decision: accept and close. Owner decision needed: verify closure.",
+                 author_type: "agent",
+                 author_id: ceo.id,
+                 issue_id: signoff_issue.id
+               })
+
+      assert {:ok, _result} =
+               AgentActions.execute(signoff_issue, ceo, [
+                 %{
+                   "type" => "block_issue",
+                   "reason" =>
+                     "[blocked] What happened: CEO is handing this back for owner verification. Blocker: owner must verify the CEO owner update before closure. Impact: no agent work remains. Next decision: owner accepts or reopens."
+                 }
+               ])
+
+      snapshot = RuntimeOperations.snapshot(company.id, parent_issue_id: parent_issue.id)
+
+      assert snapshot.owner_signoffs.count == 1
+      assert snapshot.delegated_work.count == 1
+      assert snapshot.delegated_work.swarm_worker_count == 0
+      assert snapshot.delegated_work.swarm_cto_count == 1
+      assert snapshot.delegated_work.summary =~ "1 CTO synthesis gate"
+      assert snapshot.launch_plan.label == "Run CTO synthesis"
+      assert snapshot.launch_plan.target_label == "Open CTO gate"
+      assert List.first(snapshot.next_actions).title == "Run CTO synthesis"
+
+      assert Enum.any?(
+               snapshot.next_actions,
+               &(&1.title == "Run CTO synthesis" and &1.target_label == "Open CTO gate")
+             )
+    end
+
     test "summarizes recent CEO cympho-action outcomes" do
       {:ok, company} =
         Companies.create_company(%{name: "CEO Outcome Co", slug: unique_slug()})
@@ -1511,7 +1637,7 @@ defmodule Cympho.RuntimeOperationsTest do
              )
     end
 
-    test "recovers stale checked-out issues by releasing them to todo" do
+    test "recovers stale checked-out issues by clearing locks without unassigning" do
       {:ok, company} =
         Companies.create_company(%{name: "Recover Checkout Co", slug: unique_slug()})
 
@@ -1545,7 +1671,7 @@ defmodule Cympho.RuntimeOperationsTest do
 
       assert {:ok, released} = Issues.get_issue(issue.id)
       assert released.status == :todo
-      assert is_nil(released.assignee_id)
+      assert released.assignee_id == agent.id
       assert is_nil(released.checked_out_at)
     end
 

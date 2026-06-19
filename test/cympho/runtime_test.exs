@@ -57,14 +57,27 @@ defmodule Cympho.RuntimeTest do
   end
 
   test "preflight returns adapter, cwd, and runtime context", %{agent: agent, issue: issue} do
-    assert {:ok, %RuntimeContext{} = context} = Runtime.preflight(issue, agent)
+    run_id = Ecto.UUID.generate()
+
+    assert {:ok, %RuntimeContext{} = context} = Runtime.preflight(issue, agent, run_id: run_id)
 
     assert context.issue_id == issue.id
     assert context.agent_id == agent.id
+    assert context.run_id == run_id
     assert context.adapter == Cympho.Adapters.ProcessAdapter
     assert File.dir?(context.cwd)
     assert context.adapter_config["cwd"] == context.cwd
+    assert context.adapter_config["workspace_path"] == context.cwd
     assert context.metadata["workspace_source"] == "issue_workspace"
+
+    assert context.env["CYMPHO_RUN_ID"] == run_id
+    assert context.env["CYMPHO_ISSUE_ID"] == issue.id
+    assert context.env["CYMPHO_AGENT_ID"] == agent.id
+    assert context.env["CYMPHO_COMPANY_ID"] == issue.company_id
+    assert context.env["CYMPHO_WORKSPACE"] == context.cwd
+    assert context.env["AGENT_HOME"] == context.cwd
+    assert context.adapter_config["env"]["CYMPHO_RUN_ID"] == run_id
+    assert context.adapter_config["env"]["CYMPHO_WORKSPACE"] == context.cwd
   end
 
   test "dispatch preflight blocks repo delivery on non-repo runtimes", %{
@@ -195,6 +208,35 @@ defmodule Cympho.RuntimeTest do
 
     assert context.adapter_config["model"] == "qwen3.6-flash"
     assert context.adapter_config["env"]["DASHSCOPE_API_KEY"] == "dashscope-test-key"
+  end
+
+  test "preflight blocks clear adapter and model mismatches", %{
+    company: company,
+    issue: issue
+  } do
+    {:ok, ceo} =
+      Agents.create_agent(%{
+        company_id: company.id,
+        name: "Mismatched Runtime CEO",
+        role: :ceo,
+        status: :idle,
+        adapter: :openai_chat,
+        config: %{
+          "api_key" => "sk-test",
+          "endpoint" => "https://api.openai.com/v1",
+          "model" => "claude-sonnet-4-6"
+        }
+      })
+
+    {:ok, issue} =
+      Issues.update_issue(issue, %{
+        assigned_role: "ceo",
+        assignee_id: ceo.id
+      })
+
+    assert {:error, {:adapter_model_mismatch, message}} = Runtime.preflight(issue, ceo)
+    assert message =~ "OpenAI chat endpoint"
+    assert message =~ "claude-sonnet-4-6"
   end
 
   test "preflight rejects configured workspaces whose cwd is missing", %{

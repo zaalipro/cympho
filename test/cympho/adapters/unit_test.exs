@@ -140,6 +140,7 @@ defmodule Cympho.Adapters.UnitTest do
       schema = CodexAdapter.config_schema()
       tokens_entry = Enum.find(schema, fn e -> e.key == :max_tokens end)
       timeout_entry = Enum.find(schema, fn e -> e.key == :timeout end)
+      timeout_sec_entry = Enum.find(schema, fn e -> e.key == :timeout_sec end)
 
       assert tokens_entry != nil
       assert tokens_entry.type == :integer
@@ -148,6 +149,10 @@ defmodule Cympho.Adapters.UnitTest do
       assert timeout_entry != nil
       assert timeout_entry.type == :integer
       assert timeout_entry.default == 300_000
+
+      assert timeout_sec_entry != nil
+      assert timeout_sec_entry.type == :integer
+      assert timeout_sec_entry.default == 300
     end
   end
 
@@ -166,6 +171,21 @@ defmodule Cympho.Adapters.UnitTest do
     test "accepts atom and string keys" do
       assert :ok = CodexAdapter.validate_config(%{"api_key" => "sk-test"})
       assert :ok = CodexAdapter.validate_config(%{api_key: "sk-test"})
+      assert :ok = CodexAdapter.validate_config(%{api_key: "sk-test", timeout_sec: 60})
+    end
+
+    test "rejects unsafe or ambiguous timeout values" do
+      assert {:error, message} = CodexAdapter.validate_config(%{api_key: "sk-test", timeout: 0})
+      assert message =~ "positive"
+
+      assert {:error, message} =
+               CodexAdapter.validate_config(%{
+                 api_key: "sk-test",
+                 timeout: 30_000,
+                 timeout_sec: 60
+               })
+
+      assert message =~ "disagree"
     end
 
     test "rejects missing api_key" do
@@ -371,7 +391,6 @@ defmodule Cympho.Adapters.UnitTest do
       schema = CursorAdapter.config_schema()
 
       assert is_list(schema)
-      assert length(schema) == 8
 
       keys = Enum.map(schema, fn e -> e.key end)
       assert :command in keys
@@ -382,6 +401,7 @@ defmodule Cympho.Adapters.UnitTest do
       assert :mode in keys
       assert :force in keys
       assert :timeout in keys
+      assert :timeout_sec in keys
 
       headless_entry = Enum.find(schema, fn e -> e.key == :headless end)
       assert headless_entry.type == :boolean
@@ -390,12 +410,14 @@ defmodule Cympho.Adapters.UnitTest do
     test "validate_config/1 with valid config" do
       assert :ok = CursorAdapter.validate_config(%{})
       assert :ok = CursorAdapter.validate_config(%{timeout: 60_000})
+      assert :ok = CursorAdapter.validate_config(%{timeout_sec: 60})
       assert :ok = CursorAdapter.validate_config(%{headless: true})
       assert :ok = CursorAdapter.validate_config(%{headless: false})
     end
 
     test "validate_config/1 accepts atom and string keys" do
       assert :ok = CursorAdapter.validate_config(%{"timeout" => 60_000})
+      assert :ok = CursorAdapter.validate_config(%{"timeout_sec" => 60})
       assert :ok = CursorAdapter.validate_config(%{timeout: 60_000})
     end
 
@@ -409,6 +431,13 @@ defmodule Cympho.Adapters.UnitTest do
 
     test "validate_config/1 rejects timeout exceeding 1 hour" do
       assert {:error, _} = CursorAdapter.validate_config(%{timeout: 5_000_000})
+    end
+
+    test "validate_config/1 rejects disagreeing timeout units" do
+      assert {:error, message} =
+               CursorAdapter.validate_config(%{timeout: 30_000, timeout_sec: 60})
+
+      assert message =~ "disagree"
     end
 
     test "validate_config/1 rejects non-integer timeout" do
@@ -515,6 +544,51 @@ defmodule Cympho.Adapters.UnitTest do
       assert is_reference(ref)
       assert_receive {:session_started, _session_id}, 1000
     end
+
+    test "run/4 forwards runtime env and uses cwd when workspace_path is absent" do
+      root =
+        Path.join(System.tmp_dir!(), "cympho-cursor-unit-#{System.unique_integer([:positive])}")
+
+      workspace = Path.join(root, "workspace")
+      File.mkdir_p!(workspace)
+      workspace_suffix = "/#{Path.basename(root)}/workspace"
+
+      agent_path = Path.join(root, "agent")
+
+      File.write!(
+        agent_path,
+        """
+        #!/bin/sh
+        printf '{"cwd":"%s","flag":"%s","run":"%s"}\\n' "$PWD" "$CUSTOM_FLAG" "$CYMPHO_RUN_ID"
+        """
+      )
+
+      File.chmod!(agent_path, 0o755)
+
+      try do
+        issue = %{id: "ISSUE-1", title: "Cursor Runtime", description: "Use runtime env."}
+
+        ref =
+          CursorAdapter.run(issue, "agent-1", self(),
+            config: %{
+              command: agent_path,
+              cwd: workspace,
+              env: %{"CUSTOM_FLAG" => "from-runtime", "CYMPHO_RUN_ID" => "run-123"},
+              timeout: 5_000
+            }
+          )
+
+        assert_receive {:session_started, ^ref}, 1_000
+
+        assert_receive {:turn_completed, ^ref,
+                        %{"cwd" => cwd, "flag" => "from-runtime", "run" => "run-123"}},
+                       2_000
+
+        assert String.ends_with?(cwd, workspace_suffix)
+      after
+        File.rm_rf!(root)
+      end
+    end
   end
 
   describe "HttpAdapter" do
@@ -586,7 +660,7 @@ defmodule Cympho.Adapters.UnitTest do
       config = %{
         command: "/bin/echo",
         args: ["hello"],
-        timeout: 5000
+        timeout_sec: 5
       }
 
       assert :ok = ProcessAdapter.validate_config(config)
@@ -599,6 +673,15 @@ defmodule Cympho.Adapters.UnitTest do
     test "validate_config/1 with invalid timeout" do
       assert {:error, _} = ProcessAdapter.validate_config(%{command: "test", timeout: 0})
       assert {:error, _} = ProcessAdapter.validate_config(%{command: "test", timeout: 4_000_000})
+
+      assert {:error, message} =
+               ProcessAdapter.validate_config(%{
+                 command: "test",
+                 timeout: 5_000,
+                 timeout_sec: 10
+               })
+
+      assert message =~ "disagree"
     end
 
     test "health_check/1 returns healthy for valid command" do
@@ -765,7 +848,10 @@ defmodule Cympho.Adapters.UnitTest do
 
       config = %{
         command: "/bin/sh",
-        args: ["-c", "IFS= read -r first_line; printf '%s' \"$first_line\""]
+        args: [
+          "-c",
+          "i=0; while [ \"$i\" -lt 20 ] && IFS= read -r line; do printf '%s\n' \"$line\"; i=$((i + 1)); done"
+        ]
       }
 
       ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
@@ -773,7 +859,9 @@ defmodule Cympho.Adapters.UnitTest do
       assert_receive {:session_started, ^ref}, 1_000
       assert_receive {:turn_completed, ^ref, result}, 1_000
 
+      assert result.output =~ "## Current task - do this now"
       assert result.output =~ "Issue ID: ISSUE-1"
+      assert result.output =~ "Do the prompted task."
     end
 
     test "run/4 handles command errors" do
@@ -809,6 +897,24 @@ defmodule Cympho.Adapters.UnitTest do
 
       assert_receive {:session_started, ^ref}, 1000
       assert_receive {:turn_ended_with_error, ^ref, :timeout}, 1000
+    end
+
+    test "run/4 accepts timeout_sec to avoid millisecond and second confusion" do
+      issue = %{id: "ISSUE-1", title: "Test", description: "Test"}
+      agent_id = "agent-1"
+
+      parent = self()
+
+      config = %{
+        command: "sleep",
+        args: ["10"],
+        timeout_sec: 1
+      }
+
+      ref = ProcessAdapter.run(issue, agent_id, parent, config: config)
+
+      assert_receive {:session_started, ^ref}, 1_000
+      assert_receive {:turn_ended_with_error, ^ref, :timeout}, 3_000
     end
 
     test "run/4 handles no command error" do

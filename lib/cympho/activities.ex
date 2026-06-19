@@ -5,6 +5,8 @@ defmodule Cympho.Activities do
   alias Cympho.Issues.Issue
 
   @default_list_limit 100
+  @default_company_timeline_limit 50
+  @max_company_timeline_limit 200
 
   def list_activities(issue_id, opts \\ []) do
     limit = Keyword.get(opts, :limit, @default_list_limit)
@@ -17,8 +19,8 @@ defmodule Cympho.Activities do
   end
 
   def list_company_activities(company_id, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 50)
-    offset = Keyword.get(opts, :offset, 0)
+    limit = opts |> Keyword.get(:limit, @default_company_timeline_limit) |> clamp_limit()
+    offset = opts |> Keyword.get(:offset, 0) |> max(0)
 
     query =
       company_activities_base_query(company_id, opts)
@@ -94,6 +96,13 @@ defmodule Cympho.Activities do
   defp maybe_where_actor_type(query, actor_type),
     do: where(query, [a], a.actor_type == ^actor_type)
 
+  defp maybe_where_since(query, nil), do: query
+
+  defp maybe_where_since(query, %DateTime{} = since) do
+    since = DateTime.truncate(since, :second)
+    where(query, [a], a.inserted_at > ^since)
+  end
+
   defp company_activities_base_query(company_id, opts) do
     from(a in Activity,
       join: i in Issue,
@@ -102,7 +111,13 @@ defmodule Cympho.Activities do
     )
     |> maybe_where_action(Keyword.get(opts, :action))
     |> maybe_where_actor_type(Keyword.get(opts, :actor_type))
+    |> maybe_where_since(Keyword.get(opts, :since))
   end
+
+  defp clamp_limit(limit) when is_integer(limit),
+    do: limit |> max(1) |> min(@max_company_timeline_limit)
+
+  defp clamp_limit(_limit), do: @default_company_timeline_limit
 
   defp preload_page_issues(%Cympho.Pagination.Page{} = page) do
     %{page | entries: Repo.preload(page.entries, [:issue])}

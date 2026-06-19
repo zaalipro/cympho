@@ -3,7 +3,11 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
   # sandbox connection without contention with other tests.
   use Cympho.DataCase, async: false
 
+  alias Cympho.Agents
+  alias Cympho.HeartbeatEngine
+  alias Cympho.HeartbeatEngine.Run
   alias Cympho.HeartbeatEngine.Watchdog
+  alias Cympho.Issues
 
   setup do
     pid =
@@ -33,6 +37,36 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
     test "triggers a check without error" do
       assert :ok = Watchdog.check_now()
       Process.sleep(50)
+    end
+
+    test "cancels never-started orphaned runs instead of failing them" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Watchdog Orphan Agent",
+          role: :engineer,
+          status: :idle
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Watchdog orphan run",
+          status: :todo,
+          assignee_id: agent.id
+        })
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          adapter: "process"
+        })
+
+      assert :ok = Watchdog.check_now()
+      Process.sleep(100)
+
+      reloaded = Repo.get!(Run, run.id)
+      assert reloaded.status == "cancelled"
+      assert is_nil(reloaded.error_reason)
     end
   end
 

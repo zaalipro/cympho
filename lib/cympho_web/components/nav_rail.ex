@@ -4,13 +4,13 @@ defmodule CymphoWeb.Components.NavRail do
 
   Sections:
     1. Primary action  — New issue
-    2. Top-level pins  — Dashboard, Board, Inbox (with unread badge)
+    2. Top-level pins  — Dashboard, Board, Inbox / Approvals (with badges)
     3. WORK            — Issues, Goals, Routines
     4. PROJECTS        — color dot · name · open-issue count, capped at 6
     5. AGENTS          — role icon · name · live status dot, capped at 8
 
     Settings (gear) pins to the top group. The "More" overflow (Org /
-    Approvals / Costs / Activity / Workspaces / Plugins / Skills / Tool
+    Costs / Activity / Workspaces / Plugins / Skills / Tool
     traces) lives in the user menu at the bottom of the sidebar — see
     `UserMenu`.
   """
@@ -27,6 +27,7 @@ defmodule CymphoWeb.Components.NavRail do
   attr :projects, :list, default: []
   attr :agents, :list, default: []
   attr :inbox_count, :integer, default: 0
+  attr :approval_count, :integer, default: 0
   attr :current_company, :any, default: nil
   attr :runtime_controls_allowed, :boolean, default: false
   attr :rest, :global
@@ -57,6 +58,10 @@ defmodule CymphoWeb.Components.NavRail do
 
       <div :if={@current_company && @runtime_controls_allowed} class="h-1.5"></div>
 
+      <.ui_mode_switcher />
+
+      <div class="h-1.5"></div>
+
       <.nav_link
         to={~p"/dashboard"}
         label="Dashboard"
@@ -75,6 +80,14 @@ defmodule CymphoWeb.Components.NavRail do
         icon="hero-inbox-mini"
         current_path={@current_path}
         badge={@inbox_count}
+      />
+      <.nav_link
+        to={~p"/approvals?status=pending"}
+        match="/approvals"
+        label="Approvals"
+        icon="hero-shield-check-mini"
+        current_path={@current_path}
+        badge={@approval_count}
       />
       <.nav_link
         to={~p"/reviews"}
@@ -176,13 +189,37 @@ defmodule CymphoWeb.Components.NavRail do
           "rounded-full border px-2 py-0.5 text-[10px] font-590",
           if(company_paused?(@current_company),
             do: "border-amber-500/30 bg-amber-500/10 text-amber-300",
-            else: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+            else:
+              if(company_low_power?(@current_company),
+                do: "border-sky-500/30 bg-sky-500/10 text-sky-300",
+                else: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+              )
           )
         ]}>
-          {if company_paused?(@current_company), do: "Paused", else: "Live"}
+          {runtime_status_label(@current_company)}
         </span>
       </div>
-      <div class="grid grid-cols-2 gap-1.5">
+      <div class={[
+        "grid gap-1.5",
+        if(company_paused?(@current_company), do: "grid-cols-2", else: "grid-cols-3")
+      ]}>
+        <.runtime_button
+          :if={!company_paused?(@current_company) && !company_low_power?(@current_company)}
+          action={~p"/runtime-control/low-power"}
+          icon="hero-moon-mini"
+          label="Low"
+          tone="neutral"
+          current_path={@current_path}
+          confirm="Switch runtime to low power? Only high and critical queued work will auto-dispatch."
+        />
+        <.runtime_button
+          :if={!company_paused?(@current_company) && company_low_power?(@current_company)}
+          action={~p"/runtime-control/resume"}
+          icon="hero-bolt-mini"
+          label="Full"
+          tone="neutral"
+          current_path={@current_path}
+        />
         <.runtime_button
           :if={!company_paused?(@current_company)}
           action={~p"/runtime-control/pause"}
@@ -190,6 +227,7 @@ defmodule CymphoWeb.Components.NavRail do
           label="Pause"
           tone="neutral"
           current_path={@current_path}
+          confirm="Pause runtime for this company? This releases active work but preserves queued wakes."
         />
         <.runtime_button
           :if={company_paused?(@current_company)}
@@ -205,6 +243,7 @@ defmodule CymphoWeb.Components.NavRail do
           label="Stop"
           tone="danger"
           current_path={@current_path}
+          confirm="Stop runtime for this company? This releases active work and cancels queued wakes."
         />
       </div>
     </div>
@@ -216,6 +255,7 @@ defmodule CymphoWeb.Components.NavRail do
   attr :label, :string, required: true
   attr :tone, :string, default: "neutral"
   attr :current_path, :string, required: true
+  attr :confirm, :string, default: nil
 
   defp runtime_button(assigns) do
     ~H"""
@@ -224,6 +264,7 @@ defmodule CymphoWeb.Components.NavRail do
       <input type="hidden" name="return_to" value={@current_path} />
       <button
         type="submit"
+        data-confirm={@confirm}
         class={[
           "inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border px-2 text-[12px] font-590 transition-colors",
           @tone == "danger" &&
@@ -241,6 +282,38 @@ defmodule CymphoWeb.Components.NavRail do
 
   defp company_paused?(%{status: "paused"}), do: true
   defp company_paused?(_company), do: false
+
+  defp company_low_power?(%{governance_config: %{"runtime_mode" => "low_power"}}), do: true
+  defp company_low_power?(_company), do: false
+
+  defp runtime_status_label(company) do
+    cond do
+      company_paused?(company) -> "Paused"
+      company_low_power?(company) -> "Low"
+      true -> "Live"
+    end
+  end
+
+  defp ui_mode_switcher(assigns) do
+    ~H"""
+    <button
+      type="button"
+      data-ui-mode-toggle
+      title="Toggle simple and advanced view with U"
+      aria-label="Toggle simple and advanced view with U"
+      aria-pressed="false"
+      class="ui-mode-toggle flex w-full items-center gap-2.5 rounded-xl border border-border bg-surface-2/75 px-3 py-2 text-[13px] font-590 text-text-secondary shadow-card transition-colors hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
+    >
+      <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/10 text-white">
+        <span data-ui-mode-icon class="hero-squares-2x2-mini h-3.5 w-3.5"></span>
+      </span>
+      <span class="min-w-0 flex-1 text-left">
+        <span data-ui-mode-label>Simple</span>
+      </span>
+      <span class="hero-chevron-up-down-mini h-3.5 w-3.5 shrink-0 text-text-quaternary"></span>
+    </button>
+    """
+  end
 
   ## ── Sections ───────────────────────────────────────────────────
 
@@ -376,11 +449,20 @@ defmodule CymphoWeb.Components.NavRail do
       <span
         :if={@badge && @badge > 0}
         class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-brand text-on-primary text-[10px] font-590"
+        data-testid={"nav-badge-#{badge_key(@label)}"}
       >
         {@badge}
       </span>
     </.link>
     """
+  end
+
+  defp badge_key(label) do
+    label
+    |> to_string()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/, "-")
+    |> String.trim("-")
   end
 
   ## ── Project row ────────────────────────────────────────────────

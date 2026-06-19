@@ -16,11 +16,14 @@ defmodule Cympho.HeartbeatEngine do
   alias Cympho.Repo
   alias Cympho.Adapters.Error, as: AdapterError
   alias Cympho.HeartbeatEngine.Run
-  alias Cympho.{Agents, Workspace}
+  alias Cympho.{Agents, Issues, Workspace}
+  alias Cympho.Issues.Issue
   require Logger
 
   @default_budget_allocation Decimal.new("5.00")
   @stale_threshold_minutes 15
+  @default_issue_run_limit 50
+  @max_issue_run_limit 200
 
   # ---------------------------------------------------------------------------
   # Run lifecycle
@@ -64,6 +67,7 @@ defmodule Cympho.HeartbeatEngine do
     |> Run.complete_changeset(result_attrs)
     |> Repo.update()
     |> tap_ok(fn updated ->
+      release_terminal_run_checkout(updated)
       log_audit(updated, "run_completed")
       record_cost_event(updated)
       CymphoWeb.Events.broadcast_run_status(updated, :run_completed)
@@ -89,6 +93,7 @@ defmodule Cympho.HeartbeatEngine do
     |> Run.fail_changeset(attrs)
     |> Repo.update()
     |> tap_ok(fn updated ->
+      release_terminal_run_checkout(updated)
       log_audit(updated, "run_failed")
       CymphoWeb.Events.broadcast_run_status(updated, :run_failed)
     end)
@@ -119,12 +124,37 @@ defmodule Cympho.HeartbeatEngine do
     |> change(%{status: "cancelled", completed_at: now, last_heartbeat_at: now})
     |> Repo.update()
     |> tap_ok(fn updated ->
+      release_terminal_run_checkout(updated)
       log_audit(updated, "run_cancelled")
       CymphoWeb.Events.broadcast_run_status(updated, :run_cancelled)
     end)
   end
 
   def cancel_run(%Run{status: status}), do: {:error, {:invalid_status, status}}
+
+  @doc """
+  Cancels every pending, queued, or running run for one issue.
+
+  Terminal issue transitions call this proactively so old queued runtime records
+  cannot start after the issue has already closed.
+  """
+  @spec cancel_active_runs_for_issue(String.t() | nil, String.t()) :: {:ok, non_neg_integer()}
+  def cancel_active_runs_for_issue(issue_id, reason \\ "Issue closed")
+
+  def cancel_active_runs_for_issue(issue_id, _reason) when is_binary(issue_id) do
+    Run
+    |> where([r], r.issue_id == ^issue_id and r.status in ["pending", "queued", "running"])
+    |> Repo.all()
+    |> Enum.reduce({:ok, 0}, fn
+      run, {:ok, count} ->
+        case cancel_run(run) do
+          {:ok, _cancelled} -> {:ok, count + 1}
+          {:error, _reason} -> {:ok, count}
+        end
+    end)
+  end
+
+  def cancel_active_runs_for_issue(_issue_id, _reason), do: {:ok, 0}
 
   # ---------------------------------------------------------------------------
   # Query helpers
@@ -140,6 +170,29 @@ defmodule Cympho.HeartbeatEngine do
       run -> {:ok, run}
     end
   end
+
+  @doc """
+  Merges structured metadata into a run without changing its lifecycle state.
+  """
+  @spec merge_run_metadata(String.t() | nil, map()) ::
+          {:ok, Run.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def merge_run_metadata(nil, _metadata), do: {:error, :not_found}
+
+  def merge_run_metadata(run_id, metadata) when is_binary(run_id) and is_map(metadata) do
+    case get_run(run_id) do
+      {:ok, %Run{} = run} ->
+        merged = deep_merge(run.run_metadata || %{}, stringify_metadata(metadata))
+
+        run
+        |> change(%{run_metadata: merged})
+        |> Repo.update()
+
+      {:error, :not_found} ->
+        {:error, :not_found}
+    end
+  end
+
+  def merge_run_metadata(_run_id, _metadata), do: {:error, :not_found}
 
   @doc """
   Gets the active (running) run for an agent, if any.
@@ -172,15 +225,60 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   @doc """
-  Lists all runs for an issue.
+  Lists recent runs for an issue, newest first.
+
+  Issue pages intentionally use a bounded default so long-lived issues do not
+  replay unbounded run history into LiveView render state.
   """
-  @spec list_runs_for_issue(String.t()) :: [Run.t()]
-  def list_runs_for_issue(issue_id) do
+  @spec list_runs_for_issue(String.t(), keyword()) :: [Run.t()]
+  def list_runs_for_issue(issue_id, opts \\ []) do
+    limit = opts |> Keyword.get(:limit, @default_issue_run_limit) |> normalize_issue_run_limit()
+    offset = opts |> Keyword.get(:offset, 0) |> normalize_nonnegative_integer()
+
     Run
     |> where(issue_id: ^issue_id)
     |> order_by([r], desc: r.inserted_at)
+    |> limit(^limit)
+    |> offset(^offset)
     |> Repo.all()
   end
+
+  @spec count_runs_for_issue(String.t()) :: non_neg_integer()
+  def count_runs_for_issue(issue_id) do
+    Run
+    |> where(issue_id: ^issue_id)
+    |> select([r], count(r.id))
+    |> Repo.one()
+  end
+
+  @spec issue_run_history_limit() :: pos_integer()
+  def issue_run_history_limit, do: @default_issue_run_limit
+
+  defp normalize_issue_run_limit(limit) when is_integer(limit) do
+    limit
+    |> max(1)
+    |> min(@max_issue_run_limit)
+  end
+
+  defp normalize_issue_run_limit(limit) when is_binary(limit) do
+    case Integer.parse(limit) do
+      {parsed, ""} -> normalize_issue_run_limit(parsed)
+      _ -> @default_issue_run_limit
+    end
+  end
+
+  defp normalize_issue_run_limit(_), do: @default_issue_run_limit
+
+  defp normalize_nonnegative_integer(value) when is_integer(value), do: max(value, 0)
+
+  defp normalize_nonnegative_integer(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {parsed, ""} -> normalize_nonnegative_integer(parsed)
+      _ -> 0
+    end
+  end
+
+  defp normalize_nonnegative_integer(_), do: 0
 
   # ---------------------------------------------------------------------------
   # Budget checks
@@ -217,6 +315,37 @@ defmodule Cympho.HeartbeatEngine do
       error ->
         {:error, error}
     end
+  end
+
+  defp release_terminal_run_checkout(%Run{issue_id: nil}), do: :ok
+
+  defp release_terminal_run_checkout(%Run{} = run) do
+    with {:ok, %Issue{} = issue} <- Issues.get_issue(run.issue_id),
+         true <- terminal_run_holds_checkout?(run, issue) do
+      target_status = if issue.status == :in_progress, do: :todo, else: issue.status
+
+      case Issues.clear_checkout_lock(issue, target_status) do
+        {:ok, _issue} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "HeartbeatEngine: failed to clear checkout lock for terminal run #{run.id}: #{inspect(reason)}"
+          )
+      end
+    else
+      _ -> :ok
+    end
+  end
+
+  defp terminal_run_holds_checkout?(%Run{} = run, %Issue{} = issue) do
+    same_run? = issue.checkout_run_id == run.id
+
+    legacy_checkout? =
+      is_nil(issue.checkout_run_id) and issue.assignee_id == run.agent_id and
+        issue.status == :in_progress and not is_nil(issue.checked_out_at)
+
+    same_run? or legacy_checkout?
   end
 
   @doc """
@@ -299,6 +428,7 @@ defmodule Cympho.HeartbeatEngine do
     })
     |> Repo.update()
     |> tap_ok(fn updated ->
+      release_terminal_run_checkout(updated)
       log_audit(updated, "run_recovered_stale")
     end)
   end
@@ -419,4 +549,21 @@ defmodule Cympho.HeartbeatEngine do
   defp tap_ok({:error, _} = err, _fun), do: err
 
   defp change(%Run{} = run, attrs), do: Ecto.Changeset.change(run, attrs)
+
+  defp stringify_metadata(%{} = metadata) do
+    metadata
+    |> Enum.map(fn {key, value} -> {to_string(key), stringify_metadata(value)} end)
+    |> Map.new()
+  end
+
+  defp stringify_metadata(list) when is_list(list), do: Enum.map(list, &stringify_metadata/1)
+  defp stringify_metadata(value), do: value
+
+  defp deep_merge(left, right) when is_map(left) and is_map(right) do
+    Map.merge(left, right, fn _key, left_value, right_value ->
+      deep_merge(left_value, right_value)
+    end)
+  end
+
+  defp deep_merge(_left, right), do: right
 end

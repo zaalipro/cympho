@@ -54,7 +54,6 @@
       </:actions>
     </.header>
 
-<!-- Status Badge -->
     <div class="mb-6">
       <% {status_class, status_label} = status_badge(@budget) %>
       <span class={"inline-flex items-center px-3 py-1 rounded-lg text-sm font-510 border #{status_class}"}>
@@ -62,7 +61,6 @@
       </span>
     </div>
 
-<!-- Budget Overview Cards -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
       <div class="bg-surface border border-border rounded-xl p-6">
         <div class="text-xs font-510 text-text-secondary uppercase tracking-wider mb-2">
@@ -101,7 +99,6 @@
       </div>
     </div>
 
-<!-- Progress Bar -->
     <div class="bg-surface border border-border rounded-xl p-6 mb-8">
       <div class="flex items-center justify-between mb-2">
         <h3 class="font-serif text-sm font-510 text-text-primary">Budget Utilization</h3>
@@ -116,7 +113,6 @@
       </div>
     </div>
 
-<!-- Budget Details -->
     <div class="bg-surface border border-border rounded-xl overflow-hidden">
       <div class="px-6 py-4 border-b border-border">
         <h2 class="font-serif text-lg font-510 text-text-primary">Budget Details</h2>

@@ -10,9 +10,12 @@ defmodule Cympho.RuntimePreflight do
   alias Cympho.Agents
   alias Cympho.Agents.Agent
   alias Cympho.Agents.RuntimeEnv
+  alias Cympho.Adapters.ModelCompatibility
   alias Cympho.DeliveryBriefReadiness
   alias Cympho.Issues.Issue
   alias Cympho.Secrets
+  alias Cympho.Workspaces
+  alias Cympho.Workspaces.ProjectWorkspace
 
   @repo_delivery_roles Agent.pr_delivery_roles()
 
@@ -55,6 +58,7 @@ defmodule Cympho.RuntimePreflight do
     items =
       [selected_adapter_item(adapter)] ++
         readiness_items(adapter, runtime) ++
+        model_compatibility_items(adapter, runtime) ++
         [execution_mode_item(autonomy_enabled?)]
 
     status = status_for_items(items, autonomy_enabled?)
@@ -198,6 +202,7 @@ defmodule Cympho.RuntimePreflight do
   defp issue_readiness_items(%Issue{} = issue, %Agent{} = agent, adapter, secret_keys) do
     [
       repo_delivery_runtime_item(issue, agent, adapter, secret_keys),
+      workspace_isolation_item(issue, agent, adapter, secret_keys),
       delivery_brief_item(issue, agent)
     ]
     |> Enum.reject(&is_nil/1)
@@ -219,6 +224,57 @@ defmodule Cympho.RuntimePreflight do
   end
 
   defp repo_delivery_runtime_item(_issue, _agent, _adapter, _secret_keys), do: nil
+
+  defp workspace_isolation_item(%Issue{} = issue, %Agent{role: role} = agent, adapter, secret_keys)
+       when role in @repo_delivery_roles do
+    if adapter_uses_local_workspace?(adapter) and
+         Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(agent, secret_keys: secret_keys) do
+      case shared_project_workspace(issue) do
+        %ProjectWorkspace{} = project_workspace ->
+          item(
+            :attention,
+            "Workspace isolation",
+            "Repo-delivery work would run from shared project workspace #{workspace_label(project_workspace)}. Attach an execution workspace or worktree before parallel file edits so temporary agents do not write into the same checkout.",
+            target_path: project_workspace_path(project_workspace),
+            target_label: "Open workspace"
+          )
+
+        nil ->
+          nil
+      end
+    end
+  end
+
+  defp workspace_isolation_item(_issue, _agent, _adapter, _secret_keys), do: nil
+
+  defp adapter_uses_local_workspace?(adapter),
+    do: normalize_adapter(adapter) in ~w(claude_code codex cursor openclaw process)
+
+  defp shared_project_workspace(%Issue{execution_workspace_id: id}) when is_binary(id), do: nil
+
+  defp shared_project_workspace(%Issue{project_workspace_id: id}) when is_binary(id) do
+    case Workspaces.get_project_workspace(id) do
+      {:ok, %ProjectWorkspace{} = project_workspace} -> project_workspace
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp shared_project_workspace(%Issue{project_id: id}) when is_binary(id),
+    do: Workspaces.primary_project_workspace(id)
+
+  defp shared_project_workspace(_issue), do: nil
+
+  defp workspace_label(%ProjectWorkspace{name: name, cwd: cwd}) do
+    [name, cwd]
+    |> Enum.find(&present?/1)
+    |> case do
+      nil -> "for this project"
+      value -> "`#{value}`"
+    end
+  end
+
+  defp project_workspace_path(%ProjectWorkspace{id: id}) when is_binary(id), do: "/workspaces/#{id}"
+  defp project_workspace_path(_project_workspace), do: "/workspaces"
 
   defp delivery_brief_item(%Issue{} = issue, %Agent{role: role})
        when role in @repo_delivery_roles do
@@ -480,6 +536,28 @@ defmodule Cympho.RuntimePreflight do
         Cympho.Adapters.OpenAIChatAdapter.normalize_chat_url(endpoint)
       )
     ]
+  end
+
+  defp model_compatibility_items(adapter, runtime) do
+    config = %{
+      "model" => runtime.model,
+      "provider" => runtime.provider,
+      "command" => runtime.command,
+      "endpoint" => runtime.endpoint
+    }
+
+    case ModelCompatibility.validate(adapter, config) do
+      :ok ->
+        []
+
+      {:error, message} ->
+        [
+          item(:attention, "Model/harness match", message,
+            target_path: agent_config_path(runtime, "agent-runtime-profile"),
+            target_label: "Fix model"
+          )
+        ]
+    end
   end
 
   defp claude_model_item(%{model: model}) when model in [nil, ""] do

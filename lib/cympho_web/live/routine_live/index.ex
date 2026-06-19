@@ -11,6 +11,7 @@ defmodule CymphoWeb.RoutineLive.Index do
   def mount(_params, _session, socket) do
     socket =
       socket
+      |> assign(:digest_density, "compact")
       |> assign(:infinite_scroll, %{})
       |> assign_routine_overview()
 
@@ -22,12 +23,13 @@ defmodule CymphoWeb.RoutineLive.Index do
     {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
-  defp apply_action(socket, nil, _params), do: apply_action(socket, :index, %{})
+  defp apply_action(socket, nil, params), do: apply_action(socket, :index, params)
 
-  defp apply_action(socket, :index, _params) do
+  defp apply_action(socket, :index, params) do
     socket
     |> assign(:page_title, "Routines")
     |> assign(:routine, nil)
+    |> assign(:digest_density, normalize_digest_density(params["density"]))
   end
 
   defp apply_action(socket, :new, _params) do
@@ -129,6 +131,13 @@ defmodule CymphoWeb.RoutineLive.Index do
 
   defp current_company_id(%{assigns: %{current_company: %{id: id}}}), do: id
   defp current_company_id(_socket), do: nil
+
+  defp routine_index_url("detailed"), do: ~p"/routines?#{%{density: "detailed"}}"
+  defp routine_index_url(_density), do: ~p"/routines"
+
+  defp normalize_digest_density("compact"), do: "compact"
+  defp normalize_digest_density("detailed"), do: "detailed"
+  defp normalize_digest_density(_), do: "compact"
 
   defp build_routine_command(%{metrics: metrics}, routines) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)

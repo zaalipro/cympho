@@ -83,6 +83,28 @@ defmodule Cympho.AuditTrailTest do
 
       assert {:error, %Ecto.Changeset{}} = AuditTrail.record_event(attrs)
     end
+
+    test "records company runtime control events" do
+      company = create_test_company()
+      actor_id = Ecto.UUID.generate()
+
+      for event_type <- ~w(company_runtime_paused company_runtime_resumed company_runtime_stopped) do
+        assert {:ok, %AuditEvent{} = event} =
+                 AuditTrail.record_event(%{
+                   company_id: company.id,
+                   event_type: event_type,
+                   actor_type: "user",
+                   actor_id: actor_id,
+                   resource_type: "company",
+                   resource_id: company.id,
+                   payload: %{"issues_released" => 1}
+                 })
+
+        assert event.event_type == event_type
+        assert event.resource_type == "company"
+        assert event.resource_id == company.id
+      end
+    end
   end
 
   describe "list_company_events/2" do

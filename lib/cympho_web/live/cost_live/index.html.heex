@@ -188,7 +188,13 @@
         </svg>
       </div>
       <div class="text-2xl font-510 text-text-primary">{format_cost(@summary.total_cost)}</div>
-      <div class="text-xs text-text-quaternary mt-1">Last {@days} days</div>
+      <div class="text-xs text-text-quaternary mt-1">
+        <%= if Map.get(@summary, :has_unpriced_usage?) do %>
+          plus unpriced usage
+        <% else %>
+          Last {@days} days
+        <% end %>
+      </div>
     </div>
 
     <div class="bg-surface border border-border rounded-xl p-5">
@@ -247,6 +253,34 @@
       </div>
     </div>
   </div>
+
+  <section
+    :if={Map.get(@summary, :has_unpriced_usage?)}
+    id="unpriced-usage-warning"
+    data-testid="unpriced-usage-warning"
+    class="mb-6 rounded-xl border border-amber-500/25 bg-amber-500/10 p-4"
+  >
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div class="min-w-0">
+        <p class="flex items-center gap-2 text-sm font-590 text-amber-100">
+          <span class="hero-exclamation-triangle-mini h-4 w-4 text-white"></span>
+          Pricing is missing for token usage
+        </p>
+        <p class="mt-1 text-xs leading-5 text-amber-100/80">
+          {format_tokens(@summary.unpriced_tokens)} tokens across {@summary.unpriced_request_count} {pluralize(
+            @summary.unpriced_request_count,
+            "request"
+          )} reported zero cost. Treat the dollar total as incomplete until model pricing or provider-reported cost is configured.
+        </p>
+      </div>
+      <a
+        href="#top-cost-drivers"
+        class="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-amber-500/30 bg-black/15 px-3 py-2 text-xs font-590 text-amber-50 transition hover:bg-amber-500/15"
+      >
+        <span class="hero-chart-bar-mini h-4 w-4"></span> Inspect drivers
+      </a>
+    </div>
+  </section>
   
 <!-- Daily Cost Chart -->
   <div class="bg-surface border border-border rounded-xl p-6 mb-6">

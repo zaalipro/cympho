@@ -3,7 +3,7 @@ defmodule Cympho.Wakes do
   The Wakes context handles agent wake triggers and comment-driven notifications.
 
   Wake dispatch triggers agent heartbeats on relevant events:
-  - Comment on an in_progress issue wakes the assigned agent
+  - Comment on an active working/review issue wakes the assigned agent
   - All blockers done on a blocked issue wakes the assignee
   - All children done on a parent issue wakes the parent assignee
   """
@@ -18,9 +18,11 @@ defmodule Cympho.Wakes do
   alias Cympho.HeartbeatEngine.WakeupQueue
   require Logger
 
+  @comment_wake_body_limit 4_000
+
   @doc """
   Notifies the agent assigned to an issue about a new comment.
-  Wakes the agent if the issue is in :in_progress or :blocked status and has an assignee.
+  Wakes the agent if the issue is in :in_progress or :in_review status and has an assignee.
 
   Takes a Comment struct and:
   1. Checks the issue's status and assignee
@@ -34,35 +36,146 @@ defmodule Cympho.Wakes do
   def notify_comment(%Comment{} = comment) do
     issue = Repo.get!(Issue, comment.issue_id) |> Repo.preload(:assignee)
 
-    cond do
-      issue.status not in [:in_progress, :blocked, :in_review] ->
-        {:error, :issue_not_active}
+    mention_results = notify_mentioned_agents(comment, issue)
 
-      is_nil(issue.assignee_id) ->
-        {:error, :no_assignee}
+    assignee_result =
+      cond do
+        not comment_wake_issue?(issue) ->
+          {:error, :issue_not_active}
 
-      true ->
-        reason = determine_comment_reason(comment, issue)
+        is_nil(issue.assignee_id) ->
+          {:error, :no_assignee}
 
-        do_wake_agent(
-          issue.assignee_id,
-          issue.id,
-          reason,
-          comment.author_type,
-          comment.author_id,
-          %{comment_id: comment.id}
-        )
+        comment.author_type == "agent" and comment.author_id == issue.assignee_id ->
+          {:error, :self_comment_ignored}
+
+        true ->
+          reason = determine_comment_reason(comment, issue)
+
+          do_wake_agent(
+            issue.assignee_id,
+            issue.id,
+            reason,
+            comment.author_type,
+            comment.author_id,
+            comment_wake_metadata(comment)
+          )
+      end
+
+    case assignee_result do
+      {:ok, _wake} = ok -> ok
+      _ -> Enum.find(mention_results, &match?({:ok, _}, &1)) || assignee_result
     end
   end
 
-  defp determine_comment_reason(comment, _issue) do
-    body = comment.body || ""
+  defp notify_mentioned_agents(%Comment{} = comment, %Issue{} = issue) do
+    if mentionable_issue?(issue) do
+      comment
+      |> mentioned_agents(issue)
+      |> Enum.reject(&(comment.author_type == "agent" and comment.author_id == &1.id))
+      |> Enum.reject(&(&1.id == issue.assignee_id))
+      |> Enum.map(fn agent ->
+        do_wake_agent(
+          agent.id,
+          issue.id,
+          "issue_comment_mentioned",
+          comment.author_type,
+          comment.author_id,
+          comment_wake_metadata(comment, %{
+            mentioned_agent_id: agent.id,
+            source: "agent_mention"
+          })
+        )
+      end)
+    else
+      []
+    end
+  end
 
-    if String.contains?(body, "@") do
+  defp mentionable_issue?(%Issue{} = issue), do: comment_wake_issue?(issue)
+
+  defp comment_wake_issue?(%Issue{status: status}),
+    do: status in [:in_progress, :in_review]
+
+  defp determine_comment_reason(%Comment{body: body}, %Issue{assignee: %Agent{} = assignee})
+       when is_binary(body) do
+    if body |> mention_tokens() |> then(&agent_mentioned?(assignee, &1)) do
       "issue_comment_mentioned"
     else
       "issue_commented"
     end
+  end
+
+  defp determine_comment_reason(_comment, _issue), do: "issue_commented"
+
+  defp mentioned_agents(%Comment{body: body}, %Issue{company_id: company_id})
+       when is_binary(body) and is_binary(company_id) do
+    tokens = mention_tokens(body)
+
+    company_id
+    |> Agents.list_agents_by_company()
+    |> Enum.reject(&(&1.governance_status == "terminated"))
+    |> Enum.filter(fn agent -> agent_mentioned?(agent, tokens) end)
+  end
+
+  defp mentioned_agents(_comment, _issue), do: []
+
+  defp comment_wake_metadata(%Comment{} = comment, extra \\ %{}) do
+    %{
+      comment_id: comment.id,
+      comment_body: bounded_comment_body(comment.body),
+      comment_author_type: comment.author_type,
+      comment_author_id: comment.author_id
+    }
+    |> Map.merge(extra)
+  end
+
+  defp bounded_comment_body(body) when is_binary(body) do
+    body
+    |> String.split("\n")
+    |> Enum.take(80)
+    |> Enum.join("\n")
+    |> String.slice(0, @comment_wake_body_limit)
+  end
+
+  defp bounded_comment_body(_body), do: ""
+
+  defp mention_tokens(body) do
+    ~r/@([A-Za-z0-9][A-Za-z0-9_.-]{0,80})/
+    |> Regex.scan(body)
+    |> Enum.map(fn [_match, token] -> normalize_mention(token) end)
+    |> MapSet.new()
+  end
+
+  defp agent_mentioned?(%Agent{} = agent, tokens) do
+    agent
+    |> mention_aliases()
+    |> Enum.any?(&MapSet.member?(tokens, &1))
+  end
+
+  defp mention_aliases(%Agent{} = agent) do
+    [
+      agent.id,
+      agent.id && String.slice(agent.id, 0, 8),
+      agent.url_key,
+      agent.name,
+      agent.title,
+      agent.role && Atom.to_string(agent.role)
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.flat_map(fn alias ->
+      normalized = normalize_mention(alias)
+      [normalized, String.replace(normalized, "-", "_")]
+    end)
+    |> Enum.uniq()
+  end
+
+  defp normalize_mention(value) do
+    value
+    |> to_string()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/, "-")
+    |> String.trim("-")
   end
 
   @doc """
@@ -631,6 +744,92 @@ defmodule Cympho.Wakes do
   def consume_wake(%AgentWake{} = wake), do: WakeupQueue.mark_consumed(wake)
 
   @doc """
+  Cancels every pending or running wake attached to one issue.
+
+  Terminal issue transitions use this so closed work cannot stay in an agent's
+  queue and later restart stale work.
+  """
+  @spec cancel_issue_wakes(String.t() | nil, String.t()) :: {:ok, non_neg_integer()}
+  def cancel_issue_wakes(issue_id, reason \\ "Issue closed")
+
+  def cancel_issue_wakes(issue_id, reason) when is_binary(issue_id) do
+    {count, _} =
+      AgentWake
+      |> where([w], w.issue_id == ^issue_id and w.status in ["pending", "running"])
+      |> Repo.update_all(
+        set: [
+          status: "cancelled",
+          last_error: reason
+        ]
+      )
+
+    {:ok, count}
+  end
+
+  def cancel_issue_wakes(_issue_id, _reason), do: {:ok, 0}
+
+  @doc """
+  Cancels every pending or running wake associated with a company.
+
+  Global runtime Stop uses this to clear future dispatch, not only active
+  sessions. The scope includes wakes attached through either the issue or the
+  agent, so issue-less operational wakes cannot survive a fleet stop.
+  """
+  @spec cancel_company_wakes(String.t() | nil, String.t()) :: {:ok, non_neg_integer()}
+  def cancel_company_wakes(company_id, reason \\ "Runtime stopped")
+
+  def cancel_company_wakes(company_id, reason) when is_binary(company_id) do
+    issue_ids =
+      Issue
+      |> where([i], i.company_id == ^company_id)
+      |> select([i], i.id)
+      |> Repo.all()
+
+    agent_ids =
+      Agent
+      |> where([a], a.company_id == ^company_id)
+      |> select([a], a.id)
+      |> Repo.all()
+
+    {count, _} =
+      AgentWake
+      |> where([w], w.status in ["pending", "running"])
+      |> where([w], w.issue_id in ^issue_ids or w.agent_id in ^agent_ids)
+      |> Repo.update_all(
+        set: [
+          status: "cancelled",
+          last_error: reason
+        ]
+      )
+
+    {:ok, count}
+  end
+
+  def cancel_company_wakes(_company_id, _reason), do: {:ok, 0}
+
+  @doc """
+  Cancels every pending or running wake for one agent.
+  """
+  @spec cancel_agent_wakes(String.t() | nil, String.t()) :: {:ok, non_neg_integer()}
+  def cancel_agent_wakes(agent_id, reason \\ "Agent paused")
+
+  def cancel_agent_wakes(agent_id, reason) when is_binary(agent_id) do
+    {count, _} =
+      AgentWake
+      |> where([w], w.agent_id == ^agent_id and w.status in ["pending", "running"])
+      |> Repo.update_all(
+        set: [
+          status: "cancelled",
+          last_error: reason
+        ]
+      )
+
+    {:ok, count}
+  end
+
+  def cancel_agent_wakes(_agent_id, _reason), do: {:ok, 0}
+
+  @doc """
   Counts stale pending comment wakes for a company.
 
   This intentionally only targets comment/mention wakes. Other wake reasons
@@ -718,7 +917,7 @@ defmodule Cympho.Wakes do
 
   defp all_blockers_done?(%Issue{} = issue) do
     blockers = issue.blocked_by || []
-    Enum.all?(blockers, fn blocker -> blocker.status == :done end)
+    Enum.all?(blockers, fn blocker -> blocker.status in [:done, :cancelled] end)
   end
 
   defp all_children_done?(%Issue{} = issue) do

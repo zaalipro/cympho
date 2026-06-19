@@ -742,6 +742,96 @@ defmodule Cympho.Issues do
   def clear_company_dispatch_focus(_company_id), do: {:error, :invalid_company}
 
   @doc """
+  Pauses one issue without changing its visible workflow status.
+
+  The pause flag lives in `monitor_state["issue_runtime"]`, which lets the
+  dispatcher and manual launch surfaces suppress runtime work while keeping
+  the issue in its natural lane for owner review.
+  """
+  def pause_issue_runtime(issue, opts \\ [])
+
+  def pause_issue_runtime(%Issue{} = issue, opts) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    reason = opts |> Keyword.get(:reason, "Paused by operator") |> to_string()
+    actor_id = opts |> Keyword.get(:actor) |> dispatch_actor_id()
+
+    runtime_state =
+      issue.monitor_state
+      |> normalize_monitor_state()
+      |> Map.get("issue_runtime", %{})
+      |> normalize_monitor_state()
+      |> Map.merge(%{
+        "paused" => true,
+        "paused_at" => DateTime.to_iso8601(now),
+        "paused_reason" => reason
+      })
+      |> maybe_put_issue_runtime_actor(actor_id)
+      |> Map.drop(["resumed_at", "resumed_by_user_id"])
+
+    monitor_state =
+      issue.monitor_state
+      |> normalize_monitor_state()
+      |> Map.put("issue_runtime", runtime_state)
+
+    update_issue(issue, %{monitor_state: monitor_state})
+  end
+
+  def pause_issue_runtime(_issue, _opts), do: {:error, :invalid_issue}
+
+  @doc """
+  Clears the issue-level runtime pause flag.
+  """
+  def resume_issue_runtime(issue, opts \\ [])
+
+  def resume_issue_runtime(%Issue{} = issue, opts) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    actor_id = opts |> Keyword.get(:actor) |> dispatch_actor_id()
+
+    runtime_state =
+      issue.monitor_state
+      |> normalize_monitor_state()
+      |> Map.get("issue_runtime", %{})
+      |> normalize_monitor_state()
+      |> Map.drop([
+        "paused",
+        :paused,
+        "paused_at",
+        :paused_at,
+        "paused_reason",
+        :paused_reason,
+        "paused_by_user_id",
+        :paused_by_user_id
+      ])
+      |> Map.put("resumed_at", DateTime.to_iso8601(now))
+      |> maybe_put_issue_runtime_resume_actor(actor_id)
+
+    monitor_state =
+      issue.monitor_state
+      |> normalize_monitor_state()
+      |> Map.put("issue_runtime", runtime_state)
+
+    update_issue(issue, %{monitor_state: monitor_state})
+  end
+
+  def resume_issue_runtime(_issue, _opts), do: {:error, :invalid_issue}
+
+  def issue_runtime_paused?(%Issue{monitor_state: monitor_state}),
+    do: issue_runtime_paused?(monitor_state)
+
+  def issue_runtime_paused?(%{"issue_runtime" => %{"paused" => paused}}), do: truthy?(paused)
+  def issue_runtime_paused?(%{issue_runtime: %{paused: paused}}), do: truthy?(paused)
+  def issue_runtime_paused?(_), do: false
+
+  def issue_runtime_state(%Issue{monitor_state: monitor_state}) do
+    monitor_state
+    |> normalize_monitor_state()
+    |> Map.get("issue_runtime", %{})
+    |> normalize_monitor_state()
+  end
+
+  def issue_runtime_state(_issue), do: %{}
+
+  @doc """
   Returns true when a blocked issue is waiting on owner verification of a CEO
   owner update and can be closed by an explicit owner acceptance.
   """
@@ -1209,6 +1299,20 @@ defmodule Cympho.Issues do
 
   defp maybe_put_dispatch_actor(dispatch_state, _actor_id), do: dispatch_state
 
+  defp maybe_put_issue_runtime_actor(runtime_state, actor_id)
+       when is_binary(actor_id) and actor_id != "" do
+    Map.put(runtime_state, "paused_by_user_id", actor_id)
+  end
+
+  defp maybe_put_issue_runtime_actor(runtime_state, _actor_id), do: runtime_state
+
+  defp maybe_put_issue_runtime_resume_actor(runtime_state, actor_id)
+       when is_binary(actor_id) and actor_id != "" do
+    Map.put(runtime_state, "resumed_by_user_id", actor_id)
+  end
+
+  defp maybe_put_issue_runtime_resume_actor(runtime_state, _actor_id), do: runtime_state
+
   defp maybe_put_dispatch_state(monitor_state, dispatch_state)
        when map_size(dispatch_state) == 0,
        do: monitor_state
@@ -1317,6 +1421,7 @@ defmodule Cympho.Issues do
       _ = Cympho.ReviewNudges.reconcile_issue(updated)
 
       _ = maybe_reclassify_role(old_issue, updated, attrs)
+      _ = cleanup_terminal_issue_runtime(old_issue, updated)
 
       {:ok, updated}
     end
@@ -1345,6 +1450,30 @@ defmodule Cympho.Issues do
       :ok
     else
       :ok
+    end
+  end
+
+  defp cleanup_terminal_issue_runtime(%Issue{} = old_issue, %Issue{} = updated) do
+    if old_issue.status not in @terminal_issue_statuses and
+         updated.status in @terminal_issue_statuses do
+      reason = "Issue #{updated.status}"
+
+      with {:ok, wake_count} <- Wakes.cancel_issue_wakes(updated.id, reason),
+           {:ok, run_count} <- HeartbeatEngine.cancel_active_runs_for_issue(updated.id, reason) do
+        Activities.log_activity(%{
+          issue_id: updated.id,
+          company_id: updated.company_id,
+          actor_type: "system",
+          action: "terminal_issue_runtime_cancelled",
+          metadata: %{
+            status: updated.status,
+            cancelled_wakes: wake_count,
+            cancelled_runs: run_count
+          }
+        })
+
+        :ok
+      end
     end
   end
 
@@ -1612,10 +1741,13 @@ defmodule Cympho.Issues do
   defp do_transition_update(issue, attrs) do
     with {:ok, updated} <- update_issue(issue, attrs) do
       cond do
-        updated.status == :done ->
+        updated.status in [:done, :cancelled] ->
           unblock_dependents(issue.id)
-          _ = Wakes.notify_children_completed(updated)
-          maybe_complete_parent(updated)
+
+          if updated.status == :done do
+            _ = Wakes.notify_children_completed(updated)
+            maybe_complete_parent(updated)
+          end
 
         updated.status == :in_review ->
           _ = Wakes.notify_child_in_review(updated)
@@ -1918,6 +2050,9 @@ defmodule Cympho.Issues do
       current_issue.assignee_id != nil and current_issue.assignee_id != agent_id ->
         {:error, :already_assigned}
 
+      issue_runtime_paused?(current_issue) ->
+        {:error, :issue_runtime_paused}
+
       current_issue.assignee_id == agent_id ->
         refresh_existing_checkout(current_issue, agent, required_role)
 
@@ -1941,6 +2076,18 @@ defmodule Cympho.Issues do
 
   def force_release_issue(%Issue{} = issue, target_status \\ :todo) do
     atomic_release(issue, target_status, require_owner?: false)
+  end
+
+  @doc """
+  Clears a stale checkout lock without changing the intended assignee.
+
+  Runtime recovery uses this when an issue is stranded by a dead run or stale
+  checkout. Unlike `force_release_issue/2`, this keeps `assignee_id` intact so
+  the next dispatcher pass can resume the same owner instead of silently
+  unassigning the task.
+  """
+  def clear_checkout_lock(%Issue{} = issue, target_status \\ :todo) do
+    atomic_clear_checkout_lock(issue, target_status)
   end
 
   defp same_company?(%Issue{company_id: nil}, _agent), do: true
@@ -1969,7 +2116,11 @@ defmodule Cympho.Issues do
         where:
           i.id == ^issue.id and
             is_nil(i.assignee_id) and
-            i.status in ^[:backlog, :todo, :in_progress, :in_review, :blocked]
+            i.status in ^[:backlog, :todo, :in_progress, :in_review, :blocked] and
+            fragment(
+              "COALESCE((?->'issue_runtime'->>'paused')::boolean, false) = false",
+              i.monitor_state
+            )
       )
       |> Repo.update_all(set: set_fields, inc: [lock_version: 1])
 
@@ -2001,8 +2152,12 @@ defmodule Cympho.Issues do
           %Issue{status: status} when status in [:done, :cancelled] ->
             {:error, :terminal_issue}
 
-          %Issue{} ->
-            {:error, :checkout_conflict}
+          %Issue{} = issue ->
+            if issue_runtime_paused?(issue) do
+              {:error, :issue_runtime_paused}
+            else
+              {:error, :checkout_conflict}
+            end
 
           nil ->
             {:error, :not_found}
@@ -2012,6 +2167,9 @@ defmodule Cympho.Issues do
 
   defp refresh_existing_checkout(%Issue{} = issue, %Agent{} = agent, required_role) do
     cond do
+      issue_runtime_paused?(issue) ->
+        {:error, :issue_runtime_paused}
+
       issue.status in [:done, :cancelled] ->
         {:error, :terminal_issue}
 
@@ -2093,6 +2251,46 @@ defmodule Cympho.Issues do
 
           broadcast_issue_update(released, :issue_updated, %{status: target_status})
           {:ok, released}
+        end
+
+      _ ->
+        {:error, :checkout_conflict}
+    end
+  end
+
+  defp atomic_clear_checkout_lock(%Issue{} = issue, target_status) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {count, _} =
+      from(i in Issue,
+        where: i.id == ^issue.id
+      )
+      |> Repo.update_all(
+        set: [
+          checkout_run_id: nil,
+          checked_out_at: nil,
+          status: target_status,
+          updated_at: now
+        ],
+        inc: [lock_version: 1]
+      )
+
+    case count do
+      1 ->
+        with {:ok, recovered} <- get_issue(issue.id) do
+          Activities.log_activity(%{
+            issue_id: recovered.id,
+            company_id: recovered.company_id,
+            actor_type: "system",
+            action: "checkout_lock_cleared",
+            metadata: %{
+              previous_assignee_id: issue.assignee_id,
+              target_status: target_status
+            }
+          })
+
+          broadcast_issue_update(recovered, :issue_updated, %{status: target_status})
+          {:ok, recovered}
         end
 
       _ ->
@@ -2233,7 +2431,7 @@ defmodule Cympho.Issues do
         # Stop the per-issue Orchestrator GenServer so it doesn't outlive the
         # row. Without this it survives until the dispatcher reconciliation
         # loop (~30s) and races against issue re-creation.
-        :ok = Cympho.Orchestrator.stop(issue.id)
+        :ok = Cympho.Orchestrator.stop(issue.id, :issue_deleted)
 
         Approvals.cancel_pending_for_issue(issue.id)
 

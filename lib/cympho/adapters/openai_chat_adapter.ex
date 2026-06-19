@@ -10,7 +10,10 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  alias Cympho.Adapters.RuntimeTimeout
+
   @default_timeout 120_000
+  @max_timeout 3_600_000
   @default_model "qwen3.7-plus"
   @max_response_bytes 2 * 1024 * 1024
   @default_system_prompt """
@@ -32,9 +35,16 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
     session_id = make_ref()
     config = opts[:config] || %{}
 
-    spawn(fn ->
-      do_run(session_id, issue, agent_id, recipient_pid, config, opts)
-    end)
+    worker =
+      spawn(fn ->
+        try do
+          do_run(session_id, issue, agent_id, recipient_pid, config, opts)
+        after
+          Cympho.AdapterSessions.unregister(session_id)
+        end
+      end)
+
+    Cympho.AdapterSessions.register(session_id, worker)
 
     session_id
   end
@@ -49,7 +59,14 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
         wake_context: Keyword.get(opts, :wake_context)
       )
 
-    case call_chat_completion(prompt, config) do
+    Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "openai_chat"})
+
+    result =
+      Cympho.AdapterSessions.run_cancellable(session_id, fn ->
+        call_chat_completion(prompt, config)
+      end)
+
+    case result do
       {:ok, result} -> send(recipient_pid, {:turn_completed, session_id, result})
       {:error, reason} -> send(recipient_pid, {:turn_ended_with_error, session_id, reason})
     end
@@ -84,7 +101,7 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
   end
 
   defp request(url, api_key, payload, config) do
-    timeout = integer_config(config, "timeout") || @default_timeout
+    timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
 
     headers = [
       {"authorization", "Bearer #{api_key}"},
@@ -261,7 +278,15 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
         type: :integer,
         required: false,
         default: @default_timeout,
-        description: "Request timeout in milliseconds"
+        description:
+          "Request timeout in milliseconds. Prefer timeout_sec for human-entered values."
+      },
+      %{
+        key: :timeout_sec,
+        type: :integer,
+        required: false,
+        default: div(@default_timeout, 1_000),
+        description: "Request timeout in seconds; conflicts with timeout/timeout_ms are rejected."
       },
       %{
         key: :max_tokens,
@@ -297,7 +322,7 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
     with :ok <- validate_endpoint(endpoint(config)),
          :ok <- validate_api_key(api_key(config)),
          :ok <- validate_model(model(config)),
-         :ok <- validate_optional_integer(config, "timeout"),
+         :ok <- validate_timeout(config),
          :ok <- validate_optional_integer(config, "max_tokens"),
          :ok <- validate_optional_number(config, "temperature") do
       :ok
@@ -407,6 +432,9 @@ defmodule Cympho.Adapters.OpenAIChatAdapter do
 
   defp validate_model(nil), do: {:error, "model is required"}
   defp validate_model(_), do: {:error, "model must be a string"}
+
+  defp validate_timeout(config),
+    do: RuntimeTimeout.validate(config, max_ms: @max_timeout, field: "timeout")
 
   defp validate_optional_integer(config, key) do
     case config_value(config, key) do

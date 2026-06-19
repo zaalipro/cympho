@@ -118,6 +118,27 @@ defmodule CymphoWeb.DashboardLiveTest do
       assert html =~ ~s(href="/budgets")
     end
 
+    test "warns when dashboard spend has unpriced token usage", %{
+      conn: conn,
+      current_company: company
+    } do
+      Repo.insert!(%Run{
+        company_id: company.id,
+        status: "completed",
+        adapter: "codex",
+        cost_usd: Decimal.new("0.00"),
+        input_tokens: 1_000_000,
+        output_tokens: 500_000,
+        completed_at: DateTime.utc_now() |> DateTime.truncate(:second)
+      })
+
+      {:ok, _view, html} = live(conn, "/dashboard")
+
+      assert html =~ "+ unpriced"
+      assert html =~ "Pricing missing for token usage"
+      assert html =~ ~s(href="/costs")
+    end
+
     test "renders goal alignment coverage and next action", %{
       conn: conn,
       current_company: company

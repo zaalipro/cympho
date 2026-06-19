@@ -6,6 +6,36 @@ defmodule Cympho.CostsTest do
   alias Cympho.Finances.TokenUsage
   alias Cympho.Goals
 
+  describe "summary/2" do
+    test "counts token usage that has no recorded price" do
+      company = insert_company()
+
+      insert_token_usage(%{
+        company_id: company.id,
+        cost_usd: Decimal.new("0.00"),
+        input_tokens: 1_000,
+        output_tokens: 500,
+        total_tokens: 1_500
+      })
+
+      insert_token_usage(%{
+        company_id: company.id,
+        cost_usd: Decimal.new("2.00"),
+        input_tokens: 100,
+        output_tokens: 50,
+        total_tokens: 150
+      })
+
+      summary = Costs.summary(company.id, 30)
+
+      assert Decimal.eq?(summary.total_cost, Decimal.new("2.00"))
+      assert summary.total_tokens == 1_650
+      assert summary.unpriced_tokens == 1_500
+      assert summary.unpriced_request_count == 1
+      assert summary.has_unpriced_usage?
+    end
+  end
+
   describe "by_goal/3" do
     setup do
       company = insert_company()

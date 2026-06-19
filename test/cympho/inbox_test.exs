@@ -101,4 +101,29 @@ defmodule Cympho.InboxTest do
       assert counts[agent.id]["unread"] == 1
     end
   end
+
+  describe "company badge broadcasts" do
+    test "publishes authoritative company unread counts", %{issue: issue, agent: agent} do
+      :ok = Inbox.subscribe_company_badges(agent.company_id)
+
+      {:ok, _} = Inbox.ensure_inbox_entry(issue.id, agent.id)
+      assert_receive {:company_inbox_count_changed, company_id, 1}
+      assert company_id == agent.company_id
+
+      {:ok, _} = Inbox.mark_read(issue.id, agent.id)
+      assert_receive {:company_inbox_count_changed, company_id, 0}
+      assert company_id == agent.company_id
+    end
+
+    test "bulk company reads publish a zero sidebar count", %{issue: issue, agent: agent} do
+      :ok = Inbox.subscribe_company_badges(agent.company_id)
+
+      {:ok, _} = Inbox.ensure_inbox_entry(issue.id, agent.id)
+      assert_receive {:company_inbox_count_changed, _company_id, 1}
+
+      assert {:ok, 1} = Inbox.mark_unread_read_for_company(agent.company_id)
+      assert_receive {:company_inbox_count_changed, company_id, 0}
+      assert company_id == agent.company_id
+    end
+  end
 end

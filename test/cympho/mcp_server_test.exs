@@ -2,6 +2,7 @@ defmodule Cympho.Mcp.ServerTest do
   use Cympho.DataCase, async: true
 
   alias Cympho.Agents
+  alias Cympho.Comments
   alias Cympho.Companies
   alias Cympho.Issues
   alias Cympho.Mcp.Server
@@ -12,6 +13,16 @@ defmodule Cympho.Mcp.ServerTest do
 
       assert get_in(create_issue, [:inputSchema, :properties, :assigned_role])
       assert get_in(create_issue, [:inputSchema, :properties, :assignee_id])
+    end
+
+    test "documents issue comment tools" do
+      list_comments = Enum.find(Server.tools(), &(&1.name == "list_issue_comments"))
+      create_comment = Enum.find(Server.tools(), &(&1.name == "create_issue_comment"))
+
+      assert get_in(list_comments, [:inputSchema, :properties, :issue_id])
+      assert get_in(list_comments, [:inputSchema, :properties, :limit])
+      assert get_in(create_comment, [:inputSchema, :properties, :issue_id])
+      assert get_in(create_comment, [:inputSchema, :properties, :body])
     end
   end
 
@@ -46,7 +57,12 @@ defmodule Cympho.Mcp.ServerTest do
           status: :idle
         })
 
-      {:ok, company: company, bridge: bridge, ceo: ceo, other_ceo: other_ceo}
+      {:ok,
+       company: company,
+       other_company: other_company,
+       bridge: bridge,
+       ceo: ceo,
+       other_ceo: other_ceo}
     end
 
     test "creates a company-scoped issue routed to the requested CEO", %{
@@ -137,6 +153,132 @@ defmodule Cympho.Mcp.ServerTest do
 
       assert result.total == 1
       assert [%{title: "CEO-only", assigned_role: "ceo"}] = result.issues
+    end
+
+    test "get_issue includes recent comments", %{bridge: bridge, company: company} do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          company_id: company.id,
+          title: "Trace external handoff",
+          skip_auto_assign: true
+        })
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          issue_id: issue.id,
+          body: "CTO synthesis is ready for CEO handoff.",
+          author_type: "system",
+          author_id: "swarm"
+        })
+
+      result = Server.call_tool("get_issue", %{"issue_id" => issue.id}, bridge)
+
+      assert result.comments_count == 1
+
+      assert [
+               %{
+                 body: "CTO synthesis is ready for CEO handoff.",
+                 author_type: "system",
+                 author_id: "swarm"
+               }
+             ] = result.comments
+    end
+
+    test "lists issue comments with a bounded limit", %{bridge: bridge, company: company} do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          company_id: company.id,
+          title: "Readable agent trace",
+          skip_auto_assign: true
+        })
+
+      {:ok, _first} =
+        Comments.create_comment(%{
+          issue_id: issue.id,
+          body: "Worker note",
+          author_type: "agent",
+          author_id: bridge.id
+        })
+
+      {:ok, _second} =
+        Comments.create_comment(%{
+          issue_id: issue.id,
+          body: "CTO synthesis",
+          author_type: "system",
+          author_id: "cto"
+        })
+
+      result =
+        Server.call_tool("list_issue_comments", %{"issue_id" => issue.id, "limit" => 1}, bridge)
+
+      assert result.total == 2
+      assert result.limit == 1
+      assert length(result.comments) == 1
+    end
+
+    test "creates an agent-authored issue comment", %{bridge: bridge, company: company} do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          company_id: company.id,
+          title: "Append delivery evidence",
+          skip_auto_assign: true
+        })
+
+      result =
+        Server.call_tool(
+          "create_issue_comment",
+          %{"issue_id" => issue.id, "body" => "  Worker result captured.  "},
+          bridge
+        )
+
+      assert %{success: true, comment: %{body: "Worker result captured.", author_type: "agent"}} =
+               result
+
+      assert result.comment.author_id == bridge.id
+
+      assert [%{body: "Worker result captured.", author_type: "agent", author_id: author_id}] =
+               Comments.list_comments(issue.id)
+
+      assert author_id == bridge.id
+    end
+
+    test "rejects blank MCP comments", %{bridge: bridge, company: company} do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          company_id: company.id,
+          title: "Blank comment guard",
+          skip_auto_assign: true
+        })
+
+      result =
+        Server.call_tool(
+          "create_issue_comment",
+          %{"issue_id" => issue.id, "body" => "  "},
+          bridge
+        )
+
+      assert result == %{success: false, errors: %{body: ["can't be blank"]}}
+    end
+
+    test "comment tools are scoped to the authenticated agent company", %{
+      bridge: bridge,
+      other_company: other_company
+    } do
+      {:ok, other_issue} =
+        Issues.create_issue(%{
+          company_id: other_company.id,
+          title: "Other tenant",
+          skip_auto_assign: true
+        })
+
+      assert Server.call_tool("list_issue_comments", %{"issue_id" => other_issue.id}, bridge) ==
+               %{error: "Issue not found"}
+
+      assert Server.call_tool(
+               "create_issue_comment",
+               %{"issue_id" => other_issue.id, "body" => "Should not cross tenant"},
+               bridge
+             ) == %{error: "Issue not found"}
     end
   end
 

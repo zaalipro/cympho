@@ -316,6 +316,24 @@ defmodule Cympho.CompaniesTest do
       assert blueprint.default_prefix == "GTM"
       assert blueprint.seed_issue_count == 5
       assert blueprint.role_summary =~ "Sales"
+      assert blueprint.default_agent_count > 10
+      assert blueprint.extra_agent_count == 5
+      assert blueprint.capability_count > 10
+      assert "prospecting" in blueprint.capability_tags
+      assert "sales_development" in blueprint.roles
+      assert "Build the first outbound prospect list" in blueprint.seed_issue_titles
+      assert is_list(blueprint.launch_manifest["agent_roster"])
+      assert is_list(blueprint.launch_manifest["seed_work"])
+
+      assert {:ok, manifest} =
+               Companies.autonomous_company_blueprint_manifest("go_to_market",
+                 engineer_count: "3"
+               )
+
+      assert manifest["engineer_count"] == 3
+      assert manifest["agent_count"] == blueprint.default_agent_count + 1
+      assert manifest["seed_issue_count"] == blueprint.seed_issue_count
+      assert Enum.any?(manifest["agent_roster"], &(&1["ref"] == "engineer_3"))
     end
 
     test "every listed blueprint can bootstrap a live company" do
@@ -337,7 +355,30 @@ defmodule Cympho.CompaniesTest do
         assert result.goal.goal_type == :mission
         assert length(result.seed_issues) == blueprint.seed_issue_count
         assert Enum.all?(result.seed_issues, &(&1.assignee_id && &1.assigned_role))
+
+        manifest = result.company.governance_config["company_blueprint_manifest"]
+        assert manifest["blueprint_key"] == blueprint.key
+        assert manifest["agent_count"] == length(result.agents)
+        assert manifest["seed_issue_count"] == blueprint.seed_issue_count
+        assert length(manifest["agent_roster"]) == length(result.agents)
+        assert length(manifest["seed_work"]) == length(result.seed_issues)
       end
+    end
+
+    test "normalizes API and CLI engineer counts before building blueprint manifests" do
+      assert {:ok, result} =
+               Companies.create_autonomous_company(%{
+                 name: "String Engineer Count Co",
+                 blueprint: "software",
+                 engineer_count: "20"
+               })
+
+      manifest = result.company.governance_config["company_blueprint_manifest"]
+
+      assert manifest["engineer_count"] == 8
+      assert manifest["agent_count"] == length(result.agents)
+      assert Enum.any?(manifest["agent_roster"], &(&1["ref"] == "engineer_8"))
+      refute Enum.any?(manifest["agent_roster"], &(&1["ref"] == "engineer_9"))
     end
 
     test "creates company with agents, goal, project, and seed issues" do

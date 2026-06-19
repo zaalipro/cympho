@@ -1,4 +1,4 @@
-<.page size="wide">
+<.page size="wide" data-ui-complex-page data-density={@digest_density}>
   <div class="mb-5 rounded-2xl border border-hairline bg-surface-1 p-4 sm:p-5">
     <%!-- Row 1: identity (left) + agent scope & density (right) --%>
     <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -10,7 +10,7 @@
           </span>
         </div>
 
-        <p class="mt-1.5 text-sm text-text-tertiary">
+        <p :if={@digest_density == "detailed"} class="mt-1.5 text-sm text-text-tertiary">
           Agent handoffs, review signals, and issue notifications across the company.
         </p>
         <p class="mt-2 truncate text-sm text-text-secondary">
@@ -60,34 +60,19 @@
           </span>
         </button>
 
-        <div class="inline-flex rounded-xl border border-hairline bg-surface p-1">
-          <.link
-            patch={
-              inbox_url(@selected_agent_id, @current_status, @digest_density, %{
-                density: "compact"
-              })
-            }
-            class={[
-              "rounded-lg px-2.5 py-1.5 text-xs font-510 transition-colors",
-              density_tab_class(@digest_density, "compact")
-            ]}
-          >
-            Compact
-          </.link>
-          <.link
-            patch={
-              inbox_url(@selected_agent_id, @current_status, @digest_density, %{
-                density: "detailed"
-              })
-            }
-            class={[
-              "rounded-lg px-2.5 py-1.5 text-xs font-510 transition-colors",
-              density_tab_class(@digest_density, "detailed")
-            ]}
-          >
-            Detailed
-          </.link>
-        </div>
+        <.density_switch
+          density={@digest_density}
+          compact_patch={
+            inbox_url(@selected_agent_id, @current_status, @digest_density, %{
+              density: "compact"
+            })
+          }
+          detailed_patch={
+            inbox_url(@selected_agent_id, @current_status, @digest_density, %{
+              density: "detailed"
+            })
+          }
+        />
       </div>
     </div>
 
@@ -126,7 +111,10 @@
 
   <section
     data-testid="inbox-command"
-    class="mb-5 overflow-hidden rounded-lg border border-hairline bg-surface-1 shadow-card"
+    class={[
+      "mb-5 overflow-hidden rounded-lg border border-hairline bg-surface-1 shadow-card",
+      @digest_density == "compact" && "hidden"
+    ]}
   >
     <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
       <div class="min-w-0">
@@ -262,7 +250,7 @@
   <.infinite_scroll
     id="inbox"
     has_more={@infinite_scroll[:inbox_items][:has_more?] || false}
-    container_class="grid gap-3"
+    container_class={if @digest_density == "compact", do: "grid gap-1.5", else: "grid gap-3"}
   >
     <:empty>
       <div class="rounded-lg border border-dashed border-border bg-panel px-6 py-16 text-center">
@@ -280,11 +268,15 @@
       :for={{dom_id, item} <- @streams.inbox_items}
       id={dom_id}
       class={[
-        "group rounded-2xl border border-hairline bg-surface-1 shadow-card transition-all hover:border-border-hover hover:shadow-raised",
+        "group border border-hairline bg-surface-1 shadow-card transition-all hover:border-border-hover hover:shadow-raised",
+        if(@digest_density == "compact", do: "rounded-lg", else: "rounded-2xl"),
         item.status == "unread" && "border-l-2 border-l-brand"
       ]}
     >
-      <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+      <div class={[
+        "grid lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start",
+        if(@digest_density == "compact", do: "gap-2 p-2.5", else: "gap-4 p-4")
+      ]}>
         <div class="min-w-0">
           <div class="mb-2 flex flex-wrap items-center gap-2">
             <span class={["h-2 w-2 rounded-full", status_dot(item.status)]}></span>
@@ -320,13 +312,16 @@
             </.app_link>
 
             <p
-              :if={issue_description(item.issue)}
+              :if={@digest_density == "detailed" and issue_description(item.issue)}
               class="mt-2 line-clamp-2 max-w-3xl text-sm text-text-tertiary"
             >
               {issue_description(item.issue)}
             </p>
 
-            <div :if={item.review_nudge} class="mt-2 flex flex-wrap items-center gap-1.5">
+            <div
+              :if={@digest_density == "detailed" and item.review_nudge}
+              class="mt-2 flex flex-wrap items-center gap-1.5"
+            >
               <span
                 class="line-clamp-1 text-xs text-amber-200/80"
                 title={item.review_nudge.summary}
@@ -348,7 +343,10 @@
               class="mt-2"
             />
 
-            <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            <div class={[
+              "flex flex-wrap items-center gap-2 text-xs",
+              if(@digest_density == "compact", do: "mt-1", else: "mt-2")
+            ]}>
               <span class="rounded-full border border-border bg-surface px-2 py-0.5 text-text-secondary">
                 {issue_status_label(item.issue.status)}
               </span>
@@ -401,7 +399,10 @@
             phx-click="dismiss"
             phx-value-issue_id={item.issue_id}
             phx-value-agent_id={item.agent_id}
-            class="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+            class={[
+              "rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary",
+              @digest_density == "compact" && "hidden"
+            ]}
           >
             Dismiss
           </button>
@@ -411,7 +412,10 @@
             phx-click="archive"
             phx-value-issue_id={item.issue_id}
             phx-value-agent_id={item.agent_id}
-            class="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-red-300"
+            class={[
+              "rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-red-300",
+              @digest_density == "compact" && "hidden"
+            ]}
           >
             Archive
           </button>
@@ -421,7 +425,10 @@
             phx-click="restore"
             phx-value-issue_id={item.issue_id}
             phx-value-agent_id={item.agent_id}
-            class="rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs font-510 text-emerald-300 hover:bg-emerald-500/15"
+            class={[
+              "rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs font-510 text-emerald-300 hover:bg-emerald-500/15",
+              @digest_density == "compact" && "hidden"
+            ]}
           >
             Restore
           </button>

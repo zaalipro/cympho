@@ -13,6 +13,27 @@ defmodule Cympho.Issues.SwarmEvents do
   alias Cympho.Repo
 
   @default_limit 80
+  @event_order %{
+    "launch_started" => 10,
+    "temporary_agents_created" => 20,
+    "worker_issues_created" => 30,
+    "cto_issue_created" => 40,
+    "dependencies_linked" => 50,
+    "cto_blocked_on_workers" => 60,
+    "parent_blocked_on_cto" => 70,
+    "worker_wakes_enqueued" => 80,
+    "worker_wakes_attention_required" => 80,
+    "launch_ready" => 90,
+    "worker_completed" => 120,
+    "worker_blocked" => 130,
+    "cto_synthesis_completed" => 200,
+    "cto_requested_changes" => 210,
+    "cto_synthesis_blocked" => 220,
+    "ceo_handoff_created" => 300,
+    "ceo_requested_changes" => 310,
+    "ceo_delivery_completed" => 320,
+    "parent_blocked" => 330
+  }
 
   def subscribe(company_id) when is_binary(company_id) do
     Phoenix.PubSub.subscribe(Cympho.PubSub, topic(company_id))
@@ -37,7 +58,7 @@ defmodule Cympho.Issues.SwarmEvents do
     |> order_by([e], desc: e.occurred_at, desc: e.inserted_at)
     |> limit(^limit)
     |> Repo.all()
-    |> Enum.reverse()
+    |> Enum.sort_by(&event_sort_key/1)
   end
 
   def list_for_parent(_parent_issue_id, _opts), do: []
@@ -117,6 +138,28 @@ defmodule Cympho.Issues.SwarmEvents do
 
   defp normalize_metadata(metadata) when is_map(metadata), do: metadata
   defp normalize_metadata(_metadata), do: %{}
+
+  defp event_sort_key(%SwarmEvent{} = event) do
+    {
+      timestamp_key(event.occurred_at),
+      timestamp_key(event.inserted_at),
+      event_rank(event.event_type),
+      event.id || ""
+    }
+  end
+
+  defp timestamp_key(%DateTime{} = timestamp), do: DateTime.to_unix(timestamp, :microsecond)
+
+  defp timestamp_key(%NaiveDateTime{} = timestamp) do
+    timestamp
+    |> DateTime.from_naive!("Etc/UTC")
+    |> DateTime.to_unix(:microsecond)
+  end
+
+  defp timestamp_key(_timestamp), do: 0
+
+  defp event_rank(type) when is_binary(type), do: Map.get(@event_order, type, 1_000)
+  defp event_rank(_type), do: 1_000
 
   defp topic(company_id), do: "company:#{company_id}:swarm_events"
 

@@ -63,6 +63,31 @@ defmodule CymphoWeb.CostLiveTest do
       assert html =~ "$15.00"
     end
 
+    test "surfaces unpriced token usage instead of implying zero spend is clean", %{
+      conn: conn,
+      current_company: company
+    } do
+      insert_token_usage(company,
+        cost_usd: Decimal.new("0.00"),
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        input_tokens: 1_000_000,
+        output_tokens: 500_000
+      )
+
+      {:ok, _view, html} = live(conn, "/costs")
+
+      assert html =~ "Unpriced usage"
+      assert html =~ "Price missing before the next run"
+      assert html =~ "1.5M unpriced tokens across 1 request."
+      assert html =~ ~s(data-testid="unpriced-usage-warning")
+      assert html =~ "Pricing is missing for token usage"
+      assert html =~ "1.5M tokens"
+      assert html =~ "reported zero cost"
+      assert html =~ "plus unpriced usage"
+      assert html =~ "$0.00"
+    end
+
     test "renders active budget utilization without noisy decimal precision", %{
       conn: conn,
       current_company: company

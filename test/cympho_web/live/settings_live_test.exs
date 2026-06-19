@@ -169,6 +169,11 @@ defmodule CymphoWeb.SettingsLiveTest do
 
       reloaded = Repo.get!(Cympho.Users.User, user.id)
       assert reloaded.webhook_url == "https://example.com/hook"
+
+      webhook_pref =
+        Repo.get_by(NotificationPreference, user_id: user.id, channel_type: "webhook")
+
+      assert webhook_pref.config["url"] == "https://example.com/hook"
     end
 
     test "shows test ping button after URL is saved", %{user: user} do

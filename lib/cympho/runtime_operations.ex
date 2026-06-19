@@ -55,6 +55,7 @@ defmodule Cympho.RuntimeOperations do
   @ceo_outcome_scan_limit 25
   @delegated_work_display_limit 8
   @delegated_work_scan_limit 60
+  @swarm_delegated_origin_types ["swarm_worker", "swarm_cto_review"]
   @owner_signoff_display_limit 5
   @owner_signoff_scan_limit 40
   @ceo_outcome_run_statuses ~w(pending queued running completed succeeded failed timed_out cancelled)
@@ -158,12 +159,16 @@ defmodule Cympho.RuntimeOperations do
   def stale_checked_out_issues(_company_id, _opts), do: []
 
   @doc """
-  Releases stale checked-out issues back to `:todo` for a company.
+  Clears stale checkout locks back to `:todo` for a company.
+
+  The intended assignee is preserved so a dead checkout does not erase routing
+  ownership. The next dispatcher pass can resume the same agent if it is still
+  eligible, or surface the capacity/preflight problem without losing the owner.
   """
   @spec recover_stale_checked_out_issues(String.t()) :: {:ok, map()}
   def recover_stale_checked_out_issues(company_id) when is_binary(company_id) do
     issues = stale_checked_out_issues(company_id)
-    results = Enum.map(issues, &Issues.force_release_issue(&1, :todo))
+    results = Enum.map(issues, &Issues.clear_checkout_lock(&1, :todo))
 
     {:ok,
      %{
@@ -1047,11 +1052,11 @@ defmodule Cympho.RuntimeOperations do
       runtime_mode.status == :degraded ->
         restart_launch_plan(runtime_enablement)
 
-      ceo_candidate ->
-        ceo_candidate_launch_plan(ceo_candidate)
-
       delegated_work.queueable_count > 0 ->
         delegated_work_launch_plan(delegated_work)
+
+      ceo_candidate ->
+        ceo_candidate_launch_plan(ceo_candidate)
 
       first_candidate && first_candidate.preflight.status == :blocked ->
         blocked_candidate_launch_plan(first_candidate)
@@ -1259,19 +1264,20 @@ defmodule Cympho.RuntimeOperations do
   end
 
   defp delegated_work_launch_plan(delegated_work) do
+    queueable_count = delegated_work.queueable_count
+
     %{
       status: :delegated_work_ready,
       tone: :attention,
-      label: "Run delegated CEO work",
-      summary:
-        "#{delegated_work.queueable_count} delegated #{plural_noun(delegated_work.queueable_count, "child issue")} can be queued for focused dispatch before the CEO parent can close.",
+      label: delegated_work_launch_label(delegated_work),
+      summary: delegated_work_launch_summary(queueable_count, delegated_work),
       command_label: nil,
       command: nil,
       target_path: "#delegated-work-queue",
-      target_label: "Open delegated queue",
+      target_label: delegated_work_target_label(delegated_work),
       issue: nil,
       steps: [
-        launch_step("Queue", "Use Queue runnable work for CEO-created child issues.", :active),
+        launch_step("Queue", delegated_work_queue_step(delegated_work), :active),
         launch_step(
           "Launch",
           "Run focused dispatch for the child issue at the top of the queue.",
@@ -1285,6 +1291,44 @@ defmodule Cympho.RuntimeOperations do
       ]
     }
   end
+
+  defp delegated_work_launch_label(%{swarm_cto_count: count, count: count}) when count > 0,
+    do: "Run CTO synthesis"
+
+  defp delegated_work_launch_label(%{swarm_count: count}) when count > 0,
+    do: "Run swarm queue"
+
+  defp delegated_work_launch_label(_delegated_work), do: "Run delegated CEO work"
+
+  defp delegated_work_launch_summary(count, %{swarm_cto_count: cto_count, count: cto_count})
+       when count > 0 and cto_count > 0 do
+    "#{count} CTO synthesis #{plural_noun(count, "gate")} can be queued to review worker evidence and unblock CEO handoff."
+  end
+
+  defp delegated_work_launch_summary(count, %{swarm_count: swarm_count}) when swarm_count > 0 do
+    "#{count} swarm #{plural_noun(count, "work item")} can be queued for focused dispatch before CTO synthesis and CEO handoff can finish."
+  end
+
+  defp delegated_work_launch_summary(count, _delegated_work) do
+    "#{count} delegated #{plural_noun(count, "child issue")} can be queued for focused dispatch before the CEO parent can close."
+  end
+
+  defp delegated_work_queue_step(%{swarm_cto_count: count, count: count}) when count > 0,
+    do: "Queue the CTO synthesis gate after worker packets close."
+
+  defp delegated_work_queue_step(%{swarm_count: count}) when count > 0,
+    do: "Use Queue runnable work for swarm workers and CTO gates."
+
+  defp delegated_work_queue_step(_delegated_work),
+    do: "Use Queue runnable work for CEO-created child issues."
+
+  defp delegated_work_target_label(%{swarm_cto_count: count, count: count}) when count > 0,
+    do: "Open CTO gate"
+
+  defp delegated_work_target_label(%{swarm_count: count}) when count > 0,
+    do: "Open swarm queue"
+
+  defp delegated_work_target_label(_delegated_work), do: "Open delegated queue"
 
   defp blocked_candidate_launch_plan(candidate) do
     action = get_in(candidate, [:preflight, :first_action])
@@ -1984,10 +2028,17 @@ defmodule Cympho.RuntimeOperations do
 
     parent = delegated_work_parent(company_id, parent_issue_id, entries)
     readiness = delegated_work_readiness(entries)
+    kind_counts = Enum.frequencies_by(entries, & &1.work_kind)
+    swarm_worker_count = Map.get(kind_counts, :swarm_worker, 0)
+    swarm_cto_count = Map.get(kind_counts, :swarm_cto_review, 0)
+    swarm_count = swarm_worker_count + swarm_cto_count
 
     %{
-      summary: delegated_work_summary(length(entries), parent),
+      summary: delegated_work_summary(length(entries), parent, swarm_count, kind_counts),
       count: length(entries),
+      swarm_count: swarm_count,
+      swarm_worker_count: swarm_worker_count,
+      swarm_cto_count: swarm_cto_count,
       queueable_count: readiness.queueable,
       pinned_count: readiness.pinned,
       setup_blocked_count: readiness.setup_blocked,
@@ -2000,7 +2051,8 @@ defmodule Cympho.RuntimeOperations do
       parent_issue_id: parent && parent.id,
       parent_identifier: parent_identifier(parent),
       parent_title: parent_title(parent),
-      parent_path: if(parent, do: "/issues/#{parent.id}")
+      parent_path: if(parent, do: "/issues/#{parent.id}"),
+      empty_hint: delegated_work_empty_hint(parent)
     }
   end
 
@@ -2008,6 +2060,9 @@ defmodule Cympho.RuntimeOperations do
     %{
       summary: "No open CEO-delegated child work is waiting on owners.",
       count: 0,
+      swarm_count: 0,
+      swarm_worker_count: 0,
+      swarm_cto_count: 0,
       queueable_count: 0,
       pinned_count: 0,
       setup_blocked_count: 0,
@@ -2020,17 +2075,19 @@ defmodule Cympho.RuntimeOperations do
       parent_issue_id: nil,
       parent_identifier: nil,
       parent_title: nil,
-      parent_path: nil
+      parent_path: nil,
+      empty_hint:
+        "CEO-created sub-issues will appear here once they are waiting on Product, CTO, Engineering, or another owner."
     }
   end
 
   defp delegated_work_candidates(company_id, parent_issue_id) do
     Issue
     |> scoped(company_id)
-    |> join(:inner, [i], creator in assoc(i, :created_by_agent))
-    |> where([i, creator], creator.role == :ceo)
+    |> join(:left, [i], creator in assoc(i, :created_by_agent))
     |> where([i, _creator], not is_nil(i.parent_id))
     |> maybe_filter_delegated_parent(parent_issue_id)
+    |> delegated_work_origin_scope(parent_issue_id)
     |> where([i, _creator], i.status not in [:done, :cancelled])
     |> where([i, _creator], is_nil(i.hidden_at))
     |> preload([:assignee, :project, :created_by_agent, :parent, :blocked_by])
@@ -2044,6 +2101,18 @@ defmodule Cympho.RuntimeOperations do
   end
 
   defp maybe_filter_delegated_parent(query, _parent_issue_id), do: query
+
+  defp delegated_work_origin_scope(query, parent_issue_id) when is_binary(parent_issue_id) do
+    where(
+      query,
+      [i, creator],
+      creator.role == :ceo or i.origin_type in ^@swarm_delegated_origin_types
+    )
+  end
+
+  defp delegated_work_origin_scope(query, _parent_issue_id) do
+    where(query, [_i, creator], creator.role == :ceo)
+  end
 
   defp normalized_issue_id(issue_id) when is_binary(issue_id) do
     case Ecto.UUID.cast(issue_id) do
@@ -2072,6 +2141,8 @@ defmodule Cympho.RuntimeOperations do
       issue_status_label: label_atom(issue.status),
       issue_priority: issue.priority,
       issue_priority_label: label_atom(issue.priority),
+      work_kind: delegated_work_kind(issue),
+      work_kind_label: delegated_work_kind_label(issue),
       role: role,
       role_label: role_label(role),
       assignee_name: launch_assignee_name(issue, preflight),
@@ -2079,7 +2150,7 @@ defmodule Cympho.RuntimeOperations do
       parent_issue_id: issue.parent_id,
       parent_identifier: parent_identifier(issue.parent),
       parent_title: parent_title(issue.parent),
-      created_by_name: if(issue.created_by_agent, do: issue.created_by_agent.name, else: "CEO"),
+      created_by_name: delegated_work_creator_name(issue),
       target_path: "/issues/#{issue.id}",
       parent_path: if(issue.parent_id, do: "/issues/#{issue.parent_id}"),
       inserted_at: issue.inserted_at,
@@ -2097,6 +2168,21 @@ defmodule Cympho.RuntimeOperations do
       preflight: preflight
     }
   end
+
+  defp delegated_work_kind(%Issue{origin_type: "swarm_worker"}), do: :swarm_worker
+  defp delegated_work_kind(%Issue{origin_type: "swarm_cto_review"}), do: :swarm_cto_review
+  defp delegated_work_kind(_issue), do: :ceo_delegated
+
+  defp delegated_work_kind_label(%Issue{origin_type: "swarm_worker"}), do: "Swarm worker"
+  defp delegated_work_kind_label(%Issue{origin_type: "swarm_cto_review"}), do: "CTO synthesis"
+  defp delegated_work_kind_label(_issue), do: "CEO delegated"
+
+  defp delegated_work_creator_name(%Issue{origin_type: origin})
+       when origin in @swarm_delegated_origin_types,
+       do: "Swarm protocol"
+
+  defp delegated_work_creator_name(%Issue{created_by_agent: %Agent{name: name}}), do: name
+  defp delegated_work_creator_name(_issue), do: "CEO"
 
   defp delegated_work_queueable?(true, _blocked?, _preflight), do: false
   defp delegated_work_queueable?(_dispatch_pinned?, true, _preflight), do: false
@@ -2160,20 +2246,49 @@ defmodule Cympho.RuntimeOperations do
 
   defp delegated_parent_issue(_company_id, _parent_issue_id), do: nil
 
-  defp delegated_work_summary(0, nil),
+  defp delegated_work_summary(0, nil, _swarm_count, _kind_counts),
     do: "No open CEO-delegated child work is waiting on owners."
 
-  defp delegated_work_summary(0, parent) do
-    "No open CEO-delegated child work is waiting under #{parent_identifier(parent)}."
+  defp delegated_work_summary(0, parent, _swarm_count, _kind_counts) do
+    if swarm_parent?(parent) do
+      "No open swarm worker or CTO synthesis work is waiting under #{parent_identifier(parent)}."
+    else
+      "No open CEO-delegated child work is waiting under #{parent_identifier(parent)}."
+    end
   end
 
-  defp delegated_work_summary(count, nil) do
+  defp delegated_work_summary(count, nil, _swarm_count, _kind_counts) do
     "#{count} CEO-delegated #{plural_noun(count, "child issue")} #{needs_need(count)} owner execution or review."
   end
 
-  defp delegated_work_summary(count, parent) do
+  defp delegated_work_summary(count, parent, _swarm_count, %{swarm_cto_review: count}) do
+    "#{count} CTO synthesis #{plural_noun(count, "gate")} under #{parent_identifier(parent)} #{needs_need(count)} CTO review before CEO handoff."
+  end
+
+  defp delegated_work_summary(count, parent, swarm_count, _kind_counts) when swarm_count > 0 do
+    "#{count} swarm #{plural_noun(count, "work item")} under #{parent_identifier(parent)} #{needs_need(count)} worker execution, CTO synthesis, or CEO handoff."
+  end
+
+  defp delegated_work_summary(count, parent, _swarm_count, _kind_counts) do
     "#{count} CEO-delegated #{plural_noun(count, "child issue")} under #{parent_identifier(parent)} #{needs_need(count)} owner execution or review."
   end
+
+  defp delegated_work_empty_hint(parent) do
+    if swarm_parent?(parent) do
+      "Swarm worker packets and the CTO synthesis gate will appear here while they are still open."
+    else
+      "CEO-created sub-issues will appear here once they are waiting on Product, CTO, Engineering, or another owner."
+    end
+  end
+
+  defp swarm_parent?(%Issue{monitor_state: monitor_state}) when is_map(monitor_state) do
+    case Map.get(monitor_state, "swarm") || Map.get(monitor_state, :swarm) do
+      swarm when is_map(swarm) -> true
+      _ -> false
+    end
+  end
+
+  defp swarm_parent?(_parent), do: false
 
   defp empty_ceo_outcome_snapshot(summary) do
     %{
@@ -4294,7 +4409,7 @@ defmodule Cympho.RuntimeOperations do
       why:
         "Dispatch capacity is enforced from checked-out issues, not only active run records. A stale issue can block a CEO or engineer even after run rows are cleaned up.",
       fix:
-        "Use Recover stale runtime state to release stale checked-out issues back to Todo, then start the focused issue again.",
+        "Use Recover stale runtime state to clear stale checkout locks back to Todo without changing the intended assignee, then start the focused issue again.",
       target_path: "#runtime-capacity",
       target_label: "Recover stale state"
     }
@@ -4429,9 +4544,13 @@ defmodule Cympho.RuntimeOperations do
          org_health,
          delegated_work
        ) do
+    delegated_work_action = delegated_work_next_action(delegated_work)
+    delegated_work_filtered? = Map.get(delegated_work, :filtered?, false)
+
     [
+      if(delegated_work_filtered?, do: delegated_work_action),
       owner_signoff_next_action(owner_signoffs),
-      delegated_work_next_action(delegated_work),
+      if(!delegated_work_filtered?, do: delegated_work_action),
       org_staffing_next_action(org_health),
       repo_delivery_next_action(Map.get(capacity, :repo_delivery)),
       ceo_receipt_next_action(ceo_outcomes),
@@ -4693,6 +4812,29 @@ defmodule Cympho.RuntimeOperations do
   end
 
   defp ceo_receipt_next_action(_ceo_outcomes), do: nil
+
+  defp delegated_work_next_action(%{swarm_cto_count: count, count: count}) when count > 0 do
+    %{
+      tone: :attention,
+      title: "Run CTO synthesis",
+      body:
+        "#{count} CTO synthesis #{plural_noun(count, "gate")} #{needs_need(count)} review before the CEO can receive the swarm result.",
+      target_path: "#delegated-work-queue",
+      target_label: "Open CTO gate"
+    }
+  end
+
+  defp delegated_work_next_action(%{count: count, swarm_count: swarm_count})
+       when count > 0 and swarm_count > 0 do
+    %{
+      tone: :attention,
+      title: "Run swarm queue",
+      body:
+        "#{count} swarm #{plural_noun(count, "work item")} #{needs_need(count)} worker execution or CTO synthesis before CEO handoff.",
+      target_path: "#delegated-work-queue",
+      target_label: "Open swarm queue"
+    }
+  end
 
   defp delegated_work_next_action(%{count: count}) when count > 0 do
     %{

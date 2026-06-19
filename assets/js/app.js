@@ -7,6 +7,85 @@ import {LiveSocket} from "phoenix_live_view"
 // the wild don't throw before they're cleaned up.
 window.toggleTheme = function() {};
 
+const UI_MODE_KEY = "cympho-ui-mode";
+
+function currentUIMode() {
+  try {
+    return localStorage.getItem(UI_MODE_KEY) === "advanced" ? "advanced" : "simple";
+  } catch (_e) {
+    return "simple";
+  }
+}
+
+function writeUIMode(mode) {
+  try {
+    localStorage.setItem(UI_MODE_KEY, mode);
+  } catch (_e) {
+    /* storage disabled — the DOM attribute still applies for this session */
+  }
+}
+
+function applyUIMode(mode, persist = false) {
+  const normalized = mode === "advanced" ? "advanced" : "simple";
+  document.documentElement.dataset.uiMode = normalized;
+  if (persist) writeUIMode(normalized);
+
+  document.querySelectorAll("[data-ui-mode-toggle]").forEach((toggle) => {
+    toggle.dataset.mode = normalized;
+    toggle.setAttribute("aria-pressed", String(normalized === "advanced"));
+
+    toggle.querySelectorAll("[data-ui-mode-label]").forEach((label) => {
+      label.textContent = normalized === "advanced" ? "Advanced" : "Simple";
+    });
+
+    toggle.querySelectorAll("[data-ui-mode-icon]").forEach((icon) => {
+      icon.classList.toggle("hero-squares-2x2-mini", normalized !== "advanced");
+      icon.classList.toggle("hero-adjustments-horizontal-mini", normalized === "advanced");
+    });
+  });
+}
+
+function toggleUIMode() {
+  applyUIMode(currentUIMode() === "advanced" ? "simple" : "advanced", true);
+}
+
+function shortcutTargetIsTextInput(target) {
+  if (!target) return false;
+  return target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.tagName === 'SELECT' ||
+    target.isContentEditable;
+}
+
+function plainShortcut(e, key) {
+  return e.key.toLowerCase() === key &&
+    !e.metaKey &&
+    !e.ctrlKey &&
+    !e.altKey;
+}
+
+function toggleDensityView() {
+  const switcher = document.querySelector("[data-density-switch]");
+  if (!switcher) return false;
+
+  const current = switcher.dataset.density === "detailed" ? "detailed" : "compact";
+  const next = current === "detailed" ? "compact" : "detailed";
+  const target = switcher.querySelector(`[data-density-option="${next}"]`);
+  if (!target) return false;
+
+  target.click();
+  return true;
+}
+
+document.addEventListener("click", (e) => {
+  const toggle = e.target.closest("[data-ui-mode-toggle]");
+  if (!toggle) return;
+  e.preventDefault();
+  toggleUIMode();
+});
+
+applyUIMode(currentUIMode());
+
 // Timeline scroll hook for chat-style auto-scroll
 const TimelineScroll = {
   mounted() {
@@ -285,7 +364,7 @@ let gotoTimer = null;
 
 function handleKeydown(e) {
   const target = e.target;
-  const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable;
+  const isInput = shortcutTargetIsTextInput(target);
 
   // Escape always closes modals
   if (e.key === 'Escape') {
@@ -366,6 +445,17 @@ function handleKeydown(e) {
     }
     gotoBuffer = '';
     clearTimeout(gotoTimer);
+    return;
+  }
+
+  if (plainShortcut(e, 'v') && toggleDensityView()) {
+    e.preventDefault();
+    return;
+  }
+
+  if (plainShortcut(e, 'u')) {
+    e.preventDefault();
+    toggleUIMode();
     return;
   }
 }
@@ -1681,13 +1771,17 @@ const CopyToClipboard = {
   },
 
   _flash(button, label) {
-    const original = button.dataset.copyLabel || button.textContent.trim();
+    const originalHtml = button.dataset.copyOriginalHtml || button.innerHTML;
+    const originalLabel = button.dataset.copyLabel || button.textContent.trim();
+
+    button.dataset.copyOriginalHtml = originalHtml;
     button.textContent = label;
     button.dataset.copied = "true";
 
     window.clearTimeout(button._copyResetTimer);
     button._copyResetTimer = window.setTimeout(() => {
-      button.textContent = original;
+      button.innerHTML = originalHtml;
+      if (originalLabel) button.dataset.copyLabel = originalLabel;
       delete button.dataset.copied;
     }, 1200);
   }
@@ -1981,7 +2075,7 @@ function appendSwarmCompositionRow(config) {
     'cursor-pointer transition hover:bg-surface-hover/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/40';
 
   const harnessCell = document.createElement('td');
-  harnessCell.className = 'px-3 py-2 align-middle font-510 text-text-primary';
+  harnessCell.className = 'min-w-[180px] px-3 py-2 align-middle font-510 text-text-primary';
   harnessCell.appendChild(createSwarmHiddenInput(`swarm[mix_rows][${index}][enabled]`, 'true'));
   const harnessHidden = createSwarmHiddenInput(`swarm[mix_rows][${index}][harness]`, harness);
   harnessHidden.dataset.swarmRowHarnessInput = '';
@@ -1992,7 +2086,7 @@ function appendSwarmCompositionRow(config) {
   harnessCell.appendChild(harnessLabel);
 
   const modelCell = document.createElement('td');
-  modelCell.className = 'px-3 py-2 align-middle font-mono text-text-secondary';
+  modelCell.className = 'min-w-[180px] px-3 py-2 align-middle font-mono text-text-secondary';
   const modelHidden = createSwarmHiddenInput(`swarm[mix_rows][${index}][model]`, model);
   modelHidden.dataset.swarmRowModelInput = '';
   modelCell.appendChild(modelHidden);
@@ -2002,7 +2096,8 @@ function appendSwarmCompositionRow(config) {
   modelCell.appendChild(modelLabel);
 
   const reasoningCell = document.createElement('td');
-  reasoningCell.className = 'px-3 py-2 align-middle text-text-secondary';
+  reasoningCell.className =
+    'w-[120px] min-w-[120px] px-3 py-2 align-middle text-text-secondary';
   const reasoningHidden = createSwarmHiddenInput(
     `swarm[mix_rows][${index}][reasoning_effort]`,
     reasoning
@@ -2225,6 +2320,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initSidebarMobile();
   initShortcutsModal();
   initQuickCreate();
+  applyUIMode(currentUIMode());
 
   // Re-highlight on LiveView navigation
   window.addEventListener('phx:navigate', () => {
@@ -2238,6 +2334,7 @@ document.addEventListener('DOMContentLoaded', () => {
       applyNavSectionState();
       initCompanySwitcher();
       initQuickCreate();
+      applyUIMode(currentUIMode());
     });
   });
 });

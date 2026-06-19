@@ -58,7 +58,7 @@ defmodule Cympho.IssueDigest do
       thread_rollup: thread_rollup(comments, metrics),
       coverage: coverage(metrics),
       receipt_audit: receipt_audit,
-      quality: quality(issue, metrics, receipt_audit),
+      quality: quality(issue, metrics, comments, receipt_audit),
       completion_contract:
         completion_contract(issue, state, metrics, comments, work_products, agents),
       review_readiness: review_readiness(issue, state, metrics, comments, receipt_audit),
@@ -301,6 +301,12 @@ defmodule Cympho.IssueDigest do
       metrics.agent_comments > 0 or metrics.successful_runs > 0 or metrics.work_products > 0 ->
         :in_progress
 
+      swarm_cto_synthesis_ready?(issue) ->
+        :swarm_cto_ready
+
+      swarm_worker_packet_pending?(issue) ->
+        :swarm_worker_pending
+
       pre_runtime_launch_needed?(issue, metrics) ->
         :pre_runtime
 
@@ -318,6 +324,8 @@ defmodule Cympho.IssueDigest do
   defp state_label(:coordinating), do: "Coordinating work"
   defp state_label(:ready_for_review), do: "Ready for review"
   defp state_label(:in_progress), do: "In progress"
+  defp state_label(:swarm_cto_ready), do: "CTO review ready"
+  defp state_label(:swarm_worker_pending), do: "Worker packet"
   defp state_label(:pre_runtime), do: "Launch needed"
   defp state_label(:assigned), do: "Assigned"
   defp state_label(:not_started), do: "Not started"
@@ -344,6 +352,13 @@ defmodule Cympho.IssueDigest do
 
   defp headline(_issue, :ready_for_review, _metrics), do: "Evidence is ready for CTO/CEO review."
   defp headline(_issue, :in_progress, _metrics), do: "Work has started and needs a closing note."
+
+  defp headline(_issue, :swarm_cto_ready, _metrics),
+    do: "Worker packets are ready for CTO synthesis."
+
+  defp headline(_issue, :swarm_worker_pending, _metrics),
+    do: "Temporary worker packet is waiting for its first pass."
+
   defp headline(_issue, :pre_runtime, _metrics), do: "Assigned, but runtime has not started yet."
   defp headline(_issue, :assigned, _metrics), do: "Assigned, but no delivery evidence yet."
   defp headline(_issue, :not_started, _metrics), do: "No agent work has started yet."
@@ -376,6 +391,14 @@ defmodule Cympho.IssueDigest do
 
   defp summary(_issue, :in_progress, metrics) do
     "#{metrics.runs} run#{suffix(metrics.runs)}, #{metrics.agent_comments} agent note#{suffix(metrics.agent_comments)}, and #{metrics.work_products} artifact#{suffix(metrics.work_products)} are present."
+  end
+
+  defp summary(_issue, :swarm_cto_ready, _metrics) do
+    "CTO should compare the worker packets, preserve dissent, and publish the CEO restart packet."
+  end
+
+  defp summary(_issue, :swarm_worker_pending, _metrics) do
+    "A hidden one-time worker should leave one independent packet for CTO synthesis."
   end
 
   defp summary(issue, :pre_runtime, _metrics) do
@@ -464,6 +487,14 @@ defmodule Cympho.IssueDigest do
     end
   end
 
+  defp next_action(_issue, :swarm_cto_ready, _metrics) do
+    "Add a tagged `[review]` synthesis that maps agreements, dissent, evidence quality, confidence, and the CEO recommendation."
+  end
+
+  defp next_action(_issue, :swarm_worker_pending, _metrics) do
+    "Start the temporary worker turn and require one tagged `[delivery]` packet plus `swarm_worker_complete`."
+  end
+
   defp next_action(_issue, :assigned, _metrics) do
     "Start the assigned agent or ask the CEO/CTO to split the work into smaller tickets."
   end
@@ -502,6 +533,16 @@ defmodule Cympho.IssueDigest do
     issue.status in [:todo, "todo"] and
       assigned? and
       metrics.runs == 0 and metrics.agent_comments == 0 and metrics.work_products == 0
+  end
+
+  defp swarm_cto_synthesis_ready?(issue) do
+    Map.get(issue, :origin_type) == "swarm_cto_review" and
+      Map.get(issue, :status) in [:todo, "todo", :in_review, "in_review"]
+  end
+
+  defp swarm_worker_packet_pending?(issue) do
+    Map.get(issue, :origin_type) == "swarm_worker" and
+      Map.get(issue, :status) in [:todo, "todo", :in_review, "in_review"]
   end
 
   defp latest_failed_run_signal(runs) do
@@ -818,7 +859,7 @@ defmodule Cympho.IssueDigest do
     delivery = delivery_run_summary(issue, metrics, contributions)
     review = review_run_summary(issue, state, metrics, contributions)
     owner = owner_run_summary(issue, state, metrics, contributions)
-    runtime = runtime_run_summary(metrics, contributions)
+    runtime = runtime_run_summary(issue, state, metrics, contributions)
 
     if ceo_first_turn_required?(issue, metrics) do
       [owner, runtime, delivery, review]
@@ -918,9 +959,10 @@ defmodule Cympho.IssueDigest do
     }
   end
 
-  defp runtime_run_summary(metrics, contributions) do
+  defp runtime_run_summary(issue, state, metrics, contributions) do
     status =
       cond do
+        state in [:swarm_cto_ready, :swarm_worker_pending] -> :waiting
         metrics.failed_runs > 0 -> :blocked
         metrics.active_runs > 0 -> :running
         metrics.successful_runs > 0 -> :decision
@@ -929,19 +971,19 @@ defmodule Cympho.IssueDigest do
 
     %{
       key: :runtime,
-      title: "Runtime evidence",
+      title: runtime_run_summary_title(state),
       role: "System / adapters",
       owner: contribution_names(runtime_contributions(contributions)),
       status: status,
       status_label: run_summary_status_label(status),
-      summary: runtime_run_summary_text(metrics),
+      summary: runtime_run_summary_text(issue, state, metrics),
       evidence: [
         count_chip(metrics.runs, "runs"),
         count_chip(metrics.successful_runs, "successful"),
         count_chip(metrics.failed_runs, "failed"),
         count_chip(metrics.active_runs, "active")
       ],
-      next_action: runtime_run_next_action(metrics, status)
+      next_action: runtime_run_next_action(issue, state, metrics, status)
     }
   end
 
@@ -1105,7 +1147,19 @@ defmodule Cympho.IssueDigest do
   defp review_run_next_action(_issue, _state, _metrics, _status),
     do: "Wait for delivery evidence before asking CTO for review."
 
-  defp runtime_run_summary_text(metrics) do
+  defp runtime_run_summary_title(:swarm_cto_ready), do: "Swarm evidence"
+  defp runtime_run_summary_title(:swarm_worker_pending), do: "Swarm packet"
+  defp runtime_run_summary_title(_state), do: "Runtime evidence"
+
+  defp runtime_run_summary_text(_issue, :swarm_cto_ready, _metrics) do
+    "Worker packets are closed; the remaining evidence is the CTO synthesis and CEO restart packet."
+  end
+
+  defp runtime_run_summary_text(_issue, :swarm_worker_pending, _metrics) do
+    "This worker contributes one independent packet; runtime evidence rolls up through CTO synthesis."
+  end
+
+  defp runtime_run_summary_text(_issue, _state, metrics) do
     cond do
       metrics.failed_runs > 0 ->
         "#{metrics.failed_runs} failed runtime attempt#{suffix(metrics.failed_runs)} need triage before this issue can be trusted."
@@ -1121,16 +1175,22 @@ defmodule Cympho.IssueDigest do
     end
   end
 
-  defp runtime_run_next_action(_metrics, :blocked),
+  defp runtime_run_next_action(_issue, _state, _metrics, :blocked),
     do: "Open the failed run, fix adapter/runtime config, then rerun or document the blocker."
 
-  defp runtime_run_next_action(_metrics, :running),
+  defp runtime_run_next_action(_issue, _state, _metrics, :running),
     do: "Wait for the run to finish before asking for review."
 
-  defp runtime_run_next_action(_metrics, :decision),
+  defp runtime_run_next_action(_issue, _state, _metrics, :decision),
     do: "Pair the successful run with a tagged delivery or review note."
 
-  defp runtime_run_next_action(_metrics, _status),
+  defp runtime_run_next_action(_issue, :swarm_cto_ready, _metrics, _status),
+    do: "Publish the CTO synthesis; do not start another generic runtime pass."
+
+  defp runtime_run_next_action(_issue, :swarm_worker_pending, _metrics, _status),
+    do: "Run the one-time worker or record a blocker packet for CTO."
+
+  defp runtime_run_next_action(_issue, _state, _metrics, _status),
     do: "Start an agent run or document manual verification."
 
   defp delivery_evidence?(metrics) do
@@ -1140,6 +1200,7 @@ defmodule Cympho.IssueDigest do
 
   defp review_due?(issue, state, metrics) do
     issue.status in [:in_review, :done] or state in [:ready_for_review, :closed] or
+      state == :swarm_cto_ready or
       delivery_evidence?(metrics)
   end
 
@@ -1630,8 +1691,8 @@ defmodule Cympho.IssueDigest do
     ]
   end
 
-  defp quality(issue, metrics, receipt_audit) do
-    items = quality_items(issue, metrics, receipt_audit)
+  defp quality(issue, metrics, comments, receipt_audit) do
+    items = quality_items(issue, metrics, comments, receipt_audit)
     gaps = Enum.filter(items, &(&1.status in [:missing, :attention]))
 
     %{
@@ -1665,7 +1726,7 @@ defmodule Cympho.IssueDigest do
   end
 
   defp review_readiness_gates(issue, state, metrics, comments, receipt_audit) do
-    (quality_items(issue, metrics, receipt_audit) ++
+    (quality_items(issue, metrics, comments, receipt_audit) ++
        role_completion_gates(issue, state, metrics, comments) ++
        [review_decision_gate(issue, state, metrics)])
     |> merge_review_gates()
@@ -1752,7 +1813,7 @@ defmodule Cympho.IssueDigest do
 
   defp role_completion_gates(issue, state, metrics, comments) do
     [
-      delivery_contract_gate(metrics, comments),
+      delivery_contract_gate(issue, metrics, comments),
       review_contract_gate(issue, state, metrics, comments),
       owner_contract_gate(comments)
     ]
@@ -1957,6 +2018,7 @@ defmodule Cympho.IssueDigest do
 
   defp latest_contract_comment_evidence(comments, categories, role, agent_names) do
     comments
+    |> Enum.filter(&contract_comment?/1)
     |> Enum.filter(&(tagged_comment_category(&1) in categories))
     |> Enum.map(&contract_comment_evidence(&1, role, agent_names))
     |> case do
@@ -2077,10 +2139,11 @@ defmodule Cympho.IssueDigest do
 
   defp agent_name(_agent_id, _agent_names), do: "Agent"
 
-  defp delivery_contract_gate(metrics, comment_list) do
+  defp delivery_contract_gate(issue, metrics, comment_list) do
     required? = delivery_comment_required?(metrics)
-    comments = metrics.tagged_delivery_comments
+    comments = contract_comment_count(comment_list, [:delivery])
     evidence = latest_contract_comment_evidence(comment_list, [:delivery], :engineer, %{})
+    governance_comments = governance_completion_comment_count(issue, metrics, comment_list)
 
     cond do
       evidence && evidence.contract_status == :attention ->
@@ -2099,6 +2162,15 @@ defmodule Cympho.IssueDigest do
           status: :ok,
           prompt:
             "#{comments} tagged `[delivery]` comment#{suffix(comments)} present for the implementation handoff."
+        }
+
+      governance_comments > 0 ->
+        %{
+          key: :delivery_comment,
+          label: "Delivery comment",
+          status: :ok,
+          prompt:
+            "Governance completion note covers the final delivery packet for this delegated work."
         }
 
       not required? ->
@@ -2205,6 +2277,19 @@ defmodule Cympho.IssueDigest do
       metrics.has_code_reference? or metrics.review_decision_comments > 0
   end
 
+  defp governance_completion_comment_count(issue, metrics, comments) do
+    cond do
+      swarm_governance_issue?(issue) ->
+        contract_comment_count(comments, [:review, :owner_update])
+
+      delegated_parent_work_ready?(metrics) ->
+        contract_comment_count(comments, [:owner_update])
+
+      true ->
+        0
+    end
+  end
+
   defp done_transition_blockers(digest, child_issues) do
     if child_issues != [] and digest.metrics.tagged_owner_update_comments == 0 do
       [
@@ -2221,7 +2306,7 @@ defmodule Cympho.IssueDigest do
     end
   end
 
-  defp quality_items(issue, metrics, receipt_audit) do
+  defp quality_items(issue, metrics, comments, receipt_audit) do
     [
       %{
         key: :owner_request,
@@ -2261,9 +2346,9 @@ defmodule Cympho.IssueDigest do
       %{
         key: :work_product,
         label: "Work product",
-        status: if(metrics.work_products > 0 or metrics.has_pr?, do: :ok, else: :missing),
+        status: if(work_product_ready?(issue, metrics, comments), do: :ok, else: :missing),
         prompt:
-          if(metrics.work_products > 0 or metrics.has_pr?,
+          if(work_product_ready?(issue, metrics, comments),
             do: "A work product or PR reference is attached.",
             else:
               "Attach a work product with `attach_work_product` before asking for review or closing work."
@@ -2272,6 +2357,43 @@ defmodule Cympho.IssueDigest do
       child_quality_item(metrics),
       code_reference_quality_item(issue, metrics)
     ]
+  end
+
+  defp work_product_ready?(issue, metrics, comments) do
+    metrics.work_products > 0 or metrics.has_pr? or delegated_parent_work_ready?(metrics) or
+      swarm_governance_evidence_ready?(issue, comments)
+  end
+
+  defp delegated_parent_work_ready?(metrics) do
+    metrics.child_issues > 0 and metrics.open_child_issues == 0
+  end
+
+  defp swarm_governance_evidence_ready?(issue, comments) do
+    swarm_governance_issue?(issue) and
+      contract_comment_count(comments, [:review, :owner_update]) > 0
+  end
+
+  defp contract_comment_count(comments, categories) do
+    comments
+    |> Enum.filter(&contract_comment?/1)
+    |> Enum.count(&(tagged_comment_category(&1) in categories))
+  end
+
+  defp contract_comment?(comment), do: comment_author_type(comment) in ["agent", "user"]
+
+  defp swarm_governance_issue?(issue) do
+    issue
+    |> issue_swarm_role()
+    |> Kernel.in(["parent", "cto_synthesis"])
+  end
+
+  defp issue_swarm_role(issue) do
+    issue
+    |> Map.get(:monitor_state)
+    |> case do
+      %{} = monitor_state -> get_in(monitor_state, ["swarm", "role"])
+      _ -> nil
+    end
   end
 
   defp last_action_receipt_quality_item(%{status: :ok} = audit) do

@@ -24,6 +24,16 @@ defmodule Cympho.Costs do
       |> Repo.aggregate(:sum, :total_tokens)
       |> integer_or_zero()
 
+    unpriced_tokens =
+      unpriced_usage_query(company_id, since)
+      |> Repo.aggregate(:sum, :total_tokens)
+      |> integer_or_zero()
+
+    unpriced_request_count =
+      unpriced_usage_query(company_id, since)
+      |> Repo.aggregate(:count, :id)
+      |> integer_or_zero()
+
     budget_limit =
       budget_query(company_id)
       |> where([b], b.status == "active")
@@ -39,6 +49,9 @@ defmodule Cympho.Costs do
     %{
       total_cost: total_cost,
       total_tokens: total_tokens,
+      unpriced_tokens: unpriced_tokens,
+      unpriced_request_count: unpriced_request_count,
+      has_unpriced_usage?: unpriced_tokens > 0,
       budget_limit: budget_limit,
       budget_spent: budget_spent,
       days: days
@@ -313,6 +326,14 @@ defmodule Cympho.Costs do
 
   defp token_usage_query(nil), do: TokenUsage
   defp token_usage_query(company_id), do: where(TokenUsage, [tu], tu.company_id == ^company_id)
+
+  defp unpriced_usage_query(company_id, since) do
+    company_id
+    |> token_usage_query()
+    |> where([tu], tu.inserted_at >= ^since)
+    |> where([tu], tu.total_tokens > 0)
+    |> where([tu], is_nil(tu.cost_usd) or tu.cost_usd == 0)
+  end
 
   defp budget_query(nil), do: Budget
   defp budget_query(company_id), do: where(Budget, [b], b.company_id == ^company_id)

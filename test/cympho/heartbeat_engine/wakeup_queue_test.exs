@@ -74,6 +74,56 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
       assert second.metadata["key"] == "value2"
     end
 
+    test "records coalesced comment wake context", %{agent: agent, issue: issue} do
+      {:ok, _first} =
+        WakeupQueue.enqueue(%{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: "issue_commented",
+          metadata: %{"comment_id" => "comment-1"}
+        })
+
+      {:ok, second} =
+        WakeupQueue.enqueue(%{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: "issue_commented",
+          metadata: %{"comment_id" => "comment-2"}
+        })
+
+      assert second.metadata["comment_id"] == "comment-2"
+      assert second.metadata["coalesced_count"] == 2
+      assert second.metadata["coalesced_comment_ids"] == ["comment-1", "comment-2"]
+    end
+
+    test "caps coalesced comment ids", %{agent: agent, issue: issue} do
+      {:ok, _first} =
+        WakeupQueue.enqueue(%{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: "issue_commented",
+          metadata: %{"comment_id" => "comment-0"}
+        })
+
+      last =
+        Enum.reduce(1..25, nil, fn index, _last ->
+          {:ok, wake} =
+            WakeupQueue.enqueue(%{
+              agent_id: agent.id,
+              issue_id: issue.id,
+              reason: "issue_commented",
+              metadata: %{"comment_id" => "comment-#{index}"}
+            })
+
+          wake
+        end)
+
+      assert last.metadata["coalesced_count"] == 26
+      assert length(last.metadata["coalesced_comment_ids"]) == 20
+      refute "comment-0" in last.metadata["coalesced_comment_ids"]
+      assert "comment-25" in last.metadata["coalesced_comment_ids"]
+    end
+
     test "allows different reasons for same agent/issue", %{agent: agent, issue: issue} do
       {:ok, _} =
         WakeupQueue.enqueue(%{
@@ -90,6 +140,73 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
         })
 
       assert WakeupQueue.pending_count(agent.id) == 2
+    end
+  end
+
+  describe "enqueue/1 recent duplicate guard" do
+    setup do
+      original = Application.get_env(:cympho, :wakeup_queue, [])
+      Application.put_env(:cympho, :wakeup_queue, recent_duplicate_window_seconds: 120)
+      on_exit(fn -> Application.put_env(:cympho, :wakeup_queue, original) end)
+      :ok
+    end
+
+    test "suppresses the same wake after it was just consumed", %{agent: agent, issue: issue} do
+      attrs = %{
+        agent_id: agent.id,
+        issue_id: issue.id,
+        reason: "issue_commented",
+        triggered_by_type: "user",
+        triggered_by_id: "owner-1",
+        metadata: %{comment_id: "comment-1"}
+      }
+
+      assert {:ok, _wake} = WakeupQueue.enqueue(attrs)
+      assert :ok = WakeupQueue.consume_for(agent.id, issue.id)
+
+      assert {:error, :recent_duplicate_wake} = WakeupQueue.enqueue(attrs)
+      assert WakeupQueue.pending_count(agent.id) == 0
+    end
+
+    test "allows a new wake with a different event fingerprint", %{agent: agent, issue: issue} do
+      assert {:ok, _wake} =
+               WakeupQueue.enqueue(%{
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 reason: "issue_commented",
+                 triggered_by_type: "user",
+                 triggered_by_id: "owner-1",
+                 metadata: %{comment_id: "comment-1"}
+               })
+
+      assert :ok = WakeupQueue.consume_for(agent.id, issue.id)
+
+      assert {:ok, new_wake} =
+               WakeupQueue.enqueue(%{
+                 agent_id: agent.id,
+                 issue_id: issue.id,
+                 reason: "issue_commented",
+                 triggered_by_type: "user",
+                 triggered_by_id: "owner-1",
+                 metadata: %{comment_id: "comment-2"}
+               })
+
+      assert new_wake.status == "pending"
+      assert WakeupQueue.pending_count(agent.id) == 1
+    end
+
+    test "does not suppress explicit manual dispatches", %{agent: agent, issue: issue} do
+      attrs = %{
+        agent_id: agent.id,
+        issue_id: issue.id,
+        reason: "manual_dispatch",
+        triggered_by_type: "system",
+        triggered_by_id: "operator"
+      }
+
+      assert {:ok, _wake} = WakeupQueue.enqueue(attrs)
+      assert :ok = WakeupQueue.consume_for(agent.id, issue.id)
+      assert {:ok, _wake} = WakeupQueue.enqueue(attrs)
     end
   end
 

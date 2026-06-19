@@ -249,22 +249,33 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   def integrity_status_color(:unknown), do: "text-gray-400"
   def integrity_status_color({:error, _}), do: "text-brand"
 
+  def integrity_status_color(status)
+      when is_tuple(status) and elem(status, 0) == :error,
+      do: "text-brand"
+
   def integrity_status_label(:ok), do: "Chain integrity verified"
   def integrity_status_label(:unknown), do: "Integrity not checked"
+
+  def integrity_status_label({:error, :content_hash_mismatch, sequence}),
+    do: "Content hash mismatch at sequence #{sequence}"
+
   def integrity_status_label({:error, :chain_broken, _, _}), do: "Chain integrity broken!"
   def integrity_status_label({:error, _}), do: "Integrity check failed"
+
+  def integrity_status_label(status) when is_tuple(status) and elem(status, 0) == :error,
+    do: "Integrity check failed"
 
   defp assign_trace_command(socket) do
     assign(socket, :trace_command, build_trace_command(socket.assigns))
   end
 
-  defp build_trace_command(%{integrity_status: {:error, _}, statistics: statistics}) do
+  defp build_trace_command(%{integrity_status: integrity_status, statistics: statistics})
+       when is_tuple(integrity_status) and elem(integrity_status, 0) == :error do
     %{
       tone: :critical,
       badge: "Chain broken",
       title: "Stop trusting trace exports until integrity is repaired",
-      summary:
-        "The immutable trace chain failed verification. Inspect the affected sequence before using exports for audit or governance.",
+      summary: integrity_failure_summary(integrity_status),
       action_label: "Verify again",
       action_event: "verify_integrity",
       action_path: nil,
@@ -341,6 +352,18 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
       action_path: "#traces-table",
       metrics: trace_command_metrics(statistics)
     }
+  end
+
+  defp integrity_failure_summary({:error, :content_hash_mismatch, sequence}) do
+    "Trace sequence #{sequence} has a stale or tampered content hash. Inspect that row before using exports for audit or governance."
+  end
+
+  defp integrity_failure_summary({:error, :chain_broken, from_sequence, to_sequence}) do
+    "Trace chain link #{from_sequence} -> #{to_sequence} failed verification. Inspect the affected sequence before using exports for audit or governance."
+  end
+
+  defp integrity_failure_summary(_status) do
+    "The immutable trace chain failed verification. Inspect the affected sequence before using exports for audit or governance."
   end
 
   defp trace_command_metrics(statistics) do

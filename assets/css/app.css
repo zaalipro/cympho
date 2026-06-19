@@ -304,6 +304,48 @@
   color: var(--color-brand);
 }
 
+/* Simple / Advanced product mode. Advanced keeps the existing dense
+   operational surfaces; Simple keeps the action path visible and folds
+   explanatory/audit copy away. */
+html:not([data-ui-mode="simple"]) .ui-simple-only {
+  display: none !important;
+}
+
+html[data-ui-mode="simple"] [data-ui-complex-page]:not([data-density="detailed"]) .ui-advanced-only,
+html[data-ui-mode="simple"] [data-ui-complex-page]:not([data-density="detailed"]) [data-ui-advanced-only],
+html[data-ui-mode="simple"] [data-ui-complex-page]:not([data-density="detailed"]) [data-ui-simple-hide],
+[data-density="detailed"] .ui-simple-only {
+  display: none !important;
+}
+
+.ui-mode-toggle[data-mode="advanced"] {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 18%, var(--color-surface-2));
+  color: var(--color-ink);
+}
+
+.ui-simple-icon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.ui-simple-card {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
+    var(--color-panel);
+  box-shadow: var(--shadow-card);
+}
+
 .linear-panel {
   background: var(--color-panel);
   border: 1px solid var(--color-border);

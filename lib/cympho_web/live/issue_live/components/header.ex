@@ -66,7 +66,13 @@ defmodule CymphoWeb.IssueLive.Show.Header do
       <div class="mt-3 flex flex-wrap items-center gap-2">
         <.badge variant="status" value={to_string(@issue.status)} />
         <.badge variant="priority" value={to_string(@issue.priority)} />
-        <.pending_wake_badge :if={@pending_wake} wake={@pending_wake} />
+        <span
+          :if={Cympho.Issues.issue_runtime_paused?(@issue)}
+          class="inline-flex items-center gap-1.5 rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 text-[11px] font-590 uppercase tracking-[0.06em] text-amber-100"
+        >
+          <.icon name="hero-pause-mini" class="h-3.5 w-3.5 text-white" /> Paused
+        </span>
+        <.pending_wake_badge :if={@pending_wake && !terminal_issue?(@issue)} wake={@pending_wake} />
         <span
           :if={@issue.assignee}
           class="inline-flex items-center gap-1.5 text-caption text-ink-muted"
@@ -114,4 +120,9 @@ defmodule CymphoWeb.IssueLive.Show.Header do
   defp swarm_state?(%{"role" => role}) when role in ["worker", "cto_synthesis"], do: true
   defp swarm_state?(%{role: role}) when role in ["worker", "cto_synthesis"], do: true
   defp swarm_state?(_), do: false
+
+  defp terminal_issue?(%{status: status}) when status in [:done, :cancelled, "done", "cancelled"],
+    do: true
+
+  defp terminal_issue?(_issue), do: false
 end

@@ -62,6 +62,26 @@ defmodule Cympho.RuntimeProfiles do
       description: "Exercise a generic process adapter without opening broad concurrency."
     }
   ]
+  @default_fallback_chains %{
+    "codex-gpt-5.5" => ["codex-mini", "process-codex"],
+    "codex-mini" => ["process-codex"],
+    "claude-cz" => ["claude-cm", "openai-chat-qwen-dashscope-flash"],
+    "claude-cm" => ["claude-cz", "openai-chat-qwen-dashscope-flash"],
+    "claude-qwen-dashscope" => [
+      "openai-chat-qwen-dashscope",
+      "openai-chat-qwen-dashscope-flash"
+    ],
+    "openai-chat-qwen-dashscope" => [
+      "openai-chat-qwen-dashscope-flash",
+      "openai-chat-qwen-dashscope-intl"
+    ],
+    "openai-chat-qwen-dashscope-flash" => ["openai-chat-qwen-dashscope-intl"],
+    "openai-chat-qwen-dashscope-intl" => ["openai-chat-qwen-dashscope-flash"],
+    "openclaw-zai" => ["openclaw-minimax", "codex-mini"],
+    "openclaw-minimax" => ["openclaw-zai", "codex-mini"],
+    "cursor-auto" => ["codex-mini", "process-codex"],
+    "process-codex" => ["codex-mini"]
+  }
 
   def custom_id, do: @custom_id
 
@@ -278,6 +298,38 @@ defmodule Cympho.RuntimeProfiles do
   def config(profile_id), do: get!(profile_id).config || %{}
   def runtime_config(profile_id), do: get!(profile_id).runtime_config || %{}
 
+  def fallback_profile_ids(agent_or_profile_id)
+
+  def fallback_profile_ids(%{runtime_config: runtime_config, config: config} = agent) do
+    current = from_agent(agent)
+
+    explicit =
+      first_present_list([
+        map_get(runtime_config || %{}, "fallback_profile_ids"),
+        map_get(runtime_config || %{}, "fallback_profiles"),
+        map_get(runtime_config || %{}, "fallback_runtime_profile_ids"),
+        map_get(config || %{}, "fallback_profile_ids"),
+        map_get(config || %{}, "fallback_profiles"),
+        map_get(config || %{}, "fallback_runtime_profile_ids")
+      ])
+
+    ids =
+      case explicit do
+        [] -> Map.get(@default_fallback_chains, current, [])
+        ids -> ids
+      end
+
+    normalize_fallback_ids(ids, current)
+  end
+
+  def fallback_profile_ids(profile_id) do
+    profile_id = normalize_id(profile_id)
+
+    profile_id
+    |> then(&Map.get(@default_fallback_chains, &1, []))
+    |> normalize_fallback_ids(profile_id)
+  end
+
   def summary_value(%{config: config, runtime_config: runtime_config}) do
     runtime_env = runtime_env_from_profile(%{runtime_config: runtime_config})
 
@@ -302,6 +354,51 @@ defmodule Cympho.RuntimeProfiles do
   end
 
   defp runtime_env_from_profile(_profile), do: %{}
+
+  defp first_present_list(values) do
+    Enum.find_value(values, [], fn value ->
+      ids = normalize_list(value)
+      if ids == [], do: nil, else: ids
+    end)
+  end
+
+  defp normalize_list(value) when is_list(value) do
+    value
+    |> Enum.flat_map(&normalize_list/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp normalize_list(value) when is_binary(value) do
+    value
+    |> String.split([",", "\n"], trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp normalize_list(value) when is_atom(value), do: [Atom.to_string(value)]
+  defp normalize_list(_), do: []
+
+  defp normalize_fallback_ids(ids, current) do
+    ids
+    |> normalize_list()
+    |> Enum.map(&normalize_id/1)
+    |> Enum.reject(&(&1 in [@custom_id, current]))
+    |> Enum.uniq()
+  end
+
+  defp map_get(map, key) when is_map(map) do
+    Map.get(map, key) || Map.get(map, existing_atom_key(key))
+  end
+
+  defp map_get(_map, _key), do: nil
+
+  defp existing_atom_key(key) when is_binary(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp existing_atom_key(key), do: key
 
   defp present?(value) when is_binary(value), do: String.trim(value) != ""
   defp present?(_), do: false

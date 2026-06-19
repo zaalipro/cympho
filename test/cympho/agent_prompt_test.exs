@@ -7,6 +7,7 @@ defmodule Cympho.AgentPromptTest do
     AgentPrompt,
     AgentActions,
     AgentPromptContract,
+    Attachments,
     Agents,
     Companies,
     Issues,
@@ -41,6 +42,97 @@ defmodule Cympho.AgentPromptTest do
       designer: Enum.find(agents, &(&1.role == :designer)),
       issue: issue
     }
+  end
+
+  describe "build/3 — attachment context" do
+    test "includes attachment metadata and small text attachment contents", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      with_upload_dir(fn upload_dir ->
+        content = "Acceptance criteria from attached brief.\n- Preserve user trust."
+        relative_path = Path.join(issue.id, "brief.md")
+        full_path = Path.join(upload_dir, relative_path)
+
+        File.mkdir_p!(Path.dirname(full_path))
+        File.write!(full_path, content)
+
+        {:ok, _attachment} =
+          Attachments.create_attachment(%{
+            filename: "brief.md",
+            content_type: "text/markdown",
+            file_size: byte_size(content),
+            path: relative_path,
+            issue_id: issue.id
+          })
+
+        prompt = AgentPrompt.build(issue, engineer.id)
+
+        assert prompt =~ "## Issue attachments"
+        assert prompt =~ "brief.md"
+        assert prompt =~ "text/markdown"
+        assert prompt =~ "Acceptance criteria from attached brief."
+        assert prompt =~ "Preserve user trust."
+      end)
+    end
+
+    test "inlines small image attachments as data URIs for authenticated runtimes", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      with_upload_dir(fn upload_dir ->
+        image_bytes = <<137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0>>
+        relative_path = Path.join(issue.id, "screen.png")
+        full_path = Path.join(upload_dir, relative_path)
+
+        File.mkdir_p!(Path.dirname(full_path))
+        File.write!(full_path, image_bytes)
+
+        {:ok, _attachment} =
+          Attachments.create_attachment(%{
+            filename: "screen.png",
+            content_type: "image/png",
+            file_size: byte_size(image_bytes),
+            path: relative_path,
+            issue_id: issue.id
+          })
+
+        prompt = AgentPrompt.build(issue, engineer.id)
+
+        assert prompt =~ "screen.png"
+        assert prompt =~ "Inline image data URI:"
+        assert prompt =~ "data:image/png;base64,#{Base.encode64(image_bytes)}"
+      end)
+    end
+
+    test "does not inline oversized image attachments", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      with_upload_dir(fn upload_dir ->
+        image_bytes = :binary.copy(<<0>>, 70 * 1024)
+        relative_path = Path.join(issue.id, "large-screen.png")
+        full_path = Path.join(upload_dir, relative_path)
+
+        File.mkdir_p!(Path.dirname(full_path))
+        File.write!(full_path, image_bytes)
+
+        {:ok, _attachment} =
+          Attachments.create_attachment(%{
+            filename: "large-screen.png",
+            content_type: "image/png",
+            file_size: byte_size(image_bytes),
+            path: relative_path,
+            issue_id: issue.id
+          })
+
+        prompt = AgentPrompt.build(issue, engineer.id)
+
+        assert prompt =~ "large-screen.png"
+        assert prompt =~ "not included because the image is larger than the inline image limit"
+        refute prompt =~ Base.encode64(image_bytes)
+      end)
+    end
   end
 
   describe "build/3 — role playbook injection" do
@@ -408,7 +500,110 @@ defmodule Cympho.AgentPromptTest do
     end
   end
 
+  describe "build/3 — company operating context" do
+    test "includes company description as a durable operating brief", %{
+      issue: issue,
+      ceo: ceo
+    } do
+      company = Companies.get_company!(issue.company_id)
+
+      {:ok, _company} =
+        Companies.update_company(company, %{
+          description:
+            "Build reliable autonomous-company operations for owners who need clear evidence, not mystery automation."
+        })
+
+      prompt = AgentPrompt.build(Issues.get_issue!(issue.id), ceo.id)
+
+      assert prompt =~ "## Company operating brief"
+      assert prompt =~ "Treat this as durable company context"
+
+      assert prompt =~
+               "Build reliable autonomous-company operations for owners who need clear evidence"
+    end
+
+    test "prefers explicit operating brief config and does not leak arbitrary config keys", %{
+      issue: issue,
+      ceo: ceo
+    } do
+      company = Companies.get_company!(issue.company_id)
+
+      {:ok, _company} =
+        Companies.execute_company_update(company, %{
+          description: "Fallback description should not win.",
+          governance_config: %{
+            "operating_brief" =>
+              "Serve the current owner mission, preserve dissent, and keep every runtime action auditable.",
+            "do_not_prompt" => "SHOULD_NOT_LEAK"
+          }
+        })
+
+      prompt = AgentPrompt.build(Issues.get_issue!(issue.id), ceo.id)
+
+      assert prompt =~
+               "Serve the current owner mission, preserve dissent, and keep every runtime action auditable."
+
+      refute prompt =~ "Fallback description should not win"
+      refute prompt =~ "SHOULD_NOT_LEAK"
+    end
+  end
+
+  describe "build/3 — custom instruction files" do
+    test "includes DB-managed additional instruction files in agent context", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      {:ok, engineer} =
+        Agents.update_agent(engineer, %{
+          instructions: "Entry instructions: always leave a complete delivery packet."
+        })
+
+      {:ok, _file} =
+        Cympho.Agents.InstructionFiles.create(
+          engineer,
+          "STYLE.md",
+          "Prefer terse owner-facing summaries. Name verification evidence explicitly."
+        )
+
+      prompt = AgentPrompt.build(issue, engineer.id)
+
+      assert prompt =~ "Entry instructions: always leave a complete delivery packet."
+      assert prompt =~ "### Additional instruction files"
+      assert prompt =~ "#### STYLE.md"
+
+      assert prompt =~
+               "Prefer terse owner-facing summaries. Name verification evidence explicitly."
+    end
+  end
+
   describe "build/3 — per-role action contract" do
+    test "starts with a current task block before role playbooks", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          title: "Ship the explicit task contract",
+          description: "Use this issue description as the primary objective.",
+          assigned_role: "engineer"
+        })
+
+      prompt = AgentPrompt.build(issue, engineer.id)
+
+      assert prompt =~ "## Current task - do this now"
+      assert prompt =~ "Use this issue description as the primary objective."
+
+      assert prompt =~
+               "Role playbooks and company-specific overrides below are supporting constraints"
+
+      assert String.starts_with?(prompt, "## Current task - do this now")
+
+      {task_position, _} = :binary.match(prompt, "## Current task - do this now")
+      {agent_position, _} = :binary.match(prompt, "Agent:")
+
+      assert task_position < agent_position
+    end
+
     test "engineer's action contract hides governance actions", %{
       issue: issue,
       engineer: engineer
@@ -557,6 +752,125 @@ defmodule Cympho.AgentPromptTest do
       assert prompt =~ "Do not just `comment` and exit"
       assert prompt =~ "`reassign` / `force_handoff` / `unblock`"
       assert prompt =~ "thin recovery directives are rejected"
+    end
+
+    test "runtime fallback wakes explain the retry context", %{issue: issue, engineer: engineer} do
+      prompt =
+        AgentPrompt.build(issue, engineer.id,
+          wake_context: {"runtime_fallback", %{"attempts" => 1}}
+        )
+
+      assert prompt =~ "Wake reason: `runtime_fallback`"
+      assert prompt =~ "automatic runtime fallback attempt"
+      assert prompt =~ "provider quota/rate-limit"
+      assert prompt =~ "exact restart packet needed"
+    end
+
+    test "runtime retry wakes explain the no-work retry context", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      prompt =
+        AgentPrompt.build(issue, engineer.id, wake_context: {"runtime_retry", %{"attempts" => 1}})
+
+      assert prompt =~ "Wake reason: `runtime_retry`"
+      assert prompt =~ "bounded same-runtime retry"
+      assert prompt =~ "no-output or malformed-output"
+      assert prompt =~ "avoid repeating the empty/malformed response pattern"
+      assert prompt =~ "exact restart packet needed"
+    end
+
+    test "comment mention wakes tell the agent to answer the mentioned comment", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      prompt =
+        AgentPrompt.build(issue, engineer.id,
+          wake_context: {"issue_comment_mentioned", %{"comment_id" => "comment-123"}}
+        )
+
+      assert prompt =~ "Wake reason: `issue_comment_mentioned`"
+      assert prompt =~ "explicitly mentioned in a comment"
+      assert prompt =~ "comment-123"
+
+      assert prompt =~
+               "Do not ignore this wake just because the issue is assigned to someone else"
+    end
+
+    test "comment wakes pin the triggering comment body above recent history", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      {:ok, older_comment} =
+        Comments.create_comment(%{
+          body: "Older context that should not be mistaken for the trigger.",
+          author_type: "user",
+          author_id: "owner",
+          issue_id: issue.id
+        })
+
+      {:ok, triggering_comment} =
+        Comments.create_comment(%{
+          body: "@#{engineer.name} please answer this exact scope question.",
+          author_type: "user",
+          author_id: "owner",
+          issue_id: issue.id
+        })
+
+      prompt =
+        AgentPrompt.build(issue, engineer.id,
+          wake_context: {"issue_comment_mentioned", %{"comment_id" => triggering_comment.id}}
+        )
+
+      assert prompt =~ "## Triggering comment - answer this"
+      assert prompt =~ "Comment ID: #{triggering_comment.id}"
+      assert prompt =~ "@#{engineer.name} please answer this exact scope question."
+      assert prompt =~ "treat this exact comment as the reason you are running now"
+      assert prompt =~ "Recent comments"
+      assert prompt =~ older_comment.body
+
+      {trigger_position, _} = :binary.match(prompt, "## Triggering comment - answer this")
+      {history_position, _} = :binary.match(prompt, "### Recent comments")
+
+      assert trigger_position < history_position
+    end
+
+    test "comment wakes expose missing triggering comment ids instead of pretending context exists",
+         %{issue: issue, engineer: engineer} do
+      missing_id = Ecto.UUID.generate()
+
+      prompt =
+        AgentPrompt.build(issue, engineer.id,
+          wake_context: {"issue_commented", %{"comment_id" => missing_id}}
+        )
+
+      assert prompt =~ "## Triggering comment - unavailable"
+      assert prompt =~ "Comment ID: #{missing_id}"
+      assert prompt =~ "could not be loaded for this issue"
+    end
+
+    test "comment wakes use wake metadata body when the triggering comment row is unavailable",
+         %{issue: issue, engineer: engineer} do
+      missing_id = Ecto.UUID.generate()
+
+      prompt =
+        AgentPrompt.build(issue, engineer.id,
+          wake_context:
+            {"issue_commented",
+             %{
+               "comment_id" => missing_id,
+               "comment_body" => "Please verify the pricing screen before CTO synthesis.",
+               "comment_author_type" => "user",
+               "comment_author_id" => "owner-1"
+             }}
+        )
+
+      assert prompt =~ "## Triggering comment - answer this"
+      assert prompt =~ "Comment ID: #{missing_id}"
+      assert prompt =~ "Author: user:owner-1"
+      assert prompt =~ "Source: wake metadata"
+      assert prompt =~ "Please verify the pricing screen before CTO synthesis."
+      refute prompt =~ "could not be loaded for this issue"
     end
 
     test "CEO prompt surfaces owner revision requests from the latest comments", %{
@@ -868,11 +1182,22 @@ defmodule Cympho.AgentPromptTest do
             agent_id: engineer.id,
             adapter: :openai_chat,
             adapter_config: %{},
-            cwd: "/tmp/cympho/test"
+            cwd: "/tmp/cympho/test",
+            env: %{
+              "CYMPHO_RUN_ID" => current_run.id,
+              "CYMPHO_ISSUE_ID" => issue.id,
+              "CYMPHO_AGENT_ID" => engineer.id,
+              "CYMPHO_WORKSPACE" => "/tmp/cympho/test",
+              "AGENT_HOME" => "/tmp/cympho/test"
+            }
           }
         )
 
       assert prompt =~ "Current run note: this run is the turn you are executing now."
+      assert prompt =~ "Workspace rule: the adapter cwd, `CYMPHO_WORKSPACE`, and `AGENT_HOME`"
+      assert prompt =~ "Runtime env contract:"
+      assert prompt =~ "CYMPHO_RUN_ID=set"
+      assert prompt =~ "CYMPHO_WORKSPACE=set"
       assert prompt =~ "Adapter capability: OpenAI-compatible chat"
       assert prompt =~ "cannot edit files, run tests, create branches, open real PRs"
 
@@ -997,6 +1322,27 @@ defmodule Cympho.AgentPromptTest do
       refute prompt =~ "Your role:"
       assert prompt =~ "Issue ID:"
       assert prompt =~ issue.title
+    end
+  end
+
+  defp with_upload_dir(fun) do
+    previous = Application.get_env(:cympho, :uploads_dir)
+
+    dir =
+      Path.join(System.tmp_dir!(), "cympho-agent-prompt-#{System.unique_integer([:positive])}")
+
+    Application.put_env(:cympho, :uploads_dir, dir)
+
+    try do
+      fun.(dir)
+    after
+      if previous do
+        Application.put_env(:cympho, :uploads_dir, previous)
+      else
+        Application.delete_env(:cympho, :uploads_dir)
+      end
+
+      File.rm_rf!(dir)
     end
   end
 end

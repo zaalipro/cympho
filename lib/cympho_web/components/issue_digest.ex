@@ -45,7 +45,8 @@ defmodule CymphoWeb.Components.IssueDigest do
         digest_quick_actions(
           assigns.review_gate_actions,
           assigns.review_nudges,
-          IssueMemory.handoff_packet(assigns.issue, memory)
+          IssueMemory.handoff_packet(assigns.issue, memory),
+          digest
         )
       )
 
@@ -1059,6 +1060,11 @@ defmodule CymphoWeb.Components.IssueDigest do
   def digest_state_class(:coordinating), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   def digest_state_class(:ready_for_review), do: "border-brand/30 bg-brand/10 text-brand"
   def digest_state_class(:in_progress), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
+  def digest_state_class(:swarm_cto_ready), do: "border-brand/30 bg-brand/10 text-brand"
+
+  def digest_state_class(:swarm_worker_pending),
+    do: "border-teal-500/25 bg-teal-500/10 text-teal-300"
+
   def digest_state_class(:pre_runtime), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   def digest_state_class(:assigned), do: "border-border bg-surface text-text-secondary"
   def digest_state_class(:not_started), do: "border-border bg-surface text-text-tertiary"
@@ -1160,11 +1166,12 @@ defmodule CymphoWeb.Components.IssueDigest do
   def comment_mix_class(:owner_input), do: "border-violet-500/25 bg-violet-500/10 text-violet-300"
   def comment_mix_class(_), do: "border-border bg-surface text-text-tertiary"
 
-  defp digest_quick_actions(review_gate_actions, review_nudges, handoff_packet) do
+  defp digest_quick_actions(review_gate_actions, review_nudges, handoff_packet, digest) do
     gate_actions =
       review_gate_actions
       |> Enum.map(&normalize_gate_action/1)
       |> Enum.reject(&is_nil/1)
+      |> maybe_filter_swarm_runtime_launch_actions(digest)
 
     nudge_actions =
       review_nudges
@@ -1183,6 +1190,22 @@ defmodule CymphoWeb.Components.IssueDigest do
     gate_actions ++
       nudge_actions ++ [handoff_packet_action(handoff_packet), raw_timeline_action()]
   end
+
+  defp maybe_filter_swarm_runtime_launch_actions(actions, %{state: state})
+       when state in [:swarm_cto_ready, :swarm_worker_pending] do
+    Enum.reject(actions, &runtime_launch_quick_action?/1)
+  end
+
+  defp maybe_filter_swarm_runtime_launch_actions(actions, _digest), do: actions
+
+  defp runtime_launch_quick_action?(%{event: "prioritize_dispatch"}), do: true
+  defp runtime_launch_quick_action?(%{href: "/operations#runtime-launch-checklist"}), do: true
+  defp runtime_launch_quick_action?(%{resolves: "Runtime verification"}), do: true
+  defp runtime_launch_quick_action?(%{label: "Queue focused dispatch"}), do: true
+  defp runtime_launch_quick_action?(%{label: "Focus queued"}), do: true
+  defp runtime_launch_quick_action?(%{label: "Copy focused command"}), do: true
+  defp runtime_launch_quick_action?(%{label: "Open launch checklist"}), do: true
+  defp runtime_launch_quick_action?(_action), do: false
 
   defp completion_contract_rows(contracts, review_nudges) do
     Enum.map(contracts, fn contract ->

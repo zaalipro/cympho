@@ -25,6 +25,8 @@ defmodule CymphoWeb.OnboardingLiveTest do
       assert html =~ "Community growth company"
       assert html =~ "Security compliance company"
       assert html =~ "Training academy company"
+      assert html =~ "agents"
+      assert html =~ "capabilities"
 
       html =
         view
@@ -58,6 +60,9 @@ defmodule CymphoWeb.OnboardingLiveTest do
       assert html =~ "Your autonomous company is ready"
       assert html =~ "Go-to-market company"
       assert html =~ "Growth OS"
+      assert html =~ "Manifest"
+      assert html =~ "agents ·"
+      assert html =~ "capabilities"
       assert html =~ "Product Manager"
       assert html =~ "Sales Development"
       refute html =~ "Product_manager"
@@ -65,6 +70,8 @@ defmodule CymphoWeb.OnboardingLiveTest do
 
       company = Companies.get_company_by_slug("live-growth-blueprint")
       assert company.governance_config["company_blueprint"] == "go_to_market"
+      assert company.governance_config["company_blueprint_manifest"]["agent_count"] == 10
+      assert company.governance_config["company_blueprint_manifest"]["seed_issue_count"] == 5
 
       roles =
         company.id

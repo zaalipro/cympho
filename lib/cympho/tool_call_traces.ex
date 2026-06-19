@@ -112,25 +112,22 @@ defmodule Cympho.ToolCallTraces do
   end
 
   def update_tool_call_trace_status(%ToolCallTrace{} = trace, status, result \\ nil) do
-    attrs = %{status: status}
-
-    attrs =
-      if result do
-        Map.put(attrs, :tool_result, result)
-      else
-        attrs
-      end
-
-    case trace
-         |> ToolCallTrace.changeset(attrs)
-         |> Repo.update() do
-      {:ok, updated} ->
+    Repo.transaction(fn ->
+      trace
+      |> reload_chain_suffix_for_update()
+      |> rehash_chain_suffix(status, result)
+    end)
+    |> case do
+      {:ok, {:ok, updated}} ->
         updated = Repo.preload(updated, [:agent, :issue, :company])
         maybe_broadcast_trace(updated)
         {:ok, updated}
 
-      error ->
-        error
+      {:ok, {:error, reason}} ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -141,7 +138,21 @@ defmodule Cympho.ToolCallTraces do
       |> order_by([t], asc: t.sequence_number)
       |> Repo.all()
 
-    verify_chain(traces)
+    with :ok <- verify_trace_contents(traces) do
+      verify_chain(traces)
+    end
+  end
+
+  defp verify_trace_contents(traces) do
+    Enum.reduce_while(traces, :ok, fn trace, :ok ->
+      case verify_content_hash(trace) do
+        :ok ->
+          {:cont, :ok}
+
+        {:error, :content_hash_mismatch} ->
+          {:halt, {:error, :content_hash_mismatch, trace.sequence_number}}
+      end
+    end)
   end
 
   def verify_chain([_]), do: :ok
@@ -258,6 +269,74 @@ defmodule Cympho.ToolCallTraces do
       nil -> {:ok, 1}
       max_seq when is_integer(max_seq) -> {:ok, max_seq + 1}
     end
+  end
+
+  defp reload_chain_suffix_for_update(%ToolCallTrace{} = trace) do
+    query =
+      from t in ToolCallTrace,
+        where: t.company_id == ^trace.company_id and t.sequence_number >= ^trace.sequence_number,
+        order_by: [asc: t.sequence_number],
+        lock: "FOR UPDATE"
+
+    case Repo.all(query) do
+      [] -> {:error, :not_found}
+      traces -> {:ok, traces}
+    end
+  end
+
+  defp rehash_chain_suffix({:error, reason}, _status, _result), do: {:error, reason}
+
+  defp rehash_chain_suffix({:ok, [target | rest]}, status, result) do
+    target_attrs =
+      target
+      |> trace_hash_attrs(status_update_attrs(status, result))
+      |> Map.put(:prev_hash, target.prev_hash)
+      |> put_hashes()
+
+    with {:ok, updated_target} <- target |> ToolCallTrace.changeset(target_attrs) |> Repo.update(),
+         {:ok, _last_hash} <- rehash_following_traces(rest, updated_target.chain_hash) do
+      {:ok, updated_target}
+    end
+  end
+
+  defp rehash_following_traces([], last_hash), do: {:ok, last_hash}
+
+  defp rehash_following_traces([trace | rest], prev_hash) do
+    attrs =
+      trace
+      |> trace_hash_attrs(%{})
+      |> Map.put(:prev_hash, prev_hash)
+      |> put_hashes()
+
+    with {:ok, updated} <- trace |> ToolCallTrace.changeset(attrs) |> Repo.update() do
+      rehash_following_traces(rest, updated.chain_hash)
+    end
+  end
+
+  defp status_update_attrs(status, nil), do: %{status: status}
+  defp status_update_attrs(status, result), do: %{status: status, tool_result: result}
+
+  defp trace_hash_attrs(%ToolCallTrace{} = trace, overrides) do
+    %{
+      trace_type: trace.trace_type,
+      tool_name: trace.tool_name,
+      tool_arguments: trace.tool_arguments,
+      tool_result: trace.tool_result,
+      error_message: trace.error_message,
+      status: trace.status,
+      occurred_at: trace.occurred_at,
+      actor_type: trace.actor_type,
+      actor_id: trace.actor_id
+    }
+    |> Map.merge(overrides)
+  end
+
+  defp put_hashes(attrs) do
+    {content_hash, _} = ToolCallTrace.calculate_content_hash(attrs)
+
+    attrs
+    |> Map.put(:content_hash, content_hash)
+    |> Map.put(:chain_hash, ToolCallTrace.calculate_chain_hash(content_hash, attrs[:prev_hash]))
   end
 
   defp maybe_filter_by_company(query, nil), do: query

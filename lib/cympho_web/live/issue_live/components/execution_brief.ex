@@ -18,6 +18,8 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
 
   attr :issue, :map, required: true
   attr :runs, :list, default: []
+  attr :run_history, :map, default: %{shown: 0, total: 0, limit: 50, truncated?: false}
+
   attr :pending_wake, :map, default: nil
   attr :work_products, :list, default: []
   attr :child_issues, :list, default: []
@@ -29,6 +31,7 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
   def execution_brief(assigns) do
     assigns =
       assigns
+      |> assign(:run_history, normalize_run_history(assigns.run_history, assigns.runs))
       |> assign(
         :metrics,
         execution_metrics(
@@ -461,10 +464,17 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
               <h3 class="text-eyebrow text-ink-tertiary uppercase">Runtime run ledger</h3>
               <p class="mt-1 text-caption text-ink-tertiary">
                 Latest agent runs with status, duration, owner, and captured runtime detail.
+                <span :if={@run_history[:total] > length(@run_ledger)} class="block">
+                  Showing the newest entries keeps long-running issues responsive.
+                </span>
               </p>
             </div>
             <span class="rounded-full border border-hairline bg-canvas px-2.5 py-1 text-caption text-ink-muted">
-              {length(@run_ledger)} shown
+              <%= if @run_history[:total] > length(@run_ledger) do %>
+                Latest {length(@run_ledger)} of {@run_history[:total]} runs
+              <% else %>
+                {length(@run_ledger)} shown
+              <% end %>
             </span>
           </div>
 
@@ -506,6 +516,39 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
                 </span>
                 <span :if={run.output_tokens > 0} class="rounded bg-surface-1 px-2 py-1">
                   {format_tokens(run.output_tokens)} out
+                </span>
+                <span
+                  :if={run.prompt_estimated_tokens > 0}
+                  class={prompt_context_chip_class(run.prompt_risk)}
+                >
+                  prompt ~{format_tokens(run.prompt_estimated_tokens)}
+                </span>
+                <span :if={run.prompt_chars > 0} class="rounded bg-surface-1 px-2 py-1">
+                  {format_tokens(run.prompt_chars)} chars
+                </span>
+                <span :if={run.prompt_sections > 0} class="rounded bg-surface-1 px-2 py-1">
+                  {run.prompt_sections} sections
+                </span>
+                <span
+                  :if={run.prompt_source not in [nil, "", "agent_prompt"]}
+                  class="rounded bg-surface-1 px-2 py-1"
+                >
+                  {String.replace(run.prompt_source, "_", " ")}
+                </span>
+                <span
+                  :if={run.prompt_contract_received?}
+                  class="rounded border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-emerald-300"
+                >
+                  contract received
+                </span>
+                <span :if={run.prompt_role not in [nil, ""]} class="rounded bg-surface-1 px-2 py-1">
+                  role {run.prompt_role}
+                </span>
+                <span
+                  :if={run.prompt_custom_overrides == "present"}
+                  class="rounded bg-surface-1 px-2 py-1"
+                >
+                  custom instructions
                 </span>
                 <span
                   :if={positive_cost?(run.cost_usd)}
@@ -1839,6 +1882,28 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
     %{owner_name: "Auto-route", owner_detail: "Dispatcher will infer the owner"}
   end
 
+  defp handoff_signal(%{status: status}, _latest_run, _pending_wake, _orchestrator_enabled?)
+       when status in [:done, "done"] do
+    %{
+      status: :done,
+      status_label: "Done",
+      signal_title: "Issue complete",
+      signal_detail: "Closure accepted; stale runtime wakes are ignored.",
+      next_action: "Inspect the delivery packet and owner update when evidence is needed."
+    }
+  end
+
+  defp handoff_signal(%{status: status}, _latest_run, _pending_wake, _orchestrator_enabled?)
+       when status in [:cancelled, "cancelled"] do
+    %{
+      status: :blocked,
+      status_label: "Cancelled",
+      signal_title: "Issue cancelled",
+      signal_detail: "Runtime wakes no longer apply to this issue.",
+      next_action: "Reopen or create follow-up work if this needs another pass."
+    }
+  end
+
   defp handoff_signal(
          _issue,
          _latest_run,
@@ -1983,6 +2048,36 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
       parts -> Enum.join(parts, " · ")
     end
   end
+
+  defp normalize_run_history(%{} = run_history, runs) do
+    shown = run_history |> Map.get(:shown, length(runs)) |> normalize_non_negative_count()
+    total = run_history |> Map.get(:total, shown) |> normalize_non_negative_count()
+    limit = run_history |> Map.get(:limit, shown) |> normalize_non_negative_count()
+
+    %{
+      shown: shown,
+      total: total,
+      limit: limit,
+      truncated?: Map.get(run_history, :truncated?, total > shown)
+    }
+  end
+
+  defp normalize_run_history(_, runs) do
+    shown = length(runs)
+
+    %{shown: shown, total: shown, limit: shown, truncated?: false}
+  end
+
+  defp normalize_non_negative_count(value) when is_integer(value), do: max(value, 0)
+  defp normalize_non_negative_count(_), do: 0
+
+  defp prompt_context_chip_class("context_window_risk"),
+    do: "rounded border border-brand/35 bg-brand/10 px-2 py-1 text-brand"
+
+  defp prompt_context_chip_class("large"),
+    do: "rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-300"
+
+  defp prompt_context_chip_class(_risk), do: "rounded bg-surface-1 px-2 py-1"
 
   defp handoff_reason(nil), do: "Wake queued"
 

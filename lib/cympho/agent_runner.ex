@@ -13,6 +13,7 @@ defmodule Cympho.AgentRunner do
   """
 
   @stall_timeout Application.compile_env(:cympho, :agent_runner_stall_timeout, 300_000)
+  @fresh_turn_wake_reasons ~w(issue_commented issue_comment_mentioned)
 
   @doc """
   Runs a Claude CLI session for the given issue.
@@ -25,21 +26,29 @@ defmodule Cympho.AgentRunner do
   """
   def run(issue, agent_id, recipient_pid, opts \\ []) when is_pid(recipient_pid) do
     session_id = make_ref()
-    cwd = opts[:cwd] || Cympho.Workspace.workspace_path(issue.id)
-    resume? = opts[:resume] || false
+    config = option_value(opts, :config) || %{}
+    cwd = option_value(opts, :cwd) || option_value(config, :cwd) || issue_workspace_path(issue)
+    resume_decision = resume_decision(issue, cwd, resume_requested?(opts, config), opts)
     stall_timeout = opts[:stall_timeout] || @stall_timeout
     env = opts[:env] || runtime_context_env(opts[:runtime_context])
 
-    cmd = build_claude_command(issue, agent_id, resume?, opts)
+    cmd = build_claude_command(issue, agent_id, resume_decision, opts)
 
-    spawn(fn ->
-      do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, env)
-    end)
+    worker =
+      spawn(fn ->
+        try do
+          do_run(session_id, cmd, cwd, recipient_pid, stall_timeout, env)
+        after
+          Cympho.AdapterSessions.unregister(session_id)
+        end
+      end)
+
+    Cympho.AdapterSessions.register(session_id, worker)
 
     session_id
   end
 
-  defp build_claude_command(issue, agent_id, resume?, opts) do
+  defp build_claude_command(issue, agent_id, resume_decision, opts) do
     command = cli_command(opts)
 
     base = [
@@ -51,8 +60,14 @@ defmodule Cympho.AgentRunner do
 
     prompt = build_prompt(issue, agent_id, opts)
 
+    Cympho.PromptTelemetry.attach_to_run(
+      opts,
+      prompt,
+      Map.merge(%{"adapter" => "claude_code"}, resume_telemetry(resume_decision))
+    )
+
     args =
-      if resume? do
+      if resume_decision.used do
         base ++ ["--resume"]
       else
         base
@@ -86,6 +101,86 @@ defmodule Cympho.AgentRunner do
 
   defp option_value(_opts, _key), do: nil
 
+  defp issue_workspace_path(issue), do: Cympho.Workspace.workspace_path(issue_id(issue))
+
+  defp issue_id(%{id: id}) when not is_nil(id), do: to_string(id)
+  defp issue_id(%{"id" => id}) when not is_nil(id), do: to_string(id)
+  defp issue_id(issue) when is_map(issue), do: issue |> Map.get(:id) |> to_string()
+
+  defp resume_requested?(opts, config) do
+    truthy?(option_value(opts, :resume)) or truthy?(option_value(config, :resume))
+  end
+
+  defp truthy?(true), do: true
+  defp truthy?("true"), do: true
+  defp truthy?("1"), do: true
+  defp truthy?(_), do: false
+
+  defp resume_decision(issue, cwd, false, _opts) do
+    %{
+      requested: false,
+      used: false,
+      reason: "fresh_per_run",
+      cwd: cwd,
+      issue_id: issue_id(issue)
+    }
+  end
+
+  defp resume_decision(issue, cwd, true, opts) do
+    issue_id = issue_id(issue)
+
+    cond do
+      fresh_turn_wake?(option_value(opts, :wake_context)) ->
+        %{
+          requested: true,
+          used: false,
+          reason: "comment_wake_fresh_turn",
+          cwd: cwd,
+          issue_id: issue_id
+        }
+
+      issue_scoped_cwd?(cwd, issue_id) ->
+        %{
+          requested: true,
+          used: true,
+          reason: "issue_scoped_workspace",
+          cwd: cwd,
+          issue_id: issue_id
+        }
+
+      true ->
+        %{
+          requested: true,
+          used: false,
+          reason: "shared_cwd_guard",
+          cwd: cwd,
+          issue_id: issue_id
+        }
+    end
+  end
+
+  defp fresh_turn_wake?({reason, _metadata}) when is_binary(reason),
+    do: reason in @fresh_turn_wake_reasons
+
+  defp fresh_turn_wake?(_wake_context), do: false
+
+  defp issue_scoped_cwd?(cwd, issue_id) when is_binary(cwd) and is_binary(issue_id) do
+    cwd = Path.expand(cwd)
+    issue_workspace = issue_id |> Cympho.Workspace.workspace_path() |> Path.expand()
+
+    cwd == issue_workspace or String.starts_with?(cwd, issue_workspace <> "/")
+  end
+
+  defp issue_scoped_cwd?(_cwd, _issue_id), do: false
+
+  defp resume_telemetry(%{requested: requested, used: used, reason: reason}) do
+    %{
+      "session_resume_requested" => requested,
+      "session_resume_used" => used,
+      "session_resume_reason" => reason
+    }
+  end
+
   defp bash_command(command, claude_args, prompt) do
     claude_cmd = Enum.map_join([command | claude_args], " ", &shell_quote/1)
     cld_source = ~s(source "$HOME/.cld" 2>/dev/null || true)
@@ -93,7 +188,7 @@ defmodule Cympho.AgentRunner do
     # Use heredoc to pass prompt safely without shell interpretation.
     # The single-quoted 'EOF' delimiter prevents variable expansion,
     # command substitution, and other shell interpretations.
-    ~s(bash -lc '#{cld_source}; #{claude_cmd}' << 'PROMPT'\n#{prompt}\nPROMPT)
+    ~s(bash -lc '#{cld_source}; exec #{claude_cmd}' << 'PROMPT'\n#{prompt}\nPROMPT)
   end
 
   defp shell_quote(value) do
@@ -120,6 +215,8 @@ defmodule Cympho.AgentRunner do
       Port.open({:spawn, cmd}, [
         :binary,
         :exit_status,
+        :use_stdio,
+        :stderr_to_stdout,
         cd: cwd,
         env: port_env(env)
       ])
@@ -136,16 +233,23 @@ defmodule Cympho.AgentRunner do
 
         case parse_json_output(output) do
           {:ok, result} ->
-            # Extract and send tool calls if present
-            extract_and_send_tool_calls(result, session_id, recipient_pid)
-            send(recipient_pid, {:turn_completed, session_id, result})
-            loop(port, session_id, recipient_pid, stall_timeout, new_last_output)
+            case Cympho.Adapters.ProviderFailure.detect(result) do
+              :ok ->
+                # Extract and send tool calls if present
+                extract_and_send_tool_calls(result, session_id, recipient_pid)
+                send(recipient_pid, {:turn_completed, session_id, result})
+                loop(port, session_id, recipient_pid, stall_timeout, new_last_output)
+
+              {:error, reason} ->
+                close_port(port)
+                send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+            end
 
           :continue ->
             loop(port, session_id, recipient_pid, stall_timeout, new_last_output)
 
-          :error ->
-            send(recipient_pid, {:turn_ended_with_error, session_id, {:parse_error, output}})
+          {:error, reason} ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, reason})
         end
 
       {^port, {:exit_status, 0}} ->
@@ -158,13 +262,21 @@ defmodule Cympho.AgentRunner do
         now = System.system_time(:millisecond)
 
         if last_output_time && now - last_output_time > stall_timeout do
-          Port.close(port)
+          close_port(port)
           send(recipient_pid, {:turn_ended_with_error, session_id, :stall_timeout})
         else
           schedule_stall_check(stall_timeout)
           loop(port, session_id, recipient_pid, stall_timeout, last_output_time)
         end
+
+      {:cancel_session, ^session_id, reason} ->
+        close_port(port)
+        send(recipient_pid, {:turn_ended_with_error, session_id, {:cancelled, reason}})
     end
+  end
+
+  defp close_port(port) when is_port(port) do
+    Cympho.PortKiller.close(port)
   end
 
   defp schedule_stall_check(timeout) do
@@ -181,10 +293,13 @@ defmodule Cympho.AgentRunner do
     else
       case Jason.decode(trimmed) do
         {:ok, result} -> {:ok, result}
-        {:error, _} -> :error
+        {:error, _} -> Cympho.Adapters.ProviderFailure.detect(trimmed) |> parse_error(output)
       end
     end
   end
+
+  defp parse_error(:ok, output), do: {:error, {:parse_error, output}}
+  defp parse_error({:error, reason}, _output), do: {:error, reason}
 
   defp api_key do
     Application.get_env(:cympho, :anthropic_api_key) ||

@@ -84,7 +84,7 @@
           {@launch_summary.launch_posture.detail}
         </p>
 
-        <div class="mt-5 grid grid-cols-2 gap-3">
+        <div class="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-3">
           <div class="rounded-lg border border-border bg-surface p-4">
             <div class="text-2xl font-510 text-text-primary">
               {@launch_summary.total_companies}
@@ -107,6 +107,22 @@
             </div>
             <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
               Active
+            </div>
+          </div>
+          <div class="rounded-lg border border-border bg-surface p-4">
+            <div class="text-2xl font-510 text-text-primary">
+              {@launch_summary.default_agent_count}
+            </div>
+            <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
+              Default agents
+            </div>
+          </div>
+          <div class="rounded-lg border border-border bg-surface p-4">
+            <div class="text-2xl font-510 text-text-primary">
+              {@launch_summary.capability_count}
+            </div>
+            <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
+              Capabilities
             </div>
           </div>
           <div class="rounded-lg border border-border bg-surface p-4">
@@ -157,7 +173,9 @@
           </p>
         </div>
         <div class="mt-4 flex items-center justify-between gap-3 text-xs text-text-tertiary">
-          <span>{blueprint.seed_issue_count} seed issues</span>
+          <span>
+            {blueprint.default_agent_count} agents · {blueprint.seed_issue_count} issues
+          </span>
           <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
         </div>
       </.app_link>

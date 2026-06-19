@@ -41,7 +41,7 @@ defmodule CymphoWeb.KanbanLiveTest do
 
   describe "Kanban rendering" do
     test "renders all status columns" do
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live(conn(), "/kanban?density=detailed")
       assert html =~ "Backlog"
       assert html =~ "To Do"
       assert html =~ "In Progress"
@@ -52,7 +52,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     end
 
     test "renders issues" do
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live(conn(), "/kanban?density=detailed")
       assert html =~ "Backlog Issue"
       assert html =~ "Todo Issue"
       assert html =~ "Compact"
@@ -63,7 +63,7 @@ defmodule CymphoWeb.KanbanLiveTest do
     end
 
     test "groups board header controls in one aligned toolbar" do
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live(conn(), "/kanban?density=detailed")
 
       toolbar =
         html
@@ -126,7 +126,7 @@ defmodule CymphoWeb.KanbanLiveTest do
           assigned_role: "ceo"
         })
 
-      {:ok, _view, html} = live(conn(), "/kanban")
+      {:ok, _view, html} = live(conn(), "/kanban?density=detailed")
 
       assert html =~ "Assigned launch card"
       assert html =~ "Launch needed"

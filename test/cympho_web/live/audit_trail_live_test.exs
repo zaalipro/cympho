@@ -95,6 +95,32 @@ defmodule CymphoWeb.AuditTrailLiveTest do
     assert html =~ ~s(href="/settings/audit")
   end
 
+  test "company runtime controls render as runtime audit evidence", %{
+    conn: conn,
+    current_company: company
+  } do
+    stopped =
+      insert_event(company, %{
+        event_type: "company_runtime_stopped",
+        actor_type: "user",
+        resource_type: "company",
+        resource_id: company.id,
+        payload: %{
+          "issues_released" => 2,
+          "runs_cancelled" => 3,
+          "wakes_cancelled" => 4
+        }
+      })
+
+    {:ok, _view, html} = live(conn, "/settings/audit")
+
+    assert html =~ "Inspect runtime audit evidence"
+    assert html =~ "Runtime"
+    assert html =~ "Company runtime stopped"
+    assert html =~ ~s(data-testid="audit-payload-#{stopped.id}")
+    assert html =~ "Company runtime stopped payload"
+  end
+
   test "streams events and appends the next page", %{conn: conn, current_company: company} do
     seed_events(company, 51)
 

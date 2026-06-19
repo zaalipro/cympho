@@ -7,33 +7,68 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  alias Cympho.Adapters.RuntimeTimeout
+
+  @default_timeout 300_000
+  @max_timeout 3_600_000
+  @utf8_replacement <<0xEF, 0xBF, 0xBD>>
+
   @impl true
   def run(issue, agent_id, recipient_pid, opts) when is_pid(recipient_pid) do
     session_id = make_ref()
 
-    spawn(fn ->
-      do_run(session_id, issue, agent_id, recipient_pid, opts)
-    end)
+    worker =
+      spawn(fn ->
+        Process.flag(:trap_exit, true)
+
+        try do
+          do_run(session_id, issue, agent_id, recipient_pid, opts)
+        rescue
+          exception ->
+            send(
+              recipient_pid,
+              {:turn_ended_with_error, session_id, {:adapter_crash, Exception.message(exception)}}
+            )
+        catch
+          kind, reason ->
+            send(
+              recipient_pid,
+              {:turn_ended_with_error, session_id, {:adapter_exit, kind, reason}}
+            )
+        after
+          Cympho.AdapterSessions.unregister(session_id)
+        end
+      end)
+
+    Cympho.AdapterSessions.register(session_id, worker)
 
     session_id
   end
 
   defp do_run(session_id, issue, agent_id, recipient_pid, opts) do
     config = runtime_config(opts[:config] || %{}, opts)
-    prompt = build_prompt(issue, agent_id, opts)
 
-    case start_process(issue, agent_id, config, recipient_pid, session_id, prompt) do
-      {:ok, _pid} ->
-        # Process started successfully
-        :ok
+    case command(config) do
+      command when command in [nil, ""] ->
+        send(recipient_pid, {:turn_ended_with_error, session_id, :no_command})
 
-      {:error, reason} ->
-        send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+      _command ->
+        prompt = build_prompt(issue, agent_id, opts)
+        Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "process"})
+
+        case start_process(issue, agent_id, config, recipient_pid, session_id, prompt) do
+          {:ok, _pid} ->
+            # Process started successfully
+            :ok
+
+          {:error, reason} ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+        end
     end
   end
 
   defp start_process(issue, agent_id, config, recipient_pid, session_id, prompt) do
-    command = config[:command] || config["command"]
+    command = command(config)
 
     if is_nil(command) or command == "" do
       {:error, :no_command}
@@ -58,14 +93,12 @@ defmodule Cympho.Adapters.ProcessAdapter do
           opts
         end
 
-      # Spawn a long-lived process to manage the port and handle its messages
-      spawn_link(fn ->
-        run_process(session_id, command, args, opts, recipient_pid, config, prompt)
-      end)
-
+      run_process(session_id, command, args, opts, recipient_pid, config, prompt)
       {:ok, self()}
     end
   end
+
+  defp command(config), do: config[:command] || config["command"]
 
   defp build_prompt(issue, agent_id, opts) do
     Cympho.AgentPrompt.build(issue, agent_id,
@@ -184,12 +217,10 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
       command_path ->
         try do
-          command_charlist = String.to_charlist(command_path)
-          opts_with_args = opts ++ [{:args, args}]
-          port = Port.open({:spawn_executable, command_charlist}, opts_with_args)
-          maybe_write_prompt(port, prompt, config)
-          timeout = config[:timeout] || config["timeout"] || 300_000
-          wait_for_process(port, session_id, recipient_pid, timeout, <<>>)
+          with_command_port(command_path, args, opts, prompt, config, fn port ->
+            timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
+            wait_for_process(port, session_id, recipient_pid, timeout, <<>>)
+          end)
         rescue
           e ->
             send(recipient_pid, {:turn_ended_with_error, session_id, inspect(e)})
@@ -197,11 +228,29 @@ defmodule Cympho.Adapters.ProcessAdapter do
     end
   end
 
-  defp maybe_write_prompt(port, prompt, config) do
+  defp with_command_port(command_path, args, opts, prompt, config, fun) do
     if write_prompt_stdin?(config) do
-      write_prompt(port, prompt)
+      with_prompt_file(prompt, fn prompt_path ->
+        shell = System.find_executable("sh") || "/bin/sh"
+
+        shell_args = [
+          "-c",
+          "exec \"$0\" \"$@\" < \"$CYMPHO_PROMPT_FILE\"",
+          command_path | args
+        ]
+
+        port_opts =
+          opts
+          |> put_port_args(shell_args)
+          |> put_port_env([{"CYMPHO_PROMPT_FILE", prompt_path}])
+
+        port = Port.open({:spawn_executable, String.to_charlist(shell)}, port_opts)
+        fun.(port)
+      end)
     else
-      :ok
+      port_opts = put_port_args(opts, args)
+      port = Port.open({:spawn_executable, String.to_charlist(command_path)}, port_opts)
+      fun.(port)
     end
   end
 
@@ -214,13 +263,6 @@ defmodule Cympho.Adapters.ProcessAdapter do
     end
   end
 
-  defp write_prompt(port, prompt) do
-    Port.command(port, "#{prompt}\n")
-    :ok
-  rescue
-    ArgumentError -> :closed
-  end
-
   defp resolve_command_path(command) do
     cond do
       String.starts_with?(command, "/") and File.exists?(command) -> command
@@ -230,21 +272,98 @@ defmodule Cympho.Adapters.ProcessAdapter do
 
   defp wait_for_process(port, session_id, recipient_pid, timeout, acc) do
     receive do
-      {port, {:data, data}} ->
+      {^port, {:data, data}} ->
         wait_for_process(port, session_id, recipient_pid, timeout, acc <> data)
 
+      {:EXIT, ^port, _reason} ->
+        wait_for_process(port, session_id, recipient_pid, timeout, acc)
+
       {^port, {:exit_status, 0}} ->
-        result = parse_output(acc)
-        send(recipient_pid, {:turn_completed, session_id, result})
+        output = normalize_output_utf8(acc)
+
+        case Cympho.Adapters.ProviderFailure.detect(output) do
+          :ok ->
+            result = parse_output(output)
+            send(recipient_pid, {:turn_completed, session_id, result})
+
+          {:error, reason} ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, reason})
+        end
 
       {^port, {:exit_status, code}} ->
-        send(recipient_pid, {:turn_ended_with_error, session_id, {:exit_code, code, acc}})
+        output = normalize_output_utf8(acc)
+        send(recipient_pid, {:turn_ended_with_error, session_id, {:exit_code, code, output}})
+
+      {:cancel_session, ^session_id, reason} ->
+        send(recipient_pid, {:turn_ended_with_error, session_id, {:cancelled, reason}})
+        close_port(port)
     after
       timeout ->
-        Port.close(port)
         send(recipient_pid, {:turn_ended_with_error, session_id, :timeout})
+        close_port(port)
     end
   end
+
+  defp close_port(port) when is_port(port) do
+    Cympho.PortKiller.close(port)
+  end
+
+  defp with_prompt_file(prompt, fun) do
+    path = Path.join(System.tmp_dir!(), "cympho-prompt-#{System.unique_integer([:positive])}.txt")
+    File.write!(path, prompt <> "\n", [:binary])
+    File.chmod!(path, 0o600)
+
+    try do
+      fun.(path)
+    after
+      File.rm(path)
+    end
+  end
+
+  defp put_port_args(opts, args), do: replace_port_option(opts, :args, args)
+
+  defp put_port_env(opts, additions) do
+    existing = find_port_option(opts, :env, [])
+    additions = Enum.map(additions, fn {key, value} -> {to_charlist(key), to_charlist(value)} end)
+    replace_port_option(opts, :env, existing ++ additions)
+  end
+
+  defp find_port_option(opts, key, default) do
+    Enum.find_value(opts, default, fn
+      {^key, value} -> value
+      _ -> nil
+    end)
+  end
+
+  defp replace_port_option(opts, key, value) do
+    opts
+    |> Enum.reject(&match?({^key, _}, &1))
+    |> Kernel.++([{key, value}])
+  end
+
+  defp normalize_output_utf8(output) when is_binary(output) do
+    if String.valid?(output) do
+      output
+    else
+      replace_invalid_utf8(output)
+    end
+  end
+
+  defp replace_invalid_utf8(output) do
+    case :unicode.characters_to_binary(output, :utf8, :utf8) do
+      valid when is_binary(valid) ->
+        valid
+
+      {:error, valid_prefix, rest} ->
+        valid_prefix <> @utf8_replacement <> replace_invalid_utf8(drop_invalid_byte(rest))
+
+      {:incomplete, valid_prefix, rest} ->
+        valid_prefix <> @utf8_replacement <> replace_invalid_utf8(drop_invalid_byte(rest))
+    end
+  end
+
+  defp drop_invalid_byte(<<_byte, rest::binary>>), do: rest
+  defp drop_invalid_byte(_), do: <<>>
 
   defp parse_output(output) do
     trimmed = String.trim(output)
@@ -433,8 +552,16 @@ defmodule Cympho.Adapters.ProcessAdapter do
         key: :timeout,
         type: :integer,
         required: false,
-        default: 300_000,
-        description: "Process timeout in milliseconds"
+        default: @default_timeout,
+        description:
+          "Process timeout in milliseconds. Prefer timeout_sec for human-entered values."
+      },
+      %{
+        key: :timeout_sec,
+        type: :integer,
+        required: false,
+        default: div(@default_timeout, 1_000),
+        description: "Process timeout in seconds; conflicts with timeout/timeout_ms are rejected."
       },
       %{
         key: :env,
@@ -487,7 +614,7 @@ defmodule Cympho.Adapters.ProcessAdapter do
          :ok <- validate_boolean(config["prompt_stdin"] || config[:prompt_stdin], "prompt_stdin"),
          :ok <-
            validate_string(config["model_env_key"] || config[:model_env_key], "model_env_key"),
-         :ok <- validate_timeout(config["timeout"] || config[:timeout]),
+         :ok <- validate_timeout(config),
          :ok <- validate_env(config["env"] || config[:env]) do
       :ok
     end
@@ -533,17 +660,8 @@ defmodule Cympho.Adapters.ProcessAdapter do
   defp validate_string(value, _field) when is_binary(value), do: :ok
   defp validate_string(_value, field), do: {:error, "#{field} must be a string"}
 
-  defp validate_timeout(nil), do: :ok
-
-  defp validate_timeout(timeout) when is_integer(timeout) do
-    if timeout > 0 and timeout <= 3_600_000 do
-      :ok
-    else
-      {:error, "timeout must be between 1 and 3600000 milliseconds"}
-    end
-  end
-
-  defp validate_timeout(_), do: {:error, "timeout must be an integer"}
+  defp validate_timeout(config),
+    do: RuntimeTimeout.validate(config, max_ms: @max_timeout, field: "timeout")
 
   defp validate_env(nil), do: :ok
 

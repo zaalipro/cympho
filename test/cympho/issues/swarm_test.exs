@@ -13,8 +13,28 @@ defmodule Cympho.Issues.SwarmTest do
   alias Cympho.Proxies
   alias Cympho.Repo
   alias Cympho.Users
+  alias Cympho.Wakes.AgentWake
 
   describe "normalize_config/1" do
+    test "defaults to a local reviewable runtime instead of credential-gated providers" do
+      config =
+        Swarm.normalize_config(%{
+          "swarm" => %{
+            "enabled" => "true",
+            "agent_count" => "5"
+          }
+        })
+
+      assert config.enabled
+      assert length(config.mix) == 5
+
+      assert Enum.all?(config.mix, fn spec ->
+               spec.adapter == :claude_code and
+                 spec.model == "sonnet" and
+                 spec.reasoning_effort == "medium"
+             end)
+    end
+
     test "keeps proxy routing to named profiles instead of raw proxy URLs" do
       config =
         Swarm.normalize_config(%{
@@ -466,6 +486,20 @@ defmodule Cympho.Issues.SwarmTest do
       assert MapSet.new(Enum.map(cto_issue.blocked_by, & &1.id)) ==
                MapSet.new(Enum.map(worker_issues, & &1.id))
 
+      worker_ids = Enum.map(worker_issues, & &1.id)
+
+      wakes =
+        Repo.all(
+          from wake in AgentWake,
+            where: wake.issue_id in ^worker_ids,
+            order_by: [asc: wake.inserted_at]
+        )
+
+      assert length(wakes) == 4
+      assert Enum.all?(wakes, &(&1.reason == "swarm_worker_created"))
+      assert Enum.all?(wakes, &(&1.status == "pending"))
+      assert MapSet.new(Enum.map(wakes, & &1.agent_id)) == MapSet.new(temp_agent_ids)
+
       event_types =
         parent
         |> SwarmEvents.list_for_issue()
@@ -479,6 +513,18 @@ defmodule Cympho.Issues.SwarmTest do
       assert "parent_blocked_on_cto" in event_types
       assert "worker_wakes_enqueued" in event_types
       assert "launch_ready" in event_types
+
+      assert Enum.take(event_types, 9) == [
+               "launch_started",
+               "temporary_agents_created",
+               "worker_issues_created",
+               "cto_issue_created",
+               "dependencies_linked",
+               "cto_blocked_on_workers",
+               "parent_blocked_on_cto",
+               "worker_wakes_enqueued",
+               "launch_ready"
+             ]
     end
 
     test "randomizes managed proxy pool across temporary worker assignments" do

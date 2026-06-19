@@ -48,7 +48,7 @@ defmodule CymphoWeb.IssueLive.Show do
         end
 
         comment_changeset = blank_comment_changeset()
-        runs = HeartbeatEngine.list_runs_for_issue(issue.id)
+        {runs, run_history} = load_issue_run_history(issue.id)
         interactions = IssueThreadInteractions.list_interactions(issue.id)
         work_products = WorkProducts.list_work_products(issue.id)
         child_issues = Issues.list_child_issues(issue.id)
@@ -78,6 +78,7 @@ defmodule CymphoWeb.IssueLive.Show do
            description_return_to: nil,
            assignee_search: "",
            runs: runs,
+           run_history: run_history,
            interactions: interactions,
            work_products: work_products,
            child_issues: child_issues,
@@ -136,6 +137,20 @@ defmodule CymphoWeb.IssueLive.Show do
 
   defp apply_action(socket, nil, id) do
     apply_action(socket, :show, id)
+  end
+
+  defp load_issue_run_history(issue_id) do
+    limit = HeartbeatEngine.issue_run_history_limit()
+    runs = HeartbeatEngine.list_runs_for_issue(issue_id, limit: limit)
+    total = HeartbeatEngine.count_runs_for_issue(issue_id)
+
+    {runs,
+     %{
+       shown: length(runs),
+       total: total,
+       limit: limit,
+       truncated?: total > length(runs)
+     }}
   end
 
   defp apply_edit_param(socket, %{"edit" => "description", "repair" => "owner_brief"}) do
@@ -240,6 +255,34 @@ defmodule CymphoWeb.IssueLive.Show do
   defp owner_revision_flash(false),
     do:
       "Owner revision requested and focused CEO relaunch queued. Start runtime from Operations to continue."
+
+  defp issue_pause_flash(%{} = result) do
+    sessions = Map.get(result, :orchestrators_stopped, 0)
+    runs = Map.get(result, :runs_cancelled, 0)
+    released = Map.get(result, :issues_released, 0)
+
+    "Issue paused. Stopped #{count_phrase(sessions, "harness session")}, cancelled #{count_phrase(runs, "run")}, and released #{count_phrase(released, "checkout")}."
+  end
+
+  defp issue_pause_flash(_result), do: "Issue paused."
+
+  defp issue_resume_flash({:ok, _wake_result}, true),
+    do: "Issue resumed and dispatcher notified."
+
+  defp issue_resume_flash({:ok, _wake_result}, false),
+    do: "Issue resumed. Start runtime from Operations or use the focused command to continue."
+
+  defp issue_resume_flash({:error, :issue_runtime_paused}, _notified?),
+    do: "Issue resumed, but the wake queue still sees it paused. Refresh and try again."
+
+  defp issue_resume_flash({:error, _reason}, true),
+    do: "Issue resumed and dispatcher notified."
+
+  defp issue_resume_flash({:error, _reason}, false),
+    do: "Issue resumed. No wake was queued because the issue has no active assignee."
+
+  defp count_phrase(1, label), do: "1 #{label}"
+  defp count_phrase(count, label), do: "#{count} #{label}s"
 
   @impl true
   def handle_event("add_comment", %{"comment" => comment_params}, socket) do
@@ -784,6 +827,52 @@ defmodule CymphoWeb.IssueLive.Show do
   end
 
   @impl true
+  def handle_event("pause_issue_runtime", _params, socket) do
+    issue = socket.assigns.issue
+
+    with {:ok, paused_issue} <-
+           Issues.pause_issue_runtime(issue,
+             actor: socket.assigns[:current_user],
+             reason: "Paused from issue page"
+           ),
+         {:ok, runtime_result} <-
+           Cympho.Orchestrator.Dispatcher.stop_issue(paused_issue.id, :operator_issue_pause) do
+      record_issue_runtime_audit(socket, paused_issue, "issue_runtime_paused", runtime_result)
+
+      {:noreply,
+       socket
+       |> refresh_issue_runtime_assigns(paused_issue.id)
+       |> put_flash(:info, issue_pause_flash(runtime_result))}
+    else
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to pause issue: #{inspect(reason)}")}
+    end
+  end
+
+  @impl true
+  def handle_event("resume_issue_runtime", _params, socket) do
+    case Issues.resume_issue_runtime(socket.assigns.issue, actor: socket.assigns[:current_user]) do
+      {:ok, issue} ->
+        record_issue_runtime_audit(socket, issue, "issue_runtime_resumed", %{})
+
+        wake_result =
+          Cympho.Orchestrator.Dispatcher.enqueue_wake(issue.id, "issue_resumed", %{
+            "source" => "issue_page"
+          })
+
+        dispatcher_notified? = notify_dispatcher_if_enabled(socket)
+
+        {:noreply,
+         socket
+         |> refresh_issue_runtime_assigns(issue.id)
+         |> put_flash(:info, issue_resume_flash(wake_result, dispatcher_notified?))}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to resume issue: #{inspect(reason)}")}
+    end
+  end
+
+  @impl true
   def handle_event("resolve_interaction", %{"id" => id, "status" => status}, socket) do
     current_user = socket.assigns[:current_user]
     user_id = if current_user, do: to_string(current_user.id), else: nil
@@ -989,11 +1078,11 @@ defmodule CymphoWeb.IssueLive.Show do
       socket.assigns.issue.id == updated_issue.id ->
         case get_scoped_issue(socket, updated_issue.id) do
           {:ok, issue} ->
-            runs = HeartbeatEngine.list_runs_for_issue(issue.id)
+            {runs, run_history} = load_issue_run_history(issue.id)
 
             socket =
               socket
-              |> assign(issue: issue, runs: runs)
+              |> assign(issue: issue, runs: runs, run_history: run_history)
               |> assign_child_rollup(issue.id)
               |> push_event("toast", %{
                 message: "Issue updated by another user",
@@ -1263,11 +1352,11 @@ defmodule CymphoWeb.IssueLive.Show do
             _ -> {"Run status updated", "info"}
           end
 
-        runs = HeartbeatEngine.list_runs_for_issue(issue_id)
+        {runs, run_history} = load_issue_run_history(issue_id)
 
         socket =
           socket
-          |> assign(:runs, runs)
+          |> assign(runs: runs, run_history: run_history)
           |> push_event("toast", %{
             message: message,
             type: type,
@@ -1286,7 +1375,7 @@ defmodule CymphoWeb.IssueLive.Show do
 
   def handle_info({:swarm_event_created, event}, socket) do
     if event.parent_issue_id == SwarmEvents.parent_issue_id(socket.assigns.issue) do
-      {:noreply, assign_swarm_events(socket)}
+      {:noreply, refresh_swarm_panel(socket)}
     else
       {:noreply, socket}
     end
@@ -1345,6 +1434,12 @@ defmodule CymphoWeb.IssueLive.Show do
     assign(socket, :swarm_events, SwarmEvents.list_for_issue(issue))
   end
 
+  defp refresh_swarm_panel(socket) do
+    socket
+    |> refresh_issue_assigns()
+    |> assign_swarm_events()
+  end
+
   defp load_pending_wake_for_issue(nil), do: nil
 
   defp load_pending_wake_for_issue(%{id: id}) do
@@ -1362,6 +1457,67 @@ defmodule CymphoWeb.IssueLive.Show do
         socket
     end
   end
+
+  defp refresh_issue_runtime_assigns(socket, issue_id) do
+    case get_scoped_issue(socket, issue_id) do
+      {:ok, issue} ->
+        {runs, run_history} = load_issue_run_history(issue.id)
+
+        socket
+        |> assign(:issue, issue)
+        |> assign(:runs, runs)
+        |> assign(:run_history, run_history)
+        |> assign_child_rollup(issue.id)
+        |> maybe_rebuild_timeline()
+
+      {:error, _} ->
+        socket
+    end
+  end
+
+  defp record_issue_runtime_audit(socket, issue, event_type, runtime_result) do
+    with %{id: user_id} when is_binary(user_id) <- socket.assigns[:current_user],
+         %{company_id: company_id, id: issue_id} when is_binary(company_id) <- issue do
+      attrs = %{
+        company_id: company_id,
+        event_type: event_type,
+        actor_type: "user",
+        actor_id: user_id,
+        resource_type: "issue",
+        resource_id: issue_id,
+        payload: issue_runtime_audit_payload(event_type, runtime_result)
+      }
+
+      case Cympho.AuditTrail.record_event(attrs) do
+        {:ok, _event} ->
+          :ok
+
+        {:error, reason} ->
+          require Logger
+          Logger.warning("[IssueLive.Show] issue runtime audit failed: #{inspect(reason)}")
+      end
+    else
+      _ -> :ok
+    end
+  end
+
+  defp issue_runtime_audit_payload(event_type, %{} = runtime_result) do
+    %{
+      "action" => event_type,
+      "orchestrators_stopped" => Map.get(runtime_result, :orchestrators_stopped, 0),
+      "adapter_sessions_cancel_requested" =>
+        Map.get(runtime_result, :adapter_sessions_cancel_requested, 0),
+      "adapter_sessions_cancel_confirmed" =>
+        Map.get(runtime_result, :adapter_sessions_cancel_confirmed, 0),
+      "adapter_sessions_still_registered" =>
+        Map.get(runtime_result, :adapter_sessions_still_registered, 0),
+      "issues_released" => Map.get(runtime_result, :issues_released, 0),
+      "runs_cancelled" => Map.get(runtime_result, :runs_cancelled, 0),
+      "errors" => inspect(Map.get(runtime_result, :errors, []))
+    }
+  end
+
+  defp issue_runtime_audit_payload(event_type, _runtime_result), do: %{"action" => event_type}
 
   defp child_issue_id?(socket, issue_id) when is_binary(issue_id) do
     Enum.any?(socket.assigns.child_issues || [], &(&1.id == issue_id))

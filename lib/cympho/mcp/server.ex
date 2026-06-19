@@ -9,7 +9,7 @@ defmodule Cympho.Mcp.Server do
   """
 
   import Ecto.Query, only: [from: 2]
-  alias Cympho.{Agents, Issues, Repo, Search}
+  alias Cympho.{Agents, Comments, Issues, Repo, Search}
   alias Cympho.Agents.Agent
 
   def tools do
@@ -44,14 +44,42 @@ defmodule Cympho.Mcp.Server do
       },
       %{
         name: "get_issue",
-        description:
-          "Get detailed information about a specific issue including comments and activity.",
+        description: "Get detailed information about a specific issue including recent comments.",
         inputSchema: %{
           type: "object",
           properties: %{
             issue_id: %{type: "string", description: "The issue ID"}
           },
           required: ["issue_id"]
+        }
+      },
+      %{
+        name: "list_issue_comments",
+        description:
+          "List comments for a company-scoped issue in chronological order, newest window first.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            issue_id: %{type: "string", description: "The issue ID"},
+            limit: %{
+              type: "integer",
+              description: "Max comments to return (default 20, max 100)",
+              default: 20
+            }
+          },
+          required: ["issue_id"]
+        }
+      },
+      %{
+        name: "create_issue_comment",
+        description: "Create an agent-authored comment on a company-scoped issue.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            issue_id: %{type: "string", description: "The issue ID"},
+            body: %{type: "string", description: "Comment body"}
+          },
+          required: ["issue_id", "body"]
         }
       },
       %{
@@ -148,6 +176,8 @@ defmodule Cympho.Mcp.Server do
   defp do_call("get_issue", %{"issue_id" => id}, agent) do
     case Issues.get_company_issue(agent.company_id, id) do
       {:ok, issue} ->
+        comments = Comments.list_comments(issue.id)
+
         %{
           id: issue.id,
           title: issue.title,
@@ -158,13 +188,53 @@ defmodule Cympho.Mcp.Server do
           project:
             issue.project &&
               %{id: issue.project.id, name: issue.project.name, prefix: issue.project.prefix},
-          comments_count: length(issue.comments),
+          comments_count: length(comments),
+          comments: comments |> recent_comments(10) |> Enum.map(&summarize_comment/1),
           inserted_at: issue.inserted_at,
           updated_at: issue.updated_at
         }
 
       {:error, :not_found} ->
         %{error: "Issue not found"}
+    end
+  end
+
+  defp do_call("list_issue_comments", %{"issue_id" => id} = args, agent) do
+    case Issues.get_company_issue(agent.company_id, id) do
+      {:ok, issue} ->
+        comments = Comments.list_comments(issue.id)
+        limit = parse_limit(args["limit"], 20, 100)
+
+        %{
+          issue_id: issue.id,
+          total: length(comments),
+          limit: limit,
+          comments: comments |> recent_comments(limit) |> Enum.map(&summarize_comment/1)
+        }
+
+      {:error, :not_found} ->
+        %{error: "Issue not found"}
+    end
+  end
+
+  defp do_call("create_issue_comment", %{"issue_id" => id, "body" => body}, agent)
+       when is_binary(body) do
+    body = String.trim(body)
+
+    with :ok <- validate_comment_body(body),
+         {:ok, issue} <- Issues.get_company_issue(agent.company_id, id),
+         {:ok, comment} <-
+           Comments.create_comment(%{
+             issue_id: issue.id,
+             body: body,
+             author_type: "agent",
+             author_id: agent.id
+           }) do
+      %{success: true, comment: summarize_comment(comment)}
+    else
+      {:error, :not_found} -> %{error: "Issue not found"}
+      {:error, errors} when is_map(errors) -> %{success: false, errors: errors}
+      {:error, changeset} -> %{success: false, errors: format_errors(changeset)}
     end
   end
 
@@ -269,6 +339,17 @@ defmodule Cympho.Mcp.Server do
     }
   end
 
+  defp summarize_comment(comment) do
+    %{
+      id: comment.id,
+      body: comment.body,
+      author_type: comment.author_type,
+      author_id: comment.author_id,
+      inserted_at: comment.inserted_at,
+      updated_at: comment.updated_at
+    }
+  end
+
   defp format_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
       Enum.reduce(opts, msg, fn {key, value}, acc ->
@@ -279,6 +360,26 @@ defmodule Cympho.Mcp.Server do
 
   defp parse_priority(p) when p in ["critical", "high", "medium", "low"], do: String.to_atom(p)
   defp parse_priority(_), do: :medium
+
+  defp parse_limit(value, _default, max) when is_integer(value),
+    do: value |> max(1) |> min(max)
+
+  defp parse_limit(value, default, max) when is_binary(value) do
+    case Integer.parse(value) do
+      {parsed, ""} -> parse_limit(parsed, default, max)
+      _ -> default
+    end
+  end
+
+  defp parse_limit(_value, default, _max), do: default
+
+  defp recent_comments(comments, limit) do
+    comments
+    |> Enum.take(-limit)
+  end
+
+  defp validate_comment_body(""), do: {:error, %{body: ["can't be blank"]}}
+  defp validate_comment_body(_body), do: :ok
 
   defp validate_project_id(:forbidden),
     do: {:error, %{project_id: ["does not belong to this company"]}}

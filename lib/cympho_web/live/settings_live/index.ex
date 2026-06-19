@@ -100,9 +100,15 @@ defmodule CymphoWeb.SettingsLive.Index do
   def handle_event("update_webhook_url", %{"webhook_url" => url}, socket) do
     case Users.update_notification_prefs(socket.assigns.user, %{webhook_url: url}) do
       {:ok, updated_user} ->
+        webhook_config =
+          socket.assigns.prefs
+          |> pref_for_channel("webhook")
+          |> pref_config()
+          |> Map.put("url", url)
+
         # Also persist to notification_preferences so dispatcher can find it
         Users.upsert_notification_pref(socket.assigns.user_id, "webhook", %{
-          "url" => url
+          config: webhook_config
         })
 
         prefs = Users.list_notification_prefs(socket.assigns.user_id)
@@ -245,6 +251,10 @@ defmodule CymphoWeb.SettingsLive.Index do
     pref = pref_for_channel(prefs, "webhook")
     (pref && pref.config && pref.config["url"]) || user.webhook_url || ""
   end
+
+  defp pref_config(nil), do: %{}
+  defp pref_config(%{config: config}) when is_map(config), do: config
+  defp pref_config(_pref), do: %{}
 
   defp event_enabled?(pref, event) do
     events = Map.get(pref.config, "events", Users.default_event_config())

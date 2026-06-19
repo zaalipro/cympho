@@ -43,6 +43,7 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
             <% health = Map.get(@health_by_child_id, node.issue.id) %>
             <% contract = execution_contract(node.issue) %>
             <% description = visible_description(node.issue.description, contract) %>
+            <% description_summary = simple_description(node.issue, description, 180) %>
             <span
               :if={node.depth > 0}
               aria-hidden="true"
@@ -70,14 +71,20 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
                 </span>
               </div>
               <p
+                :if={description_summary}
+                class="ui-simple-only mt-1 line-clamp-2 text-caption text-ink-tertiary"
+              >
+                {description_summary}
+              </p>
+              <p
                 :if={description}
-                class="mt-1 line-clamp-2 text-caption text-ink-tertiary"
+                class="ui-advanced-only mt-1 line-clamp-2 text-caption text-ink-tertiary"
               >
                 {description}
               </p>
               <div
                 :if={contract.rows != [] or contract.estimate}
-                class="mt-2 rounded-md border border-hairline bg-canvas/70 px-2.5 py-2"
+                class="ui-advanced-only mt-2 rounded-md border border-hairline bg-canvas/70 px-2.5 py-2"
               >
                 <div class="flex items-center justify-between gap-2">
                   <span class="text-[10px] font-590 uppercase tracking-[0.14em] text-ink-tertiary">
@@ -330,6 +337,49 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
 
   defp blank_to_nil(""), do: nil
   defp blank_to_nil(value), do: value
+
+  defp compact_description(nil, _max), do: nil
+
+  defp compact_description(description, max) do
+    text =
+      description
+      |> to_string()
+      |> String.replace(~r/\s+/, " ")
+      |> String.trim()
+
+    case text do
+      "" -> nil
+      text -> truncate(text, max)
+    end
+  end
+
+  defp truncate(text, max) when byte_size(text) <= max, do: text
+
+  defp truncate(text, max) do
+    text
+    |> String.slice(0, max)
+    |> String.trim_trailing()
+    |> Kernel.<>("...")
+  end
+
+  defp simple_description(%{origin_type: "swarm_worker"} = issue, _description, _max) do
+    role =
+      issue.assigned_role
+      |> to_string()
+      |> String.replace("_", " ")
+      |> String.trim()
+
+    case role do
+      "" -> "Temporary worker packet feeding CTO synthesis."
+      role -> "Temporary #{role} packet feeding CTO synthesis."
+    end
+  end
+
+  defp simple_description(%{origin_type: "swarm_cto_review"}, _description, _max) do
+    "CTO synthesis gate: merge worker packets, resolve dissent, then return CEO-ready delivery."
+  end
+
+  defp simple_description(_issue, description, max), do: compact_description(description, max)
 
   defp estimate_label(%{monitor_state: monitor_state}) do
     case estimated_minutes(monitor_state) do

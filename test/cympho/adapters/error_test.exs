@@ -27,6 +27,35 @@ defmodule Cympho.Adapters.ErrorTest do
     assert error.detail == "invalid api key"
   end
 
+  test "classifies quota failures" do
+    error =
+      Error.normalize(
+        {:provider_failure, :quota_exceeded, "insufficient_quota: credits exhausted"},
+        adapter: "codex"
+      )
+
+    assert error.category == :quota_exceeded
+    assert error.title == "Provider quota exceeded"
+    assert error.hint =~ "switch this agent to another runtime profile"
+  end
+
+  test "classifies provider rate limits" do
+    error = Error.normalize({:http_error, 429, "too many requests"}, adapter: "openai_chat")
+
+    assert error.category == :rate_limited
+    assert error.title == "Provider rate limited"
+    assert error.detail == "too many requests"
+  end
+
+  test "classifies transient provider outages" do
+    error = Error.normalize({:http_error, 503, "service unavailable"}, adapter: "openai_chat")
+
+    assert error.category == :provider_unavailable
+    assert error.title == "Provider unavailable"
+    assert error.detail == "service unavailable"
+    assert error.hint =~ "fallback runtime profile"
+  end
+
   test "classifies timeouts" do
     error = Error.normalize(:stall_timeout, adapter: "claude_code")
 
@@ -34,11 +63,37 @@ defmodule Cympho.Adapters.ErrorTest do
     assert error.message =~ "stopped producing output"
   end
 
+  test "classifies semantic runtime blockers" do
+    error =
+      Error.normalize(
+        {:runtime_failure, :permission_blocked,
+         "I'm unable to proceed because commands require user approval."},
+        adapter: "claude_code"
+      )
+
+    assert error.category == :runtime_blocked
+    assert error.title == "Runtime blocked"
+    assert error.detail =~ "unable to proceed"
+    assert error.hint =~ "permission policy"
+  end
+
   test "classifies malformed JSON output" do
     error = Error.normalize({:parse_error, "hello from wrapper"}, adapter: "cursor")
 
     assert error.category == :malformed_output
     assert error.detail == "hello from wrapper"
+  end
+
+  test "classifies agent action contract failures" do
+    error =
+      Error.normalize({:agent_action_failed, :unresolved_current_issue},
+        adapter: "claude_code"
+      )
+
+    assert error.category == :action_contract_failed
+    assert error.title == "Agent action contract failed"
+    assert error.detail == ":unresolved_current_issue"
+    assert error.hint =~ "resolving action"
   end
 
   test "classifies empty output" do

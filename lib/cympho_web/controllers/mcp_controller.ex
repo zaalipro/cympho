@@ -7,7 +7,7 @@ defmodule CymphoWeb.McpController do
     json(conn, %{tools: Server.tools()})
   end
 
-  def call(conn, %{"tool" => tool_name, "args" => args}) do
+  def invoke(conn, %{"tool" => tool_name, "args" => args}) do
     agent = conn.assigns.current_agent
     result = Server.call_tool(tool_name, args || %{}, agent)
 
@@ -16,11 +16,11 @@ defmodule CymphoWeb.McpController do
     |> json(%{result: result})
   end
 
-  def call(conn, %{"tool" => tool_name}) do
-    call(conn, %{"tool" => tool_name, "args" => %{}})
+  def invoke(conn, %{"tool" => tool_name}) do
+    invoke(conn, %{"tool" => tool_name, "args" => %{}})
   end
 
-  def call(conn, _params) do
+  def invoke(conn, _params) do
     conn
     |> put_status(:bad_request)
     |> json(%{error: "Missing 'tool' parameter"})

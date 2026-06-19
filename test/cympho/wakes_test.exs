@@ -241,12 +241,18 @@ defmodule Cympho.WakesTest do
       assert agent_wake.reason in ["issue_commented", "issue_comment_mentioned"]
       assert agent_wake.triggered_by_type == "user"
       assert agent_wake.triggered_by_id == "test-user"
+      assert agent_wake.metadata["comment_id"] == comment.id
+      assert agent_wake.metadata["comment_body"] == "Test comment"
+      assert agent_wake.metadata["comment_author_type"] == "user"
+      assert agent_wake.metadata["comment_author_id"] == "test-user"
     end
 
-    test "detects mention in comment body", %{agent: _agent, issue: issue} do
+    test "detects direct assignee mention in comment body", %{agent: agent, issue: issue} do
+      mention = agent.name |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-")
+
       {:ok, comment} =
         Comments.create_comment(%{
-          body: "@agent please review",
+          body: "@#{mention} please review",
           author_type: "user",
           author_id: "test-user",
           issue_id: issue.id
@@ -256,6 +262,109 @@ defmodule Cympho.WakesTest do
 
       assert {:ok, agent_wake} = result
       assert agent_wake.reason == "issue_comment_mentioned"
+    end
+
+    test "does not treat unrelated @ text as an assignee mention", %{agent: agent, issue: issue} do
+      {:ok, comment} =
+        Comments.create_comment(%{
+          body: "Forwarded from support@example.com, please check the logs.",
+          author_type: "user",
+          author_id: "test-user",
+          issue_id: issue.id
+        })
+
+      result = Wakes.notify_comment(comment)
+
+      assert {:ok, agent_wake} = result
+      assert agent_wake.agent_id == agent.id
+      assert agent_wake.reason == "issue_commented"
+    end
+
+    test "wakes a mentioned agent even when another agent owns the issue" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Mention Wake Co",
+          slug: "mention-wake-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, other_company} =
+        Companies.create_company(%{
+          name: "Other Mention Wake Co",
+          slug: "other-mention-wake-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, owner} =
+        Agents.create_agent(%{
+          name: "Issue Owner",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, designer} =
+        Agents.create_agent(%{
+          name: "Design Lead",
+          role: :designer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, other_designer} =
+        Agents.create_agent(%{
+          name: "Design Lead",
+          role: :designer,
+          status: :idle,
+          company_id: other_company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Mentioned agent should see the comment",
+          status: :in_progress,
+          company_id: company.id,
+          assignee_id: owner.id
+        })
+
+      {:ok, comment} =
+        Comments.create_comment(%{
+          body: "@design-lead please inspect the empty state before the owner update.",
+          author_type: "user",
+          author_id: "test-user",
+          issue_id: issue.id
+        })
+
+      wakes = Wakes.list_issue_wakes(issue.id)
+
+      assert Enum.any?(wakes, fn wake ->
+               wake.agent_id == owner.id and wake.reason == "issue_commented"
+             end)
+
+      assert Enum.any?(wakes, fn wake ->
+               metadata = wake.metadata || %{}
+
+               wake.agent_id == designer.id and wake.reason == "issue_comment_mentioned" and
+                 (Map.get(metadata, "comment_id") == comment.id or
+                    Map.get(metadata, :comment_id) == comment.id) and
+                 (Map.get(metadata, "comment_body") == comment.body or
+                    Map.get(metadata, :comment_body) == comment.body) and
+                 (Map.get(metadata, "source") == "agent_mention" or
+                    Map.get(metadata, :source) == "agent_mention")
+             end)
+
+      refute Enum.any?(wakes, &(&1.agent_id == other_designer.id))
+    end
+
+    test "does not wake an assigned agent from its own comment", %{agent: agent, issue: issue} do
+      {:ok, comment} =
+        Comments.create_comment(%{
+          body: "Delivery note from the assigned agent",
+          author_type: "agent",
+          author_id: agent.id,
+          issue_id: issue.id
+        })
+
+      assert {:error, :self_comment_ignored} = Wakes.notify_comment(comment)
+      assert [] = Wakes.list_issue_wakes(issue.id)
     end
 
     test "returns error when issue is not active", %{issue: issue} do
@@ -292,7 +401,7 @@ defmodule Cympho.WakesTest do
       assert {:error, :no_assignee} = Wakes.notify_comment(comment)
     end
 
-    test "wakes agent for blocked issue", %{agent: agent, issue: issue} do
+    test "does not auto-wake assignee for blocked issue comments", %{issue: issue} do
       {:ok, _} = Issues.update_issue(issue, %{status: :blocked})
       issue = Issues.get_issue!(issue.id)
 
@@ -304,10 +413,53 @@ defmodule Cympho.WakesTest do
           issue_id: issue.id
         })
 
-      result = Wakes.notify_comment(comment)
+      assert {:error, :issue_not_active} = Wakes.notify_comment(comment)
+      assert [] = Wakes.list_issue_wakes(issue.id)
+    end
 
-      assert {:ok, agent_wake} = result
-      assert agent_wake.agent_id == agent.id
+    test "does not wake mentioned non-assignees on blocked or terminal issue comments" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Quiet Comment Wake Co",
+          slug: "quiet-comment-wake-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, owner} =
+        Agents.create_agent(%{
+          name: "Quiet Owner",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, designer} =
+        Agents.create_agent(%{
+          name: "Quiet Designer",
+          role: :designer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      for status <- [:blocked, :done, :cancelled] do
+        {:ok, quiet_issue} =
+          Issues.create_issue(%{
+            title: "Quiet #{status} comment wake",
+            status: status,
+            company_id: company.id,
+            assignee_id: owner.id
+          })
+
+        {:ok, comment} =
+          Comments.create_comment(%{
+            body: "@quiet-designer context only; do not resume this #{status} issue.",
+            author_type: "user",
+            author_id: "test-user",
+            issue_id: quiet_issue.id
+          })
+
+        assert {:error, :issue_not_active} = Wakes.notify_comment(comment)
+        refute Enum.any?(Wakes.list_issue_wakes(quiet_issue.id), &(&1.agent_id == designer.id))
+      end
     end
 
     test "wakes agent for in_review issue", %{agent: agent, issue: issue} do
@@ -470,6 +622,30 @@ defmodule Cympho.WakesTest do
 
       assert length(results) == 1
       {:ok, agent_wake} = List.first(results)
+      assert agent_wake.agent_id == agent.id
+      assert agent_wake.issue_id == blocked.id
+      assert agent_wake.reason == "issue_blockers_resolved"
+    end
+
+    test "treats cancelled blockers as resolved", %{agent: agent, project: project} do
+      {:ok, blocker} =
+        Issues.create_issue(%{
+          title: "Cancelled Blocker Issue",
+          project_id: project.id,
+          status: :cancelled
+        })
+
+      {:ok, blocked} =
+        Issues.create_issue(%{
+          title: "Blocked Issue",
+          project_id: project.id,
+          assignee_id: agent.id,
+          status: :blocked
+        })
+
+      {:ok, _} = Issues.add_blocker(blocked, blocker)
+
+      assert [{:ok, agent_wake}] = Wakes.notify_blockers_resolved(blocker)
       assert agent_wake.agent_id == agent.id
       assert agent_wake.issue_id == blocked.id
       assert agent_wake.reason == "issue_blockers_resolved"

@@ -250,6 +250,29 @@ defmodule CymphoWeb.CostLive.Index do
   end
 
   defp build_cost_command(%{
+         summary: %{has_unpriced_usage?: true} = summary,
+         spend_posture: posture
+       }) do
+    %{
+      tone: :warning,
+      badge: "Unpriced usage",
+      title: "Price missing before the next run",
+      summary:
+        "Token usage exists with zero recorded cost. Treat this as unknown spend until pricing or provider reporting is configured.",
+      action_label: "Inspect drivers",
+      action_path: "#top-cost-drivers",
+      driver:
+        "#{format_tokens(summary.unpriced_tokens)} unpriced tokens across #{pluralize(summary.unpriced_request_count, "request")}.",
+      metrics: [
+        %{label: "Spend", value: format_cost(summary.total_cost)},
+        %{label: "Unpriced", value: format_tokens(summary.unpriced_tokens)},
+        %{label: "Requests", value: to_string(summary.unpriced_request_count)},
+        %{label: "Budget", value: posture_limit(posture)}
+      ]
+    }
+  end
+
+  defp build_cost_command(%{
          spend_posture: %{budget_status: :watch} = posture,
          by_agent: by_agent,
          by_issue: by_issue,

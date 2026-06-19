@@ -36,6 +36,7 @@ defmodule Cympho.Wakes.AgentWake do
     agent_handoff
     runtime_retry
     issue_created
+    swarm_worker_created
     child_created
     child_status_changed
     final_review_required

@@ -3,6 +3,7 @@ defmodule Cympho.Orchestrator.DispatcherTest do
 
   alias Cympho.Orchestrator.Dispatcher
   alias Cympho.Orchestrator.Dispatcher.State
+  alias Cympho.Issues.Issue
 
   setup do
     # Ensure registries are started (they may already be started by the app supervisor)
@@ -66,6 +67,32 @@ defmodule Cympho.Orchestrator.DispatcherTest do
       # minutes by default. Use a generous bound to avoid coupling the test
       # to the exact constant.
       assert capped <= 3_600_000
+    end
+  end
+
+  describe "runnable_candidate?/1" do
+    test "parks blocked issues even when they have no blocker relations" do
+      refute Dispatcher.runnable_candidate?(%Issue{status: :blocked, blocked_by: []})
+    end
+
+    test "rejects issues with active blockers and accepts resolved blockers" do
+      refute Dispatcher.runnable_candidate?(%Issue{
+               status: :todo,
+               blocked_by: [%Issue{status: :in_progress}]
+             })
+
+      assert Dispatcher.runnable_candidate?(%Issue{
+               status: :todo,
+               blocked_by: [%Issue{status: :cancelled}]
+             })
+    end
+
+    test "rejects issue-level paused work without changing workflow status" do
+      refute Dispatcher.runnable_candidate?(%Issue{
+               status: :todo,
+               blocked_by: [],
+               monitor_state: %{"issue_runtime" => %{"paused" => true}}
+             })
     end
   end
 

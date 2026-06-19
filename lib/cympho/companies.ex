@@ -13,6 +13,9 @@ defmodule Cympho.Companies do
   alias Cympho.Projects.Project
   alias Cympho.Secrets.Secret
 
+  @runtime_mode_key "runtime_mode"
+  @low_power_mode "low_power"
+
   # ── Company CRUD ──
 
   def list_companies do
@@ -58,17 +61,47 @@ defmodule Cympho.Companies do
   end
 
   def pause_company(%Company{} = company, reason \\ "Paused from dashboard") do
-    case do_pause_company(company, reason) do
+    case do_pause_company(company, reason, cancel_wakes?: false) do
       {:ok, updated, _runtime_stop} -> {:ok, updated}
       error -> error
     end
   end
 
-  def stop_company_runtime(%Company{} = company, reason \\ "Stopped from global runtime controls") do
-    do_pause_company(company, reason)
+  def pause_company_runtime(%Company{} = company, reason \\ "Paused from global runtime controls") do
+    do_pause_company(company, reason, cancel_wakes?: false)
   end
 
-  defp do_pause_company(%Company{} = company, reason) do
+  def stop_company_runtime(%Company{} = company, reason \\ "Stopped from global runtime controls") do
+    do_pause_company(company, reason, cancel_wakes?: true)
+  end
+
+  def enter_low_power_mode(
+        %Company{} = company,
+        reason \\ "Low power from global runtime controls"
+      ) do
+    config =
+      company
+      |> Map.get(:governance_config)
+      |> runtime_config()
+      |> Map.merge(%{
+        @runtime_mode_key => @low_power_mode,
+        "runtime_mode_reason" => reason,
+        "runtime_mode_started_at" =>
+          DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+      })
+
+    with {:ok, updated} <- execute_company_update(company, %{governance_config: config}) do
+      Phoenix.PubSub.broadcast(
+        Cympho.PubSub,
+        "company:#{updated.id}:company",
+        {:company_runtime_low_power, updated}
+      )
+
+      {:ok, updated}
+    end
+  end
+
+  defp do_pause_company(%Company{} = company, reason, opts) do
     with {:ok, updated} <-
            execute_company_update(company, %{
              status: "paused",
@@ -76,6 +109,7 @@ defmodule Cympho.Companies do
              paused_reason: reason
            }) do
       runtime_stop = stop_company_runtime_sessions(company.id, reason)
+      runtime_stop = maybe_cancel_company_wakes(company.id, runtime_stop, reason, opts)
       pause_company_agents(company.id, reason)
 
       Phoenix.PubSub.broadcast(
@@ -94,12 +128,22 @@ defmodule Cympho.Companies do
     end
   end
 
+  defp maybe_cancel_company_wakes(company_id, runtime_stop, reason, opts) do
+    if Keyword.get(opts, :cancel_wakes?, false) do
+      {:ok, count} = Cympho.Wakes.cancel_company_wakes(company_id, reason)
+      Map.put(runtime_stop, :wakes_cancelled, count)
+    else
+      Map.put_new(runtime_stop, :wakes_cancelled, 0)
+    end
+  end
+
   def resume_company(%Company{} = company) do
     with {:ok, updated} <-
            execute_company_update(company, %{
              status: "active",
              paused_at: nil,
-             paused_reason: nil
+             paused_reason: nil,
+             governance_config: clear_runtime_mode(company.governance_config)
            }) do
       resume_company_agents(company.id)
 
@@ -115,6 +159,30 @@ defmodule Cympho.Companies do
 
   def active?(%Company{status: "active"}), do: true
   def active?(_company), do: false
+
+  def runtime_mode(%Company{governance_config: config}) do
+    case config do
+      %{@runtime_mode_key => @low_power_mode} -> :low_power
+      _ -> :standard
+    end
+  end
+
+  def runtime_mode(company_id) when is_binary(company_id) do
+    case Ecto.UUID.cast(company_id) do
+      {:ok, valid_id} ->
+        case Repo.get(Company, valid_id) do
+          nil -> :standard
+          company -> runtime_mode(company)
+        end
+
+      :error ->
+        :standard
+    end
+  end
+
+  def runtime_mode(_company), do: :standard
+
+  def low_power?(company), do: runtime_mode(company) == :low_power
 
   @doc """
   Reads a runtime limit for a company from its `governance_config["limits"]`
@@ -151,6 +219,18 @@ defmodule Cympho.Companies do
   end
 
   def runtime_limit(_, _, default), do: default
+
+  defp runtime_config(config) when is_map(config), do: config
+  defp runtime_config(_config), do: %{}
+
+  defp clear_runtime_mode(config) when is_map(config) do
+    config
+    |> Map.delete(@runtime_mode_key)
+    |> Map.delete("runtime_mode_reason")
+    |> Map.delete("runtime_mode_started_at")
+  end
+
+  defp clear_runtime_mode(_config), do: %{}
 
   defp stop_company_runtime_sessions(company_id, reason) do
     case Cympho.Orchestrator.Dispatcher.stop_company(company_id, reason) do
@@ -1725,6 +1805,21 @@ defmodule Cympho.Companies do
     end
   end
 
+  def autonomous_company_blueprint_manifest(key, opts \\ []) do
+    case find_autonomous_company_blueprint(key) do
+      nil ->
+        {:error, :not_found}
+
+      blueprint ->
+        engineer_count =
+          opts
+          |> Keyword.get(:engineer_count, 2)
+          |> normalize_engineer_count()
+
+        {:ok, blueprint_launch_manifest(blueprint, engineer_count)}
+    end
+  end
+
   @doc """
   Creates a Paperclip-style autonomous starter company.
 
@@ -1749,9 +1844,13 @@ defmodule Cympho.Companies do
 
     requested_prefix = attrs[:issue_prefix] || attrs["issue_prefix"] || blueprint.default_prefix
     issue_prefix = unique_project_prefix(requested_prefix)
-    engineer_count = attrs[:engineer_count] || attrs["engineer_count"] || 2
+
+    engineer_count =
+      normalize_engineer_count(attrs[:engineer_count] || attrs["engineer_count"] || 2)
+
     adapter = normalize_adapter(attrs[:adapter] || attrs["adapter"] || :claude_code)
     seed_issue_count = length(blueprint.seed_issues)
+    launch_manifest = blueprint_launch_manifest(blueprint, engineer_count)
 
     Repo.transaction(fn ->
       company =
@@ -1771,7 +1870,8 @@ defmodule Cympho.Companies do
           governance_config: %{
             "autonomy_mode" => "autonomous_default",
             "approval_gates" => ["budget_override", "dangerous_runtime_action"],
-            "company_blueprint" => blueprint.key
+            "company_blueprint" => blueprint.key,
+            "company_blueprint_manifest" => launch_manifest
           },
           brand_color: blueprint.brand_color
         })
@@ -2011,6 +2111,8 @@ defmodule Cympho.Companies do
   end
 
   defp public_blueprint(blueprint) do
+    launch_manifest = blueprint_launch_manifest(blueprint, 2)
+
     %{
       key: blueprint.key,
       name: blueprint.name,
@@ -2018,9 +2120,132 @@ defmodule Cympho.Companies do
       default_goal: blueprint.default_goal,
       default_prefix: blueprint.default_prefix,
       role_summary: blueprint.role_summary,
-      seed_issue_count: length(blueprint.seed_issues)
+      seed_issue_count: length(blueprint.seed_issues),
+      seed_issue_titles: Enum.map(blueprint.seed_issues, & &1.title),
+      default_agent_count: launch_manifest["agent_count"],
+      extra_agent_count: launch_manifest["extra_agent_count"],
+      role_count: launch_manifest["role_count"],
+      roles: launch_manifest["roles"],
+      capability_count: launch_manifest["capability_count"],
+      capability_tags: launch_manifest["capability_tags"],
+      launch_manifest: launch_manifest
     }
   end
+
+  defp blueprint_launch_manifest(blueprint, engineer_count) do
+    roster = blueprint_agent_roster(blueprint, engineer_count)
+    seed_work = Enum.map(blueprint.seed_issues, &blueprint_seed_manifest/1)
+    roles = roster |> Enum.map(& &1["role"]) |> Enum.uniq() |> Enum.sort()
+
+    capability_tags =
+      roster |> Enum.flat_map(& &1["capability_tags"]) |> Enum.uniq() |> Enum.sort()
+
+    %{
+      "blueprint_key" => blueprint.key,
+      "blueprint_name" => blueprint.name,
+      "default_prefix" => blueprint.default_prefix,
+      "default_goal" => blueprint.default_goal,
+      "engineer_count" => engineer_count,
+      "agent_count" => length(roster),
+      "base_agent_count" => 4 + engineer_count,
+      "extra_agent_count" => length(blueprint.extra_agents),
+      "role_count" => length(roles),
+      "roles" => roles,
+      "capability_count" => length(capability_tags),
+      "capability_tags" => capability_tags,
+      "agent_roster" => roster,
+      "seed_issue_count" => length(seed_work),
+      "seed_issue_titles" => Enum.map(seed_work, & &1["title"]),
+      "seed_work" => seed_work
+    }
+  end
+
+  defp blueprint_agent_roster(blueprint, engineer_count) do
+    blueprint_base_agent_roster(engineer_count) ++
+      Enum.map(blueprint.extra_agents, &extra_agent_manifest/1)
+  end
+
+  defp blueprint_base_agent_roster(engineer_count) do
+    [
+      %{
+        "ref" => "ceo",
+        "name" => "CEO",
+        "title" => "Chief Executive Officer",
+        "role" => "ceo",
+        "reports_to" => nil,
+        "capability_tags" => ~w(budgeting hiring planning strategy)
+      },
+      %{
+        "ref" => "cto",
+        "name" => "CTO",
+        "title" => "Chief Technology Officer",
+        "role" => "cto",
+        "reports_to" => "ceo",
+        "capability_tags" => ~w(architecture review technical_planning triage)
+      },
+      %{
+        "ref" => "product_lead",
+        "name" => "Product Lead",
+        "title" => "Product Lead",
+        "role" => "product_manager",
+        "reports_to" => "ceo",
+        "capability_tags" => ~w(acceptance_criteria prioritization stakeholder_alignment)
+      },
+      %{
+        "ref" => "design_lead",
+        "name" => "Design Lead",
+        "title" => "Design Lead",
+        "role" => "designer",
+        "reports_to" => "ceo",
+        "capability_tags" => ~w(interaction_design user_flows visual_specs)
+      }
+    ] ++ engineer_manifests(engineer_count)
+  end
+
+  defp engineer_manifests(0), do: []
+
+  defp engineer_manifests(engineer_count) do
+    for index <- 1..engineer_count do
+      %{
+        "ref" => "engineer_#{index}",
+        "name" => "Engineer #{index}",
+        "title" => "Software Engineer",
+        "role" => "engineer",
+        "reports_to" => "cto",
+        "capability_tags" => ~w(debugging implementation testing)
+      }
+    end
+  end
+
+  defp extra_agent_manifest(spec) do
+    %{
+      "ref" => Atom.to_string(spec.ref),
+      "name" => spec.name,
+      "title" => spec.title,
+      "role" => Atom.to_string(spec.role),
+      "reports_to" => Atom.to_string(spec.parent),
+      "capability_tags" => spec.capabilities |> Map.keys() |> Enum.sort()
+    }
+  end
+
+  defp blueprint_seed_manifest(seed) do
+    %{
+      "title" => seed.title,
+      "priority" => Atom.to_string(seed.priority),
+      "assignee_ref" => Atom.to_string(seed.assignee)
+    }
+  end
+
+  defp normalize_engineer_count(count) when is_integer(count), do: count |> max(0) |> min(8)
+
+  defp normalize_engineer_count(count) when is_binary(count) do
+    case Integer.parse(count) do
+      {value, _} -> normalize_engineer_count(value)
+      :error -> 2
+    end
+  end
+
+  defp normalize_engineer_count(_count), do: 2
 
   defp create_template_agent!(attrs) do
     role = attrs[:role] || attrs["role"]
@@ -2162,7 +2387,11 @@ defmodule Cympho.Companies do
   end
 
   def list_memberships_for_user(user_id) do
-    from(m in CompanyMembership, where: m.user_id == ^user_id, preload: [:company])
+    from(m in CompanyMembership,
+      where: m.user_id == ^user_id,
+      order_by: [asc: m.inserted_at, asc: m.id],
+      preload: [:company]
+    )
     |> Repo.all()
   end
 

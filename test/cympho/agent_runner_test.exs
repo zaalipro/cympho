@@ -4,6 +4,8 @@ defmodule Cympho.AgentRunnerTest do
   alias Cympho.AgentRunner
   alias Cympho.AgentRunner.Mock
 
+  @receive_timeout 5_000
+
   describe "Mock.run/4" do
     test "sends session_started and turn_completed messages" do
       recipient = self()
@@ -88,9 +90,199 @@ defmodule Cympho.AgentRunnerTest do
           stall_timeout: 1_000
         )
 
-      assert_receive {:session_started, ^session_id}, 1_000
-      assert_receive {:turn_completed, ^session_id, result}, 1_000
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+      assert_receive {:turn_completed, ^session_id, result}, @receive_timeout
       assert result["type"] == "result"
     end
+
+    test "ignores requested resume when cwd is not scoped to the issue workspace" do
+      shared_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-shared-#{System.unique_integer()}")
+
+      File.mkdir_p!(shared_dir)
+      on_exit(fn -> File.rm_rf!(shared_dir) end)
+
+      command = write_resume_probe!(shared_dir)
+      recipient = self()
+
+      issue = %{
+        id: "resume-shared",
+        title: "Shared cwd resume",
+        description: "Resume must not leak stale shared context."
+      }
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", recipient,
+          cwd: shared_dir,
+          config: %{"command" => command, "resume" => true},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 1_000
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+      assert_receive {:turn_completed, ^session_id, result}, @receive_timeout
+      assert resume_probe_text(result) == "fresh"
+    end
+
+    test "allows requested resume inside the issue-scoped workspace" do
+      issue_id = "resume-scoped"
+      issue_dir = Cympho.Workspace.workspace_path(issue_id)
+
+      File.mkdir_p!(issue_dir)
+      on_exit(fn -> File.rm_rf!(issue_dir) end)
+
+      command = write_resume_probe!(issue_dir)
+      recipient = self()
+
+      issue = %{
+        id: issue_id,
+        title: "Scoped cwd resume",
+        description: "Resume is safe when the cwd belongs to this issue."
+      }
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", recipient,
+          config: %{"command" => command, "cwd" => issue_dir, "resume" => true},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 1_000
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+      assert_receive {:turn_completed, ^session_id, result}, @receive_timeout
+      assert resume_probe_text(result) == "resume"
+    end
+
+    test "ignores requested resume for comment wakes even inside the issue workspace" do
+      issue_id = "resume-comment-wake"
+      issue_dir = Cympho.Workspace.workspace_path(issue_id)
+
+      File.mkdir_p!(issue_dir)
+      on_exit(fn -> File.rm_rf!(issue_dir) end)
+
+      command = write_resume_probe!(issue_dir)
+      recipient = self()
+
+      issue = %{
+        id: issue_id,
+        title: "Comment wake resume",
+        description: "Comment wakes need a fresh prompt turn."
+      }
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", recipient,
+          config: %{"command" => command, "cwd" => issue_dir, "resume" => true},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          wake_context: {"issue_commented", %{"comment_id" => "comment-1"}},
+          stall_timeout: 1_000
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+      assert_receive {:turn_completed, ^session_id, result}, @receive_timeout
+      assert resume_probe_text(result) == "fresh"
+    end
+
+    test "treats provider quota text on exit zero as an adapter error" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-quota-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      command = Path.join(tmp_dir, "fake-claude")
+
+      File.write!(
+        command,
+        "#!/bin/sh\nprintf '%s\\n' 'Error: insufficient_quota: You exceeded your current quota'\n"
+      )
+
+      File.chmod!(command, 0o755)
+
+      recipient = self()
+      issue = %{id: "quota-command", title: "Quota command", description: "Use config command"}
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", recipient,
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 1_000
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:provider_failure, :quota_exceeded, snippet}},
+                     @receive_timeout
+
+      assert snippet =~ "insufficient_quota"
+      refute_receive {:turn_completed, ^session_id, _result}, 100
+    end
+
+    test "treats permission-blocked JSON on exit zero as an adapter error" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-blocked-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      command = Path.join(tmp_dir, "fake-claude")
+
+      File.write!(
+        command,
+        """
+        #!/bin/sh
+        printf '%s\\n' '{"type":"result","content":[{"type":"text","text":"I am unable to proceed because bash commands require user approval."}]}'
+        """
+      )
+
+      File.chmod!(command, 0o755)
+
+      recipient = self()
+
+      issue = %{
+        id: "permission-blocked-command",
+        title: "Permission blocked command",
+        description: "Use config command"
+      }
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", recipient,
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 1_000
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+
+      assert_receive {:turn_ended_with_error, ^session_id,
+                      {:runtime_failure, :permission_blocked, snippet}},
+                     @receive_timeout
+
+      assert snippet =~ "unable to proceed"
+      refute_receive {:turn_completed, ^session_id, _result}, 100
+    end
   end
+
+  defp write_resume_probe!(dir) do
+    command = Path.join(dir, "fake-claude")
+
+    File.write!(
+      command,
+      """
+      #!/bin/sh
+      case " $* " in
+        *" --resume "*) text="resume" ;;
+        *) text="fresh" ;;
+      esac
+      printf '{"type":"result","content":[{"type":"text","text":"%s"}]}\\n' "$text"
+      """
+    )
+
+    File.chmod!(command, 0o755)
+    command
+  end
+
+  defp resume_probe_text(%{"content" => [%{"text" => text} | _]}), do: text
+  defp resume_probe_text(_result), do: nil
 end

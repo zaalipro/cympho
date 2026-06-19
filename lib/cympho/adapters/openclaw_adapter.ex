@@ -12,9 +12,16 @@ defmodule Cympho.Adapters.OpenClawAdapter do
   def run(issue, agent_id, recipient_pid, opts) when is_pid(recipient_pid) do
     session_id = make_ref()
 
-    spawn(fn ->
-      do_run(session_id, issue, agent_id, recipient_pid, opts)
-    end)
+    worker =
+      spawn(fn ->
+        try do
+          do_run(session_id, issue, agent_id, recipient_pid, opts)
+        after
+          Cympho.AdapterSessions.unregister(session_id)
+        end
+      end)
+
+    Cympho.AdapterSessions.register(session_id, worker)
 
     session_id
   end
@@ -24,7 +31,12 @@ defmodule Cympho.Adapters.OpenClawAdapter do
 
     config = opts[:config] || %{}
 
-    case dispatch_to_openclaw(issue, agent_id, config) do
+    result =
+      Cympho.AdapterSessions.run_cancellable(session_id, fn ->
+        dispatch_to_openclaw(issue, agent_id, config, opts)
+      end)
+
+    case result do
       {:ok, result} ->
         send(recipient_pid, {:turn_completed, session_id, result})
 
@@ -33,7 +45,7 @@ defmodule Cympho.Adapters.OpenClawAdapter do
     end
   end
 
-  defp dispatch_to_openclaw(issue, agent_id, config) do
+  defp dispatch_to_openclaw(issue, agent_id, config, opts) do
     endpoint = get_endpoint(config)
     api_key = get_api_key(config)
 
@@ -43,8 +55,22 @@ defmodule Cympho.Adapters.OpenClawAdapter do
 
       true ->
         payload = build_openclaw_payload(issue, agent_id, config)
+        attach_payload_telemetry(opts, payload)
         make_openclaw_request(endpoint, api_key, payload)
     end
+  end
+
+  defp attach_payload_telemetry(opts, payload) do
+    Cympho.PromptTelemetry.attach_to_run(opts, encode_payload(payload), %{
+      "adapter" => "openclaw",
+      "source" => "openclaw_payload"
+    })
+  end
+
+  defp encode_payload(payload) do
+    Jason.encode!(payload)
+  rescue
+    _ -> inspect(payload)
   end
 
   defp build_openclaw_payload(issue, agent_id, config) do

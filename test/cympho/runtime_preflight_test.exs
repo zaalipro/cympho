@@ -4,8 +4,10 @@ defmodule Cympho.RuntimePreflightTest do
   alias Cympho.Agents
   alias Cympho.Companies
   alias Cympho.Issues
+  alias Cympho.Projects
   alias Cympho.RuntimePreflight
   alias Cympho.Secrets
+  alias Cympho.Workspaces
 
   test "treats a found Claude wrapper command as review-mode ready without exposing secrets" do
     agent = %{
@@ -104,6 +106,29 @@ defmodule Cympho.RuntimePreflightTest do
                  &1.detail =~ "cannot edit files")
            )
 
+    refute inspect(preflight) =~ "secret-key"
+  end
+
+  test "surfaces model and harness mismatch before launch" do
+    agent = %{
+      id: Ecto.UUID.generate(),
+      adapter: :openai_chat,
+      config: %{
+        "endpoint" => "https://api.openai.com/v1",
+        "model" => "claude-sonnet-4-6"
+      },
+      runtime_config: %{"env" => %{"OPENAI_API_KEY" => "secret-key"}}
+    }
+
+    preflight = RuntimePreflight.for_agent(agent, autonomy_enabled?: true)
+    item = Enum.find(preflight.items, &(&1.label == "Model/harness match"))
+
+    assert preflight.status == :attention
+    assert item.status == :attention
+    assert item.detail =~ "OpenAI chat endpoint"
+    assert item.detail =~ "claude-sonnet-4-6"
+    assert item.target_path == "/agents/#{agent.id}?tab=configuration#agent-runtime-profile"
+    assert item.target_label == "Fix model"
     refute inspect(preflight) =~ "secret-key"
   end
 
@@ -478,6 +503,61 @@ defmodule Cympho.RuntimePreflightTest do
              "/agents/#{agent.id}?tab=configuration#agent-runtime-profile"
   end
 
+  test "for_issue warns when local repo delivery would use a shared project workspace" do
+    {:ok, company} =
+      Companies.create_company(%{name: "Preflight Shared Workspace Co", slug: unique_slug()})
+
+    {:ok, project} =
+      Projects.create_project(%{
+        name: "Shared Workspace Project",
+        prefix: unique_prefix(),
+        company_id: company.id
+      })
+
+    {:ok, project_workspace} =
+      Workspaces.create_project_workspace(%{
+        name: "Primary shared checkout",
+        cwd: "/tmp/cympho/shared-checkout-#{System.unique_integer([:positive])}",
+        is_primary: true,
+        project_id: project.id,
+        company_id: company.id
+      })
+
+    {:ok, agent} =
+      Agents.create_agent(%{
+        name: "Workspace-aware Engineer",
+        role: :engineer,
+        status: :idle,
+        adapter: :process,
+        config: %{"command" => "echo", "model" => "custom", "repo_capable" => true},
+        company_id: company.id
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Parallel repo delivery",
+        description: complete_delivery_brief(),
+        status: :todo,
+        priority: :high,
+        assigned_role: "engineer",
+        assignee_id: agent.id,
+        company_id: company.id,
+        project_id: project.id
+      })
+
+    preflight = RuntimePreflight.for_issue(issue, autonomy_enabled?: true)
+    item = Enum.find(preflight.items, &(&1.label == "Workspace isolation"))
+
+    assert preflight.status == :attention
+    assert preflight.first_action.label == "Workspace isolation"
+    assert item.status == :attention
+    assert item.detail =~ "shared project workspace"
+    assert item.detail =~ "Primary shared checkout"
+    assert item.detail =~ "execution workspace or worktree"
+    assert item.target_path == "/workspaces/#{project_workspace.id}"
+    assert item.target_label == "Open workspace"
+  end
+
   test "for_issue accepts preloaded non-secret credential metadata" do
     {:ok, company} =
       Companies.create_company(%{name: "Preflight Cached Secrets Co", slug: unique_slug()})
@@ -660,6 +740,16 @@ defmodule Cympho.RuntimePreflightTest do
   end
 
   defp unique_slug, do: "preflight-#{System.unique_integer([:positive])}"
+
+  defp unique_prefix do
+    suffix =
+      System.unique_integer([:positive])
+      |> Integer.digits(26)
+      |> Enum.map_join(fn digit -> <<?A + digit>> end)
+      |> String.slice(0, 8)
+
+    "P" <> suffix
+  end
 
   defp complete_delivery_brief do
     """

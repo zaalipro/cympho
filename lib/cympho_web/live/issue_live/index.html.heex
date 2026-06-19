@@ -1,18 +1,26 @@
-<.page size="wide">
+<.page size="wide" data-ui-complex-page data-density={@digest_density}>
   <.header
     title={@page_title}
-    subtitle="Triage, assign, and track autonomous work across the company."
+    subtitle={
+      if @digest_density == "detailed",
+        do: "Triage, assign, and track autonomous work across the company."
+    }
   >
     <:actions>
       <.app_link
         navigate={~p"/kanban"}
-        class="inline-flex items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        class="inline-flex shrink-0 items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
       >
         Board
       </.app_link>
+      <.density_switch
+        density={@digest_density}
+        compact_patch={issue_index_url(assigns, %{"density" => "compact", "page" => "1"})}
+        detailed_patch={issue_index_url(assigns, %{"density" => "detailed", "page" => "1"})}
+      />
       <.app_link
         navigate={~p"/issues/new"}
-        class="inline-flex items-center gap-2 rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
+        class="inline-flex shrink-0 items-center gap-2 rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
       >
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -33,13 +41,13 @@
         <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
           Owner triage
         </p>
-        <p class="mt-0.5 text-xs text-text-tertiary">
+        <p :if={@digest_density == "detailed"} class="mt-0.5 text-xs text-text-tertiary">
           Jump straight to the queue that needs the next decision.
         </p>
       </div>
       <.link
         :if={@current_triage != ""}
-        patch={~p"/issues"}
+        patch={triage_lane_url("", @digest_density)}
         class="text-xs font-590 text-brand hover:text-accent-hover"
       >
         Show all issues
@@ -49,7 +57,8 @@
     <div class="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
       <.link
         :for={lane <- triage_lanes(@issue_triage_counts)}
-        patch={triage_lane_url(lane.key)}
+        patch={triage_lane_url(lane.key, @digest_density)}
+        data-testid={"issue-triage-lane-#{lane.key}"}
         class={[
           "group min-w-0 rounded-lg border px-3 py-3 transition-colors",
           triage_lane_class(@current_triage, lane.key)
@@ -61,7 +70,10 @@
               <span class={[lane.icon, "h-4 w-4 shrink-0 text-text-quaternary"]}></span>
               <p class="truncate text-xs font-590 text-text-primary">{lane.label}</p>
             </div>
-            <p class="mt-1 line-clamp-2 min-h-8 text-[11px] leading-4 text-text-tertiary">
+            <p
+              :if={@digest_density == "detailed"}
+              class="mt-1 line-clamp-2 min-h-8 text-[11px] leading-4 text-text-tertiary"
+            >
               {lane.detail}
             </p>
           </div>
@@ -76,7 +88,11 @@
     </div>
   </section>
 
-  <section :if={@attention_queue != []} id="issue-attention-queue" class="mb-4">
+  <section
+    :if={@attention_queue != [] and @digest_density == "detailed"}
+    id="issue-attention-queue"
+    class="mb-4"
+  >
     <div class="mb-2 flex items-center justify-between px-1">
       <div>
         <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
@@ -248,10 +264,14 @@
   </div>
 
   <.panel class="overflow-visible">
-    <div class="hidden border-b border-border bg-panel/60 px-4 py-2 text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary md:grid md:grid-cols-[minmax(0,1fr)_128px_120px_120px_90px_36px] md:gap-4">
+    <div class={[
+      "hidden border-b border-border bg-panel/60 px-4 py-2 text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary md:grid md:gap-4",
+      @digest_density == "compact" && "md:grid-cols-[minmax(0,1fr)_96px_90px_36px]",
+      @digest_density == "detailed" && "md:grid-cols-[minmax(0,1fr)_128px_120px_120px_90px_36px]"
+    ]}>
       <span>Issue</span>
-      <span>Launch</span>
-      <span>Assignee</span>
+      <span :if={@digest_density == "detailed"}>Launch</span>
+      <span :if={@digest_density == "detailed"}>Assignee</span>
       <span>Priority</span>
       <span class="text-right">Activity</span>
       <span></span>
@@ -292,7 +312,13 @@
 
     <div
       :for={issue <- @issues}
-      class="group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-hairline px-4 py-2.5 last:border-b-0 transition-colors duration-100 hover:bg-surface-2 md:grid-cols-[minmax(0,1fr)_128px_120px_120px_90px_36px] md:gap-4"
+      class={[
+        "group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-hairline last:border-b-0 transition-colors duration-100 hover:bg-surface-2 md:gap-4",
+        @digest_density == "compact" &&
+          "px-3 py-1.5 md:grid-cols-[minmax(0,1fr)_96px_90px_36px]",
+        @digest_density == "detailed" &&
+          "px-4 py-2.5 md:grid-cols-[minmax(0,1fr)_128px_120px_120px_90px_36px]"
+      ]}
     >
       <% launch_readiness = launch_readiness_for(@launch_readiness_by_issue, issue) %>
       <.app_link navigate={~p"/issues/#{issue.id}"} class="min-w-0">
@@ -311,16 +337,20 @@
             {status_label(issue.status)}
           </span>
         </div>
-        <p class="mt-1 truncate text-xs text-text-tertiary">
+        <p
+          :if={@digest_density == "detailed"}
+          class="mt-1 truncate text-xs text-text-tertiary"
+        >
           {issue_description(issue.description)}
         </p>
         <.issue_digest_card
+          :if={@digest_density == "detailed"}
           issue={issue}
-          density="compact"
+          density={@digest_density}
           variant="inline"
           class="mt-1.5"
         />
-        <div :if={launch_readiness} class="mt-1.5 md:hidden">
+        <div :if={@digest_density == "detailed" and launch_readiness} class="mt-1.5 md:hidden">
           <span class={[
             "inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-510",
             launch_readiness_class(launch_readiness)
@@ -331,7 +361,7 @@
         </div>
       </.app_link>
 
-      <div class="hidden min-w-0 md:block">
+      <div :if={@digest_density == "detailed"} class="hidden min-w-0 md:block">
         <.app_link
           :if={launch_readiness}
           navigate={launch_readiness.path}
@@ -344,7 +374,10 @@
         <span :if={!launch_readiness} class="text-xs text-text-quaternary">—</span>
       </div>
 
-      <div class="hidden min-w-0 text-xs text-text-tertiary md:block">
+      <div
+        :if={@digest_density == "detailed"}
+        class="hidden min-w-0 text-xs text-text-tertiary md:block"
+      >
         <span class="truncate">
           {if issue.assignee, do: issue.assignee.name, else: "Unassigned"}
         </span>

@@ -172,7 +172,14 @@ defmodule Cympho.AgentActions do
         {:error, :rate_limited}
 
       true ->
-        do_execute(issue, agent, actions)
+        case ensure_no_contradictory_success(actions) do
+          :ok ->
+            do_execute(issue, agent, actions)
+
+          {:error, reason} ->
+            maybe_emit_rejection_comment(issue, reason)
+            {:error, reason}
+        end
     end
   end
 
@@ -304,6 +311,18 @@ defmodule Cympho.AgentActions do
     system_comment(
       issue,
       "#{action_type} rejected: missing review evidence (#{gap_list}). #{instruction}"
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:contradictory_success_signal, action_type}
+       ) do
+    system_comment(
+      issue,
+      "#{action_type} rejected: the action batch declares blocked or incomplete work while also trying to advance delivery. " <>
+        "If work is blocked, emit `block_issue` with a recoverable `[blocked]` note. " <>
+        "If work is complete, remove blocked/cannot-proceed language and provide delivery or review evidence."
     )
   end
 
@@ -671,6 +690,76 @@ defmodule Cympho.AgentActions do
   )
   defp mutates_issue?(%{"type" => type}) when type in @mutating_action_types, do: true
   defp mutates_issue?(_), do: false
+
+  @success_like_action_types ~w(submit_review approve_issue swarm_worker_complete)
+  @blocked_declaration_patterns [
+    ~r/(^|\s)\[blocked\]/i,
+    ~r/\b(unable|can't|cannot|can not)\s+(to\s+)?(proceed|continue|complete|finish|do|perform)\b/i,
+    ~r/\b(i|we)\s+(do not|don't|cannot|can't)\s+have\b.*\b(access|permission|permissions|channel|credential|credentials|api key|authority|capability|capabilities)\b/i,
+    ~r/\b(needs?|requires?|awaiting|waiting for)\s+(human|owner|user)\s+(input|approval|decision|access|credential|credentials)\b/i,
+    ~r/\b(blocked by permission|blocked by permissions|permission settings)\b/i
+  ]
+
+  defp ensure_no_contradictory_success(actions) do
+    success_action =
+      Enum.find(actions, fn
+        %{"type" => type} -> type in @success_like_action_types
+        _ -> false
+      end)
+
+    cond do
+      is_nil(success_action) ->
+        :ok
+
+      Enum.any?(actions, &blocked_declaration_action?/1) ->
+        {:error, {:contradictory_success_signal, success_action["type"]}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp blocked_declaration_action?(%{} = action) do
+    action
+    |> action_text()
+    |> blocked_declaration_text?()
+  end
+
+  defp blocked_declaration_action?(_action), do: false
+
+  defp action_text(action) do
+    ~w(body notes reason summary description result comment)
+    |> Enum.map(&Map.get(action, &1))
+    |> Enum.map(&flatten_action_text/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join(" ")
+  end
+
+  defp flatten_action_text(value) when is_binary(value), do: value
+
+  defp flatten_action_text(value) when is_list(value) do
+    value
+    |> Enum.map(&flatten_action_text/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join(" ")
+  end
+
+  defp flatten_action_text(value) when is_map(value) do
+    value
+    |> Map.values()
+    |> Enum.map(&flatten_action_text/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join(" ")
+  end
+
+  defp flatten_action_text(value) when value in [nil, ""], do: ""
+  defp flatten_action_text(value), do: to_string(value)
+
+  defp blocked_declaration_text?(""), do: false
+
+  defp blocked_declaration_text?(text) do
+    Enum.any?(@blocked_declaration_patterns, &Regex.match?(&1, text))
+  end
 
   # Mirror the permissive policy used by `Issues.checkout_issue/3`: only
   # reject when both sides have a non-nil company_id and they differ. Legacy
@@ -1223,7 +1312,9 @@ defmodule Cympho.AgentActions do
     with :ok <- ensure_submit_review_quality(issue, agent, action),
          :ok <- ensure_head_sha_changed_since_last_review(issue, action),
          {:ok, _comment} <- maybe_agent_comment(issue, agent, tagged_submit_review_note(note)),
-         {:ok, transitioned} <- Issues.transition_issue_with_review_gates(issue, :in_review),
+         {:ok, issue_with_comment} <- Issues.get_issue(issue.id),
+         {:ok, transitioned} <-
+           Issues.transition_issue_with_review_gates(issue_with_comment, :in_review),
          {:ok, updated} <-
            update_workflow_issue(transitioned, agent, %{
              assignee_id: assignee_id,
@@ -1518,7 +1609,9 @@ defmodule Cympho.AgentActions do
         with :ok <- ensure_approval_quality(issue),
              :ok <- ensure_approval_note_ready(agent, tagged_note),
              {:ok, _comment} <- maybe_agent_comment(issue, agent, tagged_note),
-             {:ok, transitioned} <- Issues.transition_issue_with_review_gates(issue, :done),
+             {:ok, issue_with_comment} <- Issues.get_issue(issue.id),
+             {:ok, transitioned} <-
+               Issues.transition_issue_with_review_gates(issue_with_comment, :done),
              {:ok, released} <- Issues.force_release_issue(transitioned, :done),
              {:ok, released} <-
                update_workflow_issue(released, agent, %{

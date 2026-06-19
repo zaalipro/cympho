@@ -19,10 +19,17 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
   # O(pending) within the dequeue path, so the cap is also a latency floor.
   # Read at runtime so tests can adjust it via Application.put_env.
   @default_max_pending_wakes_per_agent 100
+  @default_recent_duplicate_window_seconds 90
+  @recent_duplicate_exempt_reasons ~w(manual_dispatch runtime_retry company_resumed)
 
   defp max_pending_wakes_per_agent do
     Application.get_env(:cympho, :wakeup_queue, [])
     |> Keyword.get(:max_pending_per_agent, @default_max_pending_wakes_per_agent)
+  end
+
+  defp recent_duplicate_window_seconds do
+    Application.get_env(:cympho, :wakeup_queue, [])
+    |> Keyword.get(:recent_duplicate_window_seconds, @default_recent_duplicate_window_seconds)
   end
 
   @doc """
@@ -30,15 +37,17 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
 
   Returns `{:ok, agent_wake}` with either the new or updated record. When the
   per-agent pending cap is exceeded and there's no existing wake to coalesce
-  with, returns `{:error, :wakeup_queue_full}`.
+  with, returns `{:error, :wakeup_queue_full}`. When the same wake was just
+  consumed, returns `{:error, :recent_duplicate_wake}` to avoid stale payload
+  loops re-opening an issue immediately.
   """
   @spec enqueue(map()) ::
           {:ok, AgentWake.t()}
-          | {:error, Ecto.Changeset.t() | :wakeup_queue_full}
+          | {:error, Ecto.Changeset.t() | :wakeup_queue_full | :recent_duplicate_wake}
   def enqueue(%{agent_id: agent_id, issue_id: issue_id, reason: reason} = attrs) do
-    triggered_by_type = Map.get(attrs, :triggered_by_type, "system")
-    triggered_by_id = Map.get(attrs, :triggered_by_id)
-    metadata = Map.get(attrs, :metadata, %{})
+    triggered_by_type = attr(attrs, :triggered_by_type, "system") || "system"
+    triggered_by_id = attr(attrs, :triggered_by_id)
+    metadata = attr(attrs, :metadata, %{}) || %{}
 
     existing =
       AgentWake
@@ -53,24 +62,38 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
         nil ->
           cap = max_pending_wakes_per_agent()
 
-          if pending_count(agent_id) >= cap do
-            Logger.warning(
-              "WakeupQueue: rejecting wake for agent #{agent_id}, queue full (cap=#{cap})"
-            )
+          cond do
+            recent_consumed_duplicate?(
+              agent_id,
+              issue_id,
+              reason,
+              attrs_fingerprint(triggered_by_type, triggered_by_id, metadata)
+            ) ->
+              Logger.debug(
+                "WakeupQueue: suppressing recent duplicate wake for agent #{agent_id}, issue #{inspect(issue_id)}, reason #{reason}"
+              )
 
-            {:error, :wakeup_queue_full}
-          else
-            %AgentWake{}
-            |> AgentWake.changeset(%{
-              agent_id: agent_id,
-              issue_id: issue_id,
-              reason: reason,
-              status: "pending",
-              triggered_by_type: triggered_by_type,
-              triggered_by_id: triggered_by_id,
-              metadata: metadata
-            })
-            |> Repo.insert()
+              {:error, :recent_duplicate_wake}
+
+            pending_count(agent_id) >= cap ->
+              Logger.warning(
+                "WakeupQueue: rejecting wake for agent #{agent_id}, queue full (cap=#{cap})"
+              )
+
+              {:error, :wakeup_queue_full}
+
+            true ->
+              %AgentWake{}
+              |> AgentWake.changeset(%{
+                agent_id: agent_id,
+                issue_id: issue_id,
+                reason: reason,
+                status: "pending",
+                triggered_by_type: triggered_by_type,
+                triggered_by_id: triggered_by_id,
+                metadata: metadata
+              })
+              |> Repo.insert()
           end
 
         wake ->
@@ -181,7 +204,143 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
   defp where_issue(query, nil), do: where(query, [w], is_nil(w.issue_id))
   defp where_issue(query, issue_id), do: where(query, [w], w.issue_id == ^issue_id)
 
+  defp recent_consumed_duplicate?(agent_id, issue_id, reason, fingerprint) do
+    seconds = recent_duplicate_window_seconds()
+
+    if guarded_recent_duplicate_reason?(reason) and is_integer(seconds) and seconds > 0 do
+      cutoff = DateTime.utc_now() |> DateTime.add(-seconds, :second)
+
+      AgentWake
+      |> where([w], w.agent_id == ^agent_id)
+      |> where([w], w.reason == ^reason and w.status == "consumed")
+      |> where([w], not is_nil(w.consumed_at) and w.consumed_at > ^cutoff)
+      |> where_issue(issue_id)
+      |> order_by([w], desc: w.consumed_at)
+      |> limit(20)
+      |> Repo.all()
+      |> Enum.any?(&(wake_fingerprint(&1) == fingerprint))
+    else
+      false
+    end
+  end
+
+  defp guarded_recent_duplicate_reason?(reason) do
+    reason not in @recent_duplicate_exempt_reasons
+  end
+
+  defp wake_fingerprint(%AgentWake{} = wake) do
+    attrs_fingerprint(
+      wake.triggered_by_type || "system",
+      wake.triggered_by_id,
+      wake.metadata || %{}
+    )
+  end
+
+  defp attrs_fingerprint(triggered_by_type, triggered_by_id, metadata) do
+    {triggered_by_type || "system", triggered_by_id || "", metadata_fingerprint(metadata)}
+  end
+
+  defp metadata_fingerprint(metadata) when is_map(metadata) do
+    metadata
+    |> first_present([
+      :dedupe_key,
+      "dedupe_key",
+      :comment_id,
+      "comment_id",
+      :review_id,
+      "review_id"
+    ])
+    |> case do
+      nil when map_size(metadata) == 0 ->
+        :empty
+
+      nil ->
+        {:metadata_hash, :erlang.phash2(normalize_metadata(metadata))}
+
+      value ->
+        {:key, to_string(value)}
+    end
+  end
+
+  defp metadata_fingerprint(_metadata), do: :empty
+
+  defp first_present(map, keys) do
+    Enum.find_value(keys, fn key ->
+      case Map.fetch(map, key) do
+        {:ok, value} when not is_nil(value) -> value
+        _ -> nil
+      end
+    end)
+  end
+
+  defp normalize_metadata(value) when is_map(value) do
+    value
+    |> Enum.map(fn {key, value} -> {to_string(key), normalize_metadata(value)} end)
+    |> Enum.sort_by(fn {key, _value} -> key end)
+  end
+
+  defp normalize_metadata(value) when is_list(value), do: Enum.map(value, &normalize_metadata/1)
+  defp normalize_metadata(value), do: value
+
+  defp attr(attrs, key, default \\ nil) do
+    Map.get(attrs, key, Map.get(attrs, to_string(key), default))
+  end
+
   defp merge_metadata(existing, new) do
-    Map.merge(existing || %{}, new || %{})
+    existing = existing || %{}
+    new = new || %{}
+
+    existing
+    |> Map.merge(new)
+    |> put_coalesced_count(existing)
+    |> put_coalesced_ids(existing, new, "comment_id", "coalesced_comment_ids")
+    |> put_coalesced_ids(existing, new, "review_id", "coalesced_review_ids")
+  end
+
+  defp put_coalesced_count(merged, existing) do
+    count = metadata_integer(existing, "coalesced_count", 1) + 1
+    Map.put(merged, "coalesced_count", count)
+  end
+
+  defp put_coalesced_ids(merged, existing, new, key, aggregate_key) do
+    ids =
+      []
+      |> append_metadata_values(existing, aggregate_key)
+      |> append_metadata_values(existing, key)
+      |> append_metadata_values(new, aggregate_key)
+      |> append_metadata_values(new, key)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.map(&to_string/1)
+      |> Enum.uniq()
+      |> Enum.take(-20)
+
+    if ids == [] do
+      merged
+    else
+      Map.put(merged, aggregate_key, ids)
+    end
+  end
+
+  defp append_metadata_values(values, metadata, key) do
+    case Map.get(metadata, key) || Map.get(metadata, String.to_atom(key)) do
+      nil -> values
+      value when is_list(value) -> values ++ value
+      value -> values ++ [value]
+    end
+  end
+
+  defp metadata_integer(metadata, key, default) do
+    case Map.get(metadata, key) || Map.get(metadata, String.to_atom(key)) do
+      value when is_integer(value) and value > 0 -> value
+      value when is_binary(value) -> parse_positive_integer(value, default)
+      _ -> default
+    end
+  end
+
+  defp parse_positive_integer(value, default) do
+    case Integer.parse(value) do
+      {parsed, _} when parsed > 0 -> parsed
+      _ -> default
+    end
   end
 end

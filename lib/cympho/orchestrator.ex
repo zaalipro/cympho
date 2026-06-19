@@ -28,8 +28,11 @@ defmodule Cympho.Orchestrator do
     :run_id,
     :runtime_context,
     :status,
+    :fallback_profile_ids,
+    no_work_retry_count: 0,
     turn_count: 0,
     tool_traces: %{},
+    fallback_errors: [],
     opts: []
   ]
 
@@ -57,6 +60,8 @@ defmodule Cympho.Orchestrator do
   alias Cympho.Issues.Issue
 
   @heartbeat_tick_interval 30_000
+  @adapter_failure_circuit_breaker_threshold 3
+  @no_progress_circuit_breaker_threshold 3
   @completion_contract_blocker_keys MapSet.new([
                                       :agent_note,
                                       :owner_summary,
@@ -68,6 +73,7 @@ defmodule Cympho.Orchestrator do
                                     ])
 
   @registry Cympho.OrchestratorRegistry
+  @max_no_work_retries 1
 
   ## Client API
 
@@ -118,11 +124,11 @@ defmodule Cympho.Orchestrator do
   @doc """
   Stops the orchestrator for a given issue.
   """
-  @spec stop(String.t()) :: :ok
-  def stop(issue_id) do
+  @spec stop(String.t(), term()) :: :ok
+  def stop(issue_id, reason \\ :normal) do
     case whereis(issue_id) do
       nil -> :ok
-      pid -> GenServer.stop(pid)
+      pid -> GenServer.stop(pid, reason)
     end
   end
 
@@ -160,22 +166,7 @@ defmodule Cympho.Orchestrator do
   def handle_continue(:start_session, %__MODULE__{} = session) do
     case prepare_runtime(session) do
       {:ok, module, config, runtime_context} ->
-        start_engine_run(session)
-        # Snapshot the most-recent pending wake before consuming so we can
-        # surface it to the agent's prompt as wake_context. Without this the
-        # agent only sees the issue and has to infer "why am I being run."
-        wake_context = peek_pending_wake(session.agent_id, session.issue.id)
-        consume_pending_wakes(session.agent_id, session.issue.id)
-        schedule_heartbeat_tick()
-
-        opts =
-          session
-          |> run_opts(config, runtime_context)
-          |> Keyword.put(:wake_context, wake_context)
-
-        session_id = module.run(session.issue, session.agent_id, self(), opts)
-
-        {:noreply, %{session | session_id: session_id, runtime_context: runtime_context}}
+        {:noreply, start_runtime_session(session, module, config, runtime_context)}
 
       {:error, error} ->
         handle_preflight_or_resolution_error(session, error)
@@ -216,8 +207,6 @@ defmodule Cympho.Orchestrator do
     # Process tool results from the response
     updated_tool_traces = process_tool_results(result, session.tool_traces)
 
-    complete_engine_run(%{session | tool_traces: updated_tool_traces}, result)
-
     # Record session completion
     _ =
       Instrumenter.record_session_event(session, "completed", %{
@@ -229,6 +218,13 @@ defmodule Cympho.Orchestrator do
     create_agent_comment(issue, agent_id, body)
 
     action_result = handle_agent_actions(issue, agent_id, body)
+
+    finalize_engine_run_for_action_result(
+      %{session | tool_traces: updated_tool_traces},
+      result,
+      action_result
+    )
+
     maybe_queue_completion_contract_nudge(issue, agent_id, action_result)
 
     case action_result do
@@ -246,7 +242,7 @@ defmodule Cympho.Orchestrator do
         })
     end
 
-    set_agent_idle(agent_id)
+    finalize_agent_after_completed_turn(issue, agent_id, action_result)
     reset_adapter_failure(agent_id)
 
     {:stop, :normal, session}
@@ -266,21 +262,19 @@ defmodule Cympho.Orchestrator do
 
     fail_engine_run(session, reason)
 
-    error_body = Error.comment(reason, adapter: session_adapter_name(session))
+    case maybe_start_provider_fallback(session, reason) do
+      {:ok, fallback_session} ->
+        {:noreply, fallback_session}
 
-    {:ok, _comment} =
-      Comments.create_comment(%{
-        body: error_body,
-        author_type: "agent",
-        author_id: agent_id,
-        issue_id: issue.id
-      })
+      :none ->
+        case maybe_start_no_work_retry(session, reason) do
+          {:ok, retry_session} ->
+            {:noreply, retry_session}
 
-    block_issue(issue)
-
-    set_agent_idle(agent_id)
-
-    {:stop, :normal, session}
+          :none ->
+            finish_failed_session(session, reason)
+        end
+    end
   end
 
   @impl true
@@ -327,6 +321,31 @@ defmodule Cympho.Orchestrator do
     {:noreply, state}
   end
 
+  defp finish_failed_session(%__MODULE__{} = session, reason) do
+    issue = session.issue
+    agent_id = session.agent_id
+
+    error_body = Error.comment(reason, adapter: session_adapter_name(session))
+
+    {:ok, _comment} =
+      Comments.create_comment(%{
+        body: error_body,
+        author_type: "agent",
+        author_id: agent_id,
+        issue_id: issue.id
+      })
+
+    block_issue(issue)
+
+    if provider_limit_failure?(reason) do
+      pause_agent_for_provider_limit(agent_id, issue, reason)
+    else
+      set_agent_idle(agent_id)
+    end
+
+    {:stop, :normal, session}
+  end
+
   @impl true
   def handle_cast(msg, state) do
     issue_id =
@@ -357,6 +376,8 @@ defmodule Cympho.Orchestrator do
 
   @impl true
   def terminate(reason, %__MODULE__{} = session) do
+    cancel_adapter_session(session.session_id, reason)
+
     if dispatcher = Process.whereis(Cympho.Orchestrator.Dispatcher) do
       send(dispatcher, {:session_ended, session.issue.id, reason})
     end
@@ -369,15 +390,27 @@ defmodule Cympho.Orchestrator do
     :ok
   end
 
+  defp cancel_adapter_session(nil, _reason), do: :ok
+  defp cancel_adapter_session(_session_id, :normal), do: :ok
+
+  defp cancel_adapter_session(session_id, reason) do
+    case Cympho.AdapterSessions.cancel(session_id, reason) do
+      :ok -> :ok
+      {:error, :not_found} -> :ok
+      {:error, :not_started} -> :ok
+    end
+  end
+
   ## Private — HeartbeatEngine integration
 
-  defp create_pending_run(session, issue, agent_id) do
+  defp create_pending_run(session, issue, agent_id, adapter_override \\ nil) do
     try do
       adapter =
-        case safe_get_agent(agent_id) do
-          {:ok, agent} -> agent |> agent_adapter() |> adapter_name()
-          {:error, _} -> "claude_code"
-        end
+        adapter_override ||
+          case safe_get_agent(agent_id) do
+            {:ok, agent} -> agent |> agent_adapter() |> adapter_name()
+            {:error, _} -> "claude_code"
+          end
 
       run_attrs = %{
         company_id: Map.get(issue, :company_id),
@@ -459,6 +492,31 @@ defmodule Cympho.Orchestrator do
 
   defp prepare_runtime(%__MODULE__{} = session), do: prepare_legacy_runtime(session)
 
+  defp prepare_runtime(%__MODULE__{issue: %Issue{} = issue} = session, profile)
+       when is_map(profile) do
+    case safe_get_agent(session.agent_id) do
+      {:ok, %Cympho.Agents.Agent{} = agent} ->
+        with {:ok, adapter} <- profile_adapter(profile) do
+          opts =
+            session.opts
+            |> Keyword.take([:skills, :cwd])
+            |> Keyword.put(:run_id, session.run_id)
+            |> Keyword.put(:adapter, adapter)
+            |> Keyword.put(:adapter_config, profile.config || %{})
+            |> Keyword.put(:runtime_profile_id, profile.id)
+            |> Keyword.put(:runtime_env, profile_env(profile))
+
+          case Runtime.preflight(issue, agent, opts) do
+            {:ok, context} -> {:ok, context.adapter, context.adapter_config, context}
+            {:error, reason} -> {:error, reason}
+          end
+        end
+
+      _ ->
+        {:error, :not_found}
+    end
+  end
+
   defp prepare_legacy_runtime(%__MODULE__{} = session) do
     agent_map = build_agent_map(session)
 
@@ -470,17 +528,272 @@ defmodule Cympho.Orchestrator do
 
   defp run_opts(session, config, nil) do
     skills = Keyword.get(session.opts || [], :skills, [])
-    [skills: skills, config: config]
+    [skills: skills, config: config, run_id: session.run_id]
   end
 
-  defp run_opts(_session, _config, %Cympho.RuntimeContext{} = context) do
+  defp run_opts(session, _config, %Cympho.RuntimeContext{} = context) do
     [
+      run_id: session.run_id,
       skills: context.skills,
       config: context.adapter_config,
       cwd: context.cwd,
       env: context.env,
       runtime_context: context
     ]
+  end
+
+  defp start_runtime_session(session, module, config, runtime_context) do
+    start_engine_run(session)
+    wake_context = runtime_wake_context(session)
+
+    if initial_runtime_attempt?(session) do
+      consume_pending_wakes(session.agent_id, session.issue.id)
+    end
+
+    schedule_heartbeat_tick()
+
+    opts =
+      session
+      |> run_opts(config, runtime_context)
+      |> Keyword.put(:wake_context, wake_context)
+
+    session_id = module.run(session.issue, session.agent_id, self(), opts)
+
+    %{session | session_id: session_id, runtime_context: runtime_context}
+  end
+
+  defp runtime_wake_context(%__MODULE__{no_work_retry_count: count}) when count > 0 do
+    {"runtime_retry", %{"attempts" => count}}
+  end
+
+  defp runtime_wake_context(%__MODULE__{fallback_errors: []} = session) do
+    # Snapshot the most-recent pending wake before consuming so we can surface
+    # it to the agent's prompt as wake_context. Without this the agent only
+    # sees the issue and has to infer "why am I being run."
+    peek_pending_wake(session.agent_id, session.issue.id)
+  end
+
+  defp runtime_wake_context(%__MODULE__{fallback_errors: fallback_errors}) do
+    {"runtime_fallback", %{"attempts" => length(fallback_errors)}}
+  end
+
+  defp initial_runtime_attempt?(%__MODULE__{fallback_errors: [], no_work_retry_count: 0}),
+    do: true
+
+  defp initial_runtime_attempt?(_session), do: false
+
+  defp maybe_start_provider_fallback(%__MODULE__{} = session, reason) do
+    if provider_fallback_failure?(reason) do
+      session
+      |> ensure_fallback_profile_ids()
+      |> start_next_provider_fallback(reason)
+    else
+      :none
+    end
+  end
+
+  defp ensure_fallback_profile_ids(%__MODULE__{fallback_profile_ids: ids} = session)
+       when is_list(ids),
+       do: session
+
+  defp ensure_fallback_profile_ids(%__MODULE__{} = session) do
+    ids =
+      case safe_get_agent(session.agent_id) do
+        {:ok, agent} -> Cympho.RuntimeProfiles.fallback_profile_ids(agent)
+        {:error, _} -> []
+      end
+
+    %{session | fallback_profile_ids: ids}
+  end
+
+  defp start_next_provider_fallback(%__MODULE__{fallback_profile_ids: []}, _reason), do: :none
+
+  defp start_next_provider_fallback(
+         %__MODULE__{fallback_profile_ids: [profile_id | rest]} = session,
+         reason
+       ) do
+    case Cympho.RuntimeProfiles.get(profile_id) do
+      nil ->
+        %{session | fallback_profile_ids: rest}
+        |> start_next_provider_fallback(reason)
+
+      profile ->
+        attempt_session =
+          session
+          |> Map.put(:fallback_profile_ids, rest)
+          |> Map.put(:fallback_errors, session.fallback_errors ++ [{profile_id, reason}])
+          |> Map.put(:no_work_retry_count, 0)
+          |> Map.put(:session_id, nil)
+          |> Map.put(:tool_traces, %{})
+          |> Map.put(:runtime_context, nil)
+          |> create_pending_run(session.issue, session.agent_id, profile.adapter)
+
+        case prepare_runtime(attempt_session, profile) do
+          {:ok, module, config, runtime_context} ->
+            create_agent_comment(
+              session.issue,
+              session.agent_id,
+              "#{provider_fallback_label(reason)} on #{runtime_label(session)}; retrying with runtime profile #{profile.name} (`#{profile.id}`)."
+            )
+
+            {:ok, start_runtime_session(attempt_session, module, config, runtime_context)}
+
+          {:error, fallback_error} ->
+            fail_engine_run(
+              attempt_session,
+              {:fallback_preflight_failed, profile.id, fallback_error}
+            )
+
+            %{attempt_session | fallback_profile_ids: rest}
+            |> start_next_provider_fallback(reason)
+        end
+    end
+  end
+
+  defp provider_limit_failure?({:provider_failure, category, _detail})
+       when category in [:quota_exceeded, :rate_limited],
+       do: true
+
+  defp provider_limit_failure?({:http_error, 429, _detail}), do: true
+  defp provider_limit_failure?(_reason), do: false
+
+  defp provider_fallback_failure?(reason) do
+    provider_limit_failure?(reason) or transient_provider_failure?(reason)
+  end
+
+  defp transient_provider_failure?({:provider_failure, :provider_unavailable, _detail}),
+    do: true
+
+  defp transient_provider_failure?({:http_error, status, _detail})
+       when status in [500, 502, 503, 504, 529],
+       do: true
+
+  defp transient_provider_failure?(_reason), do: false
+
+  defp provider_fallback_label(reason) do
+    cond do
+      provider_limit_failure?(reason) -> "Provider limit hit"
+      transient_provider_failure?(reason) -> "Provider temporarily unavailable"
+      true -> "Provider retry requested"
+    end
+  end
+
+  defp pause_agent_for_provider_limit(agent_id, %Issue{} = issue, reason) do
+    reason_text =
+      "Provider circuit breaker paused this agent after #{provider_limit_label(reason)}. Fix credentials, quota, or fallback profiles, then resume the agent."
+
+    {:ok, cancelled_wakes} = Cympho.Wakes.cancel_agent_wakes(agent_id, reason_text)
+
+    case Agents.pause_agent(agent_id, reason_text) do
+      {:ok, _agent} ->
+        create_system_comment(
+          issue,
+          "Provider circuit breaker paused this agent and cancelled #{cancelled_wakes} queued #{pluralize(cancelled_wakes, "wake")} for this agent. #{reason_text}"
+        )
+
+      {:error, error} ->
+        Logger.warning(
+          "[Orchestrator] Failed to pause agent #{agent_id} after provider circuit breaker trip: #{inspect(error)}"
+        )
+
+        set_agent_error(agent_id)
+    end
+  end
+
+  defp provider_limit_label({:provider_failure, :quota_exceeded, _detail}), do: "quota exhaustion"
+
+  defp provider_limit_label({:provider_failure, :rate_limited, _detail}),
+    do: "provider rate limiting"
+
+  defp provider_limit_label({:http_error, 429, _detail}), do: "provider rate limiting"
+
+  defp provider_limit_label(_reason), do: "provider limit failure"
+
+  defp pluralize(1, noun), do: noun
+  defp pluralize(_count, noun), do: noun <> "s"
+
+  defp maybe_start_no_work_retry(%__MODULE__{} = session, reason) do
+    if no_work_failure?(reason) and session.no_work_retry_count < @max_no_work_retries do
+      attempt_session =
+        session
+        |> Map.put(:no_work_retry_count, session.no_work_retry_count + 1)
+        |> Map.put(:session_id, nil)
+        |> Map.put(:tool_traces, %{})
+        |> Map.put(:runtime_context, nil)
+        |> create_pending_run(session.issue, session.agent_id, session_adapter_name(session))
+
+      case prepare_retry_runtime(attempt_session, session) do
+        {:ok, module, config, runtime_context} ->
+          create_agent_comment(
+            session.issue,
+            session.agent_id,
+            "No usable adapter output from #{runtime_label(session)}; retrying once with the same runtime before blocking. Reason: #{format_no_work_reason(reason)}."
+          )
+
+          {:ok, start_runtime_session(attempt_session, module, config, runtime_context)}
+
+        {:error, retry_error} ->
+          fail_engine_run(attempt_session, {:runtime_retry_preflight_failed, retry_error})
+          :none
+      end
+    else
+      :none
+    end
+  end
+
+  defp no_work_failure?(:no_output), do: true
+  defp no_work_failure?({:parse_error, _detail}), do: true
+  defp no_work_failure?(_reason), do: false
+
+  defp prepare_retry_runtime(%__MODULE__{} = attempt_session, %__MODULE__{} = previous_session) do
+    case previous_runtime_profile_id(previous_session) do
+      profile_id when is_binary(profile_id) and profile_id != "" ->
+        case Cympho.RuntimeProfiles.get(profile_id) do
+          nil -> prepare_runtime(attempt_session)
+          profile -> prepare_runtime(attempt_session, profile)
+        end
+
+      _ ->
+        prepare_runtime(attempt_session)
+    end
+  end
+
+  defp previous_runtime_profile_id(%__MODULE__{
+         runtime_context: %Cympho.RuntimeContext{metadata: metadata}
+       })
+       when is_map(metadata) do
+    Map.get(metadata, "runtime_profile_id") || Map.get(metadata, :runtime_profile_id)
+  end
+
+  defp previous_runtime_profile_id(_session), do: nil
+
+  defp format_no_work_reason(:no_output), do: "no output"
+
+  defp format_no_work_reason({:parse_error, detail}),
+    do: "malformed adapter output (#{inspect(detail)})"
+
+  defp format_no_work_reason(reason), do: inspect(reason)
+
+  defp profile_adapter(%{adapter: adapter}) when is_binary(adapter) and adapter != "" do
+    {:ok, String.to_existing_atom(adapter)}
+  rescue
+    ArgumentError -> {:error, {:unknown_adapter, adapter}}
+  end
+
+  defp profile_adapter(%{adapter: adapter}) when is_atom(adapter), do: {:ok, adapter}
+  defp profile_adapter(_profile), do: {:error, :unknown_adapter}
+
+  defp profile_env(%{runtime_config: runtime_config}) when is_map(runtime_config) do
+    Map.get(runtime_config, "env") || Map.get(runtime_config, :env) || %{}
+  end
+
+  defp profile_env(_profile), do: %{}
+
+  defp runtime_label(%__MODULE__{} = session) do
+    case session_adapter_name(session) do
+      nil -> "the current runtime"
+      adapter -> adapter
+    end
   end
 
   defp handle_preflight_or_resolution_error(session, error)
@@ -573,6 +886,8 @@ defmodule Cympho.Orchestrator do
   defp format_preflight_error({:workspace_error, reason}),
     do: "workspace setup failed: #{inspect(reason)}"
 
+  defp format_preflight_error({:adapter_model_mismatch, message}), do: message
+
   defp format_preflight_error(:company_paused), do: "company is paused"
 
   defp format_preflight_error(:company_mismatch),
@@ -582,6 +897,87 @@ defmodule Cympho.Orchestrator do
 
   # Adapter failure counter is persisted on the agent row so the cap survives
   # process / node restarts. Race-safe via atomic SQL increment.
+
+  defp finalize_agent_after_completed_turn(_issue, agent_id, :ok) do
+    reset_no_progress_failure(agent_id)
+    set_agent_idle(agent_id)
+  end
+
+  defp finalize_agent_after_completed_turn(issue, agent_id, {:error, :unresolved_current_issue}) do
+    case record_no_progress_failure(agent_id) do
+      {:ok, _count} ->
+        set_agent_idle(agent_id)
+
+      {:tripped, failure_count, cancelled_wakes} ->
+        create_system_comment(
+          issue,
+          "No-progress circuit breaker paused this agent after #{failure_count} consecutive action-contract failures and cancelled #{cancelled_wakes} queued #{pluralize(cancelled_wakes, "wake")}. The agent kept producing non-resolving work; fix its instructions, runtime profile, or model choice, then resume it."
+        )
+
+      {:failed_to_trip, failure_count} ->
+        create_system_comment(
+          issue,
+          "No-progress circuit breaker reached #{failure_count} consecutive action-contract failures, but Cympho could not pause the agent automatically. The agent was left in error state for operator repair."
+        )
+    end
+  end
+
+  defp finalize_agent_after_completed_turn(_issue, agent_id, {:error, _reason}) do
+    set_agent_idle(agent_id)
+  end
+
+  defp reset_no_progress_failure(agent_id) do
+    from(a in Cympho.Agents.Agent, where: a.id == ^agent_id)
+    |> Cympho.Repo.update_all(set: [no_progress_failure_count: 0])
+
+    :ok
+  end
+
+  defp record_no_progress_failure(agent_id) do
+    from(a in Cympho.Agents.Agent, where: a.id == ^agent_id)
+    |> Cympho.Repo.update_all(inc: [no_progress_failure_count: 1])
+
+    new_count =
+      Cympho.Repo.one(
+        from(a in Cympho.Agents.Agent,
+          where: a.id == ^agent_id,
+          select: a.no_progress_failure_count
+        )
+      ) || 0
+
+    if new_count >= @no_progress_circuit_breaker_threshold do
+      case pause_agent_for_no_progress_circuit_breaker(agent_id, new_count) do
+        {:ok, cancelled_wakes} -> {:tripped, new_count, cancelled_wakes}
+        :error -> {:failed_to_trip, new_count}
+      end
+    else
+      {:ok, new_count}
+    end
+  end
+
+  defp pause_agent_for_no_progress_circuit_breaker(agent_id, failure_count) do
+    reason =
+      "No-progress circuit breaker paused this agent after #{failure_count} consecutive action-contract failures. Fix its instructions, runtime profile, or model choice, then resume the agent."
+
+    cancelled_wakes =
+      case Cympho.Wakes.cancel_agent_wakes(agent_id, reason) do
+        {:ok, count} -> count
+      end
+
+    case Agents.pause_agent(agent_id, reason) do
+      {:ok, _agent} ->
+        reset_no_progress_failure(agent_id)
+        {:ok, cancelled_wakes}
+
+      {:error, error} ->
+        Logger.warning(
+          "[Orchestrator] Failed to pause agent #{agent_id} after no-progress circuit breaker trip: #{inspect(error)}"
+        )
+
+        set_agent_error(agent_id)
+        :error
+    end
+  end
 
   defp reset_adapter_failure(agent_id) do
     from(a in Cympho.Agents.Agent, where: a.id == ^agent_id)
@@ -602,12 +998,33 @@ defmodule Cympho.Orchestrator do
         )
       ) || 0
 
-    if new_count >= 3 do
-      set_agent_error(agent_id)
-      reset_adapter_failure(agent_id)
+    if new_count >= @adapter_failure_circuit_breaker_threshold do
+      case pause_agent_for_adapter_circuit_breaker(agent_id, new_count) do
+        :ok -> {:tripped, new_count}
+        :error -> {:failed_to_trip, new_count}
+      end
+    else
+      {:ok, new_count}
     end
+  end
 
-    new_count
+  defp pause_agent_for_adapter_circuit_breaker(agent_id, failure_count) do
+    reason =
+      "Adapter circuit breaker paused this agent after #{failure_count} consecutive adapter resolution failures. Fix the runtime/provider configuration, then resume the agent."
+
+    case Agents.pause_agent(agent_id, reason) do
+      {:ok, _agent} ->
+        reset_adapter_failure(agent_id)
+        :ok
+
+      {:error, error} ->
+        Logger.warning(
+          "[Orchestrator] Failed to pause agent #{agent_id} after adapter circuit breaker trip: #{inspect(error)}"
+        )
+
+        set_agent_error(agent_id)
+        :error
+    end
   end
 
   defp start_engine_run(%__MODULE__{run_id: nil}), do: :ok
@@ -645,6 +1062,14 @@ defmodule Cympho.Orchestrator do
       e ->
         Logger.warning("[Orchestrator] Failed to fail engine run: #{inspect(e)}")
     end
+  end
+
+  defp finalize_engine_run_for_action_result(%__MODULE__{} = session, result, :ok) do
+    complete_engine_run(session, result)
+  end
+
+  defp finalize_engine_run_for_action_result(%__MODULE__{} = session, _result, {:error, reason}) do
+    fail_engine_run(session, {:agent_action_failed, reason})
   end
 
   defp record_heartbeat(%__MODULE__{run_id: nil}), do: :ok
@@ -739,7 +1164,11 @@ defmodule Cympho.Orchestrator do
         maybe_create_completion_handoff_comment(issue, agent_id, body, actions, result)
 
         if AgentActions.unresolved_current_issue?(issue, agent_id) do
-          block_issue_with_comment(issue, "Agent actions did not resolve the current issue.")
+          block_issue_with_comment(
+            issue,
+            "Agent actions did not resolve the current issue. Emit a resolving action: handoff, block_issue, submit_review, approve_issue, or swarm_worker_complete."
+          )
+
           {:error, :unresolved_current_issue}
         else
           :ok
@@ -907,6 +1336,21 @@ defmodule Cympho.Orchestrator do
     end
   end
 
+  defp create_system_comment(issue, body) do
+    case Comments.create_comment(%{
+           body: body,
+           author_type: "system",
+           author_id: "00000000-0000-0000-0000-000000000000",
+           issue_id: issue.id
+         }) do
+      {:ok, _comment} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("[Orchestrator] Failed to create system comment: #{inspect(reason)}")
+    end
+  end
+
   defp block_issue_with_comment(issue, reason) do
     _ =
       Comments.create_comment(%{
@@ -920,19 +1364,54 @@ defmodule Cympho.Orchestrator do
   end
 
   defp block_issue(%Issue{} = issue) do
+    case Issues.get_issue(issue.id) do
+      {:ok, latest_issue} ->
+        do_block_issue(latest_issue)
+
+      {:error, reason} ->
+        Logger.warning(
+          "[Orchestrator] Could not reload issue #{issue.id} before blocking: #{inspect(reason)}"
+        )
+
+        :ok
+    end
+  end
+
+  defp block_issue(issue) do
+    Issues.transition_issue(issue, :blocked)
+  end
+
+  defp do_block_issue(%Issue{} = issue) do
     case Issues.update_issue(issue, %{
            status: :blocked,
            assignee_id: nil,
            checkout_run_id: nil,
            checked_out_at: nil
          }) do
-      {:ok, _updated} -> :ok
-      {:error, _reason} -> Issues.transition_issue(issue, :blocked)
-    end
-  end
+      {:ok, _updated} ->
+        :ok
 
-  defp block_issue(issue) do
-    Issues.transition_issue(issue, :blocked)
+      {:error, reason} ->
+        Logger.warning(
+          "[Orchestrator] Falling back to blocked transition for issue #{issue.id}: #{inspect(reason)}"
+        )
+
+        case Issues.transition_issue(issue, :blocked) do
+          {:ok, _updated} ->
+            :ok
+
+          {:error, transition_reason} ->
+            Logger.warning(
+              "[Orchestrator] Failed to block issue #{issue.id}: #{inspect(transition_reason)}"
+            )
+
+            :ok
+        end
+    end
+  rescue
+    Ecto.StaleEntryError ->
+      Logger.warning("[Orchestrator] Issue #{issue.id} changed while marking runtime failure")
+      :ok
   end
 
   defp set_agent_idle(agent_id) do
@@ -981,15 +1460,34 @@ defmodule Cympho.Orchestrator do
 
     error_body = Error.comment(reason, adapter: session_adapter_name(session))
 
-    if reason == :no_adapter_available do
-      record_adapter_failure(agent_id)
-    end
+    circuit_breaker =
+      if reason == :no_adapter_available do
+        record_adapter_failure(agent_id)
+      else
+        :not_applicable
+      end
 
     fail_engine_run(session, reason)
 
     create_agent_comment(issue, agent_id, error_body)
     release_issue_after_adapter_error(issue)
-    set_agent_idle(agent_id)
+
+    case circuit_breaker do
+      {:tripped, failure_count} ->
+        create_system_comment(
+          issue,
+          "Adapter circuit breaker paused this agent after #{failure_count} consecutive adapter resolution failures. Fix the runtime/provider configuration, then resume the agent."
+        )
+
+      {:failed_to_trip, failure_count} ->
+        create_system_comment(
+          issue,
+          "Adapter circuit breaker reached #{failure_count} consecutive adapter resolution failures, but Cympho could not pause the agent automatically. The agent was left in error state for operator repair."
+        )
+
+      _ ->
+        set_agent_idle(agent_id)
+    end
 
     {:stop, :normal, session}
   end

@@ -20,7 +20,7 @@ defmodule CymphoWeb.InboxLive.Index do
       |> assign(:selected_agent, nil)
       |> assign(:subscribed_agent_id, nil)
       |> assign(:current_status, nil)
-      |> assign(:digest_density, "detailed")
+      |> assign(:digest_density, "compact")
       |> assign(:infinite_scroll, %{})
       |> assign(:inbox_counts, %{})
       |> assign(:agent_counts, %{})
@@ -723,7 +723,7 @@ defmodule CymphoWeb.InboxLive.Index do
       %{
         status: status,
         agent_id: agent_id,
-        density: digest_density
+        density: if(digest_density == "detailed", do: digest_density)
       }
       |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
       |> Enum.into(%{})
@@ -740,7 +740,7 @@ defmodule CymphoWeb.InboxLive.Index do
       %{
         status: status,
         agent_id: agent_id,
-        density: density
+        density: if(density == "detailed", do: density)
       }
       |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
       |> Enum.into(%{})
@@ -785,7 +785,7 @@ defmodule CymphoWeb.InboxLive.Index do
 
   defp normalize_digest_density("compact"), do: "compact"
   defp normalize_digest_density("detailed"), do: "detailed"
-  defp normalize_digest_density(_), do: "detailed"
+  defp normalize_digest_density(_), do: "compact"
 
   defp normalize_agent_id("all"), do: "all"
   defp normalize_agent_id(agent_id) when is_binary(agent_id) and agent_id != "", do: agent_id
@@ -856,14 +856,6 @@ defmodule CymphoWeb.InboxLive.Index do
       "border-brand bg-brand/15 text-text-primary"
     else
       "border-border bg-surface text-text-tertiary hover:bg-surface-hover hover:text-text-secondary"
-    end
-  end
-
-  defp density_tab_class(current, density) do
-    if current == density do
-      "bg-brand text-on-primary"
-    else
-      "text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
     end
   end
 

@@ -149,7 +149,7 @@
             <label
               :for={blueprint <- @filtered_blueprints}
               class={[
-                "group flex min-h-[108px] cursor-pointer flex-col justify-between rounded-lg border bg-surface px-3 py-3 text-left transition",
+                "group flex min-h-[118px] cursor-pointer flex-col justify-between rounded-lg border bg-surface px-3 py-3 text-left transition",
                 if(@company_form["blueprint"] == blueprint.key,
                   do: "border-brand/60 bg-brand/10",
                   else: "border-border hover:border-border-hover hover:bg-surface-hover"
@@ -170,8 +170,10 @@
               >
                 {blueprint.role_summary}
               </span>
-              <span class="mt-3 text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
-                {blueprint.seed_issue_count} seed issues
+              <span class="mt-3 flex flex-wrap gap-x-2 gap-y-1 text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
+                <span>{blueprint.default_agent_count} agents</span>
+                <span>{blueprint.capability_count} capabilities</span>
+                <span>{blueprint.seed_issue_count} issues</span>
               </span>
             </label>
           </div>
@@ -299,6 +301,16 @@
               <span class="text-text-secondary">Blueprint</span>
               <span class="text-text-primary font-590 text-right">
                 {@bootstrap_result.blueprint.name}
+              </span>
+            </div>
+            <div class="flex items-center justify-between gap-3 py-1.5 px-3 rounded-lg bg-surface">
+              <span class="text-text-secondary">Manifest</span>
+              <span class="text-text-primary font-590 text-right">
+                {@bootstrap_result.company.governance_config["company_blueprint_manifest"][
+                  "agent_count"
+                ]} agents · {@bootstrap_result.company.governance_config[
+                  "company_blueprint_manifest"
+                ]["capability_count"]} capabilities
               </span>
             </div>
             <div class="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface">

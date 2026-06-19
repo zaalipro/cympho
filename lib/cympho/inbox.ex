@@ -7,9 +7,14 @@ defmodule Cympho.Inbox do
 
   @pubsub Cympho.PubSub
   @topic "inbox"
+  @company_badge_topic "company_inbox_badges"
 
   def subscribe(agent_id) do
     Phoenix.PubSub.subscribe(@pubsub, "#{@topic}:#{agent_id}")
+  end
+
+  def subscribe_company_badges(company_id) when is_binary(company_id) do
+    Phoenix.PubSub.subscribe(@pubsub, "#{@company_badge_topic}:#{company_id}")
   end
 
   def unsubscribe(agent_id) do
@@ -19,6 +24,26 @@ defmodule Cympho.Inbox do
   defp broadcast_change(agent_id, msg) do
     Phoenix.PubSub.broadcast(@pubsub, "#{@topic}:#{agent_id}", msg)
   end
+
+  defp broadcast_company_badge_change(company_id) when is_binary(company_id) do
+    count = unread_count_for_company(company_id)
+
+    Phoenix.PubSub.broadcast(
+      @pubsub,
+      "#{@company_badge_topic}:#{company_id}",
+      {:company_inbox_count_changed, company_id, count}
+    )
+  end
+
+  defp broadcast_company_badge_change(_company_id), do: :ok
+
+  defp broadcast_agent_company_badge_change(agent_id) when is_binary(agent_id) do
+    agent_id
+    |> company_id_for_agent()
+    |> broadcast_company_badge_change()
+  end
+
+  defp broadcast_agent_company_badge_change(_agent_id), do: :ok
 
   def get_inbox_state(issue_id, agent_id) do
     Repo.get_by(InboxState, issue_id: issue_id, agent_id: agent_id)
@@ -158,6 +183,7 @@ defmodule Cympho.Inbox do
         case state |> InboxState.read_changeset() |> Repo.update() do
           {:ok, updated} ->
             broadcast_change(agent_id, {:inbox_updated, updated})
+            broadcast_agent_company_badge_change(agent_id)
             {:ok, updated}
 
           error ->
@@ -177,6 +203,7 @@ defmodule Cympho.Inbox do
 
     if count > 0 do
       broadcast_change(agent_id, {:inbox_bulk_updated, agent_id})
+      broadcast_agent_company_badge_change(agent_id)
     end
 
     {:ok, count}
@@ -210,6 +237,7 @@ defmodule Cympho.Inbox do
         broadcast_change(agent_id, {:inbox_bulk_updated, agent_id})
       end)
 
+      broadcast_company_badge_change(company_id)
       {:ok, count}
     end
   end
@@ -225,6 +253,7 @@ defmodule Cympho.Inbox do
         case state |> InboxState.dismiss_changeset() |> Repo.update() do
           {:ok, updated} ->
             broadcast_change(agent_id, {:inbox_updated, updated})
+            broadcast_agent_company_badge_change(agent_id)
             {:ok, updated}
 
           error ->
@@ -242,6 +271,7 @@ defmodule Cympho.Inbox do
         case state |> InboxState.archive_changeset() |> Repo.update() do
           {:ok, updated} ->
             broadcast_change(agent_id, {:inbox_updated, updated})
+            broadcast_agent_company_badge_change(agent_id)
             {:ok, updated}
 
           error ->
@@ -259,6 +289,7 @@ defmodule Cympho.Inbox do
         case state |> InboxState.restore_changeset() |> Repo.update() do
           {:ok, updated} ->
             broadcast_change(agent_id, {:inbox_updated, updated})
+            broadcast_agent_company_badge_change(agent_id)
             {:ok, updated}
 
           error ->
@@ -298,6 +329,7 @@ defmodule Cympho.Inbox do
           state ->
             state = maybe_refresh_state(state, refresh?)
             broadcast_change(agent_id, {:inbox_created, state})
+            broadcast_agent_company_badge_change(agent_id)
             {:ok, state}
         end
 
@@ -312,6 +344,7 @@ defmodule Cympho.Inbox do
     case state |> InboxState.restore_changeset() |> Repo.update() do
       {:ok, updated} ->
         broadcast_change(state.agent_id, {:inbox_updated, updated})
+        broadcast_agent_company_badge_change(state.agent_id)
         updated
 
       {:error, _changeset} ->
@@ -341,6 +374,14 @@ defmodule Cympho.Inbox do
     Enum.map(items, fn item ->
       %{item | review_nudge: Map.get(nudges_by_pair, {item.issue_id, item.agent_id})}
     end)
+  end
+
+  defp company_id_for_agent(agent_id) do
+    Repo.one(
+      from a in Cympho.Agents.Agent,
+        where: a.id == ^agent_id,
+        select: a.company_id
+    )
   end
 
   defp run_counts_by_issue([]), do: %{}

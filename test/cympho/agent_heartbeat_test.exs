@@ -2,6 +2,11 @@ defmodule Cympho.AgentHeartbeatTest do
   use Cympho.DataCase, async: false
 
   alias Cympho.AgentHeartbeat
+  alias Cympho.Agents
+  alias Cympho.Companies
+  alias Cympho.HeartbeatEngine
+  alias Cympho.Issues
+  alias Cympho.Repo
 
   setup do
     case start_supervised({Cympho.AgentHeartbeat.Supervisor, []}) do
@@ -101,6 +106,90 @@ defmodule Cympho.AgentHeartbeatTest do
 
       # Clean up
       AgentHeartbeat.stop_for_agent(agent_id)
+    end
+  end
+
+  describe "timer heartbeat no-work guard" do
+    setup do
+      original = Application.get_env(:cympho, :agent_heartbeat, [])
+
+      Application.put_env(
+        :cympho,
+        :agent_heartbeat,
+        Keyword.put(original, :delegate_to_dispatcher, false)
+      )
+
+      on_exit(fn ->
+        Application.put_env(:cympho, :agent_heartbeat, original)
+      end)
+
+      :ok
+    end
+
+    test "keeps an agent idle and does not create a run when no assigned work exists" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "No Work Heartbeat",
+          slug: "no-work-heartbeat-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "No Work Agent",
+          role: :engineer,
+          status: :running,
+          company_id: company.id
+        })
+
+      {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+
+      send(pid, :heartbeat)
+      Process.sleep(100)
+
+      assert {:ok, :idle} = AgentHeartbeat.status(agent.id)
+      assert Repo.get!(Agents.Agent, agent.id).status == :idle
+      assert HeartbeatEngine.list_runs_for_agent(agent.id) == []
+
+      AgentHeartbeat.stop_for_agent(agent.id)
+    end
+
+    test "skips assigned work when the company is archived" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Archived Heartbeat",
+          slug: "archived-heartbeat-#{System.unique_integer([:positive])}",
+          status: "archived"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Archived Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Should not run",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+
+      send(pid, :heartbeat)
+      Process.sleep(100)
+
+      reloaded_issue = Issues.get_issue!(issue.id)
+      assert reloaded_issue.status == :todo
+      assert reloaded_issue.checkout_run_id == nil
+      assert HeartbeatEngine.list_runs_for_agent(agent.id) == []
+
+      AgentHeartbeat.stop_for_agent(agent.id)
     end
   end
 

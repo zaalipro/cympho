@@ -81,6 +81,22 @@ defmodule Cympho.AgentPromptWakeContextTest do
     assert prompt =~ "rather than only leaving an acknowledgement"
   end
 
+  test "swarm worker wake tells temporary agents to produce CTO packets", %{
+    engineer: engineer,
+    issue: issue
+  } do
+    prompt =
+      AgentPrompt.build(issue, engineer,
+        wake_context:
+          {"swarm_worker_created", %{"parent_issue_id" => "parent-123", "source" => "swarm"}}
+      )
+
+    assert prompt =~ "temporary swarm worker"
+    assert prompt =~ "CTO synthesis only"
+    assert prompt =~ "swarm_worker_complete"
+    assert prompt =~ "Do not implement code"
+  end
+
   test "no wake context produces no preamble", %{ceo: ceo, issue: issue} do
     prompt = AgentPrompt.build(issue, ceo, wake_context: nil)
     refute prompt =~ "Why you're running this turn"

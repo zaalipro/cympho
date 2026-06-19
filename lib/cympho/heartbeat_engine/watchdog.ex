@@ -4,8 +4,8 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
 
   The watchdog:
     - Finds runs with no heartbeat within the stale threshold
-    - Finds orphaned runs (running but with no active orchestrator process)
-    - Recovers them by marking as failed
+    - Finds orphaned runs with no active orchestrator process
+    - Fails interrupted running work and cancels never-started orphan work
     - Optionally re-queues the associated issue for another agent
   """
 
@@ -95,7 +95,11 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
 
   defp do_check(state) do
     stale_runs = HeartbeatEngine.find_stale_runs(@stale_threshold)
-    orphaned_runs = HeartbeatEngine.find_orphaned_runs()
+    stale_run_ids = MapSet.new(stale_runs, & &1.id)
+
+    orphaned_runs =
+      HeartbeatEngine.find_orphaned_runs()
+      |> Enum.reject(&MapSet.member?(stale_run_ids, &1.id))
 
     stale_recovered =
       Enum.flat_map(stale_runs, fn run ->
@@ -113,7 +117,7 @@ defmodule Cympho.HeartbeatEngine.Watchdog do
 
     orphaned_recovered =
       Enum.flat_map(orphaned_runs, fn run ->
-        case HeartbeatEngine.recover_stale_run(run) do
+        case HeartbeatEngine.recover_orphaned_run(run) do
           {:ok, recovered} ->
             Logger.warning("Watchdog: recovered orphaned run #{run.id} for agent #{run.agent_id}")
             maybe_requeue_issue(recovered)

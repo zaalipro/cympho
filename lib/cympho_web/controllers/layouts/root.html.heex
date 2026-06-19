@@ -1,10 +1,20 @@
 <!DOCTYPE html>
-<html lang="en" data-theme={Map.get(assigns, :theme, "claude")}>
+<html lang="en" data-theme={Map.get(assigns, :theme, "claude")} data-ui-mode="simple">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={Plug.CSRFProtection.get_csrf_token()} />
     <.live_title suffix=" · Cympho">{Map.get(assigns, :page_title, "Cympho")}</.live_title>
+    <script>
+      (() => {
+        try {
+          const mode = localStorage.getItem("cympho-ui-mode") === "advanced" ? "advanced" : "simple";
+          document.documentElement.dataset.uiMode = mode;
+        } catch (_) {
+          document.documentElement.dataset.uiMode = "simple";
+        }
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -49,6 +59,7 @@
           projects={assigns[:nav_projects] || []}
           agents={assigns[:nav_agents] || []}
           inbox_count={assigns[:nav_inbox_count] || 0}
+          approval_count={assigns[:nav_approval_count] || 0}
           current_company={assigns[:current_company]}
           runtime_controls_allowed={assigns[:runtime_controls_allowed] || false}
         />
@@ -111,12 +122,22 @@
             />
           </svg>
         </button>
-        <div
-          :if={assigns[:runtime_controls_allowed] && assigns[:current_company]}
-          class="flex items-center gap-1"
-        >
+        <div class="flex items-center gap-1">
+          <button
+            type="button"
+            data-ui-mode-toggle
+            title="Toggle simple and advanced view with U"
+            aria-label="Toggle simple and advanced view with U"
+            class="ui-mode-toggle flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface-2 text-white transition-colors hover:bg-surface-hover"
+          >
+            <span data-ui-mode-icon class="hero-squares-2x2-mini h-4 w-4"></span>
+            <span class="sr-only" data-ui-mode-label>Simple</span>
+          </button>
           <form
-            :if={Map.get(assigns[:current_company] || %{}, :status) != "paused"}
+            :if={
+              assigns[:runtime_controls_allowed] && assigns[:current_company] &&
+                Map.get(assigns[:current_company] || %{}, :status) != "paused"
+            }
             method="post"
             action={~p"/runtime-control/pause"}
           >
@@ -124,15 +145,19 @@
             <input type="hidden" name="return_to" value={@conn.request_path} />
             <button
               type="submit"
-              title="Pause runtime"
-              aria-label="Pause runtime"
+              title="Pause runtime and preserve queued wakes"
+              aria-label="Pause runtime and preserve queued wakes"
+              data-confirm="Pause runtime for this company? This releases active work but preserves queued wakes."
               class="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface-2 text-text-secondary hover:bg-surface-hover hover:text-text-primary transition-colors"
             >
               <span class="hero-pause-mini h-4 w-4"></span>
             </button>
           </form>
           <form
-            :if={Map.get(assigns[:current_company] || %{}, :status) == "paused"}
+            :if={
+              assigns[:runtime_controls_allowed] && assigns[:current_company] &&
+                Map.get(assigns[:current_company] || %{}, :status) == "paused"
+            }
             method="post"
             action={~p"/runtime-control/resume"}
           >
@@ -147,13 +172,18 @@
               <span class="hero-play-mini h-4 w-4"></span>
             </button>
           </form>
-          <form method="post" action={~p"/runtime-control/stop"}>
+          <form
+            :if={assigns[:runtime_controls_allowed] && assigns[:current_company]}
+            method="post"
+            action={~p"/runtime-control/stop"}
+          >
             <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
             <input type="hidden" name="return_to" value={@conn.request_path} />
             <button
               type="submit"
-              title="Stop runtime"
-              aria-label="Stop runtime"
+              title="Stop runtime and cancel queued wakes"
+              aria-label="Stop runtime and cancel queued wakes"
+              data-confirm="Stop runtime for this company? This releases active work and cancels queued wakes."
               class="flex h-9 w-9 items-center justify-center rounded-lg border border-red-500/25 bg-red-500/10 text-red-300 hover:bg-red-500/15 hover:text-red-200 transition-colors"
             >
               <span class="hero-stop-mini h-4 w-4"></span>
@@ -652,6 +682,14 @@
               <div class="flex items-center justify-between text-sm">
                 <span class="text-text-secondary">Close modal / dialog</span>
                 <kbd class="kbd">Esc</kbd>
+              </div>
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Simple / advanced view</span>
+                <kbd class="kbd">U</kbd>
+              </div>
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-text-secondary">Compact / detailed page</span>
+                <kbd class="kbd">V</kbd>
               </div>
             </div>
           </div>

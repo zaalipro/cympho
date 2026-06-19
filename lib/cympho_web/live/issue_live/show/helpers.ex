@@ -232,7 +232,9 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
   def adapter_error_category_label(:missing_credentials), do: "Missing credentials"
   def adapter_error_category_label(:auth_failed), do: "Auth failed"
   def adapter_error_category_label(:timeout), do: "Timeout"
+  def adapter_error_category_label(:runtime_blocked), do: "Runtime blocked"
   def adapter_error_category_label(:malformed_output), do: "Malformed output"
+  def adapter_error_category_label(:action_contract_failed), do: "Action contract"
   def adapter_error_category_label(:no_output), do: "No output"
   def adapter_error_category_label(:nonzero_exit), do: "Non-zero exit"
   def adapter_error_category_label(_), do: "Unclassified"
@@ -249,8 +251,14 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
   def adapter_error_badge_class(:timeout),
     do: "border-yellow-500/30 bg-yellow-500/10 text-yellow-200"
 
+  def adapter_error_badge_class(:runtime_blocked),
+    do: "border-amber-500/30 bg-amber-500/10 text-amber-200"
+
   def adapter_error_badge_class(:malformed_output),
     do: "border-violet-500/30 bg-violet-500/10 text-violet-200"
+
+  def adapter_error_badge_class(:action_contract_failed),
+    do: "border-amber-500/30 bg-amber-500/10 text-amber-200"
 
   def adapter_error_badge_class(:no_output),
     do: "border-border bg-surface text-text-tertiary"
@@ -1065,6 +1073,9 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
       compact_body(run.error_reason || run.continuation_summary || run.log_excerpt, 180) ||
         runtime_run_default_detail(run.status)
 
+    prompt_context = run_prompt_context(run.run_metadata)
+    prompt_delivery = run_prompt_delivery(run.run_metadata)
+
     %{
       id: run.id,
       status: run.status,
@@ -1078,7 +1089,15 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
       workspace_path: run.workspace_path,
       input_tokens: run.input_tokens || 0,
       output_tokens: run.output_tokens || 0,
-      cost_usd: run.cost_usd
+      cost_usd: run.cost_usd,
+      prompt_chars: prompt_context["chars"] || 0,
+      prompt_estimated_tokens: prompt_context["estimated_tokens"] || 0,
+      prompt_sections: prompt_context["sections"] || 0,
+      prompt_risk: prompt_context["risk"],
+      prompt_source: prompt_context["source"],
+      prompt_role: prompt_delivery["role"],
+      prompt_contract_received?: prompt_contract_received?(prompt_delivery),
+      prompt_custom_overrides: prompt_delivery["custom_overrides"]
     }
   end
 
@@ -1121,6 +1140,26 @@ defmodule CymphoWeb.IssueLive.Show.Helpers do
     do: "Runtime failed without a captured error excerpt."
 
   defp runtime_run_default_detail(_status), do: "No runtime detail captured yet."
+
+  defp run_prompt_context(%{} = metadata) do
+    Map.get(metadata, "prompt_context") || Map.get(metadata, :prompt_context) || %{}
+  end
+
+  defp run_prompt_context(_metadata), do: %{}
+
+  defp run_prompt_delivery(%{} = metadata) do
+    Map.get(metadata, "prompt_delivery") || Map.get(metadata, :prompt_delivery) || %{}
+  end
+
+  defp run_prompt_delivery(_metadata), do: %{}
+
+  defp prompt_contract_received?(%{} = delivery) do
+    Map.get(delivery, "role_playbook") == true and
+      Map.get(delivery, "role_completion_contract") == true and
+      Map.get(delivery, "action_contract") == true
+  end
+
+  defp prompt_contract_received?(_delivery), do: false
 
   defp run_sort_time(run) do
     run

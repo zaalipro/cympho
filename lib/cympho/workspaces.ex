@@ -34,6 +34,16 @@ defmodule Cympho.Workspaces do
     |> Repo.all()
   end
 
+  def primary_project_workspace(nil), do: nil
+
+  def primary_project_workspace(project_id) do
+    ProjectWorkspace
+    |> where([pw], pw.project_id == ^project_id)
+    |> order_by([pw], desc: pw.is_primary, asc: pw.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+  end
+
   def get_project_workspace!(id), do: Repo.get!(ProjectWorkspace, id)
 
   def get_project_workspace(id) do

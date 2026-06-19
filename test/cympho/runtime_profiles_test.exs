@@ -73,6 +73,27 @@ defmodule Cympho.RuntimeProfilesTest do
       assert RuntimeProfiles.from_agent(agent) == "claude-cm"
     end
 
+    test "resolves explicit fallback profile chains before catalog defaults" do
+      agent = %{
+        runtime_config: %{
+          "profile_id" => "codex-gpt-5.5",
+          "fallback_profile_ids" => ["openai-chat-qwen-dashscope-flash", "missing", "custom"]
+        },
+        config: %{}
+      }
+
+      assert RuntimeProfiles.fallback_profile_ids(agent) == ["openai-chat-qwen-dashscope-flash"]
+    end
+
+    test "provides bounded catalog fallback chains" do
+      assert RuntimeProfiles.fallback_profile_ids("codex-gpt-5.5") == [
+               "codex-mini",
+               "process-codex"
+             ]
+
+      assert RuntimeProfiles.fallback_profile_ids("custom") == []
+    end
+
     test "profile adapter overrides stale adapter form values" do
       assert RuntimeProfiles.adapter_for("openclaw-zai", "claude_code") == "openclaw"
       assert RuntimeProfiles.adapter_for("custom", "codex") == "codex"

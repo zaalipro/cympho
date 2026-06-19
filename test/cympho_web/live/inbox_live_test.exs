@@ -143,7 +143,7 @@ defmodule CymphoWeb.InboxLiveTest do
       {:ok, _entry} = Inbox.ensure_inbox_entry(issue.id, agent.id)
 
       conn = live_session_conn(conn, user, company)
-      {:ok, _view, html} = live(conn, "/inbox")
+      {:ok, _view, html} = live(conn, "/inbox?density=detailed")
 
       assert html =~ "Review checkout failure"
       assert html =~ "Investigate the provider environment"
@@ -308,13 +308,17 @@ defmodule CymphoWeb.InboxLiveTest do
       {:ok, view, html} = live(conn, "/inbox")
 
       assert html =~ "Mark unread as read"
+      assert html =~ ~s(data-testid="nav-badge-inbox")
+      assert html =~ ~r/<span[^>]*data-testid="nav-badge-inbox"[^>]*>\s*2\s*<\/span>/s
 
       view
       |> element("button[phx-click='mark_unread_read']", "Mark unread as read")
       |> render_click()
 
-      assert render(view) =~ "First Inbox Agent (1)"
-      assert render(view) =~ "Second Inbox Agent (1)"
+      html = render(view)
+      assert html =~ "First Inbox Agent (1)"
+      assert html =~ "Second Inbox Agent (1)"
+      refute html =~ ~s(data-testid="nav-badge-inbox")
       assert Inbox.get_inbox_state(first_issue.id, first_agent.id).status == "read"
       assert Inbox.get_inbox_state(second_issue.id, second_agent.id).status == "read"
     end

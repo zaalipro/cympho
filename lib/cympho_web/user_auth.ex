@@ -62,6 +62,8 @@ defmodule CymphoWeb.UserAuth do
         |> assign_user_companies()
         |> assign_current_company(session)
         |> assign_sidebar_data()
+        |> subscribe_inbox_badge_updates()
+        |> subscribe_approval_badge_updates()
 
       {:cont, socket}
     end
@@ -115,13 +117,16 @@ defmodule CymphoWeb.UserAuth do
     case socket.assigns[:current_company] do
       %{id: company_id} ->
         inbox_count = Cympho.Inbox.unread_count_for_company(company_id)
+        approval_count = pending_approval_badge_count(company_id)
 
         socket
         |> assign(:nav_projects, Cympho.Projects.list_for_sidebar(company_id))
         |> assign(:nav_agents, Cympho.Agents.list_for_sidebar(company_id))
         |> assign(:nav_goals, Cympho.Goals.list_for_sidebar(company_id))
         |> assign(:nav_inbox_count, inbox_count)
+        |> assign(:nav_approval_count, approval_count)
         |> assign(:inbox_badge_count, inbox_count)
+        |> assign(:approval_badge_count, approval_count)
 
       _ ->
         socket
@@ -129,7 +134,59 @@ defmodule CymphoWeb.UserAuth do
         |> assign(:nav_agents, [])
         |> assign(:nav_goals, [])
         |> assign(:nav_inbox_count, 0)
+        |> assign(:nav_approval_count, 0)
         |> assign(:inbox_badge_count, 0)
+        |> assign(:approval_badge_count, 0)
+    end
+  end
+
+  defp subscribe_inbox_badge_updates(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} when is_binary(company_id) ->
+        if Phoenix.LiveView.connected?(socket) do
+          Cympho.Inbox.subscribe_company_badges(company_id)
+        end
+
+        Phoenix.LiveView.attach_hook(socket, :inbox_badge_count, :handle_info, fn
+          {:company_inbox_count_changed, changed_company_id, count}, socket
+          when changed_company_id == company_id ->
+            {:halt,
+             socket
+             |> assign(:nav_inbox_count, count)
+             |> assign(:inbox_badge_count, count)}
+
+          _message, socket ->
+            {:cont, socket}
+        end)
+
+      _ ->
+        socket
+    end
+  end
+
+  defp subscribe_approval_badge_updates(socket) do
+    case socket.assigns[:current_company] do
+      %{id: company_id} when is_binary(company_id) ->
+        if Phoenix.LiveView.connected?(socket) do
+          Cympho.Approvals.subscribe(company_id)
+        end
+
+        Phoenix.LiveView.attach_hook(socket, :approval_badge_count, :handle_info, fn message,
+                                                                                     socket ->
+          if approval_badge_event?(message) do
+            count = pending_approval_badge_count(company_id)
+
+            {:cont,
+             socket
+             |> assign(:nav_approval_count, count)
+             |> assign(:approval_badge_count, count)}
+          else
+            {:cont, socket}
+          end
+        end)
+
+      _ ->
+        socket
     end
   end
 
@@ -148,13 +205,16 @@ defmodule CymphoWeb.UserAuth do
 
   defp assign_browser_sidebar_data(conn, %{id: company_id}) do
     inbox_count = Cympho.Inbox.unread_count_for_company(company_id)
+    approval_count = pending_approval_badge_count(company_id)
 
     conn
     |> Plug.Conn.assign(:nav_projects, Cympho.Projects.list_for_sidebar(company_id))
     |> Plug.Conn.assign(:nav_agents, Cympho.Agents.list_for_sidebar(company_id))
     |> Plug.Conn.assign(:nav_goals, Cympho.Goals.list_for_sidebar(company_id))
     |> Plug.Conn.assign(:nav_inbox_count, inbox_count)
+    |> Plug.Conn.assign(:nav_approval_count, approval_count)
     |> Plug.Conn.assign(:inbox_badge_count, inbox_count)
+    |> Plug.Conn.assign(:approval_badge_count, approval_count)
   end
 
   defp assign_browser_sidebar_data(conn, _company) do
@@ -163,8 +223,30 @@ defmodule CymphoWeb.UserAuth do
     |> Plug.Conn.assign(:nav_agents, [])
     |> Plug.Conn.assign(:nav_goals, [])
     |> Plug.Conn.assign(:nav_inbox_count, 0)
+    |> Plug.Conn.assign(:nav_approval_count, 0)
     |> Plug.Conn.assign(:inbox_badge_count, 0)
+    |> Plug.Conn.assign(:approval_badge_count, 0)
   end
+
+  defp pending_approval_badge_count(company_id) do
+    Cympho.Approvals.count_pending_for_company(company_id) +
+      Cympho.BoardApprovals.count_pending_for_company(company_id)
+  end
+
+  defp approval_badge_event?({event, _payload})
+       when event in [
+              :approval_created,
+              :approval_resolved,
+              :approval_cancelled,
+              :approvals_cancelled_for_issue,
+              :board_approval_created,
+              :board_approval_resolved,
+              :board_approval_cancelled,
+              :board_vote_cast
+            ],
+       do: true
+
+  defp approval_badge_event?(_message), do: false
 
   defp assign_current_user(socket, session) do
     case session["user_id"] do

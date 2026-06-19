@@ -39,7 +39,9 @@ defmodule CymphoWeb.RoutineLiveTest do
       {:ok, _view, html} = live(conn, "/routines")
       assert html =~ "Routines"
       assert html =~ "Routine command"
-      assert html =~ "Routine Health"
+      assert html =~ "Compact"
+      assert html =~ "Detailed"
+      refute html =~ "Routine Health"
     end
 
     test "shows empty state when no routines exist", %{conn: conn} do
@@ -51,7 +53,7 @@ defmodule CymphoWeb.RoutineLiveTest do
     test "shows routine health diagnostics", %{conn: conn} do
       {:ok, _routine} = create_routine(%{name: "Triggerless Routine"})
 
-      {:ok, view, html} = live(conn, "/routines")
+      {:ok, view, html} = live(conn, "/routines?density=detailed")
       assert has_element?(view, "[data-testid='routine-command']")
       assert has_element?(view, "[data-testid='routine-next-action']")
       assert html =~ "Add trigger to routine"

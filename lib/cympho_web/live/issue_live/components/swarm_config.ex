@@ -29,18 +29,6 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
         "harness" => "claude_code",
         "model" => "sonnet",
         "reasoning_effort" => "medium"
-      },
-      "1" => %{
-        "enabled" => "true",
-        "harness" => "codex",
-        "model" => "gpt-5.3-high-fast",
-        "reasoning_effort" => "high"
-      },
-      "2" => %{
-        "enabled" => "true",
-        "harness" => "openai_chat",
-        "model" => "gpt-5.4-mini",
-        "reasoning_effort" => "medium"
       }
     }
   end
@@ -128,7 +116,7 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
         <div class="rounded-md border border-border bg-panel/70 px-3 py-2">
           <div class="flex flex-wrap items-center gap-2">
             <span class="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-590 uppercase tracking-[0.06em] text-cyan-100">
-              <span data-swarm-count>{@choice_count}</span> runtime choices
+              <span data-swarm-count>{@choice_count}</span> {runtime_choice_label(@choice_count)}
             </span>
             <span class="rounded-full border border-border bg-canvas px-2 py-0.5 text-[10px] text-text-tertiary">
               Random choice per worker
@@ -141,7 +129,7 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
             </span>
           </div>
           <p class="mt-2 text-[11px] leading-4 text-text-tertiary">
-            Add the harness/model/effort combinations you are willing to spend on. Worker roles stay inside the swarm protocol.
+            Starts with a local/reviewable runtime. Add paid providers only after their credentials are configured.
           </p>
         </div>
       </div>
@@ -160,45 +148,47 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
           data-swarm-change-marker
         />
 
-        <div class="grid gap-2 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_120px_auto]">
-          <.field_select
-            id={"#{@id}-choice-harness"}
-            label="Harness"
-            value="claude_code"
-            options={@harness_options}
-            data-swarm-choice-harness="true"
-          />
-          <.model_input
-            id={"#{@id}-choice-model"}
-            value=""
-            suggestions={@model_suggestions}
-            data-swarm-choice-model="true"
-          />
-          <.field_select
-            id={"#{@id}-choice-reasoning"}
-            label="Effort"
-            value="auto"
-            options={@reasoning_options}
-            data-swarm-choice-reasoning="true"
-          />
-          <div class="flex items-end">
-            <button
-              type="button"
-              data-swarm-add-row
-              class="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-cyan-500/25 bg-cyan-500/10 px-3 text-xs font-590 text-cyan-100 hover:bg-cyan-500/15"
-            >
-              <.icon name="hero-plus-mini" class="h-4 w-4" /> Add
-            </button>
+        <div class="-mx-1 overflow-x-auto px-1">
+          <div class="grid min-w-[640px] grid-cols-[minmax(180px,1.15fr)_minmax(180px,1fr)_120px_72px] gap-2">
+            <.field_select
+              id={"#{@id}-choice-harness"}
+              label="Harness"
+              value="claude_code"
+              options={@harness_options}
+              data-swarm-choice-harness="true"
+            />
+            <.model_input
+              id={"#{@id}-choice-model"}
+              value=""
+              suggestions={@model_suggestions}
+              data-swarm-choice-model="true"
+            />
+            <.field_select
+              id={"#{@id}-choice-reasoning"}
+              label="Effort"
+              value="auto"
+              options={@reasoning_options}
+              data-swarm-choice-reasoning="true"
+            />
+            <div class="flex items-end">
+              <button
+                type="button"
+                data-swarm-add-row
+                class="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-cyan-500/25 bg-cyan-500/10 px-3 text-xs font-590 text-cyan-100 hover:bg-cyan-500/15"
+              >
+                <.icon name="hero-plus-mini" class="h-4 w-4" /> Add
+              </button>
+            </div>
           </div>
         </div>
 
         <div class="mt-3 overflow-x-auto rounded-md border border-border bg-canvas">
-          <table class="min-w-full divide-y divide-border text-left text-xs">
+          <table class="min-w-[640px] w-full divide-y divide-border text-left text-xs">
             <thead class="bg-panel/60 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
               <tr>
-                <th class="px-3 py-2">Harness</th>
-                <th class="px-3 py-2">Model</th>
-                <th class="px-3 py-2">Effort</th>
+                <th class="min-w-[180px] px-3 py-2">Harness</th>
+                <th class="min-w-[180px] px-3 py-2">Model</th>
+                <th class="w-[120px] min-w-[120px] px-3 py-2">Effort</th>
                 <th class="w-28 min-w-[7rem] px-2 py-2"></th>
               </tr>
             </thead>
@@ -375,7 +365,7 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
       tabindex="0"
       class="cursor-pointer transition hover:bg-surface-hover/50 focus:outline-none focus:ring-1 focus:ring-cyan-500/40"
     >
-      <td class="px-3 py-2 align-middle font-510 text-text-primary">
+      <td class="min-w-[180px] px-3 py-2 align-middle font-510 text-text-primary">
         <input type="hidden" name={"swarm[mix_rows][#{@index}][enabled]"} value="true" />
         <input
           type="hidden"
@@ -385,7 +375,7 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
         />
         <span data-swarm-row-harness-label>{@harness_label}</span>
       </td>
-      <td class="px-3 py-2 align-middle font-mono text-text-secondary">
+      <td class="min-w-[180px] px-3 py-2 align-middle font-mono text-text-secondary">
         <input
           type="hidden"
           name={"swarm[mix_rows][#{@index}][model]"}
@@ -394,7 +384,7 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
         />
         <span data-swarm-row-model-label>{@model_label}</span>
       </td>
-      <td class="px-3 py-2 align-middle text-text-secondary">
+      <td class="w-[120px] min-w-[120px] px-3 py-2 align-middle text-text-secondary">
         <input
           type="hidden"
           name={"swarm[mix_rows][#{@index}][reasoning_effort]"}
@@ -516,7 +506,7 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
   defp normalize_row(row) when is_map(row) do
     %{
       "enabled" => if(row["enabled"] in ["true", "on", "1", true], do: "true", else: "false"),
-      "harness" => row["harness"] || "openai_chat",
+      "harness" => row["harness"] || "claude_code",
       "model" => row["model"] || "",
       "reasoning_effort" => normalize_reasoning(row["reasoning_effort"])
     }
@@ -560,6 +550,9 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
       {"High", "high"}
     ]
   end
+
+  defp runtime_choice_label(1), do: "runtime choice"
+  defp runtime_choice_label(_count), do: "runtime choices"
 
   defp proxy_mode_options do
     [

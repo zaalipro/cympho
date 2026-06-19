@@ -31,6 +31,8 @@
 
 <div
   id="kanban-board"
+  data-ui-complex-page
+  data-density={@digest_density}
   class="flex h-[calc(100vh-64px)] flex-col overflow-hidden bg-canvas p-4 sm:p-5 lg:h-screen lg:p-6"
   phx-hook="KanbanSortable"
 >
@@ -39,7 +41,7 @@
       <h1 class="flex items-center gap-2 text-headline text-text-primary">
         <span class="min-w-0 truncate">{@page_title}</span>
       </h1>
-      <p class="mt-1 max-w-2xl text-body-sm text-text-tertiary">
+      <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
         {if @runtime_enabled?, do: "Execution board", else: "Review mode"}
       </p>
     </div>
@@ -78,26 +80,11 @@
           {if @swimlane_mode, do: "Flat View", else: "Swimlanes"}
         </button>
 
-        <div class="inline-flex h-10 min-w-0 items-stretch overflow-hidden rounded-lg border border-border bg-panel sm:shrink-0">
-          <.link
-            patch={kanban_url(@selected_project_id, "compact")}
-            class={[
-              "inline-flex h-full min-w-0 flex-1 items-center justify-center px-3 text-sm font-510 transition-colors sm:flex-none",
-              density_tab_class(@digest_density, "compact")
-            ]}
-          >
-            Compact
-          </.link>
-          <.link
-            patch={kanban_url(@selected_project_id, "detailed")}
-            class={[
-              "inline-flex h-full min-w-0 flex-1 items-center justify-center px-3 text-sm font-510 transition-colors sm:flex-none",
-              density_tab_class(@digest_density, "detailed")
-            ]}
-          >
-            Detailed
-          </.link>
-        </div>
+        <.density_switch
+          density={@digest_density}
+          compact_patch={kanban_url(@selected_project_id, "compact")}
+          detailed_patch={kanban_url(@selected_project_id, "detailed")}
+        />
       </div>
 
       <.app_link
@@ -111,9 +98,15 @@
 
   <div
     :if={!@runtime_enabled?}
-    class="mb-3 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-sm text-sky-200"
+    class="ui-advanced-only mb-3 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-sm text-sky-200"
   >
     Review mode is active. You can reorganize work here without starting agent runs.
+  </div>
+  <div
+    :if={!@runtime_enabled?}
+    class="ui-simple-only mb-3 inline-flex items-center gap-2 rounded-lg border border-sky-500/25 bg-sky-500/10 px-3 py-2 text-sm font-590 text-sky-100"
+  >
+    <span class="hero-eye-mini h-4 w-4 text-white"></span> Review mode
   </div>
 
   <div

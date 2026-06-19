@@ -10,6 +10,7 @@ defmodule CymphoWeb.OperationsLiveTest do
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Inbox
   alias Cympho.Issues
+  alias Cympho.Issues.SwarmEvents
   alias Cympho.Projects
   alias Cympho.Repo
   alias Cympho.Secrets
@@ -26,6 +27,17 @@ defmodule CymphoWeb.OperationsLiveTest do
       [{_tag, attrs, _children} | _rest] -> Map.new(attrs)
       [] -> %{}
     end
+  end
+
+  defp link_href(html, label) do
+    html
+    |> Floki.parse_document!()
+    |> Floki.find("a")
+    |> Enum.find_value(fn {_tag, attrs, children} ->
+      if children |> Floki.text() |> String.trim() == label do
+        attrs |> Map.new() |> Map.get("href")
+      end
+    end)
   end
 
   describe "Operations page" do
@@ -70,6 +82,7 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "Operations"
       assert html =~ "2xl:grid-cols-[minmax(0,1fr)_360px]"
       assert html =~ "Operations Doctor"
+      assert html =~ ~s(data-testid="operations-doctor-next-fix")
       assert html =~ "How this is diagnosed"
       assert html =~ "Why this matters"
       assert html =~ "Autonomous dispatch is off"
@@ -153,6 +166,37 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ ~s(id="runtime-clear-dispatch-focus-#{launch_issue.id}")
       refute html =~ ~s(id="runtime-queue-dispatch-focus-#{launch_issue.id}")
       assert launch_issue.id |> Issues.get_issue!() |> Issues.dispatch_pinned?()
+    end
+
+    test "uses the shared compact and detailed density switcher", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      conn = live_session_conn(conn, user, company)
+
+      {:ok, parent_issue} =
+        Issues.create_issue(%{
+          title: "Operations density parent",
+          status: :todo,
+          priority: :medium,
+          company_id: company.id
+        })
+
+      {:ok, _view, html} = live(conn, "/operations?parent_issue_id=#{parent_issue.id}")
+
+      assert html =~ ~s(data-ui-complex-page)
+      assert html =~ ~s(data-density="compact")
+      assert link_href(html, "Compact") == "/operations?parent_issue_id=#{parent_issue.id}"
+
+      detailed_href = link_href(html, "Detailed")
+      assert detailed_href =~ "/operations?"
+      assert detailed_href =~ "density=detailed"
+      assert detailed_href =~ "parent_issue_id=#{parent_issue.id}"
+
+      {:ok, _view, html} =
+        live(conn, "/operations?density=detailed&parent_issue_id=#{parent_issue.id}")
+
+      assert html =~ ~s(data-density="detailed")
+      assert link_href(html, "Compact") == "/operations?parent_issue_id=#{parent_issue.id}"
+      assert link_href(html, "Detailed") =~ "density=detailed"
     end
 
     test "explains launch-ready adapter health warnings", %{conn: conn} do
@@ -591,6 +635,156 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert second_child_issue.id |> Issues.get_issue!() |> Issues.dispatch_pinned?()
       refute setup_blocked_child_issue.id |> Issues.get_issue!() |> Issues.dispatch_pinned?()
       refute unrelated_child_issue.id |> Issues.get_issue!() |> Issues.dispatch_pinned?()
+    end
+
+    test "renders swarm parent worker and CTO queue when filtered from an issue", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      conn = live_session_conn(conn, user, company)
+
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "Operations Swarm CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          company_id: company.id
+        })
+
+      {:ok, _cto} =
+        Agents.create_agent(%{
+          name: "Operations Swarm CTO",
+          role: :cto,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          company_id: company.id
+        })
+
+      {:ok, parent_issue} =
+        Issues.create_issue(%{
+          title: "Operations-visible swarm delivery",
+          description: "Goal: verify Operations shows the swarm queue.",
+          status: :todo,
+          priority: :high,
+          assigned_role: "ceo",
+          company_id: company.id,
+          assignee_id: ceo.id,
+          swarm: %{
+            "enabled" => "true",
+            "agent_count" => "2",
+            "mix_rows" => %{
+              "0" => %{
+                "enabled" => "true",
+                "harness" => "process",
+                "model" => "custom",
+                "reasoning_effort" => "medium"
+              }
+            }
+          }
+        })
+
+      children =
+        Repo.all(
+          from i in Cympho.Issues.Issue,
+            where: i.parent_id == ^parent_issue.id,
+            order_by: [asc: i.inserted_at, asc: i.title]
+        )
+
+      worker_issues = Enum.filter(children, &(&1.origin_type == "swarm_worker"))
+      [cto_issue] = Enum.filter(children, &(&1.origin_type == "swarm_cto_review"))
+
+      assert length(worker_issues) == 2
+
+      {:ok, _view, html} =
+        live(conn, "/operations?parent_issue_id=#{parent_issue.id}#delegated-work-queue")
+
+      parent_identifier = parent_issue.identifier || String.slice(parent_issue.id, 0, 8)
+      swarm_events = SwarmEvents.list_for_parent(parent_issue.id)
+
+      assert html =~ "Delegated Work Queue"
+      assert html =~ "3 open"
+      assert html =~ "Run swarm queue"
+      assert html =~ "Open swarm queue"
+      assert html =~ "3 swarm work items under #{parent_identifier}"
+      assert html =~ ~s(data-testid="operations-swarm-log")
+      assert html =~ "Live swarm log"
+      assert html =~ "Launch ready"
+      assert html =~ "Swarm is queued: workers feed CTO synthesis, then CEO handoff."
+      assert Enum.any?(swarm_events, &(&1.event_type == "launch_ready"))
+      assert html =~ "Filtered to"
+      assert html =~ "Operations-visible swarm delivery"
+      refute html =~ "No open CEO-delegated child work is waiting"
+      assert html =~ "Swarm worker"
+      assert html =~ "CTO synthesis"
+      assert html =~ "Swarm protocol"
+      assert html =~ "Synthesize swarm delivery"
+      assert html =~ ~s(id="delegated-work-focused-command-#{cto_issue.id}")
+
+      for worker_issue <- worker_issues do
+        assert html =~ worker_issue.title
+        assert html =~ ~s(id="delegated-work-focused-command-#{worker_issue.id}")
+      end
+    end
+
+    test "refreshes the main operations queue when a swarm event arrives", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+      conn = live_session_conn(conn, user, company)
+
+      {:ok, ceo} =
+        Agents.create_agent(%{
+          name: "Main Ops Swarm CEO",
+          role: :ceo,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          company_id: company.id
+        })
+
+      {:ok, _cto} =
+        Agents.create_agent(%{
+          name: "Main Ops Swarm CTO",
+          role: :cto,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom"},
+          company_id: company.id
+        })
+
+      {:ok, view, html} = live(conn, "/operations")
+
+      refute html =~ "Main operations live swarm refresh"
+
+      {:ok, parent_issue} =
+        Issues.create_issue(%{
+          title: "Main operations live swarm refresh",
+          description: "Goal: prove Operations refreshes when a swarm starts.",
+          status: :todo,
+          priority: :high,
+          assigned_role: "ceo",
+          company_id: company.id,
+          assignee_id: ceo.id,
+          swarm: %{
+            "enabled" => "true",
+            "agent_count" => "1",
+            "mix_rows" => %{
+              "0" => %{
+                "enabled" => "true",
+                "harness" => "process",
+                "model" => "custom",
+                "reasoning_effort" => "medium"
+              }
+            }
+          }
+        })
+
+      Process.sleep(10)
+
+      html = render(view)
+      child_titles = parent_issue.id |> Issues.list_child_issues() |> Enum.map(& &1.title)
+
+      assert html =~ "Main operations live swarm refresh"
+      assert Enum.any?(child_titles, &(html =~ &1))
     end
 
     test "renders repo-capable runtime warning as an actionable delegated-work recovery link", %{
@@ -1249,7 +1443,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       assert {:ok, released} = Issues.get_issue(issue.id)
       assert released.status == :todo
-      assert is_nil(released.assignee_id)
+      assert released.assignee_id == agent.id
       assert is_nil(released.checked_out_at)
     end
 

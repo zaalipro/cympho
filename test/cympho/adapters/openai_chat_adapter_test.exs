@@ -125,6 +125,25 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
                })
 
       assert error =~ "timeout"
+
+      assert :ok =
+               OpenAIChatAdapter.validate_config(%{
+                 "endpoint" => "https://example.com/v1/chat/completions",
+                 "api_key" => "test-key",
+                 "model" => "qwen3.7-plus",
+                 "timeout_sec" => 60
+               })
+
+      assert {:error, error} =
+               OpenAIChatAdapter.validate_config(%{
+                 "endpoint" => "https://example.com/v1/chat/completions",
+                 "api_key" => "test-key",
+                 "model" => "qwen3.7-plus",
+                 "timeout" => 30_000,
+                 "timeout_sec" => 60
+               })
+
+      assert error =~ "disagree"
     end
   end
 
@@ -202,6 +221,45 @@ defmodule Cympho.Adapters.OpenAIChatAdapterTest do
 
         assert_receive {:session_started, ^session_id}, 500
         assert_receive {:turn_ended_with_error, ^session_id, {:request_error, "timeout"}}, 1_000
+      end
+    end
+
+    test "cancels an in-flight provider request through adapter sessions" do
+      test_pid = self()
+
+      with_mock Finch,
+        build: fn _, _, _, _ -> :request end,
+        stream: fn :request, Cympho.Finch, _init, _fun, receive_timeout: _timeout ->
+          send(test_pid, {:provider_request_started, self()})
+
+          receive do
+            :finish -> {:ok, %{status: 200, body: []}}
+          end
+        end do
+        session_id =
+          OpenAIChatAdapter.run(
+            %{id: "issue-1", title: "Test issue", description: "Test description"},
+            "agent-1",
+            self(),
+            config: %{
+              "endpoint" => "https://dashscope.example.com/compatible-mode/v1",
+              "api_key" => "test-key",
+              "model" => "qwen3.7-plus",
+              "timeout" => 30_000
+            }
+          )
+
+        assert_receive {:session_started, ^session_id}, 500
+        assert_receive {:provider_request_started, request_pid}, 1_000
+        assert Cympho.AdapterSessions.registered?(session_id)
+
+        assert :ok = Cympho.AdapterSessions.cancel(session_id, :operator_stop)
+
+        assert_receive {:turn_ended_with_error, ^session_id, {:cancelled, :operator_stop}},
+                       1_000
+
+        refute Process.alive?(request_pid)
+        refute_receive {:turn_completed, ^session_id, _result}, 100
       end
     end
   end

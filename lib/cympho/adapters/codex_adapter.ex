@@ -8,6 +8,8 @@ defmodule Cympho.Adapters.CodexAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  alias Cympho.Adapters.RuntimeTimeout
+
   @default_model "o4-mini"
   @model_options [
     {"GPT-5.5", "gpt-5.5"},
@@ -19,6 +21,7 @@ defmodule Cympho.Adapters.CodexAdapter do
     {"GPT-4.1", "gpt-4.1"}
   ]
   @default_timeout 300_000
+  @max_timeout 3_600_000
 
   def default_model, do: @default_model
 
@@ -32,9 +35,30 @@ defmodule Cympho.Adapters.CodexAdapter do
     session_id = make_ref()
     config = opts[:config] || %{}
 
-    spawn(fn ->
-      do_run(session_id, issue, agent_id, recipient_pid, config, opts)
-    end)
+    worker =
+      spawn(fn ->
+        Process.flag(:trap_exit, true)
+
+        try do
+          do_run(session_id, issue, agent_id, recipient_pid, config, opts)
+        rescue
+          exception ->
+            send(
+              recipient_pid,
+              {:turn_ended_with_error, session_id, {:adapter_crash, Exception.message(exception)}}
+            )
+        catch
+          kind, reason ->
+            send(
+              recipient_pid,
+              {:turn_ended_with_error, session_id, {:adapter_exit, kind, reason}}
+            )
+        after
+          Cympho.AdapterSessions.unregister(session_id)
+        end
+      end)
+
+    Cympho.AdapterSessions.register(session_id, worker)
 
     session_id
   end
@@ -49,7 +73,9 @@ defmodule Cympho.Adapters.CodexAdapter do
         wake_context: Keyword.get(opts, :wake_context)
       )
 
-    case run_codex(prompt, config, opts) do
+    Cympho.PromptTelemetry.attach_to_run(opts, prompt, %{"adapter" => "codex"})
+
+    case run_codex(session_id, prompt, config, opts) do
       {:ok, output} ->
         send(recipient_pid, {:turn_completed, session_id, output})
 
@@ -58,11 +84,11 @@ defmodule Cympho.Adapters.CodexAdapter do
     end
   end
 
-  defp run_codex(prompt, config, opts) do
+  defp run_codex(session_id, prompt, config, opts) do
     try do
       codex_bin = find_codex_binary()
       model = config[:model] || config["model"] || @default_model
-      timeout = config[:timeout] || config["timeout"] || @default_timeout
+      timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
 
       args = [
         "--model",
@@ -72,19 +98,35 @@ defmodule Cympho.Adapters.CodexAdapter do
         "--quiet"
       ]
 
-      env = config |> build_env(opts) |> port_env()
+      with_prompt_file(prompt, fn prompt_path ->
+        shell = System.find_executable("sh") || "/bin/sh"
 
-      port_opts =
-        [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, args}, {:env, env}] ++
-          cwd_opt(config, opts)
+        shell_args = [
+          "-c",
+          "exec \"$0\" \"$@\" < \"$CYMPHO_PROMPT_FILE\"",
+          to_string(codex_bin) | args
+        ]
 
-      with_port({:spawn_executable, codex_bin}, port_opts, fn port ->
-        write_prompt(port, prompt)
+        env =
+          [{"CYMPHO_PROMPT_FILE", prompt_path} | build_env(config, opts)]
+          |> port_env()
 
-        case collect_output(port, "", timeout) do
-          {:ok, raw} -> parse_codex_output(raw)
-          {:error, _} = err -> err
-        end
+        port_opts =
+          [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:args, shell_args}, {:env, env}] ++
+            cwd_opt(config, opts)
+
+        with_port({:spawn_executable, String.to_charlist(shell)}, port_opts, fn port ->
+          case collect_output(port, "", timeout, session_id) do
+            {:ok, raw} ->
+              case Cympho.Adapters.ProviderFailure.detect(raw) do
+                :ok -> parse_codex_output(raw)
+                {:error, _} = err -> err
+              end
+
+            {:error, _} = err ->
+              err
+          end
+        end)
       end)
     rescue
       e ->
@@ -103,37 +145,52 @@ defmodule Cympho.Adapters.CodexAdapter do
   end
 
   defp close_port(port) when is_port(port) do
-    try do
-      Port.close(port)
-    rescue
-      ArgumentError -> :ok
-    end
+    Cympho.PortKiller.close(port)
   end
 
   defp close_port(_port), do: :ok
 
-  defp collect_output(port, acc, timeout) do
+  defp collect_output(port, acc, timeout, session_id) do
     receive do
       {^port, {:data, data}} ->
-        collect_output(port, acc <> data, timeout)
+        collect_output(port, acc <> data, timeout, session_id)
+
+      {:EXIT, ^port, _reason} ->
+        collect_output(port, acc, timeout, session_id)
 
       {^port, {:exit_status, 0}} ->
         {:ok, acc}
 
       {^port, {:exit_status, code}} ->
         {:error, "Codex exited with status #{code}: #{acc}"}
+
+      {:cancel_session, ^session_id, reason} ->
+        result = {:error, {:cancelled, reason}}
+        close_port(port)
+        result
     after
       timeout ->
+        result = {:error, :timeout}
         close_port(port)
-        {:error, :timeout}
+        result
     end
   end
 
-  defp write_prompt(port, prompt) do
-    Port.command(port, "#{prompt}\n")
-    :ok
-  rescue
-    ArgumentError -> :closed
+  defp with_prompt_file(prompt, fun) do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "cympho-codex-prompt-#{System.unique_integer([:positive])}.txt"
+      )
+
+    File.write!(path, prompt <> "\n", [:binary])
+    File.chmod!(path, 0o600)
+
+    try do
+      fun.(path)
+    after
+      File.rm(path)
+    end
   end
 
   defp parse_codex_output(raw) do
@@ -290,7 +347,16 @@ defmodule Cympho.Adapters.CodexAdapter do
         type: :integer,
         required: false,
         default: @default_timeout,
-        description: "CLI process timeout (ms)"
+        description:
+          "CLI process timeout in milliseconds. Prefer timeout_sec for human-entered values."
+      },
+      %{
+        key: :timeout_sec,
+        type: :integer,
+        required: false,
+        default: div(@default_timeout, 1_000),
+        description:
+          "CLI process timeout in seconds; conflicts with timeout/timeout_ms are rejected."
       }
     ]
   end
@@ -319,7 +385,8 @@ defmodule Cympho.Adapters.CodexAdapter do
     with :ok <- validate_api_key(config_value(config, :api_key)),
          :ok <- validate_model(config_value(config, :model)),
          :ok <- validate_temperature(config_value(config, :temperature)),
-         :ok <- validate_max_tokens(config_value(config, :max_tokens)) do
+         :ok <- validate_max_tokens(config_value(config, :max_tokens)),
+         :ok <- validate_timeout(config) do
       :ok
     end
   end
@@ -373,4 +440,7 @@ defmodule Cympho.Adapters.CodexAdapter do
   end
 
   defp validate_max_tokens(_), do: {:error, "max_tokens must be an integer"}
+
+  defp validate_timeout(config),
+    do: RuntimeTimeout.validate(config, max_ms: @max_timeout, field: "timeout")
 end

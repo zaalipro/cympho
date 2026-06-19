@@ -3,10 +3,17 @@ defmodule CymphoWeb.AuditTrailLive.Index do
   alias Cympho.AuditTrail
 
   @governance_events ~w(board_approval_created board_approval_vote decision_created decision_reversed)
-  @runtime_events ~w(orchestrator_session_started orchestrator_session_ended orchestrator_tool_call)
+  @runtime_events ~w(
+    orchestrator_session_started
+    orchestrator_session_ended
+    orchestrator_tool_call
+    company_runtime_paused
+    company_runtime_resumed
+    company_runtime_stopped
+  )
   @agent_events ~w(agent_created agent_updated agent_deleted agent_paused agent_resumed agent_terminated)
   @budget_events ~w(budget_threshold_changed)
-  @issue_events ~w(issue_created issue_state_transition issue_assigned issue_blocked issue_unblocked)
+  @issue_events ~w(issue_created issue_state_transition issue_assigned issue_blocked issue_runtime_paused issue_runtime_resumed issue_unblocked)
   @evidence_events ~w(agent_action_executed comment_created work_product_attached)
 
   @impl true

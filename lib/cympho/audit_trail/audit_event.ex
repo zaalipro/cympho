@@ -24,6 +24,8 @@ defmodule Cympho.AuditTrail.AuditEvent do
     issue_created
     issue_assigned
     issue_blocked
+    issue_runtime_paused
+    issue_runtime_resumed
     issue_unblocked
     agent_paused
     agent_resumed
@@ -34,6 +36,10 @@ defmodule Cympho.AuditTrail.AuditEvent do
     orchestrator_session_started
     orchestrator_session_ended
     orchestrator_tool_call
+    company_runtime_paused
+    company_runtime_low_power
+    company_runtime_resumed
+    company_runtime_stopped
     board_approval_vote
     board_approval_created
     budget_threshold_changed

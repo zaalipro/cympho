@@ -30,6 +30,16 @@ defmodule CymphoWeb.GoalLiveTest do
   end
 
   describe "Goals index" do
+    test "defaults to compact density", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/goals")
+
+      assert html =~ "Goals"
+      assert html =~ "Compact"
+      assert html =~ "Detailed"
+      assert html =~ "Goal command"
+      refute html =~ "Mission alignment"
+    end
+
     test "renders alignment health, floating risk work, and per-goal work health", %{
       conn: conn,
       current_company: company
@@ -70,7 +80,7 @@ defmodule CymphoWeb.GoalLiveTest do
           priority: :critical
         })
 
-      {:ok, view, html} = live(conn, "/goals")
+      {:ok, view, html} = live(conn, "/goals?density=detailed")
 
       assert html =~ "Goal command"
       assert html =~ "Link floating work to strategy"

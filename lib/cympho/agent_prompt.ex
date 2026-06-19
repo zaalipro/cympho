@@ -22,7 +22,7 @@ defmodule Cympho.AgentPrompt do
 
   import Ecto.Query, warn: false
 
-  alias Cympho.{Agents, IssueBriefReadiness, IssueDigest, PullRequestContract, Repo}
+  alias Cympho.{Agents, Attachments, IssueBriefReadiness, IssueDigest, PullRequestContract, Repo}
   alias Cympho.Agents.{Agent, RolePlaybook}
   alias Cympho.AgentPromptContract
   alias Cympho.Comments.Comment
@@ -33,6 +33,22 @@ defmodule Cympho.AgentPrompt do
 
   @recent_comments_limit 10
   @recent_decisions_limit 3
+  @company_operating_brief_char_limit 2_000
+  @instruction_file_char_limit 4_000
+  @instruction_files_total_char_limit 12_000
+  @triggering_comment_char_limit 4_000
+  @attachment_inline_char_limit 8_000
+  @attachment_inline_image_byte_limit 64 * 1024
+  @attachment_total_inline_char_limit 96_000
+  @text_extensions ~w(.txt .md .markdown .csv .json .yaml .yml .xml .html .css .js .jsx .ts .tsx .ex .exs .py .rb .go .rs .java .c .cpp .h .sql .log)
+  @image_extensions ~w(.png .jpg .jpeg .webp .gif)
+  @text_content_types [
+    "application/csv",
+    "application/json",
+    "application/xml",
+    "application/x-yaml",
+    "text/"
+  ]
   @max_children 25
   @max_siblings 25
   @open_review_comment_limit 20
@@ -51,14 +67,19 @@ defmodule Cympho.AgentPrompt do
     skills = Keyword.get(opts, :skills, [])
     agent = resolve_agent(agent_or_id)
     history = load_history(issue, current_run_id(opts))
+    wake_context = Keyword.get(opts, :wake_context)
 
     [
-      wake_context_block(Keyword.get(opts, :wake_context), agent),
+      current_task_block(issue, agent),
+      wake_context_block(wake_context, agent),
+      triggering_comment_block(issue, wake_context),
       issue_block(issue),
+      attachments_block(issue),
       external_intake_block(issue, role_of(agent)),
       owner_brief_readiness_block(issue, role_of(agent)),
       agent_block(agent_or_id, agent),
       context_block(issue),
+      company_operating_brief_block(issue),
       decomposition_depth_block(issue, role_of(agent)),
       team_status_block(issue, role_of(agent)),
       manager_coordination_packet_block(role_of(agent)),
@@ -310,6 +331,14 @@ defmodule Cympho.AgentPrompt do
 
   defp wake_context_block(_other, _agent), do: nil
 
+  defp metadata_value(metadata, key) when is_map(metadata) and is_binary(key) do
+    Map.get(metadata, key) || Map.get(metadata, String.to_existing_atom(key))
+  rescue
+    ArgumentError -> Map.get(metadata, key)
+  end
+
+  defp metadata_value(_metadata, _key), do: nil
+
   defp wake_preamble("mission_idle", metadata, :ceo) do
     missions = Map.get(metadata, "active_missions", "?")
 
@@ -371,6 +400,35 @@ defmodule Cympho.AgentPrompt do
     |> String.trim()
   end
 
+  defp wake_preamble("swarm_worker_created", metadata, _role) do
+    parent = metadata_value(metadata, "parent_issue_id") || "the CEO parent issue"
+
+    """
+    You are a temporary swarm worker for #{parent}. Produce one independent packet for CTO synthesis only.
+
+    Required this turn: follow the issue's swarm packet contract, start with `[delivery]`, preserve dissent and assumptions, and emit exactly one `swarm_worker_complete` action when your packet is ready. Do not implement code, create extra child issues, or hand work directly to the CEO.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("runtime_fallback", metadata, _role) do
+    attempts = Map.get(metadata, "attempts") || "one or more"
+
+    """
+    This is an automatic runtime fallback attempt after #{attempts} provider quota/rate-limit failure(s). Do not repeat only a generic acknowledgement. Re-read the current issue state and comments, continue the work from the latest evidence, and finish with a concrete lifecycle action. If this fallback runtime cannot complete the task, emit `block_issue` with the provider/runtime limitation and the exact restart packet needed.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("runtime_retry", metadata, _role) do
+    attempts = Map.get(metadata, "attempts") || "one or more"
+
+    """
+    This is a bounded same-runtime retry after #{attempts} no-output or malformed-output adapter failure(s). Re-read the issue, avoid repeating the empty/malformed response pattern, and produce a concrete lifecycle action with useful evidence. If you still cannot make progress, emit `block_issue` with the runtime limitation and the exact restart packet needed.
+    """
+    |> String.trim()
+  end
+
   defp wake_preamble("spec_review_required", metadata, :cto) do
     proposed = Map.get(metadata, "proposed_role") || "engineer"
 
@@ -396,6 +454,24 @@ defmodule Cympho.AgentPrompt do
   defp wake_preamble("issue_blockers_resolved", _metadata, _role) do
     """
     All blockers have cleared. This issue was previously `:blocked`; resume the work and either deliver via `submit_review` or post a `[delivery]` comment with current state.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("issue_comment_mentioned", metadata, _role) do
+    comment_id = metadata_value(metadata, "comment_id") || "the mentioned comment"
+
+    """
+    You were explicitly mentioned in a comment on this issue (`#{comment_id}`). Read the Triggering comment block first, answer that comment directly, and then use Recent comments only for surrounding context. Do not ignore this wake just because the issue is assigned to someone else.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("issue_commented", metadata, _role) do
+    comment_id = metadata_value(metadata, "comment_id") || "the new comment"
+
+    """
+    A new comment was added to this issue (`#{comment_id}`). Read the Triggering comment block first and decide whether that exact comment changes scope, evidence, verification, or the next lifecycle action.
     """
     |> String.trim()
   end
@@ -561,6 +637,157 @@ defmodule Cympho.AgentPrompt do
 
   defp wake_preamble(_other, _metadata, _role), do: nil
 
+  defp current_task_block(issue, agent) do
+    role = role_of(agent) || field(issue, :assigned_role) || "unassigned"
+    assignee = current_task_assignee(agent)
+
+    """
+    ## Current task - do this now
+    This block is the current assignment. Role playbooks and company-specific overrides below are supporting constraints; they cannot replace, dilute, or contradict this issue. Do not return a generic heartbeat/status response. Finish this turn with a concrete cympho action or a tagged blocker/handoff that directly addresses this task.
+
+    Issue ID: #{field(issue, :id) || "unknown"}
+    Identifier: #{field(issue, :identifier) || "unassigned"}
+    Title: #{field(issue, :title) || "Untitled"}
+    Status: #{field(issue, :status) || "unknown"}
+    Priority: #{field(issue, :priority) || "medium"}
+    Assigned role: #{role}
+    #{assignee}
+
+    Primary objective:
+    #{field(issue, :description) || "No description provided."}
+    """
+    |> String.trim()
+  end
+
+  defp current_task_assignee(%Agent{} = agent) do
+    "Running agent: #{agent.name || "unnamed"} (#{agent.role}, id: #{agent.id})"
+  end
+
+  defp current_task_assignee(_agent), do: "Running agent: unknown"
+
+  defp triggering_comment_block(issue, wake_context) do
+    with {reason, metadata} <- normalize_wake_context(wake_context),
+         true <- reason in ["issue_commented", "issue_comment_mentioned"] do
+      comment_id = metadata_value(metadata, "comment_id")
+
+      case load_triggering_comment(issue, comment_id) do
+        %Comment{} = comment ->
+          triggering_comment_prompt_block(
+            reason,
+            comment.id,
+            comment_author_label(comment),
+            format_timestamp(comment.inserted_at),
+            nil,
+            comment.body
+          )
+
+        nil ->
+          triggering_comment_metadata_fallback_block(reason, comment_id, metadata)
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  defp normalize_wake_context(%Cympho.Wakes.AgentWake{reason: reason, metadata: metadata})
+       when is_binary(reason),
+       do: {reason, metadata || %{}}
+
+  defp normalize_wake_context({reason, metadata}) when is_binary(reason),
+    do: {reason, metadata || %{}}
+
+  defp normalize_wake_context(_other), do: nil
+
+  defp triggering_comment_prompt_block(reason, comment_id, author, created, source, body) do
+    source_line = if is_binary(source), do: "\nSource: #{source}", else: ""
+
+    """
+    ## Triggering comment - answer this
+    Wake reason: `#{reason}`.
+    Comment ID: #{comment_id}
+    Author: #{author}
+    Created: #{created}#{source_line}
+
+    Required this turn: treat this exact comment as the reason you are running now. If it asks a question, mentions you, changes scope, adds evidence, or requests verification, answer it directly before changing lifecycle state.
+
+    #{comment_body_for_prompt(body, @triggering_comment_char_limit)}
+    """
+    |> String.trim()
+  end
+
+  defp triggering_comment_metadata_fallback_block(reason, comment_id, metadata) do
+    case metadata_comment_body(metadata) do
+      body when is_binary(body) and body != "" ->
+        triggering_comment_prompt_block(
+          reason,
+          comment_id || "not provided",
+          metadata_comment_author_label(metadata),
+          "unknown",
+          "wake metadata",
+          body
+        )
+
+      _ ->
+        """
+        ## Triggering comment - unavailable
+        Wake reason: `#{reason}`.
+        Comment ID: #{comment_id || "not provided"}
+
+        The referenced comment could not be loaded for this issue. Use the Recent comments block as fallback context and call out the missing comment ID if it prevents a reliable answer.
+        """
+        |> String.trim()
+    end
+  end
+
+  defp metadata_comment_body(metadata) do
+    metadata_value(metadata, "comment_body") ||
+      metadata_value(metadata, "body") ||
+      metadata_value(metadata, "comment_text")
+  end
+
+  defp metadata_comment_author_label(metadata) do
+    author_type =
+      metadata_value(metadata, "comment_author_type") ||
+        metadata_value(metadata, "author_type") ||
+        "unknown"
+
+    author_id =
+      metadata_value(metadata, "comment_author_id") ||
+        metadata_value(metadata, "author_id") ||
+        "unknown"
+
+    "#{author_type}:#{author_id}"
+  end
+
+  defp load_triggering_comment(issue, comment_id) do
+    issue_id = field(issue, :id)
+
+    if is_binary(issue_id) and is_binary(comment_id) do
+      Repo.one(
+        from c in Comment,
+          where: c.id == ^comment_id and c.issue_id == ^issue_id
+      )
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp comment_body_for_prompt(body, limit) when is_binary(body) do
+    body
+    |> String.split("\n")
+    |> Enum.take(80)
+    |> Enum.join("\n")
+    |> truncate(limit)
+  end
+
+  defp comment_body_for_prompt(_body, _limit), do: ""
+
+  defp format_timestamp(nil), do: "unknown"
+
+  defp format_timestamp(%DateTime{} = timestamp), do: DateTime.to_iso8601(timestamp)
+  defp format_timestamp(%NaiveDateTime{} = timestamp), do: NaiveDateTime.to_iso8601(timestamp)
+  defp format_timestamp(timestamp), do: to_string(timestamp)
+
   defp issue_block(issue) do
     """
     Issue ID: #{field(issue, :id) || "unknown"}
@@ -574,6 +801,207 @@ defmodule Cympho.AgentPrompt do
     """
     |> String.trim()
   end
+
+  defp attachments_block(issue) do
+    issue_id = field(issue, :id)
+
+    if is_binary(issue_id) do
+      attachments = Attachments.list_attachments(issue_id)
+
+      if attachments == [] do
+        nil
+      else
+        {rows, _remaining} =
+          Enum.map_reduce(attachments, @attachment_total_inline_char_limit, fn attachment,
+                                                                               remaining ->
+            attachment_prompt_row(attachment, remaining)
+          end)
+
+        """
+        ## Issue attachments
+        Treat these attachments as first-class issue context. Small text files and common images may be inlined here. If an attachment is binary or too large to inline, mention whether you inspected it or explicitly ask for the missing detail before proceeding.
+
+        #{Enum.join(rows, "\n\n")}
+        """
+        |> String.trim()
+      end
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp attachment_prompt_row(attachment, remaining) do
+    line =
+      "- #{attachment.filename || "unnamed"} " <>
+        "(#{attachment.content_type || "unknown"}, #{format_bytes(attachment.file_size)}, id: #{attachment.id})"
+
+    case inline_attachment(attachment, remaining) do
+      {:ok, {:text, body}, consumed} ->
+        {
+          """
+          #{line}
+          Inline content:
+          ```#{attachment_language(attachment)}
+          #{body}
+          ```
+          """
+          |> String.trim(),
+          max(remaining - consumed, 0)
+        }
+
+      {:ok, {:image, data_uri}, consumed} ->
+        {
+          """
+          #{line}
+          Inline image data URI:
+          ```text
+          #{data_uri}
+          ```
+          """
+          |> String.trim(),
+          max(remaining - consumed, 0)
+        }
+
+      {:skip, reason} ->
+        {"#{line}\n  Inline content: #{reason}", remaining}
+    end
+  end
+
+  defp inline_attachment(_attachment, remaining) when remaining <= 0,
+    do: {:skip, "not included because the attachment prompt budget is already used"}
+
+  defp inline_attachment(attachment, remaining) do
+    cond do
+      image_attachment?(attachment) ->
+        inline_image_content(attachment, remaining)
+
+      text_attachment?(attachment) ->
+        inline_text_attachment(attachment, remaining)
+
+      true ->
+        {:skip, "not included because this is not a supported inline attachment type"}
+    end
+  end
+
+  defp inline_text_attachment(attachment, remaining) do
+    if (attachment.file_size || 0) > @attachment_inline_char_limit do
+      {:skip, "not included because the file is larger than the inline text limit"}
+    else
+      case Attachments.read_file(attachment) do
+        {:ok, content} when is_binary(content) ->
+          inline_text_content(content, remaining)
+
+        {:error, reason} ->
+          {:skip, "unavailable from storage: #{inspect(reason)}"}
+      end
+    end
+  end
+
+  defp inline_text_content(content, remaining) do
+    if String.valid?(content) do
+      limit = min(@attachment_inline_char_limit, remaining)
+      truncated? = String.length(content) > limit
+      body = content |> String.slice(0, limit) |> sanitize_fence()
+      body = if truncated?, do: body <> "\n...[truncated]", else: body
+      {:ok, {:text, body}, min(String.length(content), limit)}
+    else
+      {:skip, "not included because the stored bytes are not valid text"}
+    end
+  end
+
+  defp inline_image_content(attachment, remaining) do
+    declared_size = attachment.file_size || 0
+
+    cond do
+      declared_size > @attachment_inline_image_byte_limit ->
+        {:skip, "not included because the image is larger than the inline image limit"}
+
+      true ->
+        case Attachments.read_file(attachment) do
+          {:ok, content} when is_binary(content) ->
+            inline_image_data_uri(attachment, content, remaining)
+
+          {:error, reason} ->
+            {:skip, "unavailable from storage: #{inspect(reason)}"}
+        end
+    end
+  end
+
+  defp inline_image_data_uri(attachment, content, remaining) do
+    cond do
+      byte_size(content) > @attachment_inline_image_byte_limit ->
+        {:skip, "not included because the stored image is larger than the inline image limit"}
+
+      true ->
+        data_uri = "data:#{image_content_type(attachment)};base64,#{Base.encode64(content)}"
+
+        if String.length(data_uri) <= remaining do
+          {:ok, {:image, data_uri}, String.length(data_uri)}
+        else
+          {:skip, "not included because the attachment prompt budget is already used"}
+        end
+    end
+  end
+
+  defp text_attachment?(attachment) do
+    content_type = String.downcase(attachment.content_type || "")
+    extension = attachment.filename |> to_string() |> Path.extname() |> String.downcase()
+
+    Enum.any?(@text_content_types, &String.starts_with?(content_type, &1)) or
+      extension in @text_extensions
+  end
+
+  defp image_attachment?(attachment), do: not is_nil(image_content_type(attachment))
+
+  defp image_content_type(attachment) do
+    content_type =
+      attachment.content_type
+      |> to_string()
+      |> String.downcase()
+      |> String.split(";", parts: 2)
+      |> List.first()
+      |> String.trim()
+
+    extension = attachment.filename |> to_string() |> Path.extname() |> String.downcase()
+
+    cond do
+      content_type == "image/jpg" -> "image/jpeg"
+      content_type in ~w(image/png image/jpeg image/webp image/gif) -> content_type
+      extension == ".jpg" or extension == ".jpeg" -> "image/jpeg"
+      extension in @image_extensions -> "image/#{String.trim_leading(extension, ".")}"
+      true -> nil
+    end
+  end
+
+  defp attachment_language(attachment) do
+    case attachment.filename |> to_string() |> Path.extname() |> String.downcase() do
+      ".json" -> "json"
+      ".js" -> "javascript"
+      ".jsx" -> "javascript"
+      ".ts" -> "typescript"
+      ".tsx" -> "typescript"
+      ".ex" -> "elixir"
+      ".exs" -> "elixir"
+      ".py" -> "python"
+      ".md" -> "markdown"
+      ".markdown" -> "markdown"
+      ".csv" -> "csv"
+      ".sql" -> "sql"
+      _ -> "text"
+    end
+  end
+
+  defp sanitize_fence(content), do: String.replace(content, "```", "'''")
+
+  defp format_bytes(nil), do: "unknown size"
+
+  defp format_bytes(bytes) when is_integer(bytes) and bytes < 1024, do: "#{bytes} B"
+
+  defp format_bytes(bytes) when is_integer(bytes) and bytes < 1024 * 1024 do
+    "#{Float.round(bytes / 1024, 1)} KB"
+  end
+
+  defp format_bytes(bytes) when is_integer(bytes), do: "#{Float.round(bytes / 1_048_576, 1)} MB"
 
   defp external_intake_block(issue, role) when role in [:ceo, :cto] do
     if field(issue, :origin_type) == "mcp" do
@@ -667,6 +1095,12 @@ defmodule Cympho.AgentPrompt do
         text -> text
       end
 
+    additional_instruction_files =
+      case additional_instruction_files_block(agent) do
+        nil -> ""
+        block -> "\n\n" <> block
+      end
+
     """
     Agent: #{agent.name || "unnamed"} (#{agent.role})
     Agent ID: #{agent.id}
@@ -676,8 +1110,53 @@ defmodule Cympho.AgentPrompt do
 
     ### Company-specific overrides for this agent
     #{overrides}
+    #{additional_instruction_files}
     """
     |> String.trim()
+  end
+
+  defp additional_instruction_files_block(%Agent{} = agent) do
+    agent
+    |> Cympho.Agents.InstructionFiles.list_for_agent()
+    |> Enum.reject(fn {filename, content} ->
+      Cympho.Agents.InstructionFiles.entry?(filename) or non_empty_trimmed(content) == nil
+    end)
+    |> instruction_file_rows(@instruction_files_total_char_limit, [])
+    |> case do
+      [] ->
+        nil
+
+      rows ->
+        """
+        ### Additional instruction files
+        These DB-managed instruction files are part of this agent's custom context. Follow them unless they conflict with the current task or role completion contract.
+
+        #{Enum.join(Enum.reverse(rows), "\n\n")}
+        """
+        |> String.trim()
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp instruction_file_rows([], _remaining, rows), do: rows
+  defp instruction_file_rows(_files, remaining, rows) when remaining <= 0, do: rows
+
+  defp instruction_file_rows([{filename, content} | rest], remaining, rows) do
+    content = String.trim(content || "")
+    limit = min(@instruction_file_char_limit, remaining)
+    truncated? = String.length(content) > limit
+    body = content |> String.slice(0, limit) |> sanitize_fence()
+    body = if truncated?, do: body <> "\n...[truncated]", else: body
+
+    row = """
+    #### #{filename}
+    ```markdown
+    #{body}
+    ```
+    """
+
+    instruction_file_rows(rest, remaining - String.length(body), [String.trim(row) | rows])
   end
 
   defp context_block(issue) do
@@ -725,6 +1204,87 @@ defmodule Cympho.AgentPrompt do
 
   defp context_line(_label, nil), do: nil
   defp context_line(label, value), do: "#{label}: #{value}"
+
+  defp company_operating_brief_block(issue) do
+    with %Cympho.Companies.Company{} = company <- loaded_company(issue),
+         brief when is_binary(brief) <- company_operating_brief(company) do
+      """
+      ## Company operating brief
+      Treat this as durable company context for the organization you are serving. It does not override the current task, owner instructions, or issue-specific acceptance criteria.
+
+      Company: #{company.name}
+      Operating brief: #{brief}
+      """
+      |> String.trim()
+    else
+      _ -> nil
+    end
+  end
+
+  defp loaded_company(issue) do
+    case field(issue, :company) do
+      %Cympho.Companies.Company{} = company ->
+        company
+
+      %Ecto.Association.NotLoaded{} ->
+        fetch_company(field(issue, :company_id))
+
+      nil ->
+        fetch_company(field(issue, :company_id))
+
+      _other ->
+        nil
+    end
+  end
+
+  defp fetch_company(nil), do: nil
+
+  defp fetch_company(id) do
+    Repo.get(Cympho.Companies.Company, id)
+  rescue
+    _ -> nil
+  end
+
+  defp company_operating_brief(%Cympho.Companies.Company{} = company) do
+    [
+      governance_brief(company.governance_config),
+      company.description
+    ]
+    |> Enum.find_value(&non_empty_trimmed/1)
+    |> truncate_company_operating_brief()
+  end
+
+  defp governance_brief(config) when is_map(config) do
+    [
+      Map.get(config, "operating_brief"),
+      Map.get(config, "company_operating_brief"),
+      Map.get(config, "vision"),
+      get_in(config, ["knowledge", "operating_brief"]),
+      get_in(config, ["knowledge", "vision"])
+    ]
+    |> Enum.find_value(&non_empty_trimmed/1)
+  end
+
+  defp governance_brief(_config), do: nil
+
+  defp non_empty_trimmed(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp non_empty_trimmed(_value), do: nil
+
+  defp truncate_company_operating_brief(nil), do: nil
+
+  defp truncate_company_operating_brief(brief) do
+    if String.length(brief) > @company_operating_brief_char_limit do
+      String.slice(brief, 0, @company_operating_brief_char_limit) <> "\n[truncated]"
+    else
+      brief
+    end
+  end
 
   ## ── history block ──────────────────────────────────────────────
 
@@ -1023,6 +1583,7 @@ defmodule Cympho.AgentPrompt do
         context_line("Run", context.run_id),
         context_line("Workspace", context.cwd),
         context_line("Workspace source", context.metadata["workspace_source"]),
+        runtime_env_guidance(context),
         adapter_execution_guidance(context),
         current_run_guidance(context.run_id)
       ]
@@ -1032,6 +1593,21 @@ defmodule Cympho.AgentPrompt do
   end
 
   defp runtime_block(_context), do: nil
+
+  defp runtime_env_guidance(%Cympho.RuntimeContext{} = context) do
+    issue_key = runtime_env_key_status(context.env, "CYMPHO_ISSUE_ID")
+    agent_key = runtime_env_key_status(context.env, "CYMPHO_AGENT_ID")
+    workspace_key = runtime_env_key_status(context.env, "CYMPHO_WORKSPACE")
+    run_key = runtime_env_key_status(context.env, "CYMPHO_RUN_ID")
+
+    "Workspace rule: the adapter cwd, `CYMPHO_WORKSPACE`, and `AGENT_HOME` point at the workspace above. Treat that directory as the working tree; do not search broad fallback paths unless the issue explicitly asks. Runtime env contract: #{issue_key}, #{agent_key}, #{workspace_key}, #{run_key}."
+  end
+
+  defp runtime_env_key_status(env, key) when is_map(env) do
+    if Map.get(env, key) in [nil, ""], do: "#{key}=unavailable", else: "#{key}=set"
+  end
+
+  defp runtime_env_key_status(_env, key), do: "#{key}=unavailable"
 
   defp adapter_execution_guidance(%Cympho.RuntimeContext{adapter: adapter})
        when adapter in [:openai_chat, "openai_chat"] do

@@ -12,6 +12,7 @@ defmodule Cympho.IssuesTest do
   alias Cympho.PullRequestContract
   alias Cympho.ReviewNudges
   alias Cympho.Repo
+  alias Cympho.Orchestrator.Dispatcher
   alias Cympho.WorkProducts
   alias Cympho.Wakes
 
@@ -276,6 +277,63 @@ defmodule Cympho.IssuesTest do
       assert Issues.dispatch_pinned?(other_pinned)
       assert pinned_one.monitor_state["dispatch"]["note"] == "keep me"
       assert pinned_one.monitor_state["pr_quality"]["status"] == "ready"
+    end
+  end
+
+  describe "issue runtime pause" do
+    test "records and clears an issue-scoped runtime pause without dropping monitor state", %{
+      issue: issue
+    } do
+      actor_id = Ecto.UUID.generate()
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          status: :todo,
+          monitor_state: %{
+            "dispatch" => %{"note" => "keep me"},
+            "pr_quality" => %{"status" => "ready"}
+          }
+        })
+
+      {:ok, paused} =
+        Issues.pause_issue_runtime(issue, actor: %{id: actor_id}, reason: "Hold one task")
+
+      assert Issues.issue_runtime_paused?(paused)
+      assert paused.monitor_state["issue_runtime"]["paused"] == true
+      assert paused.monitor_state["issue_runtime"]["paused_reason"] == "Hold one task"
+      assert paused.monitor_state["issue_runtime"]["paused_by_user_id"] == actor_id
+      assert paused.monitor_state["dispatch"]["note"] == "keep me"
+      assert paused.monitor_state["pr_quality"]["status"] == "ready"
+
+      {:ok, resumed} = Issues.resume_issue_runtime(paused, actor: actor_id)
+
+      refute Issues.issue_runtime_paused?(resumed)
+      refute Map.has_key?(resumed.monitor_state["issue_runtime"], "paused")
+      assert resumed.monitor_state["issue_runtime"]["resumed_at"]
+      assert resumed.monitor_state["issue_runtime"]["resumed_by_user_id"] == actor_id
+    end
+
+    test "prevents checkout and wake dispatch while the issue is paused", %{issue: issue} do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Pause Guard Agent",
+          role: :engineer,
+          status: :idle
+        })
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          status: :todo,
+          assignee_id: agent.id
+        })
+
+      {:ok, paused} = Issues.pause_issue_runtime(issue, reason: "Operator hold")
+
+      refute Dispatcher.runnable_candidate?(paused)
+      assert {:error, :issue_runtime_paused} = Issues.checkout_issue(paused, agent.id)
+
+      assert {:error, :issue_runtime_paused} =
+               Dispatcher.enqueue_wake(paused.id, "manual_dispatch")
     end
   end
 
@@ -1316,6 +1374,32 @@ defmodule Cympho.IssuesTest do
     end
   end
 
+  describe "clear_checkout_lock/2" do
+    test "clears checkout metadata while preserving the assignee" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Lock Owner",
+          role: :engineer
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Clear Checkout Lock",
+          description: "Recover stale runtime ownership"
+        })
+
+      {:ok, checked_out} = Issues.checkout_issue(issue, agent)
+      assert checked_out.assignee_id == agent.id
+      assert checked_out.checked_out_at
+
+      assert {:ok, recovered} = Issues.clear_checkout_lock(checked_out)
+      assert recovered.status == :todo
+      assert recovered.assignee_id == agent.id
+      assert is_nil(recovered.checkout_run_id)
+      assert is_nil(recovered.checked_out_at)
+    end
+  end
+
   describe "transition_issue/2" do
     test "transitions issue through valid state machine path" do
       {:ok, issue} =
@@ -1436,6 +1520,37 @@ defmodule Cympho.IssuesTest do
       Issues.unblock_dependents(done_blocker.id)
       reloaded_dependent = Issues.get_issue!(dependent.id)
       assert reloaded_dependent.status == :todo
+    end
+
+    test "auto-unblocks dependent issue when the last blocker is cancelled" do
+      {:ok, blocker} =
+        Issues.create_issue(%{
+          title: "Cancelled Blocker",
+          description: "Will be cancelled",
+          status: :in_progress
+        })
+
+      {:ok, dependent} =
+        Issues.create_issue(%{
+          title: "Dependent",
+          description: "Blocked",
+          status: :blocked
+        })
+
+      {:ok, _} = Issues.add_blocker(dependent, blocker)
+      reloaded_dependent = Issues.get_issue!(dependent.id)
+      assert Issues.is_blocked?(reloaded_dependent)
+
+      {:ok, cancelled_blocker} =
+        blocker.id
+        |> Issues.get_issue!()
+        |> Issues.transition_issue(:cancelled)
+
+      assert cancelled_blocker.status == :cancelled
+
+      reloaded_dependent = Issues.get_issue!(dependent.id)
+      assert reloaded_dependent.status == :todo
+      refute Issues.is_blocked?(reloaded_dependent)
     end
 
     test "does not unblock when other blockers are still open" do
@@ -1709,6 +1824,49 @@ defmodule Cympho.IssuesTest do
     end
   end
 
+  describe "terminal issue runtime cleanup" do
+    test "transitioning to done cancels pending wakes and active runs" do
+      agent = insert_agent()
+      issue = insert_issue()
+
+      {:ok, todo} = Issues.transition_issue(issue, :todo)
+      {:ok, in_progress} = Issues.transition_issue(todo, :in_progress)
+      {:ok, in_review} = Issues.transition_issue(in_progress, :in_review)
+
+      {:ok, wake} =
+        Wakes.do_wake_agent(agent.id, in_review.id, "manual_dispatch", "system", "test", %{})
+
+      pending_run = insert_issue_run(agent.id, in_review.id, "pending")
+      running_run = insert_issue_run(agent.id, in_review.id, "running")
+
+      assert {:ok, done} = Issues.transition_issue(in_review, :done)
+      assert done.status == :done
+
+      assert Repo.get!(Cympho.Wakes.AgentWake, wake.id).status == "cancelled"
+      assert Repo.get!(Run, pending_run.id).status == "cancelled"
+      assert Repo.get!(Run, running_run.id).status == "cancelled"
+    end
+
+    test "direct cancellation update cancels pending wakes and queued runs" do
+      agent = insert_agent()
+      issue = insert_issue()
+
+      {:ok, todo} = Issues.transition_issue(issue, :todo)
+      {:ok, in_progress} = Issues.transition_issue(todo, :in_progress)
+
+      {:ok, wake} =
+        Wakes.do_wake_agent(agent.id, in_progress.id, "manual_dispatch", "system", "test", %{})
+
+      queued_run = insert_issue_run(agent.id, in_progress.id, "queued")
+
+      assert {:ok, cancelled} = Issues.update_issue(in_progress, %{status: :cancelled})
+      assert cancelled.status == :cancelled
+
+      assert Repo.get!(Cympho.Wakes.AgentWake, wake.id).status == "cancelled"
+      assert Repo.get!(Run, queued_run.id).status == "cancelled"
+    end
+  end
+
   defp insert_agent do
     %{id: id} =
       Cympho.Repo.insert!(%Cympho.Agents.Agent{
@@ -1735,6 +1893,22 @@ defmodule Cympho.IssuesTest do
       })
 
     issue
+  end
+
+  defp insert_issue_run(agent_id, issue_id, status) do
+    issue = Repo.get!(Issue, issue_id)
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Repo.insert!(%Run{
+      agent_id: agent_id,
+      issue_id: issue_id,
+      company_id: issue.company_id,
+      status: status,
+      adapter: "test",
+      started_at: if(status == "running", do: now),
+      inserted_at: now,
+      updated_at: now
+    })
   end
 
   describe "auto-complete parent" do

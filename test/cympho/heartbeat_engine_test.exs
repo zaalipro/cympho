@@ -74,6 +74,30 @@ defmodule Cympho.HeartbeatEngineTest do
       assert completed.output_tokens == 500
       assert completed.completed_at
     end
+
+    test "clears a checked-out issue when a run completes without changing status" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      issue = insert_checked_out_issue(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: issue.id,
+          adapter: "claude_local"
+        })
+
+      {:ok, started} = HeartbeatEngine.start_run(run)
+
+      assert {:ok, completed} = HeartbeatEngine.complete_run(started, %{})
+      assert completed.status == "completed"
+
+      reloaded = Cympho.Repo.get!(Cympho.Issues.Issue, issue.id)
+      assert reloaded.status == :todo
+      assert reloaded.assignee_id == agent_id
+      assert is_nil(reloaded.checkout_run_id)
+      assert is_nil(reloaded.checked_out_at)
+    end
   end
 
   describe "fail_run/2" do
@@ -95,6 +119,29 @@ defmodule Cympho.HeartbeatEngineTest do
       assert failed.error_reason == "Run timed out"
       assert failed.run_metadata["adapter_error"]["category"] == "timeout"
       assert failed.completed_at
+    end
+
+    test "clears a checked-out issue when a run fails" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      issue = insert_checked_out_issue(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: issue.id,
+          adapter: "claude_local"
+        })
+
+      {:ok, started} = HeartbeatEngine.start_run(run)
+
+      assert {:ok, failed} = HeartbeatEngine.fail_run(started, :stall_timeout)
+      assert failed.status == "failed"
+
+      reloaded = Cympho.Repo.get!(Cympho.Issues.Issue, issue.id)
+      assert reloaded.status == :todo
+      assert reloaded.assignee_id == agent_id
+      assert is_nil(reloaded.checked_out_at)
     end
 
     test "stores normalized adapter error metadata" do
@@ -134,6 +181,27 @@ defmodule Cympho.HeartbeatEngineTest do
 
       assert {:ok, cancelled} = HeartbeatEngine.cancel_run(run)
       assert cancelled.status == "cancelled"
+    end
+
+    test "clears a checked-out issue when a run is cancelled" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      issue = insert_checked_out_issue(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: issue.id,
+          adapter: "claude_local"
+        })
+
+      assert {:ok, cancelled} = HeartbeatEngine.cancel_run(run)
+      assert cancelled.status == "cancelled"
+
+      reloaded = Cympho.Repo.get!(Cympho.Issues.Issue, issue.id)
+      assert reloaded.status == :todo
+      assert reloaded.assignee_id == agent_id
+      assert is_nil(reloaded.checked_out_at)
     end
 
     test "broadcasts run_cancelled via PubSub" do
@@ -266,6 +334,63 @@ defmodule Cympho.HeartbeatEngineTest do
       assert recovered.status == "failed"
       assert recovered.error_reason == "stale_run_recovered"
     end
+
+    test "clears a checked-out issue when stale run recovery fails it" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      issue = insert_checked_out_issue(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: issue.id,
+          adapter: "claude_local"
+        })
+
+      {:ok, started} = HeartbeatEngine.start_run(run)
+
+      assert {:ok, recovered} = HeartbeatEngine.recover_stale_run(started)
+      assert recovered.status == "failed"
+
+      reloaded = Cympho.Repo.get!(Cympho.Issues.Issue, issue.id)
+      assert reloaded.status == :todo
+      assert reloaded.assignee_id == agent_id
+      assert is_nil(reloaded.checked_out_at)
+    end
+  end
+
+  describe "list_runs_for_issue/2" do
+    test "bounds issue run history by default and exposes total count" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      issue_id = insert_issue()
+      issue = Cympho.Repo.get!(Cympho.Issues.Issue, issue_id)
+      base_time = ~U[2026-01-01 00:00:00Z]
+
+      for index <- 1..55 do
+        timestamp = DateTime.add(base_time, index, :second)
+
+        Cympho.Repo.insert!(%Run{
+          agent_id: agent_id,
+          issue_id: issue_id,
+          company_id: issue.company_id,
+          status: "completed",
+          adapter: "adapter-#{index}",
+          inserted_at: timestamp,
+          updated_at: timestamp
+        })
+      end
+
+      runs = HeartbeatEngine.list_runs_for_issue(issue_id)
+
+      assert length(runs) == HeartbeatEngine.issue_run_history_limit()
+      assert hd(runs).adapter == "adapter-55"
+      refute Enum.any?(runs, &(&1.adapter == "adapter-1"))
+      assert HeartbeatEngine.count_runs_for_issue(issue_id) == 55
+
+      assert [%Run{adapter: "adapter-54"}, %Run{adapter: "adapter-53"}] =
+               HeartbeatEngine.list_runs_for_issue(issue_id, limit: 2, offset: 1)
+    end
   end
 
   describe "orphaned run recovery" do
@@ -343,5 +468,24 @@ defmodule Cympho.HeartbeatEngineTest do
       })
 
     issue.id
+  end
+
+  defp insert_checked_out_issue(agent_id) do
+    company_id = Ecto.UUID.generate()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Cympho.Repo.insert!(%Cympho.Companies.Company{
+      id: company_id,
+      name: "HB Checked Out Co #{:rand.uniform(100_000)}",
+      slug: "hb-checked-out-co-#{:rand.uniform(1_000_000)}"
+    })
+
+    Cympho.Repo.insert!(%Cympho.Issues.Issue{
+      title: "checked out issue #{:rand.uniform(100_000)}",
+      company_id: company_id,
+      status: :in_progress,
+      assignee_id: agent_id,
+      checked_out_at: now
+    })
   end
 end

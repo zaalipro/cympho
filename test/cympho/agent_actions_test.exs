@@ -446,6 +446,46 @@ defmodule Cympho.AgentActionsTest do
              end)
     end
 
+    test "submit_review is rejected when the same batch declares blocked work", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      {:ok, issue} = Issues.update_issue(issue, %{assignee_id: engineer.id, status: :in_progress})
+
+      actions = [
+        %{
+          "type" => "comment",
+          "body" =>
+            "[blocked] Cause: missing repository access. Needs: owner grants access. Current state: no delivery is possible. Next decision: unblock credentials. Restart packet: retry after access is granted."
+        },
+        %{
+          "type" => "submit_review",
+          "role" => "cto",
+          "notes" => "Ready for review even though I cannot proceed."
+        }
+      ]
+
+      assert {:error, {:contradictory_success_signal, "submit_review"}} =
+               AgentActions.execute(issue, engineer, actions)
+
+      unchanged = Issues.get_issue!(issue.id)
+      assert unchanged.status == :in_progress
+      assert unchanged.assignee_id == engineer.id
+
+      comments = Comments.list_comments(issue.id)
+
+      refute Enum.any?(comments, fn c ->
+               c.author_type == "agent" and String.contains?(c.body, "[blocked]")
+             end)
+
+      assert Enum.any?(comments, fn c ->
+               c.author_type == "system" and
+                 String.contains?(c.body, "submit_review rejected") and
+                 String.contains?(c.body, "block_issue") and
+                 String.contains?(c.body, "remove blocked/cannot-proceed language")
+             end)
+    end
+
     test "submit_review routes the issue to the agent's reports_to (parent) when set", %{
       issue: issue,
       ceo: ceo,
@@ -776,6 +816,33 @@ defmodule Cympho.AgentActionsTest do
 
       unchanged = Issues.get_issue!(issue.id)
       refute unchanged.status == :done
+    end
+
+    test "approve_issue is rejected when its note says work cannot proceed", %{
+      issue: issue,
+      ceo: ceo
+    } do
+      actions = [
+        %{
+          "type" => "approve_issue",
+          "notes" =>
+            "[owner_update] What happened: I cannot proceed because permission settings blocked verification. Business status: blocked. Owner decision needed: grant access. Evidence inspected: none."
+        }
+      ]
+
+      assert {:error, {:contradictory_success_signal, "approve_issue"}} =
+               AgentActions.execute(issue, ceo, actions)
+
+      unchanged = Issues.get_issue!(issue.id)
+      refute unchanged.status == :done
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn c ->
+               c.author_type == "system" and
+                 String.contains?(c.body, "approve_issue rejected") and
+                 String.contains?(c.body, "blocked or incomplete work")
+             end)
     end
 
     test "request_changes reopens issue for target role", %{issue: issue, cto: cto} do
@@ -1519,12 +1586,47 @@ defmodule Cympho.AgentActionsTest do
       insert_completed_run(ceo, issue)
       insert_work_product(issue, ceo)
 
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body:
+            "[handoff] What happened: all delegated child work is complete. Action taken: inspected and closed the delegated child issue before CEO approval. Evidence/artifact: delegated child artifacts and closed child issue. Verification: child issue is done and parent review gates are clear. Remaining risk: none known. Current state: ready for CEO owner update. Next decision: CEO approval. Restart packet: CEO should inspect the delegated child artifacts, closed child issue, completed run, and review evidence before closing.",
+          author_type: "agent",
+          author_id: ceo.id,
+          issue_id: issue.id
+        })
+
       assert {:ok, _} =
                AgentActions.execute(issue, ceo, [
                  %{
                    "type" => "approve_issue",
                    "notes" =>
                      "[owner_update] What happened: all delegated child work is complete. Business status: shipped. Evidence inspected: delegated child artifacts and closed child issue. Verification: review gates are clear. Remaining risk: none known. Current state: closed. Next decision: none. Owner decision needed: none. Restart packet: issue is closed; no next runtime turn is needed unless reopened."
+                 }
+               ])
+
+      assert Issues.get_issue!(issue.id).status == :done
+    end
+
+    test "approve_issue accepts delegated parent owner update without duplicate delivery artifact",
+         %{
+           issue: issue,
+           ceo: ceo,
+           cto: cto
+         } do
+      assert {:ok, %{results: [%{issue_id: child_id}]}} =
+               AgentActions.execute(issue, cto, [
+                 delivery_issue_action(%{"title" => "Closed delegated child"})
+               ])
+
+      {:ok, _} = Issues.update_issue(Issues.get_issue!(child_id), %{status: :done})
+      insert_completed_run(ceo, issue)
+
+      assert {:ok, _} =
+               AgentActions.execute(issue, ceo, [
+                 %{
+                   "type" => "approve_issue",
+                   "notes" =>
+                     "[owner_update] What happened: all delegated child work is complete. Business status: shipped. Evidence inspected: closed child issue and CTO/CEO review state. Verification: child issue is done and review gates are clear. Remaining risk: none known. Current state: closed. Next decision: none. Owner decision needed: none. Restart packet: issue is closed; reopen only for owner-requested follow-up."
                  }
                ])
 

@@ -111,6 +111,19 @@ defmodule CymphoWeb.DashboardLive.Index do
   end
 
   @impl true
+  def handle_event("low_power_company", _params, socket) do
+    with company when not is_nil(company) <- current_company(socket),
+         {:ok, updated} <- Companies.enter_low_power_mode(company, "Low power from dashboard") do
+      {:noreply,
+       socket
+       |> assign(:current_company, updated)
+       |> assign_metrics()
+       |> push_event("toast", %{message: "Low power enabled", type: "info"})}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
   def handle_event("pause_company", _params, socket) do
     with company when not is_nil(company) <- current_company(socket),
          {:ok, updated} <- Companies.pause_company(company, "Paused from dashboard") do
@@ -287,6 +300,9 @@ defmodule CymphoWeb.DashboardLive.Index do
     cond do
       not Dispatcher.enabled?() ->
         :review
+
+      autonomy_status(company) == :active and Companies.low_power?(company) ->
+        :low_power
 
       autonomy_status(company) == :active ->
         :autonomous
@@ -517,6 +533,20 @@ defmodule CymphoWeb.DashboardLive.Index do
       action: "Open budgets",
       path: "/budgets",
       tone: :danger
+    }
+  end
+
+  defp cost_control_action(%{has_unpriced_usage?: true} = cost) do
+    tokens = Map.get(cost, :period_unpriced_tokens) || Map.get(cost, :total_unpriced_tokens) || 0
+    requests = Map.get(cost, :period_unpriced_request_count) || 0
+
+    %{
+      label: "Pricing missing for token usage",
+      detail:
+        "#{format_tokens(tokens)} unpriced tokens across #{pluralize(requests, "request")}. Add pricing before scaling autonomous runs.",
+      action: "Open costs",
+      path: "/costs",
+      tone: :attention
     }
   end
 
@@ -757,6 +787,7 @@ defmodule CymphoWeb.DashboardLive.Index do
   def status_label(:active), do: "Active"
   def status_label(:paused), do: "Paused"
   def status_label(:review), do: "Review mode"
+  def status_label(:low_power), do: "Low power"
   def status_label(:autonomous), do: "Autonomous"
   def status_label(:setup), do: "Setup needed"
   def status_label(:unconfigured), do: "Unconfigured"
@@ -767,6 +798,7 @@ defmodule CymphoWeb.DashboardLive.Index do
   def autonomy_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
   def mode_badge_class(:autonomous), do: "border-green-500/25 bg-green-500/10 text-green-400"
+  def mode_badge_class(:low_power), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
   def mode_badge_class(:review), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
   def mode_badge_class(:paused), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-400"
   def mode_badge_class(_), do: "border-border bg-surface text-text-tertiary"
@@ -884,6 +916,7 @@ defmodule CymphoWeb.DashboardLive.Index do
   def autonomy_text_class(_), do: "text-text-tertiary"
 
   def mode_text_class(:autonomous), do: "text-green-300"
+  def mode_text_class(:low_power), do: "text-sky-300"
   def mode_text_class(:review), do: "text-sky-300"
   def mode_text_class(:paused), do: "text-yellow-300"
   def mode_text_class(_), do: "text-text-tertiary"

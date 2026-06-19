@@ -7,13 +7,24 @@ defmodule Cympho.Adapters.HttpAdapter do
 
   @behaviour Cympho.Adapters.Adapter
 
+  alias Cympho.Adapters.RuntimeTimeout
+
+  @default_timeout 30_000
+  @max_timeout 3_600_000
   @impl true
   def run(issue, agent_id, recipient_pid, opts) when is_pid(recipient_pid) do
     session_id = make_ref()
 
-    spawn(fn ->
-      do_run(session_id, issue, agent_id, recipient_pid, opts)
-    end)
+    worker =
+      spawn(fn ->
+        try do
+          do_run(session_id, issue, agent_id, recipient_pid, opts)
+        after
+          Cympho.AdapterSessions.unregister(session_id)
+        end
+      end)
+
+    Cympho.AdapterSessions.register(session_id, worker)
 
     session_id
   end
@@ -23,7 +34,12 @@ defmodule Cympho.Adapters.HttpAdapter do
 
     config = opts[:config] || %{}
 
-    case call_http_endpoint(issue, agent_id, config) do
+    result =
+      Cympho.AdapterSessions.run_cancellable(session_id, fn ->
+        call_http_endpoint(issue, agent_id, config, opts)
+      end)
+
+    case result do
       {:ok, result} ->
         send(recipient_pid, {:turn_completed, session_id, result})
 
@@ -32,17 +48,18 @@ defmodule Cympho.Adapters.HttpAdapter do
     end
   end
 
-  defp call_http_endpoint(issue, agent_id, config) do
+  defp call_http_endpoint(issue, agent_id, config, opts) do
     url = config[:url] || config["url"]
     method = config[:method] || config["method"] || :post
     headers = build_headers(config)
-    timeout = config[:timeout] || config["timeout"] || 30_000
+    timeout = RuntimeTimeout.resolve(config, default_ms: @default_timeout)
     callback_url = config[:callback_url] || config["callback_url"]
 
     if is_nil(url) or url == "" do
       {:error, :no_url_configured}
     else
       payload = build_payload(issue, agent_id, config)
+      attach_payload_telemetry(opts, payload)
 
       case make_http_request(method, url, headers, payload, timeout) do
         {:ok, response} ->
@@ -52,6 +69,19 @@ defmodule Cympho.Adapters.HttpAdapter do
           {:error, {:http_error, reason}}
       end
     end
+  end
+
+  defp attach_payload_telemetry(opts, payload) do
+    Cympho.PromptTelemetry.attach_to_run(opts, encode_payload(payload), %{
+      "adapter" => "http",
+      "source" => "http_payload"
+    })
+  end
+
+  defp encode_payload(payload) do
+    Jason.encode!(payload)
+  rescue
+    _ -> inspect(payload)
   end
 
   defp build_headers(config) do
@@ -295,8 +325,16 @@ defmodule Cympho.Adapters.HttpAdapter do
         key: :timeout,
         type: :integer,
         required: false,
-        default: 30_000,
-        description: "Request timeout in milliseconds"
+        default: @default_timeout,
+        description:
+          "Request timeout in milliseconds. Prefer timeout_sec for human-entered values."
+      },
+      %{
+        key: :timeout_sec,
+        type: :integer,
+        required: false,
+        default: div(@default_timeout, 1_000),
+        description: "Request timeout in seconds; conflicts with timeout/timeout_ms are rejected."
       },
       %{
         key: :payload_template,
@@ -353,7 +391,7 @@ defmodule Cympho.Adapters.HttpAdapter do
     with :ok <- validate_url(config["url"] || config[:url]),
          :ok <- validate_method(config["method"] || config[:method]),
          :ok <- validate_headers(config["headers"] || config[:headers]),
-         :ok <- validate_timeout(config["timeout"] || config[:timeout]),
+         :ok <- validate_timeout(config),
          :ok <- validate_auth_token(config["auth_token"] || config[:auth_token]),
          :ok <- validate_callback_url(config["callback_url"] || config[:callback_url]) do
       :ok
@@ -401,17 +439,8 @@ defmodule Cympho.Adapters.HttpAdapter do
 
   defp validate_headers(_), do: {:error, "headers must be a map"}
 
-  defp validate_timeout(nil), do: :ok
-
-  defp validate_timeout(timeout) when is_integer(timeout) do
-    if timeout > 0 and timeout <= 300_000 do
-      :ok
-    else
-      {:error, "timeout must be between 1 and 300000 milliseconds"}
-    end
-  end
-
-  defp validate_timeout(_), do: {:error, "timeout must be an integer"}
+  defp validate_timeout(config),
+    do: RuntimeTimeout.validate(config, max_ms: @max_timeout, field: "timeout")
 
   defp validate_auth_token(nil), do: :ok
 

@@ -40,11 +40,67 @@ defmodule CymphoWeb.Components do
         </p>
         {render_slot(@inner_block)}
       </div>
-      <div :if={@actions != []} class="flex flex-wrap items-center gap-2 sm:justify-end">
+      <div
+        :if={@actions != []}
+        class="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-end"
+      >
         {render_slot(@actions)}
       </div>
     </header>
     """
+  end
+
+  attr :density, :string, required: true
+  attr :compact_patch, :string, required: true
+  attr :detailed_patch, :string, required: true
+  attr :class, :any, default: nil
+
+  def density_switch(assigns) do
+    ~H"""
+    <div
+      class={[
+        "inline-flex shrink-0 whitespace-nowrap rounded-xl border border-hairline bg-surface p-1",
+        @class
+      ]}
+      data-density-switch
+      data-density={@density}
+      title="Toggle compact and detailed view with V"
+      aria-label="View density"
+    >
+      <.link
+        patch={@compact_patch}
+        data-density-option="compact"
+        aria-pressed={to_string(@density == "compact")}
+        title="Compact view (V)"
+        class={[
+          "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-510 transition-colors",
+          density_tab_class(@density, "compact")
+        ]}
+      >
+        <span class="hero-list-bullet-mini h-3.5 w-3.5"></span> Compact
+      </.link>
+      <.link
+        patch={@detailed_patch}
+        data-density-option="detailed"
+        aria-pressed={to_string(@density == "detailed")}
+        title="Detailed view (V)"
+        class={[
+          "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-510 transition-colors",
+          density_tab_class(@density, "detailed")
+        ]}
+      >
+        <span class="hero-rectangle-stack-mini h-3.5 w-3.5"></span> Detailed
+      </.link>
+    </div>
+    """
+  end
+
+  defp density_tab_class(current, density) do
+    if current == density do
+      "bg-surface-2 text-text-primary shadow-card"
+    else
+      "text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+    end
   end
 
   @doc """

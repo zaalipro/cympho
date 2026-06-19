@@ -73,6 +73,66 @@ defmodule Cympho.AgentsTest do
     end
   end
 
+  describe "pause_agent/2" do
+    setup [:create_company, :create_agent]
+
+    test "sets runtime and governance pause metadata", %{agent: agent} do
+      assert {:ok, paused} = Agents.pause_agent(agent, "adapter circuit breaker")
+
+      assert paused.status == :paused
+      assert paused.governance_status == "paused"
+      assert paused.pause_reason == "adapter circuit breaker"
+      assert paused.governance_reasoning == "adapter circuit breaker"
+      assert paused.paused_at != nil
+    end
+  end
+
+  describe "dispatch eligibility" do
+    setup [:create_company]
+
+    test "excludes idle agents that are governance-paused", %{company: company} do
+      {:ok, paused} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Governance Paused Engineer",
+          role: :engineer,
+          status: :idle,
+          governance_status: "paused"
+        })
+
+      refute Enum.any?(Agents.list_eligible_agents(:engineer, company.id), &(&1.id == paused.id))
+      refute Agents.get_idle_agent_by_role(:engineer, company.id)
+    end
+
+    test "excludes idle agents pending governance approval", %{company: company} do
+      {:ok, pending} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Pending Engineer",
+          role: :engineer,
+          status: :idle,
+          governance_status: "pending_approval"
+        })
+
+      refute Enum.any?(Agents.list_eligible_agents(:engineer, company.id), &(&1.id == pending.id))
+      refute Agents.get_idle_agent_by_role(:engineer, company.id)
+    end
+
+    test "keeps active idle agents eligible", %{company: company} do
+      {:ok, active} =
+        Agents.create_agent(%{
+          company_id: company.id,
+          name: "Active Engineer",
+          role: :engineer,
+          status: :idle,
+          governance_status: "active"
+        })
+
+      assert Enum.any?(Agents.list_eligible_agents(:engineer, company.id), &(&1.id == active.id))
+      assert Agents.get_idle_agent_by_role(:engineer, company.id).id == active.id
+    end
+  end
+
   describe "get_company_ceo/1" do
     setup [:create_company]
 

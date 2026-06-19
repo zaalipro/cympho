@@ -5,12 +5,13 @@ defmodule CymphoWeb.GoalLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    socket = assign_goal_overview(socket)
+    socket =
+      socket
+      |> assign(:digest_density, "compact")
+      |> assign(:infinite_scroll, %{})
+      |> assign_goal_overview()
 
-    {:ok,
-     socket
-     |> assign(:infinite_scroll, %{})
-     |> init_stream(:goals, &fetch_goals(socket, &1))}
+    {:ok, init_stream(socket, :goals, &fetch_goals(socket, &1))}
   end
 
   @impl true
@@ -18,16 +19,24 @@ defmodule CymphoWeb.GoalLive.Index do
     {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
-  defp apply_action(socket, :index, _params) do
+  defp apply_action(socket, :index, params) do
     socket
     |> assign(:page_title, "Goals")
     |> assign(:goal, nil)
+    |> assign(:digest_density, normalize_digest_density(params["density"]))
     |> assign_goal_overview()
   end
 
   defp apply_action(socket, nil, params) do
     apply_action(socket, :index, params)
   end
+
+  defp goal_index_url("detailed"), do: ~p"/goals?#{%{density: "detailed"}}"
+  defp goal_index_url(_density), do: ~p"/goals"
+
+  defp normalize_digest_density("compact"), do: "compact"
+  defp normalize_digest_density("detailed"), do: "detailed"
+  defp normalize_digest_density(_), do: "compact"
 
   @impl true
   def handle_event("delete_goal", %{"id" => id}, socket) do

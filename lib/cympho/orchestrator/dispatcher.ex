@@ -25,6 +25,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
   alias Cympho.Orchestrator
   alias Cympho.Issues
   alias Cympho.Agents
+  alias Cympho.Companies
   alias Cympho.HeartbeatEngine
   alias Cympho.Runtime
   alias Cympho.HeartbeatEngine.WakeupQueue
@@ -46,6 +47,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @max_retries Application.compile_env(:cympho, [:orchestrator, :max_retries], 5)
   @base_backoff_ms Application.compile_env(:cympho, [:orchestrator, :base_backoff_ms], 30_000)
   @max_backoff_ms Application.compile_env(:cympho, [:orchestrator, :max_backoff_ms], 600_000)
+  @adapter_stop_confirm_attempts 10
+  @adapter_stop_confirm_sleep_ms 25
+  @low_power_priorities [:critical, :high]
 
   # Client
 
@@ -82,6 +86,23 @@ defmodule Cympho.Orchestrator.Dispatcher do
     |> Keyword.get(:enabled, true)
   end
 
+  @doc """
+  Returns whether an issue may be selected by the automatic dispatcher poll.
+
+  Blocked issues are intentionally parked. Operators can relaunch them through
+  the issue page, which reopens the issue to `:todo`, and blocker-resolution
+  flows also reopen dependents explicitly. Keeping this rule here prevents a
+  broad `:active_states` override from making blocked work runnable again.
+  """
+  def runnable_candidate?(%Issue{status: status}) when status in [:blocked, "blocked"],
+    do: false
+
+  def runnable_candidate?(%Issue{} = issue) do
+    not Issues.issue_runtime_paused?(issue) and
+      not Issues.is_blocked?(issue) and
+      runtime_mode_allows_issue?(issue)
+  end
+
   @doc "Requests an immediate poll scoped to one company."
   def poll_company(company_id) when is_binary(company_id) do
     case Process.whereis(__MODULE__) do
@@ -113,27 +134,49 @@ defmodule Cympho.Orchestrator.Dispatcher do
   def stop_company(_company_id, _reason), do: {:error, :invalid_company_id}
 
   @doc """
+  Stops active orchestrator/runtime work for one issue and releases its checkout.
+  """
+  def stop_issue(issue_id, reason \\ :operator_issue_pause)
+
+  def stop_issue(issue_id, reason) when is_binary(issue_id) do
+    result =
+      issue_id
+      |> issue_runtime_issues()
+      |> Enum.reduce(empty_stop_result(reason), &stop_runtime_issue/2)
+      |> Map.update!(:issue_ids, &Enum.reverse/1)
+
+    {:ok, result}
+  end
+
+  def stop_issue(_issue_id, _reason), do: {:error, :invalid_issue_id}
+
+  @doc """
   Enqueues a wake for an issue's current assignee, or polls for assignment when
   the issue is unassigned.
   """
   def enqueue_wake(issue_id, reason, metadata \\ %{}) when is_binary(issue_id) do
     with {:ok, issue} <- Issues.get_issue(issue_id) do
-      if issue.assignee_id do
-        result =
-          WakeupQueue.enqueue(%{
-            agent_id: issue.assignee_id,
-            issue_id: issue.id,
-            reason: to_string(reason),
-            triggered_by_type: "system",
-            metadata: metadata
-          })
+      cond do
+        Issues.issue_runtime_paused?(issue) ->
+          {:error, :issue_runtime_paused}
 
-        _ = Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id)
-        _ = poll_now()
-        result
-      else
-        _ = poll_now()
-        {:ok, :queued_for_dispatch}
+        issue.assignee_id ->
+          result =
+            WakeupQueue.enqueue(%{
+              agent_id: issue.assignee_id,
+              issue_id: issue.id,
+              reason: to_string(reason),
+              triggered_by_type: "system",
+              metadata: metadata
+            })
+
+          _ = Cympho.AgentHeartbeat.trigger_heartbeat(issue.assignee_id)
+          _ = poll_now()
+          result
+
+        true ->
+          _ = poll_now()
+          {:ok, :queued_for_dispatch}
       end
     end
   end
@@ -326,6 +369,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
       reason: to_string(reason),
       issue_ids: [],
       orchestrators_stopped: 0,
+      adapter_sessions_cancel_requested: 0,
+      adapter_sessions_cancel_confirmed: 0,
+      adapter_sessions_still_registered: 0,
       issues_released: 0,
       runs_cancelled: 0,
       agents_idled: 0,
@@ -352,10 +398,18 @@ defmodule Cympho.Orchestrator.Dispatcher do
     Cympho.Repo.all(query)
   end
 
+  defp issue_runtime_issues(issue_id) do
+    Cympho.Repo.all(
+      from i in Issue,
+        where: i.id == ^issue_id,
+        order_by: [asc: i.updated_at, asc: i.id]
+    )
+  end
+
   defp stop_runtime_issue(%Issue{} = issue, acc) do
     acc
     |> track_issue(issue.id)
-    |> maybe_stop_orchestrator(issue.id)
+    |> maybe_stop_orchestrator(issue.id, {:runtime_stop, acc.reason})
     |> maybe_release_issue(issue)
     |> cancel_issue_runs(issue.id)
     |> idle_agent(issue.assignee_id)
@@ -363,19 +417,59 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   defp track_issue(acc, issue_id), do: %{acc | issue_ids: [issue_id | acc.issue_ids]}
 
-  defp maybe_stop_orchestrator(acc, issue_id) do
+  defp maybe_stop_orchestrator(acc, issue_id, reason) do
     case Orchestrator.whereis(issue_id) do
       nil ->
         acc
 
       _pid ->
+        session_id = issue_id |> Orchestrator.get_session_state() |> adapter_session_id()
+        registered_before_stop? = adapter_session_registered?(session_id)
+
         try do
-          :ok = Orchestrator.stop(issue_id)
-          %{acc | orchestrators_stopped: acc.orchestrators_stopped + 1}
+          :ok = Orchestrator.stop(issue_id, reason)
+
+          acc
+          |> Map.update!(:orchestrators_stopped, &(&1 + 1))
+          |> record_adapter_session_stop(issue_id, session_id, registered_before_stop?)
         catch
           :exit, reason ->
             add_stop_error(acc, issue_id, {:orchestrator_stop_failed, reason})
         end
+    end
+  end
+
+  defp adapter_session_id(%{session_id: session_id}), do: session_id
+  defp adapter_session_id(_state), do: nil
+
+  defp adapter_session_registered?(nil), do: false
+  defp adapter_session_registered?(session_id), do: Cympho.AdapterSessions.registered?(session_id)
+
+  defp record_adapter_session_stop(acc, _issue_id, _session_id, false), do: acc
+
+  defp record_adapter_session_stop(acc, issue_id, session_id, true) do
+    acc = Map.update!(acc, :adapter_sessions_cancel_requested, &(&1 + 1))
+
+    if adapter_session_cleared?(session_id) do
+      Map.update!(acc, :adapter_sessions_cancel_confirmed, &(&1 + 1))
+    else
+      acc
+      |> Map.update!(:adapter_sessions_still_registered, &(&1 + 1))
+      |> add_stop_error(issue_id, {:adapter_session_still_registered, inspect(session_id)})
+    end
+  end
+
+  defp adapter_session_cleared?(session_id, attempts \\ @adapter_stop_confirm_attempts)
+
+  defp adapter_session_cleared?(session_id, 0),
+    do: not Cympho.AdapterSessions.registered?(session_id)
+
+  defp adapter_session_cleared?(session_id, attempts) do
+    if Cympho.AdapterSessions.registered?(session_id) do
+      Process.sleep(@adapter_stop_confirm_sleep_ms)
+      adapter_session_cleared?(session_id, attempts - 1)
+    else
+      true
     end
   end
 
@@ -452,7 +546,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
       Enum.flat_map(MapSet.to_list(running), fn issue_id ->
         case Issues.get_issue(issue_id) do
           {:ok, issue} when issue.status in @terminal_states ->
-            Orchestrator.stop(issue_id)
+            Orchestrator.stop(issue_id, :issue_terminal)
             [issue_id]
 
           _ ->
@@ -550,12 +644,20 @@ defmodule Cympho.Orchestrator.Dispatcher do
       end
 
     query
-    |> preload([:blocked_by, :assignee])
+    |> preload([:blocked_by, :assignee, :company])
     |> Issues.order_for_dispatch()
     |> limit(^limit)
     |> Cympho.Repo.all()
-    |> Enum.reject(&Issues.is_blocked?/1)
+    |> Enum.filter(&runnable_candidate?/1)
   end
+
+  defp runtime_mode_allows_issue?(%Issue{company_id: nil}), do: true
+
+  defp runtime_mode_allows_issue?(%Issue{company: %Company{} = company, priority: priority}) do
+    not Companies.low_power?(company) or priority in @low_power_priorities
+  end
+
+  defp runtime_mode_allows_issue?(_issue), do: true
 
   defp dispatch_only_issue_id do
     :cympho

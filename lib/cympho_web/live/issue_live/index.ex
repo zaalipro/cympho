@@ -31,6 +31,7 @@ defmodule CymphoWeb.IssueLive.Index do
       |> assign(:labels, list_labels(socket))
       |> assign(:issue_triage_counts, Issues.empty_triage_counts())
       |> assign(:orchestrator_enabled?, Cympho.Orchestrator.Dispatcher.enabled?())
+      |> assign(:digest_density, "compact")
       |> assign(:unread_issues, %{})
 
     {:ok, socket}
@@ -66,6 +67,7 @@ defmodule CymphoWeb.IssueLive.Index do
       |> assign(:current_project_id, params["project_id"] || "")
       |> assign(:current_label_id, params["label_id"] || "")
       |> assign(:current_triage, normalize_triage(params["triage"]))
+      |> assign(:digest_density, normalize_digest_density(params["density"]))
       |> assign(:issue_triage_counts, issue_triage_counts(socket))
       |> assign(:unread_issues, unread_issues)
 
@@ -176,7 +178,7 @@ defmodule CymphoWeb.IssueLive.Index do
   end
 
   def handle_event("clear_filters", _params, socket) do
-    {:noreply, push_patch(socket, to: ~p"/issues")}
+    {:noreply, push_patch(socket, to: issue_index_url(socket.assigns, %{"clear" => true}))}
   end
 
   defp reload(socket) do
@@ -188,6 +190,7 @@ defmodule CymphoWeb.IssueLive.Index do
       "project_id" => socket.assigns.current_project_id,
       "label_id" => socket.assigns.current_label_id,
       "triage" => socket.assigns.current_triage,
+      "density" => socket.assigns.digest_density,
       "page" => to_string(socket.assigns.page)
     }
 
@@ -213,15 +216,31 @@ defmodule CymphoWeb.IssueLive.Index do
     |> assign(:unread_issues, unread_issues)
   end
 
-  defp build_url(socket, overrides) do
-    status = Map.get(overrides, "status", socket.assigns.current_status)
-    priority = Map.get(overrides, "priority", socket.assigns.current_priority)
-    search = Map.get(overrides, "search", socket.assigns.current_search)
-    assignee_id = Map.get(overrides, "assignee_id", socket.assigns.current_assignee_id)
-    project_id = Map.get(overrides, "project_id", socket.assigns.current_project_id)
-    label_id = Map.get(overrides, "label_id", socket.assigns.current_label_id)
-    triage = Map.get(overrides, "triage", socket.assigns.current_triage)
-    page = Map.get(overrides, "page", to_string(socket.assigns.page))
+  defp build_url(socket, overrides), do: issue_index_url(socket.assigns, overrides)
+
+  defp issue_index_url(assigns, %{"clear" => true}) do
+    issue_index_url(assigns, %{
+      "status" => "",
+      "priority" => "",
+      "search" => "",
+      "assignee_id" => "",
+      "project_id" => "",
+      "label_id" => "",
+      "triage" => "",
+      "page" => ""
+    })
+  end
+
+  defp issue_index_url(assigns, overrides) do
+    status = Map.get(overrides, "status", assigns.current_status)
+    priority = Map.get(overrides, "priority", assigns.current_priority)
+    search = Map.get(overrides, "search", assigns.current_search)
+    assignee_id = Map.get(overrides, "assignee_id", assigns.current_assignee_id)
+    project_id = Map.get(overrides, "project_id", assigns.current_project_id)
+    label_id = Map.get(overrides, "label_id", assigns.current_label_id)
+    triage = Map.get(overrides, "triage", assigns.current_triage)
+    density = Map.get(overrides, "density", assigns.digest_density)
+    page = Map.get(overrides, "page", to_string(assigns.page))
 
     query =
       %{
@@ -232,6 +251,7 @@ defmodule CymphoWeb.IssueLive.Index do
         project_id: project_id,
         label_id: label_id,
         triage: triage,
+        density: if(density == "detailed", do: density),
         page: page
       }
       |> Enum.reject(fn {_k, v} -> v in ["", nil] end)
@@ -299,8 +319,17 @@ defmodule CymphoWeb.IssueLive.Index do
 
   defp normalize_triage(_), do: ""
 
-  defp triage_lane_url(""), do: ~p"/issues"
-  defp triage_lane_url(lane), do: ~p"/issues?#{%{triage: lane}}"
+  defp normalize_digest_density("compact"), do: "compact"
+  defp normalize_digest_density("detailed"), do: "detailed"
+  defp normalize_digest_density(_), do: "compact"
+
+  defp triage_lane_url("", "detailed"), do: ~p"/issues?#{%{density: "detailed"}}"
+  defp triage_lane_url("", _density), do: ~p"/issues"
+
+  defp triage_lane_url(lane, "detailed"),
+    do: ~p"/issues?#{%{triage: lane, density: "detailed"}}"
+
+  defp triage_lane_url(lane, _density), do: ~p"/issues?#{%{triage: lane}}"
 
   defp triage_lanes(counts) do
     [

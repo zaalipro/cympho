@@ -291,6 +291,7 @@ defmodule Cympho.Agents do
   def get_idle_agent_by_role(role) do
     Agent
     |> where(role: ^role, status: :idle)
+    |> where_active_governance()
     |> first()
     |> Repo.one()
   end
@@ -301,6 +302,7 @@ defmodule Cympho.Agents do
   def get_idle_agent_by_role(role, company_id) when is_binary(company_id) do
     Agent
     |> where(role: ^role, status: :idle, company_id: ^company_id)
+    |> where_active_governance()
     |> first()
     |> Repo.one()
   end
@@ -313,6 +315,7 @@ defmodule Cympho.Agents do
   def list_eligible_agents(role) when is_atom(role) do
     Agent
     |> where(role: ^role, status: :idle)
+    |> where_active_governance()
     |> exclude_temporary()
     |> Repo.all()
     |> Enum.reject(&is_agent_at_capacity?/1)
@@ -321,9 +324,14 @@ defmodule Cympho.Agents do
   def list_eligible_agents(role, company_id) when is_atom(role) do
     Agent
     |> where(role: ^role, status: :idle, company_id: ^company_id)
+    |> where_active_governance()
     |> exclude_temporary()
     |> Repo.all()
     |> Enum.reject(&is_agent_at_capacity?/1)
+  end
+
+  defp where_active_governance(query) do
+    where(query, [a], a.governance_status not in ["paused", "terminated", "pending_approval"])
   end
 
   @doc """
@@ -820,7 +828,7 @@ defmodule Cympho.Agents do
         issue_id = heartbeat_state[:current_issue_id]
 
         if issue_id do
-          Cympho.Orchestrator.stop(issue_id)
+          Cympho.Orchestrator.stop(issue_id, :operator_stop)
         end
 
         _ = Cympho.AgentHeartbeat.set_idle(agent_id)
@@ -960,15 +968,46 @@ defmodule Cympho.Agents do
   end
 
   @doc """
-  Pauses an agent by setting status to :paused.
+  Pauses an agent by setting runtime and governance status to paused.
   """
   def pause_agent(%Agent{} = agent) do
-    update_agent(agent, %{status: :paused, paused_at: DateTime.utc_now()})
+    pause_agent(agent, "Agent paused")
   end
 
   def pause_agent(agent_id) when is_binary(agent_id) do
+    pause_agent(agent_id, "Agent paused")
+  end
+
+  def pause_agent(%Agent{} = agent, reason) when is_binary(reason) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    agent
+    |> Ecto.Changeset.change(%{
+      status: :paused,
+      governance_status: "paused",
+      governance_reasoning: reason,
+      paused_at: now,
+      pause_reason: reason
+    })
+    |> Repo.update()
+    |> case do
+      {:ok, updated} ->
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.company_id}:agents",
+          {:agent_paused, updated}
+        )
+
+        {:ok, updated}
+
+      error ->
+        error
+    end
+  end
+
+  def pause_agent(agent_id, reason) when is_binary(agent_id) and is_binary(reason) do
     case get_agent(agent_id) do
-      {:ok, agent} -> pause_agent(agent)
+      {:ok, agent} -> pause_agent(agent, reason)
       error -> error
     end
   end

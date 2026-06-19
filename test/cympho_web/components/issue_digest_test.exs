@@ -170,4 +170,58 @@ defmodule CymphoWeb.Components.IssueDigestTest do
     assert html =~ "CTO should inspect issue_memory.ex and the passing tests."
     assert html =~ "- Restart packet: CTO should inspect issue_memory.ex and the passing tests."
   end
+
+  test "hides generic runtime launch actions for swarm CTO gates" do
+    issue_id = Ecto.UUID.generate()
+    cto_id = Ecto.UUID.generate()
+
+    html =
+      render_digest(
+        issue: %Issue{
+          id: issue_id,
+          identifier: "AIL-129",
+          title: "Synthesize swarm delivery",
+          status: :todo,
+          priority: :medium,
+          origin_type: "swarm_cto_review",
+          assignee_id: cto_id,
+          assigned_role: "cto",
+          assignee: %Agent{id: cto_id, name: "CTO", role: :cto},
+          monitor_state: %{"swarm" => %{"role" => "cto_synthesis"}},
+          comments: []
+        },
+        review_gate_actions: [
+          %{
+            type: :live_event,
+            event: "prioritize_dispatch",
+            label: "Queue focused dispatch",
+            detail: "Pin this issue as the next focused dispatch candidate.",
+            tone: :primary,
+            enabled?: true,
+            gate_label: "Runtime verification"
+          },
+          %{
+            type: :copy,
+            copy_text: "CYMPHO_DISPATCH_ONLY_ISSUE_ID=#{issue_id}",
+            label: "Copy focused command",
+            success_label: "Copied",
+            gate_label: "Runtime verification"
+          },
+          %{
+            type: :anchor,
+            href: "/operations#runtime-launch-checklist",
+            label: "Open launch checklist",
+            gate_label: "Runtime verification"
+          }
+        ]
+      )
+
+    assert html =~ "CTO review ready"
+    assert html =~ "Worker packets are ready for CTO synthesis."
+    refute html =~ "Queue focused dispatch"
+    refute html =~ "Copy focused command"
+    refute html =~ "Open launch checklist"
+    assert html =~ "Copy handoff"
+    assert html =~ "Open raw timeline"
+  end
 end

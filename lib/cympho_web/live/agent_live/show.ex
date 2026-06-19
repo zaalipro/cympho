@@ -1617,7 +1617,9 @@ defmodule CymphoWeb.AgentLive.Show do
   defp adapter_error_category_label(:missing_credentials), do: "Missing credentials"
   defp adapter_error_category_label(:auth_failed), do: "Auth failed"
   defp adapter_error_category_label(:timeout), do: "Timeout"
+  defp adapter_error_category_label(:runtime_blocked), do: "Runtime blocked"
   defp adapter_error_category_label(:malformed_output), do: "Malformed output"
+  defp adapter_error_category_label(:action_contract_failed), do: "Action contract"
   defp adapter_error_category_label(:no_output), do: "No output"
   defp adapter_error_category_label(:nonzero_exit), do: "Non-zero exit"
   defp adapter_error_category_label(_), do: "Unclassified"
@@ -1634,8 +1636,14 @@ defmodule CymphoWeb.AgentLive.Show do
   defp adapter_error_badge_class(:timeout),
     do: "border-yellow-500/30 bg-yellow-500/10 text-yellow-200"
 
+  defp adapter_error_badge_class(:runtime_blocked),
+    do: "border-amber-500/30 bg-amber-500/10 text-amber-200"
+
   defp adapter_error_badge_class(:malformed_output),
     do: "border-violet-500/30 bg-violet-500/10 text-violet-200"
+
+  defp adapter_error_badge_class(:action_contract_failed),
+    do: "border-amber-500/30 bg-amber-500/10 text-amber-200"
 
   defp adapter_error_badge_class(:no_output),
     do: "border-border bg-surface text-text-tertiary"
