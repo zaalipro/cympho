@@ -393,11 +393,68 @@ defmodule Cympho.AutonomousLoopTest do
 
       assert counts.re_emitted >= 1
 
-      re_emits =
-        Wakes.list_issue_wakes(issue.id)
-        |> Enum.filter(&(&1.reason == "review_nudge_re_emit"))
+      assert Repo.get!(AgentWake, original.id).status == "consumed"
 
-      assert length(re_emits) >= 1
+      assert [active] = Wakes.list_review_nudges([issue.id])
+      assert active.reason == "review_nudge_re_emit"
+      assert active.metadata["re_emit_of"] == original.id
+      assert active.metadata["re_emit_count"] == 1
+    end
+
+    test "keeps one active recovery chain when stale duplicate nudges already exist", %{
+      company: company,
+      engineer: engineer
+    } do
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Issue with duplicate stale nudges",
+          company_id: company.id,
+          status: :in_review,
+          assignee_id: engineer.id,
+          assigned_role: "engineer",
+          skip_auto_assign: true
+        })
+
+      metadata = %{
+        "source" => "review_nudge",
+        "agent_role" => "engineer",
+        "nudge_group_key" => "duplicate-review-chain"
+      }
+
+      {:ok, original} =
+        Wakes.do_wake_agent(
+          engineer.id,
+          issue.id,
+          "manual_dispatch",
+          "system",
+          "test",
+          metadata
+        )
+
+      {:ok, duplicate} =
+        Wakes.do_wake_agent(
+          engineer.id,
+          issue.id,
+          "review_nudge_re_emit",
+          "system",
+          "test",
+          Map.merge(metadata, %{"re_emit_count" => 1, "re_emit_of" => original.id})
+        )
+
+      backdate_wake!(original.id, -600)
+      backdate_wake!(duplicate.id, -300)
+
+      counts = StaleScanner.sweep(t1_seconds: 60, t2_seconds: 1800, max_re_emits: 3)
+
+      assert counts.re_emitted == 1
+      assert Repo.get!(AgentWake, original.id).status == "consumed"
+
+      assert [active] = Wakes.list_review_nudges([issue.id])
+      assert active.reason == "review_nudge_re_emit"
+      assert active.metadata["nudge_group_key"] == "duplicate-review-chain"
+      assert active.metadata["re_emit_count"] == 2
+      assert active.id != original.id
+      assert DateTime.diff(DateTime.utc_now(), active.inserted_at, :second) < 60
     end
 
     test "escalates to a different agent in the same role at T2 / max_re_emits", %{

@@ -18,6 +18,7 @@ defmodule Cympho.Issues do
   alias Cympho.IssueDigest
   alias Cympho.PullRequestContract
   alias Cympho.Activities
+  alias Cympho.Companies
   alias Cympho.Companies.Company
   alias Cympho.ExecutionPolicies
   alias Cympho.ExecutionPolicies.ExecutionPolicy
@@ -44,6 +45,53 @@ defmodule Cympho.Issues do
     |> limit(^cap)
     |> Repo.all()
     |> Repo.preload([:comments, :blocked_by, :blocks, :assignee, :labels, :goal])
+  end
+
+  @doc """
+  Lists open issues assigned directly to a human user.
+
+  This powers the board/operator "Needs my action" queue. It is intentionally
+  issue-backed rather than notification-backed so human blockers do not get
+  buried in a noisy agent inbox.
+  """
+  def list_human_action_issues(company_id, user_id, opts \\ [])
+
+  def list_human_action_issues(company_id, user_id, opts)
+      when is_binary(company_id) and is_binary(user_id) do
+    limit = Keyword.get(opts, :limit, 100)
+
+    Issue
+    |> human_action_query(company_id, user_id)
+    |> order_by([i],
+      asc:
+        fragment(
+          "CASE ? WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END",
+          i.priority
+        ),
+      asc: i.due_on,
+      desc: i.updated_at,
+      desc: i.id
+    )
+    |> limit(^limit)
+    |> Repo.all()
+    |> Repo.preload([:comments, :assignee, :project, :labels, :goal])
+  end
+
+  def list_human_action_issues(_company_id, _user_id, _opts), do: []
+
+  def human_action_count(company_id, user_id) when is_binary(company_id) and is_binary(user_id) do
+    Issue
+    |> human_action_query(company_id, user_id)
+    |> Repo.aggregate(:count)
+  end
+
+  def human_action_count(_company_id, _user_id), do: 0
+
+  defp human_action_query(queryable, company_id, user_id) do
+    queryable
+    |> where([i], i.company_id == ^company_id)
+    |> where([i], i.assignee_user_id == ^user_id)
+    |> where([i], i.status not in ^@terminal_issue_statuses)
   end
 
   @doc """
@@ -489,6 +537,10 @@ defmodule Cympho.Issues do
   Issues with `origin_type == "backlog_planner"` (the synthetic mission
   planning issue) are excluded — those are intentionally re-used and not
   "stuck" in the usual sense.
+
+  Issues with `monitor_state["patrol"]["excluded"] == true` are also
+  excluded. Use this for intentionally long-running work that should not be
+  escalated by the stale-work patrol loop.
   """
   @spec list_stuck_issues(binary(), keyword()) :: [Issue.t()]
   def list_stuck_issues(company_id, opts \\ []) when is_binary(company_id) do
@@ -522,6 +574,11 @@ defmodule Cympho.Issues do
         from(i in Issue,
           where: i.company_id == ^company_id,
           where: is_nil(i.origin_type) or i.origin_type != "backlog_planner",
+          where:
+            fragment(
+              "COALESCE((? -> 'patrol' ->> 'excluded')::boolean, false) = false",
+              i.monitor_state
+            ),
           where: ^stuck_clause,
           order_by: [asc: i.updated_at]
         )
@@ -740,6 +797,96 @@ defmodule Cympho.Issues do
   end
 
   def clear_company_dispatch_focus(_company_id), do: {:error, :invalid_company}
+
+  @doc """
+  Excludes an issue from stale-work patrol escalation.
+
+  This is separate from issue runtime pause: a paused issue suppresses runtime
+  execution, while a patrol exclusion says the current long-running state is
+  intentional and should not wake a supervisor as stale work.
+  """
+  def exclude_from_stale_patrol(issue, opts \\ [])
+
+  def exclude_from_stale_patrol(%Issue{} = issue, opts) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    reason = opts |> Keyword.get(:reason, "Excluded from stale-work patrol") |> to_string()
+    actor_id = opts |> Keyword.get(:actor) |> dispatch_actor_id()
+
+    patrol_state =
+      issue.monitor_state
+      |> normalize_monitor_state()
+      |> Map.get("patrol", %{})
+      |> normalize_monitor_state()
+      |> Map.merge(%{
+        "excluded" => true,
+        "excluded_at" => DateTime.to_iso8601(now),
+        "excluded_reason" => reason
+      })
+      |> maybe_put_patrol_actor(actor_id)
+      |> Map.drop(["included_at", "included_by_user_id", :included_at, :included_by_user_id])
+
+    monitor_state =
+      issue.monitor_state
+      |> normalize_monitor_state()
+      |> Map.put("patrol", patrol_state)
+
+    update_issue(issue, %{monitor_state: monitor_state})
+  end
+
+  def exclude_from_stale_patrol(_issue, _opts), do: {:error, :invalid_issue}
+
+  @doc """
+  Clears stale-work patrol exclusion for an issue.
+  """
+  def include_in_stale_patrol(issue, opts \\ [])
+
+  def include_in_stale_patrol(%Issue{} = issue, opts) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    actor_id = opts |> Keyword.get(:actor) |> dispatch_actor_id()
+
+    patrol_state =
+      issue.monitor_state
+      |> normalize_monitor_state()
+      |> Map.get("patrol", %{})
+      |> normalize_monitor_state()
+      |> Map.drop([
+        "excluded",
+        :excluded,
+        "excluded_at",
+        :excluded_at,
+        "excluded_reason",
+        :excluded_reason,
+        "excluded_by_user_id",
+        :excluded_by_user_id
+      ])
+      |> Map.put("included_at", DateTime.to_iso8601(now))
+      |> maybe_put_patrol_include_actor(actor_id)
+
+    monitor_state =
+      issue.monitor_state
+      |> normalize_monitor_state()
+      |> Map.put("patrol", patrol_state)
+
+    update_issue(issue, %{monitor_state: monitor_state})
+  end
+
+  def include_in_stale_patrol(_issue, _opts), do: {:error, :invalid_issue}
+
+  def stale_patrol_excluded?(%Issue{monitor_state: monitor_state}),
+    do: stale_patrol_excluded?(monitor_state)
+
+  def stale_patrol_excluded?(%{"patrol" => %{"excluded" => excluded}}), do: truthy?(excluded)
+  def stale_patrol_excluded?(%{patrol: %{excluded: excluded}}), do: truthy?(excluded)
+  def stale_patrol_excluded?(_), do: false
+
+  def stale_patrol_state(%Issue{monitor_state: monitor_state}) do
+    monitor_state
+    |> normalize_monitor_state()
+    |> Map.get("patrol", %{})
+    |> normalize_monitor_state()
+  end
+
+  def stale_patrol_state(_issue), do: %{}
 
   @doc """
   Pauses one issue without changing its visible workflow status.
@@ -1312,6 +1459,20 @@ defmodule Cympho.Issues do
   end
 
   defp maybe_put_issue_runtime_resume_actor(runtime_state, _actor_id), do: runtime_state
+
+  defp maybe_put_patrol_actor(patrol_state, actor_id)
+       when is_binary(actor_id) and actor_id != "" do
+    Map.put(patrol_state, "excluded_by_user_id", actor_id)
+  end
+
+  defp maybe_put_patrol_actor(patrol_state, _actor_id), do: patrol_state
+
+  defp maybe_put_patrol_include_actor(patrol_state, actor_id)
+       when is_binary(actor_id) and actor_id != "" do
+    Map.put(patrol_state, "included_by_user_id", actor_id)
+  end
+
+  defp maybe_put_patrol_include_actor(patrol_state, _actor_id), do: patrol_state
 
   defp maybe_put_dispatch_state(monitor_state, dispatch_state)
        when map_size(dispatch_state) == 0,
@@ -2053,6 +2214,9 @@ defmodule Cympho.Issues do
       issue_runtime_paused?(current_issue) ->
         {:error, :issue_runtime_paused}
 
+      company_runtime_paused?(current_issue) ->
+        {:error, :company_paused}
+
       current_issue.assignee_id == agent_id ->
         refresh_existing_checkout(current_issue, agent, required_role)
 
@@ -2098,6 +2262,15 @@ defmodule Cympho.Issues do
 
   defp same_company?(_issue, _agent), do: false
 
+  defp company_runtime_paused?(%Issue{company_id: nil}), do: false
+
+  defp company_runtime_paused?(%Issue{company_id: company_id}) do
+    case Repo.get(Company, company_id) do
+      %Company{} = company -> not Companies.active?(company)
+      nil -> false
+    end
+  end
+
   defp atomic_checkout(%Issue{} = issue, agent_id, required_role) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
@@ -2111,18 +2284,19 @@ defmodule Cympho.Issues do
       ]
       |> maybe_put_assigned_role(required_role)
 
-    {count, _} =
+    query =
       from(i in Issue,
         where:
-          i.id == ^issue.id and
-            is_nil(i.assignee_id) and
+          i.id == ^issue.id and is_nil(i.assignee_id) and
             i.status in ^[:backlog, :todo, :in_progress, :in_review, :blocked] and
             fragment(
               "COALESCE((?->'issue_runtime'->>'paused')::boolean, false) = false",
               i.monitor_state
             )
       )
-      |> Repo.update_all(set: set_fields, inc: [lock_version: 1])
+      |> require_active_company_for_checkout(issue.company_id)
+
+    {count, _} = Repo.update_all(query, set: set_fields, inc: [lock_version: 1])
 
     case count do
       1 ->
@@ -2153,10 +2327,10 @@ defmodule Cympho.Issues do
             {:error, :terminal_issue}
 
           %Issue{} = issue ->
-            if issue_runtime_paused?(issue) do
-              {:error, :issue_runtime_paused}
-            else
-              {:error, :checkout_conflict}
+            cond do
+              issue_runtime_paused?(issue) -> {:error, :issue_runtime_paused}
+              company_runtime_paused?(issue) -> {:error, :company_paused}
+              true -> {:error, :checkout_conflict}
             end
 
           nil ->
@@ -2169,6 +2343,9 @@ defmodule Cympho.Issues do
     cond do
       issue_runtime_paused?(issue) ->
         {:error, :issue_runtime_paused}
+
+      company_runtime_paused?(issue) ->
+        {:error, :company_paused}
 
       issue.status in [:done, :cancelled] ->
         {:error, :terminal_issue}
@@ -2197,6 +2374,16 @@ defmodule Cympho.Issues do
       true ->
         {:ok, preload_issue(issue)}
     end
+  end
+
+  defp require_active_company_for_checkout(query, nil), do: query
+
+  defp require_active_company_for_checkout(query, company_id) do
+    from(i in query,
+      join: c in Company,
+      on: c.id == i.company_id,
+      where: c.id == ^company_id and c.status == "active"
+    )
   end
 
   defp maybe_put_assigned_role(set_fields, nil), do: set_fields

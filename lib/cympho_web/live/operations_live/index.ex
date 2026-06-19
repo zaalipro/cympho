@@ -1049,6 +1049,190 @@ defmodule CymphoWeb.OperationsLive.Index do
   defp action_badge_class(:danger), do: "border-brand/25 bg-brand/10 text-brand"
   defp action_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
+  defp simple_action_queue(
+         delegated_work,
+         owner_signoffs,
+         ceo_outcomes,
+         runtime_enablement,
+         launch_plan
+       ) do
+    rows =
+      [
+        simple_runtime_cleanup_row(runtime_enablement),
+        simple_delegated_work_row(delegated_work),
+        simple_owner_signoff_row(owner_signoffs),
+        simple_ceo_receipt_row(ceo_outcomes),
+        simple_launch_row(launch_plan, runtime_enablement)
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    case rows do
+      [] -> [simple_steady_row()]
+      rows -> Enum.take(rows, 4)
+    end
+  end
+
+  defp simple_runtime_cleanup_row(%{status: :blocked, cleanup_count: count}) when count > 0 do
+    %{
+      key: "cleanup",
+      tone: :danger,
+      icon: "hero-no-symbol-mini",
+      eyebrow: "Runtime",
+      title: "Recover stale runtime state",
+      detail:
+        "#{count} active or stale #{plural_noun(count, "slot")} must be released before launch.",
+      count_label: "#{count} held",
+      action_label: "Recover",
+      action_event: "recover_stale_runs",
+      action_path: nil
+    }
+  end
+
+  defp simple_runtime_cleanup_row(_runtime_enablement), do: nil
+
+  defp simple_delegated_work_row(%{queueable_count: count} = delegated_work) when count > 0 do
+    %{
+      key: "delegated",
+      tone: :attention,
+      icon: "hero-play-mini",
+      eyebrow: "Delegated",
+      title: "#{count} runnable delegated #{plural_noun(count, "item")}",
+      detail: simple_delegated_runnable_detail(delegated_work),
+      count_label: "#{count} runnable",
+      action_label: "Focus queue",
+      action_event: "prioritize_delegated_work",
+      action_path: nil
+    }
+  end
+
+  defp simple_delegated_work_row(%{setup_blocked_count: count}) when count > 0 do
+    %{
+      key: "delegated",
+      tone: :danger,
+      icon: "hero-wrench-screwdriver-mini",
+      eyebrow: "Delegated",
+      title: "#{count} setup #{plural_noun(count, "blocker")}",
+      detail: "Fix worker setup before the CEO parent can receive useful evidence.",
+      count_label: "#{count} blocked",
+      action_label: "Fix setup",
+      action_event: nil,
+      action_path: "#delegated-work-queue"
+    }
+  end
+
+  defp simple_delegated_work_row(%{count: count}) when count > 0 do
+    %{
+      key: "delegated",
+      tone: :attention,
+      icon: "hero-list-bullet-mini",
+      eyebrow: "Delegated",
+      title: "#{count} delegated #{plural_noun(count, "item")} open",
+      detail: "Inspect the child queue for blockers, focused runs, and review handoffs.",
+      count_label: "#{count} open",
+      action_label: "Open queue",
+      action_event: nil,
+      action_path: "#delegated-work-queue"
+    }
+  end
+
+  defp simple_delegated_work_row(_delegated_work), do: nil
+
+  defp simple_delegated_runnable_detail(%{setup_blocked_count: setup_blocked})
+       when setup_blocked > 0 do
+    "Focus runnable child work now; #{setup_blocked} setup #{plural_noun(setup_blocked, "blocker")} can be fixed from the queue."
+  end
+
+  defp simple_delegated_runnable_detail(_delegated_work) do
+    "Focus child work so CTO/CEO review has evidence instead of another status note."
+  end
+
+  defp simple_owner_signoff_row(%{count: count}) when count > 0 do
+    %{
+      key: "owner-signoff",
+      tone: :attention,
+      icon: "hero-check-circle-mini",
+      eyebrow: "Owner",
+      title: "#{count} CEO #{plural_noun(count, "update")} waiting",
+      detail: "Accept closure or request a CEO revision from one place.",
+      count_label: "#{count} waiting",
+      action_label: "Review",
+      action_event: nil,
+      action_path: "#owner-signoff-queue"
+    }
+  end
+
+  defp simple_owner_signoff_row(_owner_signoffs), do: nil
+
+  defp simple_ceo_receipt_row(%{counts: %{receipt_incomplete: count}}) when count > 0 do
+    %{
+      key: "ceo-receipts",
+      tone: :attention,
+      icon: "hero-sparkles-mini",
+      eyebrow: "CEO",
+      title: "#{count} receipt #{plural_noun(count, "gap")}",
+      detail: "Repair missing evidence, verification, risk, or next-decision fields.",
+      count_label: "#{count} gaps",
+      action_label: "Inspect",
+      action_event: nil,
+      action_path: "#ceo-outcome-monitor"
+    }
+  end
+
+  defp simple_ceo_receipt_row(_ceo_outcomes), do: nil
+
+  defp simple_launch_row(%{status: :idle}, %{status: :running}), do: nil
+
+  defp simple_launch_row(
+         %{label: label, summary: summary, target_path: target_path, tone: tone},
+         %{
+           status: status
+         }
+       )
+       when status in [:ready, :blocked] do
+    %{
+      key: "launch",
+      tone: tone,
+      icon: "hero-bolt-mini",
+      eyebrow: "Launch",
+      title: label,
+      detail: summary,
+      count_label: nil,
+      action_label: "Open",
+      action_event: nil,
+      action_path: target_path || "#runtime-launch-checklist"
+    }
+  end
+
+  defp simple_launch_row(_launch_plan, _runtime_enablement), do: nil
+
+  defp simple_steady_row do
+    %{
+      key: "steady",
+      tone: :ok,
+      icon: "hero-check-circle-mini",
+      eyebrow: "Steady",
+      title: "No urgent operations",
+      detail: "Delegated work, owner signoff, CEO receipts, and runtime cleanup are quiet.",
+      count_label: nil,
+      action_label: "Details",
+      action_event: nil,
+      action_path: "#runtime-launch-checklist"
+    }
+  end
+
+  defp simple_action_queue_title([%{key: "steady"}]), do: "All quiet"
+
+  defp simple_action_queue_title(rows) do
+    "#{length(rows)} next #{plural_noun(length(rows), "move")}"
+  end
+
+  defp simple_action_row_class(:danger), do: "border-brand/25 bg-brand/[0.07]"
+  defp simple_action_row_class(:attention), do: "border-amber-500/25 bg-amber-500/[0.06]"
+  defp simple_action_row_class(:brand), do: "border-sky-500/25 bg-sky-500/[0.06]"
+  defp simple_action_row_class(:success), do: "border-emerald-500/20 bg-emerald-500/[0.05]"
+  defp simple_action_row_class(:ok), do: "border-emerald-500/20 bg-emerald-500/[0.05]"
+  defp simple_action_row_class(_), do: "border-border bg-surface/60"
+
   defp doctor_badge_class(:critical),
     do: "border-brand/25 bg-brand/10 text-brand"
 

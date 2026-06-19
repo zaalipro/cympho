@@ -7,6 +7,7 @@ defmodule CymphoWeb.DashboardLiveTest do
   alias Cympho.AgentActions
   alias Cympho.Agents
   alias Cympho.Comments
+  alias Cympho.Companies
   alias Cympho.Finances.BudgetPolicy
   alias Cympho.Goals
   alias Cympho.HeartbeatEngine.Run
@@ -79,9 +80,51 @@ defmodule CymphoWeb.DashboardLiveTest do
       {:ok, _view, html} = live(conn, "/dashboard")
 
       assert html =~ ~s(data-testid="runtime-controls")
+      assert html =~ ~s(data-testid="desktop-runtime-topbar")
+      assert html =~ ~s(data-testid="desktop-runtime-status")
+      assert html =~ "Full power"
       assert html =~ "Pause"
       assert html =~ "Stop"
+      assert html =~ ~s(data-testid="desktop-runtime-pause")
+      assert html =~ ~s(data-testid="desktop-runtime-stop")
+      assert html =~ ~s(action="/runtime-control/pause")
       assert html =~ ~s(action="/runtime-control/stop")
+      assert html =~ ~s(id="sidebar")
+      assert html =~ ~s(data-mobile-drawer)
+      assert html =~ ~s(aria-controls="sidebar")
+      assert html =~ ~s(aria-expanded="false")
+    end
+
+    test "paused company shell topbar offers resume instead of pause" do
+      conn = authenticated_conn(%{role: "owner", is_board_member: true})
+
+      {:ok, _company} =
+        Companies.execute_company_update(current_company(), %{
+          status: "paused",
+          paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
+          paused_reason: "maintenance"
+        })
+
+      {:ok, _view, html} = live(conn, "/dashboard")
+
+      assert html =~ ~s(data-testid="desktop-runtime-topbar")
+      assert html =~ "Paused"
+      assert html =~ ~s(data-testid="desktop-runtime-resume")
+      assert html =~ ~s(action="/runtime-control/resume")
+      refute html =~ ~s(data-testid="desktop-runtime-pause")
+    end
+
+    test "low power company shell topbar offers full power instead of low power" do
+      conn = authenticated_conn(%{role: "owner", is_board_member: true})
+      {:ok, _company} = Companies.enter_low_power_mode(current_company(), "after hours")
+
+      {:ok, _view, html} = live(conn, "/dashboard")
+
+      assert html =~ ~s(data-testid="desktop-runtime-topbar")
+      assert html =~ "Low power"
+      assert html =~ ~s(data-testid="desktop-runtime-full-power")
+      assert html =~ ~s(action="/runtime-control/resume")
+      refute html =~ ~s(data-testid="desktop-runtime-low-power")
     end
 
     test "renders spend posture and budget next action", %{
@@ -731,8 +774,7 @@ defmodule CymphoWeb.DashboardLiveTest do
              AgentActions.execute(issue, ceo, [
                %{
                  "type" => "block_issue",
-                 "reason" =>
-                   "[blocked] What happened: CEO is handing this back for owner verification. Blocker: owner must verify the CEO owner update before closure. Impact: no agent work remains. Next decision: owner accepts or reopens."
+                 "reason" => owner_signoff_block_reason()
                }
              ])
 
@@ -744,5 +786,17 @@ defmodule CymphoWeb.DashboardLiveTest do
     |> Plug.Test.init_test_session(%{})
     |> Plug.Conn.put_session("user_id", user.id)
     |> Plug.Conn.put_session("company_id", company.id)
+  end
+
+  defp owner_signoff_block_reason do
+    """
+    Cause: CEO is handing this back for owner verification.
+    Attempted fix: inspected the CEO owner update and confirmed no agent work remains.
+    Needs: owner must verify the CEO owner update before closure.
+    Current state: no agent work remains; issue is waiting on owner acceptance or revision.
+    Next decision: owner accepts the update or reopens it for revision.
+    Restart packet: open the CEO owner update, inspect evidence, then accept or request revision.
+    """
+    |> String.trim()
   end
 end

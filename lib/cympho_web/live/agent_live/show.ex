@@ -150,13 +150,22 @@ defmodule CymphoWeb.AgentLive.Show do
 
     case Agents.update_agent(socket.assigns.agent, normalize_agent_params(full_params)) do
       {:ok, agent} ->
-        {socket, revision_message} =
-          maybe_record_config_revision(socket, socket.assigns.agent, agent)
+        case Agents.update_agent_permissions(agent, permissions) do
+          {:ok, agent} ->
+            {socket, revision_message} =
+              maybe_record_config_revision(socket, socket.assigns.agent, agent)
 
-        {:noreply,
-         socket
-         |> put_flash(:info, revision_message)
-         |> assign_agent(agent)}
+            {:noreply,
+             socket
+             |> put_flash(:info, revision_message)
+             |> assign_agent(agent)}
+
+          {:error, changeset} ->
+            {:noreply,
+             socket
+             |> put_flash(:error, "Could not save permissions.")
+             |> assign(:form, to_form(changeset))}
+        end
 
       {:error, :pending_board_approval, approval_id} ->
         {:noreply,
@@ -834,16 +843,28 @@ defmodule CymphoWeb.AgentLive.Show do
     case params do
       %{"env_keys" => keys, "env_values" => values}
       when is_map(keys) and is_map(values) ->
-        indices = keys |> Map.keys() |> Enum.sort_by(&safe_to_int/1)
-        Enum.map(indices, fn i -> %{key: keys[i] || "", value: values[i] || ""} end)
+        indices =
+          keys
+          |> Map.keys()
+          |> Enum.filter(&env_row_index?/1)
+          |> Enum.sort_by(&safe_to_int/1)
+
+        case indices do
+          [] -> normalize_env_rows(fallback)
+          indices -> Enum.map(indices, fn i -> %{key: keys[i] || "", value: values[i] || ""} end)
+        end
 
       _ ->
         fallback
     end
   end
 
+  defp env_row_index?(i) when is_integer(i), do: i >= 0
+  defp env_row_index?(s) when is_binary(s), do: String.match?(s, ~r/^\d+$/)
+  defp env_row_index?(_), do: false
+
   defp safe_to_int(s) when is_binary(s), do: String.to_integer(s)
-  defp safe_to_int(s), do: s
+  defp safe_to_int(s) when is_integer(s), do: s
 
   defp assign_env_rows_for_profile(socket, profile_id) do
     env_rows = env_rows_with_profile_defaults(profile_id, socket.assigns.env_rows)
@@ -1295,7 +1316,12 @@ defmodule CymphoWeb.AgentLive.Show do
   defp args_to_text(_), do: ""
 
   defp permissions_from_params(%{"permissions" => params}, fallback) when is_map(params) do
-    Map.merge(fallback, Map.new(params, fn {k, v} -> {to_string(k), truthy?(v)} end))
+    permissions =
+      params
+      |> Enum.reject(fn {key, _value} -> unused_permission_key?(key) end)
+      |> Map.new(fn {k, v} -> {to_string(k), truthy?(v)} end)
+
+    Map.merge(fallback, permissions)
   end
 
   defp permissions_from_params(_params, fallback), do: fallback
@@ -1303,13 +1329,20 @@ defmodule CymphoWeb.AgentLive.Show do
   defp truthy?(true), do: true
   defp truthy?("true"), do: true
   defp truthy?("on"), do: true
+  defp truthy?("1"), do: true
+  defp truthy?(1), do: true
+  defp truthy?(values) when is_list(values), do: Enum.any?(values, &truthy?/1)
   defp truthy?(_), do: false
 
   defp normalise_permissions(nil), do: %{}
 
   defp normalise_permissions(map) when is_map(map) do
-    Map.new(map, fn {k, v} -> {to_string(k), !!v} end)
+    map
+    |> Enum.reject(fn {key, _value} -> unused_permission_key?(key) end)
+    |> Map.new(fn {k, v} -> {to_string(k), !!v} end)
   end
+
+  defp unused_permission_key?(key), do: String.starts_with?(to_string(key), "_unused_")
 
   defp reports_to_options(%{id: company_id}, exclude_id) do
     company_id

@@ -19,6 +19,7 @@ defmodule CymphoWeb.IssueLiveTest do
   alias Cympho.Wakes
   alias Cympho.Wakes.AgentWake
   alias Cympho.WorkProducts
+  alias Cympho.Workspaces
 
   defp create_agent(attrs), do: Agents.create_agent(scoped_attrs(attrs))
   defp create_goal(attrs), do: Goals.create_goal(scoped_attrs(attrs))
@@ -40,6 +41,16 @@ defmodule CymphoWeb.IssueLiveTest do
       [{_tag, attrs, _children} | _rest] -> Map.new(attrs)
       [] -> %{}
     end
+  end
+
+  defp unique_project_prefix do
+    suffix =
+      System.unique_integer([:positive])
+      |> Integer.digits(26)
+      |> Enum.map_join(fn digit -> <<?A + digit>> end)
+      |> String.slice(0, 8)
+
+    "Q" <> suffix
   end
 
   setup do
@@ -941,6 +952,15 @@ defmodule CymphoWeb.IssueLiveTest do
   end
 
   describe "Show - Issue Detail" do
+    test "renders a live-updating document title on first load", %{issue: issue} do
+      html =
+        conn()
+        |> get("/issues/#{issue.id}")
+        |> html_response(200)
+
+      assert html =~ ~s(<title data-suffix=" · Cympho">#{issue.title} · Cympho</title>)
+    end
+
     test "renders issue detail", %{issue: issue} do
       {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
 
@@ -1176,6 +1196,38 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Floating"
       assert html =~ "This work is not tied to a mission"
       assert html =~ ~s(href="/goals")
+    end
+
+    test "shows owner-readable blocker packet in the sidebar" do
+      {:ok, issue} =
+        create_issue(%{
+          title: "Blocked with packet",
+          description: "Provider setup is missing.",
+          status: :blocked,
+          priority: :high,
+          monitor_state: %{
+            "blocker_packet" => %{
+              "kind" => "provider_auth",
+              "cause" => "Provider credentials are missing.",
+              "attempted_fix" => "Checked the runtime profile and company secrets.",
+              "needs" => "Owner adds OPENAI_API_KEY or selects a configured provider.",
+              "current_state" => "Runtime is paused before spending retries.",
+              "next_decision" => "Owner configures credentials, then relaunches the issue.",
+              "restart_packet" =>
+                "Open Operations, confirm provider health, and relaunch focused runtime."
+            }
+          }
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ ~s(data-testid="issue-blocker-packet")
+      assert html =~ "Blocker packet"
+      assert html =~ "Provider Auth"
+      assert html =~ "Owner adds OPENAI_API_KEY"
+      assert html =~ "Owner configures credentials"
+      assert html =~ "Runtime is paused before spending retries"
+      assert html =~ "Open Operations, confirm provider health"
     end
 
     test "shows focused runtime command for dispatchable issues in review mode" do
@@ -1947,6 +1999,50 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "/agents/#{agent.id}?tab=configuration#agent-process-command"
     end
 
+    test "shows paused company runtime as the issue launch blocker", %{
+      current_company: company
+    } do
+      {:ok, _paused} =
+        Companies.execute_company_update(company, %{
+          status: "paused",
+          paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
+          paused_reason: "operator hold"
+        })
+
+      {:ok, agent} =
+        create_agent(%{
+          name: "Paused Company Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom", "repo_capable" => true}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Paused company runtime blocker",
+          description: "Acceptance criteria:\n- Runtime stays stopped while paused.",
+          status: :todo,
+          priority: :high,
+          assignee_id: agent.id,
+          assigned_role: "engineer"
+        })
+
+      {:ok, view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ "Agent preflight"
+      assert html =~ "Paused"
+      assert html =~ "Runtime paused"
+      assert html =~ "operator hold"
+      assert html =~ "Open runtime controls"
+      assert html =~ "Resume company runtime before agents start."
+
+      assert html =~
+               "Company runtime is paused. Resume runtime before starting agents or harnesses."
+
+      assert has_element?(view, "button[disabled]", "Start agent")
+    end
+
     test "shows dispatch eligibility blocker for busy assigned agent on issue detail" do
       {:ok, agent} =
         create_agent(%{
@@ -2021,6 +2117,67 @@ defmodule CymphoWeb.IssueLiveTest do
       assert textarea_value(html, "textarea[name='description']") =~ "Evidence required:"
       assert textarea_value(html, "textarea[name='description']") =~ "Verification required:"
       assert textarea_value(html, "textarea[name='description']") =~ "Definition of done:"
+    end
+
+    test "shows simple workspace isolation setup action on issue detail" do
+      {:ok, project} =
+        create_project(%{
+          name: "Workspace Isolation UI",
+          prefix: unique_project_prefix()
+        })
+
+      {:ok, project_workspace} =
+        Workspaces.create_project_workspace(%{
+          name: "Shared UI checkout",
+          cwd: "/tmp/cympho/shared-ui-checkout-#{System.unique_integer([:positive])}",
+          is_primary: true,
+          project_id: project.id,
+          company_id: project.company_id
+        })
+
+      {:ok, agent} =
+        create_agent(%{
+          name: "Workspace UI Engineer",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo", "model" => "custom", "repo_capable" => true}
+        })
+
+      description = """
+      Acceptance criteria:
+      - Workspace setup warning is visible.
+
+      Evidence required:
+      - Issue detail includes the warning.
+
+      Verification required:
+      - Focused render test covers the preflight action.
+
+      Definition of done:
+      - Operator can open the workspace.
+      """
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Workspace isolation UI issue",
+          description: description,
+          status: :todo,
+          priority: :high,
+          assignee_id: agent.id,
+          assigned_role: "engineer",
+          project_id: project.id
+        })
+
+      {:ok, _view, html} = live(conn(), "/issues/#{issue.id}")
+
+      assert html =~ ~s(id="issue-simple-preflight-action")
+      assert html =~ "Setup needed"
+      assert html =~ "Workspace isolation"
+      assert html =~ "Attach a worktree before agents edit files."
+      assert html =~ "Shared UI checkout"
+      assert html =~ "/workspaces/#{project_workspace.id}"
+      assert html =~ "Open workspace"
     end
 
     test "shows delivery brief repair for an assigned repo agent without assigned role" do

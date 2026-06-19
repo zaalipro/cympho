@@ -602,6 +602,11 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "Filtered to"
       assert html =~ parent_identifier
       assert html =~ "Show all delegated work"
+      assert html =~ ~s(data-testid="operations-simple-action-queue")
+      assert html =~ ~s(data-testid="operations-simple-action-delegated")
+      assert html =~ "Action queue"
+      assert html =~ "2 runnable delegated items"
+      assert html =~ "Focus queue"
       assert html =~ "Run delegated CEO work"
       assert html =~ "Queue runnable work"
       assert html =~ "Define owner-ready success metrics"
@@ -623,7 +628,7 @@ defmodule CymphoWeb.OperationsLiveTest do
 
       html =
         view
-        |> element("button", "Queue runnable work")
+        |> element("[data-testid='operations-simple-action-button-delegated']")
         |> render_click()
 
       assert html =~ "Queued 2 delegated work items for focused dispatch."
@@ -1135,8 +1140,7 @@ defmodule CymphoWeb.OperationsLiveTest do
                AgentActions.execute(issue, ceo, [
                  %{
                    "type" => "block_issue",
-                   "reason" =>
-                     "[blocked] What happened: CEO is handing this back for owner verification. Blocker: owner must verify the CEO owner update before closure. Impact: no agent work remains. Next decision: owner accepts or reopens."
+                   "reason" => owner_signoff_block_reason()
                  }
                ])
 
@@ -1150,6 +1154,9 @@ defmodule CymphoWeb.OperationsLiveTest do
       assert html =~ "Owner accepts from operations"
       assert html =~ "Accept and close"
       assert html =~ "Accept CEO owner updates"
+      assert html =~ ~s(data-testid="operations-simple-action-owner-signoff")
+      assert html =~ "1 CEO update waiting"
+      assert html =~ ~s(href="#owner-signoff-queue")
 
       html =
         view
@@ -1217,8 +1224,7 @@ defmodule CymphoWeb.OperationsLiveTest do
                AgentActions.execute(issue, ceo, [
                  %{
                    "type" => "block_issue",
-                   "reason" =>
-                     "[blocked] What happened: CEO is handing this back for owner verification. Blocker: owner must verify the CEO owner update before closure. Impact: no agent work remains. Next decision: owner accepts or reopens."
+                   "reason" => owner_signoff_block_reason()
                  }
                ])
 
@@ -1306,8 +1312,7 @@ defmodule CymphoWeb.OperationsLiveTest do
                AgentActions.execute(issue, ceo, [
                  %{
                    "type" => "block_issue",
-                   "reason" =>
-                     "[blocked] What happened: CEO is handing this back for owner verification. Blocker: owner must verify the CEO owner update before closure. Impact: no agent work remains. Next decision: owner accepts or reopens."
+                   "reason" => owner_signoff_block_reason()
                  }
                ])
 
@@ -1374,8 +1379,7 @@ defmodule CymphoWeb.OperationsLiveTest do
                AgentActions.execute(issue, ceo, [
                  %{
                    "type" => "block_issue",
-                   "reason" =>
-                     "[blocked] What happened: CEO is handing this back for owner verification. Blocker: owner must verify the CEO owner update before closure. Impact: no agent work remains. Next decision: owner accepts or reopens."
+                   "reason" => owner_signoff_block_reason()
                  }
                ])
 
@@ -2076,6 +2080,18 @@ defmodule CymphoWeb.OperationsLiveTest do
     |> Plug.Test.init_test_session(%{})
     |> Plug.Conn.put_session("user_id", user.id)
     |> Plug.Conn.put_session("company_id", company.id)
+  end
+
+  defp owner_signoff_block_reason do
+    """
+    Cause: CEO is handing this back for owner verification.
+    Attempted fix: inspected the CEO owner update and confirmed no agent work remains.
+    Needs: owner must verify the CEO owner update before closure.
+    Current state: no agent work remains; issue is waiting on owner acceptance or revision.
+    Next decision: owner accepts the update or reopens it for revision.
+    Restart packet: open the CEO owner update, inspect evidence, then accept or request revision.
+    """
+    |> String.trim()
   end
 
   defp unique_prefix(prefix) do

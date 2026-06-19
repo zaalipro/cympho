@@ -261,6 +261,43 @@ defmodule CymphoWeb.InboxLiveTest do
       assert html =~ ~s(href="/operations#runtime-launch-checklist")
       refute html =~ "Ask for evidence after runtime starts."
     end
+
+    test "shows issues assigned directly to the human in a needs-action queue", %{conn: conn} do
+      {conn, user, company} = ConnCase.register_and_log_in_user(conn)
+
+      {:ok, action_issue} =
+        Issues.create_issue(%{
+          title: "Approve production credentials",
+          description: "Only the owner can create the provider key.",
+          status: :blocked,
+          priority: :critical,
+          company_id: company.id,
+          assignee_user_id: user.id
+        })
+
+      {:ok, _done_issue} =
+        Issues.create_issue(%{
+          title: "Already resolved human task",
+          description: "Done work should not stay in the human action queue.",
+          status: :done,
+          priority: :critical,
+          company_id: company.id,
+          assignee_user_id: user.id
+        })
+
+      conn = live_session_conn(conn, user, company)
+      {:ok, _view, html} = live(conn, "/inbox?status=action&density=detailed")
+
+      assert html =~ "Needs my action"
+      assert html =~ "My action"
+      assert html =~ "Handle your assigned blockers"
+      assert html =~ "Approve production credentials"
+      assert html =~ "Only the owner can create the provider key."
+      assert html =~ "To #{user.name}"
+      assert html =~ "Critical"
+      assert html =~ ~s(href="/issues/#{action_issue.id}")
+      refute html =~ "Already resolved human task"
+    end
   end
 
   describe "bulk triage" do

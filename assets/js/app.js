@@ -2344,19 +2344,63 @@ function initSidebarMobile() {
   const overlay = document.getElementById('sidebar-overlay');
   const sidebar = document.getElementById('sidebar');
   const mobileMenuBtn = document.querySelector('[data-mobile-menu-btn]');
+  const desktopQuery = window.matchMedia('(min-width: 1024px)');
+
+  if (!sidebar) return;
+
+  const setSidebarOpen = (open) => {
+    const desktop = desktopQuery.matches;
+    const shouldOpen = desktop || open;
+
+    sidebar.classList.toggle('-translate-x-full', !shouldOpen);
+
+    if (shouldOpen) {
+      sidebar.removeAttribute('inert');
+      sidebar.removeAttribute('aria-hidden');
+    } else {
+      sidebar.setAttribute('inert', '');
+      sidebar.setAttribute('aria-hidden', 'true');
+    }
+
+    if (overlay) {
+      overlay.classList.toggle('hidden', desktop || !open);
+    }
+
+    if (mobileMenuBtn) {
+      mobileMenuBtn.setAttribute('aria-expanded', open && !desktop ? 'true' : 'false');
+    }
+  };
+
+  const syncSidebarForViewport = () => {
+    setSidebarOpen(desktopQuery.matches);
+  };
+
+  syncSidebarForViewport();
 
   if (overlay) {
     overlay.addEventListener('click', () => {
-      sidebar.classList.add('-translate-x-full');
-      overlay.classList.add('hidden');
+      setSidebarOpen(false);
     });
   }
 
   if (mobileMenuBtn) {
     mobileMenuBtn.addEventListener('click', () => {
-      sidebar.classList.remove('-translate-x-full');
-      overlay.classList.remove('hidden');
+      setSidebarOpen(true);
     });
+  }
+
+  sidebar.addEventListener('click', (event) => {
+    if (desktopQuery.matches) return;
+
+    if (event.target.closest('a[href], [data-quick-create-trigger]')) {
+      setSidebarOpen(false);
+    }
+  });
+
+  if (desktopQuery.addEventListener) {
+    desktopQuery.addEventListener('change', syncSidebarForViewport);
+  } else {
+    desktopQuery.addListener(syncSidebarForViewport);
   }
 
   // Company switcher button in mobile header

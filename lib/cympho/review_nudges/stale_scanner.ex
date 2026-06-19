@@ -12,9 +12,11 @@ defmodule Cympho.ReviewNudges.StaleScanner do
        the wake and we move on.
 
     2. **Re-emits at T1.** If a nudge is older than `:stale_t1_seconds` and
-       has been re-emitted fewer than `:max_re_emits` times, drop a fresh
-       wake with reason `"review_nudge_re_emit"` so the heartbeat
-       broadcast fires again. Wakes carry an `re_emit_count` in metadata.
+       has been re-emitted fewer than `:max_re_emits` times, advance the
+       active wake chain with a fresh `"review_nudge_re_emit"` wake so the
+       heartbeat broadcast fires again. Wakes carry an `re_emit_count` in
+       metadata, and superseded wakes are consumed so one stuck review does
+       not accumulate duplicate recovery work.
 
     3. **Escalates at T2.** If a nudge is older than `:stale_t2_seconds` or
        has hit `:max_re_emits`, try a *different* agent in the same role
@@ -97,6 +99,10 @@ defmodule Cympho.ReviewNudges.StaleScanner do
         re_emit_count = re_emit_count(fresh)
 
         cond do
+          superseded_by_fresher_active_nudge?(fresh) ->
+            _ = Wakes.consume_review_nudge(fresh)
+            {:skip, :superseded}
+
           age_seconds >= cfg.t2_seconds or re_emit_count >= cfg.max_re_emits ->
             escalate(issue, fresh)
 
@@ -147,7 +153,7 @@ defmodule Cympho.ReviewNudges.StaleScanner do
       |> Map.put("re_emit_count", current_count + 1)
       |> Map.put("re_emit_of", wake.id)
 
-    {:ok, _new_wake} =
+    {:ok, new_wake} =
       Wakes.do_wake_agent(
         wake.agent_id,
         issue.id,
@@ -157,7 +163,87 @@ defmodule Cympho.ReviewNudges.StaleScanner do
         new_metadata
       )
 
+    new_wake = refresh_re_emitted_wake!(new_wake)
+    if new_wake.id != wake.id, do: Wakes.consume_review_nudge(wake)
+    consume_superseded_active_nudges(new_wake)
+
     {:re_emitted, current_count + 1}
+  end
+
+  defp refresh_re_emitted_wake!(%AgentWake{id: wake_id}) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    from(w in AgentWake, where: w.id == ^wake_id)
+    |> Repo.update_all(set: [inserted_at: now])
+
+    Repo.get!(AgentWake, wake_id)
+  end
+
+  defp superseded_by_fresher_active_nudge?(%AgentWake{} = wake) do
+    active_nudges_for_chain(wake)
+    |> Enum.any?(fn other ->
+      other.id != wake.id and same_nudge_chain?(other, wake) and fresher_than?(other, wake)
+    end)
+  end
+
+  defp consume_superseded_active_nudges(%AgentWake{} = keeper) do
+    keeper
+    |> active_nudges_for_chain()
+    |> Enum.reject(&(&1.id == keeper.id))
+    |> Enum.filter(&same_nudge_chain?(&1, keeper))
+    |> Enum.each(&Wakes.consume_review_nudge/1)
+  end
+
+  defp active_nudges_for_chain(%AgentWake{issue_id: issue_id, agent_id: agent_id}) do
+    from(w in AgentWake,
+      where:
+        w.issue_id == ^issue_id and w.agent_id == ^agent_id and
+          w.status in ["pending", "running"] and
+          fragment("?->>'source' = ?", w.metadata, "review_nudge")
+    )
+    |> Repo.all()
+  end
+
+  defp same_nudge_chain?(left, right), do: nudge_chain_key(left) == nudge_chain_key(right)
+
+  defp nudge_chain_key(%AgentWake{metadata: metadata}) do
+    metadata = metadata || %{}
+
+    metadata_value(metadata, "nudge_group_key") ||
+      metadata_value(metadata, "nudge_key") ||
+      metadata_value(metadata, "contract_key") ||
+      blocker_key(metadata) ||
+      metadata_value(metadata, "summary") ||
+      "review_nudge"
+  end
+
+  defp blocker_key(metadata) do
+    blocker_keys =
+      metadata
+      |> metadata_value("blocker_keys")
+      |> List.wrap()
+      |> Enum.reject(&(&1 in [nil, ""]))
+
+    cond do
+      blocker_keys != [] ->
+        Enum.join(Enum.map(blocker_keys, &to_string/1), "|")
+
+      metadata_value(metadata, "blocker_key") not in [nil, ""] ->
+        metadata_value(metadata, "blocker_key")
+
+      true ->
+        nil
+    end
+  end
+
+  defp metadata_value(metadata, key) do
+    Map.get(metadata, key) || Map.get(metadata, String.to_existing_atom(key))
+  rescue
+    ArgumentError -> Map.get(metadata, key)
+  end
+
+  defp fresher_than?(%AgentWake{inserted_at: left}, %AgentWake{inserted_at: right}) do
+    DateTime.compare(left, right) == :gt
   end
 
   defp escalate(issue, wake) do

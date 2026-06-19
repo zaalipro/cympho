@@ -40,12 +40,14 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
     ceo_launch_preview =
       ceo_launch_preview(assigns.issue, assigns.orchestrator_enabled?, issue_preflight)
 
+    blocker_packet = issue_blocker_packet(assigns.issue)
     ceo_outcome_card = ceo_outcome_card(assigns.issue, assigns.runs, assigns.all_agents)
 
     assigns =
       assigns
       |> assign(:issue_preflight, issue_preflight)
       |> assign(:ceo_launch_preview, ceo_launch_preview)
+      |> assign(:blocker_packet, blocker_packet)
       |> assign(:ceo_outcome_card, ceo_outcome_card)
       |> assign(
         :ceo_flow_steps,
@@ -153,6 +155,47 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           </div>
         </div>
 
+        <div
+          :if={@blocker_packet}
+          id="issue-blocker-packet"
+          data-testid="issue-blocker-packet"
+          class="rounded-md border border-amber-500/25 bg-amber-500/[0.08] p-3 text-amber-50"
+        >
+          <div class="flex items-start gap-2.5">
+            <span class="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10">
+              <.icon name="hero-exclamation-triangle-mini" class="h-4 w-4 text-white" />
+            </span>
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-100/80">
+                  Blocker packet
+                </p>
+                <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-amber-100">
+                  {blocker_packet_kind_label(@blocker_packet)}
+                </span>
+              </div>
+              <p class="mt-1 text-sm font-590 leading-5 text-white">
+                {blocker_packet_value(@blocker_packet, "needs") || "Needs owner decision"}
+              </p>
+              <p class="mt-1 text-[11px] leading-4 text-amber-100/75">
+                {blocker_packet_value(@blocker_packet, "next_decision") ||
+                  blocker_packet_value(@blocker_packet, "restart_packet") ||
+                  "Resolve the named blocker, then relaunch or close with owner acceptance."}
+              </p>
+            </div>
+          </div>
+
+          <dl class="ui-advanced-only mt-3 grid gap-2 text-[11px] leading-4">
+            <div
+              :for={{label, value} <- blocker_packet_fields(@blocker_packet)}
+              class="rounded border border-amber-500/15 bg-black/10 px-2 py-1.5"
+            >
+              <dt class="font-semibold uppercase tracking-[0.1em] text-amber-100/65">{label}</dt>
+              <dd class="mt-0.5 text-amber-50/90">{value}</dd>
+            </div>
+          </dl>
+        </div>
+
         <hr class="border-hairline" />
 
         <div id="issue-agent-panel" class="space-y-2">
@@ -186,6 +229,37 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
               >
                 <.icon name="hero-pause-mini" class="h-3.5 w-3.5 text-white" /> Pause
               </button>
+            </div>
+          </div>
+
+          <% simple_setup_action = simple_preflight_action(@issue_preflight) %>
+          <div
+            :if={simple_setup_action}
+            id="issue-simple-preflight-action"
+            class="ui-simple-only rounded-md border border-white/15 bg-white/[0.06] p-2.5"
+          >
+            <div class="flex items-start gap-2.5">
+              <span class="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10">
+                <.icon name="hero-exclamation-triangle-mini" class="h-4 w-4 text-white" />
+              </span>
+              <div class="min-w-0 flex-1">
+                <p class="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/70">
+                  Setup needed
+                </p>
+                <p class="mt-0.5 truncate text-sm font-590 text-white">
+                  {item_value(simple_setup_action, :label)}
+                </p>
+                <p class="mt-0.5 text-[11px] leading-4 text-white/60">
+                  {simple_preflight_action_detail(simple_setup_action)}
+                </p>
+                <.app_link
+                  :if={item_value(simple_setup_action, :target_path)}
+                  navigate={item_value(simple_setup_action, :target_path)}
+                  class="mt-1.5 inline-flex text-[11px] font-590 text-white underline underline-offset-2"
+                >
+                  {item_value(simple_setup_action, :target_label) || "Fix setup"}
+                </.app_link>
+              </div>
             </div>
           </div>
 
@@ -268,8 +342,12 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
               phx-click="toggle_agent_panel"
               size="sm"
               variant="secondary"
-              disabled={!@orchestrator_enabled? || Cympho.Issues.issue_runtime_paused?(@issue)}
-              title={start_agent_disabled_reason(@orchestrator_enabled?, @issue)}
+              disabled={
+                not is_nil(
+                  start_agent_disabled_reason(@orchestrator_enabled?, @issue, @issue_preflight)
+                )
+              }
+              title={start_agent_disabled_reason(@orchestrator_enabled?, @issue, @issue_preflight)}
             >
               {(@show_agent_panel && "Hide") || "Start"} agent
             </.button>
@@ -284,11 +362,11 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             </.button>
           </div>
           <p
-            :if={start_agent_disabled_reason(@orchestrator_enabled?, @issue)}
+            :if={start_agent_disabled_reason(@orchestrator_enabled?, @issue, @issue_preflight)}
             data-testid="start-agent-disabled-reason"
             class="ui-advanced-only rounded-md border border-amber-500/20 bg-amber-500/[0.06] px-2 py-1.5 text-[11px] leading-4 text-amber-100"
           >
-            {start_agent_disabled_reason(@orchestrator_enabled?, @issue)}
+            {start_agent_disabled_reason(@orchestrator_enabled?, @issue, @issue_preflight)}
           </p>
 
           <div :if={@show_agent_panel} class="ui-advanced-only space-y-2">
@@ -885,10 +963,13 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
 
   defp focused_runtime_command(_issue), do: nil
 
-  defp start_agent_disabled_reason(orchestrator_enabled?, issue) do
+  defp start_agent_disabled_reason(orchestrator_enabled?, issue, preflight) do
     cond do
       Cympho.Issues.issue_runtime_paused?(issue) ->
         "This issue is paused. Resume it before starting agent runtime."
+
+      company_runtime_paused_preflight?(preflight) ->
+        "Company runtime is paused. Resume runtime before starting agents or harnesses."
 
       not orchestrator_enabled? ->
         "Inline agent start is disabled in review mode. Use the focused command above or open Operations to launch runtime."
@@ -897,6 +978,14 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
         nil
     end
   end
+
+  defp company_runtime_paused_preflight?(%{label: "Paused"}), do: true
+
+  defp company_runtime_paused_preflight?(%{items: items}) when is_list(items) do
+    Enum.any?(items, &(item_value(&1, :label) == "Runtime paused"))
+  end
+
+  defp company_runtime_paused_preflight?(_preflight), do: false
 
   defp relaunch_focus_button_label(%{status: status}) when status in [:blocked, "blocked"],
     do: "Reopen and prioritize relaunch"
@@ -907,6 +996,19 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
     case preflight do
       %{first_action: action} when is_map(action) -> action
       _ -> nil
+    end
+  end
+
+  defp simple_preflight_action(preflight), do: relaunch_setup_action(preflight)
+
+  defp simple_preflight_action_detail(action) do
+    case item_value(action, :label) do
+      "Workspace isolation" -> "Attach a worktree before agents edit files."
+      "Repo-capable runtime" -> "Choose a harness that can change files."
+      "Delivery brief" -> "Tighten the issue brief before launch."
+      "Dispatch eligibility" -> "Free or assign an eligible agent."
+      "Runtime paused" -> "Resume company runtime before agents start."
+      _ -> "Fix before dispatch."
     end
   end
 
@@ -1624,6 +1726,88 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
 
   defp preflight_dot_class(_),
     do: "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-ink-tertiary"
+
+  defp issue_blocker_packet(%{monitor_state: monitor_state}) when is_map(monitor_state) do
+    packet =
+      Map.get(monitor_state, "blocker_packet") ||
+        Map.get(monitor_state, :blocker_packet)
+
+    if valid_blocker_packet?(packet), do: packet
+  end
+
+  defp issue_blocker_packet(_issue), do: nil
+
+  defp valid_blocker_packet?(packet) when is_map(packet) do
+    Enum.any?(["needs", "next_decision", "restart_packet", "cause"], fn key ->
+      not is_nil(blocker_packet_value(packet, key))
+    end)
+  end
+
+  defp valid_blocker_packet?(_packet), do: false
+
+  defp blocker_packet_fields(packet) when is_map(packet) do
+    [
+      {"Cause", "cause"},
+      {"Attempted fix", "attempted_fix"},
+      {"Needs", "needs"},
+      {"Current state", "current_state"},
+      {"Next decision", "next_decision"},
+      {"Restart packet", "restart_packet"}
+    ]
+    |> Enum.map(fn {label, key} -> {label, blocker_packet_value(packet, key)} end)
+    |> Enum.reject(fn {_label, value} -> is_nil(value) end)
+  end
+
+  defp blocker_packet_fields(_packet), do: []
+
+  defp blocker_packet_kind_label(packet) do
+    packet
+    |> blocker_packet_value("kind")
+    |> case do
+      nil ->
+        "Other"
+
+      kind ->
+        kind
+        |> String.replace("_", " ")
+        |> String.split()
+        |> Enum.map_join(" ", &String.capitalize/1)
+    end
+  end
+
+  defp blocker_packet_value(packet, key) when is_map(packet) do
+    value = Map.get(packet, key) || Map.get(packet, blocker_packet_atom_key(key))
+
+    case value do
+      value when is_binary(value) ->
+        value
+        |> String.trim()
+        |> case do
+          "" -> nil
+          value -> value
+        end
+
+      value when is_integer(value) ->
+        Integer.to_string(value)
+
+      value when is_float(value) ->
+        Float.to_string(value)
+
+      _value ->
+        nil
+    end
+  end
+
+  defp blocker_packet_value(_packet, _key), do: nil
+
+  defp blocker_packet_atom_key("kind"), do: :kind
+  defp blocker_packet_atom_key("cause"), do: :cause
+  defp blocker_packet_atom_key("attempted_fix"), do: :attempted_fix
+  defp blocker_packet_atom_key("needs"), do: :needs
+  defp blocker_packet_atom_key("current_state"), do: :current_state
+  defp blocker_packet_atom_key("next_decision"), do: :next_decision
+  defp blocker_packet_atom_key("restart_packet"), do: :restart_packet
+  defp blocker_packet_atom_key(_key), do: nil
 
   defp issue_goal(%{goal: %Ecto.Association.NotLoaded{}}), do: nil
   defp issue_goal(%{goal: nil}), do: nil

@@ -649,6 +649,41 @@ defmodule CymphoWeb.AgentLiveTest do
       assert updated.runtime_config["profile_id"] == "claude-cm"
     end
 
+    test "permission toggles persist on configuration save", %{conn: conn} do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Task Assignment Agent",
+          role: :product_manager,
+          status: :idle,
+          adapter: :claude_code
+        })
+
+      {:ok, view, html} = live(conn, "/agents/#{agent.id}?tab=configuration")
+      assert html =~ "Can assign tasks"
+
+      render_submit(view, "config_save", %{
+        "agent" => %{
+          "name" => agent.name,
+          "title" => "",
+          "role" => "product_manager",
+          "parent_id" => "",
+          "runtime_profile_id" => "claude-cm",
+          "adapter" => "claude_code",
+          "max_concurrent_jobs" => "1"
+        },
+        "env_keys" => %{"_unused_0" => "", "0" => ""},
+        "env_values" => %{"_unused_0" => "", "0" => ""},
+        "permissions" => %{
+          "_unused_can_assign_tasks" => "",
+          "can_assign_tasks" => "true"
+        }
+      })
+
+      {:ok, updated} = Agents.get_agent(agent.id)
+      assert updated.permissions["can_assign_tasks"] == true
+      refute Map.has_key?(updated.permissions, "_unused_can_assign_tasks")
+    end
+
     test "saving Qwen DashScope profile persists non-secret chat config", %{conn: conn} do
       {:ok, agent} =
         create_agent(%{

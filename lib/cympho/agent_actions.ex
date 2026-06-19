@@ -19,6 +19,7 @@ defmodule Cympho.AgentActions do
     IssueBriefReadiness,
     IssueDigest,
     Issues,
+    PrincipalPermissions,
     PullRequestContract,
     Repo,
     RuntimeProfiles,
@@ -76,6 +77,9 @@ defmodule Cympho.AgentActions do
   )
   @roles Agent.role_strings()
   @priorities ~w(low medium high critical)
+  @task_assignment_permissions ~w(task.assign tasks.assign tasks:assign task.create tasks.create tasks:create)
+  @task_assignment_permission_flags @task_assignment_permissions ++
+                                      ~w(task_assign tasks_assign can_assign_tasks can_create_tasks canAssignTasks canCreateTasks)
   @work_product_kinds ~w(code_change document url artifact other)
   @work_product_kind_aliases %{
     "code" => "code_change",
@@ -203,7 +207,7 @@ defmodule Cympho.AgentActions do
 
         {final_issue, results} =
           Enum.reduce(actions, {initial_issue, []}, fn action, {current_issue, acc} ->
-            with :ok <- authorize_action(action, agent),
+            with :ok <- authorize_action(action, current_issue, agent),
                  {:ok, action_result} <- execute_action(current_issue, agent, action) do
               log_action(current_issue, agent, action, action_result)
 
@@ -273,6 +277,28 @@ defmodule Cympho.AgentActions do
       issue,
       "Action rejected: only CEO/CTO agents may emit approve_issue, request_changes, or block_issue. " <>
         "Use submit_review to escalate, or comment to explain."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:task_assignment_permission_required, role}
+       ) do
+    system_comment(
+      issue,
+      "create_issue rejected: #{Agent.role_label(role)} task assignment requires an explicit `task.assign` or `task.create` grant for this agent. " <>
+        "Use submit_review or escalate to CEO/CTO, or ask an admin for a scoped principal permission grant."
+    )
+  end
+
+  defp maybe_emit_rejection_comment(
+         %Issue{} = issue,
+         {:task_assignment_target_forbidden, role}
+       ) do
+    system_comment(
+      issue,
+      "create_issue rejected: non-governance agents cannot create #{Agent.role_label(role)} governance work. " <>
+        "Escalate to CEO/CTO for governance-level decomposition."
     )
   end
 
@@ -916,6 +942,79 @@ defmodule Cympho.AgentActions do
 
   def unresolved_current_issue?(_issue, _agent), do: false
 
+  defp authorize_action(%{"type" => "create_issue"} = action, %Issue{} = issue, %Agent{} = agent) do
+    target_role = role_to_atom(action["role"])
+
+    cond do
+      is_nil(target_role) ->
+        {:error, {:invalid_role, @roles}}
+
+      agent.role in @governance_roles ->
+        :ok
+
+      target_role in @governance_roles ->
+        {:error, {:task_assignment_target_forbidden, target_role}}
+
+      task_assignment_granted?(agent, issue) ->
+        :ok
+
+      true ->
+        {:error, {:task_assignment_permission_required, target_role}}
+    end
+  end
+
+  defp authorize_action(action, _issue, %Agent{} = agent), do: authorize_action(action, agent)
+
+  defp task_assignment_granted?(%Agent{} = agent, %Issue{} = issue) do
+    agent_permission_flag?(agent.permissions) or
+      agent_permission_flag?(agent.capabilities) or
+      Enum.any?(@task_assignment_permissions, fn permission ->
+        PrincipalPermissions.has_permission_in_scope?(
+          agent.id,
+          "agent",
+          permission,
+          task_assignment_scopes(issue)
+        )
+      end)
+  end
+
+  defp task_assignment_scopes(%Issue{} = issue) do
+    [
+      company: issue.company_id,
+      project: issue.project_id,
+      goal: issue.goal_id,
+      issue: issue.id
+    ]
+  end
+
+  defp agent_permission_flag?(map) when is_map(map) do
+    Enum.any?(@task_assignment_permission_flags, &truthy?(Map.get(map, &1))) or
+      permission_list_includes?(Map.get(map, "permissions")) or
+      permission_list_includes?(Map.get(map, :permissions)) or
+      nested_permission_flag?(map, "task", "assign") or
+      nested_permission_flag?(map, "task", "create") or
+      nested_permission_flag?(map, "tasks", "assign") or
+      nested_permission_flag?(map, "tasks", "create")
+  end
+
+  defp agent_permission_flag?(_), do: false
+
+  defp nested_permission_flag?(map, namespace, action) do
+    case Map.get(map, namespace) || Map.get(map, String.to_atom(namespace)) do
+      nested when is_map(nested) ->
+        truthy?(Map.get(nested, action) || Map.get(nested, String.to_atom(action)))
+
+      _ ->
+        false
+    end
+  end
+
+  defp permission_list_includes?(permissions) when is_list(permissions) do
+    Enum.any?(permissions, &(to_string(&1) in @task_assignment_permissions))
+  end
+
+  defp permission_list_includes?(_), do: false
+
   defp validate_payload(%{"actions" => actions}) when is_list(actions) do
     cond do
       actions == [] ->
@@ -1371,6 +1470,8 @@ defmodule Cympho.AgentActions do
   defp execute_action(issue, agent, %{"type" => "block_issue"} = action) do
     with :ok <- ensure_governance_quality(action, "block_issue"),
          reason = tagged_blocked_note(action["reason"] || "Agent blocked this issue."),
+         blocker_kind = Map.get(action, "blocker_kind") || "other",
+         blocker_packet = blocker_packet(action, agent),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :blocked,
@@ -1378,11 +1479,9 @@ defmodule Cympho.AgentActions do
              checkout_run_id: nil,
              checked_out_at: nil,
              monitor_state:
-               Map.put(
-                 issue.monitor_state || %{},
-                 "block_reason_kind",
-                 Map.get(action, "blocker_kind")
-               )
+               (issue.monitor_state || %{})
+               |> Map.put("block_reason_kind", blocker_kind)
+               |> Map.put("blocker_packet", blocker_packet)
            }),
          {:ok, _comment} <- maybe_agent_comment(issue, agent, reason) do
       _ =
@@ -1392,7 +1491,7 @@ defmodule Cympho.AgentActions do
           action,
           "block",
           "deferred",
-          %{blocker_kind: Map.get(action, "blocker_kind")}
+          %{blocker_kind: blocker_kind, blocker_packet: blocker_packet}
         )
 
       _ = maybe_record_swarm_blocked(updated, agent, action)
@@ -3677,6 +3776,12 @@ defmodule Cympho.AgentActions do
         ~r/\b(cause|blocker|blocked|blocked on|waiting|missing|because|unavailable|down|failure|failed|conflict|owner input|dependency)\b/i
     },
     %{
+      key: :attempted_fix,
+      label: "Attempted fix",
+      detail: "State what was already tried or inspected before blocking.",
+      pattern: ~r/(^|\n)\s*(?:\[blocked\]\s*)?attempted fix\s*:/i
+    },
+    %{
       key: :needs,
       label: "Needs",
       detail:
@@ -3699,6 +3804,19 @@ defmodule Cympho.AgentActions do
         ~r/\b(next decision|next action|restart packet|resume|owner accepts|reopens|verify|close|unblock|rerun|continue)\b/i
     }
   ]
+
+  @blocker_packet_fields [
+    {"Cause", "cause"},
+    {"Attempted fix", "attempted_fix"},
+    {"Needs", "needs"},
+    {"Current state", "current_state"},
+    {"Next decision", "next_decision"},
+    {"Restart packet", "restart_packet"}
+  ]
+
+  @blocker_packet_label_pattern Enum.map_join(@blocker_packet_fields, "|", fn {label, _key} ->
+                                  Regex.escape(label)
+                                end)
 
   @request_changes_feedback_checks [
     %{
@@ -3795,9 +3913,26 @@ defmodule Cympho.AgentActions do
   end
 
   defp missing_blocker_reason_signals(reason) do
-    @block_issue_reason_checks
-    |> Enum.reject(&Regex.match?(&1.pattern, reason))
-    |> Enum.map(& &1.label)
+    field_labels =
+      @blocker_packet_fields
+      |> Enum.reject(fn {label, _key} -> block_reason_label_present?(reason, label) end)
+      |> Enum.map(fn {label, _key} -> label end)
+
+    pattern_labels =
+      @block_issue_reason_checks
+      |> Enum.reject(&Regex.match?(&1.pattern, reason))
+      |> Enum.map(& &1.label)
+
+    (field_labels ++ pattern_labels)
+    |> Enum.uniq()
+  end
+
+  defp block_reason_label_present?(reason, label) do
+    Regex.match?(block_reason_label_regex(label), reason)
+  end
+
+  defp block_reason_label_regex(label) do
+    Regex.compile!("(?:^|\\n)\\s*(?:\\[blocked\\]\\s*)?#{Regex.escape(label)}\\s*:", "i")
   end
 
   defp block_issue_reason_scaffold(reason, missing) do
@@ -3954,6 +4089,41 @@ defmodule Cympho.AgentActions do
         {:error, {:invalid_blocker_kind, "non-string", @block_reason_kinds}}
     end
   end
+
+  defp blocker_packet(action, %Agent{} = agent) do
+    reason = action |> Map.get("reason", "") |> to_string() |> String.trim()
+    blocker_kind = Map.get(action, "blocker_kind") || "other"
+
+    fields =
+      @blocker_packet_fields
+      |> Enum.map(fn {label, key} -> {key, block_reason_label_value(reason, label)} end)
+      |> Enum.into(%{})
+
+    fields
+    |> Map.merge(%{
+      "schema" => "cympho.blocker_packet.v1",
+      "kind" => blocker_kind,
+      "reason" => reason,
+      "blocked_by_agent_id" => agent.id,
+      "blocked_at" => DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+    })
+  end
+
+  defp block_reason_label_value(reason, label) do
+    pattern =
+      Regex.compile!(
+        "(?:^|\\n)\\s*(?:\\[blocked\\]\\s*)?#{Regex.escape(label)}\\s*:\\s*(.*?)(?=\\n\\s*(?:#{@blocker_packet_label_pattern})\\s*:|\\z)",
+        "is"
+      )
+
+    case Regex.run(pattern, reason, capture: :all_but_first) do
+      [value] -> value |> String.trim() |> blank_to_nil()
+      _ -> nil
+    end
+  end
+
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(value), do: value
 
   # Best-effort governance Decision record. Logs and continues on failure —
   # we never want a Decision-write error to roll back the agent's actual

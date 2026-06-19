@@ -6,7 +6,7 @@ defmodule Cympho.PrincipalPermissions.PrincipalPermissionGrant do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @primary_key {:id, :binary_id, autogenerate: true}
+  @primary_key {:id, :id, autogenerate: true}
   @foreign_key_type :binary_id
   schema "principal_permission_grants" do
     field :principal_id, :string
@@ -63,7 +63,7 @@ defmodule Cympho.PrincipalPermissions.PrincipalPermissionGrant do
   defp validate_permission_format(changeset) do
     case get_change(changeset, :permission) do
       nil -> changeset
-      _permission -> validate_format(changeset, :permission, ~r/^[a-z_]+(\.[a-z_]+)*$/)
+      _permission -> validate_format(changeset, :permission, ~r/^[a-z_]+([.:][a-z_]+)*$/)
     end
   end
 

@@ -699,6 +699,68 @@ defmodule Cympho.WakesTest do
       assert agent_wake.agent_id == agent.id
       assert agent_wake.issue_id == nil
     end
+
+    test "does not enqueue issue wakes while the company runtime is paused" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Wake Pause Co",
+          slug: "wake-pause-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Paused Company Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Paused company wake",
+          company_id: company.id,
+          assignee_id: agent.id,
+          status: :in_progress
+        })
+
+      {:ok, _paused} =
+        Companies.execute_company_update(company, %{
+          status: "paused",
+          paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
+          paused_reason: "Operator hold"
+        })
+
+      assert {:error, :company_paused} =
+               Wakes.do_wake_agent(
+                 agent.id,
+                 issue.id,
+                 "issue_commented",
+                 "system",
+                 nil,
+                 %{}
+               )
+
+      assert [] = Wakes.list_issue_wakes(issue.id)
+    end
+
+    test "does not enqueue wakes while the individual issue runtime is paused", %{
+      agent: agent,
+      issue: issue
+    } do
+      {:ok, paused} = Issues.pause_issue_runtime(issue, reason: "Operator hold")
+
+      assert {:error, :issue_runtime_paused} =
+               Wakes.do_wake_agent(
+                 agent.id,
+                 paused.id,
+                 "issue_commented",
+                 "system",
+                 nil,
+                 %{}
+               )
+
+      assert [] = Wakes.list_issue_wakes(paused.id)
+    end
   end
 
   describe "list_agent_wakes/1" do

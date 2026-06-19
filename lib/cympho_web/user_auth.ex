@@ -352,7 +352,8 @@ defmodule CymphoWeb.UserAuth do
       logo_url: company.logo_url,
       status: company.status,
       paused_at: company.paused_at,
-      paused_reason: company.paused_reason
+      paused_reason: company.paused_reason,
+      governance_config: company.governance_config || %{}
     }
   end
 

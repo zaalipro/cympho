@@ -254,6 +254,37 @@ defmodule Cympho.RuntimePreflightTest do
            )
   end
 
+  test "for_issue reports paused company runtime before agent staffing blockers" do
+    {:ok, company} =
+      Companies.create_company(%{name: "Preflight Paused Co", slug: unique_slug()})
+
+    {:ok, _paused} =
+      Companies.execute_company_update(company, %{
+        status: "paused",
+        paused_at: DateTime.utc_now() |> DateTime.truncate(:second),
+        paused_reason: "operator hold"
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        title: "Paused runtime issue",
+        status: :todo,
+        priority: :high,
+        assigned_role: "ceo",
+        company_id: company.id
+      })
+
+    preflight = RuntimePreflight.for_issue(issue, autonomy_enabled?: true)
+
+    assert preflight.status == :blocked
+    assert preflight.label == "Paused"
+    assert preflight.summary =~ "Company runtime is paused"
+    assert preflight.first_action.label == "Runtime paused"
+    assert preflight.first_action.detail =~ "operator hold"
+    assert preflight.first_action.target_path == "/dashboard"
+    assert preflight.first_action.target_label == "Open runtime controls"
+  end
+
   test "for_issue counts scoped secrets for assigned agent credentials" do
     {:ok, company} =
       Companies.create_company(%{name: "Preflight Secrets Co", slug: unique_slug()})

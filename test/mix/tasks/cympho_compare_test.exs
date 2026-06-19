@@ -60,6 +60,21 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert evidence =~ "company PubSub updates"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "human_action_inbox"))
+
+    assert evidence =~ "Needs my action"
+    assert evidence =~ "current human user"
+    assert evidence =~ "notification-only noise"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "scoped_agent_task_assignment"))
+
+    assert evidence =~ "auditable grant path"
+    assert evidence =~ "task.assign/task.create"
+    assert evidence =~ "can_assign_tasks"
+    assert evidence =~ "without CEO involvement"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "governance"))
 
     assert evidence =~ "governance risk briefs"
@@ -109,6 +124,13 @@ defmodule Mix.Tasks.CymphoCompareTest do
              Enum.find(rows, &(&1["slug"] == "stale_lock_recovery"))
 
     assert evidence =~ "preserves assignee ownership"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "stale_patrol_exclusion"))
+
+    assert evidence =~ "monitor_state[\"patrol\"]"
+    assert evidence =~ "Issues.list_stuck_issues/2"
+    assert evidence =~ "without changing workflow status"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "closed_issue_runtime_cleanup"))
@@ -219,6 +241,13 @@ defmodule Mix.Tasks.CymphoCompareTest do
     assert evidence =~ "coalesced comment/review ids"
     assert evidence =~ "triggering comment body"
     assert evidence =~ "stale queue snapshot"
+
+    assert %{"verdict" => "exceeds", "evidence" => evidence} =
+             Enum.find(rows, &(&1["slug"] == "review_recovery_dedup"))
+
+    assert evidence =~ "one active issue/agent/nudge chain"
+    assert evidence =~ "superseded rows are consumed"
+    assert evidence =~ "re_emit_of/re_emit_count"
 
     assert %{"verdict" => "exceeds", "evidence" => evidence} =
              Enum.find(rows, &(&1["slug"] == "activity_incremental_cursor"))

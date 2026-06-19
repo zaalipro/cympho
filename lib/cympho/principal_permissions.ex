@@ -72,8 +72,9 @@ defmodule Cympho.PrincipalPermissions do
           "permission_granted",
           actor || {"system", "system"},
           "Permission granted: #{grant.permission} to #{grant.principal_type}:#{grant.principal_id}",
-          resource: grant,
+          resource: nil,
           metadata: %{
+            grant_id: grant.id,
             permission: grant.permission,
             principal: "#{grant.principal_type}:#{grant.principal_id}",
             scope: grant.scope_type && "#{grant.scope_type}:#{grant.scope_id}",
@@ -138,9 +139,10 @@ defmodule Cympho.PrincipalPermissions do
           "permission_revoked",
           actor || {"system", "system"},
           "Permission revoked: #{revoked.permission} from #{revoked.principal_type}:#{revoked.principal_id}",
-          resource: revoked,
+          resource: nil,
           reasoning: reason,
           metadata: %{
+            grant_id: revoked.id,
             permission: revoked.permission,
             principal: "#{revoked.principal_type}:#{revoked.principal_id}"
           }
@@ -189,6 +191,25 @@ defmodule Cympho.PrincipalPermissions do
   end
 
   @doc """
+  Checks if a principal has an active permission that applies to one of the given scopes.
+
+  Unscoped grants apply everywhere. Scoped grants must match one of the supplied
+  `{scope_type, scope_id}` pairs. Expired grants are ignored.
+  """
+  def has_permission_in_scope?(principal_id, principal_type, permission, scopes \\ []) do
+    scopes = normalize_scopes(scopes)
+
+    list_principal_permission_grants(
+      principal_id: principal_id,
+      principal_type: principal_type,
+      permission: permission,
+      active: true,
+      not_expired: true
+    )
+    |> Enum.any?(&grant_applies_to_scope?(&1, scopes))
+  end
+
+  @doc """
   Gets all active permissions for a principal.
   """
   def get_principal_permissions(principal_id, principal_type) do
@@ -218,6 +239,34 @@ defmodule Cympho.PrincipalPermissions do
   def subscribe do
     Phoenix.PubSub.subscribe(Cympho.PubSub, "principal_permissions")
   end
+
+  defp normalize_scopes(scopes) when is_list(scopes) do
+    scopes
+    |> Enum.flat_map(fn
+      {type, id} when not is_nil(id) ->
+        [{to_string(type), to_string(id)}]
+
+      %{scope_type: type, scope_id: id} when not is_nil(type) and not is_nil(id) ->
+        [{to_string(type), to_string(id)}]
+
+      _ ->
+        []
+    end)
+    |> MapSet.new()
+  end
+
+  defp normalize_scopes(_), do: MapSet.new()
+
+  defp grant_applies_to_scope?(%PrincipalPermissionGrant{} = grant, scopes) do
+    PrincipalPermissionGrant.active?(grant) and
+      (unscoped_grant?(grant) or MapSet.member?(scopes, {grant.scope_type, grant.scope_id}))
+  end
+
+  defp unscoped_grant?(%PrincipalPermissionGrant{scope_type: scope_type, scope_id: scope_id}) do
+    blank?(scope_type) and blank?(scope_id)
+  end
+
+  defp blank?(value), do: value in [nil, ""]
 
   defp actor_id({_, id}), do: id
   defp actor_id(nil), do: nil

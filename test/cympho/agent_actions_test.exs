@@ -1,7 +1,18 @@
 defmodule Cympho.AgentActionsTest do
   use Cympho.DataCase, async: false
 
-  alias Cympho.{AgentActions, Agents, Comments, Companies, Issues, Repo, Secrets, WorkProducts}
+  alias Cympho.{
+    AgentActions,
+    Agents,
+    Comments,
+    Companies,
+    Issues,
+    PrincipalPermissions,
+    Repo,
+    Secrets,
+    WorkProducts
+  }
+
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues.SwarmEvents
 
@@ -240,6 +251,114 @@ defmodule Cympho.AgentActionsTest do
                AgentActions.execute(issue, cto, actions)
 
       assert Issues.get_issue!(created_id).assigned_role == "cto"
+    end
+
+    test "create_issue rejects non-governance agents without task assignment grants", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          assignee_id: engineer.id,
+          assigned_role: "engineer",
+          status: :in_progress
+        })
+
+      actions = [
+        delivery_issue_action(%{
+          "title" => "Split engineering task without grant"
+        })
+      ]
+
+      assert {:error, {:task_assignment_permission_required, :engineer}} =
+               AgentActions.execute(issue, engineer, actions)
+
+      refute Enum.any?(
+               Issues.list_child_issues(issue.id),
+               &(&1.title == "Split engineering task without grant")
+             )
+
+      assert Enum.any?(Comments.list_comments(issue.id), fn comment ->
+               comment.author_type == "system" and
+                 String.contains?(comment.body, "create_issue rejected") and
+                 String.contains?(comment.body, "task.assign") and
+                 String.contains?(comment.body, "scoped principal permission grant")
+             end)
+    end
+
+    test "scoped task assignment grant lets product create engineering child work", %{
+      issue: issue,
+      company: company,
+      project: project,
+      engineer: engineer
+    } do
+      [product | _] = Agents.list_agents_by_role(:product_manager, company.id)
+
+      {:ok, _grant} =
+        PrincipalPermissions.create_permission_grant(%{
+          principal_id: product.id,
+          principal_type: "agent",
+          permission: "tasks:assign",
+          scope_type: "project",
+          scope_id: project.id
+        })
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          assignee_id: product.id,
+          assigned_role: "product_manager",
+          status: :in_progress
+        })
+
+      actions = [
+        delivery_issue_action(%{
+          "title" => "Implement product-scoped grant task"
+        })
+      ]
+
+      assert {:ok,
+              %{
+                results: [%{type: "create_issue", issue_id: created_id, assignee_id: assignee_id}]
+              }} =
+               AgentActions.execute(issue, product, actions)
+
+      created = Issues.get_issue!(created_id)
+      assert created.created_by_agent_id == product.id
+      assert created.parent_id == issue.id
+      assert created.assigned_role == "engineer"
+      assert created.assignee_id == engineer.id
+      assert assignee_id == engineer.id
+    end
+
+    test "agent permission map can authorize task assignment from admin toggle", %{
+      issue: issue,
+      company: company,
+      engineer: engineer
+    } do
+      [product | _] = Agents.list_agents_by_role(:product_manager, company.id)
+
+      {:ok, product} =
+        Agents.update_agent_permissions(product, %{"can_assign_tasks" => ["false", "true"]})
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{
+          assignee_id: product.id,
+          assigned_role: "product_manager",
+          status: :in_progress
+        })
+
+      actions = [
+        delivery_issue_action(%{
+          "title" => "Implement permission-map task"
+        })
+      ]
+
+      assert {:ok, %{results: [%{type: "create_issue", issue_id: created_id}]}} =
+               AgentActions.execute(issue, product, actions)
+
+      created = Issues.get_issue!(created_id)
+      assert created.created_by_agent_id == product.id
+      assert created.assignee_id == engineer.id
     end
 
     test "create_issue is rejected when request_depth would exceed the cap", %{
@@ -915,6 +1034,9 @@ defmodule Cympho.AgentActionsTest do
       assert {:error, {:block_issue_reason_too_thin, missing, scaffold}} =
                AgentActions.execute(issue, ceo, actions)
 
+      assert "Cause" in missing
+      assert "Attempted fix" in missing
+      assert "Needs" in missing
       assert "Current state" in missing
       assert "Next decision" in missing
       assert scaffold =~ "Current blocker: Missing API key"
@@ -931,6 +1053,29 @@ defmodule Cympho.AgentActionsTest do
                  String.contains?(comment.body, "blocker reason is too thin") and
                  String.contains?(comment.body, "Repair scaffold")
              end)
+    end
+
+    test "block_issue rejects broad prose without exact blocker packet labels", %{
+      issue: issue,
+      ceo: ceo
+    } do
+      reason =
+        "Because the API key is missing, owner must add it. Current state is waiting. " <>
+          "Next decision is resume after credentials, with restart packet in the issue."
+
+      actions = [%{"type" => "block_issue", "reason" => reason}]
+
+      assert {:error, {:block_issue_reason_too_thin, missing, scaffold}} =
+               AgentActions.execute(issue, ceo, actions)
+
+      assert "Cause" in missing
+      assert "Attempted fix" in missing
+      assert "Needs" in missing
+      assert "Restart packet" in missing
+      assert scaffold =~ "[blocked] Cause:"
+
+      unchanged = Issues.get_issue!(issue.id)
+      refute unchanged.status == :blocked
     end
 
     test "request_changes is rejected when reason is empty", %{issue: issue, cto: cto} do
@@ -1016,6 +1161,27 @@ defmodule Cympho.AgentActionsTest do
       reloaded = Issues.get_issue!(issue.id)
       assert reloaded.status == :blocked
       assert reloaded.monitor_state["block_reason_kind"] == "external_dep"
+      assert reloaded.monitor_state["blocker_packet"]["schema"] == "cympho.blocker_packet.v1"
+      assert reloaded.monitor_state["blocker_packet"]["kind"] == "external_dep"
+      assert reloaded.monitor_state["blocker_packet"]["blocked_by_agent_id"] == ceo.id
+
+      assert reloaded.monitor_state["blocker_packet"]["cause"] ==
+               "missing API key blocks runtime verification."
+
+      assert reloaded.monitor_state["blocker_packet"]["attempted_fix"] ==
+               "checked company secrets and runtime preflight."
+
+      assert reloaded.monitor_state["blocker_packet"]["needs"] ==
+               "owner or operator adds the missing API key."
+
+      assert reloaded.monitor_state["blocker_packet"]["current_state"] ==
+               "work is paused until credentials are available."
+
+      assert reloaded.monitor_state["blocker_packet"]["next_decision"] ==
+               "resume once the secret is configured."
+
+      assert reloaded.monitor_state["blocker_packet"]["restart_packet"] ==
+               "rerun runtime preflight, then continue the current issue."
 
       decisions =
         Cympho.Decisions.list_decisions(%{
@@ -1028,6 +1194,9 @@ defmodule Cympho.AgentActionsTest do
       assert [decision] = decisions
       assert decision.outcome == "deferred"
       assert decision.context["blocker_kind"] == "external_dep"
+
+      assert decision.context["blocker_packet"]["needs"] ==
+               "owner or operator adds the missing API key."
     end
 
     test "attach_work_product records agent output", %{issue: issue, engineer: engineer} do

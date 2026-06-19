@@ -60,6 +60,14 @@ defmodule Mix.Tasks.Cympho.Compare do
       check: &__MODULE__.check_stale_lock_recovery/0
     },
     %{
+      slug: "stale_patrol_exclusion",
+      paperclip:
+        "Public issues report automatic recovery loops for perpetual in-progress work without an opt-out",
+      cympho:
+        "Issue monitor_state can exclude intentional long-running work from stale-work patrol escalation",
+      check: &__MODULE__.check_stale_patrol_exclusion/0
+    },
+    %{
       slug: "closed_issue_runtime_cleanup",
       paperclip:
         "Public issues report queued/running runs and process-loss retries surviving after an issue is done or cancelled",
@@ -150,6 +158,14 @@ defmodule Mix.Tasks.Cympho.Compare do
       check: &__MODULE__.check_wake_queue_context_integrity/0
     },
     %{
+      slug: "review_recovery_dedup",
+      paperclip:
+        "Public issues report duplicate recovery/evaluation work piling up for the same stuck run",
+      cympho:
+        "Review-nudge stale recovery advances one active issue/agent/nudge chain instead of accumulating duplicates",
+      check: &__MODULE__.check_review_recovery_dedup/0
+    },
+    %{
       slug: "activity_incremental_cursor",
       paperclip:
         "Public issues report activity polling ignoring ?since= and forcing external bridges to repost old events",
@@ -227,6 +243,22 @@ defmodule Mix.Tasks.Cympho.Compare do
         "Public issues report stale or client-drifted inbox/sidebar badge counts after read, resolve, or dismiss actions",
       cympho: "Server-owned company unread counts with PubSub sidebar refresh",
       check: &__MODULE__.check_server_inbox_badge_counts/0
+    },
+    %{
+      slug: "human_action_inbox",
+      paperclip:
+        "Public issues request a dedicated board-user queue for work assigned to humans instead of noisy notification inboxes",
+      cympho:
+        "Inbox has a Needs my action lane backed by open issues assigned to the current user",
+      check: &__MODULE__.check_human_action_inbox/0
+    },
+    %{
+      slug: "scoped_agent_task_assignment",
+      paperclip:
+        "Public issues request granular task-assignment grants so non-CEO agents can assign decomposed work without a CEO bottleneck",
+      cympho:
+        "Scoped principal permission grants can authorize non-governance agents to create child issues",
+      check: &__MODULE__.check_scoped_agent_task_assignment/0
     },
     %{
       slug: "comment_mention_delivery",
@@ -562,6 +594,27 @@ defmodule Mix.Tasks.Cympho.Compare do
        "Operations recovery detects stale checked-out issues, clears checkout_run_id/checked_out_at, and preserves assignee ownership for the next dispatch"}
     else
       {:gap, "stale checkout lock recovery primitives are incomplete"}
+    end
+  end
+
+  def check_stale_patrol_exclusion do
+    issues_source = source_for(Cympho.Issues)
+
+    checks = [
+      module_with_fun?(Cympho.Issues, :exclude_from_stale_patrol, 2),
+      module_with_fun?(Cympho.Issues, :include_in_stale_patrol, 2),
+      module_with_fun?(Cympho.Issues, :stale_patrol_excluded?, 1),
+      String.contains?(issues_source, "\"patrol\""),
+      String.contains?(issues_source, "\"excluded\""),
+      String.contains?(issues_source, "stale-work patrol"),
+      String.contains?(issues_source, "COALESCE((? -> 'patrol' ->> 'excluded')::boolean")
+    ]
+
+    if Enum.all?(checks) do
+      {:exceeds,
+       "Stale-work patrol exclusion lets operators mark intentional long-running issues in monitor_state[\"patrol\"], keeps excluded issues out of Issues.list_stuck_issues/2, and can be cleared without changing workflow status"}
+    else
+      {:gap, "stale-work patrol exclusion is missing monitor_state helpers or query filtering"}
     end
   end
 
@@ -936,6 +989,57 @@ defmodule Mix.Tasks.Cympho.Compare do
        "Sidebar badges use Cympho.Inbox.unread_count_for_company/1 as the source of truth and receive company PubSub updates after create/read/dismiss/archive/restore/bulk-read actions"}
     else
       {:gap, "server-owned inbox badge count path is incomplete"}
+    end
+  end
+
+  def check_human_action_inbox do
+    issues_source = source_for(Cympho.Issues)
+    inbox_live_source = source_for(CymphoWeb.InboxLive.Index)
+    inbox_template_source = template_source_for(CymphoWeb.InboxLive.Index, "index.html.heex")
+
+    checks = [
+      module_with_fun?(Cympho.Issues, :list_human_action_issues, 3),
+      module_with_fun?(Cympho.Issues, :human_action_count, 2),
+      String.contains?(issues_source, "assignee_user_id"),
+      String.contains?(issues_source, "@terminal_issue_statuses"),
+      String.contains?(inbox_live_source, "@statuses ~w(action"),
+      String.contains?(inbox_live_source, "build_human_action_items"),
+      String.contains?(inbox_live_source, "human_action_count"),
+      String.contains?(inbox_live_source, "Needs my action"),
+      String.contains?(inbox_template_source, "My action")
+    ]
+
+    if Enum.all?(checks) do
+      {:exceeds,
+       "Inbox exposes a Needs my action lane for non-terminal issues assigned to the current human user, with a dedicated count, filter tab, action-queue card, and issue-backed rows instead of notification-only noise"}
+    else
+      {:gap,
+       "human action inbox lane is missing issue query, count, filter, or template evidence"}
+    end
+  end
+
+  def check_scoped_agent_task_assignment do
+    actions_source = source_for(Cympho.AgentActions)
+    permissions_source = source_for(Cympho.PrincipalPermissions)
+    grant_source = source_for(Cympho.PrincipalPermissions.PrincipalPermissionGrant)
+
+    checks = [
+      module_with_fun?(Cympho.PrincipalPermissions, :has_permission_in_scope?, 4),
+      String.contains?(actions_source, "task_assignment_granted?"),
+      String.contains?(actions_source, "task_assignment_scopes"),
+      String.contains?(actions_source, "task.assign"),
+      String.contains?(actions_source, "tasks:assign"),
+      String.contains?(actions_source, "can_assign_tasks"),
+      String.contains?(actions_source, "task_assignment_permission_required"),
+      String.contains?(permissions_source, "grant_applies_to_scope?"),
+      String.contains?(grant_source, "[.:]")
+    ]
+
+    if Enum.all?(checks) do
+      {:exceeds,
+       "Agent task assignment has an auditable grant path: CEO/CTO orchestration remains unrestricted, non-governance create_issue requires task.assign/task.create authority, the existing can_assign_tasks admin toggle is honored, project/goal/issue/company-scoped principal grants apply without CEO involvement, colon-style tasks:assign grants are accepted, and denied agents get an actionable rejection comment"}
+    else
+      {:gap, "scoped non-CEO task assignment grants are missing authorization or evidence"}
     end
   end
 
@@ -1413,6 +1517,26 @@ defmodule Mix.Tasks.Cympho.Compare do
        "Wake queue context integrity keeps duplicate pending wakes bounded while preserving coalesced comment/review ids and counts; prompt construction still reloads the triggering comment body instead of trusting a stale queue snapshot"}
     else
       {:gap, "wake queue coalescing or fresh comment-context evidence is incomplete"}
+    end
+  end
+
+  def check_review_recovery_dedup do
+    stale_scanner_source = source_for(Cympho.ReviewNudges.StaleScanner)
+
+    checks = [
+      module_with_fun?(Cympho.ReviewNudges.StaleScanner, :sweep, 1),
+      String.contains?(stale_scanner_source, "superseded_by_fresher_active_nudge?"),
+      String.contains?(stale_scanner_source, "consume_superseded_active_nudges"),
+      String.contains?(stale_scanner_source, "refresh_re_emitted_wake!"),
+      String.contains?(stale_scanner_source, "re_emit_of"),
+      String.contains?(stale_scanner_source, "Wakes.consume_review_nudge")
+    ]
+
+    if Enum.all?(checks) do
+      {:exceeds,
+       "Review-nudge stale recovery keeps one active issue/agent/nudge chain: superseded rows are consumed, re-emits refresh the active wake timestamp, and metadata links each retry with re_emit_of/re_emit_count"}
+    else
+      {:gap, "review recovery deduplication is missing stale-chain guards or retry metadata"}
     end
   end
 

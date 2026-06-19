@@ -15,6 +15,8 @@ defmodule Cympho.Companies do
 
   @runtime_mode_key "runtime_mode"
   @low_power_mode "low_power"
+  @company_runtime_pause_key "company_runtime_pause"
+  @company_runtime_pause_source "global_runtime_control"
 
   # ── Company CRUD ──
 
@@ -244,33 +246,108 @@ defmodule Cympho.Companies do
 
   defp pause_company_agents(company_id, reason) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
+    paused_at = DateTime.to_iso8601(now)
 
     from(a in Agent,
-      where: a.company_id == ^company_id and a.governance_status != "terminated"
+      where:
+        a.company_id == ^company_id and a.governance_status != "terminated" and
+          a.governance_status != "paused" and a.status != ^:paused
     )
-    |> Repo.update_all(
-      set: [
+    |> Repo.all()
+    |> Enum.reduce(0, fn agent, count ->
+      runtime_config =
+        agent
+        |> agent_runtime_config()
+        |> Map.put(@company_runtime_pause_key, %{
+          "source" => @company_runtime_pause_source,
+          "reason" => reason,
+          "paused_at" => paused_at,
+          "previous_status" => agent.status && Atom.to_string(agent.status),
+          "previous_governance_status" => agent.governance_status,
+          "previous_governance_reasoning" => agent.governance_reasoning,
+          "previous_pause_reason" => agent.pause_reason
+        })
+
+      agent
+      |> Ecto.Changeset.change(%{
         governance_status: "paused",
         status: :paused,
         paused_at: now,
-        pause_reason: reason
-      ]
-    )
+        pause_reason: reason,
+        runtime_config: runtime_config
+      })
+      |> Repo.update()
+      |> case do
+        {:ok, _updated} -> count + 1
+        {:error, _changeset} -> count
+      end
+    end)
   end
 
   defp resume_company_agents(company_id) do
     from(a in Agent,
       where: a.company_id == ^company_id and a.governance_status == "paused"
     )
-    |> Repo.update_all(
-      set: [
-        governance_status: "active",
-        status: :idle,
-        paused_at: nil,
-        pause_reason: nil
-      ]
-    )
+    |> Repo.all()
+    |> Enum.reduce(0, fn agent, count ->
+      case company_runtime_pause_marker(agent) do
+        %{"source" => @company_runtime_pause_source} = marker ->
+          restore_company_paused_agent(agent, marker, count)
+
+        _ ->
+          count
+      end
+    end)
   end
+
+  defp restore_company_paused_agent(agent, marker, count) do
+    runtime_config =
+      agent
+      |> agent_runtime_config()
+      |> Map.delete(@company_runtime_pause_key)
+
+    attrs = %{
+      governance_status: previous_governance_status(marker),
+      governance_reasoning: marker["previous_governance_reasoning"],
+      status: previous_agent_status(marker),
+      paused_at: nil,
+      pause_reason: marker["previous_pause_reason"],
+      runtime_config: runtime_config
+    }
+
+    agent
+    |> Ecto.Changeset.change(attrs)
+    |> Repo.update()
+    |> case do
+      {:ok, _updated} -> count + 1
+      {:error, _changeset} -> count
+    end
+  end
+
+  defp company_runtime_pause_marker(%Agent{} = agent) do
+    agent
+    |> agent_runtime_config()
+    |> Map.get(@company_runtime_pause_key)
+  end
+
+  defp agent_runtime_config(%Agent{runtime_config: config}) when is_map(config), do: config
+  defp agent_runtime_config(_agent), do: %{}
+
+  defp previous_governance_status(%{"previous_governance_status" => status})
+       when is_binary(status) and status not in ["", "paused", "terminated"],
+       do: status
+
+  defp previous_governance_status(_marker), do: "active"
+
+  defp previous_agent_status(%{"previous_status" => "running"}), do: :idle
+  defp previous_agent_status(%{"previous_status" => "paused"}), do: :idle
+  defp previous_agent_status(%{"previous_status" => "terminated"}), do: :idle
+
+  defp previous_agent_status(%{"previous_status" => status}) when is_binary(status) do
+    Enum.find(Agent.status_options(), :idle, &(Atom.to_string(&1) == status))
+  end
+
+  defp previous_agent_status(_marker), do: :idle
 
   defp do_update_company(%Company{} = company, attrs) do
     company

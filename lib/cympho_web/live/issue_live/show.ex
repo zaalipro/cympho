@@ -62,6 +62,7 @@ defmodule CymphoWeb.IssueLive.Show do
 
         {:ok,
          assign(socket,
+           page_title: issue.title,
            issue: issue,
            route_issue_id: issue.id,
            comment_changeset: comment_changeset,

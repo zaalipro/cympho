@@ -11,6 +11,9 @@ defmodule Cympho.Wakes do
   import Ecto.Query, warn: false
   alias Cympho.Agents
   alias Cympho.Agents.Agent
+  alias Cympho.Companies
+  alias Cympho.Companies.Company
+  alias Cympho.Issues
   alias Cympho.Repo
   alias Cympho.Wakes.AgentWake
   alias Cympho.Issues.Issue
@@ -572,22 +575,57 @@ defmodule Cympho.Wakes do
         ) ::
           {:ok, AgentWake.t()} | {:error, atom() | Ecto.Changeset.t()}
   def do_wake_agent(agent_id, issue_id, reason, triggered_by_type, triggered_by_id, metadata) do
-    attrs = %{
-      agent_id: agent_id,
-      issue_id: issue_id,
-      reason: reason,
-      triggered_by_type: triggered_by_type,
-      triggered_by_id: triggered_by_id,
-      metadata: metadata
-    }
+    with :ok <- wake_runtime_allowed?(issue_id) do
+      attrs = %{
+        agent_id: agent_id,
+        issue_id: issue_id,
+        reason: reason,
+        triggered_by_type: triggered_by_type,
+        triggered_by_id: triggered_by_id,
+        metadata: metadata
+      }
 
-    case WakeupQueue.enqueue(attrs) do
-      {:ok, agent_wake} ->
-        Logger.info("Wakes: enqueued wake for agent #{agent_id}, reason: #{reason}")
-        {:ok, agent_wake}
+      case WakeupQueue.enqueue(attrs) do
+        {:ok, agent_wake} ->
+          Logger.info("Wakes: enqueued wake for agent #{agent_id}, reason: #{reason}")
+          {:ok, agent_wake}
 
-      {:error, _} = error ->
-        error
+        {:error, _} = error ->
+          error
+      end
+    end
+  end
+
+  defp wake_runtime_allowed?(nil), do: :ok
+  defp wake_runtime_allowed?(""), do: :ok
+
+  defp wake_runtime_allowed?(issue_id) when is_binary(issue_id) do
+    case Repo.get(Issue, issue_id) do
+      nil ->
+        {:error, :issue_not_found}
+
+      %Issue{} = issue ->
+        cond do
+          Issues.issue_runtime_paused?(issue) ->
+            {:error, :issue_runtime_paused}
+
+          company_paused?(issue.company_id) ->
+            {:error, :company_paused}
+
+          true ->
+            :ok
+        end
+    end
+  end
+
+  defp wake_runtime_allowed?(_issue_id), do: {:error, :invalid_issue}
+
+  defp company_paused?(nil), do: false
+
+  defp company_paused?(company_id) do
+    case Repo.get(Company, company_id) do
+      %Company{} = company -> not Companies.active?(company)
+      nil -> false
     end
   end
 

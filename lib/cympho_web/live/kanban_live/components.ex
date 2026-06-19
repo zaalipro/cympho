@@ -102,7 +102,10 @@ defmodule CymphoWeb.KanbanLive.Components do
       <% next_statuses = Index.valid_next_statuses(@issue.status) %>
       <%= if next_statuses != [] do %>
         <div
-          class="kanban-card-actions mt-3 flex items-center gap-1.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+          class={[
+            "kanban-card-actions mt-3 items-center gap-1.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100",
+            if(@digest_density == "compact", do: "hidden sm:flex", else: "flex")
+          ]}
           data-no-drag
         >
           <span class="text-[10px] font-510 text-text-quaternary">Move</span>

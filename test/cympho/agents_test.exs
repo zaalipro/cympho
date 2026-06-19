@@ -85,6 +85,19 @@ defmodule Cympho.AgentsTest do
       assert paused.governance_reasoning == "adapter circuit breaker"
       assert paused.paused_at != nil
     end
+
+    test "resume_agent/1 clears runtime and governance pause metadata", %{agent: agent} do
+      {:ok, paused} = Agents.pause_agent(agent, "manual hold")
+      assert paused.governance_status == "paused"
+
+      assert {:ok, resumed} = Agents.resume_agent(paused)
+
+      assert resumed.status == :idle
+      assert resumed.governance_status == "active"
+      assert resumed.governance_reasoning == nil
+      assert resumed.paused_at == nil
+      assert resumed.pause_reason == nil
+    end
   end
 
   describe "dispatch eligibility" do

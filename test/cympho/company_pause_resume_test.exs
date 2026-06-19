@@ -150,6 +150,81 @@ defmodule Cympho.CompanyPauseResumeTest do
       assert {:ok, %{id: ^agent_id}} = Dispatcher.preview_agent_for_issue(reloaded_issue)
     end
 
+    test "new focused wakes are rejected while company runtime is paused", %{company: company} do
+      agent = Agents.list_agents_by_company(company.id) |> hd()
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Focused wake blocked by company pause",
+          company_id: company.id,
+          status: :todo,
+          assignee_id: agent.id
+        })
+
+      {:ok, _paused, _runtime_stop} = Companies.pause_company_runtime(company, "operator pause")
+
+      assert {:error, :company_paused} =
+               Dispatcher.enqueue_wake(issue.id, "manual_dispatch", %{"source" => "operator"})
+
+      assert [] = Wakes.list_issue_wakes(issue.id)
+    end
+
+    test "direct checkout is rejected while company runtime is paused", %{company: company} do
+      agent = Agents.list_agents_by_company(company.id) |> hd()
+
+      {:ok, issue} =
+        Issues.create_issue(%{
+          title: "Checkout blocked by company pause",
+          company_id: company.id,
+          status: :todo
+        })
+
+      {:ok, _paused} = Companies.pause_company(company, "operator pause")
+
+      assert {:error, :company_paused} = Issues.checkout_issue(issue, agent.id, :engineer)
+
+      reloaded_issue = Repo.get!(Issue, issue.id)
+      assert reloaded_issue.status == :todo
+      assert is_nil(reloaded_issue.assignee_id)
+      assert is_nil(reloaded_issue.checked_out_at)
+    end
+
+    test "resume only reactivates agents paused by the company runtime control", %{
+      company: company
+    } do
+      [active_agent, manually_paused_agent | _] = Agents.list_agents_by_company(company.id)
+
+      {:ok, manually_paused_agent} =
+        Agents.pause_agent(manually_paused_agent, "Manual investigation")
+
+      assert {:ok, _paused} = Companies.pause_company(company, "Operator hold")
+
+      globally_paused = Repo.get!(Agent, active_agent.id)
+      assert globally_paused.status == :paused
+      assert globally_paused.governance_status == "paused"
+
+      assert globally_paused.runtime_config["company_runtime_pause"]["source"] ==
+               "global_runtime_control"
+
+      still_manual = Repo.get!(Agent, manually_paused_agent.id)
+      assert still_manual.status == :paused
+      assert still_manual.governance_status == "paused"
+      assert still_manual.pause_reason == "Manual investigation"
+      refute Map.has_key?(still_manual.runtime_config || %{}, "company_runtime_pause")
+
+      {:ok, _resumed} = Companies.resume_company(Companies.get_company!(company.id))
+
+      resumed_active = Repo.get!(Agent, active_agent.id)
+      assert resumed_active.status == :idle
+      assert resumed_active.governance_status == "active"
+      refute Map.has_key?(resumed_active.runtime_config || %{}, "company_runtime_pause")
+
+      reloaded_manual = Repo.get!(Agent, manually_paused_agent.id)
+      assert reloaded_manual.status == :paused
+      assert reloaded_manual.governance_status == "paused"
+      assert reloaded_manual.pause_reason == "Manual investigation"
+    end
+
     test "releases active issue ownership and cancels active run", %{company: company} do
       agent = Agents.list_agents_by_company(company.id) |> hd()
       now = DateTime.utc_now() |> DateTime.truncate(:second)

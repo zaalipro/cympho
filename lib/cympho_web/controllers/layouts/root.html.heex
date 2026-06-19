@@ -44,6 +44,7 @@
       <!-- Sidebar overlay for mobile -->
       <div
         id="sidebar-overlay"
+        aria-hidden="true"
         class="fixed inset-0 bg-black/30 z-40 lg:hidden hidden"
       >
       </div>
@@ -52,6 +53,7 @@
       <aside
         class="w-64 shrink-0 bg-surface-1 border-r border-hairline flex flex-col fixed inset-y-0 left-0 z-50 -translate-x-full lg:translate-x-0 transition-transform duration-200"
         id="sidebar"
+        data-mobile-drawer
       >
         <.company_rail company={assigns[:current_company]} />
         <.nav_rail
@@ -68,12 +70,26 @@
           <.user_menu user={assigns[:current_user]} current_path={@conn.request_path} />
         </div>
       </aside>
+      <script>
+        (() => {
+          const sidebar = document.getElementById("sidebar");
+          if (!sidebar) return;
+
+          const mobile = window.matchMedia("(max-width: 1023px)").matches;
+          if (mobile && sidebar.classList.contains("-translate-x-full")) {
+            sidebar.setAttribute("inert", "");
+            sidebar.setAttribute("aria-hidden", "true");
+          }
+        })();
+      </script>
       
 <!-- Mobile top bar -->
       <header class="lg:hidden fixed top-0 left-0 right-0 z-30 h-16 bg-surface-1 border-b border-hairline flex items-center justify-between px-4">
         <button
           type="button"
           data-mobile-menu-btn
+          aria-controls="sidebar"
+          aria-expanded="false"
           class="p-2 -ml-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -191,11 +207,155 @@
           </form>
         </div>
       </header>
+
+      <% runtime_topbar_company = assigns[:current_company]
+
+      runtime_topbar_allowed? =
+        assigns[:runtime_controls_allowed] && runtime_topbar_company
+
+      runtime_topbar_paused? =
+        Map.get(runtime_topbar_company || %{}, :status) == "paused"
+
+      runtime_topbar_low_power? =
+        Map.get(Map.get(runtime_topbar_company || %{}, :governance_config) || %{}, "runtime_mode") ==
+          "low_power"
+
+      runtime_topbar_label =
+        cond do
+          runtime_topbar_paused? -> "Paused"
+          runtime_topbar_low_power? -> "Low power"
+          true -> "Full power"
+        end
+
+      runtime_topbar_status_class =
+        cond do
+          runtime_topbar_paused? -> "border-amber-500/30 bg-amber-500/10 text-amber-200"
+          runtime_topbar_low_power? -> "border-sky-500/30 bg-sky-500/10 text-sky-200"
+          true -> "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
+        end %>
+
+      <header
+        :if={runtime_topbar_allowed?}
+        data-testid="desktop-runtime-topbar"
+        class="fixed left-64 right-0 top-0 z-30 hidden h-14 items-center justify-between border-b border-hairline bg-surface-1/95 px-4 backdrop-blur lg:flex"
+      >
+        <div class="flex min-w-0 items-center gap-2.5">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-2 text-white">
+            <span class="hero-bolt-mini h-4 w-4"></span>
+          </span>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-tertiary">
+                Runtime
+              </span>
+              <span
+                data-testid="desktop-runtime-status"
+                class={"rounded-full border px-2 py-0.5 text-[10px] font-590 #{runtime_topbar_status_class}"}
+              >
+                {runtime_topbar_label}
+              </span>
+            </div>
+            <p class="mt-0.5 truncate text-xs text-text-quaternary">
+              {runtime_topbar_company.name}
+            </p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-1.5">
+          <form
+            :if={!runtime_topbar_paused? && !runtime_topbar_low_power?}
+            method="post"
+            action={~p"/runtime-control/low-power"}
+          >
+            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <input type="hidden" name="return_to" value={@conn.request_path} />
+            <button
+              type="submit"
+              data-testid="desktop-runtime-low-power"
+              title="Switch runtime to low power"
+              aria-label="Switch runtime to low power"
+              data-confirm="Switch runtime to low power? Only high and critical queued work will auto-dispatch."
+              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 text-xs font-590 text-white transition-colors hover:bg-surface-hover"
+            >
+              <span class="hero-moon-mini h-4 w-4"></span> Low
+            </button>
+          </form>
+          <form
+            :if={!runtime_topbar_paused? && runtime_topbar_low_power?}
+            method="post"
+            action={~p"/runtime-control/resume"}
+          >
+            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <input type="hidden" name="return_to" value={@conn.request_path} />
+            <button
+              type="submit"
+              data-testid="desktop-runtime-full-power"
+              title="Resume full power runtime"
+              aria-label="Resume full power runtime"
+              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 text-xs font-590 text-white transition-colors hover:bg-surface-hover"
+            >
+              <span class="hero-bolt-mini h-4 w-4"></span> Full
+            </button>
+          </form>
+          <form
+            :if={!runtime_topbar_paused?}
+            method="post"
+            action={~p"/runtime-control/pause"}
+          >
+            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <input type="hidden" name="return_to" value={@conn.request_path} />
+            <button
+              type="submit"
+              data-testid="desktop-runtime-pause"
+              title="Pause runtime and preserve queued wakes"
+              aria-label="Pause runtime and preserve queued wakes"
+              data-confirm="Pause runtime for this company? This releases active work but preserves queued wakes."
+              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 text-xs font-590 text-white transition-colors hover:bg-surface-hover"
+            >
+              <span class="hero-pause-mini h-4 w-4"></span> Pause
+            </button>
+          </form>
+          <form
+            :if={runtime_topbar_paused?}
+            method="post"
+            action={~p"/runtime-control/resume"}
+          >
+            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <input type="hidden" name="return_to" value={@conn.request_path} />
+            <button
+              type="submit"
+              data-testid="desktop-runtime-resume"
+              title="Resume runtime"
+              aria-label="Resume runtime"
+              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface-2 px-2.5 text-xs font-590 text-white transition-colors hover:bg-surface-hover"
+            >
+              <span class="hero-play-mini h-4 w-4"></span> Resume
+            </button>
+          </form>
+          <form method="post" action={~p"/runtime-control/stop"}>
+            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <input type="hidden" name="return_to" value={@conn.request_path} />
+            <button
+              type="submit"
+              data-testid="desktop-runtime-stop"
+              title="Stop runtime and cancel queued wakes"
+              aria-label="Stop runtime and cancel queued wakes"
+              data-confirm="Stop runtime for this company? This releases active work and cancels queued wakes."
+              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-red-500/25 bg-red-500/10 px-2.5 text-xs font-590 text-red-200 transition-colors hover:bg-red-500/15"
+            >
+              <span class="hero-stop-mini h-4 w-4"></span> Stop
+            </button>
+          </form>
+        </div>
+      </header>
       
 <!-- Main content -->
       <main
         id="main-content"
-        class="h-screen flex-1 min-w-0 overflow-x-hidden overflow-y-auto lg:ml-64 pt-16 lg:pt-0 pb-16 lg:pb-0"
+        class={[
+          "h-screen flex-1 min-w-0 overflow-x-hidden overflow-y-auto lg:ml-64 pt-16 pb-16 lg:pb-0",
+          if(runtime_topbar_allowed?, do: "lg:pt-14", else: "lg:pt-0")
+        ]}
       >
         {@inner_content}
       </main>

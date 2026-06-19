@@ -11,6 +11,8 @@ defmodule Cympho.RuntimePreflight do
   alias Cympho.Agents.Agent
   alias Cympho.Agents.RuntimeEnv
   alias Cympho.Adapters.ModelCompatibility
+  alias Cympho.Companies
+  alias Cympho.Companies.Company
   alias Cympho.DeliveryBriefReadiness
   alias Cympho.Issues.Issue
   alias Cympho.Secrets
@@ -89,6 +91,16 @@ defmodule Cympho.RuntimePreflight do
   """
   @spec for_issue(Issue.t(), keyword()) :: map()
   def for_issue(%Issue{} = issue, opts \\ []) do
+    case company_runtime_preflight_blocker(issue) do
+      {:error, paused} ->
+        paused
+
+      :ok ->
+        issue_agent_preflight(issue, opts)
+    end
+  end
+
+  defp issue_agent_preflight(%Issue{} = issue, opts) do
     case Cympho.Orchestrator.Dispatcher.preview_agent_for_issue(issue) do
       {:ok, agent} ->
         agent_opts =
@@ -148,6 +160,51 @@ defmodule Cympho.RuntimePreflight do
           first_action: first_action(items)
         }
     end
+  end
+
+  defp company_runtime_preflight_blocker(%Issue{company_id: nil}), do: :ok
+
+  defp company_runtime_preflight_blocker(%Issue{company_id: company_id}) do
+    case Cympho.Repo.get(Company, company_id) do
+      %Company{} = company ->
+        if Companies.active?(company), do: :ok, else: {:error, paused_company_preflight(company)}
+
+      nil ->
+        :ok
+    end
+  end
+
+  defp paused_company_preflight(company) do
+    detail =
+      case company.paused_reason do
+        reason when is_binary(reason) and reason != "" ->
+          "Company runtime is paused: #{reason}. Resume runtime before starting agents or harnesses."
+
+        _ ->
+          "Company runtime is paused. Resume runtime before starting agents or harnesses."
+      end
+
+    items = [
+      item(:blocked, "Runtime paused", detail,
+        target_path: "/dashboard",
+        target_label: "Open runtime controls"
+      )
+    ]
+
+    %{
+      status: :blocked,
+      label: "Paused",
+      summary: "Company runtime is paused. Agents and harnesses will not start.",
+      adapter: nil,
+      command: nil,
+      model: nil,
+      agent_id: nil,
+      agent_name: nil,
+      agent_role: nil,
+      routed?: false,
+      items: items,
+      first_action: first_action(items)
+    }
   end
 
   defp dispatcher_enabled? do
@@ -225,7 +282,12 @@ defmodule Cympho.RuntimePreflight do
 
   defp repo_delivery_runtime_item(_issue, _agent, _adapter, _secret_keys), do: nil
 
-  defp workspace_isolation_item(%Issue{} = issue, %Agent{role: role} = agent, adapter, secret_keys)
+  defp workspace_isolation_item(
+         %Issue{} = issue,
+         %Agent{role: role} = agent,
+         adapter,
+         secret_keys
+       )
        when role in @repo_delivery_roles do
     if adapter_uses_local_workspace?(adapter) and
          Cympho.AgentRuntimeCapabilities.repo_delivery_capable?(agent, secret_keys: secret_keys) do
@@ -273,7 +335,9 @@ defmodule Cympho.RuntimePreflight do
     end
   end
 
-  defp project_workspace_path(%ProjectWorkspace{id: id}) when is_binary(id), do: "/workspaces/#{id}"
+  defp project_workspace_path(%ProjectWorkspace{id: id}) when is_binary(id),
+    do: "/workspaces/#{id}"
+
   defp project_workspace_path(_project_workspace), do: "/workspaces"
 
   defp delivery_brief_item(%Issue{} = issue, %Agent{role: role})

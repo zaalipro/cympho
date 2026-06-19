@@ -79,6 +79,53 @@ defmodule Cympho.Oversight.PatrolTest do
       stuck = Issues.list_stuck_issues(company.id, in_progress_minutes: 60)
       refute Enum.any?(stuck, &(&1.id == planning.id))
     end
+
+    test "excludes intentionally long-running issues from stale-work patrol", %{
+      company: company,
+      issue: issue,
+      engineer: engineer
+    } do
+      stale_at =
+        DateTime.utc_now() |> DateTime.add(-3 * 3600, :second) |> DateTime.truncate(:second)
+
+      {:ok, stale} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: engineer.id,
+          checked_out_at: stale_at,
+          updated_at: stale_at
+        })
+
+      assert Enum.any?(
+               Issues.list_stuck_issues(company.id, in_progress_minutes: 60),
+               &(&1.id == stale.id)
+             )
+
+      {:ok, excluded} =
+        Issues.exclude_from_stale_patrol(stale,
+          reason: "Long-running migration is expected",
+          actor: "operator-1"
+        )
+
+      assert Issues.stale_patrol_excluded?(excluded)
+
+      assert Issues.stale_patrol_state(excluded)["excluded_reason"] ==
+               "Long-running migration is expected"
+
+      refute Enum.any?(
+               Issues.list_stuck_issues(company.id, in_progress_minutes: 60),
+               &(&1.id == stale.id)
+             )
+
+      {:ok, included} = Issues.include_in_stale_patrol(excluded, actor: "operator-1")
+
+      refute Issues.stale_patrol_excluded?(included)
+
+      assert Enum.any?(
+               Issues.list_stuck_issues(company.id, in_progress_minutes: 60),
+               &(&1.id == stale.id)
+             )
+    end
   end
 
   describe "patrol_company/2" do

@@ -765,8 +765,7 @@ defmodule Cympho.RuntimeOperationsTest do
                AgentActions.execute(signoff_issue, ceo, [
                  %{
                    "type" => "block_issue",
-                   "reason" =>
-                     "[blocked] What happened: CEO is handing this back for owner verification. Blocker: owner must verify the CEO owner update before closure. Impact: no agent work remains. Next decision: owner accepts or reopens."
+                   "reason" => owner_signoff_block_reason()
                  }
                ])
 
@@ -1257,8 +1256,7 @@ defmodule Cympho.RuntimeOperationsTest do
                AgentActions.execute(issue, ceo, [
                  %{
                    "type" => "block_issue",
-                   "reason" =>
-                     "[blocked] What happened: CEO is handing this back for owner verification. Blocker: owner must verify the CEO owner update before closure. Impact: no agent work remains. Next decision: owner accepts or reopens."
+                   "reason" => owner_signoff_block_reason()
                  }
                ])
 
@@ -1337,8 +1335,7 @@ defmodule Cympho.RuntimeOperationsTest do
                AgentActions.execute(issue, ceo, [
                  %{
                    "type" => "block_issue",
-                   "reason" =>
-                     "[blocked] What happened: CEO is handing this back for owner verification. Blocker: owner must verify the CEO owner update before closure. Impact: no agent work remains. Next decision: owner accepts or reopens."
+                   "reason" => owner_signoff_block_reason()
                  }
                ])
 
@@ -1412,8 +1409,7 @@ defmodule Cympho.RuntimeOperationsTest do
                AgentActions.execute(issue, ceo, [
                  %{
                    "type" => "block_issue",
-                   "reason" =>
-                     "[blocked] What happened: CEO is handing this back for owner verification. Blocker: owner must verify the CEO owner update before closure. Impact: no agent work remains. Next decision: owner accepts or reopens."
+                   "reason" => owner_signoff_block_reason()
                  }
                ])
 
@@ -2333,6 +2329,18 @@ defmodule Cympho.RuntimeOperationsTest do
   end
 
   defp unique_slug, do: "ops-#{System.unique_integer([:positive])}"
+
+  defp owner_signoff_block_reason do
+    """
+    Cause: CEO is handing this back for owner verification.
+    Attempted fix: inspected the CEO owner update and confirmed no agent work remains.
+    Needs: owner must verify the CEO owner update before closure.
+    Current state: no agent work remains; issue is waiting on owner acceptance or revision.
+    Next decision: owner accepts the update or reopens it for revision.
+    Restart packet: open the CEO owner update, inspect evidence, then accept or request revision.
+    """
+    |> String.trim()
+  end
 
   defp configured_endpoint_port do
     :cympho

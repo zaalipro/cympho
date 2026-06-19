@@ -160,6 +160,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
         Issues.issue_runtime_paused?(issue) ->
           {:error, :issue_runtime_paused}
 
+        company_paused?(issue.company_id) ->
+          {:error, :company_paused}
+
         issue.assignee_id ->
           result =
             WakeupQueue.enqueue(%{
@@ -178,6 +181,15 @@ defmodule Cympho.Orchestrator.Dispatcher do
           _ = poll_now()
           {:ok, :queued_for_dispatch}
       end
+    end
+  end
+
+  defp company_paused?(nil), do: false
+
+  defp company_paused?(company_id) do
+    case Cympho.Repo.get(Company, company_id) do
+      %Company{} = company -> not Companies.active?(company)
+      nil -> false
     end
   end
 

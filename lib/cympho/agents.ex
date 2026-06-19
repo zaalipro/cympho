@@ -219,6 +219,47 @@ defmodule Cympho.Agents do
     end
   end
 
+  @doc """
+  Updates an agent's admin-managed permission map.
+  """
+  def update_agent_permissions(%Agent{} = agent, permissions) when is_map(permissions) do
+    permissions =
+      permissions
+      |> Enum.reject(fn {key, _value} -> unused_permission_key?(key) end)
+      |> Map.new(fn {key, value} ->
+        {to_string(key), permission_truthy?(value)}
+      end)
+
+    agent
+    |> Ecto.Changeset.change(%{permissions: permissions})
+    |> Repo.update()
+    |> case do
+      {:ok, updated} ->
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.company_id}:agents",
+          {:agent_updated, updated}
+        )
+
+        {:ok, updated}
+
+      error ->
+        error
+    end
+  end
+
+  def update_agent_permissions(%Agent{} = _agent, _permissions),
+    do: {:error, :invalid_permissions}
+
+  defp unused_permission_key?(key), do: String.starts_with?(to_string(key), "_unused_")
+
+  defp permission_truthy?(value) when value in [true, "true", "on", "1", 1], do: true
+
+  defp permission_truthy?(values) when is_list(values),
+    do: Enum.any?(values, &permission_truthy?/1)
+
+  defp permission_truthy?(_), do: false
+
   def do_update_agent(agent, attrs) do
     agent
     |> Agent.update_changeset(attrs)
@@ -1016,7 +1057,29 @@ defmodule Cympho.Agents do
   Resumes a paused agent by setting status to :idle.
   """
   def resume_agent(%Agent{} = agent) do
-    update_agent(agent, %{status: :idle, paused_at: nil, pause_reason: nil})
+    agent
+    |> Ecto.Changeset.change(%{
+      status: :idle,
+      governance_status: "active",
+      governance_reasoning: nil,
+      paused_at: nil,
+      pause_reason: nil,
+      paused_by_user_id: nil
+    })
+    |> Repo.update()
+    |> case do
+      {:ok, updated} ->
+        Phoenix.PubSub.broadcast(
+          Cympho.PubSub,
+          "company:#{updated.company_id}:agents",
+          {:agent_updated, updated}
+        )
+
+        {:ok, updated}
+
+      error ->
+        error
+    end
   end
 
   def resume_agent(agent_id) when is_binary(agent_id) do
