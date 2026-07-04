@@ -2,6 +2,8 @@ defmodule Cympho.AgentActions.TeamBuildingTest do
   use Cympho.DataCase, async: false
 
   alias Cympho.{AgentActions, Agents, Comments, Companies, Issues, Wakes}
+  alias Cympho.HeartbeatEngine.WakeupQueue
+  alias Cympho.Orchestrator.Dispatcher
   alias Cympho.Wakes.AgentWake
   import Ecto.Query
 
@@ -488,6 +490,10 @@ defmodule Cympho.AgentActions.TeamBuildingTest do
       [wake] = pending_wakes(cto.id, "escalation_from_subordinate")
       assert wake.metadata["from_agent_id"] == engineer.id
       assert wake.metadata["reason"] =~ "Cause:"
+      assert Dispatcher.runnable_candidate?(reloaded)
+
+      :ok = WakeupQueue.consume_for(cto.id, reloaded.id)
+      refute Dispatcher.runnable_candidate?(Issues.get_issue!(reloaded.id))
 
       # CEO is unaffected.
       assert pending_wakes(ceo.id, "escalation_from_subordinate") == []

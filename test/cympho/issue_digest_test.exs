@@ -212,6 +212,97 @@ defmodule Cympho.IssueDigestTest do
     assert delivery.status == :blocked
   end
 
+  test "uses the latest terminal run for runtime verification quality" do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    digest =
+      IssueDigest.build(
+        %Issue{
+          title: "Recovered runtime issue",
+          status: :todo,
+          description: "Implement the feature.",
+          comments: [
+            %Comment{
+              author_type: "agent",
+              body:
+                "[delivery] What happened: recovered after a failed runtime. Files changed: feature modules. Evidence produced: code reference and focused test output. Verification: latest run passed. Risks: none known. Current state: ready for review. Next decision: CTO review. Restart packet: CTO should inspect the latest successful run and code reference."
+            }
+          ]
+        },
+        [
+          %Run{
+            status: "failed",
+            adapter: "codex",
+            error_reason: "transient sandbox failure",
+            inserted_at: DateTime.add(now, -5, :minute),
+            completed_at: DateTime.add(now, -5, :minute)
+          },
+          %Run{
+            status: "completed",
+            adapter: "codex",
+            continuation_summary: "Focused tests passed.",
+            inserted_at: now,
+            completed_at: now
+          }
+        ],
+        [
+          %IssueWorkProduct{
+            kind: "code_change",
+            title: "Implementation branch",
+            url: "file:///tmp/cympho/worktrees/ltv-8",
+            inserted_at: now
+          }
+        ],
+        []
+      )
+
+    runtime_item = Enum.find(digest.quality.items, &(&1.key == :runtime_verification))
+    assert runtime_item.status == :ok
+    refute Enum.any?(digest.quality.gaps, &(&1.key == :runtime_verification))
+  end
+
+  test "accepts manual verification comments as runtime verification evidence" do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    digest =
+      IssueDigest.build(
+        %Issue{
+          title: "Manually verified issue",
+          status: :todo,
+          description: "Implement the feature.",
+          comments: [
+            %Comment{
+              author_type: "system",
+              body:
+                "[review] Host verification update: `mix test test/cympho_web/controllers/launch_item_controller_test.exs` passed against the real test Postgres database: 6 tests, 0 failures."
+            }
+          ]
+        },
+        [
+          %Run{
+            status: "failed",
+            adapter: "codex",
+            error_reason: "sandbox could not reach Postgres",
+            inserted_at: now,
+            completed_at: now
+          }
+        ],
+        [
+          %IssueWorkProduct{
+            kind: "code_change",
+            title: "Implementation branch",
+            url: "file:///tmp/cympho/worktrees/ltv-8",
+            inserted_at: now
+          }
+        ],
+        []
+      )
+
+    runtime_item = Enum.find(digest.quality.items, &(&1.key == :runtime_verification))
+    assert runtime_item.status == :ok
+    refute Enum.any?(digest.quality.gaps, &(&1.key == :runtime_verification))
+  end
+
   test "marks artifact-backed agent work as ready for review" do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 

@@ -33,6 +33,7 @@ defmodule Cympho.Orchestrator.Dispatcher do
   alias Cympho.Agents.Agent
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.Issues.Issue
+  alias Cympho.Wakes.AgentWake
 
   @poll_interval Application.compile_env(:cympho, [:orchestrator, :poll_interval], 30_000)
   @max_concurrent Application.compile_env(:cympho, [:orchestrator, :max_concurrent_agents], 3)
@@ -89,13 +90,19 @@ defmodule Cympho.Orchestrator.Dispatcher do
   @doc """
   Returns whether an issue may be selected by the automatic dispatcher poll.
 
-  Blocked issues are intentionally parked. Operators can relaunch them through
-  the issue page, which reopens the issue to `:todo`, and blocker-resolution
-  flows also reopen dependents explicitly. Keeping this rule here prevents a
-  broad `:active_states` override from making blocked work runnable again.
+  Blocked issues are intentionally parked unless a subordinate explicitly
+  escalated the issue to a manager. Operators can relaunch ordinary blocked
+  issues through the issue page, which reopens the issue to `:todo`, and
+  blocker-resolution flows also reopen dependents explicitly. Keeping this rule
+  here prevents a broad `:active_states` override from making blocked work
+  runnable again.
   """
-  def runnable_candidate?(%Issue{status: status}) when status in [:blocked, "blocked"],
-    do: false
+  def runnable_candidate?(%Issue{status: status} = issue) when status in [:blocked, "blocked"] do
+    not Issues.issue_runtime_paused?(issue) and
+      not Issues.is_blocked?(issue) and
+      runtime_mode_allows_issue?(issue) and
+      pending_escalation_wake?(issue.id)
+  end
 
   def runnable_candidate?(%Issue{} = issue) do
     not Issues.issue_runtime_paused?(issue) and
@@ -634,10 +641,21 @@ defmodule Cympho.Orchestrator.Dispatcher do
     active_states = @active_states
 
     query =
-      Cympho.Issues.Issue
-      |> join(:left, [i], c in Company, on: c.id == i.company_id)
-      |> where([i, c], i.status in ^active_states)
-      |> where([i, c], is_nil(i.company_id) or c.status == "active")
+      from i in Cympho.Issues.Issue,
+        as: :issue,
+        left_join: c in Company,
+        on: c.id == i.company_id,
+        where:
+          i.status in ^active_states or
+            (i.status == ^:blocked and
+               exists(
+                 from w in AgentWake,
+                   where:
+                     w.issue_id == parent_as(:issue).id and
+                       w.status == "pending" and
+                       w.reason == "escalation_from_subordinate"
+               )),
+        where: is_nil(i.company_id) or c.status == "active"
 
     query =
       if company_id do
@@ -670,6 +688,18 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   defp runtime_mode_allows_issue?(_issue), do: true
+
+  defp pending_escalation_wake?(issue_id) when is_binary(issue_id) do
+    Cympho.Repo.exists?(
+      from w in AgentWake,
+        where:
+          w.issue_id == ^issue_id and
+            w.status == "pending" and
+            w.reason == "escalation_from_subordinate"
+    )
+  end
+
+  defp pending_escalation_wake?(_issue_id), do: false
 
   defp dispatch_only_issue_id do
     :cympho

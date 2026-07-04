@@ -95,6 +95,7 @@ defmodule Cympho.AgentActions do
     "mockup" => "artifact",
     "prototype" => "artifact"
   }
+  @active_run_statuses ~w(pending queued running)
   @delivery_roles Agent.delivery_roles()
   @repo_delivery_roles Agent.pr_delivery_roles()
   @text_only_delivery_adapters [:openai_chat]
@@ -165,6 +166,8 @@ defmodule Cympho.AgentActions do
   @spec execute(Issue.t(), Agent.t() | binary(), [action()]) ::
           {:ok, %{issue: Issue.t(), results: [map()]}} | {:error, term()}
   def execute(%Issue{} = issue, %Agent{} = agent, actions) when is_list(actions) do
+    actions = backfill_approval_notes(actions)
+
     cond do
       cross_company?(issue, agent) ->
         {:error, :cross_company}
@@ -194,6 +197,39 @@ defmodule Cympho.AgentActions do
   end
 
   def execute(_issue, _agent, _actions), do: {:error, :invalid_execution_context}
+
+  defp backfill_approval_notes(actions) do
+    {actions, _last_comment} =
+      Enum.reduce(actions, {[], nil}, fn action, {acc, last_comment} ->
+        comment_body = paired_comment_body(action) || last_comment
+        action = maybe_backfill_approval_note(action, comment_body)
+        {[action | acc], comment_body}
+      end)
+
+    Enum.reverse(actions)
+  end
+
+  defp paired_comment_body(%{"type" => "comment", "body" => body}) when is_binary(body) do
+    if String.trim(body) == "", do: nil, else: body
+  end
+
+  defp paired_comment_body(_action), do: nil
+
+  defp maybe_backfill_approval_note(%{"type" => "approve_issue"} = action, comment_body)
+       when is_binary(comment_body) do
+    case Map.get(action, "notes") do
+      notes when is_binary(notes) ->
+        if String.trim(notes) == "", do: Map.put(action, "notes", comment_body), else: action
+
+      nil ->
+        Map.put(action, "notes", comment_body)
+
+      _ ->
+        action
+    end
+  end
+
+  defp maybe_backfill_approval_note(action, _comment_body), do: action
 
   defp do_execute(%Issue{} = issue, %Agent{} = agent, actions) do
     result =
@@ -1705,12 +1741,12 @@ defmodule Cympho.AgentActions do
 
         tagged_note = tagged_approval_note(agent, note)
 
-        with :ok <- ensure_approval_quality(issue),
+        with :ok <- ensure_approval_quality(issue, agent),
              :ok <- ensure_approval_note_ready(agent, tagged_note),
              {:ok, _comment} <- maybe_agent_comment(issue, agent, tagged_note),
              {:ok, issue_with_comment} <- Issues.get_issue(issue.id),
              {:ok, transitioned} <-
-               Issues.transition_issue_with_review_gates(issue_with_comment, :done),
+               Issues.transition_issue_with_review_gates(issue_with_comment, :done, agent.id),
              {:ok, released} <- Issues.force_release_issue(transitioned, :done),
              {:ok, released} <-
                update_workflow_issue(released, agent, %{
@@ -3720,7 +3756,7 @@ defmodule Cympho.AgentActions do
   defp ensure_submit_review_quality(issue, agent, action) do
     gaps =
       issue
-      |> digest_quality_gaps()
+      |> digest_quality_gaps(agent.id)
       |> Enum.map(& &1.key)
       |> required_submit_review_gaps(agent, action)
 
@@ -3751,10 +3787,10 @@ defmodule Cympho.AgentActions do
     |> Enum.reverse()
   end
 
-  defp ensure_approval_quality(issue) do
+  defp ensure_approval_quality(issue, agent) do
     gaps =
       issue
-      |> digest_quality_gaps()
+      |> digest_quality_gaps(agent.id)
       |> Enum.filter(&(&1.key in [:runtime_verification, :code_reference]))
       |> Enum.map(& &1.key)
 
@@ -4163,15 +4199,20 @@ defmodule Cympho.AgentActions do
     end
   end
 
-  defp digest_quality_gaps(issue) do
+  defp digest_quality_gaps(issue, current_agent_id) do
     issue =
       issue
       |> Repo.preload([:comments, :project], force: true)
 
+    runs =
+      issue.id
+      |> HeartbeatEngine.list_runs_for_issue()
+      |> reject_current_agent_active_runs(current_agent_id)
+
     digest =
       IssueDigest.build(
         issue,
-        HeartbeatEngine.list_runs_for_issue(issue.id),
+        runs,
         WorkProducts.list_work_products(issue.id),
         Issues.list_child_issues(issue.id)
       )
@@ -4181,6 +4222,14 @@ defmodule Cympho.AgentActions do
     |> Enum.reject(&(&1.key in [:review_decision, :ceo_owner_update]))
     |> Enum.uniq_by(& &1.key)
   end
+
+  defp reject_current_agent_active_runs(runs, agent_id) when is_binary(agent_id) do
+    Enum.reject(runs, fn run ->
+      run.agent_id == agent_id and run.status in @active_run_statuses
+    end)
+  end
+
+  defp reject_current_agent_active_runs(runs, _agent_id), do: runs
 
   defp explicit_note?(%{"notes" => notes}) when is_binary(notes), do: String.trim(notes) != ""
   defp explicit_note?(_action), do: false

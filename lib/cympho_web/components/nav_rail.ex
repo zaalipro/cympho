@@ -116,6 +116,12 @@ defmodule CymphoWeb.Components.NavRail do
         icon="hero-clipboard-document-list-mini"
         current_path={@current_path}
       />
+      <.nav_link
+        to={~p"/launch-items"}
+        label="Launch Tracker"
+        icon="hero-sparkles-mini"
+        current_path={@current_path}
+      />
       <.nav_link to={~p"/goals"} label="Goals" icon="hero-flag-mini" current_path={@current_path} />
       <.nav_link
         to={~p"/routines"}

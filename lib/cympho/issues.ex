@@ -33,6 +33,7 @@ defmodule Cympho.Issues do
   # mount. Override with `%{limit: n}` if a caller genuinely needs more.
   @list_issues_safety_cap 5_000
   @owner_acceptance_success_statuses ~w(completed succeeded)
+  @active_run_statuses ~w(pending queued running)
   @terminal_issue_statuses [:done, :cancelled]
 
   def list_issues(opts \\ %{}) do
@@ -1785,7 +1786,7 @@ defmodule Cympho.Issues do
       not StateMachine.valid_transition?(issue.status, new_status) ->
         {:error, :invalid_transition}
 
-      (blockers = review_status_blockers(issue, new_status)) != [] ->
+      (blockers = review_status_blockers(issue, new_status, agent_id)) != [] ->
         {:error,
          {:review_gates_blocked,
           %{
@@ -1810,19 +1811,32 @@ defmodule Cympho.Issues do
     end
   end
 
-  defp review_status_blockers(%Issue{} = issue, status) do
+  defp review_status_blockers(%Issue{} = issue, status, current_agent_id) do
     issue =
       issue
       |> Repo.preload([:comments, :project], force: true)
 
+    runs =
+      issue.id
+      |> HeartbeatEngine.list_runs_for_issue()
+      |> reject_current_agent_active_runs(current_agent_id)
+
     IssueDigest.review_status_blockers(
       issue,
       status,
-      HeartbeatEngine.list_runs_for_issue(issue.id),
+      runs,
       WorkProducts.list_work_products(issue.id),
       list_child_issues(issue.id)
     )
   end
+
+  defp reject_current_agent_active_runs(runs, agent_id) when is_binary(agent_id) do
+    Enum.reject(runs, fn run ->
+      run.agent_id == agent_id and run.status in @active_run_statuses
+    end)
+  end
+
+  defp reject_current_agent_active_runs(runs, _agent_id), do: runs
 
   defp do_transition(%Issue{} = issue, new_status) do
     attrs = %{status: new_status}

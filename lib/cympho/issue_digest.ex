@@ -238,6 +238,8 @@ defmodule Cympho.IssueDigest do
     failed_runs = Enum.count(runs, &(&1.status in @failed_run_statuses))
     active_runs = Enum.count(runs, &(&1.status in @active_run_statuses))
     successful_runs = Enum.count(runs, &(&1.status in @successful_run_statuses))
+    latest_terminal_run_status = latest_terminal_run_status(runs)
+    manual_runtime_verification? = manual_runtime_verification?(comments)
     agent_comments = Enum.count(comments, &(&1.author_type == "agent"))
     code_products = Enum.count(work_products, &(&1.kind == "code_change"))
     pr_url = Issue.pr_url(issue, Map.get(issue, :project))
@@ -267,6 +269,8 @@ defmodule Cympho.IssueDigest do
       active_runs: active_runs,
       failed_runs: failed_runs,
       successful_runs: successful_runs,
+      latest_terminal_run_status: latest_terminal_run_status,
+      manual_runtime_verification?: manual_runtime_verification?,
       work_products: length(work_products),
       code_products: code_products,
       child_issues: length(child_issues),
@@ -279,6 +283,36 @@ defmodule Cympho.IssueDigest do
       pr_quality_gaps: List.wrap(pr_quality["gaps"]),
       has_description?: Map.get(issue, :description) not in [nil, ""]
     }
+  end
+
+  defp latest_terminal_run_status(runs) do
+    runs
+    |> Enum.filter(&(&1.status in @failed_run_statuses or &1.status in @successful_run_statuses))
+    |> Enum.sort_by(&run_timestamp/1, {:desc, DateTime})
+    |> List.first()
+    |> case do
+      nil -> nil
+      run -> run.status
+    end
+  end
+
+  defp run_timestamp(run) do
+    Map.get(run, :completed_at) || Map.get(run, :inserted_at) || ~U[1970-01-01 00:00:00Z]
+  end
+
+  defp manual_runtime_verification?(comments) do
+    Enum.any?(comments, &manual_runtime_verification_comment?/1)
+  end
+
+  defp manual_runtime_verification_comment?(comment) do
+    body = comment_body(comment) |> String.downcase()
+
+    comment_author_type(comment) in ["agent", "system", "user"] and
+      String.contains?(body, "verification") and
+      not String.contains?(body, "rejected") and
+      Enum.any?(["tests passed", "test passed", "0 failures", "passed against"], fn marker ->
+        String.contains?(body, marker)
+      end)
   end
 
   defp state(issue, metrics) do
@@ -2425,16 +2459,6 @@ defmodule Cympho.IssueDigest do
     }
   end
 
-  defp runtime_quality_item(%{failed_runs: failed_runs}) when failed_runs > 0 do
-    %{
-      key: :runtime_verification,
-      label: "Runtime verification",
-      status: :attention,
-      prompt:
-        "#{failed_runs} failed run#{suffix(failed_runs)} need attention. Fix the adapter/runtime problem or leave a blocked comment before requesting review."
-    }
-  end
-
   defp runtime_quality_item(%{active_runs: active_runs}) when active_runs > 0 do
     %{
       key: :runtime_verification,
@@ -2445,12 +2469,36 @@ defmodule Cympho.IssueDigest do
     }
   end
 
-  defp runtime_quality_item(%{successful_runs: successful_runs}) when successful_runs > 0 do
+  defp runtime_quality_item(%{
+         latest_terminal_run_status: status,
+         successful_runs: successful_runs
+       })
+       when status in @successful_run_statuses do
     %{
       key: :runtime_verification,
       label: "Runtime verification",
       status: :ok,
       prompt: "#{successful_runs} successful run#{suffix(successful_runs)} recorded."
+    }
+  end
+
+  defp runtime_quality_item(%{manual_runtime_verification?: true}) do
+    %{
+      key: :runtime_verification,
+      label: "Runtime verification",
+      status: :ok,
+      prompt: "Manual verification comment records passing runtime evidence."
+    }
+  end
+
+  defp runtime_quality_item(%{latest_terminal_run_status: status, failed_runs: failed_runs})
+       when status in @failed_run_statuses do
+    %{
+      key: :runtime_verification,
+      label: "Runtime verification",
+      status: :attention,
+      prompt:
+        "#{failed_runs} failed run#{suffix(failed_runs)} need attention. Fix the adapter/runtime problem or leave a blocked comment before requesting review."
     }
   end
 

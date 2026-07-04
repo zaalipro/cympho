@@ -848,6 +848,37 @@ defmodule Cympho.AgentActionsTest do
              )
     end
 
+    test "approve_issue uses the paired review comment as notes when notes are omitted", %{
+      issue: issue,
+      cto: cto,
+      engineer: engineer
+    } do
+      insert_completed_run(engineer, issue)
+      insert_work_product(issue, engineer)
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body:
+            "[delivery] What happened: delivered the requested work. Files changed: implementation files. Evidence produced: work product and completed verification run. Verification: completed run passed. Risks: none known. Current state: ready for approval. Next decision: CTO approval. Restart packet: CTO should inspect the work product and completed run.",
+          author_type: "agent",
+          author_id: engineer.id,
+          issue_id: issue.id
+        })
+
+      actions = [
+        %{
+          "type" => "comment",
+          "body" =>
+            "[review] Verdict: accepted. What happened: reviewed the implementation and evidence. Evidence inspected: work product and completed verification run. Verification: completed run passed. Gaps: none. Follow-up issues: none. Next decision: close this issue. Restart packet: issue can be reopened if owner requests changes."
+        },
+        %{"type" => "approve_issue"}
+      ]
+
+      assert {:ok, _} = AgentActions.execute(issue, cto, actions)
+
+      assert Issues.get_issue!(issue.id).status == :done
+    end
+
     test "approve_issue rejects thin approval notes even when evidence gates pass", %{
       issue: issue,
       ceo: ceo
@@ -935,6 +966,115 @@ defmodule Cympho.AgentActionsTest do
 
       unchanged = Issues.get_issue!(issue.id)
       refute unchanged.status == :done
+    end
+
+    test "approve_issue accepts a latest successful run after earlier runtime failures", %{
+      issue: issue,
+      ceo: ceo,
+      engineer: engineer
+    } do
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      Repo.insert!(%Run{
+        agent_id: engineer.id,
+        issue_id: issue.id,
+        status: "failed",
+        adapter: "process",
+        error_reason: "transient sandbox failure",
+        inserted_at: DateTime.add(now, -5, :minute),
+        completed_at: DateTime.add(now, -5, :minute)
+      })
+
+      insert_completed_run(engineer, issue)
+
+      {:ok, _work_product} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          created_by_agent_id: engineer.id,
+          kind: "code_change",
+          title: "Implementation patch",
+          url: "file:///tmp/cympho/worktrees/ltv-8"
+        })
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body:
+            "[delivery] What happened: recovered after an earlier runtime failure. Files changed: implementation patch. Evidence produced: code reference and completed verification run. Verification: latest run passed. Risks: none known. Current state: ready for approval. Next decision: CEO owner update. Restart packet: CEO should inspect the latest completed run and code reference.",
+          author_type: "agent",
+          author_id: engineer.id,
+          issue_id: issue.id
+        })
+
+      assert {:ok, _} =
+               AgentActions.execute(issue, ceo, [
+                 %{
+                   "type" => "approve_issue",
+                   "notes" =>
+                     "[owner_update] What happened: approved recovered runtime work. Business status: shipped. Evidence inspected: code reference and latest completed verification run. Verification: approval gates are clear after the later success. Remaining risk: none known. Current state: closed. Next decision: none. Owner decision needed: none. Restart packet: issue is closed; reopen only if follow-up changes are requested."
+                 }
+               ])
+
+      assert Issues.get_issue!(issue.id).status == :done
+    end
+
+    test "approve_issue accepts manual verification after runtime failures", %{
+      issue: issue,
+      ceo: ceo,
+      engineer: engineer
+    } do
+      Repo.insert!(%Run{
+        agent_id: engineer.id,
+        issue_id: issue.id,
+        status: "failed",
+        adapter: "process",
+        error_reason: "sandbox could not reach Postgres"
+      })
+
+      Repo.insert!(%Run{
+        agent_id: ceo.id,
+        issue_id: issue.id,
+        status: "running",
+        adapter: "openai_chat",
+        started_at: DateTime.utc_now() |> DateTime.truncate(:second)
+      })
+
+      {:ok, _work_product} =
+        WorkProducts.create_work_product(%{
+          issue_id: issue.id,
+          created_by_agent_id: engineer.id,
+          kind: "code_change",
+          title: "Implementation patch",
+          url: "file:///tmp/cympho/worktrees/ltv-8"
+        })
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body:
+            "[delivery] What happened: recovered after a sandbox runtime failure. Files changed: implementation patch. Evidence produced: code reference and host verification output. Verification: focused controller test passed with 0 failures. Risks: none known. Current state: ready for approval. Next decision: CEO owner update. Restart packet: CEO should inspect the code reference and host verification comment before closing.",
+          author_type: "agent",
+          author_id: engineer.id,
+          issue_id: issue.id
+        })
+
+      {:ok, _comment} =
+        Comments.create_comment(%{
+          body:
+            "[review] Host verification update: `mix test test/cympho_web/controllers/launch_item_controller_test.exs` passed against the real test Postgres database: 6 tests, 0 failures. Restart packet: reviewer should inspect the code reference before approval.",
+          author_type: "system",
+          author_id: "00000000-0000-0000-0000-000000000000",
+          issue_id: issue.id
+        })
+
+      assert {:ok, _} =
+               AgentActions.execute(issue, ceo, [
+                 %{
+                   "type" => "approve_issue",
+                   "notes" =>
+                     "[owner_update] What happened: approved manually verified work. Business status: shipped. Evidence inspected: code reference and host verification comment. Verification: focused controller test passed with 0 failures. Remaining risk: none known. Current state: closed. Next decision: none. Owner decision needed: none. Restart packet: issue is closed; reopen only if follow-up changes are requested."
+                 }
+               ])
+
+      assert Issues.get_issue!(issue.id).status == :done
     end
 
     test "approve_issue is rejected when its note says work cannot proceed", %{

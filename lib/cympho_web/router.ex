@@ -66,6 +66,7 @@ defmodule CymphoWeb.Router do
       live "/issues", IssueLive.Index
       live "/issues/new", IssueLive.New
       live "/issues/:id", IssueLive.Show
+      live "/launch-items", LaunchItemLive.Index
       live "/my-issues", IssueLive.MyIssues
       live "/reviews", ReviewQueueLive.Index
       live "/inbox", InboxLive.Index
@@ -199,6 +200,8 @@ defmodule CymphoWeb.Router do
 
     get "/search", SearchController, :search
     get "/dashboard", DashboardController, :index
+
+    resources "/launch-items", LaunchItemController, only: [:index, :create, :show, :update, :delete]
 
     resources "/goals", GoalController, only: [:index, :show, :create, :update, :delete]
 
