@@ -31,7 +31,8 @@ defmodule CymphoWeb.SettingsHubTest do
       {:ok, _view, html} = live(conn, "/settings/secrets")
       assert html =~ "Add Secret"
       assert html =~ "Runtime credential cockpit"
-      assert html =~ "0 of 4 ready"
+      assert html =~ "0 of 5 ready"
+      assert html =~ "LLMotions runtime"
       assert html =~ "No runtime secrets stored yet"
       assert html =~ "Runtime preflight uses these encrypted secrets"
       assert html =~ "Add runtime secret"
@@ -59,8 +60,9 @@ defmodule CymphoWeb.SettingsHubTest do
       {:ok, _view, html} = live(conn, "/settings/secrets")
 
       assert html =~ "Runtime credential cockpit"
-      assert html =~ "1 of 4 ready"
+      assert html =~ "1 of 5 ready"
       assert html =~ "CEO Qwen runtime"
+      assert html =~ "LLMotions runtime"
       assert html =~ "DASHSCOPE_API_KEY is stored as an encrypted active secret."
       assert html =~ "Claude Code runtime"
       assert html =~ "Add ANTHROPIC_API_KEY at company scope."

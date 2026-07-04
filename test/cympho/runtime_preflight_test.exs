@@ -1,5 +1,5 @@
 defmodule Cympho.RuntimePreflightTest do
-  use Cympho.DataCase, async: true
+  use Cympho.DataCase, async: false
 
   alias Cympho.Agents
   alias Cympho.Companies
@@ -109,6 +109,41 @@ defmodule Cympho.RuntimePreflightTest do
     refute inspect(preflight) =~ "secret-key"
   end
 
+  test "surfaces LLMotions chat readiness without exposing the key" do
+    agent = %{
+      adapter: :openai_chat,
+      config: %{
+        "endpoint" => "https://cli.llmotions.com/v1",
+        "model" => "gemma-4-31b"
+      },
+      runtime_config: %{"env" => %{"LLMOTIONS_API_KEY" => "secret-key"}}
+    }
+
+    preflight = RuntimePreflight.for_agent(agent, autonomy_enabled?: true)
+
+    assert preflight.status == :ready
+    assert preflight.model == "gemma-4-31b"
+
+    assert Enum.any?(
+             preflight.items,
+             &(&1.label == "Configured endpoint" and
+                 &1.detail == "https://cli.llmotions.com/v1")
+           )
+
+    assert Enum.any?(
+             preflight.items,
+             &(&1.label == "Request URL" and
+                 &1.detail == "https://cli.llmotions.com/v1/chat/completions")
+           )
+
+    assert Enum.any?(
+             preflight.items,
+             &(&1.label == "Chat completion key" and &1.status == :ok)
+           )
+
+    refute inspect(preflight) =~ "secret-key"
+  end
+
   test "surfaces model and harness mismatch before launch" do
     agent = %{
       id: Ecto.UUID.generate(),
@@ -133,50 +168,80 @@ defmodule Cympho.RuntimePreflightTest do
   end
 
   test "links missing DashScope chat credentials to DASHSCOPE_API_KEY" do
-    agent = %{
-      adapter: :openai_chat,
-      config: %{
-        "endpoint" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model" => "qwen3.6-flash"
-      },
-      runtime_config: %{}
-    }
+    without_chat_provider_env(fn ->
+      agent = %{
+        adapter: :openai_chat,
+        config: %{
+          "endpoint" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "model" => "qwen3.6-flash"
+        },
+        runtime_config: %{}
+      }
 
-    preflight = RuntimePreflight.for_agent(agent, autonomy_enabled?: true)
-    item = Enum.find(preflight.items, &(&1.label == "Chat completion key"))
-    uri = URI.parse(item.target_path)
-    query = URI.decode_query(uri.query)
+      preflight = RuntimePreflight.for_agent(agent, autonomy_enabled?: true)
+      item = Enum.find(preflight.items, &(&1.label == "Chat completion key"))
+      uri = URI.parse(item.target_path)
+      query = URI.decode_query(uri.query)
 
-    assert preflight.status == :attention
-    assert item.status == :attention
-    assert item.detail =~ "Add DASHSCOPE_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY"
-    assert uri.path == "/settings/secrets"
-    assert query["key"] == "DASHSCOPE_API_KEY"
-    assert query["scope"] == "company"
-    assert query["description"] == "Chat completion key for agent runtime"
+      assert preflight.status == :attention
+      assert item.status == :attention
+      assert item.detail =~ "Add DASHSCOPE_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY"
+      assert uri.path == "/settings/secrets"
+      assert query["key"] == "DASHSCOPE_API_KEY"
+      assert query["scope"] == "company"
+      assert query["description"] == "Chat completion key for agent runtime"
+    end)
+  end
+
+  test "links missing LLMotions chat credentials to LLMOTIONS_API_KEY" do
+    without_chat_provider_env(fn ->
+      agent = %{
+        adapter: :openai_chat,
+        config: %{
+          "endpoint" => "https://cli.llmotions.com/v1",
+          "model" => "gemma-4-31b"
+        },
+        runtime_config: %{}
+      }
+
+      preflight = RuntimePreflight.for_agent(agent, autonomy_enabled?: true)
+      item = Enum.find(preflight.items, &(&1.label == "Chat completion key"))
+      uri = URI.parse(item.target_path)
+      query = URI.decode_query(uri.query)
+
+      assert preflight.status == :attention
+      assert item.status == :attention
+      assert item.detail =~ "Add LLMOTIONS_API_KEY or OPENAI_API_KEY"
+      assert uri.path == "/settings/secrets"
+      assert query["key"] == "LLMOTIONS_API_KEY"
+      assert query["scope"] == "company"
+      assert query["description"] == "Chat completion key for agent runtime"
+    end)
   end
 
   test "links missing generic chat credentials to OPENAI_API_KEY" do
-    agent = %{
-      adapter: :openai_chat,
-      config: %{
-        "endpoint" => "https://api.openai.example.com/v1",
-        "model" => "gpt-compatible"
-      },
-      runtime_config: %{}
-    }
+    without_chat_provider_env(fn ->
+      agent = %{
+        adapter: :openai_chat,
+        config: %{
+          "endpoint" => "https://api.openai.example.com/v1",
+          "model" => "gpt-compatible"
+        },
+        runtime_config: %{}
+      }
 
-    preflight = RuntimePreflight.for_agent(agent, autonomy_enabled?: true)
-    item = Enum.find(preflight.items, &(&1.label == "Chat completion key"))
-    uri = URI.parse(item.target_path)
-    query = URI.decode_query(uri.query)
+      preflight = RuntimePreflight.for_agent(agent, autonomy_enabled?: true)
+      item = Enum.find(preflight.items, &(&1.label == "Chat completion key"))
+      uri = URI.parse(item.target_path)
+      query = URI.decode_query(uri.query)
 
-    assert preflight.status == :attention
-    assert item.status == :attention
-    assert item.detail =~ "Add OPENAI_API_KEY or DASHSCOPE_API_KEY or ANTHROPIC_API_KEY"
-    assert uri.path == "/settings/secrets"
-    assert query["key"] == "OPENAI_API_KEY"
-    assert query["scope"] == "company"
+      assert preflight.status == :attention
+      assert item.status == :attention
+      assert item.detail =~ "Add OPENAI_API_KEY or DASHSCOPE_API_KEY or ANTHROPIC_API_KEY"
+      assert uri.path == "/settings/secrets"
+      assert query["key"] == "OPENAI_API_KEY"
+      assert query["scope"] == "company"
+    end)
   end
 
   test "blocks when a local process command is missing" do
@@ -771,6 +836,22 @@ defmodule Cympho.RuntimePreflightTest do
   end
 
   defp unique_slug, do: "preflight-#{System.unique_integer([:positive])}"
+
+  defp without_chat_provider_env(fun) do
+    keys = ~w(DASHSCOPE_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY LLMOTIONS_API_KEY)
+    original = Map.new(keys, &{&1, System.get_env(&1)})
+
+    Enum.each(keys, &System.delete_env/1)
+
+    try do
+      fun.()
+    after
+      Enum.each(original, fn
+        {key, nil} -> System.delete_env(key)
+        {key, value} -> System.put_env(key, value)
+      end)
+    end
+  end
 
   defp unique_prefix do
     suffix =

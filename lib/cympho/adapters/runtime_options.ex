@@ -165,8 +165,17 @@ defmodule Cympho.Adapters.RuntimeOptions do
   def process_defaults("codex") do
     %{
       "command" => "codex",
+      "args" => [
+        "exec",
+        "--sandbox",
+        "workspace-write",
+        "--skip-git-repo-check",
+        "--color",
+        "never"
+      ],
       "provider" => "openai",
-      "model_arg_template" => ["--model", "{{model}}"]
+      "model_arg_template" => ["--model", "{{model}}"],
+      "timeout_sec" => 1200
     }
   end
 

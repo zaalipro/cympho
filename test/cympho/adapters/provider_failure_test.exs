@@ -17,6 +17,16 @@ defmodule Cympho.Adapters.ProviderFailureTest do
     assert snippet =~ "429"
   end
 
+  test "ignores Codex token-count telemetry in otherwise successful process output" do
+    output = """
+    Reading prompt from stdin...
+    {"type":"event_msg","payload":{"type":"token_count","info":{"rate_limits":{"primary":{"limit":"250000 tokens per minute"}}}}}
+    {"type":"response_item","payload":{"type":"message","content":[{"type":"output_text","text":"Work complete.\\n```cympho-actions\\n{\\"actions\\":[{\\"type\\":\\"comment\\",\\"body\\":\\"Verified\\"}]}\\n```"}]}}
+    """
+
+    assert :ok = ProviderFailure.detect(output)
+  end
+
   test "detects raw transient provider outages" do
     assert {:error, {:provider_failure, :provider_unavailable, snippet}} =
              ProviderFailure.detect("HTTP 529: provider overloaded, please retry later")

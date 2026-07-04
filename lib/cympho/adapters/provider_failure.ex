@@ -112,7 +112,12 @@ defmodule Cympho.Adapters.ProviderFailure do
   end
 
   defp detect_text(text) do
-    clean = text |> to_string() |> String.trim()
+    clean =
+      text
+      |> to_string()
+      |> strip_adapter_telemetry()
+      |> String.trim()
+
     lower = String.downcase(clean)
     runtime_blocked = detect_runtime_blocked_text(clean)
 
@@ -145,6 +150,22 @@ defmodule Cympho.Adapters.ProviderFailure do
     Map.has_key?(map, "error") or Map.has_key?(map, :error) or
       Map.get(map, "type") == "error" or Map.get(map, :type) == "error" or
       Map.get(map, "status") == "error" or Map.get(map, :status) == "error"
+  end
+
+  defp strip_adapter_telemetry(text) do
+    text
+    |> String.split("\n")
+    |> Enum.reject(&adapter_telemetry_line?/1)
+    |> Enum.join("\n")
+  end
+
+  defp adapter_telemetry_line?(line) do
+    with {:ok, %{"type" => "event_msg", "payload" => payload}} <- Jason.decode(line),
+         true <- Map.get(payload, "type") == "token_count" do
+      true
+    else
+      _ -> false
+    end
   end
 
   defp flatten_text(value) when is_binary(value), do: value

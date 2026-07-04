@@ -987,6 +987,11 @@ defmodule Cympho.AgentPromptTest do
       assert example =~ ~s("estimated_minutes")
       assert example =~ ~s("type": "block_issue")
       assert example =~ "waiting for delegated product and CTO sub-issues"
+      assert example =~ "\\nAttempted fix:"
+      assert example =~ "\\nNeeds:"
+      assert example =~ "\\nCurrent state:"
+      assert example =~ "\\nNext decision:"
+      assert example =~ "\\nRestart packet:"
       assert example =~ "[owner_update]"
       assert example =~ "Restart packet"
     end
@@ -1009,10 +1014,11 @@ defmodule Cympho.AgentPromptTest do
       assert example =~ ~s("estimated_minutes")
       assert example =~ ~s("type": "block_issue")
       assert example =~ ~s("reason": "[blocked] Cause:)
-      assert example =~ "Attempted fix:"
-      assert example =~ "Needs:"
-      assert example =~ "Current state:"
-      assert example =~ "Next decision:"
+      assert example =~ "\\nAttempted fix:"
+      assert example =~ "\\nNeeds:"
+      assert example =~ "\\nCurrent state:"
+      assert example =~ "\\nNext decision:"
+      assert example =~ "\\nRestart packet:"
       assert example =~ "manual browser reload check"
       assert example =~ "[handoff]"
       assert example =~ "Restart packet"

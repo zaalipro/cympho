@@ -300,6 +300,24 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
     }
   end
 
+  defp runtime_hint(%{"key" => "LLMOTIONS_API_KEY"}) do
+    %{
+      title: "LLMotions runtime setup",
+      summary:
+        "This secret unlocks LLMotions OpenAI-compatible chat completions for CEO and CTO smoke runs.",
+      profile: "OpenAI Chat LLMotions Gemma / Gemini Flash",
+      save_effect: "Runtime preflight marks LLMotions profiles ready without exposing the token.",
+      next_step:
+        "Use gemma-4-31b for the first governance smoke, then compare gemini-3.5-flash-low or gemini-3.5-flash on the same scenario.",
+      items: [
+        %{label: "Credential key", value: "LLMOTIONS_API_KEY"},
+        %{label: "Smoke model", value: "gemma-4-31b"},
+        %{label: "Alternate models", value: "gemini-3.5-flash-low, gemini-3.5-flash"},
+        %{label: "Endpoint", value: "https://cli.llmotions.com/v1"}
+      ]
+    }
+  end
+
   defp runtime_hint(%{"key" => key}) when key in ["OPENAI_API_KEY", "CODEX_API_KEY"] do
     %{
       title: "Runtime credential setup",

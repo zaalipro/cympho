@@ -64,6 +64,24 @@ defmodule Cympho.RuntimeProfilesTest do
       assert RuntimeProfiles.summary_value(profile) == "Model qwen3.7-plus"
     end
 
+    test "exposes non-secret LLMotions defaults" do
+      profile = RuntimeProfiles.get!("openai-chat-llmotions-gemma")
+
+      assert profile.adapter == "openai_chat"
+      assert profile.posture == "Low-cost gateway"
+      assert profile.config["model"] == "gemma-4-31b"
+      assert profile.config["endpoint"] == "https://cli.llmotions.com/v1"
+      assert profile.description =~ "LLMOTIONS_API_KEY"
+      refute Map.has_key?(profile.config, "api_key")
+      assert RuntimeProfiles.summary_value(profile) == "Model gemma-4-31b"
+
+      assert RuntimeProfiles.get!("openai-chat-llmotions-gemini-flash-low").config["model"] ==
+               "gemini-3.5-flash-low"
+
+      assert RuntimeProfiles.get!("openai-chat-llmotions-gemini-flash").config["model"] ==
+               "gemini-3.5-flash"
+    end
+
     test "resolves selected agent profile from runtime_config" do
       agent = %{
         runtime_config: %{"profile_id" => "claude-cm"},
@@ -89,6 +107,11 @@ defmodule Cympho.RuntimeProfilesTest do
       assert RuntimeProfiles.fallback_profile_ids("codex-gpt-5.5") == [
                "codex-mini",
                "process-codex"
+             ]
+
+      assert RuntimeProfiles.fallback_profile_ids("openai-chat-llmotions-gemma") == [
+               "openai-chat-llmotions-gemini-flash-low",
+               "openai-chat-qwen-dashscope-flash"
              ]
 
       assert RuntimeProfiles.fallback_profile_ids("custom") == []
@@ -149,10 +172,35 @@ defmodule Cympho.RuntimeProfilesTest do
       assert RuntimeProfiles.max_concurrent_jobs_for_profile("openai-chat-qwen-dashscope-intl") ==
                1
 
+      assert %{profile_id: "openai-chat-llmotions-gemma", max_concurrent_jobs: 1} =
+               RuntimeProfiles.quick_preset("llmotions_gemma")
+
+      assert RuntimeProfiles.max_concurrent_jobs_for_profile("openai-chat-llmotions-gemma") == 1
+
+      assert %{profile_id: "openai-chat-llmotions-gemini-flash-low", max_concurrent_jobs: 1} =
+               RuntimeProfiles.quick_preset("llmotions_gemini_flash_low")
+
+      assert %{
+               profile_id: "openai-chat-llmotions-gemini-flash",
+               max_concurrent_jobs: 1
+             } = RuntimeProfiles.quick_preset("llmotions_gemini_flash")
+
       assert %{profile_id: "process-codex", max_concurrent_jobs: 1} =
                RuntimeProfiles.quick_preset("provider_test")
 
       assert RuntimeProfiles.get!("process-codex").config["model"] == "gpt-5.4-mini"
+
+      assert RuntimeProfiles.get!("process-codex").config["args"] ==
+               [
+                 "exec",
+                 "--sandbox",
+                 "workspace-write",
+                 "--skip-git-repo-check",
+                 "--color",
+                 "never"
+               ]
+
+      assert RuntimeProfiles.get!("process-codex").config["timeout_sec"] == 1200
 
       assert is_nil(RuntimeProfiles.quick_preset("missing"))
       assert RuntimeProfiles.max_concurrent_jobs_for_profile("custom", 3) == 3

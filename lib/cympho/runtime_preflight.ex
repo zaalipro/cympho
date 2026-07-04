@@ -483,10 +483,15 @@ defmodule Cympho.RuntimePreflight do
     endpoint = runtime.endpoint |> to_string() |> String.downcase()
     model = runtime.model |> to_string() |> String.downcase()
 
-    if String.contains?(endpoint, "dashscope") or String.starts_with?(model, "qwen") do
-      ["DASHSCOPE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
-    else
-      ["OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY"]
+    cond do
+      String.contains?(endpoint, "llmotions") ->
+        ["LLMOTIONS_API_KEY", "OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY"]
+
+      String.contains?(endpoint, "dashscope") or String.starts_with?(model, "qwen") ->
+        ["DASHSCOPE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "LLMOTIONS_API_KEY"]
+
+      true ->
+        ["OPENAI_API_KEY", "DASHSCOPE_API_KEY", "ANTHROPIC_API_KEY", "LLMOTIONS_API_KEY"]
     end
   end
 
@@ -809,6 +814,7 @@ defmodule Cympho.RuntimePreflight do
   defp model_for_agent(agent, "openai_chat", env_vars) do
     runtime_config_value(agent, "model") ||
       config_value(agent, "model") ||
+      env_vars["LLMOTIONS_MODEL"] ||
       env_vars["OPENAI_MODEL"] ||
       env_vars["DASHSCOPE_MODEL"] ||
       env_vars["MODEL"]
@@ -840,6 +846,7 @@ defmodule Cympho.RuntimePreflight do
   defp endpoint_for_agent(agent, "openai_chat", env_vars) do
     config_value(agent, "endpoint") ||
       config_value(agent, "base_url") ||
+      env_vars["LLMOTIONS_BASE_URL"] ||
       env_vars["OPENAI_BASE_URL"] ||
       env_vars["DASHSCOPE_BASE_URL"]
   end

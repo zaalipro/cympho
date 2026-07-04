@@ -1646,9 +1646,9 @@ defmodule Cympho.AgentPrompt do
     - CTO review: `[review] Verdict: accepted/request changes/blocked. What happened: ... Evidence inspected: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ... Restart packet: ...`
     - CEO owner update: `[owner_update] What happened: ... Business status: shipped/not shipped/ready for owner signoff. Evidence inspected: ... Verification: ... Remaining risk: ... Current state: ... Next decision: ... Owner decision needed: ... Restart packet: ...`
       If you will also use `block_issue` only to wait for owner verification, do not call the business status `shipped`; use `ready for owner signoff` or `not shipped until owner accepts`.
-    - Blocked work: `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ... Restart packet: ...`
+    - Blocked work: `[blocked] Cause: ...\nAttempted fix: ...\nNeeds: ...\nCurrent state: ...\nNext decision: ...\nRestart packet: ...`
       Thin `block_issue` reasons are rejected; include cause, needs, current state, next decision, and restart packet so the issue can recover later.
-      If you emit a `block_issue` action, its JSON `reason` must be the full tagged blocker note with these exact labels: `[blocked] Cause: ... Attempted fix: ... Needs: ... Current state: ... Next decision: ... Restart packet: ...`. Do not rely on the prose summary or a separate `comment` action to satisfy this; the server validates `block_issue.reason` directly.
+      If you emit a `block_issue` action, its JSON `reason` must be the full tagged blocker note with escaped newlines between labels: `"[blocked] Cause: ...\\nAttempted fix: ...\\nNeeds: ...\\nCurrent state: ...\\nNext decision: ...\\nRestart packet: ..."`. Do not rely on the prose summary or a separate `comment` action to satisfy this; the server validates `block_issue.reason` directly.
     Never emit `attach_work_product`, `submit_review`, `approve_issue`, `request_changes`, `block_issue`, `handoff`, or a meaningful `create_issue` without a paired owner-readable `comment`. The issue page uses these comments as the owner-facing execution record and groups noisy activity by those tags.
 
     Treat your final response summary as run memory. Include objective, actions taken, files changed or artifacts, validation, risks/gaps, current state, next decision, and restart packet. Avoid vague endings like "done", "fixed", or "tests passed" without the decision context; Cympho folds your summary and tagged comment into the issue memory panel.
@@ -1878,7 +1878,7 @@ defmodule Cympho.AgentPrompt do
         },
         {
           "type": "block_issue",
-          "reason": "[blocked] Cause: waiting for delegated product and CTO sub-issues to return evidence. Attempted fix: split the owner request into measurable planning work. Needs: sub-issue completion. Current state: delegated. Next decision: review evidence and approve or request changes. Restart packet: resume by reading the child issue evidence, verification notes, and remaining risks before closing the parent.",
+          "reason": "[blocked] Cause: waiting for delegated product and CTO sub-issues to return evidence.\\nAttempted fix: split the owner request into measurable planning work.\\nNeeds: sub-issue completion.\\nCurrent state: delegated.\\nNext decision: review evidence and approve or request changes.\\nRestart packet: resume by reading the child issue evidence, verification notes, and remaining risks before closing the parent.",
           "blocker_kind": "external_dep"
         }
       ]
@@ -1923,7 +1923,7 @@ defmodule Cympho.AgentPrompt do
         },
         {
           "type": "block_issue",
-          "reason": "[blocked] Cause: waiting for delegated engineer child issue evidence before CTO can review or submit the plan upward. Attempted fix: created the scoped engineer child issue with acceptance criteria, evidence required, verification required, definition of done, dependencies, risks, and estimated minutes. Needs: engineer completes the child issue and submits PR/work-product evidence for CTO review. Current state: engineering work is delegated and this CTO issue is paused until child evidence returns. Next decision: CTO reviews the engineer evidence and approves, requests changes, or escalates any blocker. Restart packet: resume by inspecting the engineer child issue, attached work product or PR, test output, verification notes, and remaining risks before closing this CTO issue.",
+          "reason": "[blocked] Cause: waiting for delegated engineer child issue evidence before CTO can review or submit the plan upward.\\nAttempted fix: created the scoped engineer child issue with acceptance criteria, evidence required, verification required, definition of done, dependencies, risks, and estimated minutes.\\nNeeds: engineer completes the child issue and submits PR/work-product evidence for CTO review.\\nCurrent state: engineering work is delegated and this CTO issue is paused until child evidence returns.\\nNext decision: CTO reviews the engineer evidence and approves, requests changes, or escalates any blocker.\\nRestart packet: resume by inspecting the engineer child issue, attached work product or PR, test output, verification notes, and remaining risks before closing this CTO issue.",
           "blocker_kind": "external_dep"
         }
       ]

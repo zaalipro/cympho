@@ -377,6 +377,7 @@ defmodule Cympho.Orchestrator do
   @impl true
   def terminate(reason, %__MODULE__{} = session) do
     cancel_adapter_session(session.session_id, reason)
+    finalize_active_run_on_shutdown(session, reason)
 
     if dispatcher = Process.whereis(Cympho.Orchestrator.Dispatcher) do
       send(dispatcher, {:session_ended, session.issue.id, reason})
@@ -400,6 +401,47 @@ defmodule Cympho.Orchestrator do
       {:error, :not_started} -> :ok
     end
   end
+
+  defp finalize_active_run_on_shutdown(%__MODULE__{run_id: nil}, _reason), do: :ok
+  defp finalize_active_run_on_shutdown(%__MODULE__{}, :normal), do: :ok
+
+  defp finalize_active_run_on_shutdown(%__MODULE__{} = session, reason) do
+    with {:ok, run} <- HeartbeatEngine.get_run(session.run_id),
+         true <- active_run_status?(Map.get(run, :status)) do
+      result =
+        if cancellation_shutdown_reason?(reason) do
+          HeartbeatEngine.cancel_run(run)
+        else
+          HeartbeatEngine.fail_run(run, {:orchestrator_terminated, reason})
+        end
+
+      case result do
+        {:ok, _updated} ->
+          :ok
+
+        {:error, error} ->
+          Logger.warning(
+            "[Orchestrator] failed to finalize run #{session.run_id} during shutdown: #{inspect(error)}"
+          )
+      end
+    else
+      _ -> :ok
+    end
+  rescue
+    error ->
+      Logger.warning(
+        "[Orchestrator] failed to finalize run #{session.run_id} during shutdown: #{Exception.message(error)}"
+      )
+  end
+
+  defp active_run_status?(status), do: status in ["pending", "queued", "running"]
+
+  defp cancellation_shutdown_reason?(:shutdown), do: true
+  defp cancellation_shutdown_reason?({:shutdown, _detail}), do: true
+  defp cancellation_shutdown_reason?({:runtime_stop, _detail}), do: true
+  defp cancellation_shutdown_reason?(:operator_stop), do: true
+  defp cancellation_shutdown_reason?(:issue_terminal), do: true
+  defp cancellation_shutdown_reason?(_reason), do: false
 
   ## Private — HeartbeatEngine integration
 

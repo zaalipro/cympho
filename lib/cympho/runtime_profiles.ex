@@ -55,6 +55,27 @@ defmodule Cympho.RuntimeProfiles do
       description: "Use DashScope International compatible-mode chat completions."
     },
     %{
+      id: "llmotions_gemma",
+      name: "LLMotions Gemma",
+      profile_id: "openai-chat-llmotions-gemma",
+      max_concurrent_jobs: 1,
+      description: "Use LLMotions Gemma for low-cost CEO/CTO governance smoke runs."
+    },
+    %{
+      id: "llmotions_gemini_flash_low",
+      name: "LLMotions Gemini Flash Low",
+      profile_id: "openai-chat-llmotions-gemini-flash-low",
+      max_concurrent_jobs: 1,
+      description: "Use the lower-cost LLMotions Gemini Flash profile for cheap smoke runs."
+    },
+    %{
+      id: "llmotions_gemini_flash",
+      name: "LLMotions Gemini Flash",
+      profile_id: "openai-chat-llmotions-gemini-flash",
+      max_concurrent_jobs: 1,
+      description: "Use LLMotions Gemini Flash when the smoke run needs a stronger pass."
+    },
+    %{
       id: "provider_test",
       name: "Provider test",
       profile_id: "process-codex",
@@ -77,6 +98,17 @@ defmodule Cympho.RuntimeProfiles do
     ],
     "openai-chat-qwen-dashscope-flash" => ["openai-chat-qwen-dashscope-intl"],
     "openai-chat-qwen-dashscope-intl" => ["openai-chat-qwen-dashscope-flash"],
+    "openai-chat-llmotions-gemma" => [
+      "openai-chat-llmotions-gemini-flash-low",
+      "openai-chat-qwen-dashscope-flash"
+    ],
+    "openai-chat-llmotions-gemini-flash-low" => [
+      "openai-chat-llmotions-gemma"
+    ],
+    "openai-chat-llmotions-gemini-flash" => [
+      "openai-chat-llmotions-gemini-flash-low",
+      "openai-chat-llmotions-gemma"
+    ],
     "openclaw-zai" => ["openclaw-minimax", "codex-mini"],
     "openclaw-minimax" => ["openclaw-zai", "codex-mini"],
     "cursor-auto" => ["codex-mini", "process-codex"],
@@ -166,6 +198,45 @@ defmodule Cympho.RuntimeProfiles do
         config: %{
           "endpoint" => "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
           "model" => "qwen3.7-plus"
+        },
+        runtime_config: %{}
+      },
+      %{
+        id: "openai-chat-llmotions-gemma",
+        name: "OpenAI Chat LLMotions Gemma",
+        adapter: "openai_chat",
+        posture: "Low-cost gateway",
+        description:
+          "Calls LLMotions OpenAI-compatible chat completions with gemma-4-31b for CEO/CTO smoke tests. Add LLMOTIONS_API_KEY in Secrets before execution; OPENAI_API_KEY remains accepted as a compatible-gateway alias.",
+        config: %{
+          "endpoint" => "https://cli.llmotions.com/v1",
+          "model" => "gemma-4-31b"
+        },
+        runtime_config: %{}
+      },
+      %{
+        id: "openai-chat-llmotions-gemini-flash-low",
+        name: "OpenAI Chat LLMotions Gemini Flash Low",
+        adapter: "openai_chat",
+        posture: "Low-cost gateway",
+        description:
+          "Calls LLMotions OpenAI-compatible chat completions with gemini-3.5-flash-low for cheap governance and routing smoke tests. Add LLMOTIONS_API_KEY in Secrets before execution.",
+        config: %{
+          "endpoint" => "https://cli.llmotions.com/v1",
+          "model" => "gemini-3.5-flash-low"
+        },
+        runtime_config: %{}
+      },
+      %{
+        id: "openai-chat-llmotions-gemini-flash",
+        name: "OpenAI Chat LLMotions Gemini Flash",
+        adapter: "openai_chat",
+        posture: "Gateway",
+        description:
+          "Calls LLMotions OpenAI-compatible chat completions with gemini-3.5-flash for stronger CEO/CTO planning turns. Add LLMOTIONS_API_KEY in Secrets before execution.",
+        config: %{
+          "endpoint" => "https://cli.llmotions.com/v1",
+          "model" => "gemini-3.5-flash"
         },
         runtime_config: %{}
       },

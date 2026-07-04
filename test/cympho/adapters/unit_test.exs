@@ -477,9 +477,7 @@ defmodule Cympho.Adapters.UnitTest do
     end
 
     test "health_check/1 without cursor binary reports unhealthy" do
-      has_cursor = System.find_executable("cursor") != nil
-
-      unless has_cursor do
+      unless cursor_entrypoint_available?() do
         assert CursorAdapter.health_check(%{}).status == :unhealthy
       end
     end
@@ -490,9 +488,7 @@ defmodule Cympho.Adapters.UnitTest do
     end
 
     test "available?/1 without cursor binary returns false" do
-      has_cursor = System.find_executable("cursor") != nil
-
-      unless has_cursor do
+      unless cursor_entrypoint_available?() do
         assert CursorAdapter.available?(%{}) == false
       end
     end
@@ -519,9 +515,7 @@ defmodule Cympho.Adapters.UnitTest do
     end
 
     test "run/4 sends error when cursor binary not available" do
-      has_cursor = System.find_executable("cursor") != nil
-
-      unless has_cursor do
+      unless cursor_entrypoint_available?() do
         issue = %{id: "issue-1", title: "Test", description: "Do something"}
         _ref = CursorAdapter.run(issue, "agent-1", self(), config: %{timeout: 500})
 
@@ -928,5 +922,9 @@ defmodule Cympho.Adapters.UnitTest do
 
       assert_receive {:turn_ended_with_error, ^ref, :no_command}
     end
+  end
+
+  defp cursor_entrypoint_available? do
+    Enum.any?(~w(agent cursor-agent cursor), &(System.find_executable(&1) != nil))
   end
 end

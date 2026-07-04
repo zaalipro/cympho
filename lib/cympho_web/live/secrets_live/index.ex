@@ -18,6 +18,18 @@ defmodule CymphoWeb.SecretsLive.Index do
       icon: "hero-sparkles-mini"
     },
     %{
+      id: "llmotions",
+      title: "LLMotions runtime",
+      summary: "OpenAI-compatible LLMotions execution for CEO and CTO smoke runs.",
+      profile: "OpenAI Chat LLMotions Gemma / Gemini Flash",
+      primary_key: "LLMOTIONS_API_KEY",
+      keys: ["LLMOTIONS_API_KEY", "OPENAI_API_KEY"],
+      model: "gemma-4-31b for smoke, gemini-3.5-flash for stronger planning",
+      endpoint: "https://cli.llmotions.com/v1",
+      description: "LLMotions OpenAI-compatible runtime credential",
+      icon: "hero-bolt-mini"
+    },
+    %{
       id: "claude-compatible",
       title: "Claude Code runtime",
       summary: "Anthropic-compatible execution for Claude Code adapters and wrapper commands.",

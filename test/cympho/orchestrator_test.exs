@@ -212,6 +212,55 @@ defmodule Cympho.OrchestratorTest do
       end
     end
 
+    test "runtime shutdown cancels the active run instead of leaving it running", %{
+      agent: agent,
+      issue: issue
+    } do
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      {:ok, checked_out} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: agent.id,
+          checked_out_at: now,
+          started_at: now
+        })
+
+      MockAdapter.script(agent.id, checked_out.id, [:silent])
+      trap_exit? = Process.flag(:trap_exit, true)
+
+      try do
+        with_mocks([
+          {Cympho.Adapters, [],
+           [
+             resolve: fn _ -> {:ok, MockAdapter, %{}} end
+           ]}
+        ]) do
+          assert {:ok, pid} =
+                   Orchestrator.start_and_run(checked_out, agent.id,
+                     adapter: :mock,
+                     adapter_config: %{}
+                   )
+
+          assert {:ok, %Run{status: "running"}} =
+                   wait_for_latest_run_status(checked_out.id, "running")
+
+          GenServer.stop(pid, {:runtime_stop, "focused runtime expired"})
+          assert_receive {:EXIT, ^pid, {:runtime_stop, "focused runtime expired"}}, 1_000
+
+          assert {:ok, %Run{status: "cancelled", completed_at: completed_at}} =
+                   wait_for_latest_run_status(checked_out.id, "cancelled")
+
+          assert completed_at
+          assert Issues.get_issue!(checked_out.id).status == :todo
+        end
+      after
+        Process.flag(:trap_exit, trap_exit?)
+      end
+    end
+
     test "starts session when adapter resolves successfully", %{
       issue_id: issue_id,
       agent_id: agent_id,
@@ -1248,6 +1297,21 @@ defmodule Cympho.OrchestratorTest do
   end
 
   defp wait_until_stopped(_pid, 0), do: :timeout
+
+  defp wait_for_latest_run_status(issue_id, status, attempts \\ 40)
+
+  defp wait_for_latest_run_status(issue_id, status, attempts) when attempts > 0 do
+    case Cympho.HeartbeatEngine.list_runs_for_issue(issue_id, limit: 1) do
+      [%Run{status: ^status} = run] ->
+        {:ok, run}
+
+      _ ->
+        Process.sleep(50)
+        wait_for_latest_run_status(issue_id, status, attempts - 1)
+    end
+  end
+
+  defp wait_for_latest_run_status(_issue_id, _status, 0), do: :timeout
 
   defp wait_for_session_id(pid, session_id, attempts \\ 20)
 

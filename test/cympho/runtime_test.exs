@@ -210,6 +210,47 @@ defmodule Cympho.RuntimeTest do
     assert context.adapter_config["env"]["DASHSCOPE_API_KEY"] == "dashscope-test-key"
   end
 
+  test "preflight injects LLMotions secret into OpenAI chat adapter config", %{
+    company: company
+  } do
+    {:ok, ceo} =
+      Agents.create_agent(%{
+        company_id: company.id,
+        name: "LLMotions Runtime CEO",
+        role: :ceo,
+        status: :idle,
+        adapter: :openai_chat,
+        config: %{
+          "endpoint" => "https://cli.llmotions.com/v1",
+          "model" => "gemma-4-31b"
+        }
+      })
+
+    {:ok, _secret} =
+      Secrets.create_secret(%{
+        company_id: company.id,
+        scope: "company",
+        key: "LLMOTIONS_API_KEY",
+        value: "llmotions-test-key"
+      })
+
+    {:ok, issue} =
+      Issues.create_issue(%{
+        company_id: company.id,
+        title: "CEO LLMotions runtime smoke",
+        status: :todo,
+        assigned_role: "ceo",
+        assignee_id: ceo.id
+      })
+
+    assert {:ok, context} = Runtime.preflight(issue, ceo)
+    assert context.adapter == Cympho.Adapters.OpenAIChatAdapter
+    assert context.adapter_config["api_key"] == "llmotions-test-key"
+    assert context.adapter_config["endpoint"] == "https://cli.llmotions.com/v1"
+    assert context.adapter_config["model"] == "gemma-4-31b"
+    assert context.adapter_config["env"]["LLMOTIONS_API_KEY"] == "llmotions-test-key"
+  end
+
   test "preflight blocks clear adapter and model mismatches", %{
     company: company,
     issue: issue

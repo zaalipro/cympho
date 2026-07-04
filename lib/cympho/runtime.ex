@@ -290,16 +290,16 @@ defmodule Cympho.Runtime do
   end
 
   defp with_secret_backed_api_key(config, :openai_chat, env) do
+    endpoint = openai_chat_endpoint(config, env)
+    model = openai_chat_model(config, env)
+
     config
     |> put_config_new(
       "api_key",
-      env["DASHSCOPE_API_KEY"] || env["OPENAI_API_KEY"] || env["ANTHROPIC_API_KEY"]
+      openai_chat_api_key(endpoint, model, env)
     )
-    |> put_config_new(
-      "endpoint",
-      env["DASHSCOPE_BASE_URL"] || env["OPENAI_BASE_URL"] || env["ANTHROPIC_BASE_URL"]
-    )
-    |> put_config_new("model", env["DASHSCOPE_MODEL"] || env["OPENAI_MODEL"] || env["MODEL"])
+    |> put_config_new("endpoint", endpoint)
+    |> put_config_new("model", model)
   end
 
   defp with_secret_backed_api_key(config, :agrenting, env) do
@@ -313,6 +313,72 @@ defmodule Cympho.Runtime do
   end
 
   defp with_secret_backed_api_key(config, _adapter, _env), do: config
+
+  defp openai_chat_api_key(endpoint, model, env) do
+    cond do
+      llmotions_chat?(endpoint, model) ->
+        first_env(env, [
+          "LLMOTIONS_API_KEY",
+          "OPENAI_API_KEY",
+          "DASHSCOPE_API_KEY",
+          "ANTHROPIC_API_KEY"
+        ])
+
+      dashscope_chat?(endpoint, model) ->
+        first_env(env, [
+          "DASHSCOPE_API_KEY",
+          "OPENAI_API_KEY",
+          "ANTHROPIC_API_KEY",
+          "LLMOTIONS_API_KEY"
+        ])
+
+      true ->
+        first_env(env, [
+          "OPENAI_API_KEY",
+          "DASHSCOPE_API_KEY",
+          "ANTHROPIC_API_KEY",
+          "LLMOTIONS_API_KEY"
+        ])
+    end
+  end
+
+  defp openai_chat_endpoint(config, env) do
+    config_value(config, "endpoint") ||
+      config_value(config, "base_url") ||
+      env["LLMOTIONS_BASE_URL"] ||
+      env["OPENAI_BASE_URL"] ||
+      env["DASHSCOPE_BASE_URL"] ||
+      env["ANTHROPIC_BASE_URL"]
+  end
+
+  defp openai_chat_model(config, env) do
+    config_value(config, "model") ||
+      env["LLMOTIONS_MODEL"] ||
+      env["OPENAI_MODEL"] ||
+      env["DASHSCOPE_MODEL"] ||
+      env["MODEL"]
+  end
+
+  defp first_env(env, keys) do
+    Enum.find_value(keys, fn key ->
+      value = env[key]
+      if value in [nil, ""], do: nil, else: value
+    end)
+  end
+
+  defp config_value(config, key) when is_map(config) do
+    Map.get(config, key) || Map.get(config, String.to_atom(key))
+  end
+
+  defp llmotions_chat?(endpoint, model) do
+    text = "#{endpoint} #{model}" |> String.downcase()
+    String.contains?(text, "llmotions")
+  end
+
+  defp dashscope_chat?(endpoint, model) do
+    text = "#{endpoint} #{model}" |> String.downcase()
+    String.contains?(text, "dashscope") or String.contains?(text, "qwen")
+  end
 
   defp put_config_new(config, _key, nil), do: config
   defp put_config_new(config, _key, ""), do: config
