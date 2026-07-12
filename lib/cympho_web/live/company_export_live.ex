@@ -80,7 +80,7 @@ defmodule CymphoWeb.CompanyExportLive do
               <button
                 :if={!@loading}
                 phx-click="generate_export"
-                class="inline-flex items-center gap-2 rounded-button bg-brand px-5 py-3 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+                class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-5 py-3 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
               >
                 <.icon name="hero-arrow-path-mini" class="h-4 w-4" />
                 {if @download_ready, do: "Regenerate export", else: "Generate export"}

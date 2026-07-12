@@ -1,8 +1,8 @@
-<div class="p-6 lg:p-8">
-  <.header
-    title="Approvals"
-    subtitle="Track agent-requested approvals, unblock pending work, and keep a decision trail."
-  >
+<div class="p-6 lg:p-8" data-ui-complex-page>
+  <.header title="Approvals">
+    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
+      Track agent-requested approvals, unblock pending work, and keep a decision trail.
+    </p>
     <:actions>
       <form phx-change="filter_status">
         <.select_menu
@@ -20,10 +20,39 @@
     </:actions>
   </.header>
 
+  <div class="ui-simple-only mt-6 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
+      <span class="ui-simple-icon">
+        <span class="hero-clock-mini h-4 w-4"></span>
+      </span>
+      <span class="min-w-0">
+        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          Pending
+        </span>
+        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
+          {@approval_command.pending_count} waiting for a decision
+        </span>
+      </span>
+    </div>
+    <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
+      <span class="ui-simple-icon">
+        <span class="hero-link-mini h-4 w-4"></span>
+      </span>
+      <span class="min-w-0">
+        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          Linked issues
+        </span>
+        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
+          {@approval_command.linked_issue_count} connected
+        </span>
+      </span>
+    </div>
+  </div>
+
   <div
     id="approval-command"
     data-testid="approval-command"
-    class="mt-6 overflow-hidden rounded-xl border border-border bg-panel"
+    class="ui-advanced-only mt-6 overflow-hidden rounded-xl border border-border bg-panel"
   >
     <div class="border-b border-border px-5 py-4">
       <div class="flex flex-wrap items-start justify-between gap-3">

@@ -215,7 +215,10 @@ defmodule CymphoWeb.Components do
 
   def panel(assigns) do
     ~H"""
-    <section class={["rounded-xl border border-border bg-panel shadow-card", @class]} {@rest}>
+    <section
+      class={["card-lift rounded-xl border border-border bg-panel shadow-card", @class]}
+      {@rest}
+    >
       {render_slot(@inner_block)}
     </section>
     """
@@ -230,11 +233,19 @@ defmodule CymphoWeb.Components do
 
   def metric(assigns) do
     ~H"""
-    <div class={["rounded-xl border border-border bg-panel px-4 py-3 shadow-card", @class]} {@rest}>
+    <div
+      class={["card-lift rounded-xl border border-border bg-panel px-4 py-3 shadow-card", @class]}
+      {@rest}
+    >
       <p class="text-eyebrow uppercase text-text-quaternary">
         {@label}
       </p>
-      <p class={["mt-1 text-2xl font-590 leading-8 tabular-nums", metric_tone(@tone)]}>{@value}</p>
+      <p class={[
+        "mt-1 font-serif text-2xl font-590 leading-8 tabular-nums",
+        metric_tone(@tone)
+      ]}>
+        {@value}
+      </p>
       <p :if={@hint} class="mt-1 truncate text-caption text-text-quaternary">{@hint}</p>
     </div>
     """
@@ -250,7 +261,7 @@ defmodule CymphoWeb.Components do
   def empty_state(assigns) do
     ~H"""
     <div class={["flex flex-col items-center justify-center px-6 py-16 text-center", @class]}>
-      <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-surface text-text-tertiary">
+      <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-brand/20 bg-brand/10 text-text-tertiary shadow-[0_0_24px_rgba(217,119,87,0.12)]">
         <%= if @icon_slot != [] || @icon do %>
           {render_slot(@icon_slot)}
         <% else %>
@@ -349,7 +360,7 @@ defmodule CymphoWeb.Components do
 
   def overflow_menu(assigns) do
     ~H"""
-    <details class={["linear-menu relative", @class]}>
+    <details class={["cympho-menu relative", @class]}>
       <summary
         class={[
           "flex h-8 cursor-pointer list-none items-center justify-center rounded-md text-text-quaternary transition-colors hover:bg-surface-hover hover:text-text-primary",
@@ -370,7 +381,7 @@ defmodule CymphoWeb.Components do
         <span :if={@trigger_text}>{@trigger_text}</span>
       </summary>
       <div class={[
-        "linear-menu-panel absolute z-30 mt-2 min-w-44 rounded-xl border border-border bg-panel p-1 shadow-dialog",
+        "cympho-menu-panel absolute z-30 mt-2 min-w-44 rounded-xl border border-border bg-panel p-1 shadow-dialog",
         menu_align(@align)
       ]}>
         {render_slot(@inner_block)}
@@ -753,7 +764,7 @@ defmodule CymphoWeb.Components do
         role="listbox"
         class={[
           "hidden absolute left-0 top-full z-50 w-full min-w-[9rem]",
-          "rounded-lg bg-surface-2 border border-hairline shadow-elevated overflow-hidden"
+          "cympho-menu-panel rounded-lg bg-surface-2 border border-hairline shadow-elevated overflow-hidden"
         ]}
       >
         <ul data-select-list class="max-h-60 overflow-y-auto py-1">
@@ -818,7 +829,7 @@ defmodule CymphoWeb.Components do
   end
 
   defp button_variant("primary"),
-    do: "bg-brand text-on-primary font-590 hover:bg-accent-hover"
+    do: "cta-glow bg-brand text-on-primary font-590 hover:bg-accent-hover"
 
   defp button_variant("secondary"),
     do: "bg-button text-text-primary border border-border hover:bg-button-hover"

@@ -1810,6 +1810,39 @@ const liveSocket = new LiveSocket("/live", Socket, {
 liveSocket.connect();
 window.liveSocket = liveSocket;
 
+// Slim terracotta progress bar along the top during LiveView navigation.
+// Pure transform animation (GPU-cheap); appears only when loading takes
+// longer than 120ms so patches don't flicker it.
+const progressBar = document.createElement("div");
+progressBar.setAttribute("aria-hidden", "true");
+progressBar.style.cssText = [
+  "position:fixed", "top:0", "left:0", "right:0", "height:2px", "z-index:80",
+  "background:linear-gradient(90deg, var(--color-primary), var(--color-primary-hover))",
+  "transform-origin:left", "transform:scaleX(0)", "opacity:0",
+  "transition:transform 400ms cubic-bezier(0.16,1,0.3,1), opacity 200ms ease",
+  "pointer-events:none"
+].join(";");
+document.body.appendChild(progressBar);
+
+let progressTimer = null;
+window.addEventListener("phx:page-loading-start", () => {
+  clearTimeout(progressTimer);
+  progressTimer = setTimeout(() => {
+    progressBar.style.opacity = "1";
+    progressBar.style.transform = "scaleX(0.7)";
+  }, 120);
+});
+window.addEventListener("phx:page-loading-stop", () => {
+  clearTimeout(progressTimer);
+  if (progressBar.style.opacity === "1") {
+    progressBar.style.transform = "scaleX(1)";
+    setTimeout(() => {
+      progressBar.style.opacity = "0";
+      setTimeout(() => { progressBar.style.transform = "scaleX(0)"; }, 200);
+    }, 150);
+  }
+});
+
 function createSwarmHiddenInput(name, value) {
   const input = document.createElement('input');
   input.type = 'hidden';

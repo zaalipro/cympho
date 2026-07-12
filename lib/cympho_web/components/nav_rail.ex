@@ -45,7 +45,7 @@ defmodule CymphoWeb.Components.NavRail do
       |> assign(:hidden_agents_count, max(0, length(assigns.agents) - @agents_visible))
 
     ~H"""
-    <nav class="flex-1 overflow-y-auto py-2.5 px-2 space-y-0.5" {@rest}>
+    <nav class="flex-1 overflow-y-auto py-2.5 px-2 space-y-0.5" data-ui-complex-page {@rest}>
       <.primary_action />
 
       <div class="h-1.5"></div>
@@ -100,6 +100,7 @@ defmodule CymphoWeb.Components.NavRail do
         label="Operations"
         icon="hero-command-line-mini"
         current_path={@current_path}
+        advanced_only
       />
       <.nav_link
         to={~p"/settings/profile"}
@@ -121,6 +122,7 @@ defmodule CymphoWeb.Components.NavRail do
         label="Launch Tracker"
         icon="hero-sparkles-mini"
         current_path={@current_path}
+        advanced_only
       />
       <.nav_link to={~p"/goals"} label="Goals" icon="hero-flag-mini" current_path={@current_path} />
       <.nav_link
@@ -128,6 +130,7 @@ defmodule CymphoWeb.Components.NavRail do
         label="Routines"
         icon="hero-arrow-path-rounded-square-mini"
         current_path={@current_path}
+        advanced_only
       />
 
       <.nav_section
@@ -185,7 +188,7 @@ defmodule CymphoWeb.Components.NavRail do
     ~H"""
     <div
       data-testid="runtime-controls"
-      class="rounded-xl border border-border bg-surface-2/70 p-2 shadow-card"
+      class="ui-advanced-only rounded-xl border border-border bg-surface-2/70 p-2 shadow-card"
     >
       <div class="mb-2 flex items-center justify-between gap-2 px-0.5">
         <span class="flex items-center gap-1.5 text-[11px] font-590 uppercase tracking-[0.08em] text-text-tertiary">
@@ -329,10 +332,12 @@ defmodule CymphoWeb.Components.NavRail do
       type="button"
       data-quick-create-trigger
       class={[
-        "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl shadow-card",
+        "btn-press w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl shadow-card",
         "text-[13px] font-510 text-text-primary",
-        "bg-brand/15 hover:bg-brand/25 border border-brand/30",
-        "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+        "bg-brand/15 hover:bg-brand/25 border border-brand/30 hover:border-brand/50",
+        "hover:shadow-[0_0_20px_rgba(217,119,87,0.25)]",
+        "transition-[box-shadow,background-color,border-color] duration-300",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
       ]}
     >
       <span class="hero-pencil-square-mini w-4 h-4 text-brand"></span>
@@ -434,6 +439,8 @@ defmodule CymphoWeb.Components.NavRail do
   # can navigate to one route (e.g. /settings/profile) yet stay highlighted
   # across a whole section (e.g. any /settings/*).
   attr :match, :string, default: nil
+  # Hidden while the UI is in simple mode.
+  attr :advanced_only, :boolean, default: false
 
   defp nav_link(assigns) do
     active? = active?(assigns.match || assigns.to, assigns.current_path)
@@ -444,7 +451,8 @@ defmodule CymphoWeb.Components.NavRail do
       navigate={@to}
       class={[
         "nav-item flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-[13px] font-510 transition-colors",
-        "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        "text-text-secondary hover:bg-surface-hover hover:text-text-primary",
+        @advanced_only && "ui-advanced-only"
       ]}
       data-nav-path={@to}
       data-active={if @active?, do: "true", else: "false"}

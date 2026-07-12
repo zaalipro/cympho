@@ -219,7 +219,7 @@
     <div
       id="inbox-action-queue"
       data-testid="inbox-action-queue"
-      class="grid gap-px border-t border-hairline bg-hairline md:grid-cols-2 xl:grid-cols-5"
+      class="stagger-children grid gap-px border-t border-hairline bg-hairline md:grid-cols-2 xl:grid-cols-5"
     >
       <div
         :for={queue <- @inbox_action_queue}
@@ -274,7 +274,7 @@
       :for={{dom_id, item} <- @streams.inbox_items}
       id={dom_id}
       class={[
-        "group border border-hairline bg-surface-1 shadow-card transition-all hover:border-border-hover hover:shadow-raised",
+        "group border border-hairline bg-surface-1 shadow-card transition-all hover:border-border-hover hover:bg-surface-hover/40 hover:shadow-raised",
         if(@digest_density == "compact", do: "rounded-lg", else: "rounded-2xl"),
         item.status == "unread" && "border-l-2 border-l-brand"
       ]}

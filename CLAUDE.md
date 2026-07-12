@@ -141,7 +141,7 @@ Company-based. Most schemas have a `company_id` FK. `CymphoWeb.UserAuth` (LiveVi
 
 ### Design System
 
-Dark-mode-first UI inspired by Linear. See `DESIGN.md` for the full spec. Tailwind CSS with custom tokens (brand indigo `#5e6ad2`, canvas/panel/surface layers). Inter Variable font. Kanban drag-and-drop via SortableJS.
+Dark-mode-first warm editorial UI ("Claude" aesthetic: warm charcoal canvas, terracotta brand, serif display type). See `DESIGN.md` for the full spec. Tailwind CSS with custom tokens (brand terracotta `#D97757`, canvas/surface ladder). Kanban drag-and-drop via SortableJS.
 
 ## Conventions
 

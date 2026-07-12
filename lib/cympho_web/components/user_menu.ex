@@ -45,10 +45,11 @@ defmodule CymphoWeb.Components.UserMenu do
 
       <div
         data-user-menu-popover
+        data-ui-complex-page
         role="menu"
         class={[
           "hidden absolute bottom-full left-0 right-0 mb-2 z-50 rounded-xl",
-          "bg-surface-2 border border-hairline shadow-dialog overflow-hidden"
+          "cympho-menu-panel bg-surface-2 border border-hairline shadow-dialog overflow-hidden"
         ]}
       >
         <div :if={!@user} class="px-3 py-2.5 border-b border-hairline">
@@ -117,24 +118,28 @@ defmodule CymphoWeb.Components.UserMenu do
             icon="hero-rectangle-stack-mini"
             current={@current_path}
             label="Workspaces"
+            advanced_only
           />
           <.menu_link
             to={~p"/plugins"}
             icon="hero-puzzle-piece-mini"
             current={@current_path}
             label="Plugins"
+            advanced_only
           />
           <.menu_link
             to={~p"/skills"}
             icon="hero-academic-cap-mini"
             current={@current_path}
             label="Skills"
+            advanced_only
           />
           <.menu_link
             to={~p"/tool-call-traces"}
             icon="hero-magnifying-glass-mini"
             current={@current_path}
             label="Tool traces"
+            advanced_only
           />
         </div>
 
@@ -183,13 +188,19 @@ defmodule CymphoWeb.Components.UserMenu do
   attr :icon, :string, required: true
   attr :label, :string, required: true
   attr :current, :string, required: true
+  # Hidden while the UI is in simple mode.
+  attr :advanced_only, :boolean, default: false
 
   defp menu_link(assigns) do
     active? = active?(assigns.to, assigns.current)
     assigns = assign(assigns, :active?, active?)
 
     ~H"""
-    <.link navigate={@to} class={menu_row_class(@active?)} role="menuitem">
+    <.link
+      navigate={@to}
+      class={[menu_row_class(@active?), @advanced_only && "ui-advanced-only"]}
+      role="menuitem"
+    >
       <span class={[@icon, "w-4 h-4 text-text-tertiary group-hover:text-text-primary"]}></span>
       <span class="flex-1 text-left">{@label}</span>
     </.link>

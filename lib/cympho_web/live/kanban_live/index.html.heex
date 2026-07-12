@@ -89,7 +89,7 @@
 
       <.app_link
         navigate={~p"/issues/new"}
-        class="order-1 col-span-2 inline-flex h-10 w-full shrink-0 items-center justify-center gap-2 rounded-button bg-brand px-3 text-sm font-590 text-on-primary transition-colors hover:bg-accent-hover sm:order-none sm:w-auto"
+        class="order-1 col-span-2 inline-flex h-10 w-full shrink-0 items-center justify-center gap-2 cta-glow rounded-button bg-brand px-3 text-sm font-590 text-on-primary transition-colors hover:bg-accent-hover sm:order-none sm:w-auto"
       >
         <span class="hero-plus-mini h-4 w-4"></span> New Issue
       </.app_link>
@@ -183,7 +183,7 @@
   </div>
 
   <%!-- Filter bar --%>
-  <div class="linear-panel mb-4 flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
+  <div class="cympho-panel mb-4 flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
     <.combobox
       id="kanban-filter-assignee"
       label="Assignee"
@@ -228,7 +228,7 @@
           name="query"
           value={@filter_search}
           placeholder="Search title, assignee, priority..."
-          class="linear-field h-10 w-full pl-9 pr-8 text-sm placeholder:text-text-quaternary"
+          class="cympho-field h-10 w-full pl-9 pr-8 text-sm placeholder:text-text-quaternary"
         />
         <%= if @filter_search != "" do %>
           <button
@@ -450,7 +450,7 @@
       </div>
     <% else %>
       <div class="flex-1 overflow-y-auto rounded-2xl border border-hairline bg-panel/30 p-2 lg:overflow-x-auto lg:overflow-y-hidden">
-        <div class="flex flex-col gap-2 pb-2 lg:h-full lg:min-w-max lg:flex-row">
+        <div class="stagger-children flex flex-col gap-2 pb-2 lg:h-full lg:min-w-max lg:flex-row">
           <%= for status <- status_columns() do %>
             <% issues = issues_for_status(computed, status) %>
             <% limit = wip_limit(@selected_project, status) %>
@@ -520,7 +520,7 @@
                             class="bg-surface-2 border border-hairline rounded-lg p-2.5 space-y-1.5 hover:bg-surface-3 transition-colors duration-100 cursor-grab active:cursor-grabbing mb-2 min-h-[64px]"
                             data-issue-id={issue.id}
                           >
-                            <div class="text-sm font-510 text-text-primary leading-snug line-clamp-2 sm:line-clamp-1">
+                            <div class="text-sm font-590 text-text-primary leading-snug line-clamp-2 sm:line-clamp-1">
                               {issue.title}
                             </div>
                             <.issue_digest_card
@@ -604,7 +604,7 @@
     phx-click="cancel_comment"
   >
     <div
-      class="bg-surface-2 border border-hairline rounded-2xl shadow-dialog w-full max-w-md mx-4 p-4"
+      class="dialog-enter bg-surface-2 border border-hairline rounded-2xl shadow-dialog w-full max-w-md mx-4 p-4"
       phx-click-away="cancel_comment"
     >
       <h3 class="font-serif text-sm font-510 text-text-primary mb-3">Add comment</h3>

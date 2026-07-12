@@ -1,4 +1,4 @@
-<div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0">
+<div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0" data-ui-complex-page>
   <.header
     title={@routine.name}
     subtitle={@routine.description || "Routine details and run history."}
@@ -20,7 +20,7 @@
         type="button"
         phx-click="manual_run"
         phx-disable-with="Starting..."
-        class="rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+        class="cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
       >
         Run Now
       </button>
@@ -38,13 +38,13 @@
         {routine_label(@routine.priority)}
       </div>
     </div>
-    <div class="rounded-xl border border-border bg-surface p-4">
+    <div class="ui-advanced-only rounded-xl border border-border bg-surface p-4">
       <div class="text-xs text-text-quaternary">Concurrency</div>
       <div class="mt-2 text-sm font-590 text-text-primary">
         {routine_label(@routine.concurrency_policy)}
       </div>
     </div>
-    <div class="rounded-xl border border-border bg-surface p-4">
+    <div class="ui-advanced-only rounded-xl border border-border bg-surface p-4">
       <div class="text-xs text-text-quaternary">Catch-up</div>
       <div class="mt-2 text-sm font-590 text-text-primary">
         {routine_label(@routine.catch_up_policy)}

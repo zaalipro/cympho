@@ -37,15 +37,15 @@ defmodule CymphoWeb.WorkspaceLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <.page size="wide">
-      <.header
-        title="Workspaces"
-        subtitle="Execution directories, runtime services, previews, probes, and leases available to autonomous agents."
-      >
+    <.page size="wide" data-ui-complex-page>
+      <.header title="Workspaces">
+        <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
+          Execution directories, runtime services, previews, probes, and leases available to autonomous agents.
+        </p>
         <:actions>
           <.app_link
             navigate="/operations#runtime-launch-checklist"
-            class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+            class="ui-advanced-only inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
           >
             <.icon name="hero-command-line-mini" class="h-4 w-4" /> Runtime checklist
           </.app_link>
@@ -102,7 +102,7 @@ defmodule CymphoWeb.WorkspaceLive.Index do
           </.app_link>
         </div>
 
-        <div class="grid grid-cols-2 border-t border-border sm:grid-cols-4 lg:grid-cols-7">
+        <div class="ui-advanced-only grid grid-cols-2 border-t border-border sm:grid-cols-4 lg:grid-cols-7">
           <.workspace_command_metric
             :for={metric <- @workspace_command.metrics}
             label={metric.label}
@@ -133,7 +133,7 @@ defmodule CymphoWeb.WorkspaceLive.Index do
       <section id="workspace-list" class="overflow-hidden rounded-lg border border-border bg-panel">
         <div class="border-b border-border px-4 py-3">
           <p class="text-sm font-590 text-text-primary">Workspace inventory</p>
-          <p class="mt-1 text-xs leading-5 text-text-tertiary">
+          <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
             Each card shows whether agents have an active execution lane, an inspectable service, and a clean preview path.
           </p>
         </div>
@@ -168,7 +168,7 @@ defmodule CymphoWeb.WorkspaceLive.Index do
                 {item.summary}
               </p>
 
-              <div class="mt-4 grid grid-cols-4 gap-px overflow-hidden rounded-md border border-border bg-border">
+              <div class="ui-advanced-only mt-4 grid grid-cols-4 gap-px overflow-hidden rounded-md border border-border bg-border">
                 <.workspace_card_metric
                   label="Open"
                   value={item.metrics.open_execution_workspaces}

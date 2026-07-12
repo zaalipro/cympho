@@ -2,8 +2,11 @@
 /deps/
 /_build/
 
-# Generated files
-/priv/static/
+# Generated files (favicon.svg is source-controlled; the rest is build output)
+/priv/static/*
+!/priv/static/images/
+/priv/static/images/*
+!/priv/static/images/favicon.svg
 
 # The config/prod.secret.exs file may contain sensitive data
 /config/prod.secret.exs

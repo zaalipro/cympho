@@ -44,7 +44,8 @@ defmodule CymphoWeb.LaunchItemController do
     end
   end
 
-  def update(conn, %{"id" => id} = params), do: update(conn, %{"id" => id, "launch_item" => params})
+  def update(conn, %{"id" => id} = params),
+    do: update(conn, %{"id" => id, "launch_item" => params})
 
   def delete(conn, %{"id" => id}) do
     company_id = conn.assigns.current_company.id

@@ -247,7 +247,7 @@ defmodule CymphoWeb.CompanyImportLive do
             <div class="text-text-primary mb-2">Drop a company export JSON here</div>
             <div class="text-text-tertiary text-sm mb-4">or choose one from disk</div>
 
-            <label class="inline-flex cursor-pointer items-center gap-2 rounded-button bg-brand px-5 py-3 text-sm font-510 text-on-primary transition-colors hover:bg-accent">
+            <label class="inline-flex cursor-pointer items-center gap-2 cta-glow rounded-button bg-brand px-5 py-3 text-sm font-510 text-on-primary transition-colors hover:bg-accent">
               <.icon name="hero-folder-open-mini" class="h-4 w-4" /> Browse files
               <.live_file_input upload={@uploads.import_file} class="hidden" />
             </label>
@@ -279,7 +279,7 @@ defmodule CymphoWeb.CompanyImportLive do
 
             <button
               type="submit"
-              class="mt-4 w-full rounded-button bg-brand px-6 py-3 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+              class="mt-4 w-full cta-glow rounded-button bg-brand px-6 py-3 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
             >
               Continue to Preview
             </button>

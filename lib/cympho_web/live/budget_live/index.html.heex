@@ -1,7 +1,10 @@
-<div class={[
-  "p-6 lg:p-8 mx-auto",
-  if(@live_action in [:new, :edit], do: "max-w-7xl", else: "max-w-6xl")
-]}>
+<div
+  class={[
+    "p-6 lg:p-8 mx-auto",
+    if(@live_action in [:new, :edit], do: "max-w-7xl", else: "max-w-6xl")
+  ]}
+  data-ui-complex-page
+>
   <div
     :if={@flash && @flash[:info]}
     class="mb-6 bg-success/10 border border-success/20 text-success text-sm px-4 py-3 rounded-lg"
@@ -53,7 +56,7 @@
     <section
       id="budget-command"
       data-testid="budget-command"
-      class="mb-6 overflow-hidden rounded-lg border border-border bg-panel"
+      class="ui-advanced-only mb-6 overflow-hidden rounded-lg border border-border bg-panel"
     >
       <div class="border-b border-border bg-gradient-to-b from-surface-2/50 to-transparent px-5 py-4">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -98,7 +101,7 @@
       </div>
     </section>
 
-    <div class="mb-6 bg-surface border border-border rounded-xl p-6">
+    <div class="ui-advanced-only mb-6 bg-surface border border-border rounded-xl p-6">
       <h2 class="text-xs font-590 text-text-secondary uppercase tracking-wider mb-4">
         Budget Overview
       </h2>

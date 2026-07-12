@@ -518,7 +518,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
         <div class="flex gap-2">
           <button
             type="button"
-            class="rounded-button bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+            class="cta-glow rounded-button bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-on-primary transition-colors hover:bg-accent"
             phx-click="verify_integrity"
           >
             Verify Integrity
@@ -638,7 +638,7 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
         <div class="flex gap-2">
           <button
             type="submit"
-            class="rounded-button bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+            class="cta-glow rounded-button bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-on-primary transition-colors hover:bg-accent"
           >
             Apply Filters
           </button>

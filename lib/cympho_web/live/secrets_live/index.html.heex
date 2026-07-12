@@ -35,7 +35,7 @@
   <section
     id="runtime-credential-guide"
     data-testid="runtime-credential-guide"
-    class="mb-4 overflow-hidden rounded-lg border border-border bg-panel"
+    class="ui-advanced-only mb-4 overflow-hidden rounded-lg border border-border bg-panel"
   >
     <div class="border-b border-border bg-gradient-to-b from-surface-2/50 to-transparent px-5 py-4">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -134,7 +134,7 @@
 
   <div
     :if={@rotation_summary.total > 0}
-    class="mb-4 rounded-lg border border-border bg-panel p-4"
+    class="ui-advanced-only mb-4 rounded-lg border border-border bg-panel p-4"
   >
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
@@ -247,7 +247,7 @@
             {secret.description}
           </p>
 
-          <div class="text-xs leading-5 text-text-quaternary">
+          <div class="ui-advanced-only text-xs leading-5 text-text-quaternary">
             Created: {Calendar.strftime(secret.inserted_at, "%b %d, %Y %H:%M")}
             <span class="mx-2">•</span>
             Updated: {Calendar.strftime(secret.updated_at, "%b %d, %Y %H:%M")}

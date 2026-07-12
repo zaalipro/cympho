@@ -1,19 +1,74 @@
-<.page size="wide">
-  <.header
-    title={@page_title}
-    subtitle="Track workstreams by repo, execution health, goals, and the project queues that need attention."
-  >
+<.page size="wide" data-ui-complex-page>
+  <.header title={@page_title}>
+    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
+      Track workstreams by repo, execution health, goals, and the project queues that need attention.
+    </p>
     <:actions>
       <.app_link
         navigate={~p"/projects/new"}
-        class="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
+        class="cta-glow inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
       >
         <.icon name="hero-plus-mini" class="h-4 w-4" /> New project
       </.app_link>
     </:actions>
   </.header>
 
-  <div class="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+  <div class="ui-simple-only mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
+      <span class="ui-simple-icon">
+        <span class="hero-folder-mini h-4 w-4"></span>
+      </span>
+      <span class="min-w-0">
+        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          Projects
+        </span>
+        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
+          {@project_overview.active_projects} active
+        </span>
+      </span>
+    </div>
+    <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
+      <span class="ui-simple-icon">
+        <span class="hero-list-bullet-mini h-4 w-4"></span>
+      </span>
+      <span class="min-w-0">
+        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          Open issues
+        </span>
+        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
+          {@project_overview.open_issues}
+        </span>
+      </span>
+    </div>
+    <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
+      <span class="ui-simple-icon">
+        <span class="hero-hand-raised-mini h-4 w-4"></span>
+      </span>
+      <span class="min-w-0">
+        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          Blocked
+        </span>
+        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
+          {@project_overview.blocked_projects}
+        </span>
+      </span>
+    </div>
+    <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
+      <span class="ui-simple-icon">
+        <span class="hero-eye-mini h-4 w-4"></span>
+      </span>
+      <span class="min-w-0">
+        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+          In review
+        </span>
+        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
+          {@project_overview.review_projects}
+        </span>
+      </span>
+    </div>
+  </div>
+
+  <div class="ui-advanced-only mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
     <.panel class="overflow-hidden">
       <div class="border-b border-border px-5 py-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
@@ -116,7 +171,7 @@
         </p>
         <.app_link
           navigate={~p"/projects/new"}
-          class="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
+          class="cta-glow mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
         >
           <.icon name="hero-plus-mini" class="h-4 w-4" /> Create your first project
         </.app_link>
@@ -168,9 +223,11 @@
             </span>
           </div>
 
-          <p class="mt-3 text-xs text-text-tertiary">{project_state_detail(state)}</p>
+          <p class="ui-advanced-only mt-3 text-xs text-text-tertiary">
+            {project_state_detail(state)}
+          </p>
 
-          <div class="mt-5 grid grid-cols-4 gap-2">
+          <div class="ui-advanced-only mt-5 grid grid-cols-4 gap-2">
             <div class="rounded-lg border border-border bg-surface-1 px-2.5 py-2">
               <p class="text-[10px] font-650 uppercase text-text-quaternary">Open</p>
               <p class="mt-1 text-lg font-650 text-text-primary">{health.open}</p>
@@ -196,7 +253,7 @@
             </div>
             <div class="h-2 overflow-hidden rounded-full bg-surface-2">
               <div
-                class="h-full rounded-full bg-emerald-400"
+                class="progress-spring h-full rounded-full bg-emerald-400"
                 style={progress_width(health.progress_percent)}
               >
               </div>

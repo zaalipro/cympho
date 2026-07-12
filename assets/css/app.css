@@ -8,7 +8,7 @@
 @import "themes.css";
 
 /* ============================================
-   Cympho Design Tokens — sourced from DESIGN.md (Linear spec)
+   Cympho Design Tokens — sourced from DESIGN.md (warm editorial spec)
 
    These :root values are the default "Ember" theme (warm dark). Per-theme
    overrides live in themes.css under [data-theme="…"]; flipping that attr
@@ -128,6 +128,13 @@
   --vignette-color: rgba(0, 0, 0, 0.35);
   --noise-opacity: 0.035;
   --theme-hero-bg: transparent;
+
+  /* Motion — spring-weighted curves; never linear/ease-in-out on
+     interactive surfaces. --ease-spring for entrances + lifts,
+     --ease-out-expo for large translations, --ease-press for tap-downs. */
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-press: cubic-bezier(0.36, 0, 0.66, -0.56);
 }
 
 /* Respect reduced motion preference */
@@ -141,7 +148,7 @@
     scroll-behavior: auto !important;
   }
 
-  .linear-menu-panel {
+  .cympho-menu-panel {
     animation: none;
   }
 
@@ -339,20 +346,38 @@ html[data-ui-mode="simple"] [data-ui-complex-page]:not([data-density="detailed"]
 
 .ui-simple-card {
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: 12px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
     var(--color-panel);
-  box-shadow: var(--shadow-card);
+  box-shadow:
+    inset 0 1px 0 0 var(--shadow-inset-highlight),
+    0 1px 2px rgb(var(--shadow-rgb) / calc(0.18 * var(--shadow-strength)));
+  transition:
+    transform 400ms var(--ease-spring),
+    border-color 200ms ease,
+    box-shadow 400ms var(--ease-spring);
 }
 
-.linear-panel {
+.ui-simple-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+  box-shadow:
+    inset 0 1px 0 0 var(--shadow-inset-highlight),
+    0 4px 12px rgb(var(--shadow-rgb) / calc(0.22 * var(--shadow-strength))),
+    0 12px 32px rgb(var(--shadow-rgb) / calc(0.18 * var(--shadow-strength)));
+}
+
+.cympho-panel {
   background: var(--color-panel);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: 12px;
+  box-shadow:
+    inset 0 1px 0 0 var(--shadow-inset-highlight),
+    0 1px 2px rgb(var(--shadow-rgb) / calc(0.18 * var(--shadow-strength)));
 }
 
-.linear-field {
+.cympho-field {
   background: var(--color-panel);
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -360,7 +385,7 @@ html[data-ui-mode="simple"] [data-ui-complex-page]:not([data-density="detailed"]
   outline: none;
 }
 
-.linear-field:focus {
+.cympho-field:focus {
   border-color: rgb(var(--color-primary-rgb) / 0.75);
   box-shadow: 0 0 0 2px rgb(var(--color-primary-rgb) / 0.22);
 }
@@ -418,24 +443,27 @@ html[data-ui-mode="simple"] [data-ui-complex-page]:not([data-density="detailed"]
   80% { transform: translateX(2px); }
 }
 
-.linear-menu > summary::-webkit-details-marker {
+.cympho-menu > summary::-webkit-details-marker {
   display: none;
 }
 
-.linear-menu[open] > summary {
+.cympho-menu[open] > summary {
   background: var(--color-surface-hover);
   color: var(--color-text-primary);
 }
 
-.linear-menu-panel {
+.cympho-menu-panel {
   transform-origin: top right;
-  animation: menu-pop 0.12s ease-out;
+  animation: menu-pop 280ms var(--ease-spring);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  background: color-mix(in srgb, var(--color-panel) 88%, transparent) !important;
 }
 
 @keyframes menu-pop {
   from {
     opacity: 0;
-    transform: translateY(-4px) scale(0.98);
+    transform: translateY(-6px) scale(0.96);
   }
   to {
     opacity: 1;
@@ -469,10 +497,14 @@ button, a, select, input[type="submit"] {
 }
 
 /* Command palette search highlight */
+.command-item {
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
 .command-item[aria-selected="true"],
 .command-item:hover {
   background: var(--color-surface-hover);
   color: var(--color-text-primary);
+  box-shadow: inset 2px 0 0 0 var(--color-primary);
 }
 
 /* ============================================
@@ -826,17 +858,24 @@ html[data-theme="dark"] .badge-error { background: rgba(239,68,68,0.15); color: 
 .toast {
   pointer-events: auto;
   padding: 10px 16px;
-  border-radius: 8px;
+  border-radius: 12px;
   font-size: 13px;
   font-weight: 500;
   line-height: 1.4;
   max-width: 360px;
   opacity: 0;
-  transform: translateX(20px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transform: translateX(24px) scale(0.97);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    inset 0 1px 0 0 var(--shadow-inset-highlight),
+    0 4px 16px rgb(var(--shadow-rgb) / calc(0.30 * var(--shadow-strength)));
+  transition:
+    opacity 320ms var(--ease-spring),
+    transform 420ms var(--ease-spring);
 }
-.toast-visible { opacity: 1; transform: translateX(0); }
-.toast-exit { opacity: 0; transform: translateX(20px); }
+.toast-visible { opacity: 1; transform: translateX(0) scale(1); }
+.toast-exit { opacity: 0; transform: translateX(24px) scale(0.97); }
 .toast-info    { background: rgba(201, 100, 66, 0.15); color: var(--color-brand); border: 1px solid rgba(201, 100, 66, 0.2); }
 .toast-success { background: rgba(61, 139, 79, 0.15); color: var(--color-success); border: 1px solid rgba(61, 139, 79, 0.2); }
 .toast-warning { background: rgba(180, 140, 60, 0.15); color: #b48c3c; border: 1px solid rgba(180, 140, 60, 0.2); }
@@ -968,4 +1007,228 @@ html[data-theme="dark"] .toast-error { background: rgba(239, 68, 68, 0.15); colo
 }
 .btn-press:active {
   transform: scale(0.97);
+}
+
+/* ============================================
+   Premium layer — haptic depth + choreographed motion
+   ============================================ */
+
+/* Upgrade the shared lift/press utilities to spring physics. */
+.card-lift {
+  transition:
+    transform 400ms var(--ease-spring),
+    box-shadow 400ms var(--ease-spring),
+    border-color 200ms ease-out;
+}
+.card-lift:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 0 var(--shadow-inset-highlight),
+    0 0 0 1px var(--color-border-hover),
+    0 4px 12px rgb(var(--shadow-rgb) / calc(0.24 * var(--shadow-strength))),
+    0 16px 40px rgb(var(--shadow-rgb) / calc(0.20 * var(--shadow-strength)));
+}
+.btn-press {
+  transition:
+    transform 260ms var(--ease-spring),
+    background-color 160ms ease-out,
+    box-shadow 260ms var(--ease-spring);
+}
+.btn-press:active {
+  transform: scale(0.97);
+}
+
+/* Primary CTA glow — terracotta halo that breathes on hover. Applied to
+   `bg-brand` buttons via the shared component classes. */
+.cta-glow {
+  position: relative;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
+    0 1px 2px rgb(var(--shadow-rgb) / 0.3),
+    0 0 0 0 rgb(var(--color-primary-rgb) / 0);
+  transition:
+    box-shadow 500ms var(--ease-spring),
+    transform 260ms var(--ease-spring),
+    background-color 160ms ease-out;
+}
+.cta-glow:hover {
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.22),
+    0 2px 6px rgb(var(--shadow-rgb) / 0.35),
+    0 0 24px 2px rgb(var(--color-primary-rgb) / 0.35);
+  transform: translateY(-1px);
+}
+.cta-glow:active {
+  transform: translateY(0) scale(0.98);
+}
+
+/* Page entrance — content wrapper fades up once per navigation. LiveView
+   patches don't remount the element, so this fires only on real loads. */
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.page-enter {
+  animation: page-enter 600ms var(--ease-out-expo) both;
+}
+
+/* Staggered list entrance — apply `stagger-children` to a list container;
+   the first 12 children cascade in. Cheap: transform + opacity only. */
+@keyframes stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.stagger-children > * {
+  animation: stagger-in 500ms var(--ease-out-expo) both;
+}
+.stagger-children > *:nth-child(1)  { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2)  { animation-delay: 40ms; }
+.stagger-children > *:nth-child(3)  { animation-delay: 80ms; }
+.stagger-children > *:nth-child(4)  { animation-delay: 120ms; }
+.stagger-children > *:nth-child(5)  { animation-delay: 160ms; }
+.stagger-children > *:nth-child(6)  { animation-delay: 200ms; }
+.stagger-children > *:nth-child(7)  { animation-delay: 240ms; }
+.stagger-children > *:nth-child(8)  { animation-delay: 280ms; }
+.stagger-children > *:nth-child(9)  { animation-delay: 320ms; }
+.stagger-children > *:nth-child(10) { animation-delay: 360ms; }
+.stagger-children > *:nth-child(11) { animation-delay: 400ms; }
+.stagger-children > *:nth-child(12) { animation-delay: 440ms; }
+
+/* Ambient canvas glow — a fixed radial terracotta wash anchored top-center
+   so the dark canvas has a light source. Fixed + pointer-events-none, so
+   zero scroll repaints. Sits under content (z-0 wrapper needed). */
+.cympho-ambient::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(
+      900px 480px at 50% -120px,
+      rgb(var(--color-primary-rgb) / 0.07),
+      transparent 70%
+    );
+}
+
+/* Shimmer skeleton — replaces flat pulse placeholders. */
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+.skeleton-shimmer {
+  background: linear-gradient(
+    100deg,
+    var(--color-surface-2) 40%,
+    var(--color-surface-3) 50%,
+    var(--color-surface-2) 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s var(--ease-out-expo) infinite;
+}
+
+/* Nav rail rows — icon nudges right on hover; spring, not snap. */
+.nav-item {
+  transition:
+    background-color 160ms ease-out,
+    color 160ms ease-out;
+}
+.nav-item > span:first-child {
+  transition: transform 300ms var(--ease-spring);
+}
+.nav-item:hover > span:first-child {
+  transform: translateX(2px);
+}
+
+/* Progress bars fill with a spring instead of jumping. */
+.progress-spring {
+  transition: width 800ms var(--ease-out-expo);
+}
+
+/* Badge micro-pop when a live badge count changes (retriggered via JS
+   class flip or LiveView re-render remount). */
+@keyframes badge-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+.badge-pop {
+  animation: badge-pop 360ms var(--ease-spring);
+}
+
+/* Kanban cards get pickup physics: lifted + slightly rotated while
+   dragging, soft landing via the confirmed outline fade. */
+.kanban-card-dragging {
+  opacity: 0.9;
+  transform: rotate(2deg) scale(1.03);
+  box-shadow:
+    0 0 0 1px var(--color-border-hover),
+    0 8px 20px rgb(var(--shadow-rgb) / 0.35),
+    0 24px 56px rgb(var(--shadow-rgb) / 0.30);
+}
+
+/* Modal / dialog entrance. */
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.dialog-enter {
+  animation: dialog-enter 380ms var(--ease-spring) both;
+}
+
+/* Reduced-motion: neutralize every premium animation. */
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .stagger-children > *,
+  .dialog-enter,
+  .badge-pop,
+  .skeleton-shimmer {
+    animation: none !important;
+  }
+  .card-lift:hover,
+  .ui-simple-card:hover,
+  .cta-glow:hover,
+  .nav-item:hover > span:first-child {
+    transform: none !important;
+  }
+}
+
+/* Kanban card hover — soft raise + hairline warm-up; grab affordance. */
+.kanban-column-cards [data-issue-id] {
+  transition:
+    transform 320ms var(--ease-spring),
+    box-shadow 320ms var(--ease-spring),
+    border-color 180ms ease-out,
+    background-color 180ms ease-out;
+}
+.kanban-column-cards [data-issue-id]:hover {
+  transform: translateY(-1px);
+  border-color: var(--color-hairline-strong);
+  box-shadow:
+    inset 0 1px 0 0 var(--shadow-inset-highlight),
+    0 3px 10px rgb(var(--shadow-rgb) / calc(0.22 * var(--shadow-strength)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kanban-column-cards [data-issue-id]:hover {
+    transform: none;
+  }
 }

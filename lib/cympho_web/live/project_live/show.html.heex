@@ -1,8 +1,8 @@
-<.page size="wide">
-  <.header
-    title={@project.name}
-    subtitle="Project command center for strategy, issue flow, runtime readiness, repository context, and agent environment."
-  >
+<.page size="wide" data-ui-complex-page>
+  <.header title={@project.name}>
+    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
+      Project command center for strategy, issue flow, runtime readiness, repository context, and agent environment.
+    </p>
     <:actions>
       <.app_link
         navigate={~p"/projects"}
@@ -62,7 +62,7 @@
       </.app_link>
     </div>
 
-    <div class="grid grid-cols-2 border-t border-border sm:grid-cols-4 lg:grid-cols-7">
+    <div class="ui-advanced-only grid grid-cols-2 border-t border-border sm:grid-cols-4 lg:grid-cols-7">
       <.project_command_metric
         :for={metric <- @project_command.metrics}
         label={metric.label}
@@ -78,7 +78,7 @@
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p class="text-sm font-590 text-text-primary">Work queue</p>
-            <p class="mt-1 text-xs leading-5 text-text-tertiary">
+            <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
               Recent project issues, newest first. Open the full queue when blockers or reviews pile up.
             </p>
           </div>
@@ -133,7 +133,7 @@
     <div class="grid gap-5">
       <section
         data-testid="project-readiness"
-        class="overflow-hidden rounded-lg border border-border bg-panel"
+        class="ui-advanced-only overflow-hidden rounded-lg border border-border bg-panel"
       >
         <div class="border-b border-border px-4 py-3">
           <p class="text-sm font-590 text-text-primary">Execution readiness</p>
@@ -234,7 +234,7 @@
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p class="text-sm font-590 text-text-primary">Mission control</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
+              <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
                 Root goals connected to this project and their issue progress.
               </p>
             </div>
@@ -295,7 +295,7 @@
     <section class="overflow-hidden rounded-lg border border-border bg-panel">
       <div class="border-b border-border px-4 py-3">
         <p class="text-sm font-590 text-text-primary">Project settings</p>
-        <p class="mt-1 text-xs leading-5 text-text-tertiary">
+        <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
           Update the project identity, repo, and sidebar color agents see in context.
         </p>
       </div>
@@ -332,7 +332,7 @@
       </.simple_form>
     </section>
 
-    <section class="overflow-hidden rounded-lg border border-border bg-panel">
+    <section class="ui-advanced-only overflow-hidden rounded-lg border border-border bg-panel">
       <div class="border-b border-border px-4 py-3">
         <p class="text-sm font-590 text-text-primary">Environment variables</p>
         <p class="mt-1 text-xs leading-5 text-text-tertiary">

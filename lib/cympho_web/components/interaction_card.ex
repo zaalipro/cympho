@@ -14,7 +14,7 @@ defmodule CymphoWeb.Components.InteractionCard do
     ~H"""
     <div
       id={"interaction-#{@interaction.id}"}
-      class="bg-surface border border-border rounded-xl p-4 space-y-3"
+      class="card-lift bg-surface border border-border rounded-xl p-4 space-y-3 shadow-card"
     >
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">

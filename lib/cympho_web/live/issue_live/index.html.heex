@@ -20,7 +20,7 @@
       />
       <.app_link
         navigate={~p"/issues/new"}
-        class="inline-flex shrink-0 items-center gap-2 rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
+        class="inline-flex shrink-0 items-center gap-2 cta-glow rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
       >
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -54,7 +54,7 @@
       </.link>
     </div>
 
-    <div class="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+    <div class="stagger-children grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
       <.link
         :for={lane <- triage_lanes(@issue_triage_counts)}
         patch={triage_lane_url(lane.key, @digest_density)}
@@ -107,7 +107,7 @@
       </span>
     </div>
 
-    <div class="grid gap-2 lg:grid-cols-4">
+    <div class="stagger-children grid gap-2 lg:grid-cols-4">
       <article
         :for={item <- @attention_queue}
         class="min-w-0 rounded-lg border border-border bg-surface/70 px-3 py-3 transition-colors hover:border-border-hover hover:bg-surface-hover/40"
@@ -161,7 +161,7 @@
     </div>
   </section>
 
-  <div class="linear-panel mb-4 p-3">
+  <div class="cympho-panel mb-4 p-3">
     <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
       <form phx-submit="search" class="min-w-0 flex-1">
         <div class="relative">
@@ -183,7 +183,7 @@
             name="search"
             value={@current_search}
             placeholder="Search issues..."
-            class="linear-field h-10 w-full pl-9 pr-3 text-sm placeholder:text-text-quaternary"
+            class="cympho-field h-10 w-full pl-9 pr-3 text-sm placeholder:text-text-quaternary"
           />
         </div>
       </form>
@@ -295,7 +295,7 @@
       <:actions>
         <.app_link
           navigate={~p"/issues/new"}
-          class="rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
+          class="cta-glow rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
         >
           New Issue
         </.app_link>

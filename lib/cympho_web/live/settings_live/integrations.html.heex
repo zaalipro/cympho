@@ -13,7 +13,7 @@
     </:actions>
   </.header>
 
-  <.panel class="mb-4 overflow-hidden" data-testid="mcp-command">
+  <.panel class="ui-advanced-only mb-4 overflow-hidden" data-testid="mcp-command">
     <div class={[
       "h-px bg-gradient-to-r from-transparent to-transparent",
       if(@mcp_status.status.tone == :ready, do: "via-success/40", else: "via-brand/30")
@@ -330,7 +330,7 @@
             </p>
           </label>
 
-          <label class="space-y-1.5">
+          <label class="ui-advanced-only space-y-1.5">
             <span class="text-xs font-510 text-text-secondary">Base URL</span>
             <input
               type="url"
@@ -344,7 +344,7 @@
             </p>
           </label>
 
-          <label class="space-y-1.5 lg:col-span-2">
+          <label class="ui-advanced-only space-y-1.5 lg:col-span-2">
             <span class="text-xs font-510 text-text-secondary">Repo access token</span>
             <input
               type="password"
@@ -422,7 +422,7 @@
             <button
               type="submit"
               phx-disable-with="Saving..."
-              class="btn-press inline-flex items-center gap-2 rounded-button bg-brand bg-gradient-to-b from-white/[0.10] to-transparent px-4 py-2 text-sm font-510 text-on-primary shadow-[inset_0_1px_0_0_rgba(255,255,255,0.18)] transition-colors hover:bg-accent-hover"
+              class="btn-press inline-flex items-center gap-2 cta-glow rounded-button bg-brand bg-gradient-to-b from-white/[0.10] to-transparent px-4 py-2 text-sm font-510 text-on-primary shadow-[inset_0_1px_0_0_rgba(255,255,255,0.18)] transition-colors hover:bg-accent-hover"
             >
               <.icon name="hero-check" class="h-4 w-4" /> Save connection
             </button>
@@ -432,7 +432,7 @@
     </.panel>
 
     <div class="space-y-4">
-      <.panel>
+      <.panel class="ui-advanced-only">
         <div class="p-5">
           <h3 class="text-sm font-590 text-text-primary">Connection State</h3>
           <dl class="mt-4 space-y-3 text-sm">

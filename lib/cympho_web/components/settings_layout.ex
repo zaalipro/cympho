@@ -58,7 +58,7 @@ defmodule CymphoWeb.Components.SettingsLayout do
     assigns = assign(assigns, :groups, @groups)
 
     ~H"""
-    <.page size="wide">
+    <.page size="wide" data-ui-complex-page>
       <div class="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8">
         <nav class="min-w-0 lg:sticky lg:top-6 lg:self-start" aria-label="Settings sections">
           <p class="mb-3 px-1 text-sm font-590 text-text-primary lg:mb-4 lg:px-3 lg:text-card-title">

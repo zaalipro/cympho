@@ -65,7 +65,7 @@
       </div>
     </div>
 
-    <div class="grid gap-3 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+    <div class="ui-advanced-only grid gap-3 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_280px]">
       <div class="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
         <div
           :for={stat <- @runtime_readiness.stats}
@@ -95,7 +95,7 @@
       </div>
     </div>
 
-    <div class="grid gap-2 border-t border-border/70 px-5 py-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="ui-advanced-only grid gap-2 border-t border-border/70 px-5 py-4 sm:grid-cols-2 xl:grid-cols-4">
       <div :for={lane <- @runtime_readiness.lanes} class={runtime_lane_class(lane.tone)}>
         <p class="text-eyebrow uppercase text-text-quaternary">{lane.label}</p>
         <p class="mt-3 font-mono text-2xl font-590 text-text-primary">{lane.value}</p>
@@ -134,7 +134,7 @@
             <span class="text-text-tertiary">Assigned Agents</span>
             <span class="text-text-secondary">{agent_count(assigns, adapter.key)}</span>
           </div>
-          <div class="flex items-center justify-between text-xs">
+          <div class="ui-advanced-only flex items-center justify-between text-xs">
             <span class="text-text-tertiary">Config Fields</span>
             <span class="text-text-secondary">{length(adapter.config_schema)}</span>
           </div>

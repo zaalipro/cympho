@@ -66,7 +66,7 @@
           </.overflow_menu>
           <.app_link
             navigate={~p"/kanban"}
-            class="rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary shadow-card hover:bg-accent-hover"
+            class="cta-glow rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary shadow-card hover:bg-accent-hover"
           >
             Open board
           </.app_link>
@@ -74,7 +74,7 @@
       </.header>
     </div>
 
-    <div class="ui-simple-only mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="ui-simple-only stagger-children mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
       <a
         href={Map.get(primary_next, :path, ~p"/operations")}
         class="ui-simple-card group flex min-w-0 items-center gap-3 px-3 py-3 transition hover:border-border-hover hover:bg-surface-hover"
@@ -452,7 +452,7 @@
 
       <div
         :if={@ceo_command_lane.steps != []}
-        class="grid grid-cols-2 border-t border-border md:grid-cols-4"
+        class="stagger-children grid grid-cols-2 border-t border-border md:grid-cols-4"
       >
         <div
           :for={step <- @ceo_command_lane.steps}
@@ -513,7 +513,7 @@
         </div>
       </div>
 
-      <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div class="stagger-children mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <a
           :for={signal <- @autonomy_readiness.signals}
           href={signal.path}
@@ -593,7 +593,7 @@
           </div>
         </div>
 
-        <div class="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        <div class="stagger-children mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
           <a
             :for={primitive <- @autonomy_readiness.paperclip.primitives}
             href={primitive.path}
@@ -644,7 +644,7 @@
         </a>
       </div>
 
-      <div class="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
+      <div class="stagger-children grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
         <a
           :for={signal <- @execution_health}
           href={signal.path}
@@ -677,7 +677,7 @@
          Work Metrics — single instrument band. Five inline columns
          with vertical dividers. Monospace numerals + sparklines.
          ============================================================ --%>
-    <div class="mb-5 grid grid-cols-2 divide-y divide-border overflow-hidden rounded-2xl border border-hairline bg-surface-1 sm:grid-cols-3 sm:divide-y-0 sm:divide-x lg:grid-cols-6">
+    <div class="stagger-children mb-5 grid grid-cols-2 divide-y divide-border overflow-hidden rounded-2xl border border-hairline bg-surface-1 sm:grid-cols-3 sm:divide-y-0 sm:divide-x lg:grid-cols-6">
       <%!-- Queued --%>
       <div class="px-4 py-3.5 sm:border-r sm:border-border">
         <div class="flex items-center justify-between">
@@ -811,7 +811,7 @@
     <%!-- ============================================================
          Mid row — Active Agents | Twin donuts | Inbox
          ============================================================ --%>
-    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-stretch">
+    <div class="stagger-children grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-stretch">
       <.panel class="flex flex-col overflow-hidden">
         <div class="flex items-center justify-between border-b border-border px-4 py-3">
           <div>

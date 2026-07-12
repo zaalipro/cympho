@@ -121,7 +121,7 @@ defmodule CymphoWeb.OrgChartLive do
             </.app_link>
             <.app_link
               navigate={~p"/agents/new"}
-              class="inline-flex items-center gap-2 rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
+              class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
             >
               <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
@@ -137,25 +137,25 @@ defmodule CymphoWeb.OrgChartLive do
         </.header>
 
         <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div class="linear-panel px-4 py-3">
+          <div class="cympho-panel px-4 py-3">
             <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
               Company agents
             </p>
             <p class="mt-1 text-2xl font-590 text-text-primary">{tree_count(@org_chart)}</p>
           </div>
-          <div class="linear-panel px-4 py-3">
+          <div class="cympho-panel px-4 py-3">
             <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
               Root leaders
             </p>
             <p class="mt-1 text-2xl font-590 text-text-primary">{length(@org_chart)}</p>
           </div>
-          <div class="linear-panel px-4 py-3">
+          <div class="cympho-panel px-4 py-3">
             <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
               Depth
             </p>
             <p class="mt-1 text-2xl font-590 text-text-primary">{tree_depth(@org_chart)}</p>
           </div>
-          <div class="linear-panel px-4 py-3">
+          <div class="cympho-panel px-4 py-3">
             <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
               Org health
             </p>
@@ -280,7 +280,7 @@ defmodule CymphoWeb.OrgChartLive do
 
         <div
           :if={Enum.empty?(@org_chart)}
-          class="linear-panel flex min-h-[360px] flex-col items-center justify-center px-6 py-16 text-center"
+          class="cympho-panel flex min-h-[360px] flex-col items-center justify-center px-6 py-16 text-center"
         >
           <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-surface text-text-tertiary">
             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -301,7 +301,7 @@ defmodule CymphoWeb.OrgChartLive do
         <div
           :if={not Enum.empty?(@org_chart)}
           id="org-chart-export-area"
-          class="linear-panel overflow-x-auto px-5 py-8"
+          class="cympho-panel overflow-x-auto px-5 py-8"
         >
           <.render_tree nodes={@org_chart} level={0} />
         </div>
@@ -322,7 +322,7 @@ defmodule CymphoWeb.OrgChartLive do
 
           <div class="space-y-4">
             <div class="grid grid-cols-2 gap-4">
-              <div class="linear-panel px-4 py-3">
+              <div class="cympho-panel px-4 py-3">
                 <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
                   Direct Reports
                 </p>
@@ -330,7 +330,7 @@ defmodule CymphoWeb.OrgChartLive do
                   {@selected_agent_stats && @selected_agent_stats.direct_reports}
                 </p>
               </div>
-              <div class="linear-panel px-4 py-3">
+              <div class="cympho-panel px-4 py-3">
                 <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
                   Total Issues
                 </p>
@@ -338,7 +338,7 @@ defmodule CymphoWeb.OrgChartLive do
                   {@selected_agent_stats && @selected_agent_stats.total_issues}
                 </p>
               </div>
-              <div class="linear-panel px-4 py-3">
+              <div class="cympho-panel px-4 py-3">
                 <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
                   Completed This Week
                 </p>
@@ -346,7 +346,7 @@ defmodule CymphoWeb.OrgChartLive do
                   {@selected_agent_stats && @selected_agent_stats.completed_this_week}
                 </p>
               </div>
-              <div class="linear-panel px-4 py-3">
+              <div class="cympho-panel px-4 py-3">
                 <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
                   Blocked Issues
                 </p>
@@ -358,7 +358,7 @@ defmodule CymphoWeb.OrgChartLive do
 
             <div
               :if={@selected_agent_stats && @selected_agent_stats.budget_status}
-              class="linear-panel px-4 py-3"
+              class="cympho-panel px-4 py-3"
             >
               <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary mb-2">
                 Budget Status
@@ -406,7 +406,7 @@ defmodule CymphoWeb.OrgChartLive do
           </.header>
 
           <div class="space-y-4">
-            <div class="linear-panel px-4 py-3">
+            <div class="cympho-panel px-4 py-3">
               <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
                 Total Agents
               </p>
@@ -415,7 +415,7 @@ defmodule CymphoWeb.OrgChartLive do
               </p>
             </div>
 
-            <div class="linear-panel px-4 py-3">
+            <div class="cympho-panel px-4 py-3">
               <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary mb-3">
                 By Role
               </p>
@@ -437,7 +437,7 @@ defmodule CymphoWeb.OrgChartLive do
               </div>
             </div>
 
-            <div class="linear-panel px-4 py-3">
+            <div class="cympho-panel px-4 py-3">
               <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary mb-3">
                 By Status
               </p>
@@ -452,7 +452,7 @@ defmodule CymphoWeb.OrgChartLive do
               </div>
             </div>
 
-            <div class="linear-panel px-4 py-3">
+            <div class="cympho-panel px-4 py-3">
               <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
                 Idle Ratio
               </p>

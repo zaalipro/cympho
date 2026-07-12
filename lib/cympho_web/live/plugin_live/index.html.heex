@@ -1,9 +1,12 @@
-<div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0">
-  <.header title={@page_title} subtitle="Install, inspect, and govern runtime extensions.">
+<div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0" data-ui-complex-page>
+  <.header title={@page_title}>
+    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
+      Install, inspect, and govern runtime extensions.
+    </p>
     <:actions>
       <.app_link
         navigate={~p"/plugins/marketplace"}
-        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[40px] rounded-lg transition-colors inline-flex items-center gap-2"
+        class="ui-advanced-only bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[40px] rounded-lg transition-colors inline-flex items-center gap-2"
       >
         Marketplace
       </.app_link>
@@ -18,7 +21,7 @@
 
   <section
     data-testid="plugin-health"
-    class="mb-5 rounded-lg border border-border bg-panel px-5 py-4"
+    class="ui-advanced-only mb-5 rounded-lg border border-border bg-panel px-5 py-4"
   >
     <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
       <div class="min-w-0">
@@ -213,7 +216,7 @@
           <p class="line-clamp-2 max-w-3xl text-sm leading-5 text-text-tertiary">
             {plugin.description || "No description provided."}
           </p>
-          <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
+          <div class="ui-advanced-only mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
             <span>{plugin.identifier}</span>
             <span>v{plugin.version}</span>
             <span>{company_name(plugin)}</span>

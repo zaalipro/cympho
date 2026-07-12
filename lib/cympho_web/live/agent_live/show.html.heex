@@ -1,4 +1,4 @@
-<.page size="content">
+<.page size="content" data-ui-complex-page>
   <%!-- ── Breadcrumbs ────────────────────────────────────────────── --%>
   <div class="mb-3 flex items-center gap-2 text-xs text-text-quaternary">
     <.app_link navigate={~p"/agents"} class="hover:text-text-secondary">Agents</.app_link>
@@ -106,7 +106,9 @@
       phx-click="set_tab"
       phx-value-tab={key}
       class={[
-        "border-b-2 px-3 py-2 text-sm transition-colors -mb-px",
+        "border-b-2 px-3 py-2 text-sm transition-colors duration-200 -mb-px",
+        key in ["instructions", "skills", "configuration"] && @current_tab != key &&
+          "ui-advanced-only",
         if(@current_tab == key,
           do: "border-brand text-text-primary font-510",
           else: "border-transparent text-text-tertiary hover:text-text-secondary"
@@ -151,7 +153,7 @@
         @latest_run
       ) %>
 
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div class="ui-advanced-only grid grid-cols-2 gap-3 sm:grid-cols-4">
       <div class="rounded-lg border border-border bg-panel px-4 py-3">
         <p class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
           Max jobs
@@ -182,9 +184,31 @@
       </div>
     </div>
 
+    <div class="ui-simple-only rounded-xl border border-border bg-surface/70 p-4">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-base font-590 text-text-primary">Run readiness</h2>
+            <span class={readiness_badge_class(agent_command.readiness.status)}>
+              {agent_command.readiness.label}
+            </span>
+          </div>
+          <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
+            {agent_command.readiness.summary}
+          </p>
+        </div>
+        <.app_link
+          navigate={agent_command.action.path}
+          class={"inline-flex shrink-0 items-center justify-center rounded-lg border px-3 py-2 text-sm font-590 transition-colors hover:bg-surface-hover #{agent_command_action_class(agent_command.action.tone)}"}
+        >
+          {agent_command.action.label}
+        </.app_link>
+      </div>
+    </div>
+
     <section
       id="agent-command-center"
-      class="rounded-xl border border-border bg-surface/70 p-4"
+      class="ui-advanced-only rounded-xl border border-border bg-surface/70 p-4"
     >
       <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div class="min-w-0">
@@ -367,7 +391,7 @@
             View runs →
           </button>
         </div>
-        <div class="mt-2 grid grid-cols-2 gap-3 text-xs text-text-quaternary sm:grid-cols-4">
+        <div class="ui-advanced-only mt-2 grid grid-cols-2 gap-3 text-xs text-text-quaternary sm:grid-cols-4">
           <div>
             <p class="uppercase tracking-[0.08em]">Input tokens</p>
             <p class="mt-1 text-sm font-510 text-text-secondary">
@@ -436,7 +460,7 @@
       </div>
     </.panel>
 
-    <.panel :if={!Enum.empty?(@wake_history)} class="overflow-hidden">
+    <.panel :if={!Enum.empty?(@wake_history)} class="ui-advanced-only overflow-hidden">
       <div class="border-b border-border px-4 py-3">
         <h3 class="text-sm font-590 text-text-primary">Wake History</h3>
       </div>
@@ -591,7 +615,7 @@
             </div>
             <button
               type="submit"
-              class="rounded-button bg-brand px-3 py-1.5 text-xs font-510 text-on-primary hover:bg-accent-hover"
+              class="cta-glow rounded-button bg-brand px-3 py-1.5 text-xs font-510 text-on-primary hover:bg-accent-hover"
             >
               Save
             </button>

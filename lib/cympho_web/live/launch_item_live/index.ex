@@ -79,12 +79,10 @@ defmodule CymphoWeb.LaunchItemLive.Index do
 
       <div class="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <section class="space-y-5">
-          <div
-            class={[
-              "rounded-2xl border p-5 shadow-card",
-              summary_tone_class(@summary.tone)
-            ]}
-          >
+          <div class={[
+            "rounded-2xl border p-5 shadow-card",
+            summary_tone_class(@summary.tone)
+          ]}>
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div class="min-w-0">
                 <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-current/70">
@@ -109,7 +107,8 @@ defmodule CymphoWeb.LaunchItemLive.Index do
             </div>
 
             <div class="mt-4 h-2 overflow-hidden rounded-full bg-black/10">
-              <div class="h-full rounded-full bg-current/80" style={progress_bar_fill(@summary)}></div>
+              <div class="h-full rounded-full bg-current/80" style={progress_bar_fill(@summary)}>
+              </div>
             </div>
 
             <div
@@ -388,12 +387,10 @@ defmodule CymphoWeb.LaunchItemLive.Index do
                 </div>
 
                 <div class="mt-4 flex flex-wrap items-center gap-2 text-xs text-text-secondary">
-                  <span
-                    class={[
-                      "rounded-full border px-2.5 py-1 font-590 uppercase tracking-[0.08em]",
-                      status_badge_class(item.status)
-                    ]}
-                  >
+                  <span class={[
+                    "rounded-full border px-2.5 py-1 font-590 uppercase tracking-[0.08em]",
+                    status_badge_class(item.status)
+                  ]}>
                     {status_label(item.status)}
                   </span>
                   <span class="rounded-full border border-border bg-panel px-2.5 py-1 font-590 uppercase tracking-[0.08em] text-text-tertiary">

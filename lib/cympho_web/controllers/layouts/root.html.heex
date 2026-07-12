@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={Plug.CSRFProtection.get_csrf_token()} />
+    <link rel="icon" type="image/svg+xml" href={~p"/images/favicon.svg"} />
     <.live_title suffix=" · Cympho">{Map.get(assigns, :page_title, "Cympho")}</.live_title>
     <script>
       (() => {
@@ -51,7 +52,7 @@
       
 <!-- Desktop sidebar / Mobile drawer -->
       <aside
-        class="w-64 shrink-0 bg-surface-1 border-r border-hairline flex flex-col fixed inset-y-0 left-0 z-50 -translate-x-full lg:translate-x-0 transition-transform duration-200"
+        class="w-64 shrink-0 bg-surface-1 border-r border-hairline flex flex-col fixed inset-y-0 left-0 z-50 -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
         id="sidebar"
         data-mobile-drawer
       >
@@ -353,11 +354,13 @@
       <main
         id="main-content"
         class={[
-          "h-screen flex-1 min-w-0 overflow-x-hidden overflow-y-auto lg:ml-64 pt-16 pb-16 lg:pb-0",
+          "cympho-ambient h-screen flex-1 min-w-0 overflow-x-hidden overflow-y-auto lg:ml-64 pt-16 pb-16 lg:pb-0",
           if(runtime_topbar_allowed?, do: "lg:pt-14", else: "lg:pt-0")
         ]}
       >
-        {@inner_content}
+        <div class="page-enter relative z-[1]">
+          {@inner_content}
+        </div>
       </main>
     </div>
     
@@ -638,9 +641,9 @@
 <!-- Command palette -->
     <div
       id="command-palette"
-      class="hidden fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-black/30"
+      class="hidden fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-black/40 backdrop-blur-sm"
     >
-      <div class="bg-surface-2 border border-hairline rounded-2xl shadow-dialog w-full max-w-lg mx-4 overflow-hidden">
+      <div class="dialog-enter bg-surface-2 border border-hairline rounded-2xl shadow-dialog w-full max-w-lg mx-4 overflow-hidden">
         <div class="flex items-center gap-3 px-4 border-b border-border">
           <svg
             class="w-4 h-4 text-text-quaternary shrink-0"
