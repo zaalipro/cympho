@@ -1,6 +1,8 @@
 defmodule Cympho.Orchestrator.DispatcherTest do
   use ExUnit.Case, async: false
 
+  import Cympho.WaitHelpers
+
   alias Cympho.Orchestrator.Dispatcher
   alias Cympho.Orchestrator.Dispatcher.State
   alias Cympho.Issues.Issue
@@ -33,7 +35,8 @@ defmodule Cympho.Orchestrator.DispatcherTest do
       # Dispatcher may already be started by app supervisor - use it directly
       ensure_dispatcher_running()
       send(Dispatcher, {:session_ended, "any-issue-id", :normal})
-      :timer.sleep(50)
+      # Dispatcher.state() is a GenServer call, so it returns only after the
+      # :session_ended message has been handled — no sleep needed.
       state = Dispatcher.state()
       refute MapSet.member?(state.running_issue_ids, "any-issue-id")
     end
@@ -128,12 +131,12 @@ defmodule Cympho.Orchestrator.DispatcherTest do
 
       # The DOWN must free the slot even though no :session_ended arrived
       # (brutal kills skip terminate/2).
-      assert eventually(fn ->
-               state = Dispatcher.state()
+      wait_until(fn ->
+        state = Dispatcher.state()
 
-               not MapSet.member?(state.running_issue_ids, issue_id) and
-                 not Enum.any?(state.monitors, fn {_ref, id} -> id == issue_id end)
-             end)
+        refute MapSet.member?(state.running_issue_ids, issue_id)
+        refute Enum.any?(state.monitors, fn {_ref, id} -> id == issue_id end)
+      end)
     end
 
     @tag :capture_log
@@ -158,12 +161,12 @@ defmodule Cympho.Orchestrator.DispatcherTest do
       send(Process.whereis(Dispatcher), {:session_ended, issue_id, :normal})
       Process.exit(fake_orchestrator, :kill)
 
-      assert eventually(fn ->
-               state = Dispatcher.state()
+      wait_until(fn ->
+        state = Dispatcher.state()
 
-               not MapSet.member?(state.running_issue_ids, issue_id) and
-                 not Enum.any?(state.monitors, fn {_ref, id} -> id == issue_id end)
-             end)
+        refute MapSet.member?(state.running_issue_ids, issue_id)
+        refute Enum.any?(state.monitors, fn {_ref, id} -> id == issue_id end)
+      end)
     end
   end
 
@@ -198,19 +201,6 @@ defmodule Cympho.Orchestrator.DispatcherTest do
   defp ensure_dispatcher_running do
     unless Process.whereis(Dispatcher) do
       {:ok, _} = Dispatcher.start_link([])
-    end
-  end
-
-  defp eventually(fun, attempts \\ 40)
-
-  defp eventually(_fun, 0), do: false
-
-  defp eventually(fun, attempts) do
-    if fun.() do
-      true
-    else
-      Process.sleep(25)
-      eventually(fun, attempts - 1)
     end
   end
 end

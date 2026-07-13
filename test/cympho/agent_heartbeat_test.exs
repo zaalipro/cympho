@@ -145,7 +145,8 @@ defmodule Cympho.AgentHeartbeatTest do
       Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
 
       send(pid, :heartbeat)
-      Process.sleep(100)
+      # :sys.get_state blocks until the :heartbeat message has been handled
+      :sys.get_state(pid)
 
       assert {:ok, :idle} = AgentHeartbeat.status(agent.id)
       assert Repo.get!(Agents.Agent, agent.id).status == :idle
@@ -182,7 +183,8 @@ defmodule Cympho.AgentHeartbeatTest do
       Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
 
       send(pid, :heartbeat)
-      Process.sleep(100)
+      # :sys.get_state blocks until the :heartbeat message has been handled
+      :sys.get_state(pid)
 
       reloaded_issue = Issues.get_issue!(issue.id)
       assert reloaded_issue.status == :todo
@@ -303,7 +305,8 @@ defmodule Cympho.AgentHeartbeatTest do
       Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
 
       send(pid, :heartbeat)
-      Process.sleep(100)
+      # :sys.get_state blocks until the :heartbeat message has been handled
+      :sys.get_state(pid)
 
       assert Repo.get!(Agents.Agent, agent.id).status == :idle
 
@@ -332,7 +335,8 @@ defmodule Cympho.AgentHeartbeatTest do
       Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
 
       send(pid, :heartbeat)
-      Process.sleep(100)
+      # :sys.get_state blocks until the :heartbeat message has been handled
+      :sys.get_state(pid)
 
       assert Repo.get!(Agents.Agent, agent.id).status == :paused
 

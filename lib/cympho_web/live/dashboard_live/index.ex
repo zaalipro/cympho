@@ -220,9 +220,17 @@ defmodule CymphoWeb.DashboardLive.Index do
 
   defp assign_metrics(socket) do
     company_id = socket.assigns[:current_company] && socket.assigns.current_company.id
-    summary = if company_id, do: Dashboard.summary(company_id), else: Dashboard.empty_summary()
-    company = current_company(socket)
+    # Compute the runtime snapshot once per refresh and share it with the
+    # summary (which feeds it into autonomy readiness) — previously the LiveView
+    # and Dashboard.summary each recomputed RuntimeOperations.snapshot.
     operations = RuntimeOperations.snapshot(company_id)
+
+    summary =
+      if company_id,
+        do: Dashboard.summary(company_id, operations),
+        else: Dashboard.empty_summary()
+
+    company = current_company(socket)
 
     queued =
       status_count(summary.issue_status_counts, :todo) +

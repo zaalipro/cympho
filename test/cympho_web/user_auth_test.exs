@@ -34,9 +34,13 @@ defmodule CymphoWeb.UserAuthTest do
       })
       |> Repo.insert()
 
-    # Add user to both companies (with a small delay so inserted_at ordering is deterministic)
-    Companies.create_membership!(%{user_id: user.id, company_id: company1.id, role: "member"})
-    Process.sleep(1100)
+    # Add user to both companies. Backdate the first membership so
+    # second-precision inserted_at ordering is deterministic without sleeping.
+    m1 =
+      Companies.create_membership!(%{user_id: user.id, company_id: company1.id, role: "member"})
+
+    earlier = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-60)
+    {:ok, _} = Repo.update(Ecto.Changeset.change(m1, inserted_at: earlier))
     Companies.create_membership!(%{user_id: user.id, company_id: company2.id, role: "admin"})
 
     %{user: user, company1: company1, company2: company2}

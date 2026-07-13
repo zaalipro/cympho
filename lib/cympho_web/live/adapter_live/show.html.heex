@@ -144,7 +144,7 @@
               <input
                 type={input_type(field.type)}
                 name={"config[#{field.key}]"}
-                value={Map.get(@config, field.key) || ""}
+                value={input_value(Map.get(@config, field.key))}
                 placeholder={if field.default, do: inspect(field.default), else: ""}
                 class="flex-1 bg-surface-hover border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-quaternary focus:outline-none focus:border-brand transition-colors"
               />

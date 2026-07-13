@@ -93,6 +93,13 @@ defmodule Cympho.AgentApprovalWorkflowTest do
     end
   end
 
+  # PubSub delivers to local subscribers before broadcast/3 returns, and the
+  # executor processes each message synchronously in handle_info, so a
+  # :sys.get_state call returns only after all prior messages are handled.
+  defp sync_executor do
+    :sys.get_state(Cympho.BoardApprovals.BoardApprovalActionExecutor)
+  end
+
   # --- Agent Hire Gate ---
 
   describe "create_agent/1 with governance" do
@@ -349,8 +356,8 @@ defmodule Cympho.AgentApprovalWorkflowTest do
         {"user", board_member.id}
       )
 
-      # Give the executor time to process
-      Process.sleep(100)
+      # Wait for the executor to process the resolved event
+      sync_executor()
 
       # Verify agent was created
       agents = Agents.list_agents_by_company(company.id)
@@ -375,7 +382,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
         {"user", board_member.id}
       )
 
-      Process.sleep(100)
+      sync_executor()
 
       # Verify role was changed
       {:ok, updated} = Agents.get_agent(agent.id)
@@ -397,7 +404,8 @@ defmodule Cympho.AgentApprovalWorkflowTest do
         {"user", board_member.id}
       )
 
-      Process.sleep(100)
+      # Flush the executor's mailbox so any (erroneous) execution would have run
+      sync_executor()
 
       # Verify agent was NOT created
       agents = Agents.list_agents_by_company(company.id)
@@ -418,7 +426,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
         {"user", board_member.id}
       )
 
-      Process.sleep(100)
+      sync_executor()
 
       logs =
         GovernanceAuditLogs.list_governance_audit_logs(action_type: "agent_hired")
@@ -440,7 +448,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
         {"user", board_member.id}
       )
 
-      Process.sleep(100)
+      sync_executor()
 
       logs =
         GovernanceAuditLogs.list_governance_audit_logs(action_type: "board_decision")
@@ -474,7 +482,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
         {"user", board_member.id}
       )
 
-      Process.sleep(100)
+      sync_executor()
 
       # Role should NOT be cto since current role at execution time was product_manager
       {:ok, updated} = Agents.get_agent(agent.id)
@@ -496,7 +504,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
         {"user", board_member.id}
       )
 
-      Process.sleep(100)
+      sync_executor()
 
       agents_before = Agents.list_agents_by_company(company.id)
       assert length(agents_before) == 1
@@ -509,7 +517,7 @@ defmodule Cympho.AgentApprovalWorkflowTest do
         {"user", board_member.id}
       )
 
-      Process.sleep(100)
+      sync_executor()
 
       agents_after = Agents.list_agents_by_company(company.id)
       assert length(agents_after) == 1

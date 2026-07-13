@@ -765,9 +765,12 @@ defmodule Cympho.WakesTest do
 
   describe "list_agent_wakes/1" do
     test "returns wakes for a specific agent", %{agent: agent, issue: issue} do
-      {:ok, _} = Wakes.do_wake_agent(agent.id, issue.id, "issue_commented", "user", "1", %{})
+      {:ok, w1} = Wakes.do_wake_agent(agent.id, issue.id, "issue_commented", "user", "1", %{})
 
-      Process.sleep(1100)
+      # Backdate w1 so second-precision inserted_at ordering is deterministic
+      # without sleeping across a second boundary.
+      earlier = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-60)
+      {:ok, _} = Repo.update(Ecto.Changeset.change(w1, inserted_at: earlier))
 
       {:ok, _} =
         Wakes.do_wake_agent(agent.id, issue.id, "issue_blockers_resolved", "system", nil, %{})

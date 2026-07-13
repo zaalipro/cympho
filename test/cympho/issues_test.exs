@@ -2001,9 +2001,16 @@ defmodule Cympho.IssuesTest do
         })
 
       {:ok, _} = Issues.transition_issue(parent, :done)
-      done_at = Issues.get_issue!(parent.id).updated_at
 
-      :timer.sleep(1100)
+      # Backdate updated_at so a (wrong) retransition — which stamps "now" —
+      # is detectable without sleeping across a second boundary.
+      done_at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-60)
+
+      {:ok, _} =
+        Issues.get_issue!(parent.id)
+        |> Ecto.Changeset.change(updated_at: done_at)
+        |> Repo.update()
+
       {:ok, _} = Issues.transition_issue(child, :done)
 
       # If maybe_complete_parent had retransitioned, updated_at would differ

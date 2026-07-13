@@ -90,7 +90,10 @@ defmodule CymphoWeb.WorkProductControllerTest do
           title: "First document"
         })
 
-      Process.sleep(1100)
+      # Backdate wp1 so second-precision inserted_at ordering is deterministic
+      # without sleeping across a second boundary.
+      earlier = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-60)
+      {:ok, wp1} = Cympho.Repo.update(Ecto.Changeset.change(wp1, inserted_at: earlier))
 
       {:ok, wp2} =
         WorkProducts.create_work_product(%{

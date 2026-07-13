@@ -11,6 +11,7 @@ defmodule CymphoWeb.ChannelCase do
       require Phoenix.ChannelTest
       import Phoenix.ChannelTest
       import CymphoWeb.ChannelCase
+      import Cympho.WaitHelpers
 
       @endpoint CymphoWeb.Endpoint
 

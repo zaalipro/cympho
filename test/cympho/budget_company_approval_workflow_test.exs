@@ -33,6 +33,13 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
     end
   end
 
+  # PubSub delivers to local subscribers before broadcast/3 returns, and the
+  # executor processes each message synchronously in handle_info, so a
+  # :sys.get_state call returns only after all prior messages are handled.
+  defp sync_executor do
+    :sys.get_state(Cympho.BoardApprovals.BoardApprovalActionExecutor)
+  end
+
   defp create_test_company(attrs) do
     unique = System.unique_integer([:positive])
 
@@ -290,7 +297,7 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
         BoardApprovals.cast_vote(approval.id, user.id, "approve", "Looks good")
 
       # Wait for the executor to process the PubSub message
-      Process.sleep(50)
+      sync_executor()
 
       updated_approval = BoardApprovals.get_board_approval!(approval.id)
       assert updated_approval.status == "approved"
@@ -320,7 +327,7 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       {:ok, _} =
         BoardApprovals.cast_vote(approval.id, user.id, "approve", "Approved increase")
 
-      Process.sleep(50)
+      sync_executor()
 
       updated_approval = BoardApprovals.get_board_approval!(approval.id)
       assert updated_approval.status == "approved"
@@ -355,7 +362,7 @@ defmodule Cympho.BudgetCompanyApprovalWorkflowTest do
       {:ok, _} =
         BoardApprovals.cast_vote(approval.id, user.id, "approve", "Config change approved")
 
-      Process.sleep(50)
+      sync_executor()
 
       updated_approval = BoardApprovals.get_board_approval!(approval.id)
       assert updated_approval.status == "approved"

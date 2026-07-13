@@ -783,7 +783,8 @@ defmodule CymphoWeb.OperationsLiveTest do
           }
         })
 
-      Process.sleep(10)
+      # Poll until the issue-created broadcast has reached the LiveView.
+      wait_until(fn -> assert render(view) =~ "Main operations live swarm refresh" end)
 
       html = render(view)
       child_titles = parent_issue.id |> Issues.list_child_issues() |> Enum.map(& &1.title)

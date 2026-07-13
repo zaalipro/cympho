@@ -121,7 +121,12 @@ defmodule CymphoWeb.LaunchItemControllerTest do
   end
 
   describe "PATCH /api/launch-items/:id" do
-    test "updates a launch item", %{conn: conn, company: company, current_user: current_user, backup_owner: backup_owner} do
+    test "updates a launch item", %{
+      conn: conn,
+      company: company,
+      current_user: current_user,
+      backup_owner: backup_owner
+    } do
       {:ok, launch_item} =
         launch_item(company, current_user, %{title: "Original", status: "planned"})
 
@@ -142,7 +147,11 @@ defmodule CymphoWeb.LaunchItemControllerTest do
       assert data["is_blocked"]
     end
 
-    test "rejects an invalid status update", %{conn: conn, company: company, current_user: current_user} do
+    test "rejects an invalid status update", %{
+      conn: conn,
+      company: company,
+      current_user: current_user
+    } do
       {:ok, launch_item} =
         launch_item(company, current_user, %{title: "Original", status: "planned"})
 

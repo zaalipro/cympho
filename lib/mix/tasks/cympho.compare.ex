@@ -565,12 +565,21 @@ defmodule Mix.Tasks.Cympho.Compare do
   def check_zero_token_idle_heartbeats do
     source = source_for(Cympho.AgentHeartbeat)
 
+    # The :running status update must have exactly one call site — inside the
+    # successful-checkout branch. A second call site means idle timer wakes
+    # are being marked running again (the original regression).
+    running_status_call_sites =
+      source
+      |> String.split("maybe_update_agent_status(agent_id, :running)")
+      |> length()
+      |> Kernel.-(1)
+
     checks = [
       String.contains?(source, "do_heartbeat_for_available_agent"),
       String.contains?(source, "check_agent_runtime_available"),
       String.contains?(source, "company_active?"),
-      String.contains?(source, "No work available, stay idle"),
-      not String.contains?(source, "# Update agent status to running if idle")
+      String.contains?(source, "maybe_update_agent_status(agent_id, :idle)"),
+      running_status_call_sites == 1
     ]
 
     if Enum.all?(checks) do
@@ -604,9 +613,9 @@ defmodule Mix.Tasks.Cympho.Compare do
       module_with_fun?(Cympho.Issues, :exclude_from_stale_patrol, 2),
       module_with_fun?(Cympho.Issues, :include_in_stale_patrol, 2),
       module_with_fun?(Cympho.Issues, :stale_patrol_excluded?, 1),
+      module_with_fun?(Cympho.Issues, :list_stuck_issues, 2),
       String.contains?(issues_source, "\"patrol\""),
       String.contains?(issues_source, "\"excluded\""),
-      String.contains?(issues_source, "stale-work patrol"),
       String.contains?(issues_source, "COALESCE((? -> 'patrol' ->> 'excluded')::boolean")
     ]
 
@@ -687,17 +696,17 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(dispatcher_source, "Issues.force_release_issue"),
       String.contains?(orchestrator_source, "cancel_adapter_session"),
       String.contains?(controller_source, "adapter_session_suffix"),
-      String.contains?(controller_source, "Stopped \#{count_phrase(sessions"),
-      String.contains?(controller_source, "preserved queued wakes"),
-      String.contains?(controller_source, "cancelled \#{count_phrase(wakes"),
+      String.contains?(controller_source, "defp count_phrase("),
+      String.contains?(controller_source, ":orchestrators_stopped"),
+      String.contains?(controller_source, ":wakes_cancelled"),
       String.contains?(controller_source, "record_runtime_control_event"),
       String.contains?(controller_source, "company_runtime_paused"),
       String.contains?(controller_source, "company_runtime_stopped"),
       String.contains?(controller_source, "company_runtime_resumed"),
-      String.contains?(nav_source, "preserves queued wakes"),
-      String.contains?(nav_source, "cancels queued wakes"),
-      String.contains?(layout_source, "Pause runtime and preserve queued wakes"),
-      String.contains?(layout_source, "Stop runtime and cancel queued wakes"),
+      String.contains?(nav_source, "/runtime-control/pause"),
+      String.contains?(nav_source, "/runtime-control/stop"),
+      String.contains?(layout_source, "desktop-runtime-pause"),
+      String.contains?(layout_source, "desktop-runtime-stop"),
       String.contains?(audit_event_source, "company_runtime_paused"),
       String.contains?(audit_event_source, "company_runtime_stopped"),
       String.contains?(audit_event_source, "company_runtime_resumed")
@@ -734,11 +743,10 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(dispatcher_source, ":operator_issue_pause"),
       String.contains?(dispatcher_source, "{:error, :issue_runtime_paused}"),
       String.contains?(heartbeat_source, "issue_runtime"),
-      String.contains?(header_source, "hero-pause-mini"),
-      String.contains?(header_source, "Paused"),
+      String.contains?(header_source, "issue_runtime_paused?(@issue)"),
       String.contains?(sidebar_source, "pause_issue_runtime"),
       String.contains?(sidebar_source, "resume_issue_runtime"),
-      String.contains?(sidebar_source, "Freeze only this issue"),
+      String.contains?(sidebar_source, "issue_runtime_control_detail"),
       String.contains?(show_source, "record_issue_runtime_audit"),
       String.contains?(show_source, "issue_runtime_paused"),
       String.contains?(show_source, "issue_runtime_resumed"),
@@ -775,7 +783,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(dispatcher_source, "Companies.low_power?(company)"),
       String.contains?(controller_source, "company_runtime_low_power"),
       String.contains?(nav_source, "/runtime-control/low-power"),
-      String.contains?(nav_source, "Only high and critical queued work will auto-dispatch"),
+      String.contains?(nav_source, "company_low_power?"),
       String.contains?(dashboard_source, ":low_power"),
       String.contains?(audit_event_source, "company_runtime_low_power")
     ]
@@ -803,7 +811,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(costs_source, "has_unpriced_usage?") and
         String.contains?(dashboard_source, "has_unpriced_usage?") and
         String.contains?(cost_live_source, "unpriced-usage-warning") and
-        String.contains?(dashboard_live_source, "+ unpriced")
+        String.contains?(dashboard_live_source, ":has_unpriced_usage?")
 
     cond do
       has_budgets and has_finances and has_posture and has_period and has_unpriced_guard ->
@@ -825,7 +833,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       module_with_fun?(Cympho.Agents, :pause_agent, 2),
       String.contains?(source, "@adapter_failure_circuit_breaker_threshold 3"),
       String.contains?(source, "pause_agent_for_adapter_circuit_breaker"),
-      String.contains?(source, "Adapter circuit breaker paused this agent")
+      String.contains?(source, "reset_adapter_failure")
     ]
 
     if Enum.all?(checks) do
@@ -872,10 +880,10 @@ defmodule Mix.Tasks.Cympho.Compare do
     checks = [
       module_with_fun?(Cympho.Attachments, :list_attachments, 1),
       module_with_fun?(Cympho.Attachments, :read_file, 1),
-      String.contains?(source, "## Issue attachments"),
-      String.contains?(source, "Inline image data URI"),
+      String.contains?(source, "attachments_block(issue)"),
+      String.contains?(source, "inline_attachment(attachment"),
       String.contains?(source, "Base.encode64"),
-      String.contains?(source, "data:\#{image_content_type(attachment)};base64")
+      String.contains?(source, "image_content_type(attachment)")
     ]
 
     if Enum.all?(checks) do
@@ -915,11 +923,9 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(runtime_source, "\"CYMPHO_WORKSPACE\""),
       String.contains?(runtime_source, "\"AGENT_HOME\""),
       String.contains?(runtime_source, "Map.put_new(\"workspace_path\", cwd)"),
-      String.contains?(prompt_source, "Workspace rule: the adapter cwd"),
-      String.contains?(
-        cursor_source,
-        "config[:workspace_path] || config[\"workspace_path\"] || config[:cwd]"
-      ),
+      String.contains?(prompt_source, "runtime_env_guidance"),
+      String.contains?(cursor_source, "defp cursor_cwd_opt("),
+      String.contains?(cursor_source, "config[:workspace_path]"),
       String.contains?(cursor_source, "normalize_env(runtime_env)")
     ]
 
@@ -937,10 +943,10 @@ defmodule Mix.Tasks.Cympho.Compare do
     runtime_source = source_for(Cympho.Runtime)
 
     checks = [
-      String.contains?(preflight_source, "Workspace isolation"),
+      String.contains?(preflight_source, "workspace_isolation_item"),
       String.contains?(preflight_source, "adapter_uses_local_workspace?"),
       String.contains?(preflight_source, "shared_project_workspace"),
-      String.contains?(preflight_source, "Attach an execution workspace or worktree"),
+      String.contains?(preflight_source, "project_workspace_path(project_workspace)"),
       String.contains?(workspaces_source, "def primary_project_workspace"),
       String.contains?(runtime_source, "Workspaces.primary_project_workspace")
     ]
@@ -1002,10 +1008,10 @@ defmodule Mix.Tasks.Cympho.Compare do
       module_with_fun?(Cympho.Issues, :human_action_count, 2),
       String.contains?(issues_source, "assignee_user_id"),
       String.contains?(issues_source, "@terminal_issue_statuses"),
-      String.contains?(inbox_live_source, "@statuses ~w(action"),
+      String.contains?(inbox_live_source, "Map.put(\"action\", human_action_count(socket))"),
       String.contains?(inbox_live_source, "build_human_action_items"),
       String.contains?(inbox_live_source, "human_action_count"),
-      String.contains?(inbox_live_source, "Needs my action"),
+      String.contains?(inbox_live_source, ":human_action"),
       String.contains?(inbox_template_source, "inbox-action-queue")
     ]
 
@@ -1063,7 +1069,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(wakes_source, "comment_wake_issue?"),
       String.contains?(wakes_source, "status in [:in_progress, :in_review]"),
       String.contains?(wakes_source, "comment_author_type"),
-      String.contains?(prompt_source, "Triggering comment - answer this"),
+      String.contains?(prompt_source, "triggering_comment_prompt_block"),
       String.contains?(runner_source, "comment_wake_fresh_turn"),
       String.contains?(runner_source, "issue_commented"),
       String.contains?(runner_source, "issue_comment_mentioned")
@@ -1081,13 +1087,13 @@ defmodule Mix.Tasks.Cympho.Compare do
     source = source_for(Cympho.AgentPrompt)
 
     checks = [
-      String.contains?(source, "## Current task - do this now"),
-      String.contains?(source, "they cannot replace, dilute, or contradict this issue"),
-      String.contains?(source, "## Triggering comment - answer this"),
+      String.contains?(source, "current_task_block(issue, agent)"),
+      String.contains?(source, "defp current_task_assignee"),
+      String.contains?(source, "triggering_comment_block(issue, wake_context)"),
       String.contains?(source, "load_triggering_comment"),
       String.contains?(source, "where: c.id == ^comment_id and c.issue_id == ^issue_id"),
-      String.contains?(source, "Read the Triggering comment block first"),
-      String.contains?(source, "## Company operating brief"),
+      String.contains?(source, "defp wake_preamble(\"issue_comment_mentioned\""),
+      String.contains?(source, "company_operating_brief_block(issue)"),
       String.contains?(source, "additional_instruction_files_block"),
       String.contains?(source, "InstructionFiles.list_for_agent")
     ]
@@ -1154,7 +1160,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(trace_source, "rehash_chain_suffix"),
       String.contains?(trace_source, ":content_hash_mismatch"),
       String.contains?(live_source, "verify_integrity"),
-      String.contains?(live_source, "Content hash mismatch at sequence")
+      String.contains?(live_source, "{:error, :content_hash_mismatch, sequence}")
     ]
 
     if Enum.all?(checks) do
@@ -1455,7 +1461,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(issue_live_source, "load_issue_run_history"),
       String.contains?(issue_live_source, "run_history"),
       String.contains?(execution_brief_source, "run_history[:total]"),
-      String.contains?(execution_brief_source, "long-running issues responsive")
+      String.contains?(execution_brief_source, "normalize_run_history(")
     ]
 
     if Enum.all?(checks) do
@@ -1480,10 +1486,10 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(components_source, "data-density-option=\"compact\""),
       String.contains?(components_source, "data-density-option=\"detailed\""),
       String.contains?(components_source, "aria-pressed={to_string(@density == \"compact\")}"),
-      String.contains?(components_source, "Toggle compact and detailed view with V"),
-      String.contains?(nav_source, "Toggle simple and advanced view with U"),
-      String.contains?(layout_source, "Simple / advanced view"),
-      String.contains?(layout_source, "Compact / detailed page"),
+      String.contains?(nav_source, "data-ui-mode-toggle"),
+      String.contains?(layout_source, "id=\"shortcuts-modal\""),
+      String.contains?(layout_source, ">U</kbd>"),
+      String.contains?(layout_source, ">V</kbd>"),
       String.contains?(app_js, "function toggleDensityView()"),
       String.contains?(app_js, "plainShortcut(e, 'v')"),
       String.contains?(app_js, "plainShortcut(e, 'u')")
@@ -1509,7 +1515,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(wakeup_queue_source, "coalesced_review_ids"),
       String.contains?(wakeup_queue_source, "Enum.take(-20)"),
       String.contains?(wakes_source, "comment_body: bounded_comment_body"),
-      String.contains?(prompt_source, "## Triggering comment - answer this")
+      String.contains?(prompt_source, "load_triggering_comment")
     ]
 
     if Enum.all?(checks) do
@@ -1549,7 +1555,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(activities_source, "a.inserted_at > ^since"),
       String.contains?(activities_source, "@max_company_timeline_limit 200"),
       String.contains?(controller_source, "parse_since"),
-      String.contains?(controller_source, "Invalid since timestamp"),
+      String.contains?(controller_source, ":invalid_since"),
       String.contains?(controller_source, "Activities.list_company_activities"),
       String.contains?(controller_source, "since: format_since(since)")
     ]

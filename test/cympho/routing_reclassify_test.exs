@@ -73,8 +73,8 @@ defmodule Cympho.RoutingReclassifyTest do
         end do
         {:ok, updated} = Issues.update_issue(issue, %{title: "Rewrite auth infra"})
 
-        # Reclassify runs under Task.Supervisor — give it a beat to land.
-        wait_for_role(updated.id, "cto", 50)
+        # Reclassify runs under Task.Supervisor — poll until it lands.
+        wait_until(fn -> assert Issues.get_issue!(updated.id).assigned_role == "cto" end)
 
         reloaded = Issues.get_issue!(updated.id)
         assert reloaded.assigned_role == "cto"
@@ -104,24 +104,23 @@ defmodule Cympho.RoutingReclassifyTest do
         request: fn _, _, _ ->
           flunk("Finch.request should not be called when prior source is not llm")
         end do
+        pre_existing = MapSet.new(Task.Supervisor.children(Cympho.TaskSupervisor))
+
         {:ok, updated} = Issues.update_issue(issue, %{title: "Brand new title"})
-        Process.sleep(30)
+
+        # If a reclassify task was (erroneously) spawned, wait for it to
+        # drain so its effects (role write / mocked-Finch flunk) would land.
+        wait_until(fn ->
+          spawned =
+            Task.Supervisor.children(Cympho.TaskSupervisor)
+            |> Enum.reject(&MapSet.member?(pre_existing, &1))
+
+          assert spawned == []
+        end)
+
         reloaded = Issues.get_issue!(updated.id)
         assert reloaded.assigned_role == "engineer"
       end
     end
   end
-
-  defp wait_for_role(id, expected, retries) when retries > 0 do
-    case Issues.get_issue(id) do
-      {:ok, %{assigned_role: ^expected}} ->
-        :ok
-
-      _ ->
-        Process.sleep(20)
-        wait_for_role(id, expected, retries - 1)
-    end
-  end
-
-  defp wait_for_role(_id, _expected, 0), do: :timeout
 end

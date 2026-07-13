@@ -1220,7 +1220,24 @@ defmodule Cympho.Orchestrator do
   defp start_engine_run(%__MODULE__{run_id: run_id}) do
     try do
       {:ok, run} = HeartbeatEngine.get_run(run_id)
-      HeartbeatEngine.start_run(run)
+
+      case HeartbeatEngine.start_run(run) do
+        {:error, {:invalid_status, status}} ->
+          # Lost CAS race: the run left "pending" before we could start it
+          # (e.g. the watchdog recovered it, or a duplicate dispatch won). The
+          # run did not start here; keep the session running so the adapter
+          # attempt is not aborted on a benign race.
+          Logger.warning("[Orchestrator] engine run already transitioned; not started here",
+            component: "orchestrator",
+            agent_id: Map.get(run, :agent_id),
+            issue_id: Map.get(run, :issue_id),
+            run_id: Map.get(run, :id),
+            status: status
+          )
+
+        _ok_or_other ->
+          :ok
+      end
     rescue
       e ->
         Logger.warning("[Orchestrator] Failed to start engine run: #{inspect(e)}")

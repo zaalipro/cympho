@@ -1,6 +1,8 @@
 defmodule Cympho.AdapterSessionsTest do
   use ExUnit.Case, async: false
 
+  import Cympho.WaitHelpers
+
   alias Cympho.AdapterSessions
 
   test "cancel sends the cancellation message to the registered worker" do
@@ -35,7 +37,7 @@ defmodule Cympho.AdapterSessionsTest do
 
     send(worker, :stop)
 
-    refute eventually_registered?(session_id)
+    wait_until(fn -> refute AdapterSessions.registered?(session_id) end)
   end
 
   test "run_cancellable returns the request result" do
@@ -70,17 +72,5 @@ defmodule Cympho.AdapterSessionsTest do
 
     assert_receive {:request_result, {:error, {:cancelled, :operator_stop}}}, 1_000
     refute Process.alive?(request_pid)
-  end
-
-  defp eventually_registered?(session_id, attempts \\ 10)
-  defp eventually_registered?(session_id, 0), do: AdapterSessions.registered?(session_id)
-
-  defp eventually_registered?(session_id, attempts) do
-    if AdapterSessions.registered?(session_id) do
-      Process.sleep(20)
-      eventually_registered?(session_id, attempts - 1)
-    else
-      false
-    end
   end
 end

@@ -1,6 +1,8 @@
 defmodule Cympho.PortKillerTest do
   use ExUnit.Case, async: false
 
+  import Cympho.WaitHelpers
+
   alias Cympho.PortKiller
 
   test "close terminates a stubborn port OS process" do
@@ -35,19 +37,7 @@ defmodule Cympho.PortKillerTest do
     assert process_alive?(os_pid)
 
     assert :ok = PortKiller.close(port, grace_ms: 10)
-    refute eventually_alive?(os_pid)
-  end
-
-  defp eventually_alive?(os_pid, attempts \\ 20)
-  defp eventually_alive?(os_pid, 0), do: process_alive?(os_pid)
-
-  defp eventually_alive?(os_pid, attempts) do
-    if process_alive?(os_pid) do
-      Process.sleep(50)
-      eventually_alive?(os_pid, attempts - 1)
-    else
-      false
-    end
+    wait_until(fn -> refute process_alive?(os_pid) end)
   end
 
   defp process_alive?(os_pid) do

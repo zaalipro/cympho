@@ -11,6 +11,7 @@ defmodule CymphoWeb.LiveCase do
       import Phoenix.ConnTest
       import Phoenix.LiveViewTest
       import CymphoWeb.LiveCase
+      import Cympho.WaitHelpers
 
       @endpoint CymphoWeb.Endpoint
     end

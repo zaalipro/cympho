@@ -56,6 +56,13 @@ defmodule CymphoWeb.BoardGovernanceE2ETest do
     end
   end
 
+  # PubSub delivers to local subscribers before broadcast/3 returns, and the
+  # executor processes each message synchronously in handle_info, so a
+  # :sys.get_state call returns only after all prior messages are handled.
+  defp sync_executor do
+    :sys.get_state(Cympho.BoardApprovals.BoardApprovalActionExecutor)
+  end
+
   # --- E2E: API agent creation through board pipeline ---
 
   describe "POST /api/agents through board pipeline" do
@@ -186,8 +193,8 @@ defmodule CymphoWeb.BoardGovernanceE2ETest do
       # Step 3: Board member casts approve vote, triggering auto-approve
       {:ok, _vote} = BoardApprovals.cast_vote(approval_id, board_user.id, "approve", "LGTM")
 
-      # Step 4: Wait for auto-approve + executor
-      Process.sleep(150)
+      # Step 4: Wait for auto-approve + executor to process the resolved event
+      sync_executor()
 
       # Step 5: Agent should now exist
       agents = Agents.list_agents_by_company(company.id)
@@ -226,7 +233,8 @@ defmodule CymphoWeb.BoardGovernanceE2ETest do
       {:ok, _} = BoardApprovals.cast_vote(approval_id, board_user1.id, "approve")
       {:ok, _} = BoardApprovals.cast_vote(approval_id, board_user2.id, "deny")
 
-      Process.sleep(100)
+      # Flush the executor's mailbox so any (erroneous) execution would have run
+      sync_executor()
 
       # Agent should NOT exist (threshold not met, not auto-approved)
       agents = Agents.list_agents_by_company(company.id)
@@ -263,7 +271,7 @@ defmodule CymphoWeb.BoardGovernanceE2ETest do
       # Board member approves
       {:ok, _} = BoardApprovals.cast_vote(approval.id, board_user.id, "approve")
 
-      Process.sleep(150)
+      sync_executor()
 
       # Budget should be updated
       updated_budget = Cympho.Budgets.get_budget!(budget.id)

@@ -60,14 +60,12 @@ defmodule Cympho.Issues.AutoAssignmentReassignerTest do
 
       # The sweep spawns supervised tasks; wait for them to drain.
       wait_until(fn ->
-        map_size(:sys.get_state(pid).tasks) == 0
+        assert map_size(:sys.get_state(pid).tasks) == 0
       end)
 
       wait_until(fn ->
-        Repo.get!(Cympho.Issues.Issue, issue.id).assignee_id == agent.id
+        assert Repo.get!(Cympho.Issues.Issue, issue.id).assignee_id == agent.id
       end)
-
-      assert Repo.get!(Cympho.Issues.Issue, issue.id).assignee_id == agent.id
     end
 
     test "sweep survives when the DB query fails", %{pid: pid} do
@@ -84,19 +82,6 @@ defmodule Cympho.Issues.AutoAssignmentReassignerTest do
 
       assert Process.alive?(pid)
       assert log =~ "sweep failed"
-    end
-  end
-
-  defp wait_until(fun, attempts \\ 50)
-
-  defp wait_until(_fun, 0), do: :timeout
-
-  defp wait_until(fun, attempts) do
-    if fun.() do
-      :ok
-    else
-      Process.sleep(20)
-      wait_until(fun, attempts - 1)
     end
   end
 

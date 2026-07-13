@@ -1137,7 +1137,8 @@ defmodule CymphoWeb.IssueLiveTest do
           metadata: %{worker_index: 1}
         })
 
-      Process.sleep(10)
+      # Poll until the swarm event broadcast has reached the LiveView.
+      wait_until(fn -> assert render(view) =~ "1/1 closed" end)
 
       html = render(view)
       assert html =~ "1/1 closed"

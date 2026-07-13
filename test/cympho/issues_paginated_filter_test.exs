@@ -145,19 +145,23 @@ defmodule Cympho.IssuesPaginatedFilterTest do
     end
 
     test "page 2 returns different issues" do
-      # Create issues with distinct timestamps for stable pagination
-      {:ok, _i1} =
+      # Create issues, then backdate their timestamps so second-precision
+      # ordering is deterministic without sleeping across second boundaries.
+      {:ok, i1} =
         Issues.create_issue(%{title: "Page1Issue", description: "first", status: :backlog})
 
-      Process.sleep(1100)
-
-      {:ok, _i2} =
+      {:ok, i2} =
         Issues.create_issue(%{title: "Page1Issue2", description: "second", status: :backlog})
-
-      Process.sleep(1100)
 
       {:ok, _i3} =
         Issues.create_issue(%{title: "Page2Issue", description: "third", status: :backlog})
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      for {issue, offset} <- [{i1, -120}, {i2, -60}] do
+        ts = DateTime.add(now, offset)
+        {:ok, _} = Repo.update(Ecto.Changeset.change(issue, inserted_at: ts, updated_at: ts))
+      end
 
       page1 = Issues.list_issues_paginated(%{"page" => "1", "per_page" => "2"})
       page2 = Issues.list_issues_paginated(%{"page" => "2", "per_page" => "2"})

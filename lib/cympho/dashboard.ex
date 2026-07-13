@@ -15,6 +15,7 @@ defmodule Cympho.Dashboard do
   alias Cympho.Oversight.Patrol
   alias Cympho.Projects.Project
   alias Cympho.RuntimeCapacity
+  alias Cympho.RuntimeOperations
   alias Cympho.Wakes.AgentWake
 
   def active_agents_count(company_id \\ nil) do
@@ -107,7 +108,9 @@ defmodule Cympho.Dashboard do
     |> Repo.all()
   end
 
-  def summary(company_id \\ nil) do
+  def summary(company_id \\ nil, operations \\ nil) do
+    operations = operations || snapshot_operations(company_id)
+
     %{
       active_agents: active_agents_count(company_id),
       total_agents: total_agents_count(company_id),
@@ -125,10 +128,16 @@ defmodule Cympho.Dashboard do
       cost_summary: cost_summary(company_id),
       runtime_capacity: runtime_capacity(company_id),
       goal_alignment: Goals.alignment_summary(company_id),
-      autonomy_readiness: AutonomyReadiness.snapshot(company_id),
+      autonomy_readiness: AutonomyReadiness.snapshot(company_id, operations),
       patrol_summary: patrol_summary(company_id)
     }
   end
+
+  # Compute the runtime snapshot once so callers (the dashboard LiveView) can
+  # share a single snapshot across summary + their own operations read instead
+  # of recomputing it per 30s refresh. Skips the query when unscoped.
+  defp snapshot_operations(nil), do: nil
+  defp snapshot_operations(company_id), do: RuntimeOperations.snapshot(company_id)
 
   def empty_summary do
     %{

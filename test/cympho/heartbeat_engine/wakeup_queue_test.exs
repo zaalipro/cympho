@@ -223,8 +223,10 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
           reason: "issue_commented"
         })
 
-      # Ensure different timestamp
-      Process.sleep(1100)
+      # Backdate the first wake so second-precision inserted_at ordering is
+      # deterministic without sleeping across a second boundary.
+      earlier = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-60)
+      {:ok, first} = Repo.update(Ecto.Changeset.change(first, inserted_at: earlier))
 
       {:ok, _latest} =
         WakeupQueue.enqueue(%{
@@ -341,14 +343,17 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
       issue: issue,
       issue2: issue2
     } do
-      {:ok, _first} =
+      {:ok, first} =
         WakeupQueue.enqueue(%{
           agent_id: agent.id,
           issue_id: issue.id,
           reason: "issue_commented"
         })
 
-      Process.sleep(1100)
+      # Backdate the first wake so second-precision inserted_at ordering is
+      # deterministic without sleeping across a second boundary.
+      earlier = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-60)
+      {:ok, _first} = Repo.update(Ecto.Changeset.change(first, inserted_at: earlier))
 
       {:ok, second} =
         WakeupQueue.enqueue(%{

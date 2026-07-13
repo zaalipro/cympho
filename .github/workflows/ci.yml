@@ -1,0 +1,94 @@
+# Continuous Integration for Cympho (Elixir/Phoenix).
+#
+# Runs on every push to main and on every pull request. A single job keeps
+# things fast: deps are cached, then we lint-check formatting, compile with
+# warnings-as-errors, and run the full test suite against a Postgres service.
+#
+# Tool versions are pinned to match .tool-versions:
+#   elixir 1.19.5-otp-28
+#   erlang 28.4.3
+#
+# Env-sensitivity note: the test suite is designed to run green in a bare
+# environment (the documented fresh-checkout path). Tests that touch external
+# providers/binaries (claude/codex/cursor CLIs, ANTHROPIC_API_KEY,
+# OPENAI_API_KEY, CYMPHO_CLAUDE_COMMAND) either delete the env var and assert
+# the "unavailable" path, or branch on System.find_executable/1 and skip the
+# online assertions when the binary is absent. No secrets are therefore
+# required here. The LLM router is disabled in config/test.exs
+# (llm_router_enabled?: false) so no Finch/network calls are made.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Format, compile & test
+    runs-on: ubuntu-latest
+
+    env:
+      MIX_ENV: test
+      # config/test.exs reads these; defaults are paperclip/paperclip/localhost
+      # with database cympho_test. We set them explicitly to match the service.
+      TEST_DB_USER: paperclip
+      TEST_DB_PASSWORD: paperclip
+      TEST_DB_HOST: localhost
+      TEST_DB_NAME: cympho_test
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: paperclip
+          POSTGRES_PASSWORD: paperclip
+          POSTGRES_DB: cympho_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Elixir/Erlang
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.4.3"
+          elixir-version: "1.19.5-otp-28"
+
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock', '.tool-versions') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Compile (warnings as errors)
+        run: mix compile --warnings-as-errors
+
+      - name: Run tests
+        run: mix test
+
+      # Credo is informational per CLAUDE.md — surface issues without failing CI.
+      - name: Credo (non-blocking)
+        run: mix credo
+        continue-on-error: true

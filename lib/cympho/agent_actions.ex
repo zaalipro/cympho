@@ -10,14 +10,9 @@ defmodule Cympho.AgentActions do
 
   alias Cympho.{
     Activities,
-    AgentPromptContract,
     Agents,
     Comments,
     Decisions,
-    DeliveryBriefReadiness,
-    HeartbeatEngine,
-    IssueBriefReadiness,
-    IssueDigest,
     Issues,
     PrincipalPermissions,
     PullRequestContract,
@@ -26,15 +21,15 @@ defmodule Cympho.AgentActions do
     WorkProducts
   }
 
+  alias Cympho.AgentActions.Parser
+  alias Cympho.AgentActions.Validation
+
   alias Cympho.Agents.Agent
   alias Cympho.Issues.Issue
   alias Cympho.Issues.SwarmEvents
   alias Cympho.AuditTrail.Instrumenter
 
   require Logger
-
-  @max_actions 10
-  @max_block_bytes 65_536
 
   # Hard cap on agent-action chain depth. `create_issue` from an agent action
   # increments the child's `request_depth`; once we exceed the cap, further
@@ -46,56 +41,10 @@ defmodule Cympho.AgentActions do
                                         [:agent_actions, :max_active_child_issues_per_parent],
                                         12
                                       )
-  # Cap on initiatives a single `seed_mission_issues` call can spawn. Mission
-  # decomposition typically lands at 3–5 initiatives; values above 8 indicate
-  # the CEO is over-fanning and should split a mission into sub-missions.
-  @max_initiatives_per_seed Application.compile_env(
-                              :cympho,
-                              [:agent_actions, :max_initiatives_per_seed],
-                              8
-                            )
-  @supported_types ~w(
-    create_issue
-    submit_review
-    approve_issue
-    request_changes
-    block_issue
-    comment
-    attach_work_product
-    set_pr_url
-    handoff
-    seed_mission_issues
-    spawn_agent
-    delegate
-    escalate
-    intervene
-    merge_pr
-    force_fix_pr
-    resolve_conflict
-    cancel_issue
-    swarm_worker_complete
-  )
   @roles Agent.role_strings()
-  @priorities ~w(low medium high critical)
   @task_assignment_permissions ~w(task.assign tasks.assign tasks:assign task.create tasks.create tasks:create)
   @task_assignment_permission_flags @task_assignment_permissions ++
                                       ~w(task_assign tasks_assign can_assign_tasks can_create_tasks canAssignTasks canCreateTasks)
-  @work_product_kinds ~w(code_change document url artifact other)
-  @work_product_kind_aliases %{
-    "code" => "code_change",
-    "code_changes" => "code_change",
-    "implementation" => "code_change",
-    "plan" => "document",
-    "planning" => "document",
-    "spec" => "document",
-    "strategy" => "document",
-    "strategy_doc" => "document",
-    "strategy_document" => "document",
-    "design" => "artifact",
-    "mockup" => "artifact",
-    "prototype" => "artifact"
-  }
-  @active_run_statuses ~w(pending queued running)
   @delivery_roles Agent.delivery_roles()
   @repo_delivery_roles Agent.pr_delivery_roles()
   @text_only_delivery_adapters [:openai_chat]
@@ -112,10 +61,10 @@ defmodule Cympho.AgentActions do
   """
   def limits do
     %{
-      max_actions: @max_actions,
+      max_actions: Parser.max_actions(),
       max_request_depth: @max_request_depth,
       max_active_child_issues_per_parent: @max_active_child_issues_per_parent,
-      max_initiatives_per_seed: @max_initiatives_per_seed
+      max_initiatives_per_seed: Parser.max_initiatives_per_seed()
     }
   end
 
@@ -129,245 +78,7 @@ defmodule Cympho.AgentActions do
   exactly one); byte-identical or semantically equal duplicates collapse.
   """
   @spec parse(String.t()) :: {:ok, [action()]} | {:error, atom() | tuple()}
-  def parse(text) when is_binary(text) do
-    case extract_action_json(text) do
-      {:ok, json} when byte_size(json) > @max_block_bytes ->
-        {:error, {:action_block_too_large, byte_size(json), @max_block_bytes}}
-
-      {:ok, json} ->
-        decode_action_json(json)
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  def parse(_), do: {:error, :missing_action_block}
-
-  @action_block_patterns [
-    ~r/```(?:cympho[-_ ]?actions|cympo-actions)[ \t\r]*\n(.*?)```/is,
-    ~r/(?:^|\n)\s*(?:cympho[-_ ]?actions|cympo-actions)\s*\n\s*```json\s*\n(.*?)```/is
-  ]
-
-  @unclosed_action_block_pattern ~r/```(?:cympho[-_ ]?actions|cympo-actions)[ \t\r]*\n(.*)\z/is
-  @generic_block_pattern ~r/```[\w.-]*[ \t\r]*\n(.*?)```/s
-
-  defp extract_action_json(text) do
-    case dedup_action_jsons(marked_block_jsons(text)) do
-      [json] -> {:ok, json}
-      [_one, _two | _] -> {:error, :multiple_action_blocks}
-      [] -> extract_fallback_action_json(text)
-    end
-  end
-
-  # No well-formed cympho-actions block. Try, in order: a truncated
-  # (unclosed) marked fence, generic code fences carrying an actions payload,
-  # then a bare `{"actions": ...}` object in prose.
-  defp extract_fallback_action_json(text) do
-    case Regex.run(@unclosed_action_block_pattern, text, capture: :all_but_first) do
-      [tail] ->
-        # The block never closed — take a balanced object from the first
-        # brace so trailing prose doesn't poison the decode.
-        case bare_action_json(tail) do
-          {:ok, json} -> {:ok, json}
-          {:error, _} -> {:ok, tail}
-        end
-
-      nil ->
-        case dedup_action_jsons(generic_block_jsons(text)) do
-          [json] -> {:ok, json}
-          [_one, _two | _] -> {:error, :multiple_action_blocks}
-          [] -> bare_action_json(text)
-        end
-    end
-  end
-
-  defp marked_block_jsons(text) do
-    Enum.flat_map(@action_block_patterns, fn pattern ->
-      Regex.scan(pattern, text, capture: :all_but_first)
-      |> Enum.map(fn [json] -> json end)
-    end)
-  end
-
-  defp generic_block_jsons(text) do
-    @generic_block_pattern
-    |> Regex.scan(text, capture: :all_but_first)
-    |> Enum.map(fn [block] -> block end)
-    |> Enum.filter(&actions_payload_candidate?/1)
-  end
-
-  defp actions_payload_candidate?(block) do
-    trimmed = String.trim(block)
-    String.starts_with?(trimmed, "{") and String.contains?(trimmed, ~s("actions"))
-  end
-
-  defp bare_action_json(text) do
-    case Regex.run(~r/\{\s*"actions"\s*:/, text, return: :index) do
-      [{start, _len}] ->
-        {:ok, text |> binary_part(start, byte_size(text) - start) |> take_balanced_json()}
-
-      nil ->
-        {:error, :missing_action_block}
-    end
-  end
-
-  # Collapse duplicate candidates: identical after trim, or decoding to the
-  # same JSON term (agents sometimes repeat the block verbatim).
-  defp dedup_action_jsons(candidates) do
-    candidates
-    |> Enum.map(&String.trim/1)
-    |> Enum.uniq_by(fn candidate ->
-      case Jason.decode(candidate) do
-        {:ok, decoded} -> {:decoded, decoded}
-        {:error, _} -> {:raw, candidate}
-      end
-    end)
-  end
-
-  defp decode_action_json(json) do
-    case Jason.decode(json) do
-      {:ok, decoded} ->
-        validate_payload(decoded)
-
-      {:error, error} ->
-        case repair_and_decode(json) do
-          {:ok, decoded} ->
-            Logger.warning("recovered malformed cympho-actions JSON",
-              component: "agent_actions"
-            )
-
-            validate_payload(decoded)
-
-          :error ->
-            {:error, {:invalid_json, Exception.message(error)}}
-        end
-    end
-  end
-
-  # Conservative repair for LLM-damaged JSON: escape raw control characters
-  # inside strings, drop trailing commas, and close truncated brackets. Only
-  # accepted when the repaired text strictly decodes.
-  defp repair_and_decode(json) do
-    {scrubbed, in_string, stack} = scrub_json(json)
-
-    completed =
-      if in_string or stack != [] do
-        string_closer = if in_string, do: "\"", else: ""
-
-        [
-          scrubbed
-          |> String.trim_trailing()
-          |> String.trim_trailing(",")
-          |> Kernel.<>(string_closer <> List.to_string(stack))
-        ]
-      else
-        []
-      end
-
-    Enum.find_value([scrubbed | completed], :error, fn candidate ->
-      case Jason.decode(candidate) do
-        {:ok, decoded} -> {:ok, decoded}
-        {:error, _} -> nil
-      end
-    end)
-  end
-
-  # Single pass over the JSON tracking string/escape state and the stack of
-  # expected closers. Inside strings: escape raw newlines/tabs. Outside
-  # strings: drop a comma directly followed by a closing brace/bracket.
-  defp scrub_json(json), do: scrub_json(json, false, false, [], [])
-
-  defp scrub_json(<<>>, in_string, _escaped, stack, acc) do
-    {acc |> Enum.reverse() |> IO.iodata_to_binary(), in_string, stack}
-  end
-
-  defp scrub_json(<<char::utf8, rest::binary>>, true, true, stack, acc),
-    do: scrub_json(rest, true, false, stack, [<<char::utf8>> | acc])
-
-  defp scrub_json(<<?\\, rest::binary>>, true, false, stack, acc),
-    do: scrub_json(rest, true, true, stack, ["\\" | acc])
-
-  defp scrub_json(<<?", rest::binary>>, true, false, stack, acc),
-    do: scrub_json(rest, false, false, stack, ["\"" | acc])
-
-  defp scrub_json(<<?\n, rest::binary>>, true, false, stack, acc),
-    do: scrub_json(rest, true, false, stack, ["\\n" | acc])
-
-  defp scrub_json(<<?\r, rest::binary>>, true, false, stack, acc),
-    do: scrub_json(rest, true, false, stack, ["\\r" | acc])
-
-  defp scrub_json(<<?\t, rest::binary>>, true, false, stack, acc),
-    do: scrub_json(rest, true, false, stack, ["\\t" | acc])
-
-  defp scrub_json(<<char::utf8, rest::binary>>, true, false, stack, acc),
-    do: scrub_json(rest, true, false, stack, [<<char::utf8>> | acc])
-
-  defp scrub_json(<<?", rest::binary>>, false, _escaped, stack, acc),
-    do: scrub_json(rest, true, false, stack, ["\"" | acc])
-
-  defp scrub_json(<<?{, rest::binary>>, false, _escaped, stack, acc),
-    do: scrub_json(rest, false, false, [?} | stack], ["{" | acc])
-
-  defp scrub_json(<<?[, rest::binary>>, false, _escaped, stack, acc),
-    do: scrub_json(rest, false, false, [?] | stack], ["[" | acc])
-
-  defp scrub_json(<<char, rest::binary>>, false, _escaped, [char | stack], acc)
-       when char in [?}, ?]],
-       do: scrub_json(rest, false, false, stack, [<<char>> | acc])
-
-  # Mismatched closer — pass through so decoding fails loudly.
-  defp scrub_json(<<char, rest::binary>>, false, _escaped, stack, acc)
-       when char in [?}, ?]],
-       do: scrub_json(rest, false, false, stack, [<<char>> | acc])
-
-  defp scrub_json(<<?,, rest::binary>>, false, _escaped, stack, acc) do
-    case next_meaningful_char(rest) do
-      char when char in [?}, ?]] -> scrub_json(rest, false, false, stack, acc)
-      _ -> scrub_json(rest, false, false, stack, ["," | acc])
-    end
-  end
-
-  defp scrub_json(<<char::utf8, rest::binary>>, false, _escaped, stack, acc),
-    do: scrub_json(rest, false, false, stack, [<<char::utf8>> | acc])
-
-  defp next_meaningful_char(<<char, rest::binary>>) when char in [?\s, ?\t, ?\n, ?\r],
-    do: next_meaningful_char(rest)
-
-  defp next_meaningful_char(<<char, _::binary>>), do: char
-  defp next_meaningful_char(<<>>), do: nil
-
-  # Extracts a brace-balanced JSON object from the head of `binary`,
-  # respecting strings. If it never balances (truncated output), the whole
-  # remainder is returned and the repair pass closes it.
-  defp take_balanced_json(binary), do: take_balanced_json(binary, false, false, 0, [])
-
-  defp take_balanced_json(<<>>, _in_string, _escaped, _depth, acc),
-    do: acc |> Enum.reverse() |> IO.iodata_to_binary()
-
-  defp take_balanced_json(<<char::utf8, rest::binary>>, true, true, depth, acc),
-    do: take_balanced_json(rest, true, false, depth, [<<char::utf8>> | acc])
-
-  defp take_balanced_json(<<?\\, rest::binary>>, true, false, depth, acc),
-    do: take_balanced_json(rest, true, true, depth, ["\\" | acc])
-
-  defp take_balanced_json(<<?", rest::binary>>, in_string, false, depth, acc),
-    do: take_balanced_json(rest, not in_string, false, depth, ["\"" | acc])
-
-  defp take_balanced_json(<<?{, rest::binary>>, false, _escaped, depth, acc),
-    do: take_balanced_json(rest, false, false, depth + 1, ["{" | acc])
-
-  defp take_balanced_json(<<?}, rest::binary>>, false, _escaped, depth, acc) do
-    acc = ["}" | acc]
-
-    if depth <= 1 do
-      acc |> Enum.reverse() |> IO.iodata_to_binary()
-    else
-      take_balanced_json(rest, false, false, depth - 1, acc)
-    end
-  end
-
-  defp take_balanced_json(<<char::utf8, rest::binary>>, in_string, _escaped, depth, acc),
-    do: take_balanced_json(rest, in_string, false, depth, [<<char::utf8>> | acc])
+  defdelegate parse(text), to: Parser
 
   @doc """
   Executes validated actions for an issue and agent.
@@ -388,7 +99,7 @@ defmodule Cympho.AgentActions do
         {:error, :rate_limited}
 
       true ->
-        case ensure_no_contradictory_success(actions) do
+        case Validation.ensure_no_contradictory_success(actions) do
           :ok ->
             do_execute(issue, agent, actions)
 
@@ -604,8 +315,8 @@ defmodule Cympho.AgentActions do
          %Issue{} = issue,
          {:quality_gate_failed, action_type, gaps}
        ) do
-    gap_list = gaps |> Enum.map(&quality_gap_label/1) |> Enum.join(", ")
-    instruction = quality_gate_instruction(action_type, gaps)
+    gap_list = gaps |> Enum.map(&Validation.quality_gap_label/1) |> Enum.join(", ")
+    instruction = Validation.quality_gate_instruction(action_type, gaps)
 
     system_comment(
       issue,
@@ -880,76 +591,6 @@ defmodule Cympho.AgentActions do
   defp mutates_issue?(%{"type" => type}) when type in @mutating_action_types, do: true
   defp mutates_issue?(_), do: false
 
-  @success_like_action_types ~w(submit_review approve_issue swarm_worker_complete)
-  @blocked_declaration_patterns [
-    ~r/(^|\s)\[blocked\]/i,
-    ~r/\b(unable|can't|cannot|can not)\s+(to\s+)?(proceed|continue|complete|finish|do|perform)\b/i,
-    ~r/\b(i|we)\s+(do not|don't|cannot|can't)\s+have\b.*\b(access|permission|permissions|channel|credential|credentials|api key|authority|capability|capabilities)\b/i,
-    ~r/\b(needs?|requires?|awaiting|waiting for)\s+(human|owner|user)\s+(input|approval|decision|access|credential|credentials)\b/i,
-    ~r/\b(blocked by permission|blocked by permissions|permission settings)\b/i
-  ]
-
-  defp ensure_no_contradictory_success(actions) do
-    success_action =
-      Enum.find(actions, fn
-        %{"type" => type} -> type in @success_like_action_types
-        _ -> false
-      end)
-
-    cond do
-      is_nil(success_action) ->
-        :ok
-
-      Enum.any?(actions, &blocked_declaration_action?/1) ->
-        {:error, {:contradictory_success_signal, success_action["type"]}}
-
-      true ->
-        :ok
-    end
-  end
-
-  defp blocked_declaration_action?(%{} = action) do
-    action
-    |> action_text()
-    |> blocked_declaration_text?()
-  end
-
-  defp blocked_declaration_action?(_action), do: false
-
-  defp action_text(action) do
-    ~w(body notes reason summary description result comment)
-    |> Enum.map(&Map.get(action, &1))
-    |> Enum.map(&flatten_action_text/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join(" ")
-  end
-
-  defp flatten_action_text(value) when is_binary(value), do: value
-
-  defp flatten_action_text(value) when is_list(value) do
-    value
-    |> Enum.map(&flatten_action_text/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join(" ")
-  end
-
-  defp flatten_action_text(value) when is_map(value) do
-    value
-    |> Map.values()
-    |> Enum.map(&flatten_action_text/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join(" ")
-  end
-
-  defp flatten_action_text(value) when value in [nil, ""], do: ""
-  defp flatten_action_text(value), do: to_string(value)
-
-  defp blocked_declaration_text?(""), do: false
-
-  defp blocked_declaration_text?(text) do
-    Enum.any?(@blocked_declaration_patterns, &Regex.match?(&1, text))
-  end
-
   # Mirror the permissive policy used by `Issues.checkout_issue/3`: only
   # reject when both sides have a non-nil company_id and they differ. Legacy
   # fixtures and seed data may have nil company_ids; tightening fully is a
@@ -1068,20 +709,10 @@ defmodule Cympho.AgentActions do
   defp repo_delivery_claim?(%{"type" => "set_pr_url"}), do: true
 
   defp repo_delivery_claim?(%{"type" => "attach_work_product"} = action) do
-    work_product_kind(action) == "code_change" or github_pull_request_url?(action["url"])
+    Parser.work_product_kind(action) == "code_change" or github_pull_request_url?(action["url"])
   end
 
   defp repo_delivery_claim?(_action), do: false
-
-  defp work_product_kind(action) do
-    action
-    |> Map.get("kind", "other")
-    |> to_string()
-    |> String.trim()
-    |> String.downcase()
-    |> String.replace(~r/[\s-]+/, "_")
-    |> then(&Map.get(@work_product_kind_aliases, &1, &1))
-  end
 
   defp github_pull_request_url?(url) when is_binary(url) do
     match?({:ok, _}, Cympho.Github.parse_pull_request_url(url))
@@ -1178,394 +809,6 @@ defmodule Cympho.AgentActions do
 
   defp permission_list_includes?(_), do: false
 
-  defp validate_payload(%{"actions" => actions}) when is_list(actions) do
-    cond do
-      actions == [] ->
-        {:error, :empty_actions}
-
-      length(actions) > @max_actions ->
-        {:error, {:too_many_actions, @max_actions}}
-
-      true ->
-        actions
-        |> Enum.map(&validate_action/1)
-        |> skip_unsupported_among_valid()
-        |> collect_validated()
-    end
-  end
-
-  # Recover common payload-shape drift: a bare list of actions, or a single
-  # action object at the top level.
-  defp validate_payload(actions) when is_list(actions),
-    do: validate_payload(%{"actions" => actions})
-
-  defp validate_payload(%{"type" => _} = action), do: validate_payload(%{"actions" => [action]})
-
-  defp validate_payload(%{} = payload) do
-    case normalize_string_keys(payload) do
-      %{"actions" => _} = normalized when normalized != payload -> validate_payload(normalized)
-      _ -> {:error, :missing_actions}
-    end
-  end
-
-  defp validate_payload(_), do: {:error, :missing_actions}
-
-  # An unknown action type must not abort a batch that also carries valid
-  # actions — convert it to a skip marker (executed as a warning comment) so
-  # the known actions still run. A batch of only unknown types keeps the
-  # hard `{:unsupported_action, type}` error.
-  defp skip_unsupported_among_valid(results) do
-    if Enum.any?(results, &match?({:ok, _}, &1)) do
-      Enum.map(results, fn
-        {:error, {:unsupported_action, type}} ->
-          {:ok, %{"type" => "skip_unsupported", "original_type" => type}}
-
-        other ->
-          other
-      end)
-    else
-      results
-    end
-  end
-
-  defp validate_action(%{} = action) do
-    action = normalize_string_keys(action)
-
-    case action["type"] do
-      type when type in @supported_types ->
-        validate_supported_action(type, action)
-
-      nil ->
-        {:error, :invalid_action}
-
-      type ->
-        {:error, {:unsupported_action, type}}
-    end
-  end
-
-  defp validate_action(_), do: {:error, :invalid_action}
-
-  defp normalize_work_product_action(action) do
-    action
-    |> copy_string_alias("name", "title")
-    |> copy_string_alias("content", "description")
-    |> normalize_work_product_kind_alias()
-    |> normalize_work_product_payload()
-  end
-
-  defp copy_string_alias(action, from, to) do
-    case Map.get(action, from) do
-      value when is_binary(value) ->
-        if blank?(Map.get(action, to)) and not blank?(value) do
-          Map.put(action, to, value)
-        else
-          action
-        end
-
-      _ ->
-        action
-    end
-  end
-
-  defp normalize_work_product_kind_alias(action) do
-    case Map.get(action, "kind") do
-      kind when is_binary(kind) ->
-        normalized =
-          kind
-          |> String.trim()
-          |> String.downcase()
-          |> String.replace(~r/[\s-]+/, "_")
-
-        canonical = Map.get(@work_product_kind_aliases, normalized, normalized)
-
-        if canonical in @work_product_kinds do
-          Map.put(action, "kind", canonical)
-        else
-          action
-        end
-
-      _ ->
-        action
-    end
-  end
-
-  defp normalize_work_product_payload(action) do
-    case Map.get(action, "payload") do
-      nil ->
-        action
-
-      payload when is_map(payload) ->
-        action
-
-      payload when is_binary(payload) ->
-        Map.put(action, "payload", %{"text" => payload})
-
-      payload ->
-        Map.put(action, "payload", %{"value" => payload})
-    end
-  end
-
-  defp validate_supported_action(type, action) do
-    case type do
-      "create_issue" ->
-        with :ok <- require_string(action, "title"),
-             :ok <- validate_role(action["role"]),
-             :ok <- validate_priority(Map.get(action, "priority", "medium")),
-             :ok <- validate_optional_depends_on(action["depends_on"]),
-             :ok <- validate_optional_estimate(action["estimated_minutes"]),
-             :ok <- validate_optional_brief_fields(action) do
-          {:ok,
-           Map.merge(action, %{
-             "description" => Map.get(action, "description", ""),
-             "priority" => Map.get(action, "priority", "medium")
-           })}
-        end
-
-      "submit_review" ->
-        with :ok <- validate_role(action["role"]) do
-          {:ok, action}
-        end
-
-      "approve_issue" ->
-        {:ok, action}
-
-      "request_changes" ->
-        with :ok <- validate_role(action["role"]) do
-          {:ok, action}
-        end
-
-      "block_issue" ->
-        {:ok, action}
-
-      "comment" ->
-        with :ok <- require_string(action, "body") do
-          {:ok, action}
-        end
-
-      "attach_work_product" ->
-        action = normalize_work_product_action(action)
-
-        with :ok <- require_string(action, "title"),
-             :ok <- validate_work_product_kind(Map.get(action, "kind", "other")),
-             :ok <- validate_optional_map(action, "payload"),
-             :ok <- validate_optional_map(action, "metadata") do
-          {:ok,
-           Map.merge(action, %{
-             "kind" => Map.get(action, "kind", "other"),
-             "description" => Map.get(action, "description", ""),
-             "payload" => Map.get(action, "payload", %{}),
-             "metadata" => Map.get(action, "metadata", %{})
-           })}
-        end
-
-      "set_pr_url" ->
-        with :ok <- require_string(action, "url"),
-             :ok <- validate_url(action["url"]) do
-          {:ok, action}
-        end
-
-      "handoff" ->
-        with :ok <- validate_role(action["role"]),
-             :ok <- validate_optional_string(action, "summary"),
-             :ok <- validate_optional_string(action, "remaining"),
-             :ok <- validate_optional_string(action, "decisions"),
-             :ok <- validate_optional_string_or_list(action, "file_paths") do
-          {:ok, action}
-        end
-
-      "seed_mission_issues" ->
-        with :ok <- require_string(action, "goal_id"),
-             :ok <- validate_initiatives(action["initiatives"]) do
-          {:ok, Map.put_new(action, "initiatives", action["initiatives"])}
-        end
-
-      "spawn_agent" ->
-        with :ok <- require_string(action, "name"),
-             :ok <- validate_role(action["role"]) do
-          {:ok, action}
-        end
-
-      "delegate" ->
-        with :ok <- require_string(action, "to_agent_id"),
-             :ok <- validate_uuid_string(action["to_agent_id"], "to_agent_id"),
-             :ok <- validate_optional_string(action, "reason") do
-          {:ok, action}
-        end
-
-      "escalate" ->
-        with :ok <- validate_optional_string(action, "reason"),
-             :ok <- validate_optional_string(action, "to_role") do
-          {:ok, action}
-        end
-
-      "intervene" ->
-        with :ok <- validate_intervene_mode(action["mode"]),
-             :ok <- validate_intervene_target(action),
-             :ok <- validate_optional_string(action, "reason") do
-          {:ok, action}
-        end
-
-      "merge_pr" ->
-        with :ok <- validate_optional_string(action, "method"),
-             :ok <- validate_optional_string(action, "commit_title"),
-             :ok <- validate_optional_string(action, "commit_message") do
-          {:ok, action}
-        end
-
-      "force_fix_pr" ->
-        with :ok <- require_string(action, "reason"),
-             :ok <- validate_pr_review_comments(action["comments"]) do
-          {:ok, action}
-        end
-
-      "resolve_conflict" ->
-        with :ok <- validate_optional_string(action, "branch"),
-             :ok <- validate_optional_string(action, "summary") do
-          {:ok, action}
-        end
-
-      "cancel_issue" ->
-        with :ok <- require_string(action, "reason") do
-          {:ok, action}
-        end
-
-      "swarm_worker_complete" ->
-        with :ok <- require_string(action, "summary") do
-          {:ok, action}
-        end
-    end
-  end
-
-  # Inline review comments are an optional list of `%{path, line, body}`
-  # objects. We allow an empty/missing list — the action body alone may be
-  # the entire feedback.
-  defp validate_pr_review_comments(nil), do: :ok
-  defp validate_pr_review_comments([]), do: :ok
-
-  defp validate_pr_review_comments(comments) when is_list(comments) do
-    Enum.reduce_while(comments, :ok, fn item, _acc ->
-      case item do
-        %{} = m ->
-          if is_binary(m["path"]) and is_binary(m["body"]) do
-            {:cont, :ok}
-          else
-            {:halt, {:error, :invalid_review_comment}}
-          end
-
-        _ ->
-          {:halt, {:error, :invalid_review_comment}}
-      end
-    end)
-  end
-
-  defp validate_pr_review_comments(_), do: {:error, :invalid_review_comments}
-
-  @intervene_modes ~w(reassign unblock cancel force_handoff)
-  defp validate_intervene_mode(mode) when mode in @intervene_modes, do: :ok
-  defp validate_intervene_mode(_), do: {:error, {:invalid_intervene_mode, @intervene_modes}}
-
-  # `reassign` and `force_handoff` need a destination; `unblock` and `cancel`
-  # do not. We accept either to_agent_id (preferred) or to_role.
-  defp validate_intervene_target(%{"mode" => mode} = action)
-       when mode in ["reassign", "force_handoff"] do
-    cond do
-      is_binary(action["to_agent_id"]) and action["to_agent_id"] != "" ->
-        validate_uuid_string(action["to_agent_id"], "to_agent_id")
-
-      is_binary(action["to_role"]) and action["to_role"] != "" ->
-        validate_role(action["to_role"])
-
-      true ->
-        {:error, :missing_intervene_target}
-    end
-  end
-
-  defp validate_intervene_target(_action), do: :ok
-
-  defp validate_optional_depends_on(nil), do: :ok
-  defp validate_optional_depends_on([]), do: :ok
-
-  defp validate_optional_depends_on(refs) when is_list(refs) do
-    if Enum.all?(refs, &is_binary/1),
-      do: :ok,
-      else: {:error, :invalid_depends_on}
-  end
-
-  defp validate_optional_depends_on(_), do: {:error, :invalid_depends_on}
-
-  defp validate_optional_estimate(nil), do: :ok
-  defp validate_optional_estimate(n) when is_integer(n) and n > 0, do: :ok
-
-  defp validate_optional_estimate(s) when is_binary(s) do
-    case Integer.parse(s) do
-      {n, ""} when n > 0 -> :ok
-      _ -> {:error, :invalid_estimate}
-    end
-  end
-
-  defp validate_optional_estimate(_), do: {:error, :invalid_estimate}
-
-  @create_issue_brief_fields ~w(
-    acceptance_criteria
-    dependencies
-    evidence_required
-    verification_required
-    definition_of_done
-    risks
-  )
-
-  defp validate_optional_brief_fields(action) do
-    Enum.reduce_while(@create_issue_brief_fields, :ok, fn field, _acc ->
-      case validate_optional_string_or_list(action, field) do
-        :ok -> {:cont, :ok}
-        error -> {:halt, error}
-      end
-    end)
-  end
-
-  # Initiatives are a non-empty list of issue specs. Each must have a title and
-  # role. Description is optional. Priority defaults to "high" — mission-level
-  # work is by definition the company's highest priority.
-  defp validate_initiatives(initiatives) when is_list(initiatives) and initiatives != [] do
-    if length(initiatives) > @max_initiatives_per_seed do
-      {:error, {:too_many_initiatives, @max_initiatives_per_seed}}
-    else
-      Enum.reduce_while(initiatives, :ok, fn item, _acc ->
-        case validate_initiative(item) do
-          :ok -> {:cont, :ok}
-          err -> {:halt, err}
-        end
-      end)
-    end
-  end
-
-  defp validate_initiatives(_), do: {:error, :missing_initiatives}
-
-  defp validate_initiative(%{} = item) do
-    item = normalize_string_keys(item)
-
-    with :ok <- require_string(item, "title"),
-         :ok <- validate_optional_string(item, "description"),
-         :ok <- validate_role(item["role"]),
-         :ok <- validate_priority(Map.get(item, "priority", "high")),
-         :ok <- ensure_mission_initiative_ready(item) do
-      :ok
-    end
-  end
-
-  defp validate_initiative(_), do: {:error, :invalid_initiative}
-
-  defp collect_validated(results) do
-    Enum.reduce_while(results, {:ok, []}, fn
-      {:ok, action}, {:ok, acc} -> {:cont, {:ok, [action | acc]}}
-      {:error, reason}, _ -> {:halt, {:error, reason}}
-    end)
-    |> case do
-      {:ok, actions} -> {:ok, Enum.reverse(actions)}
-      error -> error
-    end
-  end
-
   defp execute_action(issue, agent, %{"type" => "create_issue"} = action) do
     current_depth = issue.request_depth || 0
     active_children = active_child_issue_count(issue)
@@ -1586,7 +829,7 @@ defmodule Cympho.AgentActions do
         {:error, {:child_issue_limit_exceeded, active_children, max_children}}
 
       true ->
-        with :ok <- ensure_delivery_brief_ready(action) do
+        with :ok <- Validation.ensure_delivery_brief_ready(action) do
           do_create_issue(issue, agent, action)
         end
     end
@@ -1604,7 +847,7 @@ defmodule Cympho.AgentActions do
     assignee_id = Issues.resolve_reviewer(issue, agent, action["role"])
     note = action["notes"] || "Submitted for #{human_role(action["role"])} review."
 
-    with :ok <- ensure_submit_review_quality(issue, agent, action),
+    with :ok <- Validation.ensure_submit_review_quality(issue, agent, action),
          :ok <- ensure_head_sha_changed_since_last_review(issue, action),
          {:ok, _comment} <- maybe_agent_comment(issue, agent, tagged_submit_review_note(note)),
          {:ok, issue_with_comment} <- Issues.get_issue(issue.id),
@@ -1634,8 +877,8 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "request_changes"} = action) do
-    with :ok <- ensure_governance_quality(action, "request_changes"),
-         :ok <- ensure_request_changes_feedback_ready(action),
+    with :ok <- Validation.ensure_governance_quality(action, "request_changes"),
+         :ok <- Validation.ensure_request_changes_feedback_ready(action),
          reason = tagged_review_note(action["reason"] || "Changes requested."),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
@@ -1664,10 +907,10 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "block_issue"} = action) do
-    with :ok <- ensure_governance_quality(action, "block_issue"),
+    with :ok <- Validation.ensure_governance_quality(action, "block_issue"),
          reason = tagged_blocked_note(action["reason"] || "Agent blocked this issue."),
          blocker_kind = Map.get(action, "blocker_kind") || "other",
-         blocker_packet = blocker_packet(action, agent),
+         blocker_packet = Validation.blocker_packet(action, agent),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :blocked,
@@ -1729,7 +972,7 @@ defmodule Cympho.AgentActions do
            system_comment(
              issue,
              "Skipped unsupported action #{inspect(original_type)}. " <>
-               "Supported types: #{Enum.join(@supported_types, ", ")}. " <>
+               "Supported types: #{Enum.join(Parser.supported_types(), ", ")}. " <>
                "The other actions in this batch were executed."
            ) do
       {:ok, %{type: "skip_unsupported", original_type: original_type, skipped: true}}
@@ -1885,7 +1128,7 @@ defmodule Cympho.AgentActions do
     handoff_reason = action["reason"] || "Handing off to #{action["role"]}."
     context_body = build_handoff_context(issue, agent, action, handoff_reason)
 
-    with :ok <- ensure_handoff_delivery_brief_ready(issue, action, handoff_reason),
+    with :ok <- Validation.ensure_handoff_delivery_brief_ready(issue, action, handoff_reason),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
@@ -1944,8 +1187,8 @@ defmodule Cympho.AgentActions do
 
         tagged_note = tagged_approval_note(agent, note)
 
-        with :ok <- ensure_approval_quality(issue, agent),
-             :ok <- ensure_approval_note_ready(agent, tagged_note),
+        with :ok <- Validation.ensure_approval_quality(issue, agent),
+             :ok <- Validation.ensure_approval_note_ready(agent, tagged_note),
              {:ok, _comment} <- maybe_agent_comment(issue, agent, tagged_note),
              {:ok, issue_with_comment} <- Issues.get_issue(issue.id),
              {:ok, transitioned} <-
@@ -2069,26 +1312,6 @@ defmodule Cympho.AgentActions do
   defp swarm_atom_key("worker_index"), do: :worker_index
   defp swarm_atom_key(_key), do: nil
 
-  defp ensure_approval_note_ready(%Agent{role: role}, note) when role in @governance_roles do
-    case AgentPromptContract.audit_response(role, note) do
-      %{status: :ok} ->
-        :ok
-
-      %{missing_fields: missing} ->
-        {:error, {:approval_note_too_thin, role, missing, approval_note_scaffold(role, note)}}
-    end
-  end
-
-  defp ensure_approval_note_ready(_agent, _note), do: :ok
-
-  defp approval_note_scaffold(role, note) do
-    [
-      "Current approval note: #{note}",
-      "Required shape: #{AgentPromptContract.required_template(role)}"
-    ]
-    |> Enum.join("\n")
-  end
-
   # Spec-review approval: the CTO has signed off on a CEO-seeded initiative
   # and is releasing it into the proposed role's pool. The issue moves from
   # backlog → todo with `assigned_role: proposed_role`; it does NOT close.
@@ -2108,7 +1331,7 @@ defmodule Cympho.AgentActions do
       |> Map.put("spec_approved_by", agent.id)
       |> Map.put("spec_approved_role_release", proposed_role)
 
-    with :ok <- ensure_spec_release_delivery_brief_ready(issue, proposed_role, note),
+    with :ok <- Validation.ensure_spec_release_delivery_brief_ready(issue, proposed_role, note),
          {:ok, _comment} <-
            maybe_agent_comment(issue, agent, "[spec-approved] #{note}"),
          {:ok, updated} <-
@@ -2137,33 +1360,6 @@ defmodule Cympho.AgentActions do
          issue_id: updated.id,
          released_to_role: proposed_role
        }}
-    end
-  end
-
-  defp ensure_spec_release_delivery_brief_ready(%Issue{} = issue, role, note) do
-    role_atom = role_to_atom(role)
-
-    if role_atom in @repo_delivery_roles do
-      readiness =
-        DeliveryBriefReadiness.evaluate(%{
-          title: issue.title,
-          description:
-            [issue.description, note]
-            |> Enum.reject(&blank?/1)
-            |> Enum.join("\n")
-        })
-
-      case readiness.status do
-        :thin ->
-          {:error,
-           {:spec_review_delivery_brief_too_thin, role_atom, readiness.next_prompt,
-            missing_readiness_labels(readiness), readiness.repair_scaffold}}
-
-        _ ->
-          :ok
-      end
-    else
-      :ok
     end
   end
 
@@ -2379,112 +1575,6 @@ defmodule Cympho.AgentActions do
     end
   end
 
-  defp ensure_delivery_brief_ready(%{"role" => role} = action) do
-    role = role_to_atom(role)
-
-    if role in @repo_delivery_roles do
-      readiness =
-        DeliveryBriefReadiness.evaluate(%{
-          title: action["title"],
-          description: delivery_brief_readiness_text(action)
-        })
-
-      case readiness.status do
-        :thin ->
-          {:error,
-           {:delivery_brief_too_thin, role, readiness.next_prompt,
-            missing_readiness_labels(readiness), readiness.repair_scaffold}}
-
-        _ ->
-          :ok
-      end
-    else
-      :ok
-    end
-  end
-
-  defp ensure_delivery_brief_ready(_action), do: :ok
-
-  defp ensure_handoff_delivery_brief_ready(%Issue{} = issue, action, reason) do
-    role = role_to_atom(action["role"])
-
-    if role in @repo_delivery_roles do
-      readiness =
-        DeliveryBriefReadiness.evaluate(%{
-          title: issue.title,
-          description:
-            [
-              issue.description,
-              reason,
-              action["summary"],
-              action["remaining"],
-              action["decisions"]
-            ]
-            |> Enum.reject(&blank?/1)
-            |> Enum.join("\n")
-        })
-
-      case readiness.status do
-        :thin ->
-          {:error,
-           {:handoff_delivery_brief_too_thin, role, readiness.next_prompt,
-            missing_readiness_labels(readiness), readiness.repair_scaffold}}
-
-        _ ->
-          :ok
-      end
-    else
-      :ok
-    end
-  end
-
-  defp delivery_brief_readiness_text(action) do
-    [
-      action["description"],
-      structured_delivery_signal("Acceptance criteria", action["acceptance_criteria"]),
-      structured_delivery_signal("Evidence required", action["evidence_required"]),
-      structured_delivery_signal("Verification required", action["verification_required"]),
-      structured_delivery_signal("Definition of done", action["definition_of_done"])
-    ]
-    |> Enum.reject(&blank?/1)
-    |> Enum.join("\n")
-  end
-
-  defp structured_delivery_signal(_label, nil), do: nil
-
-  defp structured_delivery_signal(label, value) do
-    items =
-      value
-      |> explicit_brief_items()
-      |> Enum.reject(&blank?/1)
-
-    if items == [] do
-      nil
-    else
-      "#{label}: #{Enum.join(items, "; ")}"
-    end
-  end
-
-  defp explicit_brief_items(value) when is_binary(value) do
-    value
-    |> String.split(~r/\r?\n/)
-    |> Enum.map(&clean_brief_item/1)
-  end
-
-  defp explicit_brief_items(values) when is_list(values) do
-    values
-    |> Enum.map(&to_string/1)
-    |> Enum.map(&clean_brief_item/1)
-  end
-
-  defp explicit_brief_items(_value), do: []
-
-  defp missing_readiness_labels(%{checks: checks}) do
-    checks
-    |> Enum.reject(& &1.passed?)
-    |> Enum.map(& &1.label)
-  end
-
   defp maybe_put_estimate(monitor, nil), do: monitor
 
   defp maybe_put_estimate(monitor, val) when is_integer(val) and val > 0,
@@ -2562,7 +1652,7 @@ defmodule Cympho.AgentActions do
   defp normalize_brief_items(value, defaults) when is_binary(value) do
     value
     |> String.split(~r/\r?\n/)
-    |> Enum.map(&clean_brief_item/1)
+    |> Enum.map(&Validation.clean_brief_item/1)
     |> Enum.reject(&blank?/1)
     |> case do
       [] -> defaults
@@ -2573,7 +1663,7 @@ defmodule Cympho.AgentActions do
   defp normalize_brief_items(values, defaults) when is_list(values) do
     values
     |> Enum.map(&to_string/1)
-    |> Enum.map(&clean_brief_item/1)
+    |> Enum.map(&Validation.clean_brief_item/1)
     |> Enum.reject(&blank?/1)
     |> case do
       [] -> defaults
@@ -2582,13 +1672,6 @@ defmodule Cympho.AgentActions do
   end
 
   defp normalize_brief_items(_value, defaults), do: defaults
-
-  defp clean_brief_item(value) do
-    value
-    |> String.trim()
-    |> String.replace(~r/^[-*]\s+/, "")
-    |> String.trim()
-  end
 
   defp default_acceptance_criteria(role)
        when role in ["engineer", "qa_engineer", "release_engineer"] do
@@ -2747,8 +1830,8 @@ defmodule Cympho.AgentActions do
       initiatives == [] ->
         {:error, :missing_initiatives}
 
-      length(initiatives) > @max_initiatives_per_seed ->
-        {:error, {:too_many_initiatives, @max_initiatives_per_seed}}
+      length(initiatives) > Parser.max_initiatives_per_seed() ->
+        {:error, {:too_many_initiatives, Parser.max_initiatives_per_seed()}}
 
       not is_binary(goal_id) or goal_id == "" ->
         {:error, :missing_goal_id}
@@ -2792,7 +1875,7 @@ defmodule Cympho.AgentActions do
     else
       results =
         Enum.map(initiatives, fn raw ->
-          item = normalize_string_keys(raw)
+          item = Parser.normalize_string_keys(raw)
           seed_one_initiative(issue, agent, goal, item, base_depth)
         end)
 
@@ -2829,34 +1912,14 @@ defmodule Cympho.AgentActions do
   defp ensure_mission_initiatives_ready(initiatives) do
     Enum.reduce_while(initiatives, :ok, fn raw, _acc ->
       raw
-      |> normalize_string_keys()
-      |> ensure_mission_initiative_ready()
+      |> Parser.normalize_string_keys()
+      |> Validation.ensure_mission_initiative_ready()
       |> case do
         :ok -> {:cont, :ok}
         error -> {:halt, error}
       end
     end)
   end
-
-  defp ensure_mission_initiative_ready(%{} = item) do
-    readiness =
-      IssueBriefReadiness.evaluate(%{
-        title: item["title"],
-        description: Map.get(item, "description", "")
-      })
-
-    case readiness.status do
-      :thin ->
-        {:error,
-         {:mission_initiative_too_thin, item["title"], readiness.next_prompt,
-          missing_readiness_labels(readiness), readiness.launch_scaffold}}
-
-      _ ->
-        :ok
-    end
-  end
-
-  defp ensure_mission_initiative_ready(_item), do: {:error, :invalid_initiative}
 
   defp seed_one_initiative(issue, agent, goal, item, base_depth) do
     case find_recent_duplicate(issue.company_id, item["title"], goal.id) do
@@ -3202,7 +2265,7 @@ defmodule Cympho.AgentActions do
 
     with {:ok, target} <- get_action_target_agent(target_id, "delegate"),
          :ok <- ensure_can_delegate(agent, target),
-         :ok <- ensure_delegate_delivery_brief_ready(issue, target, reason),
+         :ok <- Validation.ensure_delegate_delivery_brief_ready(issue, target, reason),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
@@ -3247,31 +2310,6 @@ defmodule Cympho.AgentActions do
     |> Enum.join("\n\n")
   end
 
-  defp ensure_delegate_delivery_brief_ready(%Issue{} = issue, %Agent{} = target, reason) do
-    if target.role in @repo_delivery_roles do
-      readiness =
-        DeliveryBriefReadiness.evaluate(%{
-          title: issue.title,
-          description:
-            [issue.description, reason]
-            |> Enum.reject(&blank?/1)
-            |> Enum.join("\n")
-        })
-
-      case readiness.status do
-        :thin ->
-          {:error,
-           {:delegate_delivery_brief_too_thin, target.role, readiness.next_prompt,
-            missing_readiness_labels(readiness), readiness.repair_scaffold}}
-
-        _ ->
-          :ok
-      end
-    else
-      :ok
-    end
-  end
-
   defp ensure_can_delegate(%Agent{} = caller, %Agent{} = target) do
     cond do
       caller.company_id && target.company_id && caller.company_id != target.company_id ->
@@ -3299,7 +2337,7 @@ defmodule Cympho.AgentActions do
 
     target_agent_id = resolve_escalation_target(agent, target_role)
 
-    with :ok <- ensure_escalation_reason_ready(reason),
+    with :ok <- Validation.ensure_escalation_reason_ready(reason),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :blocked,
@@ -3377,7 +2415,7 @@ defmodule Cympho.AgentActions do
   # callers) get a structured error instead of FunctionClauseError. Mirrors
   # `validate_intervene_mode/1`'s error shape exactly.
   defp do_intervene(_issue, _agent, _action) do
-    {:error, {:invalid_intervene_mode, @intervene_modes}}
+    {:error, {:invalid_intervene_mode, Parser.intervene_modes()}}
   end
 
   # `reassign` directly attaches the issue to a named agent (or a fresh one
@@ -3387,10 +2425,16 @@ defmodule Cympho.AgentActions do
   defp intervene_reassign(issue, agent, action) do
     reason = action["reason"] || "Supervisor reassigned this stalled issue."
 
-    with :ok <- ensure_governance_quality(action, "intervene"),
+    with :ok <- Validation.ensure_governance_quality(action, "intervene"),
          {:ok, target} <- resolve_intervene_target(agent, action),
          :ok <- ensure_can_delegate(agent, target),
-         :ok <- ensure_intervene_delivery_brief_ready(issue, target.role, reason, "reassign"),
+         :ok <-
+           Validation.ensure_intervene_delivery_brief_ready(
+             issue,
+             target.role,
+             reason,
+             "reassign"
+           ),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
@@ -3440,8 +2484,14 @@ defmodule Cympho.AgentActions do
     target_role = action["to_role"]
     reason = action["reason"] || "Supervisor forced handoff to #{target_role}."
 
-    with :ok <- ensure_governance_quality(action, "intervene"),
-         :ok <- ensure_intervene_delivery_brief_ready(issue, target_role, reason, "force_handoff"),
+    with :ok <- Validation.ensure_governance_quality(action, "intervene"),
+         :ok <-
+           Validation.ensure_intervene_delivery_brief_ready(
+             issue,
+             target_role,
+             reason,
+             "force_handoff"
+           ),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
@@ -3480,64 +2530,14 @@ defmodule Cympho.AgentActions do
     end
   end
 
-  defp ensure_intervene_delivery_brief_ready(%Issue{} = issue, role, reason, mode) do
-    role = role_to_atom(role)
-
-    if role in @repo_delivery_roles do
-      readiness =
-        DeliveryBriefReadiness.evaluate(%{
-          title: issue.title,
-          description:
-            [issue.description, reason]
-            |> Enum.reject(&blank?/1)
-            |> Enum.join("\n")
-        })
-
-      case readiness.status do
-        :thin ->
-          {:error,
-           {:intervene_delivery_brief_too_thin, mode, role, readiness.next_prompt,
-            missing_readiness_labels(readiness), readiness.repair_scaffold}}
-
-        _ ->
-          :ok
-      end
-    else
-      :ok
-    end
-  end
-
-  defp ensure_intervene_unblock_delivery_brief_ready(%Issue{} = issue, reason) do
-    case delivery_role_for_issue(issue) do
-      role when role in @repo_delivery_roles ->
-        ensure_intervene_delivery_brief_ready(issue, role, reason, "unblock")
-
-      _ ->
-        :ok
-    end
-  end
-
-  defp delivery_role_for_issue(%Issue{assigned_role: role}) when is_binary(role) and role != "" do
-    role_to_atom(role)
-  end
-
-  defp delivery_role_for_issue(%Issue{assignee_id: assignee_id}) when is_binary(assignee_id) do
-    case Agents.get_agent(assignee_id) do
-      {:ok, %Agent{role: role}} -> role
-      _ -> nil
-    end
-  end
-
-  defp delivery_role_for_issue(_issue), do: nil
-
   # `unblock` is the missing inverse of `block_issue`. The supervisor has
   # decided the blocker no longer applies (or never did) — flip back to
   # :todo, clear assignee so the dispatcher can re-route.
   defp intervene_unblock(issue, agent, action) do
     reason = action["reason"] || "Supervisor unblocked this issue."
 
-    with :ok <- ensure_governance_quality(action, "intervene"),
-         :ok <- ensure_intervene_unblock_delivery_brief_ready(issue, reason),
+    with :ok <- Validation.ensure_governance_quality(action, "intervene"),
+         :ok <- Validation.ensure_intervene_unblock_delivery_brief_ready(issue, reason),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
              status: :todo,
@@ -3573,7 +2573,7 @@ defmodule Cympho.AgentActions do
   defp intervene_cancel(issue, agent, action) do
     reason = action["reason"] || "Supervisor cancelled this issue."
 
-    with :ok <- ensure_governance_quality(action, "intervene"),
+    with :ok <- Validation.ensure_governance_quality(action, "intervene"),
          {:ok, updated} <-
            Issues.transition_issue_with_review_gates(issue, :cancelled),
          {:ok, released} <- Issues.force_release_issue(updated, :cancelled),
@@ -3757,7 +2757,7 @@ defmodule Cympho.AgentActions do
   defp truthy?(_), do: false
 
   defp get_action_target_agent(target_id, action_name) do
-    with :ok <- validate_uuid_string(target_id, "to_agent_id") do
+    with :ok <- Parser.validate_uuid_string(target_id, "to_agent_id") do
       case Agents.get_agent(target_id) do
         {:ok, agent} -> {:ok, agent}
         {:error, :not_found} -> {:error, {:agent_target_not_found, action_name, target_id}}
@@ -3816,7 +2816,7 @@ defmodule Cympho.AgentActions do
       |> normalize_map()
       |> Map.put("pr_iteration_count", iteration)
 
-    with :ok <- ensure_force_fix_pr_feedback_ready(action),
+    with :ok <- Validation.ensure_force_fix_pr_feedback_ready(action),
          {:ok, _comment} <- system_comment(issue, issue_body),
          {:ok, updated} <-
            update_workflow_issue(issue, agent, %{
@@ -3956,414 +2956,6 @@ defmodule Cympho.AgentActions do
     end
   end
 
-  defp ensure_submit_review_quality(issue, agent, action) do
-    gaps =
-      issue
-      |> digest_quality_gaps(agent.id)
-      |> Enum.map(& &1.key)
-      |> required_submit_review_gaps(agent, action)
-
-    if gaps == [] do
-      :ok
-    else
-      {:error, {:quality_gate_failed, "submit_review", gaps}}
-    end
-  end
-
-  defp required_submit_review_gaps(gap_keys, agent, action) do
-    gap_keys = MapSet.new(gap_keys)
-
-    []
-    |> maybe_add_gap(
-      :agent_note,
-      MapSet.member?(gap_keys, :agent_note) and not explicit_note?(action)
-    )
-    |> maybe_add_gap(
-      :work_product,
-      agent.role in @delivery_roles and MapSet.member?(gap_keys, :work_product)
-    )
-    |> maybe_add_gap(
-      :delivery_comment,
-      MapSet.member?(gap_keys, :delivery_comment) and not explicit_note?(action)
-    )
-    |> maybe_add_gap(:code_reference, MapSet.member?(gap_keys, :code_reference))
-    |> Enum.reverse()
-  end
-
-  defp ensure_approval_quality(issue, agent) do
-    gaps =
-      issue
-      |> digest_quality_gaps(agent.id)
-      |> Enum.filter(&(&1.key in [:runtime_verification, :code_reference]))
-      |> Enum.map(& &1.key)
-
-    if gaps == [] do
-      :ok
-    else
-      {:error, {:quality_gate_failed, "approve_issue", gaps}}
-    end
-  end
-
-  @block_reason_kinds ~w(external_dep ci_failure env_unavailable owner_input_needed conflicting_change other)
-
-  @block_issue_reason_checks [
-    %{
-      key: :cause,
-      label: "Cause",
-      detail: "Name the blocker or why work cannot continue.",
-      pattern:
-        ~r/\b(cause|blocker|blocked|blocked on|waiting|missing|because|unavailable|down|failure|failed|conflict|owner input|dependency)\b/i
-    },
-    %{
-      key: :attempted_fix,
-      label: "Attempted fix",
-      detail: "State what was already tried or inspected before blocking.",
-      pattern: ~r/(^|\n)\s*(?:\[blocked\]\s*)?attempted fix\s*:/i
-    },
-    %{
-      key: :needs,
-      label: "Needs",
-      detail:
-        "Name the owner, system, credential, decision, artifact, or event needed to unblock.",
-      pattern:
-        ~r/\b(needs?|requires?|owner must|must|waiting for|blocked on|until|after|credential|api key|decision|approval|artifact|dependency)\b/i
-    },
-    %{
-      key: :current_state,
-      label: "Current state",
-      detail: "State what is true now, impact, or what was already attempted.",
-      pattern:
-        ~r/\b(current state|status|impact|what happened|attempted fix|tried|inspected|verified|no agent work|agent work remains|ready for owner signoff)\b/i
-    },
-    %{
-      key: :next_decision,
-      label: "Next decision",
-      detail: "Tell the next owner what decision or action resumes the issue.",
-      pattern:
-        ~r/\b(next decision|next action|restart packet|resume|owner accepts|reopens|verify|close|unblock|rerun|continue)\b/i
-    }
-  ]
-
-  @blocker_packet_fields [
-    {"Cause", "cause"},
-    {"Attempted fix", "attempted_fix"},
-    {"Needs", "needs"},
-    {"Current state", "current_state"},
-    {"Next decision", "next_decision"},
-    {"Restart packet", "restart_packet"}
-  ]
-
-  @blocker_packet_label_pattern Enum.map_join(@blocker_packet_fields, "|", fn {label, _key} ->
-                                  Regex.escape(label)
-                                end)
-
-  @request_changes_feedback_checks [
-    %{
-      key: :evidence_inspected,
-      label: "Evidence inspected",
-      detail: "Name the PR, diff, work product, test output, log, or artifact you reviewed.",
-      pattern:
-        ~r/\b(evidence inspected|inspected|reviewed|pr|pull request|diff|work product|artifact|test output|ci|log)\b/i
-    },
-    %{
-      key: :required_changes,
-      label: "Required changes",
-      detail: "List each concrete change the delivery agent must make.",
-      pattern:
-        ~r/(^|\n)\s*[-*]\s+\S|\b(required changes?|must|fix|add|remove|update|change|cover|handle|rework|replace)\b/i
-    },
-    %{
-      key: :verification_required,
-      label: "Verification required",
-      detail:
-        "Name the test, command, CI check, smoke path, or reproduction that proves the fix.",
-      pattern:
-        ~r/\b(verification|required test|test|spec|ci|smoke|repro|reproduce|run|coverage)\b/i
-    },
-    %{
-      key: :next_action,
-      label: "Next action",
-      detail: "Tell the agent how to resume and when to resubmit for review.",
-      pattern:
-        ~r/\b(next action|next decision|restart packet|resubmit|submit_review|ready for review|return for review|after fixing)\b/i
-    }
-  ]
-
-  # Governance actions (request_changes, block_issue, intervene) flip an issue
-  # away from forward progress on the authority of a CEO/CTO. We require
-  # enough reasoning that the engineer can act and the audit trail is useful.
-  # The bar is a recoverable packet: enough signal for the next owner to act.
-  defp ensure_governance_quality(action, type) do
-    reason = action |> Map.get("reason", "") |> to_string() |> String.trim()
-
-    case type do
-      "request_changes" ->
-        validate_governance_reason(reason, 20, "request_changes")
-
-      "block_issue" ->
-        with :ok <- validate_governance_reason(reason, 10, "block_issue"),
-             :ok <- validate_block_reason_kind(action),
-             :ok <- ensure_block_issue_reason_ready(reason) do
-          :ok
-        end
-
-      "intervene" ->
-        validate_governance_reason(reason, 15, "intervene")
-    end
-  end
-
-  defp validate_governance_reason(reason, min_length, action_name) do
-    cond do
-      reason == "" ->
-        {:error, {:governance_reason_missing, action_name}}
-
-      String.length(reason) < min_length ->
-        {:error, {:governance_reason_too_short, action_name, min_length}}
-
-      true ->
-        :ok
-    end
-  end
-
-  defp ensure_block_issue_reason_ready(reason) do
-    missing = missing_blocker_reason_signals(reason)
-
-    case missing do
-      [] ->
-        :ok
-
-      _ ->
-        {:error,
-         {:block_issue_reason_too_thin, missing, block_issue_reason_scaffold(reason, missing)}}
-    end
-  end
-
-  defp ensure_escalation_reason_ready(reason) do
-    missing = missing_blocker_reason_signals(reason)
-
-    case missing do
-      [] ->
-        :ok
-
-      _ ->
-        {:error,
-         {:escalation_reason_too_thin, missing, escalation_reason_scaffold(reason, missing)}}
-    end
-  end
-
-  defp missing_blocker_reason_signals(reason) do
-    field_labels =
-      @blocker_packet_fields
-      |> Enum.reject(fn {label, _key} -> block_reason_label_present?(reason, label) end)
-      |> Enum.map(fn {label, _key} -> label end)
-
-    pattern_labels =
-      @block_issue_reason_checks
-      |> Enum.reject(&Regex.match?(&1.pattern, reason))
-      |> Enum.map(& &1.label)
-
-    (field_labels ++ pattern_labels)
-    |> Enum.uniq()
-  end
-
-  defp block_reason_label_present?(reason, label) do
-    Regex.match?(block_reason_label_regex(label), reason)
-  end
-
-  defp block_reason_label_regex(label) do
-    Regex.compile!("(?:^|\\n)\\s*(?:\\[blocked\\]\\s*)?#{Regex.escape(label)}\\s*:", "i")
-  end
-
-  defp block_issue_reason_scaffold(reason, missing) do
-    current =
-      reason
-      |> to_string()
-      |> String.trim()
-      |> case do
-        "" -> nil
-        value -> "Current blocker: #{value}"
-      end
-
-    [
-      current,
-      "[blocked] Cause: <why work cannot continue>",
-      "Attempted fix: <what was tried or inspected>",
-      "Needs: <owner, system, credential, decision, artifact, or event required>",
-      "Current state: <what remains true now>",
-      "Next decision: <who decides or acts next>",
-      "Restart packet: <where the next owner should resume>",
-      "Missing blocker signals: #{Enum.join(missing, ", ")}."
-    ]
-    |> Enum.reject(&blank?/1)
-    |> Enum.join("\n")
-  end
-
-  defp escalation_reason_scaffold(reason, missing) do
-    current =
-      reason
-      |> to_string()
-      |> String.trim()
-      |> case do
-        "" -> nil
-        value -> "Current escalation: #{value}"
-      end
-
-    [
-      current,
-      "[blocked] Cause: <why this cannot be solved at your authority level>",
-      "Attempted fix: <what you tried or inspected>",
-      "Needs: <decision, permission, scope cut, owner input, or resource required>",
-      "Current state: <what is true now>",
-      "Next decision: <what the supervisor must decide>",
-      "Restart packet: <where the supervisor should resume>",
-      "Missing escalation signals: #{Enum.join(missing, ", ")}."
-    ]
-    |> Enum.reject(&blank?/1)
-    |> Enum.join("\n")
-  end
-
-  defp ensure_request_changes_feedback_ready(%{"role" => role, "reason" => reason}) do
-    role = role_to_atom(role)
-
-    if role in @repo_delivery_roles do
-      case missing_review_feedback_signals(reason) do
-        [] ->
-          :ok
-
-        missing ->
-          {:error,
-           {:request_changes_feedback_too_thin, role, missing,
-            request_changes_feedback_scaffold(reason, missing)}}
-      end
-    else
-      :ok
-    end
-  end
-
-  defp ensure_request_changes_feedback_ready(_action), do: :ok
-
-  defp ensure_force_fix_pr_feedback_ready(action) do
-    feedback = review_feedback_text(action)
-
-    case missing_review_feedback_signals(feedback) do
-      [] ->
-        :ok
-
-      missing ->
-        {:error,
-         {:force_fix_pr_feedback_too_thin, missing,
-          request_changes_feedback_scaffold(feedback, missing)}}
-    end
-  end
-
-  defp missing_review_feedback_signals(text) do
-    text = to_string(text || "")
-
-    @request_changes_feedback_checks
-    |> Enum.reject(&Regex.match?(&1.pattern, text))
-    |> Enum.map(& &1.label)
-  end
-
-  defp review_feedback_text(action) do
-    comments =
-      action
-      |> Map.get("comments", [])
-      |> List.wrap()
-      |> Enum.map_join("\n", fn
-        %{} = comment ->
-          [
-            comment["path"] || comment[:path],
-            comment["line"] || comment[:line],
-            comment["body"] || comment[:body]
-          ]
-          |> Enum.reject(&blank?/1)
-          |> Enum.map_join(" ", &to_string/1)
-
-        value ->
-          to_string(value)
-      end)
-
-    [action["reason"], comments]
-    |> Enum.reject(&blank?/1)
-    |> Enum.join("\n")
-  end
-
-  defp request_changes_feedback_scaffold(reason, missing) do
-    current =
-      reason
-      |> to_string()
-      |> String.trim()
-      |> case do
-        "" -> nil
-        value -> "Current feedback: #{value}"
-      end
-
-    [
-      current,
-      "[review] Verdict: request changes",
-      "Evidence inspected: <PR, diff, work product, test output, log, or artifact reviewed>",
-      "Required changes:",
-      "- <specific file, behavior, test, or artifact gap to fix>",
-      "Verification required: <command, CI check, smoke path, or reproduction>",
-      "Next action: fix the listed gaps, attach evidence, and resubmit for review.",
-      "Missing review signals: #{Enum.join(missing, ", ")}."
-    ]
-    |> Enum.reject(&blank?/1)
-    |> Enum.join("\n")
-  end
-
-  defp validate_block_reason_kind(action) do
-    case Map.get(action, "blocker_kind") do
-      nil ->
-        :ok
-
-      kind when is_binary(kind) ->
-        if kind in @block_reason_kinds do
-          :ok
-        else
-          {:error, {:invalid_blocker_kind, kind, @block_reason_kinds}}
-        end
-
-      _ ->
-        {:error, {:invalid_blocker_kind, "non-string", @block_reason_kinds}}
-    end
-  end
-
-  defp blocker_packet(action, %Agent{} = agent) do
-    reason = action |> Map.get("reason", "") |> to_string() |> String.trim()
-    blocker_kind = Map.get(action, "blocker_kind") || "other"
-
-    fields =
-      @blocker_packet_fields
-      |> Enum.map(fn {label, key} -> {key, block_reason_label_value(reason, label)} end)
-      |> Enum.into(%{})
-
-    fields
-    |> Map.merge(%{
-      "schema" => "cympho.blocker_packet.v1",
-      "kind" => blocker_kind,
-      "reason" => reason,
-      "blocked_by_agent_id" => agent.id,
-      "blocked_at" => DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
-    })
-  end
-
-  defp block_reason_label_value(reason, label) do
-    pattern =
-      Regex.compile!(
-        "(?:^|\\n)\\s*(?:\\[blocked\\]\\s*)?#{Regex.escape(label)}\\s*:\\s*(.*?)(?=\\n\\s*(?:#{@blocker_packet_label_pattern})\\s*:|\\z)",
-        "is"
-      )
-
-    case Regex.run(pattern, reason, capture: :all_but_first) do
-      [value] -> value |> String.trim() |> blank_to_nil()
-      _ -> nil
-    end
-  end
-
-  defp blank_to_nil(""), do: nil
-  defp blank_to_nil(value), do: value
-
   # Best-effort governance Decision record. Logs and continues on failure —
   # we never want a Decision-write error to roll back the agent's actual
   # transition, since that would silently swallow the supervisor's intent.
@@ -4401,93 +2993,6 @@ defmodule Cympho.AgentActions do
       {:ok, :skipped}
     end
   end
-
-  defp digest_quality_gaps(issue, current_agent_id) do
-    issue =
-      issue
-      |> Repo.preload([:comments, :project], force: true)
-
-    runs =
-      issue.id
-      |> HeartbeatEngine.list_runs_for_issue()
-      |> reject_current_agent_active_runs(current_agent_id)
-
-    digest =
-      IssueDigest.build(
-        issue,
-        runs,
-        WorkProducts.list_work_products(issue.id),
-        Issues.list_child_issues(issue.id)
-      )
-
-    digest.quality.gaps
-    |> Kernel.++(digest.review_readiness.blockers)
-    |> Enum.reject(&(&1.key in [:review_decision, :ceo_owner_update]))
-    |> Enum.uniq_by(& &1.key)
-  end
-
-  defp reject_current_agent_active_runs(runs, agent_id) when is_binary(agent_id) do
-    Enum.reject(runs, fn run ->
-      run.agent_id == agent_id and run.status in @active_run_statuses
-    end)
-  end
-
-  defp reject_current_agent_active_runs(runs, _agent_id), do: runs
-
-  defp explicit_note?(%{"notes" => notes}) when is_binary(notes), do: String.trim(notes) != ""
-  defp explicit_note?(_action), do: false
-
-  defp maybe_add_gap(gaps, gap, true), do: [gap | gaps]
-  defp maybe_add_gap(gaps, _gap, _condition), do: gaps
-
-  defp quality_gap_label(:agent_note), do: "agent completion note"
-  defp quality_gap_label(:work_product), do: "work product or PR reference"
-  defp quality_gap_label(:runtime_verification), do: "runtime verification"
-  defp quality_gap_label(:code_reference), do: "code reference"
-  defp quality_gap_label(:child_work), do: "sub-issue closure"
-  defp quality_gap_label(:delivery_comment), do: "tagged delivery comment"
-  defp quality_gap_label(:ceo_owner_update), do: "CEO owner update"
-  defp quality_gap_label(gap), do: gap |> to_string() |> String.replace("_", " ")
-
-  defp quality_gate_instruction("submit_review", gaps) do
-    pieces =
-      [
-        if(:agent_note in gaps,
-          do: "add a `comment` action or explicit submit_review notes explaining what changed"
-        ),
-        if(:work_product in gaps,
-          do: "attach a work product or set a PR URL"
-        ),
-        if(:delivery_comment in gaps,
-          do:
-            "include submit_review notes or add a `[delivery]` comment with what changed, verification, evidence, and next owner"
-        ),
-        if(:code_reference in gaps,
-          do: "set the GitHub PR URL or include a URL on the code-change work product"
-        )
-      ]
-      |> Enum.reject(&is_nil/1)
-
-    "Before asking for review, #{Enum.join(pieces, "; ")}."
-  end
-
-  defp quality_gate_instruction("approve_issue", gaps) do
-    pieces =
-      [
-        if(:runtime_verification in gaps,
-          do: "wait for active runs to finish or resolve failed runtime runs"
-        ),
-        if(:code_reference in gaps,
-          do: "set the GitHub PR URL or include a URL on the code-change work product"
-        )
-      ]
-      |> Enum.reject(&is_nil/1)
-
-    "Before approving, #{Enum.join(pieces, "; ")}."
-  end
-
-  defp quality_gate_instruction(_action_type, _gaps),
-    do: "Address the digest quality checklist and retry."
 
   defp find_recent_duplicate(company_id, title, goal_id, parent_id \\ :any) do
     since = DateTime.utc_now() |> DateTime.add(-24, :hour)
@@ -4809,79 +3314,5 @@ defmodule Cympho.AgentActions do
         issue,
         agent.id
       )
-  end
-
-  defp require_string(action, field) do
-    case Map.get(action, field) do
-      value when is_binary(value) ->
-        if String.trim(value) == "", do: {:error, {:required, field}}, else: :ok
-
-      _ ->
-        {:error, {:required, field}}
-    end
-  end
-
-  defp validate_uuid_string(value, field) when is_binary(value) do
-    case Ecto.UUID.cast(value) do
-      {:ok, _uuid} -> :ok
-      :error -> {:error, {:invalid_uuid, field}}
-    end
-  end
-
-  defp validate_uuid_string(_value, field), do: {:error, {:invalid_uuid, field}}
-
-  defp validate_role(role) when role in @roles, do: :ok
-  defp validate_role(_role), do: {:error, {:invalid_role, @roles}}
-
-  defp validate_priority(priority) when priority in @priorities, do: :ok
-  defp validate_priority(_priority), do: {:error, {:invalid_priority, @priorities}}
-
-  defp validate_work_product_kind(kind) when kind in @work_product_kinds, do: :ok
-
-  defp validate_work_product_kind(_kind),
-    do: {:error, {:invalid_work_product_kind, @work_product_kinds}}
-
-  defp validate_optional_map(action, field) do
-    case Map.get(action, field) do
-      nil -> :ok
-      value when is_map(value) -> :ok
-      _ -> {:error, {:invalid_map, field}}
-    end
-  end
-
-  defp validate_url(url) when is_binary(url) do
-    case URI.parse(url) do
-      %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) ->
-        :ok
-
-      _ ->
-        {:error, {:invalid_url, "url"}}
-    end
-  end
-
-  defp validate_url(_url), do: {:error, {:invalid_url, "url"}}
-
-  defp validate_optional_string(action, field) do
-    case Map.get(action, field) do
-      nil -> :ok
-      value when is_binary(value) -> :ok
-      _ -> {:error, {:invalid_string, field}}
-    end
-  end
-
-  defp validate_optional_string_or_list(action, field) do
-    case Map.get(action, field) do
-      nil -> :ok
-      value when is_binary(value) -> :ok
-      value when is_list(value) -> :ok
-      _ -> {:error, {:invalid_string_or_list, field}}
-    end
-  end
-
-  defp normalize_string_keys(map) do
-    Map.new(map, fn
-      {key, value} when is_atom(key) -> {Atom.to_string(key), value}
-      {key, value} -> {key, value}
-    end)
   end
 end

@@ -136,8 +136,9 @@ defmodule Cympho.AutonomousLoopTest do
           assigned_role: "ceo"
         })
 
-      # `maybe_auto_ignite` runs in Task.Supervisor; wait briefly for it.
-      :ok = wait_until(fn -> Issues.get_issue!(issue.id).assignee_id != nil end)
+      # `auto_ignite_sync` is enabled in this describe's setup, but poll
+      # anyway in case ignition is deferred.
+      wait_until(fn -> assert Issues.get_issue!(issue.id).assignee_id != nil end)
 
       ignited = Issues.get_issue!(issue.id)
       assert ignited.assignee_id != nil
@@ -159,9 +160,8 @@ defmodule Cympho.AutonomousLoopTest do
           skip_auto_assign: true
         })
 
-      # Give the supervisor a moment to *not* do anything.
-      Process.sleep(150)
-
+      # `auto_ignite_sync` is enabled in this describe's setup, so ignition
+      # (if it were to fire) would have run synchronously inside create_issue.
       latest = Issues.get_issue!(issue.id)
       assert latest.assignee_id == nil
       assert latest.status == :backlog
@@ -179,8 +179,8 @@ defmodule Cympho.AutonomousLoopTest do
           status: :todo
         })
 
-      Process.sleep(100)
-
+      # `auto_ignite_sync` is enabled in this describe's setup, so ignition
+      # (if it were to fire) would have run synchronously inside create_issue.
       latest = Issues.get_issue!(child.id)
       assert latest.parent_id == seed.id
       # Should not have been routed by the top-level ignition path.
@@ -567,20 +567,6 @@ defmodule Cympho.AutonomousLoopTest do
   # ---------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------
-
-  defp wait_until(fun, attempts \\ 30) when is_function(fun, 0) do
-    cond do
-      fun.() ->
-        :ok
-
-      attempts <= 0 ->
-        {:error, :timeout}
-
-      true ->
-        Process.sleep(50)
-        wait_until(fun, attempts - 1)
-    end
-  end
 
   defp restore(_key, nil), do: :ok
   defp restore(key, value), do: Application.put_env(:cympho, key, value)

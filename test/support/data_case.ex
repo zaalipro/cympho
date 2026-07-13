@@ -14,6 +14,7 @@ defmodule Cympho.DataCase do
       import Ecto.Changeset
       import Ecto.Query
       import Cympho.DataCase
+      import Cympho.WaitHelpers
     end
   end
 

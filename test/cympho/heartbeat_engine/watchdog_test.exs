@@ -36,7 +36,8 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
   describe "check_now/0" do
     test "triggers a check without error" do
       assert :ok = Watchdog.check_now()
-      Process.sleep(50)
+      # Sync through the GenServer so the check_now cast has been processed.
+      _ = :sys.get_state(Process.whereis(Watchdog))
     end
 
     test "cancels never-started orphaned runs instead of failing them" do
@@ -62,7 +63,8 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
         })
 
       assert :ok = Watchdog.check_now()
-      Process.sleep(100)
+      # Sync through the GenServer so the check_now cast has been processed.
+      _ = :sys.get_state(Process.whereis(Watchdog))
 
       reloaded = Repo.get!(Run, run.id)
       assert reloaded.status == "cancelled"
@@ -187,7 +189,8 @@ defmodule Cympho.HeartbeatEngine.WatchdogTest do
         ExUnit.CaptureLog.capture_log(fn ->
           send(pid, :random_garbage_msg)
           GenServer.cast(pid, :random_garbage_cast)
-          Process.sleep(50)
+          # Sync through the GenServer so both messages have been processed.
+          _ = :sys.get_state(pid)
         end)
 
       assert Process.alive?(pid)

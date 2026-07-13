@@ -7,7 +7,12 @@ defmodule Cympho.RoutinesTest do
   describe "list_routines/0" do
     test "returns all routines ordered by inserted_at desc" do
       {:ok, r1} = Routines.create_routine(%{name: "First Routine"})
-      Process.sleep(1100)
+
+      # Backdate r1 so second-precision inserted_at ordering is deterministic
+      # without sleeping across a second boundary.
+      earlier = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.add(-60)
+      {:ok, r1} = Repo.update(Ecto.Changeset.change(r1, inserted_at: earlier))
+
       {:ok, r2} = Routines.create_routine(%{name: "Second Routine"})
 
       routines = Routines.list_routines()

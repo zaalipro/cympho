@@ -62,10 +62,11 @@ defmodule CymphoWeb.InboxLiveTest do
 
       {:ok, view, _html} = live(conn, "/inbox?agent_id=#{agent.id}")
 
-      # Send unknown message - should not crash
+      # Send unknown message - should not crash. render/1 is a call into the
+      # LiveView, so it returns only after :unknown_message was handled.
       ExUnit.CaptureLog.capture_log(fn ->
         send(view.pid, :unknown_message)
-        Process.sleep(10)
+        render(view)
       end)
 
       # View should still be responsive

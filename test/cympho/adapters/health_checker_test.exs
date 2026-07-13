@@ -88,8 +88,14 @@ defmodule Cympho.Adapters.HealthCheckerTest do
 
   describe "health check polling" do
     test "health checker does not crash on periodic checks" do
-      Process.sleep(300)
-      assert Process.alive?(Process.whereis(HealthChecker))
+      pid = Process.whereis(HealthChecker)
+
+      # Trigger the periodic tick directly instead of waiting for the timer;
+      # :sys.get_state blocks until the :check_all message has been handled.
+      send(pid, :check_all)
+      :sys.get_state(pid)
+
+      assert Process.alive?(pid)
     end
   end
 

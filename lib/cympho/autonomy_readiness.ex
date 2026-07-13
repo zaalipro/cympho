@@ -44,8 +44,8 @@ defmodule Cympho.AutonomyReadiness do
     }
   ]
 
-  def snapshot(company_id) do
-    operations = safe_operations_snapshot(company_id)
+  def snapshot(company_id, operations \\ :compute) do
+    operations = resolve_operations(operations, company_id)
 
     signals =
       @foundation_signals
@@ -92,6 +92,12 @@ defmodule Cympho.AutonomyReadiness do
       primitives: []
     }
   end
+
+  # Lets an already-computed RuntimeOperations snapshot be injected so the
+  # dashboard can share one snapshot across summary + LiveView per refresh.
+  # `:compute` preserves the arity-1 behavior of fetching it here.
+  defp resolve_operations(:compute, company_id), do: safe_operations_snapshot(company_id)
+  defp resolve_operations(operations, _company_id), do: operations
 
   defp safe_operations_snapshot(nil), do: nil
 

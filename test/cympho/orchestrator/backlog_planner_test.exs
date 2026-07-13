@@ -136,19 +136,9 @@ defmodule Cympho.Orchestrator.BacklogPlannerTest do
 
   ## helpers
 
-  defp wait_until_unregistered(issue_id, attempts \\ 40)
-
-  defp wait_until_unregistered(_issue_id, 0), do: :timeout
-
-  defp wait_until_unregistered(issue_id, attempts) do
-    case Cympho.Orchestrator.whereis(issue_id) do
-      nil ->
-        :ok
-
-      _pid ->
-        Process.sleep(25)
-        wait_until_unregistered(issue_id, attempts - 1)
-    end
+  defp wait_until_unregistered(issue_id) do
+    wait_until(fn -> assert Cympho.Orchestrator.whereis(issue_id) == nil end)
+    :ok
   end
 
   defp cancel_all_issues(company_id) do

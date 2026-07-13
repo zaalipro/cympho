@@ -315,6 +315,21 @@ defmodule Cympho.DashboardTest do
       assert [%{status: "unread", issue: %{title: "Inbox dashboard item"}} | _] =
                summary.recent_inbox
     end
+
+    test "summary/2 threads an injected runtime operations snapshot into readiness" do
+      company = create_company!("Dashboard Injected Snapshot")
+
+      # A pre-computed snapshot (passed by the dashboard LiveView so it is only
+      # computed once per refresh) must be used as-is, not recomputed. Assert
+      # its sentinel flows through to the autonomy readiness runtime signal.
+      operations = %{doctor: %{level: :ok, label: "Injected", summary: "SENTINEL-INJECTED"}}
+
+      summary = Dashboard.summary(company.id, operations)
+
+      runtime_signal = Enum.find(summary.autonomy_readiness.signals, &(&1.key == :runtime))
+
+      assert runtime_signal.summary == "SENTINEL-INJECTED"
+    end
   end
 
   describe "routine_health/1" do

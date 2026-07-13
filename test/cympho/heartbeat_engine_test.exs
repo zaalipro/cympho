@@ -256,8 +256,8 @@ defmodule Cympho.HeartbeatEngineTest do
       {:ok, started} = HeartbeatEngine.start_run(run)
       original_hb = started.last_heartbeat_at
 
-      Process.sleep(10)
-
+      # Timestamps are second-precision, so the new heartbeat may land in the
+      # same second — the assertion allows :eq, no sleep needed.
       assert {:ok, updated} = HeartbeatEngine.record_heartbeat(started)
       assert DateTime.compare(updated.last_heartbeat_at, original_hb) in [:gt, :eq]
     end
@@ -437,7 +437,13 @@ defmodule Cympho.HeartbeatEngineTest do
       {:ok, started} = HeartbeatEngine.start_run(run)
       {:ok, recovered} = HeartbeatEngine.recover_stale_run(started)
 
-      Process.sleep(1100)
+      # Backdate the terminal run's liveness timestamp so an erroneous
+      # re-touch (which would stamp "now") is detectable without sleeping
+      # across a second boundary.
+      backdated = DateTime.add(recovered.last_heartbeat_at, -60)
+
+      {:ok, _} =
+        Cympho.Repo.update(Ecto.Changeset.change(recovered, last_heartbeat_at: backdated))
 
       # Late heartbeat from the (dead) session must not move the terminal
       # run's liveness timestamp.
@@ -445,7 +451,7 @@ defmodule Cympho.HeartbeatEngineTest do
 
       reloaded = Cympho.Repo.get!(Run, started.id)
       assert reloaded.status == "failed"
-      assert DateTime.compare(reloaded.last_heartbeat_at, recovered.last_heartbeat_at) == :eq
+      assert DateTime.compare(reloaded.last_heartbeat_at, backdated) == :eq
     end
   end
 

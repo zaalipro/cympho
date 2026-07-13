@@ -11,6 +11,7 @@ defmodule CymphoWeb.ConnCase do
       import Plug.Conn
       import Phoenix.ConnTest
       import CymphoWeb.ConnCase
+      import Cympho.WaitHelpers
 
       use Phoenix.VerifiedRoutes,
         endpoint: CymphoWeb.Endpoint,

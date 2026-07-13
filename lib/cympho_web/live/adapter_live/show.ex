@@ -178,4 +178,10 @@ defmodule CymphoWeb.AdapterLive.Show do
   defp input_type(:boolean), do: "checkbox"
   defp input_type(:float), do: "number"
   defp input_type(_), do: "text"
+
+  # Map/list config values (e.g. process/http adapter env defaults) are not
+  # valid HTML attribute values — render them as JSON text.
+  defp input_value(nil), do: ""
+  defp input_value(value) when is_map(value) or is_list(value), do: Jason.encode!(value)
+  defp input_value(value), do: value
 end
