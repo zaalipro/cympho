@@ -21,7 +21,7 @@ defmodule CymphoWeb.MyIssuesLiveTest do
     test "shows empty state when no issues", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/my-issues")
 
-      assert html =~ "No issues found"
+      assert html =~ "Nothing on your plate."
     end
 
     test "switches tabs via patch", %{conn: conn} do

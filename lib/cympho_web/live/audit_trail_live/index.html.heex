@@ -6,12 +6,12 @@
 
   <section
     data-testid="audit-command"
-    class="mb-5 overflow-hidden rounded-lg border border-border bg-panel shadow-card"
+    class="ember-glass mb-5 overflow-hidden"
   >
     <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
             Audit command
           </p>
           <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{audit_command_badge_class(@audit_command.tone)}"}>
@@ -63,13 +63,13 @@
     <div class="ui-advanced-only grid grid-cols-2 border-t border-border sm:grid-cols-3 lg:grid-cols-7">
       <div
         :for={metric <- @audit_command.metrics}
-        class="border-r border-border px-4 py-3 last:border-r-0"
+        class="ember-stat border-r border-border px-4 py-3 last:border-r-0"
       >
         <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
           {metric.label}
         </p>
         <p class={[
-          "mt-1 font-mono text-xl font-590 tabular-nums",
+          "mt-1 font-serif text-xl font-590 tabular-nums",
           audit_metric_value_class(metric.tone)
         ]}>
           {metric.value}
@@ -81,7 +81,9 @@
   <section class="mb-5 rounded-lg border border-border bg-panel px-4 py-3">
     <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
       <div class="min-w-0">
-        <p class="text-sm font-590 text-text-primary">Audit filters</p>
+        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+          Audit filters
+        </p>
         <p class="ui-advanced-only mt-1 max-w-2xl text-xs leading-5 text-text-tertiary">
           Scope the trail by event, actor, resource, and date when reconstructing a decision.
         </p>
@@ -187,8 +189,11 @@
 
   <section id="audit-events" class="overflow-hidden rounded-lg border border-border bg-panel">
     <div class="border-b border-border px-4 py-3">
-      <p class="text-sm font-590 text-text-primary">Audit events</p>
-      <p class="mt-1 text-xs text-text-tertiary">
+      <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+        Audit events
+      </p>
+      <hr class="ember-rule mt-2 w-24" />
+      <p class="mt-2 text-xs text-text-tertiary">
         Newest events appear first. Payloads stay collapsed until inspection.
       </p>
     </div>
@@ -213,7 +218,7 @@
       <div
         :for={{dom_id, event} <- @streams.events}
         id={dom_id}
-        class="group flex items-start gap-4 p-4 transition-colors hover:bg-surface-hover"
+        class="group flex items-start gap-4 p-4 transition-colors hover:bg-surface-hover hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
       >
         <div class={"flex h-9 w-9 shrink-0 items-center justify-center rounded-full #{audit_icon_tone(event.event_type)}"}>
           <.icon name={audit_icon(event.event_type)} class="h-4 w-4" />

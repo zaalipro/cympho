@@ -13,7 +13,7 @@
     </:actions>
   </.header>
 
-  <.panel class="ui-advanced-only mb-4 overflow-hidden" data-testid="mcp-command">
+  <.panel class="ember-glass ui-advanced-only mb-4 overflow-hidden" data-testid="mcp-command">
     <div class={[
       "h-px bg-gradient-to-r from-transparent to-transparent",
       if(@mcp_status.status.tone == :ready, do: "via-success/40", else: "via-brand/30")
@@ -42,7 +42,7 @@
         </div>
 
         <div class="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <div class="rounded-md border border-border bg-surface px-3 py-2">
+          <div class="ember-stat rounded-md border border-border bg-surface px-3 py-2">
             <div class="font-mono text-lg font-510 leading-none text-text-primary">
               {@mcp_status.tool_count}
             </div>
@@ -50,7 +50,7 @@
               MCP tools
             </div>
           </div>
-          <div class="rounded-md border border-border bg-surface px-3 py-2">
+          <div class="ember-stat rounded-md border border-border bg-surface px-3 py-2">
             <div class="font-mono text-lg font-510 leading-none text-text-primary">
               {@mcp_status.agent_count}
             </div>
@@ -58,7 +58,7 @@
               Agents
             </div>
           </div>
-          <div class="rounded-md border border-border bg-surface px-3 py-2">
+          <div class="ember-stat rounded-md border border-border bg-surface px-3 py-2">
             <div class="font-mono text-lg font-510 leading-none text-text-primary">
               {@mcp_status.ceo_count}
             </div>
@@ -66,7 +66,7 @@
               CEOs
             </div>
           </div>
-          <div class="rounded-md border border-border bg-surface px-3 py-2">
+          <div class="ember-stat rounded-md border border-border bg-surface px-3 py-2">
             <div class="font-mono text-lg font-510 leading-none text-text-primary">
               {@mcp_status.api_key_count}
             </div>
@@ -82,7 +82,7 @@
               <.icon name="hero-arrow-turn-down-right" class="h-4 w-4" />
             </div>
             <div class="min-w-0">
-              <div class="text-xs font-590 uppercase tracking-wider text-text-tertiary">
+              <div class="font-serif text-[13px] font-510 italic tracking-[0.01em] text-brand/90">
                 Next operator move
               </div>
               <p class="mt-1 text-sm leading-5 text-text-primary">
@@ -130,7 +130,7 @@
 
         <div class="mt-5 rounded-lg border border-border bg-surface p-3">
           <div class="flex flex-wrap items-center gap-2">
-            <span class="text-xs font-510 uppercase tracking-wider text-text-tertiary">
+            <span class="font-serif text-[13px] font-510 italic tracking-[0.01em] text-brand/90">
               MCP routes
             </span>
             <code class="break-all rounded bg-black/20 px-2.5 py-1.5 text-xs text-text-primary">
@@ -281,7 +281,7 @@
   </.panel>
 
   <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-    <.panel class="overflow-hidden">
+    <.panel class="ember-glass overflow-hidden">
       <div class={[
         "h-px bg-gradient-to-r from-transparent to-transparent",
         if(agrenting_connected?(@agrenting_status), do: "via-success/40", else: "via-border")

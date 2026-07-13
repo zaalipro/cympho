@@ -1,562 +1,575 @@
-<.page size="wide" data-ui-complex-page>
-  <.header title={@page_title}>
-    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-      Approve finished work, return weak submissions, and clear CTO spec review.
-    </p>
-    <:actions>
-      <.app_link
-        navigate={~p"/issues?triage=review"}
-        class="ui-advanced-only rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-      >
-        Review issues
-      </.app_link>
-      <.app_link
-        navigate={~p"/operations#review-nudges"}
-        class="cta-glow rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary hover:bg-accent-hover"
-      >
-        Review nudges
-      </.app_link>
-    </:actions>
-  </.header>
-
-  <div
-    :if={@flash["error"]}
-    class="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
-  >
-    {@flash["error"]}
-  </div>
-
-  <div
-    :if={@flash["info"]}
-    class="mb-4 rounded-lg border border-brand/30 bg-brand/10 px-3 py-2 text-sm text-brand"
-  >
-    {@flash["info"]}
-  </div>
-
-  <div class="ui-simple-only mb-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-    <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-      <span class="ui-simple-icon">
-        <span class="hero-check-circle-mini h-4 w-4"></span>
-      </span>
-      <span class="min-w-0">
-        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Decision needed
-        </span>
-        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-          {length(@awaiting_review)} awaiting review
-        </span>
-      </span>
-    </div>
-    <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-      <span class="ui-simple-icon">
-        <span class="hero-arrow-uturn-left-mini h-4 w-4"></span>
-      </span>
-      <span class="min-w-0">
-        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Rework
-        </span>
-        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-          {length(@kicked_back)} kicked back
-        </span>
-      </span>
-    </div>
-    <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-      <span class="ui-simple-icon">
-        <span class="hero-document-check-mini h-4 w-4"></span>
-      </span>
-      <span class="min-w-0">
-        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Spec review
-        </span>
-        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-          {length(@spec_review)} initiatives
-        </span>
-      </span>
-    </div>
-    <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-      <span class="ui-simple-icon">
-        <span class="hero-queue-list-mini h-4 w-4"></span>
-      </span>
-      <span class="min-w-0">
-        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          In flight
-        </span>
-        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-          {@stats.total} total
-        </span>
-      </span>
-    </div>
-  </div>
-
-  <section class="ui-advanced-only mb-5 overflow-hidden rounded-lg border border-hairline bg-surface-1 shadow-card">
-    <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+<.page size="wide" data-ui-complex-page class="ember-aurora">
+  <div class="relative z-[1]">
+    <.header>
       <div class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            {@review_command.eyebrow}
-          </p>
-          <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{review_command_tone_class(@review_command.tone)}"}>
-            <%= case @review_command.tone do %>
-              <% :attention -> %>
-                Gates blocked
-              <% :ready -> %>
-                Ready to accept
-              <% :active -> %>
-                Spec decision
-              <% :rework -> %>
-                Rework loop
-              <% _ -> %>
-                Clear
-            <% end %>
-          </span>
-        </div>
-
-        <h2 class="mt-2 text-lg font-590 text-text-primary">
-          {@review_command.heading}
-        </h2>
-        <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
-          {@review_command.detail}
-        </p>
-
-        <div :if={@review_command.focus} class="mt-3 flex flex-wrap items-center gap-2 text-xs">
-          <span class="rounded-full border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
-            {@review_command.focus.lane}
-          </span>
-          <span class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary">
-            {@review_command.focus.age} waiting
-          </span>
-          <span class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary">
-            role: {@review_command.focus.role}
-          </span>
-          <span
-            :if={@review_command.focus.assignee}
-            class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary"
-          >
-            {@review_command.focus.assignee}
-          </span>
-        </div>
-
-        <div :if={@review_command.blocker_labels != []} class="mt-3 flex flex-wrap gap-2">
-          <span
-            :for={label <- Enum.take(@review_command.blocker_labels, 4)}
-            class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-xs font-510 text-amber-200"
-          >
-            {label}
-          </span>
-          <span
-            :if={length(@review_command.blocker_labels) > 4}
-            class="rounded-full border border-border bg-surface px-2 py-1 text-xs text-text-tertiary"
-          >
-            +{length(@review_command.blocker_labels) - 4} more
-          </span>
-        </div>
-      </div>
-
-      <.app_link
-        navigate={@review_command.action_path}
-        class={"inline-flex shrink-0 items-center justify-center rounded-lg border px-3 py-2 text-sm font-590 transition-colors #{review_command_action_class(@review_command.tone)}"}
-      >
-        {@review_command.action_label}
-      </.app_link>
-    </div>
-
-    <div class="grid grid-cols-2 border-t border-hairline sm:grid-cols-5">
-      <div class="border-r border-hairline px-4 py-3 last:border-r-0">
-        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Ready
-        </p>
-        <p class="mt-1 font-mono text-xl font-590 text-emerald-200 tabular-nums">
-          {@review_command.ready_count}
+        <span class="ember-eyebrow">
+          {length(@awaiting_review)} awaiting decision
+        </span>
+        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+          Review queue
+        </h1>
+        <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+          Approve finished work, return weak submissions, and clear CTO spec review.
         </p>
       </div>
-      <div class="border-r border-hairline px-4 py-3 last:border-r-0">
-        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Blocked gates
-        </p>
-        <p class="mt-1 font-mono text-xl font-590 text-amber-200 tabular-nums">
-          {@review_command.blocked_count}
-        </p>
-      </div>
-      <div class="border-r border-hairline px-4 py-3 last:border-r-0">
-        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Rework
-        </p>
-        <p class="mt-1 font-mono text-xl font-590 text-blue-200 tabular-nums">
-          {@review_command.rework_count}
-        </p>
-      </div>
-      <div class="border-r border-hairline px-4 py-3 last:border-r-0">
-        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Spec gates
-        </p>
-        <p class="mt-1 font-mono text-xl font-590 text-brand tabular-nums">
-          {@review_command.spec_count}
-        </p>
-      </div>
-      <div class="px-4 py-3">
-        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Oldest
-        </p>
-        <p class="mt-1 font-mono text-xl font-590 text-text-primary tabular-nums">
-          {@review_command.oldest_label}
-        </p>
-      </div>
-    </div>
-  </section>
+      <:actions>
+        <.app_link
+          navigate={~p"/issues?triage=review"}
+          class="ui-advanced-only rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        >
+          Review issues
+        </.app_link>
+        <.app_link
+          navigate={~p"/operations#review-nudges"}
+          class="cta-glow rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary hover:bg-accent-hover"
+        >
+          Review nudges
+        </.app_link>
+      </:actions>
+    </.header>
 
-  <section class="ui-advanced-only mb-5 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-    <div class="rounded-lg border border-hairline bg-surface-1 px-4 py-3">
-      <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-        In flight
-      </p>
-      <p class="mt-1 font-mono text-[30px] font-590 leading-none tabular-nums text-text-primary">
-        {@stats.total}
-      </p>
-      <p class="mt-1 text-xs text-text-tertiary">All active review work</p>
+    <div
+      :if={@flash["error"]}
+      class="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+    >
+      {@flash["error"]}
     </div>
 
-    <div class="rounded-lg border border-hairline bg-surface-1 px-4 py-3">
-      <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-        Decision needed
-      </p>
-      <p class="mt-1 font-mono text-[30px] font-590 leading-none tabular-nums text-sky-300">
-        {length(@awaiting_review)}
-      </p>
-      <p class="mt-1 text-xs text-text-tertiary">Awaiting approve or changes</p>
+    <div
+      :if={@flash["info"]}
+      class="mb-4 rounded-lg border border-brand/30 bg-brand/10 px-3 py-2 text-sm text-brand"
+    >
+      {@flash["info"]}
     </div>
 
-    <div class="rounded-lg border border-hairline bg-surface-1 px-4 py-3">
-      <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-        Rework loop
-      </p>
-      <p class="mt-1 font-mono text-[30px] font-590 leading-none tabular-nums text-amber-300">
-        {length(@kicked_back)}
-      </p>
-      <p class="mt-1 text-xs text-text-tertiary">Returned to delivery</p>
-    </div>
-
-    <div class="rounded-lg border border-hairline bg-surface-1 px-4 py-3">
-      <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-        Oldest age
-      </p>
-      <p class="mt-1 font-mono text-[30px] font-590 leading-none tabular-nums text-text-primary">
-        <%= if @stats.oldest_age_hours do %>
-          {@stats.oldest_age_hours}h
-        <% else %>
-          —
-        <% end %>
-      </p>
-      <p class="mt-1 truncate text-xs text-text-tertiary">
-        <%= if Enum.empty?(@stats.by_role) do %>
-          No reviewer bottleneck
-        <% else %>
-          <%= for {role, count} <- @stats.by_role do %>
-            {role}: {count}<span class="last:hidden"> · </span>
-          <% end %>
-        <% end %>
-      </p>
-    </div>
-  </section>
-
-  <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.8fr)]">
-    <section class="min-w-0 rounded-2xl border border-hairline bg-surface-1 shadow-card">
-      <div class="flex items-start justify-between gap-3 border-b border-hairline px-4 py-3">
-        <div>
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            Awaiting review
-          </p>
-          <h2 class="mt-1 text-base font-590 text-text-primary">
-            Decision queue
-            <span class="ml-2 font-mono text-sm text-text-quaternary">
-              {length(@awaiting_review)}
-            </span>
-          </h2>
-        </div>
-        <span class="ui-advanced-only rounded-full border border-sky-500/25 bg-sky-500/10 px-2 py-1 text-xs font-510 text-sky-200">
-          Gate checked on close
+    <div class="ui-simple-only stagger-children mb-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
+        <span class="ui-simple-icon">
+          <span class="hero-check-circle-mini h-4 w-4"></span>
+        </span>
+        <span class="min-w-0">
+          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+            Decision needed
+          </span>
+          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
+            {length(@awaiting_review)} awaiting review
+          </span>
         </span>
       </div>
+      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
+        <span class="ui-simple-icon">
+          <span class="hero-arrow-uturn-left-mini h-4 w-4"></span>
+        </span>
+        <span class="min-w-0">
+          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+            Rework
+          </span>
+          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
+            {length(@kicked_back)} kicked back
+          </span>
+        </span>
+      </div>
+      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
+        <span class="ui-simple-icon">
+          <span class="hero-document-check-mini h-4 w-4"></span>
+        </span>
+        <span class="min-w-0">
+          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+            Spec review
+          </span>
+          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
+            {length(@spec_review)} initiatives
+          </span>
+        </span>
+      </div>
+      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
+        <span class="ui-simple-icon">
+          <span class="hero-queue-list-mini h-4 w-4"></span>
+        </span>
+        <span class="min-w-0">
+          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+            In flight
+          </span>
+          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
+            {@stats.total} total
+          </span>
+        </span>
+      </div>
+    </div>
 
-      <div
-        :if={Enum.empty?(@awaiting_review)}
-        class="px-6 py-14 text-center"
-      >
-        <div class="mx-auto flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-surface">
-          <span class="hero-check-circle-mini h-5 w-5 text-text-tertiary"></span>
+    <section class="ember-glass ui-advanced-only mb-5 overflow-hidden">
+      <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              {@review_command.eyebrow}
+            </p>
+            <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{review_command_tone_class(@review_command.tone)}"}>
+              <%= case @review_command.tone do %>
+                <% :attention -> %>
+                  Gates blocked
+                <% :ready -> %>
+                  Ready to accept
+                <% :active -> %>
+                  Spec decision
+                <% :rework -> %>
+                  Rework loop
+                <% _ -> %>
+                  Clear
+              <% end %>
+            </span>
+          </div>
+
+          <h2 class="mt-2 text-lg font-590 text-text-primary">
+            {@review_command.heading}
+          </h2>
+          <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
+            {@review_command.detail}
+          </p>
+
+          <div :if={@review_command.focus} class="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <span class="rounded-full border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
+              {@review_command.focus.lane}
+            </span>
+            <span class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary">
+              {@review_command.focus.age} waiting
+            </span>
+            <span class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary">
+              role: {@review_command.focus.role}
+            </span>
+            <span
+              :if={@review_command.focus.assignee}
+              class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary"
+            >
+              {@review_command.focus.assignee}
+            </span>
+          </div>
+
+          <div :if={@review_command.blocker_labels != []} class="mt-3 flex flex-wrap gap-2">
+            <span
+              :for={label <- Enum.take(@review_command.blocker_labels, 4)}
+              class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-xs font-510 text-amber-200"
+            >
+              {label}
+            </span>
+            <span
+              :if={length(@review_command.blocker_labels) > 4}
+              class="rounded-full border border-border bg-surface px-2 py-1 text-xs text-text-tertiary"
+            >
+              +{length(@review_command.blocker_labels) - 4} more
+            </span>
+          </div>
         </div>
-        <p class="mt-4 text-sm font-590 text-text-secondary">No issues awaiting review.</p>
-        <p class="mt-1 text-sm text-text-quaternary">
-          Finished work will land here for a decision.
-        </p>
+
+        <.app_link
+          navigate={@review_command.action_path}
+          class={"inline-flex shrink-0 items-center justify-center rounded-lg border px-3 py-2 text-sm font-590 transition-colors #{review_command_action_class(@review_command.tone)}"}
+        >
+          {@review_command.action_label}
+        </.app_link>
       </div>
 
-      <div :if={!Enum.empty?(@awaiting_review_decisions)} class="divide-y divide-hairline">
-        <article
-          :for={card <- @awaiting_review_decisions}
-          data-testid={"review-decision-card-#{card.issue.id}"}
-          class="px-4 py-4 transition hover:bg-surface-hover/30"
-        >
-          <% issue = card.issue %>
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class={"h-2 w-2 rounded-full #{status_color(issue.status)}"}></span>
-              <span :if={issue.identifier} class="font-mono text-xs text-text-quaternary">
-                {issue.identifier}
-              </span>
-              <span class="rounded-full border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[11px] font-510 text-sky-200">
-                Awaiting review
-              </span>
-              <span class="text-xs text-text-quaternary">{format_age(issue.updated_at)}</span>
-            </div>
-
-            <.app_link
-              navigate={~p"/issues/#{issue.id}"}
-              class="mt-2 block text-base font-590 leading-6 text-text-primary hover:text-brand"
-            >
-              {issue.title}
-            </.app_link>
-
-            <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-quaternary">
-              <span :if={issue.assigned_role}>reviewer role: {issue.assigned_role}</span>
-              <span :if={issue.assignee}>assigned to {issue.assignee.name}</span>
-              <span :if={issue.project}>{issue.project.name}</span>
-            </div>
-
-            <div
-              data-testid={"review-gate-card-#{issue.id}"}
-              class={"mt-3 rounded-lg border px-3 py-2.5 #{review_gate_card_class(card)}"}
-            >
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <p class="text-xs font-590 text-text-primary">
-                  {review_gate_heading(card)}
-                </p>
-                <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{review_gate_badge_class(card)}"}>
-                  <%= if card.blocker_count == 0 do %>
-                    gates clear
-                  <% else %>
-                    {card.blocker_count} {if card.blocker_count == 1, do: "gap", else: "gaps"}
-                  <% end %>
-                </span>
-              </div>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                {review_gate_detail(card)}
-              </p>
-              <div :if={card.blocker_labels != []} class="mt-2 flex flex-wrap gap-1.5">
-                <span
-                  :for={label <- Enum.take(card.blocker_labels, 5)}
-                  class="rounded bg-canvas px-1.5 py-0.5 text-[11px] font-510 text-amber-200"
-                >
-                  {label}
-                </span>
-                <span
-                  :if={length(card.blocker_labels) > 5}
-                  class="rounded bg-canvas px-1.5 py-0.5 text-[11px] text-text-quaternary"
-                >
-                  +{length(card.blocker_labels) - 5} more
-                </span>
-              </div>
-            </div>
-
-            <div
-              :if={card.review_packet}
-              data-testid={"review-decision-packet-#{issue.id}"}
-              class={"mt-3 rounded-lg border px-3 py-3 #{review_packet_card_class(card.review_packet)}"}
-            >
-              <div class="flex flex-wrap items-start justify-between gap-2">
-                <div class="min-w-0">
-                  <p class="text-xs font-590 text-text-primary">Review decision packet</p>
-                  <p class="mt-1 text-sm font-590 text-text-primary">
-                    {card.review_packet.verdict}
-                  </p>
-                  <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                    {card.review_packet.summary}
-                  </p>
-                </div>
-                <span class={"shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-510 #{review_packet_badge_class(card.review_packet)}"}>
-                  {if card.review_packet.tone == :ready, do: "ready", else: "risk"}
-                </span>
-              </div>
-
-              <div class="ui-advanced-only mt-3 grid gap-3 md:grid-cols-2">
-                <div>
-                  <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                    Evidence present
-                  </p>
-                  <ul class="mt-2 space-y-1.5">
-                    <li
-                      :for={line <- card.review_packet.evidence}
-                      class="flex gap-2 text-xs leading-5 text-text-tertiary"
-                    >
-                      <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400/80">
-                      </span>
-                      <span>{line}</span>
-                    </li>
-                  </ul>
-                </div>
-                <div>
-                  <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                    Risk / asks
-                  </p>
-                  <ul class="mt-2 space-y-1.5">
-                    <li
-                      :for={line <- card.review_packet.risks}
-                      class="flex gap-2 text-xs leading-5 text-text-tertiary"
-                    >
-                      <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400/80"></span>
-                      <span>{line}</span>
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-            <div
-              data-testid={"review-action-bar-#{issue.id}"}
-              class="mt-4 flex flex-col gap-3 border-t border-hairline pt-3 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <p class="ui-advanced-only text-xs leading-5 text-text-tertiary">
-                Decide from the packet above; blocked gates will stop closure automatically.
-              </p>
-              <div class="flex flex-wrap items-center gap-2 sm:justify-end">
-                <button
-                  type="button"
-                  phx-click="approve_review"
-                  phx-value-id={issue.id}
-                  class="btn-press rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs font-510 text-emerald-200 hover:bg-emerald-500/15"
-                >
-                  Approve and close
-                </button>
-                <button
-                  type="button"
-                  phx-click="request_changes"
-                  phx-value-id={issue.id}
-                  class="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs font-510 text-amber-200 hover:bg-amber-500/15"
-                >
-                  Request changes
-                </button>
-                <.app_link
-                  navigate={~p"/issues/#{issue.id}"}
-                  class="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                >
-                  Open issue
-                </.app_link>
-              </div>
-            </div>
-          </div>
-        </article>
+      <div class="grid grid-cols-2 border-t border-hairline sm:grid-cols-5">
+        <div class="border-r border-hairline px-4 py-3 last:border-r-0">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Ready
+          </p>
+          <p class="mt-1 font-mono text-xl font-590 text-emerald-200 tabular-nums">
+            {@review_command.ready_count}
+          </p>
+        </div>
+        <div class="border-r border-hairline px-4 py-3 last:border-r-0">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Blocked gates
+          </p>
+          <p class="mt-1 font-mono text-xl font-590 text-amber-200 tabular-nums">
+            {@review_command.blocked_count}
+          </p>
+        </div>
+        <div class="border-r border-hairline px-4 py-3 last:border-r-0">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Rework
+          </p>
+          <p class="mt-1 font-mono text-xl font-590 text-blue-200 tabular-nums">
+            {@review_command.rework_count}
+          </p>
+        </div>
+        <div class="border-r border-hairline px-4 py-3 last:border-r-0">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Spec gates
+          </p>
+          <p class="mt-1 font-mono text-xl font-590 text-brand tabular-nums">
+            {@review_command.spec_count}
+          </p>
+        </div>
+        <div class="px-4 py-3">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Oldest
+          </p>
+          <p class="mt-1 font-mono text-xl font-590 text-text-primary tabular-nums">
+            {@review_command.oldest_label}
+          </p>
+        </div>
       </div>
     </section>
 
-    <aside class="space-y-4">
-      <section class="rounded-2xl border border-hairline bg-surface-1 shadow-card">
-        <div class="border-b border-hairline px-4 py-3">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            Kicked back to engineering
-          </p>
-          <h2 class="mt-1 text-base font-590 text-text-primary">
-            Rework lane
-            <span class="ml-2 font-mono text-sm text-text-quaternary">
-              {length(@kicked_back)}
-            </span>
-          </h2>
+    <section class="ui-advanced-only mb-5 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+      <div class="rounded-lg border border-hairline bg-surface-1 px-4 py-3">
+        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          In flight
+        </p>
+        <p class="mt-1 font-mono text-[30px] font-590 leading-none tabular-nums text-text-primary">
+          {@stats.total}
+        </p>
+        <p class="mt-1 text-xs text-text-tertiary">All active review work</p>
+      </div>
+
+      <div class="rounded-lg border border-hairline bg-surface-1 px-4 py-3">
+        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Decision needed
+        </p>
+        <p class="mt-1 font-mono text-[30px] font-590 leading-none tabular-nums text-sky-300">
+          {length(@awaiting_review)}
+        </p>
+        <p class="mt-1 text-xs text-text-tertiary">Awaiting approve or changes</p>
+      </div>
+
+      <div class="rounded-lg border border-hairline bg-surface-1 px-4 py-3">
+        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Rework loop
+        </p>
+        <p class="mt-1 font-mono text-[30px] font-590 leading-none tabular-nums text-amber-300">
+          {length(@kicked_back)}
+        </p>
+        <p class="mt-1 text-xs text-text-tertiary">Returned to delivery</p>
+      </div>
+
+      <div class="rounded-lg border border-hairline bg-surface-1 px-4 py-3">
+        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Oldest age
+        </p>
+        <p class="mt-1 font-mono text-[30px] font-590 leading-none tabular-nums text-text-primary">
+          <%= if @stats.oldest_age_hours do %>
+            {@stats.oldest_age_hours}h
+          <% else %>
+            —
+          <% end %>
+        </p>
+        <p class="mt-1 truncate text-xs text-text-tertiary">
+          <%= if Enum.empty?(@stats.by_role) do %>
+            No reviewer bottleneck
+          <% else %>
+            <%= for {role, count} <- @stats.by_role do %>
+              {role}: {count}<span class="last:hidden"> · </span>
+            <% end %>
+          <% end %>
+        </p>
+      </div>
+    </section>
+
+    <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.8fr)]">
+      <section class="min-w-0 rounded-2xl border border-hairline bg-surface-1 shadow-card">
+        <div class="flex items-start justify-between gap-3 border-b border-hairline px-4 py-3">
+          <div>
+            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+              Awaiting review
+            </p>
+            <h2 class="mt-1 text-base font-590 text-text-primary">
+              Decision queue
+              <span class="ml-2 font-mono text-sm text-text-quaternary">
+                {length(@awaiting_review)}
+              </span>
+            </h2>
+          </div>
+          <span class="ui-advanced-only rounded-full border border-sky-500/25 bg-sky-500/10 px-2 py-1 text-xs font-510 text-sky-200">
+            Gate checked on close
+          </span>
         </div>
 
         <div
-          :if={Enum.empty?(@kicked_back)}
-          class="px-5 py-8 text-center"
+          :if={Enum.empty?(@awaiting_review)}
+          class="px-6 py-14 text-center"
         >
-          <p class="text-sm text-text-secondary">No issues currently kicked back.</p>
+          <div class="mx-auto flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-surface">
+            <span class="hero-check-circle-mini h-5 w-5 text-text-tertiary"></span>
+          </div>
+          <p class="mt-4 text-sm font-590 text-text-secondary">No issues awaiting review.</p>
+          <p class="mt-1 text-sm text-text-quaternary">
+            Finished work will land here for a decision.
+          </p>
         </div>
 
-        <div :if={!Enum.empty?(@kicked_back)} class="divide-y divide-hairline">
-          <article :for={issue <- @kicked_back} class="px-4 py-3">
-            <div class="flex items-start gap-3">
-              <span class={"mt-1.5 h-2 w-2 shrink-0 rounded-full #{status_color(issue.status)}"}>
+        <div :if={!Enum.empty?(@awaiting_review_decisions)} class="divide-y divide-hairline">
+          <article
+            :for={card <- @awaiting_review_decisions}
+            data-testid={"review-decision-card-#{card.issue.id}"}
+            class="px-4 py-4 transition hover:bg-surface-hover/30"
+          >
+            <% issue = card.issue %>
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class={"h-2 w-2 rounded-full #{status_color(issue.status)}"}></span>
+                <span :if={issue.identifier} class="font-mono text-xs text-text-quaternary">
+                  {issue.identifier}
+                </span>
+                <span class="rounded-full border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[11px] font-510 text-sky-200">
+                  Awaiting review
+                </span>
+                <span class="text-xs text-text-quaternary">{format_age(issue.updated_at)}</span>
+              </div>
+
+              <.app_link
+                navigate={~p"/issues/#{issue.id}"}
+                class="mt-2 block text-base font-590 leading-6 text-text-primary hover:text-brand"
+              >
+                {issue.title}
+              </.app_link>
+
+              <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-quaternary">
+                <span :if={issue.assigned_role}>reviewer role: {issue.assigned_role}</span>
+                <span :if={issue.assignee}>assigned to {issue.assignee.name}</span>
+                <span :if={issue.project}>{issue.project.name}</span>
+              </div>
+
+              <div
+                data-testid={"review-gate-card-#{issue.id}"}
+                class={"mt-3 rounded-lg border px-3 py-2.5 #{review_gate_card_class(card)}"}
+              >
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="text-xs font-590 text-text-primary">
+                    {review_gate_heading(card)}
+                  </p>
+                  <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{review_gate_badge_class(card)}"}>
+                    <%= if card.blocker_count == 0 do %>
+                      gates clear
+                    <% else %>
+                      {card.blocker_count} {if card.blocker_count == 1, do: "gap", else: "gaps"}
+                    <% end %>
+                  </span>
+                </div>
+                <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                  {review_gate_detail(card)}
+                </p>
+                <div :if={card.blocker_labels != []} class="mt-2 flex flex-wrap gap-1.5">
+                  <span
+                    :for={label <- Enum.take(card.blocker_labels, 5)}
+                    class="rounded bg-canvas px-1.5 py-0.5 text-[11px] font-510 text-amber-200"
+                  >
+                    {label}
+                  </span>
+                  <span
+                    :if={length(card.blocker_labels) > 5}
+                    class="rounded bg-canvas px-1.5 py-0.5 text-[11px] text-text-quaternary"
+                  >
+                    +{length(card.blocker_labels) - 5} more
+                  </span>
+                </div>
+              </div>
+
+              <div
+                :if={card.review_packet}
+                data-testid={"review-decision-packet-#{issue.id}"}
+                class={"mt-3 rounded-lg border px-3 py-3 #{review_packet_card_class(card.review_packet)}"}
+              >
+                <div class="flex flex-wrap items-start justify-between gap-2">
+                  <div class="min-w-0">
+                    <p class="text-xs font-590 text-text-primary">Review decision packet</p>
+                    <p class="mt-1 text-sm font-590 text-text-primary">
+                      {card.review_packet.verdict}
+                    </p>
+                    <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                      {card.review_packet.summary}
+                    </p>
+                  </div>
+                  <span class={"shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-510 #{review_packet_badge_class(card.review_packet)}"}>
+                    {if card.review_packet.tone == :ready, do: "ready", else: "risk"}
+                  </span>
+                </div>
+
+                <div class="ui-advanced-only mt-3 grid gap-3 md:grid-cols-2">
+                  <div>
+                    <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                      Evidence present
+                    </p>
+                    <ul class="mt-2 space-y-1.5">
+                      <li
+                        :for={line <- card.review_packet.evidence}
+                        class="flex gap-2 text-xs leading-5 text-text-tertiary"
+                      >
+                        <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400/80">
+                        </span>
+                        <span>{line}</span>
+                      </li>
+                    </ul>
+                  </div>
+                  <div>
+                    <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                      Risk / asks
+                    </p>
+                    <ul class="mt-2 space-y-1.5">
+                      <li
+                        :for={line <- card.review_packet.risks}
+                        class="flex gap-2 text-xs leading-5 text-text-tertiary"
+                      >
+                        <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400/80">
+                        </span>
+                        <span>{line}</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                data-testid={"review-action-bar-#{issue.id}"}
+                class="mt-4 flex flex-col gap-3 border-t border-hairline pt-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <p class="ui-advanced-only text-xs leading-5 text-text-tertiary">
+                  Decide from the packet above; blocked gates will stop closure automatically.
+                </p>
+                <div class="flex flex-wrap items-center gap-2 sm:justify-end">
+                  <button
+                    type="button"
+                    phx-click="approve_review"
+                    phx-value-id={issue.id}
+                    class="btn-press rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs font-510 text-emerald-200 hover:bg-emerald-500/15"
+                  >
+                    Approve and close
+                  </button>
+                  <button
+                    type="button"
+                    phx-click="request_changes"
+                    phx-value-id={issue.id}
+                    class="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs font-510 text-amber-200 hover:bg-amber-500/15"
+                  >
+                    Request changes
+                  </button>
+                  <.app_link
+                    navigate={~p"/issues/#{issue.id}"}
+                    class="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    Open issue
+                  </.app_link>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <aside class="space-y-4">
+        <section class="rounded-2xl border border-hairline bg-surface-1 shadow-card">
+          <div class="border-b border-hairline px-4 py-3">
+            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+              Kicked back to engineering
+            </p>
+            <h2 class="mt-1 text-base font-590 text-text-primary">
+              Rework lane
+              <span class="ml-2 font-mono text-sm text-text-quaternary">
+                {length(@kicked_back)}
               </span>
-              <div class="min-w-0 flex-1">
+            </h2>
+          </div>
+
+          <div
+            :if={Enum.empty?(@kicked_back)}
+            class="px-5 py-8 text-center"
+          >
+            <p class="text-sm text-text-secondary">No issues currently kicked back.</p>
+          </div>
+
+          <div :if={!Enum.empty?(@kicked_back)} class="divide-y divide-hairline">
+            <article :for={issue <- @kicked_back} class="px-4 py-3">
+              <div class="flex items-start gap-3">
+                <span class={"mt-1.5 h-2 w-2 shrink-0 rounded-full #{status_color(issue.status)}"}>
+                </span>
+                <div class="min-w-0 flex-1">
+                  <.app_link
+                    navigate={~p"/issues/#{issue.id}"}
+                    class="block truncate text-sm font-590 text-text-primary hover:text-brand"
+                  >
+                    {issue.title}
+                  </.app_link>
+                  <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-quaternary">
+                    <span :if={issue.last_reviewer}>
+                      last reviewed by {issue.last_reviewer.name || issue.last_reviewer.id}
+                    </span>
+                    <span :if={issue.assigned_role}>fix role: {issue.assigned_role}</span>
+                    <span :if={issue.project}>{issue.project.name}</span>
+                  </div>
+                </div>
+                <span class="shrink-0 text-xs text-text-quaternary">
+                  {format_age(issue.updated_at)}
+                </span>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="rounded-2xl border border-hairline bg-surface-1 shadow-card">
+          <div class="border-b border-hairline px-4 py-3">
+            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+              Spec review (CTO)
+            </p>
+            <h2 class="mt-1 text-base font-590 text-text-primary">
+              Initiative gate
+              <span class="ml-2 font-mono text-sm text-text-quaternary">
+                {length(@spec_review)}
+              </span>
+            </h2>
+          </div>
+
+          <div
+            :if={Enum.empty?(@spec_review)}
+            class="px-5 py-8 text-center"
+          >
+            <p class="text-sm text-text-secondary">No initiatives awaiting CTO spec review.</p>
+          </div>
+
+          <div :if={!Enum.empty?(@spec_review)} class="divide-y divide-hairline">
+            <article :for={issue <- @spec_review} class="px-4 py-3">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span :if={issue.identifier} class="font-mono text-xs text-text-quaternary">
+                    {issue.identifier}
+                  </span>
+                  <span class="text-xs text-text-quaternary">
+                    {format_age(issue.inserted_at)}
+                  </span>
+                </div>
                 <.app_link
                   navigate={~p"/issues/#{issue.id}"}
-                  class="block truncate text-sm font-590 text-text-primary hover:text-brand"
+                  class="mt-1 block truncate text-sm font-590 text-text-primary hover:text-brand"
                 >
                   {issue.title}
                 </.app_link>
                 <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-quaternary">
-                  <span :if={issue.last_reviewer}>
-                    last reviewed by {issue.last_reviewer.name || issue.last_reviewer.id}
+                  <span>
+                    proposed role: {get_in(issue.monitor_state, ["proposed_role"]) || "—"}
                   </span>
-                  <span :if={issue.assigned_role}>fix role: {issue.assigned_role}</span>
                   <span :if={issue.project}>{issue.project.name}</span>
                 </div>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    phx-click="approve_spec"
+                    phx-value-id={issue.id}
+                    class="rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-xs font-510 text-brand hover:bg-brand/15"
+                  >
+                    Approve spec
+                  </button>
+                  <.app_link
+                    navigate={~p"/issues/#{issue.id}"}
+                    class="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    Open issue
+                  </.app_link>
+                </div>
               </div>
-              <span class="shrink-0 text-xs text-text-quaternary">
-                {format_age(issue.updated_at)}
-              </span>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <section class="rounded-2xl border border-hairline bg-surface-1 shadow-card">
-        <div class="border-b border-hairline px-4 py-3">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            Spec review (CTO)
-          </p>
-          <h2 class="mt-1 text-base font-590 text-text-primary">
-            Initiative gate
-            <span class="ml-2 font-mono text-sm text-text-quaternary">
-              {length(@spec_review)}
-            </span>
-          </h2>
-        </div>
-
-        <div
-          :if={Enum.empty?(@spec_review)}
-          class="px-5 py-8 text-center"
-        >
-          <p class="text-sm text-text-secondary">No initiatives awaiting CTO spec review.</p>
-        </div>
-
-        <div :if={!Enum.empty?(@spec_review)} class="divide-y divide-hairline">
-          <article :for={issue <- @spec_review} class="px-4 py-3">
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <span :if={issue.identifier} class="font-mono text-xs text-text-quaternary">
-                  {issue.identifier}
-                </span>
-                <span class="text-xs text-text-quaternary">{format_age(issue.inserted_at)}</span>
-              </div>
-              <.app_link
-                navigate={~p"/issues/#{issue.id}"}
-                class="mt-1 block truncate text-sm font-590 text-text-primary hover:text-brand"
-              >
-                {issue.title}
-              </.app_link>
-              <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-quaternary">
-                <span>
-                  proposed role: {get_in(issue.monitor_state, ["proposed_role"]) || "—"}
-                </span>
-                <span :if={issue.project}>{issue.project.name}</span>
-              </div>
-              <div class="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  phx-click="approve_spec"
-                  phx-value-id={issue.id}
-                  class="rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-xs font-510 text-brand hover:bg-brand/15"
-                >
-                  Approve spec
-                </button>
-                <.app_link
-                  navigate={~p"/issues/#{issue.id}"}
-                  class="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                >
-                  Open issue
-                </.app_link>
-              </div>
-            </div>
-          </article>
-        </div>
-      </section>
-    </aside>
+            </article>
+          </div>
+        </section>
+      </aside>
+    </div>
   </div>
 </.page>

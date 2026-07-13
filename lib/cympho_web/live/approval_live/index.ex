@@ -39,6 +39,14 @@ defmodule CymphoWeb.ApprovalLive.Index do
     {:reply, %{}, load_next(socket, :approvals, &fetch_approvals(socket, &1, status))}
   end
 
+  def handle_event("approve", %{"id" => id}, socket) do
+    resolve_inline(socket, id, :approved, "Approved via approvals queue")
+  end
+
+  def handle_event("deny", %{"id" => id}, socket) do
+    resolve_inline(socket, id, :denied, "Denied via approvals queue")
+  end
+
   @impl true
   def handle_info({:approval_created, _approval}, socket) do
     {:noreply, reload_approvals(socket)}
@@ -60,6 +68,33 @@ defmodule CymphoWeb.ApprovalLive.Index do
     socket
     |> assign(:approval_command, build_approval_command(socket, status))
     |> reset_stream(:approvals, &fetch_approvals(socket, &1, status))
+  end
+
+  # Inline decision from the queue. Guards the approval to the current
+  # company before resolving; the :approval_resolved broadcast then
+  # refreshes the stream for every subscribed view.
+  defp resolve_inline(socket, id, decision, reason) do
+    with %{id: company_id} <- socket.assigns[:current_company],
+         {:ok, _approval} <- Approvals.get_company_approval(company_id, id),
+         {:ok, _resolved} <-
+           Approvals.resolve_approval(id, decision, %{
+             resolved_by_user_id: current_user_id(socket),
+             resolution_reason: reason
+           }) do
+      {:noreply,
+       socket
+       |> put_flash(:info, if(decision == :approved, do: "Approved", else: "Denied"))
+       |> reload_approvals()}
+    else
+      _ -> {:noreply, put_flash(socket, :error, "Could not resolve approval")}
+    end
+  end
+
+  defp current_user_id(socket) do
+    case socket.assigns[:current_user] do
+      %{id: id} -> id
+      _ -> nil
+    end
   end
 
   defp fetch_approvals(socket, cursor, status) do

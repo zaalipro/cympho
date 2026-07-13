@@ -202,6 +202,16 @@ defmodule CymphoWeb.KanbanLive.Components do
   def column_accent_class(:cancelled), do: "border-l-text-tertiary"
   def column_accent_class(_), do: "border-l-border"
 
+  @doc "Status-tinted gradient wash for a column header, keyed to status."
+  def column_wash_class(:backlog), do: "bg-gradient-to-b from-slate-500/10 to-transparent"
+  def column_wash_class(:todo), do: "bg-gradient-to-b from-sky-500/10 to-transparent"
+  def column_wash_class(:in_progress), do: "bg-gradient-to-b from-brand/10 to-transparent"
+  def column_wash_class(:in_review), do: "bg-gradient-to-b from-amber-500/10 to-transparent"
+  def column_wash_class(:blocked), do: "bg-gradient-to-b from-brand/10 to-transparent"
+  def column_wash_class(:done), do: "bg-gradient-to-b from-emerald-500/10 to-transparent"
+  def column_wash_class(:cancelled), do: "bg-gradient-to-b from-slate-500/10 to-transparent"
+  def column_wash_class(_), do: ""
+
   def priority_class(:critical), do: "bg-brand/20 text-brand"
   def priority_class(:high), do: "bg-amber-400/20 text-amber-300"
   def priority_class(:medium), do: "bg-yellow-500/20 text-yellow-400"

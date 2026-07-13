@@ -5,8 +5,10 @@
   />
 
   <section :for={{group, themes} <- @grouped} class="mb-10">
-    <h2 class="mb-3 text-eyebrow uppercase text-text-tertiary">{group}</h2>
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <h2 class="mb-3 font-serif text-[15px] font-510 italic tracking-[0.01em] text-brand/90">
+      {group}
+    </h2>
+    <div class="stagger-children grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <button
         :for={theme <- themes}
         type="button"
@@ -14,7 +16,7 @@
         phx-value-theme={theme.id}
         aria-pressed={theme.id == @current_theme}
         class={[
-          "group relative rounded-2xl border p-3 text-left transition-all focus:outline-none focus-ring",
+          "group card-lift relative rounded-2xl border p-3 text-left transition-all focus:outline-none focus-ring",
           if(theme.id == @current_theme,
             do: "border-brand shadow-card",
             else: "border-hairline hover:border-hairline-strong hover:shadow-card"

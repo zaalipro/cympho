@@ -1,23 +1,24 @@
 <.page size="full" data-ui-complex-page data-density={@digest_density}>
   <header class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
     <div class="min-w-0">
-      <div class="flex items-center gap-2 text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="ember-eyebrow">
+          Runtime mode ·
+          <span class={mode_text_class(@runtime_mode.status)}>{@runtime_mode.label}</span>
+        </span>
         <span
           class={[
-            "cympho-pulse-dot inline-block h-1.5 w-1.5 rounded-full",
+            "cympho-pulse-dot hidden h-1.5 w-1.5 rounded-full",
             mode_dot_class(@runtime_mode.status)
           ]}
           style={"--cympho-pulse-color: #{mode_pulse_color(@runtime_mode.status)};"}
         >
         </span>
-        <span class="text-text-tertiary">Runtime mode</span>
-        <span class="text-text-quaternary/60">·</span>
-        <span class={mode_text_class(@runtime_mode.status)}>{@runtime_mode.label}</span>
       </div>
-      <h1 class="mt-2 text-[22px] font-590 leading-7 tracking-tight text-text-primary">
+      <h1 class="ember-ink mt-3 font-serif text-[clamp(28px,4vw,40px)] font-510 leading-[1.08] tracking-[-0.02em]">
         Operations
       </h1>
-      <p class="ui-advanced-only mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
+      <p class="ui-advanced-only mt-2 max-w-2xl text-sm leading-5 text-text-tertiary">
         Runtime services, adapter health, and execution capacity for the current company.
       </p>
     </div>
@@ -127,7 +128,7 @@
   >
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div class="min-w-0">
-        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
           Live work
         </p>
         <h2 class="mt-1 text-base font-590 text-text-primary">
@@ -142,30 +143,30 @@
       </.app_link>
     </div>
     <div class="stagger-children mt-3 grid gap-2 sm:grid-cols-3">
-      <div class="rounded-md border border-border bg-surface/60 px-3 py-2">
+      <div class="ember-stat rounded-md border border-border bg-surface/60 px-3 py-2">
         <div class="flex items-center gap-2 text-text-secondary">
           <span class="hero-inbox-mini h-4 w-4 text-white"></span>
           <span class="text-xs font-590">Delegated</span>
         </div>
-        <p class="mt-1 font-mono text-xl font-590 tabular-nums text-sky-200">
+        <p class="mt-1 font-serif text-[28px] font-510 leading-none tabular-nums text-sky-200">
           {@delegated_work.count}
         </p>
       </div>
-      <div class="rounded-md border border-border bg-surface/60 px-3 py-2">
+      <div class="ember-stat rounded-md border border-border bg-surface/60 px-3 py-2">
         <div class="flex items-center gap-2 text-text-secondary">
           <span class="hero-check-circle-mini h-4 w-4 text-white"></span>
           <span class="text-xs font-590">Owner</span>
         </div>
-        <p class="mt-1 font-mono text-xl font-590 tabular-nums text-amber-200">
+        <p class="mt-1 font-serif text-[28px] font-510 leading-none tabular-nums text-amber-200">
           {@owner_signoffs.count}
         </p>
       </div>
-      <div class="rounded-md border border-border bg-surface/60 px-3 py-2">
+      <div class="ember-stat rounded-md border border-border bg-surface/60 px-3 py-2">
         <div class="flex items-center gap-2 text-text-secondary">
           <span class="hero-sparkles-mini h-4 w-4 text-white"></span>
           <span class="text-xs font-590">CEO watch</span>
         </div>
-        <p class="mt-1 font-mono text-xl font-590 tabular-nums text-emerald-200">
+        <p class="mt-1 font-serif text-[28px] font-510 leading-none tabular-nums text-emerald-200">
           {@ceo_outcomes.counts.attention}
         </p>
       </div>
@@ -222,7 +223,7 @@
       ) %>
     <div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
       <div class="min-w-0">
-        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
           Action queue
         </p>
         <h2 class="mt-1 text-base font-590 text-text-primary">
@@ -297,10 +298,10 @@
 
   <div class="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_360px]">
     <div class="min-w-0 space-y-4">
-      <section class="ui-advanced-only rounded-lg border border-border bg-panel">
+      <section class="ui-advanced-only ember-glass">
         <div class="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div class="min-w-0">
-            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Runtime mode
             </p>
             <div class="mt-1.5 flex flex-wrap items-baseline gap-2">
@@ -315,17 +316,17 @@
               {@runtime_mode.summary}
             </p>
           </div>
-          <div class="flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
-            <div class="bg-surface/60 px-4 py-2.5">
-              <p class="font-mono text-[20px] font-590 leading-none tabular-nums text-text-primary">
+          <div class="stagger-children flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
+            <div class="ember-stat bg-surface/60 px-4 py-2.5">
+              <p class="font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
                 {@runtime_mode.disabled_services}
               </p>
               <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                 Disabled
               </p>
             </div>
-            <div class="bg-surface/60 px-4 py-2.5">
-              <p class="font-mono text-[20px] font-590 leading-none tabular-nums text-text-primary">
+            <div class="ember-stat bg-surface/60 px-4 py-2.5">
+              <p class="font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
                 {@runtime_mode.not_running_services}
               </p>
               <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
@@ -338,7 +339,7 @@
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
                   Runtime launch checklist
                 </p>
                 <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{enablement_badge_class(@runtime_enablement.status)}"}>
@@ -545,7 +546,7 @@
             <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
-                  <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                  <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
                     CEO flow verification
                   </p>
                   <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{ceo_flow_badge_class(@ceo_flow.stage)}"}>
@@ -577,14 +578,14 @@
             <div class="stagger-children mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
               <div
                 :for={step <- @ceo_flow.steps}
-                class={"min-w-0 rounded-md border px-3 py-2.5 #{ceo_flow_step_class(step.state)}"}
+                class={"ember-stat min-w-0 rounded-md border px-3 py-2.5 #{ceo_flow_step_class(step.state)}"}
               >
                 <div class="flex items-start justify-between gap-2">
                   <p class="truncate text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
                     {step.label}
                   </p>
                   <p class={[
-                    "font-mono text-[18px] font-590 leading-none tabular-nums",
+                    "font-serif text-[28px] font-510 leading-none tabular-nums",
                     ceo_flow_step_value_class(step.state)
                   ]}>
                     {step.value}
@@ -699,7 +700,7 @@
           <div class="ui-advanced-only mt-4 rounded-md border border-border bg-surface/50">
             <div class="flex flex-wrap items-start justify-between gap-3 border-b border-border px-3 py-3">
               <div>
-                <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
                   Launch preview
                 </p>
                 <p class="mt-1 text-xs leading-5 text-text-tertiary">
@@ -989,6 +990,7 @@
               <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
                 {@owner_signoffs.summary}
               </p>
+              <hr class="ember-rule mt-3" />
             </div>
           </div>
         </div>
@@ -1067,7 +1069,7 @@
 
       <section
         id="delegated-work-queue"
-        class="scroll-mt-20 rounded-lg border border-border bg-panel md:scroll-mt-6"
+        class="ember-glass scroll-mt-20 md:scroll-mt-6"
       >
         <div class="border-b border-border px-5 py-4">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1078,6 +1080,7 @@
                   {@delegated_work.count} open
                 </span>
               </div>
+              <hr class="ember-rule mt-3" />
               <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
                 {@delegated_work.summary}
               </p>
@@ -1435,27 +1438,28 @@
               <p class="ui-advanced-only mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
                 {@ceo_outcomes.summary}
               </p>
+              <hr class="ember-rule mt-3" />
             </div>
 
             <div
               data-testid="ceo-outcome-health-strip"
-              class="grid min-w-0 grid-cols-3 gap-px overflow-hidden rounded-md border border-border bg-border"
+              class="stagger-children grid min-w-0 grid-cols-3 gap-px overflow-hidden rounded-md border border-border bg-border"
             >
-              <div class="min-w-0 bg-surface/70 px-3 py-2.5">
+              <div class="ember-stat min-w-0 bg-surface/70 px-3 py-2.5">
                 <p class="text-[11px] font-510 text-text-quaternary">Signal</p>
-                <p class="mt-1 font-mono text-lg font-590 leading-none tabular-nums text-emerald-300">
+                <p class="mt-1 font-serif text-[28px] font-510 leading-none tabular-nums text-emerald-300">
                   {ceo_outcome_signal_count(@ceo_outcomes.counts)}
                 </p>
               </div>
-              <div class="min-w-0 bg-surface/70 px-3 py-2.5">
+              <div class="ember-stat min-w-0 bg-surface/70 px-3 py-2.5">
                 <p class="text-[11px] font-510 text-text-quaternary">Receipts</p>
-                <p class="mt-1 font-mono text-lg font-590 leading-none tabular-nums text-teal-300">
+                <p class="mt-1 font-serif text-[28px] font-510 leading-none tabular-nums text-teal-300">
                   {@ceo_outcomes.counts.receipt_complete}/{@ceo_outcomes.counts.receipt_checked}
                 </p>
               </div>
-              <div class="min-w-0 bg-surface/70 px-3 py-2.5">
+              <div class="ember-stat min-w-0 bg-surface/70 px-3 py-2.5">
                 <p class="text-[11px] font-510 text-text-quaternary">Attention</p>
-                <p class="mt-1 font-mono text-lg font-590 leading-none tabular-nums text-amber-300">
+                <p class="mt-1 font-serif text-[28px] font-510 leading-none tabular-nums text-amber-300">
                   {@ceo_outcomes.counts.attention}
                 </p>
               </div>
@@ -1468,10 +1472,10 @@
           >
             <div
               :for={metric <- ceo_outcome_metric_cards(@ceo_outcomes.counts)}
-              class="min-w-0 rounded-md border border-border bg-surface/60 px-3 py-2.5"
+              class="ember-stat min-w-0 rounded-md border border-border bg-surface/60 px-3 py-2.5"
             >
               <p class="text-[11px] font-510 text-text-quaternary">{metric.label}</p>
-              <p class={"mt-1 font-mono text-lg font-590 leading-none tabular-nums #{metric.value_class}"}>
+              <p class={"mt-1 font-serif text-[28px] font-510 leading-none tabular-nums #{metric.value_class}"}>
                 {metric.value}
               </p>
               <p class="ui-advanced-only mt-1 text-[11px] leading-4 text-text-tertiary">
@@ -1622,27 +1626,28 @@
               <p class="mt-1 max-w-2xl text-sm leading-6 text-text-tertiary">
                 {@doctor.summary}
               </p>
+              <hr class="ember-rule mt-3" />
             </div>
 
-            <div class="flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
-              <div class="min-w-[68px] bg-panel px-3 py-2 text-center">
-                <p class="font-mono text-[18px] font-590 leading-none tabular-nums text-brand">
+            <div class="stagger-children flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
+              <div class="ember-stat min-w-[68px] bg-panel px-3 py-2 text-center">
+                <p class="font-serif text-[28px] font-510 leading-none tabular-nums text-brand">
                   {@doctor.counts.critical}
                 </p>
                 <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Fix
                 </p>
               </div>
-              <div class="min-w-[68px] bg-panel px-3 py-2 text-center">
-                <p class="font-mono text-[18px] font-590 leading-none tabular-nums text-amber-300">
+              <div class="ember-stat min-w-[68px] bg-panel px-3 py-2 text-center">
+                <p class="font-serif text-[28px] font-510 leading-none tabular-nums text-amber-300">
                   {@doctor.counts.warning}
                 </p>
                 <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Watch
                 </p>
               </div>
-              <div class="min-w-[68px] bg-panel px-3 py-2 text-center">
-                <p class="font-mono text-[18px] font-590 leading-none tabular-nums text-emerald-300">
+              <div class="ember-stat min-w-[68px] bg-panel px-3 py-2 text-center">
+                <p class="font-serif text-[28px] font-510 leading-none tabular-nums text-emerald-300">
                   {@doctor.counts.ok}
                 </p>
                 <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
@@ -1806,6 +1811,7 @@
               <p class="mt-1 max-w-2xl text-xs leading-5 text-text-quaternary">
                 {@prompt_radar.summary}
               </p>
+              <hr class="ember-rule mt-3" />
               <div :if={@prompt_radar.watchlist != []} class="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -1821,7 +1827,7 @@
               </div>
             </div>
 
-            <div class="flex shrink-0 flex-wrap items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
+            <div class="stagger-children flex shrink-0 flex-wrap items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
               <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
                 <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-text-primary">
                   {@prompt_radar.counts.total}
@@ -2092,9 +2098,10 @@
                 Contract and memory failures by agent, based on delivery, review, owner-update,
                 and issue-memory fields shown on issue pages.
               </p>
+              <hr class="ember-rule mt-3" />
             </div>
 
-            <div class="flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
+            <div class="stagger-children flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
               <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
                 <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-text-primary">
                   {@contract_failures.counts.issues}
@@ -2373,6 +2380,7 @@
           <p class="mt-1 text-xs text-text-quaternary">
             These switches decide whether Cympho only reviews work or actively runs the company.
           </p>
+          <hr class="ember-rule mt-3" />
         </div>
         <div class="grid divide-y divide-border lg:grid-cols-2 lg:divide-x lg:divide-y-0">
           <div :for={service <- @services} class="p-4">
@@ -2409,11 +2417,12 @@
       >
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Runtime capacity
             </p>
             <h2 class="mt-1.5 text-base font-590 text-text-primary">{@capacity.summary}</h2>
             <p class="mt-1 text-sm leading-5 text-text-tertiary">{@capacity.hint}</p>
+            <hr class="ember-rule mt-3" />
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <button
@@ -2431,35 +2440,35 @@
           </div>
         </div>
         <div class="stagger-children mt-4 grid divide-y divide-border overflow-hidden rounded-md border border-border sm:grid-cols-4 sm:divide-x sm:divide-y-0">
-          <div class="px-4 py-3">
+          <div class="ember-stat px-4 py-3">
             <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Agents
             </p>
-            <p class="mt-1.5 font-mono text-[20px] font-590 leading-none tabular-nums text-text-primary">
+            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
               {@capacity.total_agents}
             </p>
           </div>
-          <div class="px-4 py-3">
+          <div class="ember-stat px-4 py-3">
             <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Total slots
             </p>
-            <p class="mt-1.5 font-mono text-[20px] font-590 leading-none tabular-nums text-text-primary">
+            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
               {@capacity.total_slots}
             </p>
           </div>
-          <div class="px-4 py-3">
+          <div class="ember-stat px-4 py-3">
             <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Local CLI slots
             </p>
-            <p class="mt-1.5 font-mono text-[20px] font-590 leading-none tabular-nums text-text-primary">
+            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
               {@capacity.local_slots}
             </p>
           </div>
-          <div class="px-4 py-3">
+          <div class="ember-stat px-4 py-3">
             <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Held slots
             </p>
-            <p class="mt-1.5 font-mono text-[20px] font-590 leading-none tabular-nums text-text-primary">
+            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
               {@capacity.running_runs}
             </p>
             <p class="mt-2 font-mono text-[11px] tabular-nums text-text-quaternary">
@@ -2633,53 +2642,54 @@
       >
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Host footprint
             </p>
             <h2 class="mt-1.5 text-base font-590 text-text-primary">{@host.summary}</h2>
             <p class="mt-1 text-sm leading-5 text-text-tertiary">{@host.hint}</p>
+            <hr class="ember-rule mt-3" />
           </div>
           <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{capacity_badge_class(@host.level)}"}>
             {@host.label}
           </span>
         </div>
         <div class="stagger-children mt-4 grid divide-y divide-border overflow-hidden rounded-md border border-border sm:grid-cols-4 sm:divide-x sm:divide-y-0">
-          <div class="px-4 py-3">
+          <div class="ember-stat px-4 py-3">
             <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               BEAM memory
             </p>
-            <p class="mt-1.5 font-mono text-[18px] font-590 leading-none tabular-nums text-text-primary">
+            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
               {format_memory(@host.memory_bytes)}
             </p>
             <p class="mt-2 text-[11px] text-text-quaternary">
               {format_memory(@host.process_memory_bytes)} process heap
             </p>
           </div>
-          <div class="px-4 py-3">
+          <div class="ember-stat px-4 py-3">
             <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               BEAM processes
             </p>
-            <p class="mt-1.5 font-mono text-[18px] font-590 leading-none tabular-nums text-text-primary">
+            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
               {@host.process_count}
             </p>
             <p class="mt-2 font-mono text-[11px] tabular-nums text-text-quaternary">
               {@host.process_usage_percent}% of limit
             </p>
           </div>
-          <div class="px-4 py-3">
+          <div class="ember-stat px-4 py-3">
             <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Schedulers
             </p>
-            <p class="mt-1.5 font-mono text-[18px] font-590 leading-none tabular-nums text-text-primary">
+            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
               {@host.schedulers_online}
             </p>
             <p class="mt-2 text-[11px] text-text-quaternary">Online CPU schedulers</p>
           </div>
-          <div class="px-4 py-3">
+          <div class="ember-stat px-4 py-3">
             <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Run queue
             </p>
-            <p class="mt-1.5 font-mono text-[18px] font-590 leading-none tabular-nums text-text-primary">
+            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
               {@host.run_queue}
             </p>
             <p class="mt-2 text-[11px] text-text-quaternary">Runnable BEAM work</p>
@@ -2704,8 +2714,9 @@
               <p class="mt-1 text-xs text-text-quaternary">
                 Evidence, review, and owner-update requests waiting across the company.
               </p>
+              <hr class="ember-rule mt-3" />
             </div>
-            <div class="flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
+            <div class="stagger-children flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
               <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
                 <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-text-primary">
                   {@review_nudges.counts.active}
@@ -2915,9 +2926,10 @@
               <p class="mt-1 text-xs leading-5 text-text-quaternary">
                 Stale comment wakes that still occupy agent queue room. Clearing them leaves issue comments intact.
               </p>
+              <hr class="ember-rule mt-3" />
             </div>
             <div class="flex shrink-0 flex-wrap items-stretch gap-2">
-              <div class="flex overflow-hidden rounded-md border border-border bg-border">
+              <div class="stagger-children flex overflow-hidden rounded-md border border-border bg-border">
                 <div class="min-w-[84px] bg-panel px-3 py-2 text-center">
                   <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-text-primary">
                     {@wake_queue.counts.pending_comments}
@@ -3051,6 +3063,7 @@
           <p class="mt-1 text-xs text-text-quaternary">
             Local CLI adapters consume real OS memory; BEAM processes stay lightweight.
           </p>
+          <hr class="ember-rule mt-3" />
         </div>
         <div
           :if={@pressure_agents == []}

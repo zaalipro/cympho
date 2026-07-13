@@ -62,345 +62,354 @@ defmodule CymphoWeb.LaunchItemLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <.page size="wide" data-ui-complex-page>
-      <.header
-        title="Launch Tracker"
-        subtitle="Create launch items, keep owners assigned, and surface blocked work before the next launch decision."
-      >
-        <:actions>
-          <.app_link
-            navigate={~p"/dashboard"}
-            class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-          >
-            Back to dashboard
-          </.app_link>
-        </:actions>
-      </.header>
-
-      <div class="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-        <section class="space-y-5">
-          <div class={[
-            "rounded-2xl border p-5 shadow-card",
-            summary_tone_class(@summary.tone)
-          ]}>
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div class="min-w-0">
-                <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-current/70">
-                  Readiness summary
-                </p>
-                <h2 class="mt-2 text-2xl font-590 text-current">
-                  {@summary.headline}
-                </h2>
-                <p class="mt-1 max-w-2xl text-sm leading-6 text-current/80">
-                  {@summary.detail}
-                </p>
-              </div>
-
-              <div class="rounded-2xl border border-current/15 bg-black/10 px-4 py-3 text-right">
-                <p class="text-3xl font-590 tabular-nums text-current">
-                  {@summary.completion_percent}%
-                </p>
-                <p class="mt-1 text-[10px] font-590 uppercase tracking-[0.12em] text-current/70">
-                  Completed
-                </p>
-              </div>
-            </div>
-
-            <div class="mt-4 h-2 overflow-hidden rounded-full bg-black/10">
-              <div class="h-full rounded-full bg-current/80" style={progress_bar_fill(@summary)}>
-              </div>
-            </div>
-
-            <div
-              :if={@summary.blocked_titles != []}
-              class="mt-4 rounded-xl border border-current/15 bg-black/10 px-3 py-3"
+    <.page size="wide" data-ui-complex-page class="ember-aurora">
+      <div class="relative z-[1]">
+        <.header>
+          <span class="ember-eyebrow">Launch readiness</span>
+          <h1 class="ember-ink mt-4 font-serif text-[clamp(28px,4vw,42px)] font-510 leading-[1.08] tracking-[-0.02em]">
+            Launch Tracker
+          </h1>
+          <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+            Create launch items, keep owners assigned, and surface blocked work before the next launch decision.
+          </p>
+          <:actions>
+            <.app_link
+              navigate={~p"/dashboard"}
+              class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
             >
-              <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-current/65">
-                Blocked titles
-              </p>
-              <ul class="mt-2 space-y-1 text-sm text-current/85">
-                <li :for={title <- @summary.blocked_titles} class="truncate">
-                  {title}
-                </li>
-              </ul>
+              Back to dashboard
+            </.app_link>
+          </:actions>
+        </.header>
+
+        <div class="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+          <section class="space-y-5">
+            <div class={[
+              "relative rounded-2xl border p-5 shadow-[inset_0_1px_0_0_rgba(255,250,245,0.08),0_1px_2px_rgb(var(--shadow-rgb)/0.3),0_24px_64px_rgb(var(--shadow-rgb)/0.28)]",
+              summary_tone_class(@summary.tone)
+            ]}>
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-current/80">
+                    Readiness summary
+                  </p>
+                  <h2 class="mt-2 text-2xl font-590 text-current">
+                    {@summary.headline}
+                  </h2>
+                  <p class="mt-1 max-w-2xl text-sm leading-6 text-current/80">
+                    {@summary.detail}
+                  </p>
+                </div>
+
+                <div class="rounded-2xl border border-current/15 bg-black/10 px-4 py-3 text-right">
+                  <p class="text-3xl font-590 tabular-nums text-current">
+                    {@summary.completion_percent}%
+                  </p>
+                  <p class="mt-1 text-[10px] font-590 uppercase tracking-[0.12em] text-current/70">
+                    Completed
+                  </p>
+                </div>
+              </div>
+
+              <div class="mt-4 h-2 overflow-hidden rounded-full bg-black/10">
+                <div
+                  class="progress-spring h-full rounded-full bg-current/80"
+                  style={progress_bar_fill(@summary)}
+                >
+                </div>
+              </div>
+
+              <div
+                :if={@summary.blocked_titles != []}
+                class="mt-4 rounded-xl border border-current/15 bg-black/10 px-3 py-3"
+              >
+                <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-current/65">
+                  Blocked titles
+                </p>
+                <ul class="mt-2 space-y-1 text-sm text-current/85">
+                  <li :for={title <- @summary.blocked_titles} class="truncate">
+                    {title}
+                  </li>
+                </ul>
+              </div>
+
+              <div class="mt-4 grid gap-3 sm:grid-cols-4">
+                <div class="rounded-xl border border-current/15 bg-black/10 px-3 py-3">
+                  <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-current/65">
+                    Total
+                  </p>
+                  <p class="mt-1 text-2xl font-590 tabular-nums text-current">{@summary.total}</p>
+                </div>
+                <div class="rounded-xl border border-current/15 bg-black/10 px-3 py-3">
+                  <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-current/65">
+                    Open
+                  </p>
+                  <p class="mt-1 text-2xl font-590 tabular-nums text-current">
+                    {@summary.open_count}
+                  </p>
+                </div>
+                <div class="rounded-xl border border-current/15 bg-black/10 px-3 py-3">
+                  <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-current/65">
+                    Blocked
+                  </p>
+                  <p class="mt-1 text-2xl font-590 tabular-nums text-current">
+                    {@summary.blocked_count}
+                  </p>
+                </div>
+                <div class="rounded-xl border border-current/15 bg-black/10 px-3 py-3">
+                  <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-current/65">
+                    Completed
+                  </p>
+                  <p class="mt-1 text-2xl font-590 tabular-nums text-current">
+                    {@summary.completed_count}
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div class="mt-4 grid gap-3 sm:grid-cols-4">
-              <div class="rounded-xl border border-current/15 bg-black/10 px-3 py-3">
-                <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-current/65">
-                  Total
-                </p>
-                <p class="mt-1 text-2xl font-590 tabular-nums text-current">{@summary.total}</p>
+            <div class="rounded-2xl border border-border bg-panel p-5 shadow-card">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                    New launch item
+                  </p>
+                  <h2 class="mt-2 text-lg font-590 text-text-primary">Add work to the tracker</h2>
+                  <p class="mt-1 text-sm leading-6 text-text-tertiary">
+                    Capture a title, owner, status, and blocked state in one pass.
+                  </p>
+                </div>
               </div>
-              <div class="rounded-xl border border-current/15 bg-black/10 px-3 py-3">
-                <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-current/65">
-                  Open
-                </p>
-                <p class="mt-1 text-2xl font-590 tabular-nums text-current">
-                  {@summary.open_count}
-                </p>
-              </div>
-              <div class="rounded-xl border border-current/15 bg-black/10 px-3 py-3">
-                <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-current/65">
-                  Blocked
-                </p>
-                <p class="mt-1 text-2xl font-590 tabular-nums text-current">
-                  {@summary.blocked_count}
-                </p>
-              </div>
-              <div class="rounded-xl border border-current/15 bg-black/10 px-3 py-3">
-                <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-current/65">
-                  Completed
-                </p>
-                <p class="mt-1 text-2xl font-590 tabular-nums text-current">
-                  {@summary.completed_count}
-                </p>
-              </div>
-            </div>
-          </div>
 
-          <div class="rounded-2xl border border-border bg-panel p-5 shadow-card">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                  New launch item
-                </p>
-                <h2 class="mt-2 text-lg font-590 text-text-primary">Add work to the tracker</h2>
+              <.simple_form
+                for={@form}
+                id="launch-item-create-form"
+                phx-submit="create_launch_item"
+                class="mt-5 space-y-4"
+              >
+                <.input
+                  field={@form[:title]}
+                  label="Title"
+                  required
+                  placeholder="Ship launch checklist, QA signoff, or release comms"
+                />
+
+                <div class="grid gap-4 sm:grid-cols-2">
+                  <.input
+                    field={@form[:owner_user_id]}
+                    type="select"
+                    label="Owner"
+                    required
+                    options={owner_options(@company_members)}
+                  />
+
+                  <.input
+                    field={@form[:status]}
+                    type="select"
+                    label="Status"
+                    required
+                    options={status_options()}
+                  />
+                </div>
+
+                <.input field={@form[:is_blocked]} type="checkbox" label="Blocked" />
+
+                <div class="flex justify-end">
+                  <.button type="submit" variant="primary">Create launch item</.button>
+                </div>
+              </.simple_form>
+            </div>
+          </section>
+
+          <section class="space-y-4">
+            <div
+              id="blocked-work-view"
+              class="rounded-2xl border border-border bg-panel p-5 shadow-card"
+            >
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                    Blocked work
+                  </p>
+                  <h2 class="mt-2 text-lg font-590 text-text-primary">Items needing attention</h2>
+                </div>
+
+                <span class="rounded-full border border-rose-500/25 bg-rose-500/10 px-3 py-1 text-xs font-590 text-rose-300">
+                  {@summary.blocked_count} blocked
+                </span>
+              </div>
+
+              <div
+                :if={blocked_items(@launch_items) == []}
+                class="mt-5 rounded-2xl border border-dashed border-border/80 bg-surface/40 px-5 py-6 text-center"
+              >
+                <p class="text-sm font-590 text-text-primary">No blocked launch items.</p>
                 <p class="mt-1 text-sm leading-6 text-text-tertiary">
-                  Capture a title, owner, status, and blocked state in one pass.
+                  Blocked items appear here as soon as they are marked.
                 </p>
               </div>
-            </div>
 
-            <.simple_form
-              for={@form}
-              id="launch-item-create-form"
-              phx-submit="create_launch_item"
-              class="mt-5 space-y-4"
-            >
-              <.input
-                field={@form[:title]}
-                label="Title"
-                required
-                placeholder="Ship launch checklist, QA signoff, or release comms"
-              />
-
-              <div class="grid gap-4 sm:grid-cols-2">
-                <.input
-                  field={@form[:owner_user_id]}
-                  type="select"
-                  label="Owner"
-                  required
-                  options={owner_options(@company_members)}
-                />
-
-                <.input
-                  field={@form[:status]}
-                  type="select"
-                  label="Status"
-                  required
-                  options={status_options()}
-                />
-              </div>
-
-              <.input field={@form[:is_blocked]} type="checkbox" label="Blocked" />
-
-              <div class="flex justify-end">
-                <.button type="submit" variant="primary">Create launch item</.button>
-              </div>
-            </.simple_form>
-          </div>
-        </section>
-
-        <section class="space-y-4">
-          <div
-            id="blocked-work-view"
-            class="rounded-2xl border border-border bg-panel p-5 shadow-card"
-          >
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                  Blocked work
-                </p>
-                <h2 class="mt-2 text-lg font-590 text-text-primary">Items needing attention</h2>
-              </div>
-
-              <span class="rounded-full border border-rose-500/25 bg-rose-500/10 px-3 py-1 text-xs font-590 text-rose-300">
-                {@summary.blocked_count} blocked
-              </span>
-            </div>
-
-            <div
-              :if={blocked_items(@launch_items) == []}
-              class="mt-5 rounded-2xl border border-dashed border-border/80 bg-surface/40 px-5 py-6 text-center"
-            >
-              <p class="text-sm font-590 text-text-primary">No blocked launch items.</p>
-              <p class="mt-1 text-sm leading-6 text-text-tertiary">
-                Blocked items appear here as soon as they are marked.
-              </p>
-            </div>
-
-            <div :if={blocked_items(@launch_items) != []} class="mt-5 space-y-3">
-              <article
-                :for={item <- blocked_items(@launch_items)}
-                id={"blocked-launch-item-#{item.id}"}
-                class="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3"
-              >
-                <div class="flex flex-wrap items-center justify-between gap-3">
-                  <div class="min-w-0">
-                    <h3 class="truncate text-sm font-590 text-rose-100">{item.title}</h3>
-                    <p class="mt-1 text-xs text-rose-100/70">
-                      Owner: {owner_label(item.owner_user)}
-                    </p>
+              <div :if={blocked_items(@launch_items) != []} class="stagger-children mt-5 space-y-3">
+                <article
+                  :for={item <- blocked_items(@launch_items)}
+                  id={"blocked-launch-item-#{item.id}"}
+                  class="card-lift rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="min-w-0">
+                      <h3 class="truncate text-sm font-590 text-rose-100">{item.title}</h3>
+                      <p class="mt-1 text-xs text-rose-100/70">
+                        Owner: {owner_label(item.owner_user)}
+                      </p>
+                    </div>
+                    <span class="rounded-full border border-rose-500/25 px-2.5 py-1 text-xs font-590 uppercase tracking-[0.08em] text-rose-200">
+                      {status_label(item.status)}
+                    </span>
                   </div>
-                  <span class="rounded-full border border-rose-500/25 px-2.5 py-1 text-xs font-590 uppercase tracking-[0.08em] text-rose-200">
-                    {status_label(item.status)}
-                  </span>
-                </div>
-              </article>
-            </div>
-          </div>
-
-          <div class="rounded-2xl border border-border bg-panel p-5 shadow-card">
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                  Items
-                </p>
-                <h2 class="mt-2 text-lg font-590 text-text-primary">Manage launch execution</h2>
+                </article>
               </div>
-
-              <span class="rounded-full border border-border bg-surface px-3 py-1 text-xs font-590 text-text-secondary">
-                {@summary.total} item{if @summary.total == 1, do: "", else: "s"}
-              </span>
             </div>
 
-            <div
-              :if={Enum.empty?(@launch_items)}
-              class="mt-6 rounded-2xl border border-dashed border-border/80 bg-surface/40 px-5 py-10 text-center"
-            >
-              <p class="text-base font-590 text-text-primary">No launch items yet.</p>
-              <p class="mt-2 text-sm leading-6 text-text-tertiary">
-                Use the form to create the first item and start tracking readiness.
-              </p>
-            </div>
-
-            <div :if={!Enum.empty?(@launch_items)} class="mt-5 space-y-3">
-              <article
-                :for={item <- @launch_items}
-                id={"launch-item-#{item.id}"}
-                class="rounded-2xl border border-border bg-surface/70 p-4 shadow-sm"
-              >
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0">
-                    <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                      Launch item
-                    </p>
-                    <h3 class="mt-1 truncate text-base font-590 text-text-primary">
-                      {item.title}
-                    </h3>
-                    <p class="mt-1 text-sm text-text-tertiary">
-                      Owner: {owner_label(item.owner_user)}
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    phx-click="toggle_blocked"
-                    phx-value-id={item.id}
-                    class={[
-                      "shrink-0 rounded-full border px-3 py-1.5 text-xs font-590 transition",
-                      blocked_badge_class(item.is_blocked)
-                    ]}
-                  >
-                    {blocked_toggle_label(item.is_blocked)}
-                  </button>
+            <div class="rounded-2xl border border-border bg-panel p-5 shadow-card">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                    Items
+                  </p>
+                  <h2 class="mt-2 text-lg font-590 text-text-primary">Manage launch execution</h2>
                 </div>
 
-                <div class="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] md:items-end">
-                  <form
-                    id={"launch-item-owner-#{item.id}"}
-                    phx-change="update_owner"
-                    class="space-y-1"
-                  >
-                    <input type="hidden" name="_id" value={item.id} />
-                    <label class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                      Owner
-                    </label>
-                    <select
-                      name="owner_user_id"
-                      class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20"
+                <span class="rounded-full border border-border bg-surface px-3 py-1 text-xs font-590 text-text-secondary">
+                  {@summary.total} item{if @summary.total == 1, do: "", else: "s"}
+                </span>
+              </div>
+
+              <div
+                :if={Enum.empty?(@launch_items)}
+                class="mt-6 rounded-2xl border border-dashed border-border/80 bg-surface/40 px-5 py-10 text-center"
+              >
+                <p class="text-base font-590 text-text-primary">No launch items yet.</p>
+                <p class="mt-2 text-sm leading-6 text-text-tertiary">
+                  Use the form to create the first item and start tracking readiness.
+                </p>
+              </div>
+
+              <div :if={!Enum.empty?(@launch_items)} class="stagger-children mt-5 space-y-3">
+                <article
+                  :for={item <- @launch_items}
+                  id={"launch-item-#{item.id}"}
+                  class="card-lift rounded-2xl border border-border bg-surface/70 p-4 shadow-sm"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                        Launch item
+                      </p>
+                      <h3 class="mt-1 truncate text-base font-590 text-text-primary">
+                        {item.title}
+                      </h3>
+                      <p class="mt-1 text-sm text-text-tertiary">
+                        Owner: {owner_label(item.owner_user)}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      phx-click="toggle_blocked"
+                      phx-value-id={item.id}
+                      class={[
+                        "shrink-0 rounded-full border px-3 py-1.5 text-xs font-590 transition",
+                        blocked_badge_class(item.is_blocked)
+                      ]}
                     >
-                      <option
-                        :for={{label, value} <- owner_options(@company_members)}
-                        value={value}
-                        selected={value == item.owner_user_id}
-                      >
-                        {label}
-                      </option>
-                    </select>
-                  </form>
+                      {blocked_toggle_label(item.is_blocked)}
+                    </button>
+                  </div>
 
-                  <div class="space-y-1">
-                    <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                      Status
-                    </p>
-                    <div class="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        phx-click="update_status"
-                        phx-value-id={item.id}
-                        phx-value-status="planned"
-                        class={[
-                          "rounded-full border px-3 py-1.5 text-xs font-590 transition",
-                          status_button_class(item.status, "planned")
-                        ]}
+                  <div class="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] md:items-end">
+                    <form
+                      id={"launch-item-owner-#{item.id}"}
+                      phx-change="update_owner"
+                      class="space-y-1"
+                    >
+                      <input type="hidden" name="_id" value={item.id} />
+                      <label class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                        Owner
+                      </label>
+                      <select
+                        name="owner_user_id"
+                        class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20"
                       >
-                        Planned
-                      </button>
-                      <button
-                        type="button"
-                        phx-click="update_status"
-                        phx-value-id={item.id}
-                        phx-value-status="in_progress"
-                        class={[
-                          "rounded-full border px-3 py-1.5 text-xs font-590 transition",
-                          status_button_class(item.status, "in_progress")
-                        ]}
-                      >
-                        In progress
-                      </button>
-                      <button
-                        type="button"
-                        phx-click="update_status"
-                        phx-value-id={item.id}
-                        phx-value-status="completed"
-                        class={[
-                          "rounded-full border px-3 py-1.5 text-xs font-590 transition",
-                          status_button_class(item.status, "completed")
-                        ]}
-                      >
-                        Completed
-                      </button>
+                        <option
+                          :for={{label, value} <- owner_options(@company_members)}
+                          value={value}
+                          selected={value == item.owner_user_id}
+                        >
+                          {label}
+                        </option>
+                      </select>
+                    </form>
+
+                    <div class="space-y-1">
+                      <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                        Status
+                      </p>
+                      <div class="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          phx-click="update_status"
+                          phx-value-id={item.id}
+                          phx-value-status="planned"
+                          class={[
+                            "rounded-full border px-3 py-1.5 text-xs font-590 transition",
+                            status_button_class(item.status, "planned")
+                          ]}
+                        >
+                          Planned
+                        </button>
+                        <button
+                          type="button"
+                          phx-click="update_status"
+                          phx-value-id={item.id}
+                          phx-value-status="in_progress"
+                          class={[
+                            "rounded-full border px-3 py-1.5 text-xs font-590 transition",
+                            status_button_class(item.status, "in_progress")
+                          ]}
+                        >
+                          In progress
+                        </button>
+                        <button
+                          type="button"
+                          phx-click="update_status"
+                          phx-value-id={item.id}
+                          phx-value-status="completed"
+                          class={[
+                            "rounded-full border px-3 py-1.5 text-xs font-590 transition",
+                            status_button_class(item.status, "completed")
+                          ]}
+                        >
+                          Completed
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div class="mt-4 flex flex-wrap items-center gap-2 text-xs text-text-secondary">
-                  <span class={[
-                    "rounded-full border px-2.5 py-1 font-590 uppercase tracking-[0.08em]",
-                    status_badge_class(item.status)
-                  ]}>
-                    {status_label(item.status)}
-                  </span>
-                  <span class="rounded-full border border-border bg-panel px-2.5 py-1 font-590 uppercase tracking-[0.08em] text-text-tertiary">
-                    {if item.is_blocked, do: "Blocked", else: "Clear"}
-                  </span>
-                </div>
-              </article>
+                  <div class="mt-4 flex flex-wrap items-center gap-2 text-xs text-text-secondary">
+                    <span class={[
+                      "rounded-full border px-2.5 py-1 font-590 uppercase tracking-[0.08em]",
+                      status_badge_class(item.status)
+                    ]}>
+                      {status_label(item.status)}
+                    </span>
+                    <span class="rounded-full border border-border bg-panel px-2.5 py-1 font-590 uppercase tracking-[0.08em] text-text-tertiary">
+                      {if item.is_blocked, do: "Blocked", else: "Clear"}
+                    </span>
+                  </div>
+                </article>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
     </.page>
     """

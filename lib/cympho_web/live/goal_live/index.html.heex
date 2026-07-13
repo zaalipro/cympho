@@ -1,410 +1,438 @@
-<.page size="wide" data-ui-complex-page data-density={@digest_density}>
-  <.header
-    title={@page_title}
-    subtitle={
-      if @digest_density == "detailed",
-        do:
-          "Connect company goals to live work, spot floating issues, and keep agents aimed at the right outcome."
-    }
-  >
-    <:actions>
-      <.density_switch
-        density={@digest_density}
-        compact_patch={goal_index_url("compact")}
-        detailed_patch={goal_index_url("detailed")}
-      />
-      <.app_link
-        navigate={~p"/goals/new"}
-        class="cta-glow inline-flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
+<.page size="wide" data-ui-complex-page data-density={@digest_density} class="ember-aurora">
+  <div class="relative z-[1]">
+    <.header>
+      <span class="ember-eyebrow">
+        Mission control · {@alignment_summary.active_goals} active
+      </span>
+      <h1 class="ember-ink mt-3 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+        {@page_title}
+      </h1>
+      <p
+        :if={@digest_density == "detailed"}
+        class="mt-2 max-w-2xl text-body-sm text-text-tertiary"
       >
-        <.icon name="hero-plus-mini" class="h-4 w-4" /> New Goal
-      </.app_link>
-    </:actions>
-  </.header>
-
-  <section class="mb-5 overflow-hidden rounded-lg border border-hairline bg-surface-1 shadow-card">
-    <div class={[
-      "grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start",
-      if(@digest_density == "compact", do: "p-3", else: "p-4")
-    ]}>
-      <div class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
-          <p class="text-eyebrow uppercase text-text-quaternary">Goal command</p>
-          <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{goal_command_badge_class(@goal_command.tone)}"}>
-            {@goal_command.badge}
-          </span>
-        </div>
-
-        <h2 class="mt-2 text-lg font-590 text-text-primary">
-          {@goal_command.heading}
-        </h2>
-        <p
-          :if={@digest_density == "detailed"}
-          class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary"
+        Connect company goals to live work, spot floating issues, and keep agents aimed at the right outcome.
+      </p>
+      <:actions>
+        <.density_switch
+          density={@digest_density}
+          compact_patch={goal_index_url("compact")}
+          detailed_patch={goal_index_url("detailed")}
+        />
+        <.app_link
+          navigate={~p"/goals/new"}
+          class="cta-glow inline-flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
         >
-          {@goal_command.detail}
-        </p>
+          <.icon name="hero-plus-mini" class="h-4 w-4" /> New Goal
+        </.app_link>
+      </:actions>
+    </.header>
 
-        <div
-          :if={@digest_density == "detailed" and @goal_command.focus_label}
-          class="mt-3 flex flex-wrap items-center gap-2 text-xs"
-        >
-          <span class="rounded-full border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
-            {@goal_command.focus_label}
-          </span>
-          <span
-            :if={@goal_command.focus_detail}
-            class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary"
+    <hr class="ember-rule mb-5" />
+
+    <section class="ember-glass mb-5 overflow-hidden">
+      <div class={[
+        "grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start",
+        if(@digest_density == "compact", do: "p-3", else: "p-4")
+      ]}>
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Goal command
+            </p>
+            <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{goal_command_badge_class(@goal_command.tone)}"}>
+              {@goal_command.badge}
+            </span>
+          </div>
+
+          <h2 class="mt-2 text-lg font-590 text-text-primary">
+            {@goal_command.heading}
+          </h2>
+          <p
+            :if={@digest_density == "detailed"}
+            class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary"
           >
-            {@goal_command.focus_detail}
-          </span>
+            {@goal_command.detail}
+          </p>
+
+          <div
+            :if={@digest_density == "detailed" and @goal_command.focus_label}
+            class="mt-3 flex flex-wrap items-center gap-2 text-xs"
+          >
+            <span class="rounded-full border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
+              {@goal_command.focus_label}
+            </span>
+            <span
+              :if={@goal_command.focus_detail}
+              class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary"
+            >
+              {@goal_command.focus_detail}
+            </span>
+          </div>
+
+          <div :if={@digest_density == "compact"} class="mt-3 flex flex-wrap gap-1.5 text-xs">
+            <span class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
+              <span class="hero-check-circle-mini h-3.5 w-3.5 text-white"></span>
+              {@goal_command.aligned_percent}% aligned
+            </span>
+            <span class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
+              <span class="hero-link-mini h-3.5 w-3.5 text-white"></span>
+              {@goal_command.floating_count} need link
+            </span>
+            <span class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
+              <span class="hero-no-symbol-mini h-3.5 w-3.5 text-white"></span>
+              {@goal_command.blocked_goal_count} blocked
+            </span>
+          </div>
         </div>
 
-        <div :if={@digest_density == "compact"} class="mt-3 flex flex-wrap gap-1.5 text-xs">
-          <span class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
-            <span class="hero-check-circle-mini h-3.5 w-3.5 text-white"></span>
-            {@goal_command.aligned_percent}% aligned
-          </span>
-          <span class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
-            <span class="hero-link-mini h-3.5 w-3.5 text-white"></span>
-            {@goal_command.floating_count} need link
-          </span>
-          <span class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
-            <span class="hero-no-symbol-mini h-3.5 w-3.5 text-white"></span>
-            {@goal_command.blocked_goal_count} blocked
-          </span>
-        </div>
+        <.app_link
+          navigate={@goal_command.action_path}
+          class={"inline-flex shrink-0 items-center justify-center rounded-lg border px-3 py-2 text-sm font-590 transition-colors #{goal_command_action_class(@goal_command.tone)}"}
+        >
+          {@goal_command.action_label}
+        </.app_link>
       </div>
 
-      <.app_link
-        navigate={@goal_command.action_path}
-        class={"inline-flex shrink-0 items-center justify-center rounded-lg border px-3 py-2 text-sm font-590 transition-colors #{goal_command_action_class(@goal_command.tone)}"}
+      <div
+        :if={@digest_density == "detailed"}
+        class="grid grid-cols-2 border-t border-hairline sm:grid-cols-5"
       >
-        {@goal_command.action_label}
-      </.app_link>
-    </div>
+        <div class="ember-stat border-r border-hairline px-4 py-3 last:border-r-0">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Aligned
+          </p>
+          <p class="mt-1 font-mono text-xl font-590 text-text-primary tabular-nums">
+            {@goal_command.aligned_percent}%
+          </p>
+        </div>
+        <div class="ember-stat border-r border-hairline px-4 py-3 last:border-r-0">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Needs link
+          </p>
+          <p class="mt-1 font-mono text-xl font-590 text-amber-300 tabular-nums">
+            {@goal_command.floating_count}
+          </p>
+        </div>
+        <div class="ember-stat border-r border-hairline px-4 py-3 last:border-r-0">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Idle goals
+          </p>
+          <p class="mt-1 font-mono text-xl font-590 text-blue-300 tabular-nums">
+            {@goal_command.idle_count}
+          </p>
+        </div>
+        <div class="ember-stat border-r border-hairline px-4 py-3 last:border-r-0">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Blocked goals
+          </p>
+          <p class="mt-1 font-mono text-xl font-590 text-red-300 tabular-nums">
+            {@goal_command.blocked_goal_count}
+          </p>
+        </div>
+        <div class="ember-stat px-4 py-3">
+          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Review goals
+          </p>
+          <p class="mt-1 font-mono text-xl font-590 text-cyan-300 tabular-nums">
+            {@goal_command.review_goal_count}
+          </p>
+        </div>
+      </div>
+    </section>
 
     <div
       :if={@digest_density == "detailed"}
-      class="grid grid-cols-2 border-t border-hairline sm:grid-cols-5"
+      class="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]"
     >
-      <div class="border-r border-hairline px-4 py-3 last:border-r-0">
-        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Aligned
-        </p>
-        <p class="mt-1 font-mono text-xl font-590 text-text-primary tabular-nums">
-          {@goal_command.aligned_percent}%
-        </p>
-      </div>
-      <div class="border-r border-hairline px-4 py-3 last:border-r-0">
-        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Needs link
-        </p>
-        <p class="mt-1 font-mono text-xl font-590 text-amber-300 tabular-nums">
-          {@goal_command.floating_count}
-        </p>
-      </div>
-      <div class="border-r border-hairline px-4 py-3 last:border-r-0">
-        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Idle goals
-        </p>
-        <p class="mt-1 font-mono text-xl font-590 text-blue-300 tabular-nums">
-          {@goal_command.idle_count}
-        </p>
-      </div>
-      <div class="border-r border-hairline px-4 py-3 last:border-r-0">
-        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Blocked goals
-        </p>
-        <p class="mt-1 font-mono text-xl font-590 text-red-300 tabular-nums">
-          {@goal_command.blocked_goal_count}
-        </p>
-      </div>
-      <div class="px-4 py-3">
-        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Review goals
-        </p>
-        <p class="mt-1 font-mono text-xl font-590 text-cyan-300 tabular-nums">
-          {@goal_command.review_goal_count}
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <div
-    :if={@digest_density == "detailed"}
-    class="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]"
-  >
-    <.panel class="overflow-hidden">
-      <div class="border-b border-border px-5 py-4">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p class="text-eyebrow uppercase text-text-quaternary">Mission alignment</p>
-            <h2 class="mt-1 text-card-title text-text-primary">
-              {@alignment_summary.aligned_percent}% of open work is goal-linked
-            </h2>
-          </div>
-          <span class={[
-            "rounded-full border px-2.5 py-1 text-xs font-510",
-            alignment_status_class(@alignment_summary.status)
-          ]}>
-            {alignment_status_label(@alignment_summary.status)}
-          </span>
-        </div>
-        <p class="mt-2 max-w-3xl text-body-sm text-text-tertiary">
-          {alignment_status_detail(@alignment_summary.status)}
-        </p>
-      </div>
-
-      <div class="grid gap-5 px-5 py-5 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <div>
-          <div class="flex items-end gap-2">
-            <span class="text-5xl font-650 leading-none text-text-primary">
-              {@alignment_summary.aligned_percent}
-            </span>
-            <span class="pb-1 text-sm font-510 text-text-tertiary">percent aligned</span>
-          </div>
-          <div class="mt-4 h-2 overflow-hidden rounded-full bg-surface-2">
-            <div
-              class="progress-spring h-full rounded-full bg-primary"
-              style={progress_width(@alignment_summary.aligned_percent)}
-            >
+      <.panel class="overflow-hidden">
+        <div class="border-b border-border px-5 py-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Mission alignment
+              </p>
+              <h2 class="mt-1 text-card-title text-text-primary">
+                {@alignment_summary.aligned_percent}% of open work is goal-linked
+              </h2>
             </div>
+            <span class={[
+              "rounded-full border px-2.5 py-1 text-xs font-510",
+              alignment_status_class(@alignment_summary.status)
+            ]}>
+              {alignment_status_label(@alignment_summary.status)}
+            </span>
           </div>
-          <p class="mt-3 text-caption text-text-tertiary">
-            {@alignment_summary.mission_aligned} goal-linked of {@alignment_summary.total_open} open issues.
+          <p class="mt-2 max-w-3xl text-body-sm text-text-tertiary">
+            {alignment_status_detail(@alignment_summary.status)}
           </p>
+          <hr class="ember-rule mt-4" />
         </div>
 
-        <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <div class="rounded-lg border border-border bg-surface-1 px-3 py-3">
-            <p class="text-eyebrow uppercase text-text-quaternary">Missions</p>
-            <p class="mt-1 text-card-title text-text-primary">
-              {@alignment_summary.active_missions}
-            </p>
-          </div>
-          <div class="rounded-lg border border-border bg-surface-1 px-3 py-3">
-            <p class="text-eyebrow uppercase text-text-quaternary">Active Goals</p>
-            <p class="mt-1 text-card-title text-text-primary">
-              {@alignment_summary.active_goals}
-            </p>
-          </div>
-          <div class="rounded-lg border border-border bg-surface-1 px-3 py-3">
-            <p class="text-eyebrow uppercase text-text-quaternary">Idle Goals</p>
-            <p class="mt-1 text-card-title text-amber-300">
-              {@alignment_summary.goals_without_work}
-            </p>
-          </div>
-          <div class="rounded-lg border border-border bg-surface-1 px-3 py-3">
-            <p class="text-eyebrow uppercase text-text-quaternary">Floating</p>
-            <p class="mt-1 text-card-title text-red-300">{@alignment_summary.floating}</p>
-          </div>
-        </div>
-      </div>
-    </.panel>
-
-    <.panel class="overflow-hidden">
-      <div class="border-b border-border px-5 py-4">
-        <p class="text-eyebrow uppercase text-text-quaternary">Needs links</p>
-        <h2 class="mt-1 text-card-title text-text-primary">Highest-risk floating work</h2>
-      </div>
-      <div class="p-5">
-        <div
-          :if={Enum.empty?(@alignment_summary.risk_issues)}
-          class="rounded-lg border border-dashed border-border px-4 py-6 text-center text-body-sm text-text-tertiary"
-        >
-          No open unlinked issues in this company.
-        </div>
-
-        <ul :if={!Enum.empty?(@alignment_summary.risk_issues)} class="space-y-2">
-          <li :for={issue <- @alignment_summary.risk_issues}>
-            <div class="rounded-lg border border-border bg-surface-1 px-3 py-3 transition-colors hover:bg-surface-2">
-              <div class="flex flex-col gap-3">
-                <.app_link navigate={~p"/issues/#{issue.id}"} class="min-w-0">
-                  <div class="flex items-start justify-between gap-3">
-                    <div class="min-w-0">
-                      <p class="truncate text-sm font-510 text-text-primary">{issue.title}</p>
-                      <p class="mt-1 truncate text-xs text-text-tertiary">
-                        {issue.project_name || "No project"} · {issue.assignee_name ||
-                          "Unassigned"}
-                      </p>
-                    </div>
-                    <.badge variant="priority" value={to_string(issue.priority)} />
-                  </div>
-                </.app_link>
-
-                <form
-                  :if={@goal_link_targets != []}
-                  phx-submit="link_issue_to_goal"
-                  class="flex flex-col gap-2 sm:flex-row"
-                >
-                  <input type="hidden" name="issue_id" value={issue.id} />
-                  <select
-                    name="goal_id"
-                    aria-label={"Attach #{issue.title} to goal"}
-                    class="min-w-0 flex-1 rounded-md border border-border bg-canvas px-2 py-1.5 text-xs text-text-secondary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                  >
-                    <option :for={goal <- @goal_link_targets} value={goal.id}>
-                      {goal.label}
-                    </option>
-                  </select>
-                  <button
-                    type="submit"
-                    class="inline-flex shrink-0 items-center justify-center rounded-md border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-590 text-brand transition-colors hover:border-brand/50 hover:bg-brand/15"
-                  >
-                    Attach
-                  </button>
-                </form>
-
-                <div
-                  :if={@goal_link_targets == []}
-                  class="rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200"
-                >
-                  Create an active goal before linking this work.
-                </div>
+        <div class="grid gap-5 px-5 py-5 lg:grid-cols-[220px_minmax(0,1fr)]">
+          <div>
+            <div class="flex items-end gap-2">
+              <span class="text-5xl font-650 leading-none text-text-primary">
+                {@alignment_summary.aligned_percent}
+              </span>
+              <span class="pb-1 text-sm font-510 text-text-tertiary">percent aligned</span>
+            </div>
+            <div class="mt-4 h-2 overflow-hidden rounded-full bg-surface-2">
+              <div
+                class="progress-spring h-full rounded-full bg-primary"
+                style={progress_width(@alignment_summary.aligned_percent)}
+              >
               </div>
             </div>
-          </li>
-        </ul>
-      </div>
-    </.panel>
-  </div>
-
-  <.infinite_scroll
-    id="goals"
-    has_more={@infinite_scroll[:goals][:has_more?] || false}
-    container_class={
-      if @digest_density == "compact",
-        do: "grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3",
-        else: "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
-    }
-    end_label="All goals loaded"
-  >
-    <:empty>
-      <div class="rounded-xl border border-dashed border-border bg-panel px-6 py-14 text-center">
-        <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-surface-1 text-text-tertiary">
-          <.icon name="hero-flag-mini" class="h-6 w-6" />
-        </div>
-        <p class="text-sm font-510 text-text-primary">No goals yet.</p>
-        <p class="mt-1 text-sm text-text-tertiary">
-          Create a mission so owner requests and agent work can attach to a business outcome.
-        </p>
-        <.app_link
-          navigate={~p"/goals/new"}
-          class="mt-4 inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-        >
-          <.icon name="hero-plus-mini" class="h-4 w-4" /> Create your first goal
-        </.app_link>
-      </div>
-    </:empty>
-
-    <.card :for={{dom_id, goal} <- @streams.goals} id={dom_id}>
-      <% health = goal_health(@goal_work_health, goal.id) %>
-      <div class={[
-        "flex h-full flex-col",
-        if(@digest_density == "compact", do: "p-3", else: "p-5")
-      ]}>
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="text-eyebrow uppercase text-text-quaternary">
-              {goal_type_label(goal.goal_type)}
+            <p class="mt-3 text-caption text-text-tertiary">
+              {@alignment_summary.mission_aligned} goal-linked of {@alignment_summary.total_open} open issues.
             </p>
-            <h3 class="mt-1 truncate text-base font-650 text-text-primary">{goal.title}</h3>
           </div>
-          <div class="flex shrink-0 flex-col items-end gap-1.5">
-            <.badge variant="status" value={goal.status} />
-            <.badge variant="priority" value={goal.priority} />
-          </div>
-        </div>
 
-        <p
-          :if={@digest_density == "detailed" and goal.description not in [nil, ""]}
-          class="mt-3 min-h-10 text-sm leading-5 text-text-tertiary line-clamp-2"
-        >
-          {goal.description}
-        </p>
-        <p
-          :if={@digest_density == "detailed" and goal.description in [nil, ""]}
-          class="mt-3 min-h-10 text-sm leading-5 text-text-quaternary"
-        >
-          No description yet.
-        </p>
-
-        <div
-          :if={@digest_density == "compact"}
-          class="mt-3 flex flex-wrap gap-1.5 text-[11px] text-text-tertiary"
-        >
-          <span class="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1">
-            <span class="hero-list-bullet-mini h-3.5 w-3.5 text-white"></span>
-            {health.open} open
-          </span>
-          <span class="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1">
-            <span class="hero-eye-mini h-3.5 w-3.5 text-white"></span>
-            {health.in_review} review
-          </span>
-          <span class="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1">
-            <span class="hero-check-circle-mini h-3.5 w-3.5 text-white"></span>
-            {health.progress_percent}%
-          </span>
-        </div>
-
-        <div :if={@digest_density == "detailed"} class="mt-5 grid grid-cols-4 gap-2">
-          <div class="rounded-lg border border-border bg-surface-1 px-2.5 py-2">
-            <p class="text-[10px] font-650 uppercase text-text-quaternary">Open</p>
-            <p class="mt-1 text-lg font-650 text-text-primary">{health.open}</p>
-          </div>
-          <div class="rounded-lg border border-border bg-surface-1 px-2.5 py-2">
-            <p class="text-[10px] font-650 uppercase text-text-quaternary">Review</p>
-            <p class="mt-1 text-lg font-650 text-cyan-300">{health.in_review}</p>
-          </div>
-          <div class="rounded-lg border border-border bg-surface-1 px-2.5 py-2">
-            <p class="text-[10px] font-650 uppercase text-text-quaternary">Blocked</p>
-            <p class="mt-1 text-lg font-650 text-red-300">{health.blocked}</p>
-          </div>
-          <div class="rounded-lg border border-border bg-surface-1 px-2.5 py-2">
-            <p class="text-[10px] font-650 uppercase text-text-quaternary">Done</p>
-            <p class="mt-1 text-lg font-650 text-emerald-300">{health.done}</p>
-          </div>
-        </div>
-
-        <div :if={@digest_density == "detailed"} class="mt-4">
-          <div class="mb-2 flex items-center justify-between gap-3 text-xs text-text-tertiary">
-            <span>{health.progress_percent}% complete</span>
-            <span>{health.done}/{health.total} linked issues</span>
-          </div>
-          <div class="h-2 overflow-hidden rounded-full bg-surface-2">
-            <div
-              class="h-full rounded-full bg-emerald-400"
-              style={progress_width(health.progress_percent)}
-            >
+          <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
+              <p class="text-eyebrow uppercase text-text-quaternary">Missions</p>
+              <p class="mt-1 text-card-title text-text-primary">
+                {@alignment_summary.active_missions}
+              </p>
+            </div>
+            <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
+              <p class="text-eyebrow uppercase text-text-quaternary">Active Goals</p>
+              <p class="mt-1 text-card-title text-text-primary">
+                {@alignment_summary.active_goals}
+              </p>
+            </div>
+            <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
+              <p class="text-eyebrow uppercase text-text-quaternary">Idle Goals</p>
+              <p class="mt-1 text-card-title text-amber-300">
+                {@alignment_summary.goals_without_work}
+              </p>
+            </div>
+            <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
+              <p class="text-eyebrow uppercase text-text-quaternary">Floating</p>
+              <p class="mt-1 text-card-title text-red-300">{@alignment_summary.floating}</p>
             </div>
           </div>
         </div>
+      </.panel>
 
-        <div class="mt-5 flex flex-wrap items-center gap-2">
-          <.app_link
-            navigate={~p"/goals/#{goal.id}"}
-            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-          >
-            <.icon name="hero-arrow-right-mini" class="h-3.5 w-3.5" /> Open
-          </.app_link>
-          <.app_link
-            navigate={~p"/goals/#{goal.id}/edit"}
-            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-          >
-            <.icon name="hero-pencil-square-mini" class="h-3.5 w-3.5" /> Edit
-          </.app_link>
-          <button
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs font-510 text-red-300 transition-colors hover:bg-red-500/20"
-            phx-click="delete_goal"
-            phx-value-id={goal.id}
-            data-confirm="Delete this goal?"
-          >
-            <.icon name="hero-trash-mini" class="h-3.5 w-3.5" /> Delete
-          </button>
+      <.panel class="overflow-hidden">
+        <div class="border-b border-border px-5 py-4">
+          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Needs links
+          </p>
+          <h2 class="mt-1 text-card-title text-text-primary">Highest-risk floating work</h2>
         </div>
-      </div>
-    </.card>
-  </.infinite_scroll>
+        <div class="p-5">
+          <div
+            :if={Enum.empty?(@alignment_summary.risk_issues)}
+            class="rounded-lg border border-dashed border-border px-4 py-6 text-center text-body-sm text-text-tertiary"
+          >
+            No open unlinked issues in this company.
+          </div>
+
+          <ul :if={!Enum.empty?(@alignment_summary.risk_issues)} class="space-y-2">
+            <li :for={issue <- @alignment_summary.risk_issues}>
+              <div class="rounded-lg border border-border bg-surface-1 px-3 py-3 transition-colors hover:bg-surface-2">
+                <div class="flex flex-col gap-3">
+                  <.app_link navigate={~p"/issues/#{issue.id}"} class="min-w-0">
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="min-w-0">
+                        <p class="truncate text-sm font-510 text-text-primary">{issue.title}</p>
+                        <p class="mt-1 truncate text-xs text-text-tertiary">
+                          {issue.project_name || "No project"} · {issue.assignee_name ||
+                            "Unassigned"}
+                        </p>
+                      </div>
+                      <.badge variant="priority" value={to_string(issue.priority)} />
+                    </div>
+                  </.app_link>
+
+                  <form
+                    :if={@goal_link_targets != []}
+                    phx-submit="link_issue_to_goal"
+                    class="flex flex-col gap-2 sm:flex-row"
+                  >
+                    <input type="hidden" name="issue_id" value={issue.id} />
+                    <select
+                      name="goal_id"
+                      aria-label={"Attach #{issue.title} to goal"}
+                      class="min-w-0 flex-1 rounded-md border border-border bg-canvas px-2 py-1.5 text-xs text-text-secondary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                    >
+                      <option :for={goal <- @goal_link_targets} value={goal.id}>
+                        {goal.label}
+                      </option>
+                    </select>
+                    <button
+                      type="submit"
+                      class="inline-flex shrink-0 items-center justify-center rounded-md border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-590 text-brand transition-colors hover:border-brand/50 hover:bg-brand/15"
+                    >
+                      Attach
+                    </button>
+                  </form>
+
+                  <div
+                    :if={@goal_link_targets == []}
+                    class="rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200"
+                  >
+                    Create an active goal before linking this work.
+                  </div>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </.panel>
+    </div>
+
+    <.infinite_scroll
+      id="goals"
+      has_more={@infinite_scroll[:goals][:has_more?] || false}
+      container_class={
+        if @digest_density == "compact",
+          do: "grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3",
+          else: "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
+      }
+      end_label="All goals loaded"
+    >
+      <:empty>
+        <div class="rounded-xl border border-dashed border-border bg-panel px-6 py-14 text-center">
+          <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-surface-1 text-text-tertiary">
+            <.icon name="hero-flag-mini" class="h-6 w-6" />
+          </div>
+          <p class="text-sm font-510 text-text-primary">No goals yet.</p>
+          <p class="mt-1 text-sm text-text-tertiary">
+            Create a mission so owner requests and agent work can attach to a business outcome.
+          </p>
+          <.app_link
+            navigate={~p"/goals/new"}
+            class="mt-4 inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+          >
+            <.icon name="hero-plus-mini" class="h-4 w-4" /> Create your first goal
+          </.app_link>
+        </div>
+      </:empty>
+
+      <.card :for={{dom_id, goal} <- @streams.goals} id={dom_id}>
+        <% health = goal_health(@goal_work_health, goal.id) %>
+        <div class={[
+          "relative flex h-full flex-col overflow-hidden rounded-xl",
+          if(@digest_density == "compact", do: "p-3", else: "p-5")
+        ]}>
+          <span
+            aria-hidden="true"
+            class="pointer-events-none absolute inset-y-0 left-0 w-[3px]"
+            style="background: linear-gradient(180deg, #D97757, transparent 90%)"
+          >
+          </span>
+          <span
+            aria-hidden="true"
+            class="pointer-events-none absolute -left-12 -top-12 h-36 w-36 rounded-full opacity-[0.16] blur-2xl"
+            style="background: radial-gradient(closest-side, #D97757, transparent)"
+          >
+          </span>
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="font-serif text-[12px] font-510 italic tracking-[0.02em] text-brand/80">
+                {goal_type_label(goal.goal_type)}
+              </p>
+              <h3 class="mt-1 truncate text-base font-650 text-text-primary">{goal.title}</h3>
+            </div>
+            <div class="flex shrink-0 flex-col items-end gap-1.5">
+              <.badge variant="status" value={goal.status} />
+              <.badge variant="priority" value={goal.priority} />
+            </div>
+          </div>
+
+          <p
+            :if={@digest_density == "detailed" and goal.description not in [nil, ""]}
+            class="mt-3 min-h-10 text-sm leading-5 text-text-tertiary line-clamp-2"
+          >
+            {goal.description}
+          </p>
+          <p
+            :if={@digest_density == "detailed" and goal.description in [nil, ""]}
+            class="mt-3 min-h-10 text-sm leading-5 text-text-quaternary"
+          >
+            No description yet.
+          </p>
+
+          <div
+            :if={@digest_density == "compact"}
+            class="mt-3 flex flex-wrap gap-1.5 text-[11px] text-text-tertiary"
+          >
+            <span class="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1">
+              <span class="hero-list-bullet-mini h-3.5 w-3.5 text-white"></span>
+              {health.open} open
+            </span>
+            <span class="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1">
+              <span class="hero-eye-mini h-3.5 w-3.5 text-white"></span>
+              {health.in_review} review
+            </span>
+            <span class="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1">
+              <span class="hero-check-circle-mini h-3.5 w-3.5 text-white"></span>
+              {health.progress_percent}%
+            </span>
+          </div>
+
+          <div :if={@digest_density == "detailed"} class="mt-5 grid grid-cols-4 gap-2">
+            <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
+              <p class="text-[10px] font-650 uppercase text-text-quaternary">Open</p>
+              <p class="mt-1 text-lg font-650 text-text-primary">{health.open}</p>
+            </div>
+            <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
+              <p class="text-[10px] font-650 uppercase text-text-quaternary">Review</p>
+              <p class="mt-1 text-lg font-650 text-cyan-300">{health.in_review}</p>
+            </div>
+            <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
+              <p class="text-[10px] font-650 uppercase text-text-quaternary">Blocked</p>
+              <p class="mt-1 text-lg font-650 text-red-300">{health.blocked}</p>
+            </div>
+            <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
+              <p class="text-[10px] font-650 uppercase text-text-quaternary">Done</p>
+              <p class="mt-1 text-lg font-650 text-emerald-300">{health.done}</p>
+            </div>
+          </div>
+
+          <div :if={@digest_density == "detailed"} class="mt-4">
+            <div class="mb-2 flex items-center justify-between gap-3 text-xs text-text-tertiary">
+              <span>{health.progress_percent}% complete</span>
+              <span>{health.done}/{health.total} linked issues</span>
+            </div>
+            <div class="h-2 overflow-hidden rounded-full bg-surface-2">
+              <div
+                class="progress-spring h-full rounded-full bg-emerald-400"
+                style={progress_width(health.progress_percent)}
+              >
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-5 flex flex-wrap items-center gap-2">
+            <.app_link
+              navigate={~p"/goals/#{goal.id}"}
+              class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+            >
+              <.icon name="hero-arrow-right-mini" class="h-3.5 w-3.5" /> Open
+            </.app_link>
+            <.app_link
+              navigate={~p"/goals/#{goal.id}/edit"}
+              class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+            >
+              <.icon name="hero-pencil-square-mini" class="h-3.5 w-3.5" /> Edit
+            </.app_link>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs font-510 text-red-300 transition-colors hover:bg-red-500/20"
+              phx-click="delete_goal"
+              phx-value-id={goal.id}
+              data-confirm="Delete this goal?"
+            >
+              <.icon name="hero-trash-mini" class="h-3.5 w-3.5" /> Delete
+            </button>
+          </div>
+        </div>
+      </.card>
+    </.infinite_scroll>
+  </div>
 </.page>

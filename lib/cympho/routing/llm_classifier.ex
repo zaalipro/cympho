@@ -176,9 +176,13 @@ defmodule Cympho.Routing.LlmClassifier do
   end
 
   defp api_key(opts) do
-    opts[:api_key] ||
-      Application.get_env(:cympho, :anthropic_api_key) ||
-      System.get_env("ANTHROPIC_API_KEY")
+    case Keyword.fetch(opts, :api_key) do
+      {:ok, api_key} ->
+        api_key
+
+      :error ->
+        Application.get_env(:cympho, :anthropic_api_key) || System.get_env("ANTHROPIC_API_KEY")
+    end
   end
 
   @doc """

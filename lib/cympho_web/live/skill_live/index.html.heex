@@ -1,221 +1,233 @@
-<div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0" data-ui-complex-page>
-  <.header title={@page_title}>
-    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-      Inspect and govern reusable agent capabilities.
-    </p>
-    <:actions>
-      <.app_link
-        navigate={~p"/skills/new"}
-        class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 min-h-[40px] rounded-button transition-colors inline-flex items-center gap-2"
-      >
-        <.icon name="hero-plus-mini" class="h-4 w-4" /> New Skill
-      </.app_link>
-    </:actions>
-  </.header>
-
-  <section
-    data-testid="skill-health"
-    class="ui-advanced-only mb-5 rounded-lg border border-border bg-panel px-5 py-4"
-  >
-    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-      <div class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
-          <h2 class="text-sm font-590 text-text-primary">Skill Health</h2>
-          <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{skill_health_badge(@skill_health.level)}"}>
-            {@skill_health.label}
-          </span>
-        </div>
-        <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
-          {@skill_health.summary}
-        </p>
-      </div>
-
-      <div class="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:min-w-[440px] sm:grid-cols-5">
-        <.skill_health_metric
-          label="Enabled"
-          value={@skill_health.metrics.enabled_skills}
-          tone={if @skill_health.metrics.enabled_skills > 0, do: :ok, else: :neutral}
-        />
-        <.skill_health_metric
-          label="Manifest"
-          value={@skill_health.metrics.invalid_manifest_skills}
-          tone={if @skill_health.metrics.invalid_manifest_skills > 0, do: :critical, else: :ok}
-        />
-        <.skill_health_metric
-          label="Cap gaps"
-          value={@skill_health.metrics.capabilityless_enabled_skills}
-          tone={
-            if @skill_health.metrics.capabilityless_enabled_skills > 0,
-              do: :warning,
-              else: :ok
-          }
-        />
-        <.skill_health_metric
-          label="Disabled"
-          value={@skill_health.metrics.disabled_skills}
-          tone={if @skill_health.metrics.disabled_skills > 0, do: :warning, else: :ok}
-        />
-        <.skill_health_metric
-          label="Watcher"
-          value={if @skill_health.metrics.hot_reloader_running?, do: "on", else: "off"}
-          tone={if @skill_health.metrics.hot_reloader_running?, do: :ok, else: :warning}
-        />
-      </div>
-    </div>
-
-    <div class="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <div :if={@skill_health.recommendations != []} class="grid gap-2 lg:grid-cols-2">
-        <div
-          :for={recommendation <- @skill_health.recommendations}
-          class={"rounded-md border px-3 py-2 #{skill_recommendation_class(recommendation.severity)}"}
-        >
-          <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
-            {recommendation.label}
-          </p>
-          <p class="mt-1 text-xs leading-5 opacity-85">{recommendation.detail}</p>
-        </div>
-      </div>
-
-      <div
-        :if={@skill_health.recommendations == []}
-        class="rounded-md border border-border bg-surface px-3 py-2"
-      >
-        <p class="text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-          {skill_posture_label(@skill_health.level)}
-        </p>
-        <p class="mt-1 text-xs leading-5 text-text-tertiary">
-          {skill_posture_text(@skill_health.level)}
-        </p>
-      </div>
-
-      <div
-        data-testid="skill-next-action"
-        class={"rounded-md border px-3 py-3 #{skill_next_action_class(@skill_health.next_action.tone)}"}
-      >
-        <p class="text-[11px] font-590 uppercase tracking-[0.1em] opacity-75">
-          Next operator move
-        </p>
-        <p class="mt-1 text-sm font-590">{@skill_health.next_action.label}</p>
-        <p class="mt-1 text-xs leading-5 opacity-85">{@skill_health.next_action.detail}</p>
+<div class="ember-aurora p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0" data-ui-complex-page>
+  <div class="relative z-[1]">
+    <.header>
+      <span class="ember-eyebrow">
+        Skill registry · {@skill_health.metrics.enabled_skills} enabled
+      </span>
+      <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+        {@page_title}
+      </h1>
+      <p class="ui-advanced-only mt-2 max-w-2xl text-body-sm text-text-tertiary">
+        Inspect and govern reusable agent capabilities.
+      </p>
+      <:actions>
         <.app_link
-          navigate={skill_next_action_path(@skill_health.next_action)}
-          class="mt-3 inline-flex min-h-[32px] items-center gap-1.5 rounded-md border border-current/20 px-2.5 py-1.5 text-xs font-590 opacity-90 transition hover:opacity-100"
+          navigate={~p"/skills/new"}
+          class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 min-h-[40px] cta-glow rounded-button transition-colors inline-flex items-center gap-2"
         >
-          {@skill_health.next_action.cta}
-          <.icon name="hero-arrow-right-mini" class="h-3.5 w-3.5" />
+          <.icon name="hero-plus-mini" class="h-4 w-4" /> New Skill
         </.app_link>
-      </div>
-    </div>
-  </section>
+      </:actions>
+    </.header>
 
-  <form
-    phx-change="filter_company"
-    phx-submit="filter_company"
-    class="mb-6 rounded-xl border border-border bg-surface p-4"
-  >
-    <.input
-      type="select"
-      name="company_id"
-      label="Company"
-      value={@selected_company_id || ""}
-      options={Enum.map(@companies, &{&1.name, &1.id})}
-    />
-  </form>
-
-  <.infinite_scroll
-    id="skill"
-    has_more={@infinite_scroll[:skill][:has_more?] || false}
-    container_class="grid grid-cols-1 gap-3"
-  >
-    <:empty>
-      <div
-        data-testid="skills-empty"
-        class="rounded-xl border border-border bg-surface px-6 py-16 text-center"
-      >
-        <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-subtle text-text-tertiary">
-          <.icon name="hero-sparkles-mini" class="h-5 w-5" />
-        </div>
-        <h2 class="text-sm font-590 text-text-primary">
-          {skill_empty_title(@selected_company_id)}
-        </h2>
-        <p class="mx-auto mt-1 max-w-md text-sm leading-5 text-text-tertiary">
-          {skill_empty_detail(@selected_company_id)}
-        </p>
-        <div class="mt-5 flex flex-wrap justify-center gap-2">
-          <.app_link navigate={~p"/skills/new"} class={skill_empty_action_class(:primary)}>
-            New skill
-          </.app_link>
-          <.app_link
-            navigate={~p"/operations#runtime-launch-checklist"}
-            class={skill_empty_action_class(:neutral)}
-          >
-            Runtime checklist
-          </.app_link>
-        </div>
-      </div>
-    </:empty>
-
-    <div
-      :for={{dom_id, skill} <- @streams.skill}
-      id={dom_id}
-      class="group rounded-xl border border-border bg-surface p-4 transition-colors hover:border-border-hover hover:bg-surface-hover"
+    <section
+      data-testid="skill-health"
+      class="ui-advanced-only ember-glass mb-5 px-5 py-4"
     >
-      <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div class="min-w-0 flex-1">
-          <div class="mb-2 flex flex-wrap items-center gap-2">
-            <.app_link
-              navigate={~p"/skills/#{skill.id}"}
-              class="truncate text-sm font-590 text-text-primary hover:text-brand"
-            >
-              {skill.name}
-            </.app_link>
-            <span class={"inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510 #{status_class(skill.enabled)}"}>
-              {status_label(skill.enabled)}
-            </span>
-            <span class={"inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510 #{manifest_class(skill)}"}>
-              {manifest_label(skill)}
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-sm font-590 text-text-primary">Skill Health</h2>
+            <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{skill_health_badge(@skill_health.level)}"}>
+              {@skill_health.label}
             </span>
           </div>
-
-          <p class="line-clamp-2 max-w-3xl text-sm leading-5 text-text-tertiary">
-            {skill.description || "No description provided."}
+          <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
+            {@skill_health.summary}
           </p>
-
-          <div class="ui-advanced-only mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
-            <span>{skill.identifier}</span>
-            <span>v{skill.version || "0.0.0"}</span>
-            <span>{scope_label(skill)}</span>
-            <span>{capability_count(skill)} capabilities</span>
-            <span>{manifest_entrypoint(skill)}</span>
-          </div>
         </div>
 
-        <div class="flex shrink-0 flex-wrap items-center gap-2">
-          <button
-            type="button"
-            phx-click="toggle_skill"
-            phx-value-id={skill.id}
-            class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-          >
-            {if skill.enabled, do: "Disable", else: "Enable"}
-          </button>
-          <.app_link
-            navigate={~p"/skills/#{skill.id}/edit"}
-            class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-          >
-            Edit
-          </.app_link>
-          <button
-            type="button"
-            phx-click="delete"
-            phx-value-id={skill.id}
-            data-confirm="Delete this skill?"
-            class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-510 text-red-400 transition-colors hover:bg-red-500/15"
-          >
-            Delete
-          </button>
+        <div class="ember-stat grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:min-w-[440px] sm:grid-cols-5">
+          <.skill_health_metric
+            label="Enabled"
+            value={@skill_health.metrics.enabled_skills}
+            tone={if @skill_health.metrics.enabled_skills > 0, do: :ok, else: :neutral}
+          />
+          <.skill_health_metric
+            label="Manifest"
+            value={@skill_health.metrics.invalid_manifest_skills}
+            tone={if @skill_health.metrics.invalid_manifest_skills > 0, do: :critical, else: :ok}
+          />
+          <.skill_health_metric
+            label="Cap gaps"
+            value={@skill_health.metrics.capabilityless_enabled_skills}
+            tone={
+              if @skill_health.metrics.capabilityless_enabled_skills > 0,
+                do: :warning,
+                else: :ok
+            }
+          />
+          <.skill_health_metric
+            label="Disabled"
+            value={@skill_health.metrics.disabled_skills}
+            tone={if @skill_health.metrics.disabled_skills > 0, do: :warning, else: :ok}
+          />
+          <.skill_health_metric
+            label="Watcher"
+            value={if @skill_health.metrics.hot_reloader_running?, do: "on", else: "off"}
+            tone={if @skill_health.metrics.hot_reloader_running?, do: :ok, else: :warning}
+          />
         </div>
       </div>
-    </div>
-  </.infinite_scroll>
+
+      <div class="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div :if={@skill_health.recommendations != []} class="grid gap-2 lg:grid-cols-2">
+          <div
+            :for={recommendation <- @skill_health.recommendations}
+            class={"rounded-md border px-3 py-2 #{skill_recommendation_class(recommendation.severity)}"}
+          >
+            <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
+              {recommendation.label}
+            </p>
+            <p class="mt-1 text-xs leading-5 opacity-85">{recommendation.detail}</p>
+          </div>
+        </div>
+
+        <div
+          :if={@skill_health.recommendations == []}
+          class="rounded-md border border-border bg-surface px-3 py-2"
+        >
+          <p class="text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+            {skill_posture_label(@skill_health.level)}
+          </p>
+          <p class="mt-1 text-xs leading-5 text-text-tertiary">
+            {skill_posture_text(@skill_health.level)}
+          </p>
+        </div>
+
+        <div
+          data-testid="skill-next-action"
+          class={"rounded-md border px-3 py-3 #{skill_next_action_class(@skill_health.next_action.tone)}"}
+        >
+          <p class="text-[11px] font-590 uppercase tracking-[0.1em] opacity-75">
+            Next operator move
+          </p>
+          <p class="mt-1 text-sm font-590">{@skill_health.next_action.label}</p>
+          <p class="mt-1 text-xs leading-5 opacity-85">{@skill_health.next_action.detail}</p>
+          <.app_link
+            navigate={skill_next_action_path(@skill_health.next_action)}
+            class="mt-3 inline-flex min-h-[32px] items-center gap-1.5 rounded-md border border-current/20 px-2.5 py-1.5 text-xs font-590 opacity-90 transition hover:opacity-100"
+          >
+            {@skill_health.next_action.cta}
+            <.icon name="hero-arrow-right-mini" class="h-3.5 w-3.5" />
+          </.app_link>
+        </div>
+      </div>
+    </section>
+
+    <form
+      phx-change="filter_company"
+      phx-submit="filter_company"
+      class="mb-6 rounded-xl border border-border bg-surface p-4"
+    >
+      <.input
+        type="select"
+        name="company_id"
+        label="Company"
+        value={@selected_company_id || ""}
+        options={Enum.map(@companies, &{&1.name, &1.id})}
+      />
+    </form>
+
+    <p class="mb-3 px-1 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+      Installed skills
+    </p>
+
+    <.infinite_scroll
+      id="skill"
+      has_more={@infinite_scroll[:skill][:has_more?] || false}
+      container_class="grid grid-cols-1 gap-3"
+    >
+      <:empty>
+        <div
+          data-testid="skills-empty"
+          class="rounded-xl border border-border bg-surface px-6 py-16 text-center"
+        >
+          <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-subtle text-text-tertiary">
+            <.icon name="hero-sparkles-mini" class="h-5 w-5" />
+          </div>
+          <h2 class="text-sm font-590 text-text-primary">
+            {skill_empty_title(@selected_company_id)}
+          </h2>
+          <p class="mx-auto mt-1 max-w-md text-sm leading-5 text-text-tertiary">
+            {skill_empty_detail(@selected_company_id)}
+          </p>
+          <div class="mt-5 flex flex-wrap justify-center gap-2">
+            <.app_link navigate={~p"/skills/new"} class={skill_empty_action_class(:primary)}>
+              New skill
+            </.app_link>
+            <.app_link
+              navigate={~p"/operations#runtime-launch-checklist"}
+              class={skill_empty_action_class(:neutral)}
+            >
+              Runtime checklist
+            </.app_link>
+          </div>
+        </div>
+      </:empty>
+
+      <div
+        :for={{dom_id, skill} <- @streams.skill}
+        id={dom_id}
+        class="group rounded-xl border border-border bg-surface p-4 transition hover:border-border-hover hover:bg-surface-hover hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
+      >
+        <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div class="min-w-0 flex-1">
+            <div class="mb-2 flex flex-wrap items-center gap-2">
+              <.app_link
+                navigate={~p"/skills/#{skill.id}"}
+                class="truncate text-sm font-590 text-text-primary hover:text-brand"
+              >
+                {skill.name}
+              </.app_link>
+              <span class={"inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510 #{status_class(skill.enabled)}"}>
+                {status_label(skill.enabled)}
+              </span>
+              <span class={"inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510 #{manifest_class(skill)}"}>
+                {manifest_label(skill)}
+              </span>
+            </div>
+
+            <p class="line-clamp-2 max-w-3xl text-sm leading-5 text-text-tertiary">
+              {skill.description || "No description provided."}
+            </p>
+
+            <div class="ui-advanced-only mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
+              <span>{skill.identifier}</span>
+              <span>v{skill.version || "0.0.0"}</span>
+              <span>{scope_label(skill)}</span>
+              <span>{capability_count(skill)} capabilities</span>
+              <span>{manifest_entrypoint(skill)}</span>
+            </div>
+          </div>
+
+          <div class="flex shrink-0 flex-wrap items-center gap-2">
+            <button
+              type="button"
+              phx-click="toggle_skill"
+              phx-value-id={skill.id}
+              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+            >
+              {if skill.enabled, do: "Disable", else: "Enable"}
+            </button>
+            <.app_link
+              navigate={~p"/skills/#{skill.id}/edit"}
+              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+            >
+              Edit
+            </.app_link>
+            <button
+              type="button"
+              phx-click="delete"
+              phx-value-id={skill.id}
+              data-confirm="Delete this skill?"
+              class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-510 text-red-400 transition-colors hover:bg-red-500/15"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    </.infinite_scroll>
+  </div>
 </div>

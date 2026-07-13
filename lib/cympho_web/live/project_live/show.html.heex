@@ -1,389 +1,400 @@
-<.page size="wide" data-ui-complex-page>
-  <.header title={@project.name}>
-    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-      Project command center for strategy, issue flow, runtime readiness, repository context, and agent environment.
-    </p>
-    <:actions>
-      <.app_link
-        navigate={~p"/projects"}
-        class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-      >
-        <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Projects
-      </.app_link>
-      <.app_link
-        navigate={~p"/issues/new?project_id=#{@project.id}"}
-        class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
-      >
-        <.icon name="hero-plus-mini" class="h-3.5 w-3.5" /> New issue
-      </.app_link>
-    </:actions>
-  </.header>
-
-  <section
-    data-testid="project-command"
-    class="mb-5 overflow-hidden rounded-lg border border-border bg-panel shadow-card"
-  >
-    <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-      <div class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            Project command
-          </p>
-          <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{project_state_class(@project_command.tone)}"}>
-            {@project_command.badge}
-          </span>
-          <.badge variant="pill" value={@project.prefix} />
-          <.badge variant="status" value={to_string(@project.status)} />
-        </div>
-
-        <h2 class="mt-2 text-lg font-590 text-text-primary">
-          {@project_command.heading}
-        </h2>
-        <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
-          {@project_command.detail}
-        </p>
-
-        <div class="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs">
-          <span class="max-w-full truncate rounded-full border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
-            {@project_command.focus_label}
-          </span>
-          <span class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary">
-            {@project_command.focus_detail}
-          </span>
-        </div>
-      </div>
-
-      <.app_link
-        navigate={@project_command.action_path}
-        class={"inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-590 transition-colors #{project_action_class(@project_command.tone)}"}
-      >
-        <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
-        {@project_command.action_label}
-      </.app_link>
-    </div>
-
-    <div class="ui-advanced-only grid grid-cols-2 border-t border-border sm:grid-cols-4 lg:grid-cols-7">
-      <.project_command_metric
-        :for={metric <- @project_command.metrics}
-        label={metric.label}
-        value={metric.value}
-        tone={metric.tone}
-      />
-    </div>
-  </section>
-
-  <div class="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
-    <section class="overflow-hidden rounded-lg border border-border bg-panel">
-      <div class="border-b border-border px-4 py-3">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p class="text-sm font-590 text-text-primary">Work queue</p>
-            <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
-              Recent project issues, newest first. Open the full queue when blockers or reviews pile up.
-            </p>
-          </div>
-          <.app_link
-            navigate={~p"/issues?project_id=#{@project.id}"}
-            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-          >
-            <.icon name="hero-list-bullet-mini" class="h-3.5 w-3.5" /> All issues
-          </.app_link>
-        </div>
-      </div>
-
-      <div :if={!Enum.empty?(@issues)} class="divide-y divide-border">
+<.page size="wide" data-ui-complex-page class="ember-aurora">
+  <div class="relative z-[1]">
+    <.header>
+      <span class="ember-eyebrow">Project command</span>
+      <h1 class="ember-ink mt-3 truncate font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+        {@project.name}
+      </h1>
+      <p class="ui-advanced-only mt-2 max-w-2xl text-body-sm text-text-tertiary">
+        Project command center for strategy, issue flow, runtime readiness, repository context, and agent environment.
+      </p>
+      <:actions>
         <.app_link
-          :for={issue <- @issues}
-          navigate={~p"/issues/#{issue.id}"}
-          class="group flex min-w-0 items-center gap-3 p-4 hover:bg-surface-hover"
+          navigate={~p"/projects"}
+          class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
         >
-          <.badge variant="status" value={to_string(issue.status)} />
-          <span
-            :if={issue.identifier}
-            class="shrink-0 font-mono text-xs text-text-quaternary"
-          >
-            {issue.identifier}
-          </span>
-          <span class="min-w-0 flex-1 truncate text-sm text-text-secondary group-hover:text-text-primary">
-            {issue.title}
-          </span>
-          <.badge variant="priority" value={to_string(issue.priority)} />
+          <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Projects
+        </.app_link>
+        <.app_link
+          navigate={~p"/issues/new?project_id=#{@project.id}"}
+          class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
+        >
+          <.icon name="hero-plus-mini" class="h-3.5 w-3.5" /> New issue
+        </.app_link>
+      </:actions>
+    </.header>
+
+    <section data-testid="project-command" class="ember-glass mb-5 overflow-hidden">
+      <div class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+              Project command
+            </p>
+            <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{project_state_class(@project_command.tone)}"}>
+              {@project_command.badge}
+            </span>
+            <.badge variant="pill" value={@project.prefix} />
+            <.badge variant="status" value={to_string(@project.status)} />
+          </div>
+
+          <h2 class="mt-2 text-lg font-590 text-text-primary">
+            {@project_command.heading}
+          </h2>
+          <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
+            {@project_command.detail}
+          </p>
+
+          <div class="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs">
+            <span class="max-w-full truncate rounded-full border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
+              {@project_command.focus_label}
+            </span>
+            <span class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary">
+              {@project_command.focus_detail}
+            </span>
+          </div>
+        </div>
+
+        <.app_link
+          navigate={@project_command.action_path}
+          class={"inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-590 transition-colors #{project_action_class(@project_command.tone)}"}
+        >
+          <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
+          {@project_command.action_label}
         </.app_link>
       </div>
 
-      <.empty_state
-        :if={Enum.empty?(@issues)}
-        title="No issues in this project"
-        message="Create the first executable issue so agents can start moving this workstream."
-      >
-        <:icon_slot>
-          <.icon name="hero-list-bullet-mini" class="h-5 w-5" />
-        </:icon_slot>
-        <:actions>
-          <.app_link
-            navigate={~p"/issues/new?project_id=#{@project.id}"}
-            class="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
-          >
-            <.icon name="hero-plus-mini" class="h-4 w-4" /> New issue
-          </.app_link>
-        </:actions>
-      </.empty_state>
+      <div class="ui-advanced-only grid grid-cols-2 border-t border-border sm:grid-cols-4 lg:grid-cols-7">
+        <.project_command_metric
+          :for={metric <- @project_command.metrics}
+          label={metric.label}
+          value={metric.value}
+          tone={metric.tone}
+        />
+      </div>
     </section>
 
-    <div class="grid gap-5">
-      <section
-        data-testid="project-readiness"
-        class="ui-advanced-only overflow-hidden rounded-lg border border-border bg-panel"
-      >
-        <div class="border-b border-border px-4 py-3">
-          <p class="text-sm font-590 text-text-primary">Execution readiness</p>
-          <p class="mt-1 text-xs leading-5 text-text-tertiary">
-            The minimum context agents need before they can execute safely.
-          </p>
-        </div>
-
-        <div class="divide-y divide-border">
-          <div class="p-4">
-            <div class="flex items-start gap-3">
-              <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-text-secondary">
-                <.icon name="hero-link-mini" class="h-4 w-4" />
-              </div>
-              <div class="min-w-0">
-                <p class="text-sm font-590 text-text-primary">Repository</p>
-                <a
-                  :if={@project.repo_url not in [nil, ""]}
-                  href={@project.repo_url}
-                  target="_blank"
-                  rel="noopener"
-                  class="mt-1 inline-flex max-w-full items-center gap-1.5 truncate text-xs text-primary hover:underline"
-                >
-                  <span class="truncate">{@project.repo_url}</span>
-                  <.icon name="hero-arrow-top-right-on-square-mini" class="h-3.5 w-3.5 shrink-0" />
-                </a>
-                <p :if={@project.repo_url in [nil, ""]} class="mt-1 text-xs text-text-tertiary">
-                  Not configured. Add a repository URL in project settings.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div class="p-4">
-            <div class="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p class="text-sm font-590 text-text-primary">Workspaces</p>
-                <p class="mt-1 text-xs text-text-tertiary">
-                  Project workspaces isolate agent execution and previews.
-                </p>
-              </div>
-              <span class="font-mono text-sm font-590 text-text-primary">
-                {length(@project_workspaces)}
-              </span>
-            </div>
-
-            <div :if={!Enum.empty?(@project_workspaces)} class="space-y-2">
-              <.app_link
-                :for={workspace <- @project_workspaces}
-                navigate={~p"/workspaces/#{workspace.id}"}
-                class="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-              >
-                <span class="min-w-0 truncate">{workspace.name}</span>
-                <span class="min-w-0 truncate text-text-quaternary">
-                  {workspace_location(workspace)}
-                </span>
-              </.app_link>
-            </div>
-
-            <p :if={Enum.empty?(@project_workspaces)} class="text-xs text-text-tertiary">
-              No workspace is attached yet.
-            </p>
-          </div>
-
-          <div class="p-4">
-            <div class="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p class="text-sm font-590 text-text-primary">Environment keys</p>
-                <p class="mt-1 text-xs text-text-tertiary">
-                  Values are encrypted and injected into project-scoped agent runs.
-                </p>
-              </div>
-              <span class="font-mono text-sm font-590 text-text-primary">
-                {length(@env_keys)}
-              </span>
-            </div>
-
-            <div :if={!Enum.empty?(@env_keys)} class="flex flex-wrap gap-2">
-              <span
-                :for={key <- @env_keys}
-                class="rounded-full border border-border bg-surface px-2 py-1 font-mono text-xs text-text-secondary"
-              >
-                {key}
-              </span>
-            </div>
-            <p :if={Enum.empty?(@env_keys)} class="text-xs text-text-tertiary">
-              No project environment keys.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section
-        data-testid="project-goals"
-        class="overflow-hidden rounded-lg border border-border bg-panel"
-      >
-        <div class="border-b border-border px-4 py-3">
+    <div class="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+      <section class="overflow-hidden rounded-lg border border-border bg-panel">
+        <div class="px-4 py-3">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p class="text-sm font-590 text-text-primary">Mission control</p>
+              <p class="text-sm font-590 text-text-primary">Work queue</p>
               <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
-                Root goals connected to this project and their issue progress.
+                Recent project issues, newest first. Open the full queue when blockers or reviews pile up.
               </p>
             </div>
             <.app_link
-              navigate={~p"/goals"}
+              navigate={~p"/issues?project_id=#{@project.id}"}
               class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
             >
-              <.icon name="hero-flag-mini" class="h-3.5 w-3.5" /> Goals
+              <.icon name="hero-list-bullet-mini" class="h-3.5 w-3.5" /> All issues
             </.app_link>
           </div>
+          <hr class="ember-rule mt-3" />
         </div>
 
-        <div :if={!Enum.empty?(@goal_progress)} class="divide-y divide-border">
+        <div :if={!Enum.empty?(@issues)} class="divide-y divide-border">
           <.app_link
-            :for={{goal, progress} <- @goal_progress}
-            navigate={~p"/goals/#{goal.id}"}
-            class="block p-4 hover:bg-surface-hover"
+            :for={issue <- @issues}
+            navigate={~p"/issues/#{issue.id}"}
+            class="group flex min-w-0 items-center gap-3 p-4 hover:bg-surface-hover"
           >
-            <div class="flex min-w-0 items-start justify-between gap-3">
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <h3 class="truncate text-sm font-590 text-text-primary">{goal.title}</h3>
-                  <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{goal_status_class(goal.status)}"}>
-                    {String.capitalize(goal.status)}
-                  </span>
-                </div>
-                <p class="mt-1 text-xs text-text-tertiary">
-                  {goal_type_label(goal.goal_type)} / {progress.done} of {progress.total} issues done
-                </p>
-              </div>
-              <span class="shrink-0 font-mono text-sm font-590 text-text-secondary">
-                {progress.percent}%
-              </span>
-            </div>
-            <div class="mt-3 h-2 overflow-hidden rounded-full bg-surface">
-              <div
-                class="h-full rounded-full bg-emerald-400"
-                style={progress_width(progress.percent)}
-              />
-            </div>
+            <.badge variant="status" value={to_string(issue.status)} />
+            <span
+              :if={issue.identifier}
+              class="shrink-0 font-mono text-xs text-text-quaternary"
+            >
+              {issue.identifier}
+            </span>
+            <span class="min-w-0 flex-1 truncate text-sm text-text-secondary group-hover:text-text-primary">
+              {issue.title}
+            </span>
+            <.badge variant="priority" value={to_string(issue.priority)} />
           </.app_link>
         </div>
 
         <.empty_state
-          :if={Enum.empty?(@goal_progress)}
-          title="No goals linked"
-          message="Connect this project to a mission or goal so execution stays aligned."
+          :if={Enum.empty?(@issues)}
+          title="No issues in this project"
+          message="Create the first executable issue so agents can start moving this workstream."
         >
           <:icon_slot>
-            <.icon name="hero-flag-mini" class="h-5 w-5" />
+            <.icon name="hero-list-bullet-mini" class="h-5 w-5" />
           </:icon_slot>
+          <:actions>
+            <.app_link
+              navigate={~p"/issues/new?project_id=#{@project.id}"}
+              class="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
+            >
+              <.icon name="hero-plus-mini" class="h-4 w-4" /> New issue
+            </.app_link>
+          </:actions>
         </.empty_state>
       </section>
-    </div>
-  </div>
 
-  <div class="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.75fr)]">
-    <section class="overflow-hidden rounded-lg border border-border bg-panel">
-      <div class="border-b border-border px-4 py-3">
-        <p class="text-sm font-590 text-text-primary">Project settings</p>
-        <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
-          Update the project identity, repo, and sidebar color agents see in context.
-        </p>
-      </div>
-
-      <.simple_form for={@form} phx-submit="save" class="space-y-5 p-5">
-        <.input field={@form[:name]} label="Name" required />
-        <.input
-          field={@form[:description]}
-          label="Description"
-          type="textarea"
-          rows={3}
-        />
-        <div class="grid gap-5 sm:grid-cols-2">
-          <.input field={@form[:prefix]} label="Prefix" required placeholder="PROJ" />
-          <.select
-            name="project[status]"
-            label="Status"
-            options={[Active: "active", Archived: "archived"]}
-          />
-        </div>
-        <.input
-          field={@form[:repo_url]}
-          label="Repository URL"
-          placeholder="https://github.com/owner/repo"
-        />
-
-        <.color_swatch_picker field={@form[:color]} label="Sidebar color" />
-
-        <:actions>
-          <div class="flex items-center justify-end border-t border-border pt-5">
-            <.button type="submit" variant="primary">Save changes</.button>
+      <div class="grid gap-5">
+        <section
+          data-testid="project-readiness"
+          class="ui-advanced-only overflow-hidden rounded-lg border border-border bg-panel"
+        >
+          <div class="px-4 py-3">
+            <p class="text-sm font-590 text-text-primary">Execution readiness</p>
+            <p class="mt-1 text-xs leading-5 text-text-tertiary">
+              The minimum context agents need before they can execute safely.
+            </p>
+            <hr class="ember-rule mt-3" />
           </div>
-        </:actions>
-      </.simple_form>
-    </section>
 
-    <section class="ui-advanced-only overflow-hidden rounded-lg border border-border bg-panel">
-      <div class="border-b border-border px-4 py-3">
-        <p class="text-sm font-590 text-text-primary">Environment variables</p>
-        <p class="mt-1 text-xs leading-5 text-text-tertiary">
-          Store project-scoped runtime credentials. Values are never displayed after save.
-        </p>
-      </div>
+          <div class="divide-y divide-border">
+            <div class="p-4">
+              <div class="flex items-start gap-3">
+                <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-text-secondary">
+                  <.icon name="hero-link-mini" class="h-4 w-4" />
+                </div>
+                <div class="min-w-0">
+                  <p class="text-sm font-590 text-text-primary">Repository</p>
+                  <a
+                    :if={@project.repo_url not in [nil, ""]}
+                    href={@project.repo_url}
+                    target="_blank"
+                    rel="noopener"
+                    class="mt-1 inline-flex max-w-full items-center gap-1.5 truncate text-xs text-primary hover:underline"
+                  >
+                    <span class="truncate">{@project.repo_url}</span>
+                    <.icon
+                      name="hero-arrow-top-right-on-square-mini"
+                      class="h-3.5 w-3.5 shrink-0"
+                    />
+                  </a>
+                  <p :if={@project.repo_url in [nil, ""]} class="mt-1 text-xs text-text-tertiary">
+                    Not configured. Add a repository URL in project settings.
+                  </p>
+                </div>
+              </div>
+            </div>
 
-      <div class="space-y-4 p-5">
-        <div
-          :if={Enum.empty?(@secrets)}
-          class="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-text-tertiary"
+            <div class="p-4">
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm font-590 text-text-primary">Workspaces</p>
+                  <p class="mt-1 text-xs text-text-tertiary">
+                    Project workspaces isolate agent execution and previews.
+                  </p>
+                </div>
+                <span class="font-mono text-sm font-590 text-text-primary">
+                  {length(@project_workspaces)}
+                </span>
+              </div>
+
+              <div :if={!Enum.empty?(@project_workspaces)} class="space-y-2">
+                <.app_link
+                  :for={workspace <- @project_workspaces}
+                  navigate={~p"/workspaces/#{workspace.id}"}
+                  class="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                >
+                  <span class="min-w-0 truncate">{workspace.name}</span>
+                  <span class="min-w-0 truncate text-text-quaternary">
+                    {workspace_location(workspace)}
+                  </span>
+                </.app_link>
+              </div>
+
+              <p :if={Enum.empty?(@project_workspaces)} class="text-xs text-text-tertiary">
+                No workspace is attached yet.
+              </p>
+            </div>
+
+            <div class="p-4">
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm font-590 text-text-primary">Environment keys</p>
+                  <p class="mt-1 text-xs text-text-tertiary">
+                    Values are encrypted and injected into project-scoped agent runs.
+                  </p>
+                </div>
+                <span class="font-mono text-sm font-590 text-text-primary">
+                  {length(@env_keys)}
+                </span>
+              </div>
+
+              <div :if={!Enum.empty?(@env_keys)} class="flex flex-wrap gap-2">
+                <span
+                  :for={key <- @env_keys}
+                  class="rounded-full border border-border bg-surface px-2 py-1 font-mono text-xs text-text-secondary"
+                >
+                  {key}
+                </span>
+              </div>
+              <p :if={Enum.empty?(@env_keys)} class="text-xs text-text-tertiary">
+                No project environment keys.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section
+          data-testid="project-goals"
+          class="overflow-hidden rounded-lg border border-border bg-panel"
         >
-          No environment variables yet.
+          <div class="px-4 py-3">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="text-sm font-590 text-text-primary">Mission control</p>
+                <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
+                  Root goals connected to this project and their issue progress.
+                </p>
+              </div>
+              <.app_link
+                navigate={~p"/goals"}
+                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+              >
+                <.icon name="hero-flag-mini" class="h-3.5 w-3.5" /> Goals
+              </.app_link>
+            </div>
+            <hr class="ember-rule mt-3" />
+          </div>
+
+          <div :if={!Enum.empty?(@goal_progress)} class="divide-y divide-border">
+            <.app_link
+              :for={{goal, progress} <- @goal_progress}
+              navigate={~p"/goals/#{goal.id}"}
+              class="block p-4 hover:bg-surface-hover"
+            >
+              <div class="flex min-w-0 items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="truncate text-sm font-590 text-text-primary">{goal.title}</h3>
+                    <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{goal_status_class(goal.status)}"}>
+                      {String.capitalize(goal.status)}
+                    </span>
+                  </div>
+                  <p class="mt-1 text-xs text-text-tertiary">
+                    {goal_type_label(goal.goal_type)} / {progress.done} of {progress.total} issues done
+                  </p>
+                </div>
+                <span class="shrink-0 font-mono text-sm font-590 text-text-secondary">
+                  {progress.percent}%
+                </span>
+              </div>
+              <div class="mt-3 h-2 overflow-hidden rounded-full bg-surface">
+                <div
+                  class="h-full rounded-full bg-emerald-400"
+                  style={progress_width(progress.percent)}
+                />
+              </div>
+            </.app_link>
+          </div>
+
+          <.empty_state
+            :if={Enum.empty?(@goal_progress)}
+            title="No goals linked"
+            message="Connect this project to a mission or goal so execution stays aligned."
+          >
+            <:icon_slot>
+              <.icon name="hero-flag-mini" class="h-5 w-5" />
+            </:icon_slot>
+          </.empty_state>
+        </section>
+      </div>
+    </div>
+
+    <div class="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.75fr)]">
+      <section class="overflow-hidden rounded-lg border border-border bg-panel">
+        <div class="px-4 py-3">
+          <p class="text-sm font-590 text-text-primary">Project settings</p>
+          <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
+            Update the project identity, repo, and sidebar color agents see in context.
+          </p>
+          <hr class="ember-rule mt-3" />
         </div>
 
-        <ul
-          :if={!Enum.empty?(@secrets)}
-          class="overflow-hidden rounded-md border border-border divide-y divide-border"
-        >
-          <li
-            :for={secret <- @secrets}
-            class="flex items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-hover"
-          >
-            <.icon name="hero-key-mini" class="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
-            <span class="font-mono text-xs text-text-primary">{secret.key}</span>
-            <span class="font-mono text-xs text-text-tertiary">********</span>
-            <button
-              type="button"
-              phx-click="delete_env"
-              phx-value-id={secret.id}
-              data-confirm={"Remove #{secret.key}?"}
-              class="ml-auto rounded-md p-1.5 text-text-tertiary transition-colors hover:bg-red-500/10 hover:text-red-300"
-              aria-label={"Delete #{secret.key}"}
-            >
-              <.icon name="hero-trash-mini" class="h-3.5 w-3.5" />
-            </button>
-          </li>
-        </ul>
+        <.simple_form for={@form} phx-submit="save" class="space-y-5 p-5">
+          <.input field={@form[:name]} label="Name" required />
+          <.input
+            field={@form[:description]}
+            label="Description"
+            type="textarea"
+            rows={3}
+          />
+          <div class="grid gap-5 sm:grid-cols-2">
+            <.input field={@form[:prefix]} label="Prefix" required placeholder="PROJ" />
+            <.select
+              name="project[status]"
+              label="Status"
+              options={[Active: "active", Archived: "archived"]}
+            />
+          </div>
+          <.input
+            field={@form[:repo_url]}
+            label="Repository URL"
+            placeholder="https://github.com/owner/repo"
+          />
 
-        <.simple_form
-          for={@env_form}
-          phx-submit="add_env"
-          class="grid grid-cols-1 items-end gap-2 border-t border-border pt-4 sm:grid-cols-[160px_1fr_auto]"
-        >
-          <.input field={@env_form[:key]} label="Key" placeholder="GITHUB_TOKEN" />
-          <.input field={@env_form[:value]} type="password" label="Value" placeholder="ghp_..." />
+          <.color_swatch_picker field={@form[:color]} label="Sidebar color" />
+
           <:actions>
-            <.button type="submit" variant="secondary">Add</.button>
+            <div class="flex items-center justify-end border-t border-border pt-5">
+              <.button type="submit" variant="primary">Save changes</.button>
+            </div>
           </:actions>
         </.simple_form>
-      </div>
-    </section>
+      </section>
+
+      <section class="ui-advanced-only overflow-hidden rounded-lg border border-border bg-panel">
+        <div class="px-4 py-3">
+          <p class="text-sm font-590 text-text-primary">Environment variables</p>
+          <p class="mt-1 text-xs leading-5 text-text-tertiary">
+            Store project-scoped runtime credentials. Values are never displayed after save.
+          </p>
+          <hr class="ember-rule mt-3" />
+        </div>
+
+        <div class="space-y-4 p-5">
+          <div
+            :if={Enum.empty?(@secrets)}
+            class="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-text-tertiary"
+          >
+            No environment variables yet.
+          </div>
+
+          <ul
+            :if={!Enum.empty?(@secrets)}
+            class="overflow-hidden rounded-md border border-border divide-y divide-border"
+          >
+            <li
+              :for={secret <- @secrets}
+              class="flex items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-hover"
+            >
+              <.icon name="hero-key-mini" class="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
+              <span class="font-mono text-xs text-text-primary">{secret.key}</span>
+              <span class="font-mono text-xs text-text-tertiary">********</span>
+              <button
+                type="button"
+                phx-click="delete_env"
+                phx-value-id={secret.id}
+                data-confirm={"Remove #{secret.key}?"}
+                class="ml-auto rounded-md p-1.5 text-text-tertiary transition-colors hover:bg-red-500/10 hover:text-red-300"
+                aria-label={"Delete #{secret.key}"}
+              >
+                <.icon name="hero-trash-mini" class="h-3.5 w-3.5" />
+              </button>
+            </li>
+          </ul>
+
+          <.simple_form
+            for={@env_form}
+            phx-submit="add_env"
+            class="grid grid-cols-1 items-end gap-2 border-t border-border pt-4 sm:grid-cols-[160px_1fr_auto]"
+          >
+            <.input field={@env_form[:key]} label="Key" placeholder="GITHUB_TOKEN" />
+            <.input field={@env_form[:value]} type="password" label="Value" placeholder="ghp_..." />
+            <:actions>
+              <.button type="submit" variant="secondary">Add</.button>
+            </:actions>
+          </.simple_form>
+        </div>
+      </section>
+    </div>
   </div>
 </.page>

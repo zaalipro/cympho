@@ -65,7 +65,9 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
       <div class="p-4 lg:p-5 space-y-4 lg:sticky lg:top-0 lg:max-h-screen lg:overflow-y-auto">
         <div class="space-y-3">
           <div class="flex items-center justify-between gap-3">
-            <span class="text-eyebrow text-ink-tertiary uppercase">Status</span>
+            <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Status
+            </span>
             <.combobox
               id="issue-status-combobox"
               options={status_combobox_options(@issue.status)}
@@ -77,7 +79,9 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             />
           </div>
           <div class="flex items-center justify-between gap-3">
-            <span class="text-eyebrow text-ink-tertiary uppercase">Priority</span>
+            <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Priority
+            </span>
             <.combobox
               id="issue-priority-combobox"
               options={priority_combobox_options()}
@@ -89,7 +93,9 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             />
           </div>
           <div class="flex items-center justify-between gap-3">
-            <span class="text-eyebrow text-ink-tertiary uppercase">Assignee</span>
+            <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Assignee
+            </span>
             <.combobox
               id="issue-assignee-combobox"
               options={assignee_combobox_options(@all_agents)}
@@ -101,12 +107,16 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
             />
           </div>
           <div class="flex items-center justify-between gap-3">
-            <span class="text-eyebrow text-ink-tertiary uppercase">Due</span>
+            <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Due
+            </span>
             <span class={["text-caption", (@issue.due_on && "text-ink") || "text-ink-tertiary"]}>
               {(@issue.due_on && Calendar.strftime(@issue.due_on, "%b %-d, %Y")) || "—"}
             </span>
           </div>
         </div>
+
+        <hr class="ember-rule" />
 
         <% mission_goal = issue_goal(@issue) %>
         <div
@@ -393,7 +403,9 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
         >
           <div class="flex items-start justify-between gap-3">
             <div>
-              <p class="text-eyebrow text-ink-tertiary uppercase">CEO flow</p>
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                CEO flow
+              </p>
               <p class="mt-1 text-sm font-510 text-ink">Owner request loop</p>
             </div>
             <span class="shrink-0 rounded-full border border-border bg-panel px-2 py-0.5 text-[10px] font-510 uppercase text-ink-tertiary">
@@ -422,7 +434,9 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
         >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="text-eyebrow text-ink-tertiary uppercase">CEO launch preview</p>
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                CEO launch preview
+              </p>
               <p class="mt-1 text-sm font-510 text-ink">{@ceo_launch_preview.target}</p>
             </div>
             <span class="shrink-0 rounded-full border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-510 uppercase text-sky-200">
@@ -515,7 +529,9 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           <% relaunch_setup_action = relaunch_setup_action(@issue_preflight) %>
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="text-eyebrow text-ink-tertiary uppercase">CEO outcome</p>
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                CEO outcome
+              </p>
               <p class="mt-1 text-sm font-510 text-ink">{@ceo_outcome_card.title}</p>
               <p class="mt-1 text-caption text-ink-tertiary">{@ceo_outcome_card.detail}</p>
             </div>
@@ -607,7 +623,9 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           <% readiness = agent_readiness(@issue, agent, @orchestrator_enabled?, @issue_preflight) %>
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="text-eyebrow text-ink-tertiary uppercase">Agent readiness</p>
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Agent readiness
+              </p>
               <p class="mt-1 truncate text-sm font-510 text-ink">{agent.name}</p>
               <p class="mt-0.5 text-caption text-ink-tertiary">{readiness.runtime}</p>
             </div>
@@ -679,7 +697,9 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           <% readiness = auto_route_readiness(@issue, @issue_preflight) %>
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="text-eyebrow text-ink-tertiary uppercase">Auto-route readiness</p>
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Auto-route readiness
+              </p>
               <p class="mt-1 truncate text-sm font-510 text-ink">
                 {readiness.agent_name}
               </p>
@@ -719,7 +739,7 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           class="ui-advanced-only group"
           open={@issue.github_pr_number not in [nil, 0] or @issue.github_pr_url not in [nil, ""]}
         >
-          <summary class="flex items-center justify-between gap-2 cursor-pointer text-eyebrow text-ink-tertiary uppercase list-none">
+          <summary class="flex items-center justify-between gap-2 cursor-pointer font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90 list-none">
             <span>GitHub PR</span>
             <.icon
               name="hero-chevron-down-mini"
@@ -856,7 +876,9 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
         <hr :if={!Enum.empty?(@documents)} class="border-hairline" />
 
         <div :if={!Enum.empty?(@documents)} class="space-y-2">
-          <span class="text-eyebrow text-ink-tertiary uppercase">Documents</span>
+          <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Documents
+          </span>
           <ul class="space-y-1">
             <li :for={doc <- @documents} class="text-caption text-ink-muted truncate">
               {doc.title || doc.key}

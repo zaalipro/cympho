@@ -1,99 +1,119 @@
-<div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0" data-ui-complex-page>
-  <.header
-    title={@routine.name}
-    subtitle={@routine.description || "Routine details and run history."}
-  >
-    <:actions>
-      <.app_link
-        navigate={~p"/routines"}
-        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-      >
-        Back
-      </.app_link>
-      <.app_link
-        navigate={~p"/routines/#{@routine.id}/edit"}
-        class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-      >
-        Edit
-      </.app_link>
-      <button
-        type="button"
-        phx-click="manual_run"
-        phx-disable-with="Starting..."
-        class="cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-      >
-        Run Now
-      </button>
-    </:actions>
-  </.header>
+<div class="ember-aurora p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0" data-ui-complex-page>
+  <div class="relative z-[1]">
+    <.header>
+      <div class="min-w-0">
+        <span class="ember-eyebrow">
+          Routine · {routine_label(@routine.status)}
+        </span>
+        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+          {@routine.name}
+        </h1>
+        <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+          {@routine.description || "Routine details and run history."}
+        </p>
+      </div>
+      <:actions>
+        <.app_link
+          navigate={~p"/routines"}
+          class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+        >
+          Back
+        </.app_link>
+        <.app_link
+          navigate={~p"/routines/#{@routine.id}/edit"}
+          class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+        >
+          Edit
+        </.app_link>
+        <button
+          type="button"
+          phx-click="manual_run"
+          phx-disable-with="Starting..."
+          class="cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+        >
+          Run Now
+        </button>
+      </:actions>
+    </.header>
 
-  <div class="mb-6 grid grid-cols-1 gap-3 md:grid-cols-4">
-    <div class="rounded-xl border border-border bg-surface p-4">
-      <div class="text-xs text-text-quaternary">Status</div>
-      <div class="mt-2 text-sm font-590 text-text-primary">{routine_label(@routine.status)}</div>
-    </div>
-    <div class="rounded-xl border border-border bg-surface p-4">
-      <div class="text-xs text-text-quaternary">Priority</div>
-      <div class="mt-2 text-sm font-590 text-text-primary">
-        {routine_label(@routine.priority)}
+    <div class="mb-6 grid grid-cols-1 gap-3 md:grid-cols-4">
+      <div class="ember-stat rounded-xl border border-border bg-surface p-4">
+        <div class="text-xs text-text-quaternary">Status</div>
+        <div class="mt-2 text-sm font-590 text-text-primary">
+          {routine_label(@routine.status)}
+        </div>
+      </div>
+      <div class="ember-stat rounded-xl border border-border bg-surface p-4">
+        <div class="text-xs text-text-quaternary">Priority</div>
+        <div class="mt-2 text-sm font-590 text-text-primary">
+          {routine_label(@routine.priority)}
+        </div>
+      </div>
+      <div class="ui-advanced-only ember-stat rounded-xl border border-border bg-surface p-4">
+        <div class="text-xs text-text-quaternary">Concurrency</div>
+        <div class="mt-2 text-sm font-590 text-text-primary">
+          {routine_label(@routine.concurrency_policy)}
+        </div>
+      </div>
+      <div class="ui-advanced-only ember-stat rounded-xl border border-border bg-surface p-4">
+        <div class="text-xs text-text-quaternary">Catch-up</div>
+        <div class="mt-2 text-sm font-590 text-text-primary">
+          {routine_label(@routine.catch_up_policy)}
+        </div>
       </div>
     </div>
-    <div class="ui-advanced-only rounded-xl border border-border bg-surface p-4">
-      <div class="text-xs text-text-quaternary">Concurrency</div>
-      <div class="mt-2 text-sm font-590 text-text-primary">
-        {routine_label(@routine.concurrency_policy)}
+
+    <section class="ember-glass overflow-hidden">
+      <div class="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <h2 class="font-serif text-[15px] font-510 italic tracking-[0.02em] text-brand/90">
+          Run History
+        </h2>
+        <span class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary tabular-nums">
+          {length(@runs)} {if length(@runs) == 1, do: "run", else: "runs"}
+        </span>
       </div>
-    </div>
-    <div class="ui-advanced-only rounded-xl border border-border bg-surface p-4">
-      <div class="text-xs text-text-quaternary">Catch-up</div>
-      <div class="mt-2 text-sm font-590 text-text-primary">
-        {routine_label(@routine.catch_up_policy)}
+
+      <div :if={@runs != []} class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-subtle text-xs uppercase tracking-wider text-text-quaternary">
+            <tr>
+              <th class="px-4 py-3 font-510">Status</th>
+              <th class="px-4 py-3 font-510">Trigger</th>
+              <th class="px-4 py-3 font-510">Triggered</th>
+              <th class="px-4 py-3 font-510">Completed</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border">
+            <tr
+              :for={run <- @runs}
+              class="transition-colors duration-200 hover:bg-surface-hover"
+            >
+              <td class="px-4 py-3">
+                <span class={[
+                  "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510",
+                  run_status_class(run.status)
+                ]}>
+                  {routine_label(run.status)}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-text-secondary">{run.trigger_type}</td>
+              <td class="px-4 py-3 text-text-tertiary">
+                {format_datetime(run.triggered_at)}
+              </td>
+              <td class="px-4 py-3 text-text-tertiary">
+                {format_datetime(run.completed_at)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-    </div>
+
+      <div :if={@runs == []} class="px-6 py-16 text-center">
+        <p class="text-sm text-text-primary">No runs yet</p>
+        <p class="mt-1 text-sm text-text-tertiary">
+          Run this routine manually or wait for a trigger.
+        </p>
+      </div>
+    </section>
   </div>
-
-  <section class="rounded-xl border border-border bg-surface">
-    <div class="border-b border-border px-4 py-3">
-      <h2 class="text-sm font-590 text-text-primary">Run History</h2>
-    </div>
-
-    <div :if={@runs != []} class="overflow-x-auto">
-      <table class="w-full text-left text-sm">
-        <thead class="bg-subtle text-xs uppercase tracking-wider text-text-quaternary">
-          <tr>
-            <th class="px-4 py-3 font-510">Status</th>
-            <th class="px-4 py-3 font-510">Trigger</th>
-            <th class="px-4 py-3 font-510">Triggered</th>
-            <th class="px-4 py-3 font-510">Completed</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-border">
-          <tr :for={run <- @runs} class="hover:bg-surface-hover">
-            <td class="px-4 py-3">
-              <span class={[
-                "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510",
-                run_status_class(run.status)
-              ]}>
-                {routine_label(run.status)}
-              </span>
-            </td>
-            <td class="px-4 py-3 text-text-secondary">{run.trigger_type}</td>
-            <td class="px-4 py-3 text-text-tertiary">
-              {format_datetime(run.triggered_at)}
-            </td>
-            <td class="px-4 py-3 text-text-tertiary">
-              {format_datetime(run.completed_at)}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div :if={@runs == []} class="px-6 py-16 text-center">
-      <p class="text-sm text-text-primary">No runs yet</p>
-      <p class="mt-1 text-sm text-text-tertiary">
-        Run this routine manually or wait for a trigger.
-      </p>
-    </div>
-  </section>
 </div>

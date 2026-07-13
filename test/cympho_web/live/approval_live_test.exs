@@ -62,7 +62,8 @@ defmodule CymphoWeb.ApprovalLiveTest do
       assert html =~ "Linked issues"
       assert html =~ "Created"
       assert html =~ "Blocks 1 linked issue"
-      assert html =~ "Review decision"
+      assert html =~ ~s(data-testid="approval-approve-#{pending.id}")
+      assert html =~ ~s(data-testid="approval-deny-#{pending.id}")
       assert html =~ "review_gate"
       assert html =~ "Approved decision record"
       assert html =~ "View record"
@@ -74,7 +75,7 @@ defmodule CymphoWeb.ApprovalLiveTest do
       assert filtered_html =~ "Filtered to Pending approvals."
       assert filtered_html =~ "Clear filter"
       assert filtered_html =~ "launch_gate"
-      assert filtered_html =~ "Review decision"
+      assert filtered_html =~ ~s(data-testid="approval-approve-#{pending.id}")
       assert filtered_html =~ "Blocks 1 linked issue"
       refute filtered_html =~ "review_gate"
       refute filtered_html =~ "budget_gate"
@@ -87,6 +88,63 @@ defmodule CymphoWeb.ApprovalLiveTest do
       assert empty_filtered_html =~ ~s(href="/approvals")
       assert empty_filtered_html =~ "Activity"
       refute empty_filtered_html =~ "No approvals yet."
+    end
+
+    test "approves an approval inline from the queue", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Inline Approver",
+          role: :ceo,
+          company_id: company.id
+        })
+
+      {:ok, approval} =
+        Approvals.create_approval(%{
+          type: "inline_gate",
+          requested_by_agent_id: agent.id
+        })
+
+      {:ok, view, _html} = live(conn, "/approvals")
+
+      html = render_click(view, :approve, %{"id" => approval.id})
+
+      refute html =~ ~s(data-testid="approval-approve-#{approval.id}")
+      assert html =~ "Approved decision record"
+
+      resolved = Approvals.get_approval!(approval.id)
+      assert resolved.status == :approved
+      assert resolved.resolved_by_user_id == Plug.Conn.get_session(conn, :user_id)
+    end
+
+    test "denies an approval inline from the queue", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Inline Denier",
+          role: :ceo,
+          company_id: company.id
+        })
+
+      {:ok, approval} =
+        Approvals.create_approval(%{
+          type: "deny_gate",
+          requested_by_agent_id: agent.id
+        })
+
+      {:ok, view, _html} = live(conn, "/approvals")
+
+      html = render_click(view, :deny, %{"id" => approval.id})
+
+      refute html =~ ~s(data-testid="approval-deny-#{approval.id}")
+      assert html =~ "Denied decision record"
+
+      resolved = Approvals.get_approval!(approval.id)
+      assert resolved.status == :denied
     end
 
     test "status filter event patches to the selected status", %{conn: conn} do

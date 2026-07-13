@@ -1,262 +1,277 @@
-<div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0" data-ui-complex-page>
-  <.header title={@page_title}>
-    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-      Install, inspect, and govern runtime extensions.
-    </p>
-    <:actions>
-      <.app_link
-        navigate={~p"/plugins/marketplace"}
-        class="ui-advanced-only bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[40px] rounded-lg transition-colors inline-flex items-center gap-2"
-      >
-        Marketplace
-      </.app_link>
-      <.app_link
-        navigate={~p"/plugins/new"}
-        class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 min-h-[40px] rounded-button transition-colors inline-flex items-center gap-2"
-      >
-        <.icon name="hero-plus-mini" class="h-4 w-4" /> New Plugin
-      </.app_link>
-    </:actions>
-  </.header>
-
-  <section
-    data-testid="plugin-health"
-    class="ui-advanced-only mb-5 rounded-lg border border-border bg-panel px-5 py-4"
-  >
-    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-      <div class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
-          <h2 class="text-sm font-590 text-text-primary">Plugin Health</h2>
-          <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{plugin_health_badge(@plugin_health.level)}"}>
-            {@plugin_health.label}
-          </span>
-        </div>
-        <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
-          {@plugin_health.summary}
-        </p>
-      </div>
-
-      <div class="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:min-w-[440px] sm:grid-cols-5">
-        <.plugin_health_metric
-          label="Enabled"
-          value={@plugin_health.metrics.enabled_plugins}
-          tone={if @plugin_health.metrics.enabled_plugins > 0, do: :ok, else: :neutral}
-        />
-        <.plugin_health_metric
-          label="Errors"
-          value={
-            @plugin_health.metrics.status_error_plugins +
-              @plugin_health.metrics.manifest_error_plugins
-          }
-          tone={
-            if @plugin_health.metrics.status_error_plugins +
-                 @plugin_health.metrics.manifest_error_plugins > 0,
-               do: :critical,
-               else: :ok
-          }
-        />
-        <.plugin_health_metric
-          label="Cap gaps"
-          value={@plugin_health.metrics.capabilityless_enabled_plugins}
-          tone={
-            if @plugin_health.metrics.capabilityless_enabled_plugins > 0,
-              do: :warning,
-              else: :ok
-          }
-        />
-        <.plugin_health_metric
-          label="Logs"
-          value={@plugin_health.metrics.recent_error_logs}
-          tone={if @plugin_health.metrics.recent_error_logs > 0, do: :critical, else: :ok}
-        />
-        <.plugin_health_metric
-          label="Webhooks"
-          value={@plugin_health.metrics.failing_webhooks}
-          tone={if @plugin_health.metrics.failing_webhooks > 0, do: :warning, else: :ok}
-        />
-      </div>
-    </div>
-
-    <div class="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <div :if={@plugin_health.recommendations != []} class="grid gap-2 lg:grid-cols-2">
-        <div
-          :for={recommendation <- @plugin_health.recommendations}
-          class={"rounded-md border px-3 py-2 #{plugin_recommendation_class(recommendation.severity)}"}
-        >
-          <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
-            {recommendation.label}
-          </p>
-          <p class="mt-1 text-xs leading-5 opacity-85">{recommendation.detail}</p>
-        </div>
-      </div>
-
-      <div
-        :if={@plugin_health.recommendations == []}
-        class="rounded-md border border-border bg-surface px-3 py-2"
-      >
-        <p class="text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
-          {plugin_posture_label(@plugin_health.level)}
-        </p>
-        <p class="mt-1 text-xs leading-5 text-text-tertiary">
-          {plugin_posture_text(@plugin_health.level)}
-        </p>
-      </div>
-
-      <div
-        data-testid="plugin-next-action"
-        class={"rounded-md border px-3 py-3 #{plugin_next_action_class(@plugin_health.next_action.tone)}"}
-      >
-        <p class="text-[11px] font-590 uppercase tracking-[0.1em] opacity-75">
-          Next operator move
-        </p>
-        <p class="mt-1 text-sm font-590">{@plugin_health.next_action.label}</p>
-        <p class="mt-1 text-xs leading-5 opacity-85">{@plugin_health.next_action.detail}</p>
+<div class="ember-aurora p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0" data-ui-complex-page>
+  <div class="relative z-[1]">
+    <.header>
+      <span class="ember-eyebrow">
+        Runtime extensions · {@plugin_health.metrics.enabled_plugins} active
+      </span>
+      <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+        {@page_title}
+      </h1>
+      <p class="ui-advanced-only mt-2 max-w-2xl text-body-sm text-text-tertiary">
+        Install, inspect, and govern runtime extensions.
+      </p>
+      <:actions>
         <.app_link
-          navigate={plugin_next_action_path(@plugin_health.next_action)}
-          class="mt-3 inline-flex min-h-[32px] items-center gap-1.5 rounded-md border border-current/20 px-2.5 py-1.5 text-xs font-590 opacity-90 transition hover:opacity-100"
+          navigate={~p"/plugins/marketplace"}
+          class="ui-advanced-only bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[40px] rounded-lg transition-colors inline-flex items-center gap-2"
         >
-          {@plugin_health.next_action.cta}
-          <.icon name="hero-arrow-right-mini" class="h-3.5 w-3.5" />
+          Marketplace
         </.app_link>
-      </div>
-    </div>
-  </section>
+        <.app_link
+          navigate={~p"/plugins/new"}
+          class="bg-brand hover:bg-accent text-on-primary font-510 text-sm px-4 py-2 min-h-[40px] cta-glow rounded-button transition-colors inline-flex items-center gap-2"
+        >
+          <.icon name="hero-plus-mini" class="h-4 w-4" /> New Plugin
+        </.app_link>
+      </:actions>
+    </.header>
 
-  <form
-    phx-change="filter"
-    phx-submit="filter"
-    class="mb-6 grid grid-cols-1 gap-3 rounded-xl border border-border bg-surface p-4 sm:grid-cols-[minmax(0,1fr)_220px]"
-  >
-    <.input
-      type="select"
-      name="company_id"
-      label="Company"
-      value={@selected_company_id || ""}
-      options={[{"All companies", ""} | Enum.map(@companies, &{&1.name, &1.id})]}
-    />
-    <.input
-      type="select"
-      name="status"
-      label="Status"
-      value={@selected_status || ""}
-      options={[
-        {"All statuses", ""},
-        {"Installed", "installed"},
-        {"Active", "active"},
-        {"Disabled", "disabled"},
-        {"Error", "error"}
-      ]}
-    />
-  </form>
-
-  <.infinite_scroll
-    id="plugins"
-    has_more={@infinite_scroll[:plugins][:has_more?] || false}
-    container_class="grid grid-cols-1 gap-3"
-  >
-    <:empty>
-      <div
-        data-testid="plugins-empty"
-        class="rounded-xl border border-border bg-surface px-6 py-16 text-center"
-      >
-        <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-subtle text-text-tertiary">
-          <.icon name={plugin_empty_icon(@selected_company_id, @selected_status)} class="h-5 w-5" />
-        </div>
-        <h2 class="text-sm font-590 text-text-primary">
-          {plugin_empty_title(@selected_company_id, @selected_status)}
-        </h2>
-        <p class="mx-auto mt-1 max-w-md text-sm leading-5 text-text-tertiary">
-          {plugin_empty_detail(@selected_company_id, @selected_status)}
-        </p>
-        <div class="mt-5 flex flex-wrap justify-center gap-2">
-          <.app_link
-            :if={plugin_filters_active?(@selected_company_id, @selected_status)}
-            navigate={~p"/plugins"}
-            class={plugin_empty_action_class(:primary)}
-          >
-            Clear filters
-          </.app_link>
-          <.app_link
-            navigate={~p"/plugins/marketplace"}
-            class={plugin_empty_action_class(:neutral)}
-          >
-            Browse marketplace
-          </.app_link>
-          <.app_link navigate={~p"/plugins/new"} class={plugin_empty_action_class(:neutral)}>
-            New plugin
-          </.app_link>
-        </div>
-      </div>
-    </:empty>
-
-    <div
-      :for={{dom_id, plugin} <- @streams.plugins}
-      id={dom_id}
-      class="group rounded-xl border border-border bg-surface p-4 transition-colors hover:border-border-hover hover:bg-surface-hover"
+    <section
+      data-testid="plugin-health"
+      class="ui-advanced-only ember-glass mb-5 px-5 py-4"
     >
-      <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div class="min-w-0 flex-1">
-          <div class="mb-2 flex flex-wrap items-center gap-2">
-            <.app_link
-              navigate={~p"/plugins/#{plugin.id}"}
-              class="truncate text-sm font-590 text-text-primary hover:text-brand"
-            >
-              {plugin.name}
-            </.app_link>
-            <span class={[
-              "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510",
-              status_class(plugin.status)
-            ]}>
-              {status_label(plugin.status)}
-            </span>
-            <span class={["text-xs font-510", enabled_class(plugin.enabled)]}>
-              {enabled_label(plugin.enabled)}
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-sm font-590 text-text-primary">Plugin Health</h2>
+            <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{plugin_health_badge(@plugin_health.level)}"}>
+              {@plugin_health.label}
             </span>
           </div>
-          <p class="line-clamp-2 max-w-3xl text-sm leading-5 text-text-tertiary">
-            {plugin.description || "No description provided."}
+          <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
+            {@plugin_health.summary}
           </p>
-          <div class="ui-advanced-only mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
-            <span>{plugin.identifier}</span>
-            <span>v{plugin.version}</span>
-            <span>{company_name(plugin)}</span>
-            <span>{project_name(plugin)}</span>
-            <span>{capability_count(plugin.capabilities)} capabilities</span>
+        </div>
+
+        <div class="ember-stat grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border sm:min-w-[440px] sm:grid-cols-5">
+          <.plugin_health_metric
+            label="Enabled"
+            value={@plugin_health.metrics.enabled_plugins}
+            tone={if @plugin_health.metrics.enabled_plugins > 0, do: :ok, else: :neutral}
+          />
+          <.plugin_health_metric
+            label="Errors"
+            value={
+              @plugin_health.metrics.status_error_plugins +
+                @plugin_health.metrics.manifest_error_plugins
+            }
+            tone={
+              if @plugin_health.metrics.status_error_plugins +
+                   @plugin_health.metrics.manifest_error_plugins > 0,
+                 do: :critical,
+                 else: :ok
+            }
+          />
+          <.plugin_health_metric
+            label="Cap gaps"
+            value={@plugin_health.metrics.capabilityless_enabled_plugins}
+            tone={
+              if @plugin_health.metrics.capabilityless_enabled_plugins > 0,
+                do: :warning,
+                else: :ok
+            }
+          />
+          <.plugin_health_metric
+            label="Logs"
+            value={@plugin_health.metrics.recent_error_logs}
+            tone={if @plugin_health.metrics.recent_error_logs > 0, do: :critical, else: :ok}
+          />
+          <.plugin_health_metric
+            label="Webhooks"
+            value={@plugin_health.metrics.failing_webhooks}
+            tone={if @plugin_health.metrics.failing_webhooks > 0, do: :warning, else: :ok}
+          />
+        </div>
+      </div>
+
+      <div class="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div :if={@plugin_health.recommendations != []} class="grid gap-2 lg:grid-cols-2">
+          <div
+            :for={recommendation <- @plugin_health.recommendations}
+            class={"rounded-md border px-3 py-2 #{plugin_recommendation_class(recommendation.severity)}"}
+          >
+            <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
+              {recommendation.label}
+            </p>
+            <p class="mt-1 text-xs leading-5 opacity-85">{recommendation.detail}</p>
           </div>
         </div>
 
-        <div class="flex shrink-0 flex-wrap items-center gap-2">
-          <button
-            type="button"
-            phx-click="toggle_plugin"
-            phx-value-id={plugin.id}
-            class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-          >
-            {if plugin.enabled, do: "Disable", else: "Enable"}
-          </button>
+        <div
+          :if={@plugin_health.recommendations == []}
+          class="rounded-md border border-border bg-surface px-3 py-2"
+        >
+          <p class="text-[11px] font-590 uppercase tracking-[0.1em] text-text-quaternary">
+            {plugin_posture_label(@plugin_health.level)}
+          </p>
+          <p class="mt-1 text-xs leading-5 text-text-tertiary">
+            {plugin_posture_text(@plugin_health.level)}
+          </p>
+        </div>
+
+        <div
+          data-testid="plugin-next-action"
+          class={"rounded-md border px-3 py-3 #{plugin_next_action_class(@plugin_health.next_action.tone)}"}
+        >
+          <p class="text-[11px] font-590 uppercase tracking-[0.1em] opacity-75">
+            Next operator move
+          </p>
+          <p class="mt-1 text-sm font-590">{@plugin_health.next_action.label}</p>
+          <p class="mt-1 text-xs leading-5 opacity-85">{@plugin_health.next_action.detail}</p>
           <.app_link
-            navigate={~p"/plugins/#{plugin.id}/settings"}
-            class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+            navigate={plugin_next_action_path(@plugin_health.next_action)}
+            class="mt-3 inline-flex min-h-[32px] items-center gap-1.5 rounded-md border border-current/20 px-2.5 py-1.5 text-xs font-590 opacity-90 transition hover:opacity-100"
           >
-            Settings
+            {@plugin_health.next_action.cta}
+            <.icon name="hero-arrow-right-mini" class="h-3.5 w-3.5" />
           </.app_link>
-          <.app_link
-            navigate={~p"/plugins/#{plugin.id}/edit"}
-            class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-          >
-            Edit
-          </.app_link>
-          <button
-            type="button"
-            phx-click="delete"
-            phx-value-id={plugin.id}
-            data-confirm="Delete this plugin?"
-            class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-510 text-red-400 transition-colors hover:bg-red-500/15"
-          >
-            Delete
-          </button>
         </div>
       </div>
-    </div>
-  </.infinite_scroll>
+    </section>
+
+    <form
+      phx-change="filter"
+      phx-submit="filter"
+      class="mb-6 grid grid-cols-1 gap-3 rounded-xl border border-border bg-surface p-4 sm:grid-cols-[minmax(0,1fr)_220px]"
+    >
+      <.input
+        type="select"
+        name="company_id"
+        label="Company"
+        value={@selected_company_id || ""}
+        options={[{"All companies", ""} | Enum.map(@companies, &{&1.name, &1.id})]}
+      />
+      <.input
+        type="select"
+        name="status"
+        label="Status"
+        value={@selected_status || ""}
+        options={[
+          {"All statuses", ""},
+          {"Installed", "installed"},
+          {"Active", "active"},
+          {"Disabled", "disabled"},
+          {"Error", "error"}
+        ]}
+      />
+    </form>
+
+    <p class="mb-3 px-1 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+      Installed plugins
+    </p>
+
+    <.infinite_scroll
+      id="plugins"
+      has_more={@infinite_scroll[:plugins][:has_more?] || false}
+      container_class="grid grid-cols-1 gap-3"
+    >
+      <:empty>
+        <div
+          data-testid="plugins-empty"
+          class="rounded-xl border border-border bg-surface px-6 py-16 text-center"
+        >
+          <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-subtle text-text-tertiary">
+            <.icon
+              name={plugin_empty_icon(@selected_company_id, @selected_status)}
+              class="h-5 w-5"
+            />
+          </div>
+          <h2 class="text-sm font-590 text-text-primary">
+            {plugin_empty_title(@selected_company_id, @selected_status)}
+          </h2>
+          <p class="mx-auto mt-1 max-w-md text-sm leading-5 text-text-tertiary">
+            {plugin_empty_detail(@selected_company_id, @selected_status)}
+          </p>
+          <div class="mt-5 flex flex-wrap justify-center gap-2">
+            <.app_link
+              :if={plugin_filters_active?(@selected_company_id, @selected_status)}
+              navigate={~p"/plugins"}
+              class={plugin_empty_action_class(:primary)}
+            >
+              Clear filters
+            </.app_link>
+            <.app_link
+              navigate={~p"/plugins/marketplace"}
+              class={plugin_empty_action_class(:neutral)}
+            >
+              Browse marketplace
+            </.app_link>
+            <.app_link navigate={~p"/plugins/new"} class={plugin_empty_action_class(:neutral)}>
+              New plugin
+            </.app_link>
+          </div>
+        </div>
+      </:empty>
+
+      <div
+        :for={{dom_id, plugin} <- @streams.plugins}
+        id={dom_id}
+        class="group rounded-xl border border-border bg-surface p-4 transition hover:border-border-hover hover:bg-surface-hover hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
+      >
+        <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div class="min-w-0 flex-1">
+            <div class="mb-2 flex flex-wrap items-center gap-2">
+              <.app_link
+                navigate={~p"/plugins/#{plugin.id}"}
+                class="truncate text-sm font-590 text-text-primary hover:text-brand"
+              >
+                {plugin.name}
+              </.app_link>
+              <span class={[
+                "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510",
+                status_class(plugin.status)
+              ]}>
+                {status_label(plugin.status)}
+              </span>
+              <span class={["text-xs font-510", enabled_class(plugin.enabled)]}>
+                {enabled_label(plugin.enabled)}
+              </span>
+            </div>
+            <p class="line-clamp-2 max-w-3xl text-sm leading-5 text-text-tertiary">
+              {plugin.description || "No description provided."}
+            </p>
+            <div class="ui-advanced-only mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
+              <span>{plugin.identifier}</span>
+              <span>v{plugin.version}</span>
+              <span>{company_name(plugin)}</span>
+              <span>{project_name(plugin)}</span>
+              <span>{capability_count(plugin.capabilities)} capabilities</span>
+            </div>
+          </div>
+
+          <div class="flex shrink-0 flex-wrap items-center gap-2">
+            <button
+              type="button"
+              phx-click="toggle_plugin"
+              phx-value-id={plugin.id}
+              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+            >
+              {if plugin.enabled, do: "Disable", else: "Enable"}
+            </button>
+            <.app_link
+              navigate={~p"/plugins/#{plugin.id}/settings"}
+              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+            >
+              Settings
+            </.app_link>
+            <.app_link
+              navigate={~p"/plugins/#{plugin.id}/edit"}
+              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+            >
+              Edit
+            </.app_link>
+            <button
+              type="button"
+              phx-click="delete"
+              phx-value-id={plugin.id}
+              data-confirm="Delete this plugin?"
+              class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-510 text-red-400 transition-colors hover:bg-red-500/15"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    </.infinite_scroll>
+  </div>
 </div>

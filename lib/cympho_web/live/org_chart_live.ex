@@ -75,15 +75,19 @@ defmodule CymphoWeb.OrgChartLive do
     ~H"""
     <div
       id="org-chart-page"
-      class="min-h-screen bg-canvas px-4 py-5 sm:px-6 lg:px-8"
+      class="ember-aurora min-h-screen bg-canvas px-4 py-5 sm:px-6 lg:px-8"
       phx-hook="OrgChartExport"
       id="org-chart-export"
     >
-      <div class="mx-auto max-w-7xl">
-        <.header
-          title="Org"
-          subtitle="Autonomous reporting lines from CEO to CTO and execution agents."
-        >
+      <div class="relative z-[1] mx-auto max-w-7xl">
+        <.header>
+          <span class="ember-eyebrow">Reporting lines</span>
+          <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+            Org
+          </h1>
+          <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+            Autonomous reporting lines from CEO to CTO and execution agents.
+          </p>
           <:actions>
             <.button
               phx-click="export_svg"
@@ -137,29 +141,35 @@ defmodule CymphoWeb.OrgChartLive do
         </.header>
 
         <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div class="cympho-panel px-4 py-3">
-            <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
+          <div class="ember-stat cympho-panel px-4 py-3">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Company agents
             </p>
-            <p class="mt-1 text-2xl font-590 text-text-primary">{tree_count(@org_chart)}</p>
+            <p class="mt-1 font-serif text-2xl font-590 tabular-nums text-text-primary">
+              {tree_count(@org_chart)}
+            </p>
           </div>
-          <div class="cympho-panel px-4 py-3">
-            <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
+          <div class="ember-stat cympho-panel px-4 py-3">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Root leaders
             </p>
-            <p class="mt-1 text-2xl font-590 text-text-primary">{length(@org_chart)}</p>
+            <p class="mt-1 font-serif text-2xl font-590 tabular-nums text-text-primary">
+              {length(@org_chart)}
+            </p>
           </div>
-          <div class="cympho-panel px-4 py-3">
-            <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
+          <div class="ember-stat cympho-panel px-4 py-3">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Depth
             </p>
-            <p class="mt-1 text-2xl font-590 text-text-primary">{tree_depth(@org_chart)}</p>
+            <p class="mt-1 font-serif text-2xl font-590 tabular-nums text-text-primary">
+              {tree_depth(@org_chart)}
+            </p>
           </div>
-          <div class="cympho-panel px-4 py-3">
-            <p class="text-xs font-510 uppercase tracking-[0.08em] text-text-quaternary">
+          <div class="ember-stat cympho-panel px-4 py-3">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Org health
             </p>
-            <p class={"mt-1 text-2xl font-590 #{org_health_text(@org_health.level)}"}>
+            <p class={"mt-1 font-serif text-2xl font-590 tabular-nums #{org_health_text(@org_health.level)}"}>
               {@org_health.label}
             </p>
           </div>
@@ -167,7 +177,7 @@ defmodule CymphoWeb.OrgChartLive do
 
         <section
           data-testid="org-health"
-          class="mb-5 rounded-lg border border-border bg-panel px-5 py-4"
+          class="ember-glass mb-5 px-5 py-4"
         >
           <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div class="min-w-0">
@@ -521,7 +531,7 @@ defmodule CymphoWeb.OrgChartLive do
 
   def agent_card(assigns) do
     ~H"""
-    <div class="group block w-56 rounded-xl border border-border bg-surface px-4 py-3 hover:border-border-hover hover:bg-surface-hover">
+    <div class="card-lift group block w-56 rounded-xl border border-border bg-surface px-4 py-3 hover:border-border-hover hover:bg-surface-hover">
       <div class="mb-3 flex items-start gap-3">
         <div class={"flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-590 #{role_avatar_class(@node.role)}"}>
           {initials(@node.name)}

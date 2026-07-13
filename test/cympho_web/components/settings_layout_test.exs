@@ -42,7 +42,7 @@ defmodule CymphoWeb.Components.SettingsLayoutTest do
 
     # Exactly one tab is current / styled active.
     assert length(String.split(html, ~s(aria-current="page"))) - 1 == 1
-    assert length(String.split(html, "bg-surface-3")) - 1 == 1
+    assert length(String.split(html, "bg-brand/10")) - 1 == 1
 
     # …and it is the Appearance tab (href precedes the rest attrs on the anchor).
     assert html =~ ~r|<a[^>]*href="/settings/appearance"[^>]*aria-current="page"|

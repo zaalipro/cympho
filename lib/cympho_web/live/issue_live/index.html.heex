@@ -1,433 +1,448 @@
-<.page size="wide" data-ui-complex-page data-density={@digest_density}>
-  <.header
-    title={@page_title}
-    subtitle={
-      if @digest_density == "detailed",
-        do: "Triage, assign, and track autonomous work across the company."
-    }
-  >
-    <:actions>
-      <.app_link
-        navigate={~p"/kanban"}
-        class="inline-flex shrink-0 items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-      >
-        Board
-      </.app_link>
-      <.density_switch
-        density={@digest_density}
-        compact_patch={issue_index_url(assigns, %{"density" => "compact", "page" => "1"})}
-        detailed_patch={issue_index_url(assigns, %{"density" => "detailed", "page" => "1"})}
-      />
-      <.app_link
-        navigate={~p"/issues/new"}
-        class="inline-flex shrink-0 items-center gap-2 cta-glow rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
-      >
-        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M12 4v16m8-8H4"
-          />
-        </svg>
-        New Issue
-      </.app_link>
-    </:actions>
-  </.header>
-
-  <section class="mb-4">
-    <div class="mb-2 flex items-center justify-between px-1">
-      <div>
-        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Owner triage
-        </p>
-        <p :if={@digest_density == "detailed"} class="mt-0.5 text-xs text-text-tertiary">
-          Jump straight to the queue that needs the next decision.
+<.page size="wide" data-ui-complex-page data-density={@digest_density} class="ember-aurora">
+  <div class="relative z-[1]">
+    <.header>
+      <div class="min-w-0">
+        <span class="ember-eyebrow">
+          Owner triage · {@total} open
+        </span>
+        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+          {@page_title}
+        </h1>
+        <p
+          :if={@digest_density == "detailed"}
+          class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary"
+        >
+          Triage, assign, and track autonomous work across the company.
         </p>
       </div>
-      <.link
-        :if={@current_triage != ""}
-        patch={triage_lane_url("", @digest_density)}
-        class="text-xs font-590 text-brand hover:text-accent-hover"
-      >
-        Show all issues
-      </.link>
-    </div>
-
-    <div class="stagger-children grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
-      <.link
-        :for={lane <- triage_lanes(@issue_triage_counts)}
-        patch={triage_lane_url(lane.key, @digest_density)}
-        data-testid={"issue-triage-lane-#{lane.key}"}
-        class={[
-          "group min-w-0 rounded-lg border px-3 py-3 transition-colors",
-          triage_lane_class(@current_triage, lane.key)
-        ]}
-      >
-        <div class="flex items-start justify-between gap-2">
-          <div class="min-w-0">
-            <div class="flex items-center gap-1.5">
-              <span class={[lane.icon, "h-4 w-4 shrink-0 text-text-quaternary"]}></span>
-              <p class="truncate text-xs font-590 text-text-primary">{lane.label}</p>
-            </div>
-            <p
-              :if={@digest_density == "detailed"}
-              class="mt-1 line-clamp-2 min-h-8 text-[11px] leading-4 text-text-tertiary"
-            >
-              {lane.detail}
-            </p>
-          </div>
-          <span class={[
-            "shrink-0 font-mono text-xl font-590 leading-none tabular-nums",
-            triage_lane_count_class(@current_triage, lane.key)
-          ]}>
-            {lane.count}
-          </span>
-        </div>
-      </.link>
-    </div>
-  </section>
-
-  <section
-    :if={@attention_queue != [] and @digest_density == "detailed"}
-    id="issue-attention-queue"
-    class="mb-4"
-  >
-    <div class="mb-2 flex items-center justify-between px-1">
-      <div>
-        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Attention queue
-        </p>
-        <p class="mt-0.5 text-xs text-text-tertiary">
-          First concrete moves from the issues currently in view.
-        </p>
-      </div>
-      <span class="rounded-full border border-border bg-panel px-2.5 py-1 text-[11px] font-510 text-text-tertiary">
-        {length(@attention_queue)} shown
-      </span>
-    </div>
-
-    <div class="stagger-children grid gap-2 lg:grid-cols-4">
-      <article
-        :for={item <- @attention_queue}
-        class="min-w-0 rounded-lg border border-border bg-surface/70 px-3 py-3 transition-colors hover:border-border-hover hover:bg-surface-hover/40"
-      >
-        <div class="flex items-start justify-between gap-2">
-          <div class="min-w-0">
-            <div class="flex min-w-0 items-center gap-2">
-              <span class="shrink-0 font-mono text-[11px] text-text-quaternary">
-                {issue_identifier(item.issue)}
-              </span>
-              <span class={[
-                "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-590",
-                attention_action_class(item.action)
-              ]}>
-                {item.action}
-              </span>
-            </div>
-            <p class="mt-2 line-clamp-2 text-sm font-590 leading-5 text-text-primary">
-              {item.issue.title}
-            </p>
-          </div>
-          <.app_link
-            navigate={item.path}
-            class="shrink-0 rounded-md border border-border bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
-          >
-            Open
-          </.app_link>
-        </div>
-
-        <p class="mt-2 line-clamp-2 text-xs leading-5 text-text-tertiary">{item.detail}</p>
-        <div class="mt-3 rounded-md border border-border bg-canvas px-2.5 py-2">
-          <div class="flex flex-wrap items-center gap-1.5">
-            <span class="rounded-full border border-border bg-panel px-1.5 py-0.5 text-[10px] font-510 text-text-secondary">
-              {item.digest_label}
-            </span>
-            <span class="line-clamp-1 text-[11px] leading-4 text-text-tertiary">
-              {item.digest_headline}
-            </span>
-          </div>
-        </div>
-
-        <div class="mt-2 flex min-w-0 items-center justify-between gap-2 text-[11px] text-text-quaternary">
-          <span class="truncate">
-            {if item.issue.assignee, do: item.issue.assignee.name, else: "No agent assigned"}
-          </span>
-          <span class={"shrink-0 rounded-full px-2 py-0.5 #{priority_badge_class(item.issue.priority)}"}>
-            {String.capitalize(to_string(item.issue.priority))}
-          </span>
-        </div>
-      </article>
-    </div>
-  </section>
-
-  <div class="cympho-panel mb-4 p-3">
-    <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
-      <form phx-submit="search" class="min-w-0 flex-1">
-        <div class="relative">
-          <svg
-            class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-quaternary"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
+      <:actions>
+        <.app_link
+          navigate={~p"/kanban"}
+          class="inline-flex shrink-0 items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        >
+          Board
+        </.app_link>
+        <.density_switch
+          density={@digest_density}
+          compact_patch={issue_index_url(assigns, %{"density" => "compact", "page" => "1"})}
+          detailed_patch={issue_index_url(assigns, %{"density" => "detailed", "page" => "1"})}
+        />
+        <.app_link
+          navigate={~p"/issues/new"}
+          class="inline-flex shrink-0 items-center gap-2 cta-glow rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
+        >
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               stroke-linecap="round"
               stroke-linejoin="round"
               stroke-width="2"
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              d="M12 4v16m8-8H4"
             />
           </svg>
-          <input
-            type="text"
-            name="search"
-            value={@current_search}
-            placeholder="Search issues..."
-            class="cympho-field h-10 w-full pl-9 pr-3 text-sm placeholder:text-text-quaternary"
-          />
-        </div>
-      </form>
-
-      <div class="flex flex-wrap items-center gap-2">
-        <.combobox
-          id="filter-status"
-          label="Status"
-          placeholder="Any status"
-          searchable?={false}
-          options={
-            Enum.map(
-              Cympho.Issues.Issue.status_options(),
-              &%{id: to_string(&1), label: status_label(&1)}
-            )
-          }
-          selected={@current_status}
-          on_change="combobox_status"
-        />
-
-        <.combobox
-          id="filter-priority"
-          label="Priority"
-          placeholder="Any priority"
-          searchable?={false}
-          options={
-            Enum.map(
-              Cympho.Issues.Issue.priority_options(),
-              &%{id: to_string(&1), label: String.capitalize(to_string(&1))}
-            )
-          }
-          selected={@current_priority}
-          on_change="combobox_priority"
-        />
-
-        <.combobox
-          id="filter-assignee"
-          label="Assignee"
-          placeholder="Anyone"
-          options={Enum.map(@agents, &%{id: &1.id, label: &1.name})}
-          selected={@current_assignee_id}
-          on_change="combobox_assignee"
-        />
-
-        <.combobox
-          id="filter-project"
-          label="Project"
-          placeholder="Any project"
-          options={Enum.map(@projects, &%{id: &1.id, label: &1.name})}
-          selected={@current_project_id}
-          on_change="combobox_project"
-        />
-
-        <.combobox
-          id="filter-label"
-          label="Label"
-          placeholder="Any label"
-          options={Enum.map(@labels, &%{id: &1.id, label: &1.name})}
-          selected={@current_label_id}
-          on_change="combobox_label"
-        />
-
-        <button
-          :if={filters_active?(assigns)}
-          type="button"
-          phx-click="clear_filters"
-          class="h-7 rounded-md border border-hairline bg-surface-1 px-2.5 text-caption font-510 text-ink-muted hover:bg-surface-2 hover:text-ink transition-colors duration-100"
-        >
-          Clear
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <div class="mb-2 flex items-center justify-between px-1 text-xs text-text-quaternary">
-    <span>{@total} issue(s)</span>
-    <span :if={@total_pages > 1}>Page {@page} of {@total_pages}</span>
-  </div>
-
-  <.panel class="overflow-visible">
-    <div class={[
-      "hidden border-b border-border bg-panel/60 px-4 py-2 text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary md:grid md:gap-4",
-      @digest_density == "compact" && "md:grid-cols-[minmax(0,1fr)_96px_90px_36px]",
-      @digest_density == "detailed" && "md:grid-cols-[minmax(0,1fr)_128px_120px_120px_90px_36px]"
-    ]}>
-      <span>Issue</span>
-      <span :if={@digest_density == "detailed"}>Launch</span>
-      <span :if={@digest_density == "detailed"}>Assignee</span>
-      <span>Priority</span>
-      <span class="text-right">Activity</span>
-      <span></span>
-    </div>
-
-    <.empty_state
-      :if={Enum.empty?(@issues)}
-      title="No issues found"
-      message="Create an issue or clear filters to see work."
-    >
-      <:icon_slot>
-        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-          />
-        </svg>
-      </:icon_slot>
-      <:actions>
-        <.app_link
-          navigate={~p"/issues/new"}
-          class="cta-glow rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
-        >
           New Issue
         </.app_link>
-        <button
-          :if={filters_active?(assigns)}
-          type="button"
-          phx-click="clear_filters"
-          class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-        >
-          Clear filters
-        </button>
       </:actions>
-    </.empty_state>
+    </.header>
 
-    <div
-      :for={issue <- @issues}
-      class={[
-        "group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-hairline last:border-b-0 transition-colors duration-100 hover:bg-surface-2 md:gap-4",
-        @digest_density == "compact" &&
-          "px-3 py-1.5 md:grid-cols-[minmax(0,1fr)_96px_90px_36px]",
-        @digest_density == "detailed" &&
-          "px-4 py-2.5 md:grid-cols-[minmax(0,1fr)_128px_120px_120px_90px_36px]"
-      ]}
+    <section class="mb-4">
+      <div class="mb-2 flex items-center justify-between px-1">
+        <div>
+          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Decision lanes
+          </p>
+          <p :if={@digest_density == "detailed"} class="mt-0.5 text-xs text-text-tertiary">
+            Jump straight to the queue that needs the next decision.
+          </p>
+        </div>
+        <.link
+          :if={@current_triage != ""}
+          patch={triage_lane_url("", @digest_density)}
+          class="text-xs font-590 text-brand hover:text-accent-hover"
+        >
+          Show all issues
+        </.link>
+      </div>
+
+      <div class="stagger-children grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+        <.link
+          :for={lane <- triage_lanes(@issue_triage_counts)}
+          patch={triage_lane_url(lane.key, @digest_density)}
+          data-testid={"issue-triage-lane-#{lane.key}"}
+          class={[
+            "ember-stat group min-w-0 rounded-xl border px-3 py-3 transition-colors",
+            triage_lane_class(@current_triage, lane.key)
+          ]}
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <div class="flex items-center gap-1.5">
+                <span class={[lane.icon, "h-4 w-4 shrink-0 text-text-quaternary"]}></span>
+                <p class="truncate text-xs font-590 text-text-primary">{lane.label}</p>
+              </div>
+              <p
+                :if={@digest_density == "detailed"}
+                class="mt-1 line-clamp-2 min-h-8 text-[11px] leading-4 text-text-tertiary"
+              >
+                {lane.detail}
+              </p>
+            </div>
+            <span class={[
+              "shrink-0 font-serif text-[22px] font-510 leading-none tabular-nums",
+              triage_lane_count_class(@current_triage, lane.key)
+            ]}>
+              {lane.count}
+            </span>
+          </div>
+        </.link>
+      </div>
+    </section>
+
+    <section
+      :if={@attention_queue != [] and @digest_density == "detailed"}
+      id="issue-attention-queue"
+      class="mb-4"
     >
-      <% launch_readiness = launch_readiness_for(@launch_readiness_by_issue, issue) %>
-      <.app_link navigate={~p"/issues/#{issue.id}"} class="min-w-0">
-        <div class="flex min-w-0 items-center gap-2">
-          <span
-            :if={@unread_issues[issue.id]}
-            class="h-1.5 w-1.5 shrink-0 rounded-full bg-brand"
-            title="Unread comments"
-          >
-          </span>
-          <span class="shrink-0 font-mono text-[11px] text-text-quaternary">
-            {issue_identifier(issue)}
-          </span>
-          <span class="truncate text-sm font-510 text-text-primary">{issue.title}</span>
-          <span class={"hidden rounded-full px-2 py-0.5 text-[11px] font-510 sm:inline-flex #{status_badge_class(issue.status)}"}>
-            {status_label(issue.status)}
-          </span>
+      <div class="mb-2 flex items-center justify-between px-1">
+        <div>
+          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Attention queue
+          </p>
+          <p class="mt-0.5 text-xs text-text-tertiary">
+            First concrete moves from the issues currently in view.
+          </p>
         </div>
-        <p
-          :if={@digest_density == "detailed"}
-          class="mt-1 truncate text-xs text-text-tertiary"
-        >
-          {issue_description(issue.description)}
-        </p>
-        <.issue_digest_card
-          :if={@digest_density == "detailed"}
-          issue={issue}
-          density={@digest_density}
-          variant="inline"
-          class="mt-1.5"
-        />
-        <div :if={@digest_density == "detailed" and launch_readiness} class="mt-1.5 md:hidden">
-          <span class={[
-            "inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-510",
-            launch_readiness_class(launch_readiness)
-          ]}>
-            <span class="shrink-0">{launch_readiness.label}</span>
-            <span class="truncate text-[10px] opacity-80">{launch_readiness.target}</span>
-          </span>
-        </div>
-      </.app_link>
-
-      <div :if={@digest_density == "detailed"} class="hidden min-w-0 md:block">
-        <.app_link
-          :if={launch_readiness}
-          navigate={launch_readiness.path}
-          title={launch_readiness.summary}
-          class={launch_readiness_link_class(launch_readiness)}
-        >
-          <span class="truncate text-[11px] font-590 leading-4">{launch_readiness.label}</span>
-          <span class="truncate text-[10px] leading-3 opacity-80">{launch_readiness.target}</span>
-        </.app_link>
-        <span :if={!launch_readiness} class="text-xs text-text-quaternary">—</span>
-      </div>
-
-      <div
-        :if={@digest_density == "detailed"}
-        class="hidden min-w-0 text-xs text-text-tertiary md:block"
-      >
-        <span class="truncate">
-          {if issue.assignee, do: issue.assignee.name, else: "Unassigned"}
+        <span class="rounded-full border border-border bg-panel px-2.5 py-1 text-[11px] font-510 text-text-tertiary">
+          {length(@attention_queue)} shown
         </span>
       </div>
 
-      <div class="hidden md:block">
-        <span class={"inline-flex rounded-full px-2 py-0.5 text-[11px] font-510 #{priority_badge_class(issue.priority)}"}>
-          {String.capitalize(to_string(issue.priority))}
-        </span>
-      </div>
+      <div class="stagger-children grid gap-2 lg:grid-cols-4">
+        <article
+          :for={item <- @attention_queue}
+          class="ember-stat card-lift min-w-0 rounded-xl border border-border bg-surface/70 px-3 py-3"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <div class="flex min-w-0 items-center gap-2">
+                <span class="shrink-0 font-mono text-[11px] text-text-quaternary">
+                  {issue_identifier(item.issue)}
+                </span>
+                <span class={[
+                  "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-590",
+                  attention_action_class(item.action)
+                ]}>
+                  {item.action}
+                </span>
+              </div>
+              <p class="mt-2 line-clamp-2 text-sm font-590 leading-5 text-text-primary">
+                {item.issue.title}
+              </p>
+            </div>
+            <.app_link
+              navigate={item.path}
+              class="shrink-0 rounded-md border border-border bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+            >
+              Open
+            </.app_link>
+          </div>
 
-      <div class="hidden items-center justify-end gap-2 text-xs text-text-quaternary md:flex">
-        <span>{length(issue.comments)} {pluralize(length(issue.comments), "comment")}</span>
-      </div>
+          <p class="mt-2 line-clamp-2 text-xs leading-5 text-text-tertiary">{item.detail}</p>
+          <div class="mt-3 rounded-md border border-border bg-canvas px-2.5 py-2">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="rounded-full border border-border bg-panel px-1.5 py-0.5 text-[10px] font-510 text-text-secondary">
+                {item.digest_label}
+              </span>
+              <span class="line-clamp-1 text-[11px] leading-4 text-text-tertiary">
+                {item.digest_headline}
+              </span>
+            </div>
+          </div>
 
-      <div class="flex justify-end">
-        <.overflow_menu label={"Actions for #{issue.title}"}>
-          <.menu_item navigate={~p"/issues/#{issue.id}"}>Open issue</.menu_item>
-          <.menu_item
-            danger
-            phx-click="delete_issue"
-            phx-value-id={issue.id}
-            data-confirm="Delete this issue?"
+          <div class="mt-2 flex min-w-0 items-center justify-between gap-2 text-[11px] text-text-quaternary">
+            <span class="truncate">
+              {if item.issue.assignee, do: item.issue.assignee.name, else: "No agent assigned"}
+            </span>
+            <span class={"shrink-0 rounded-full px-2 py-0.5 #{priority_badge_class(item.issue.priority)}"}>
+              {String.capitalize(to_string(item.issue.priority))}
+            </span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <div class="cympho-panel mb-4 p-3">
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <form phx-submit="search" class="min-w-0 flex-1">
+          <div class="relative">
+            <svg
+              class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-quaternary"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              />
+            </svg>
+            <input
+              type="text"
+              name="search"
+              value={@current_search}
+              placeholder="Search issues..."
+              class="cympho-field h-10 w-full pl-9 pr-3 text-sm placeholder:text-text-quaternary"
+            />
+          </div>
+        </form>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <.combobox
+            id="filter-status"
+            label="Status"
+            placeholder="Any status"
+            searchable?={false}
+            options={
+              Enum.map(
+                Cympho.Issues.Issue.status_options(),
+                &%{id: to_string(&1), label: status_label(&1)}
+              )
+            }
+            selected={@current_status}
+            on_change="combobox_status"
+          />
+
+          <.combobox
+            id="filter-priority"
+            label="Priority"
+            placeholder="Any priority"
+            searchable?={false}
+            options={
+              Enum.map(
+                Cympho.Issues.Issue.priority_options(),
+                &%{id: to_string(&1), label: String.capitalize(to_string(&1))}
+              )
+            }
+            selected={@current_priority}
+            on_change="combobox_priority"
+          />
+
+          <.combobox
+            id="filter-assignee"
+            label="Assignee"
+            placeholder="Anyone"
+            options={Enum.map(@agents, &%{id: &1.id, label: &1.name})}
+            selected={@current_assignee_id}
+            on_change="combobox_assignee"
+          />
+
+          <.combobox
+            id="filter-project"
+            label="Project"
+            placeholder="Any project"
+            options={Enum.map(@projects, &%{id: &1.id, label: &1.name})}
+            selected={@current_project_id}
+            on_change="combobox_project"
+          />
+
+          <.combobox
+            id="filter-label"
+            label="Label"
+            placeholder="Any label"
+            options={Enum.map(@labels, &%{id: &1.id, label: &1.name})}
+            selected={@current_label_id}
+            on_change="combobox_label"
+          />
+
+          <button
+            :if={filters_active?(assigns)}
+            type="button"
+            phx-click="clear_filters"
+            class="h-7 rounded-md border border-hairline bg-surface-1 px-2.5 text-caption font-510 text-ink-muted hover:bg-surface-2 hover:text-ink transition-colors duration-100"
           >
-            Delete issue
-          </.menu_item>
-        </.overflow_menu>
+            Clear
+          </button>
+        </div>
       </div>
     </div>
-  </.panel>
 
-  <div :if={@total_pages > 1} class="mt-5 flex items-center justify-center gap-3">
-    <button
-      :if={@page > 1}
-      type="button"
-      phx-click="change_page"
-      phx-value-page={@page - 1}
-      class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-    >
-      Previous
-    </button>
-    <span class="text-sm text-text-tertiary">Page {@page} of {@total_pages}</span>
-    <button
-      :if={@page < @total_pages}
-      type="button"
-      phx-click="change_page"
-      phx-value-page={@page + 1}
-      class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-    >
-      Next
-    </button>
+    <div class="mb-2 flex items-center justify-between px-1 text-xs text-text-quaternary">
+      <span>{@total} issue(s)</span>
+      <span :if={@total_pages > 1}>Page {@page} of {@total_pages}</span>
+    </div>
+
+    <.panel class="overflow-visible">
+      <div class={[
+        "hidden border-b border-border bg-panel/60 px-4 py-2 text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary md:grid md:gap-4",
+        @digest_density == "compact" && "md:grid-cols-[minmax(0,1fr)_96px_90px_36px]",
+        @digest_density == "detailed" &&
+          "md:grid-cols-[minmax(0,1fr)_128px_120px_120px_90px_36px]"
+      ]}>
+        <span>Issue</span>
+        <span :if={@digest_density == "detailed"}>Launch</span>
+        <span :if={@digest_density == "detailed"}>Assignee</span>
+        <span>Priority</span>
+        <span class="text-right">Activity</span>
+        <span></span>
+      </div>
+
+      <.empty_state
+        :if={Enum.empty?(@issues)}
+        title="No issues found"
+        message="Create an issue or clear filters to see work."
+      >
+        <:icon_slot>
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+            />
+          </svg>
+        </:icon_slot>
+        <:actions>
+          <.app_link
+            navigate={~p"/issues/new"}
+            class="cta-glow rounded-button bg-brand px-3 py-2 text-sm font-510 text-on-primary hover:bg-accent-hover"
+          >
+            New Issue
+          </.app_link>
+          <button
+            :if={filters_active?(assigns)}
+            type="button"
+            phx-click="clear_filters"
+            class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+          >
+            Clear filters
+          </button>
+        </:actions>
+      </.empty_state>
+
+      <div
+        :for={issue <- @issues}
+        class={[
+          "group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-hairline last:border-b-0",
+          "transition-[background-color,box-shadow] duration-200 hover:bg-surface-2",
+          "hover:shadow-[inset_2px_0_0_0_var(--color-primary)]",
+          @digest_density == "compact" &&
+            "px-3 py-1.5 md:grid-cols-[minmax(0,1fr)_96px_90px_36px]",
+          @digest_density == "detailed" &&
+            "px-4 py-2.5 md:grid-cols-[minmax(0,1fr)_128px_120px_120px_90px_36px]"
+        ]}
+      >
+        <% launch_readiness = launch_readiness_for(@launch_readiness_by_issue, issue) %>
+        <.app_link navigate={~p"/issues/#{issue.id}"} class="min-w-0">
+          <div class="flex min-w-0 items-center gap-2">
+            <span
+              :if={@unread_issues[issue.id]}
+              class="h-1.5 w-1.5 shrink-0 rounded-full bg-brand"
+              title="Unread comments"
+            >
+            </span>
+            <span class="shrink-0 font-mono text-[11px] text-text-quaternary">
+              {issue_identifier(issue)}
+            </span>
+            <span class="truncate text-sm font-510 text-text-primary">{issue.title}</span>
+            <span class={"hidden rounded-full px-2 py-0.5 text-[11px] font-510 sm:inline-flex #{status_badge_class(issue.status)}"}>
+              {status_label(issue.status)}
+            </span>
+          </div>
+          <p
+            :if={@digest_density == "detailed"}
+            class="mt-1 truncate text-xs text-text-tertiary"
+          >
+            {issue_description(issue.description)}
+          </p>
+          <.issue_digest_card
+            :if={@digest_density == "detailed"}
+            issue={issue}
+            density={@digest_density}
+            variant="inline"
+            class="mt-1.5"
+          />
+          <div :if={@digest_density == "detailed" and launch_readiness} class="mt-1.5 md:hidden">
+            <span class={[
+              "inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-510",
+              launch_readiness_class(launch_readiness)
+            ]}>
+              <span class="shrink-0">{launch_readiness.label}</span>
+              <span class="truncate text-[10px] opacity-80">{launch_readiness.target}</span>
+            </span>
+          </div>
+        </.app_link>
+
+        <div :if={@digest_density == "detailed"} class="hidden min-w-0 md:block">
+          <.app_link
+            :if={launch_readiness}
+            navigate={launch_readiness.path}
+            title={launch_readiness.summary}
+            class={launch_readiness_link_class(launch_readiness)}
+          >
+            <span class="truncate text-[11px] font-590 leading-4">{launch_readiness.label}</span>
+            <span class="truncate text-[10px] leading-3 opacity-80">
+              {launch_readiness.target}
+            </span>
+          </.app_link>
+          <span :if={!launch_readiness} class="text-xs text-text-quaternary">—</span>
+        </div>
+
+        <div
+          :if={@digest_density == "detailed"}
+          class="hidden min-w-0 text-xs text-text-tertiary md:block"
+        >
+          <span class="truncate">
+            {if issue.assignee, do: issue.assignee.name, else: "Unassigned"}
+          </span>
+        </div>
+
+        <div class="hidden md:block">
+          <span class={"inline-flex rounded-full px-2 py-0.5 text-[11px] font-510 #{priority_badge_class(issue.priority)}"}>
+            {String.capitalize(to_string(issue.priority))}
+          </span>
+        </div>
+
+        <div class="hidden items-center justify-end gap-2 text-xs text-text-quaternary md:flex">
+          <span>{length(issue.comments)} {pluralize(length(issue.comments), "comment")}</span>
+        </div>
+
+        <div class="flex justify-end">
+          <.overflow_menu label={"Actions for #{issue.title}"}>
+            <.menu_item navigate={~p"/issues/#{issue.id}"}>Open issue</.menu_item>
+            <.menu_item
+              danger
+              phx-click="delete_issue"
+              phx-value-id={issue.id}
+              data-confirm="Delete this issue?"
+            >
+              Delete issue
+            </.menu_item>
+          </.overflow_menu>
+        </div>
+      </div>
+    </.panel>
+
+    <div :if={@total_pages > 1} class="mt-5 flex items-center justify-center gap-3">
+      <button
+        :if={@page > 1}
+        type="button"
+        phx-click="change_page"
+        phx-value-page={@page - 1}
+        class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+      >
+        Previous
+      </button>
+      <span class="text-sm text-text-tertiary">Page {@page} of {@total_pages}</span>
+      <button
+        :if={@page < @total_pages}
+        type="button"
+        phx-click="change_page"
+        phx-value-page={@page + 1}
+        class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+      >
+        Next
+      </button>
+    </div>
   </div>
 </.page>

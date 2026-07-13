@@ -37,193 +37,201 @@ defmodule CymphoWeb.WorkspaceLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <.page size="wide" data-ui-complex-page>
-      <.header title="Workspaces">
-        <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-          Execution directories, runtime services, previews, probes, and leases available to autonomous agents.
-        </p>
-        <:actions>
-          <.app_link
-            navigate="/operations#runtime-launch-checklist"
-            class="ui-advanced-only inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-          >
-            <.icon name="hero-command-line-mini" class="h-4 w-4" /> Runtime checklist
-          </.app_link>
-        </:actions>
-      </.header>
-
-      <section
-        data-testid="workspace-command"
-        class="mb-5 overflow-hidden rounded-lg border border-border bg-panel shadow-card"
-      >
-        <div
-          data-testid="workspace-health"
-          class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start"
-        >
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2">
-              <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                Workspace command
-              </p>
-              <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{workspace_command_badge_class(@workspace_command.tone)}"}>
-                {@workspace_command.badge}
-              </span>
-            </div>
-
-            <h2 class="mt-2 text-lg font-590 text-text-primary">
-              {@workspace_command.heading}
-            </h2>
-            <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
-              {@workspace_command.detail}
-            </p>
-
-            <div
-              :if={@workspace_command.focus_label}
-              class="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs"
-            >
-              <span class="max-w-full truncate rounded-full border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
-                {@workspace_command.focus_label}
-              </span>
-              <span
-                :if={@workspace_command.focus_detail}
-                class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary"
-              >
-                {@workspace_command.focus_detail}
-              </span>
-            </div>
-          </div>
-
-          <.app_link
-            navigate={@workspace_command.action_path}
-            class={"inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-590 transition-colors #{workspace_command_action_class(@workspace_command.tone)}"}
-          >
-            <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
-            {@workspace_command.action_label}
-          </.app_link>
-        </div>
-
-        <div class="ui-advanced-only grid grid-cols-2 border-t border-border sm:grid-cols-4 lg:grid-cols-7">
-          <.workspace_command_metric
-            :for={metric <- @workspace_command.metrics}
-            label={metric.label}
-            value={metric.value}
-            tone={metric.tone}
-          />
-        </div>
-
-        <div
-          :if={@workspace_health.recommendations != []}
-          class="border-t border-border bg-surface/30 p-4"
-        >
-          <p class="text-xs font-590 text-text-secondary">Recommended actions</p>
-          <div class="mt-3 grid gap-2 lg:grid-cols-2">
-            <div
-              :for={recommendation <- @workspace_health.recommendations}
-              class={"rounded-md border px-3 py-2 #{workspace_recommendation_class(recommendation.severity)}"}
-            >
-              <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
-                {recommendation.label}
-              </p>
-              <p class="mt-1 text-xs leading-5 opacity-85">{recommendation.detail}</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="workspace-list" class="overflow-hidden rounded-lg border border-border bg-panel">
-        <div class="border-b border-border px-4 py-3">
-          <p class="text-sm font-590 text-text-primary">Workspace inventory</p>
-          <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
-            Each card shows whether agents have an active execution lane, an inspectable service, and a clean preview path.
+    <.page size="wide" data-ui-complex-page class="ember-aurora">
+      <div class="relative z-[1]">
+        <.header>
+          <span class="ember-eyebrow">Execution surfaces</span>
+          <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+            Workspaces
+          </h1>
+          <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
+            Execution directories, runtime services, previews, probes, and leases available to autonomous agents.
           </p>
-        </div>
-
-        <div
-          :if={!Enum.empty?(@workspace_inventory)}
-          data-testid="workspace-list"
-          class="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-3"
-        >
-          <%= for item <- @workspace_inventory do %>
-            <% workspace = item.workspace %>
+          <:actions>
             <.app_link
-              navigate={~p"/workspaces/#{workspace.id}"}
-              class={"group block rounded-lg border border-border bg-surface/50 p-4 hover:bg-surface-hover #{workspace_inventory_border_class(item.level)}"}
+              navigate="/operations#runtime-launch-checklist"
+              class="ui-advanced-only inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
             >
-              <div class="flex min-w-0 items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <h3 class="truncate text-sm font-590 text-text-primary">
-                    {workspace.name}
-                  </h3>
-                  <p class="mt-1 truncate text-xs text-text-tertiary">
-                    {workspace_location(workspace)}
-                  </p>
-                </div>
+              <.icon name="hero-command-line-mini" class="h-4 w-4" /> Runtime checklist
+            </.app_link>
+          </:actions>
+        </.header>
 
-                <span class={"shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-510 #{workspace_inventory_badge_class(item.level)}"}>
-                  {item.label}
+        <section
+          data-testid="workspace-command"
+          class="mb-5 overflow-hidden rounded-lg border border-border bg-panel shadow-card"
+        >
+          <div
+            data-testid="workspace-health"
+            class="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start"
+          >
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                  Workspace command
+                </p>
+                <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{workspace_command_badge_class(@workspace_command.tone)}"}>
+                  {@workspace_command.badge}
                 </span>
               </div>
 
-              <p class="mt-3 min-h-[40px] text-sm leading-5 text-text-tertiary">
-                {item.summary}
+              <h2 class="mt-2 text-lg font-590 text-text-primary">
+                {@workspace_command.heading}
+              </h2>
+              <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
+                {@workspace_command.detail}
               </p>
 
-              <div class="ui-advanced-only mt-4 grid grid-cols-4 gap-px overflow-hidden rounded-md border border-border bg-border">
-                <.workspace_card_metric
-                  label="Open"
-                  value={item.metrics.open_execution_workspaces}
-                  tone={if item.metrics.open_execution_workspaces > 0, do: :ok, else: :neutral}
-                />
-                <.workspace_card_metric
-                  label="Services"
-                  value={item.metrics.running_services}
-                  tone={if item.metrics.running_services > 0, do: :ok, else: :neutral}
-                />
-                <.workspace_card_metric
-                  label="Gaps"
-                  value={item.metrics.previewless_services}
-                  tone={if item.metrics.previewless_services > 0, do: :warning, else: :ok}
-                />
-                <.workspace_card_metric
-                  label="Stale"
-                  value={item.metrics.stale_execution_workspaces}
-                  tone={if item.metrics.stale_execution_workspaces > 0, do: :warning, else: :ok}
-                />
+              <div
+                :if={@workspace_command.focus_label}
+                class="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs"
+              >
+                <span class="max-w-full truncate rounded-full border border-border bg-surface px-2 py-1 font-510 text-text-secondary">
+                  {@workspace_command.focus_label}
+                </span>
+                <span
+                  :if={@workspace_command.focus_detail}
+                  class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary"
+                >
+                  {@workspace_command.focus_detail}
+                </span>
               </div>
+            </div>
 
-              <div class="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs">
-                <%= if workspace.is_primary do %>
-                  <span class="rounded-full border border-brand/25 bg-brand/10 px-2 py-1 font-510 text-brand">
-                    Primary
-                  </span>
-                <% end %>
-
-                <%= if workspace.source_type do %>
-                  <span class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary">
-                    {workspace.source_type}
-                  </span>
-                <% end %>
-
-                <%= if workspace_ref(workspace) do %>
-                  <span class="max-w-full truncate rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary">
-                    {workspace_ref(workspace)}
-                  </span>
-                <% end %>
-              </div>
+            <.app_link
+              navigate={@workspace_command.action_path}
+              class={"inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-590 transition-colors #{workspace_command_action_class(@workspace_command.tone)}"}
+            >
+              <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
+              {@workspace_command.action_label}
             </.app_link>
-          <% end %>
-        </div>
+          </div>
 
-        <.empty_state
-          :if={Enum.empty?(@workspace_inventory)}
-          title="No workspaces found"
-          message="Attach a project workspace before agents run commands, host previews, or lease shared environments."
-        >
-          <:icon_slot>
-            <.icon name="hero-folder-mini" class="h-5 w-5" />
-          </:icon_slot>
-        </.empty_state>
-      </section>
+          <div class="ui-advanced-only grid grid-cols-2 border-t border-border sm:grid-cols-4 lg:grid-cols-7">
+            <.workspace_command_metric
+              :for={metric <- @workspace_command.metrics}
+              label={metric.label}
+              value={metric.value}
+              tone={metric.tone}
+            />
+          </div>
+
+          <div
+            :if={@workspace_health.recommendations != []}
+            class="border-t border-border bg-surface/30 p-4"
+          >
+            <p class="text-xs font-590 text-text-secondary">Recommended actions</p>
+            <div class="mt-3 grid gap-2 lg:grid-cols-2">
+              <div
+                :for={recommendation <- @workspace_health.recommendations}
+                class={"rounded-md border px-3 py-2 #{workspace_recommendation_class(recommendation.severity)}"}
+              >
+                <p class="text-[11px] font-590 uppercase tracking-[0.1em]">
+                  {recommendation.label}
+                </p>
+                <p class="mt-1 text-xs leading-5 opacity-85">{recommendation.detail}</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="workspace-list" class="overflow-hidden rounded-lg border border-border bg-panel">
+          <div class="border-b border-border px-4 py-3">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Workspace inventory
+            </p>
+            <p class="ui-advanced-only mt-1 text-xs leading-5 text-text-tertiary">
+              Each card shows whether agents have an active execution lane, an inspectable service, and a clean preview path.
+            </p>
+          </div>
+
+          <div
+            :if={!Enum.empty?(@workspace_inventory)}
+            data-testid="workspace-list"
+            class="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-3"
+          >
+            <%= for item <- @workspace_inventory do %>
+              <% workspace = item.workspace %>
+              <.app_link
+                navigate={~p"/workspaces/#{workspace.id}"}
+                class={"group card-lift block rounded-lg border border-border bg-surface/50 p-4 hover:bg-surface-hover #{workspace_inventory_border_class(item.level)}"}
+              >
+                <div class="flex min-w-0 items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <h3 class="truncate text-sm font-590 text-text-primary">
+                      {workspace.name}
+                    </h3>
+                    <p class="mt-1 truncate text-xs text-text-tertiary">
+                      {workspace_location(workspace)}
+                    </p>
+                  </div>
+
+                  <span class={"shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-510 #{workspace_inventory_badge_class(item.level)}"}>
+                    {item.label}
+                  </span>
+                </div>
+
+                <p class="mt-3 min-h-[40px] text-sm leading-5 text-text-tertiary">
+                  {item.summary}
+                </p>
+
+                <div class="ui-advanced-only mt-4 grid grid-cols-4 gap-px overflow-hidden rounded-md border border-border bg-border">
+                  <.workspace_card_metric
+                    label="Open"
+                    value={item.metrics.open_execution_workspaces}
+                    tone={if item.metrics.open_execution_workspaces > 0, do: :ok, else: :neutral}
+                  />
+                  <.workspace_card_metric
+                    label="Services"
+                    value={item.metrics.running_services}
+                    tone={if item.metrics.running_services > 0, do: :ok, else: :neutral}
+                  />
+                  <.workspace_card_metric
+                    label="Gaps"
+                    value={item.metrics.previewless_services}
+                    tone={if item.metrics.previewless_services > 0, do: :warning, else: :ok}
+                  />
+                  <.workspace_card_metric
+                    label="Stale"
+                    value={item.metrics.stale_execution_workspaces}
+                    tone={if item.metrics.stale_execution_workspaces > 0, do: :warning, else: :ok}
+                  />
+                </div>
+
+                <div class="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs">
+                  <%= if workspace.is_primary do %>
+                    <span class="rounded-full border border-brand/25 bg-brand/10 px-2 py-1 font-510 text-brand">
+                      Primary
+                    </span>
+                  <% end %>
+
+                  <%= if workspace.source_type do %>
+                    <span class="rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary">
+                      {workspace.source_type}
+                    </span>
+                  <% end %>
+
+                  <%= if workspace_ref(workspace) do %>
+                    <span class="max-w-full truncate rounded-full border border-border bg-surface px-2 py-1 text-text-tertiary">
+                      {workspace_ref(workspace)}
+                    </span>
+                  <% end %>
+                </div>
+              </.app_link>
+            <% end %>
+          </div>
+
+          <.empty_state
+            :if={Enum.empty?(@workspace_inventory)}
+            title="No workspaces found"
+            message="Attach a project workspace before agents run commands, host previews, or lease shared environments."
+          >
+            <:icon_slot>
+              <.icon name="hero-folder-mini" class="h-5 w-5" />
+            </:icon_slot>
+          </.empty_state>
+        </section>
+      </div>
     </.page>
     """
   end
@@ -234,11 +242,11 @@ defmodule CymphoWeb.WorkspaceLive.Index do
 
   def workspace_command_metric(assigns) do
     ~H"""
-    <div class="border-r border-border px-4 py-3 last:border-r-0">
+    <div class="ember-stat border-r border-border px-4 py-3 last:border-r-0">
       <p class="text-[10px] font-590 uppercase leading-3 tracking-[0.12em] text-text-quaternary">
         {@label}
       </p>
-      <p class={"mt-1 font-mono text-xl font-590 leading-none tabular-nums #{workspace_metric_text(@tone)}"}>
+      <p class={"mt-1 font-serif text-xl font-510 leading-none tabular-nums #{workspace_metric_text(@tone)}"}>
         {@value}
       </p>
     </div>

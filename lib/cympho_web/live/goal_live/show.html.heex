@@ -9,7 +9,7 @@
       </.app_link>
       <.app_link
         navigate={~p"/goals/#{@goal.id}/edit"}
-        class="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-white hover:bg-primary-hover transition-colors"
+        class="cta-glow inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-510 text-white hover:bg-primary-hover transition-colors"
       >
         <.icon name="hero-pencil-square-mini" class="w-3.5 h-3.5" /> Edit
       </.app_link>
@@ -35,7 +35,7 @@
   <div class="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-5">
     <div
       :for={status <- [:backlog, :todo, :in_progress, :in_review, :done, :blocked]}
-      class="bg-surface-1 border border-hairline rounded-md px-3 py-2.5"
+      class="ember-stat bg-surface-1 border border-hairline rounded-md px-3 py-2.5"
     >
       <div class="text-eyebrow text-ink-tertiary uppercase">{status_label(status)}</div>
       <div class="text-card-title text-ink mt-0.5">{Map.get(@status_counts, status, 0)}</div>
@@ -44,10 +44,11 @@
 
   <.panel>
     <div class="p-5">
-      <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center justify-between mb-2">
         <h2 class="text-card-title text-ink">Issues</h2>
         <span class="text-caption text-ink-tertiary">{length(@issues)} shown</span>
       </div>
+      <hr class="ember-rule mb-4" />
 
       <div
         :if={Enum.empty?(@issues)}

@@ -1,39 +1,33 @@
-<.page size="wide" data-ui-complex-page>
+<.page size="wide" data-ui-complex-page class="ember-aurora">
   <% primary_next =
     @primary_next_action || %{path: ~p"/operations", label: "Open Operations", action: "Open"} %>
 
   <div class="relative z-10">
     <%!-- ============================================================
-         Hero — calm flat greeting on the warm canvas (Claude-style).
-         The status line keeps the mission-control rhythm: animated
-         pulse dot · autonomy · operating mode.
+         Hero — molten editorial greeting. Aurora field drifts behind;
+         the headline carries a terracotta→amber gradient tail and the
+         status line rides in an ember eyebrow chip.
          ============================================================ --%>
-    <div class="mb-8 px-1">
+    <div class="mb-10 px-1 pt-2">
       <.header>
         <div class="min-w-0">
-          <div class="flex items-center gap-2 text-[11px] font-510 tracking-[0.08em] text-text-quaternary">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="ember-eyebrow">
+              {status_label(@autonomy_status)} · {status_label(@operating_mode)}
+            </span>
             <span
               class={[
-                "cympho-pulse-dot inline-block h-2 w-2 rounded-full",
+                "cympho-pulse-dot hidden h-2 w-2 rounded-full",
                 autonomy_dot_color(@autonomy_status)
               ]}
               style={"--cympho-pulse-color: #{autonomy_pulse_color(@autonomy_status)};"}
             >
             </span>
-            <span class="text-text-tertiary">Autonomous company</span>
-            <span class="text-text-quaternary/60">·</span>
-            <span class={[autonomy_text_class(@autonomy_status)]}>
-              {status_label(@autonomy_status)}
-            </span>
-            <span class="text-text-quaternary/60">·</span>
-            <span class={[mode_text_class(@operating_mode)]}>
-              {status_label(@operating_mode)}
-            </span>
           </div>
-          <h1 class="mt-3 flex items-center gap-2.5 font-serif text-headline text-text-primary">
-            <.spark class="h-[0.8em] w-[0.8em] text-brand" /> What's up next?
+          <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+            What's up next?
           </h1>
-          <p class="ui-advanced-only mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
+          <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
             Decide what the company should do next, then watch agents execute it.
           </p>
         </div>
@@ -152,7 +146,7 @@
          so descriptions stop truncating. Right column hosts the
          radial pressure gauge (replaces the old 1.5px flat bar).
          ============================================================ --%>
-    <div class="ui-advanced-only mb-4 grid grid-cols-1 gap-3 rounded-2xl border border-hairline bg-surface-1 p-5 shadow-card xl:grid-cols-[minmax(220px,0.85fr)_minmax(0,1.75fr)_minmax(280px,0.95fr)] xl:gap-5">
+    <div class="ember-glass ui-advanced-only mb-4 grid grid-cols-1 gap-3 p-5 xl:grid-cols-[minmax(220px,0.85fr)_minmax(0,1.75fr)_minmax(280px,0.95fr)] xl:gap-5">
       <section class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
           <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
@@ -339,12 +333,12 @@
       :if={@ceo_command_lane}
       id="dashboard-ceo-command-lane"
       data-testid="dashboard-ceo-command-lane"
-      class="ui-advanced-only mb-5 overflow-hidden rounded-2xl border border-hairline bg-surface-1 shadow-card"
+      class="ember-glass ui-advanced-only mb-5 overflow-hidden"
     >
       <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1.6fr)_minmax(260px,0.8fr)]">
         <div class="min-w-0 p-4">
           <div class="flex flex-wrap items-center gap-2">
-            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               CEO command lane
             </p>
             <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-510 #{ceo_command_stage_class(@ceo_command_lane.stage)}"}>
@@ -632,17 +626,20 @@
          monospace display-md numbers, hero-icon accents.
          ============================================================ --%>
     <div class="mb-5 rounded-2xl border border-hairline bg-surface-1 p-4 shadow-card">
-      <div class="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+      <div class="mb-1 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
             Execution health
           </p>
-          <h2 class="mt-1 text-base font-590 text-text-primary">Owner morning brief</h2>
+          <h2 class="mt-1 font-serif text-[19px] font-510 text-text-primary">
+            Owner morning brief
+          </h2>
         </div>
         <a href="/operations" class="text-xs font-590 text-text-tertiary hover:text-text-primary">
           Open Operations →
         </a>
       </div>
+      <hr class="ember-rule mb-4 mt-2" />
 
       <div class="stagger-children grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
         <a
@@ -662,7 +659,7 @@
               </span>
             </div>
             <p class={[
-              "mt-2 font-mono text-[32px] font-590 leading-none tabular-nums",
+              "mt-2 font-serif text-[34px] font-510 leading-none tabular-nums",
               health_tone_text(signal.tone)
             ]}>
               {signal.value}
@@ -699,7 +696,7 @@
             />
           </svg>
         </div>
-        <p class="mt-1.5 font-mono text-[28px] font-590 leading-none tabular-nums text-text-primary">
+        <p class="mt-1.5 font-serif text-[30px] font-510 leading-none tabular-nums text-text-primary">
           {@queued_work}
         </p>
         <p class="mt-1 truncate text-xs text-text-quaternary">
@@ -715,7 +712,7 @@
           </p>
           <span class="hero-play-mini text-brand/70"></span>
         </div>
-        <p class="mt-1.5 font-mono text-[28px] font-590 leading-none tabular-nums text-brand">
+        <p class="mt-1.5 font-serif text-[30px] font-510 leading-none tabular-nums text-brand">
           {@running_work}
         </p>
         <p class="mt-1 truncate text-xs text-text-quaternary">Checked out</p>
@@ -730,7 +727,7 @@
           <span class="hero-no-symbol-mini text-brand/70"></span>
         </div>
         <p class={[
-          "mt-1.5 font-mono text-[28px] font-590 leading-none tabular-nums",
+          "mt-1.5 font-serif text-[30px] font-510 leading-none tabular-nums",
           if(@blocked_work > 0, do: "text-brand", else: "text-text-primary")
         ]}>
           {@blocked_work}
@@ -746,7 +743,7 @@
           </p>
           <span class="hero-user-group-mini text-green-400/70"></span>
         </div>
-        <p class="mt-1.5 font-mono text-[28px] font-590 leading-none tabular-nums text-green-300">
+        <p class="mt-1.5 font-serif text-[30px] font-510 leading-none tabular-nums text-green-300">
           {@active_agents}<span class="text-text-quaternary/80">/{@total_agents}</span>
         </p>
         <p class="mt-1 truncate text-xs text-text-quaternary">Active capacity</p>
@@ -761,7 +758,7 @@
           <span class="hero-flag-mini text-teal-400/70"></span>
         </div>
         <p class={[
-          "mt-1.5 font-mono text-[28px] font-590 leading-none tabular-nums",
+          "mt-1.5 font-serif text-[30px] font-510 leading-none tabular-nums",
           alignment_text_class(@goal_alignment.status)
         ]}>
           {@goal_alignment.aligned_percent}<span class="text-text-quaternary/80">%</span>
@@ -788,7 +785,7 @@
             />
           </svg>
         </div>
-        <p class="mt-1.5 font-mono text-[28px] font-590 leading-none tabular-nums text-text-primary">
+        <p class="mt-1.5 font-serif text-[30px] font-510 leading-none tabular-nums text-text-primary">
           {throughput_total(@throughput.closed)}
         </p>
         <p class="mt-1 flex min-w-0 items-center gap-1.5 text-xs">

@@ -58,10 +58,10 @@ defmodule CymphoWeb.Components.SettingsLayout do
     assigns = assign(assigns, :groups, @groups)
 
     ~H"""
-    <.page size="wide" data-ui-complex-page>
-      <div class="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8">
+    <.page size="wide" data-ui-complex-page class="ember-aurora">
+      <div class="relative z-[1] grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8">
         <nav class="min-w-0 lg:sticky lg:top-6 lg:self-start" aria-label="Settings sections">
-          <p class="mb-3 px-1 text-sm font-590 text-text-primary lg:mb-4 lg:px-3 lg:text-card-title">
+          <p class="ember-ink mb-3 px-1 font-serif text-lg font-510 tracking-[-0.01em] lg:mb-4 lg:px-3">
             Settings
           </p>
           <div class="flex gap-2 overflow-x-auto pb-2 lg:block lg:space-y-5 lg:overflow-visible lg:pb-0">
@@ -100,7 +100,7 @@ defmodule CymphoWeb.Components.SettingsLayout do
     [
       "group flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg border px-3 py-2 text-[13px] font-510 transition-colors lg:border-transparent lg:py-1.5",
       (active? &&
-         "order-first border-border bg-surface-3 text-text-primary lg:order-none lg:border-transparent") ||
+         "order-first border-brand/30 bg-brand/10 text-text-primary shadow-[0_10px_30px_-14px_rgb(var(--color-primary-rgb)/0.6)] lg:order-none lg:border-transparent") ||
         "border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary lg:bg-transparent"
     ]
   end
