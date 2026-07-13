@@ -106,7 +106,13 @@ defmodule CymphoWeb.LaunchItemLiveTest do
       |> render_click()
 
     assert html =~ "Unblock"
-    assert has_element?(view, "#blocked-work-view #blocked-launch-item-#{item.id}", "Ship launch checklist")
+
+    assert has_element?(
+             view,
+             "#blocked-work-view #blocked-launch-item-#{item.id}",
+             "Ship launch checklist"
+           )
+
     assert html =~ "Blocked titles"
 
     assert {:ok, blocked_item} = LaunchItems.get_company_launch_item(company.id, item.id)

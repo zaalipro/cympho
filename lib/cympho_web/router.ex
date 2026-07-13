@@ -201,7 +201,8 @@ defmodule CymphoWeb.Router do
     get "/search", SearchController, :search
     get "/dashboard", DashboardController, :index
 
-    resources "/launch-items", LaunchItemController, only: [:index, :create, :show, :update, :delete]
+    resources "/launch-items", LaunchItemController,
+      only: [:index, :create, :show, :update, :delete]
 
     resources "/goals", GoalController, only: [:index, :show, :create, :update, :delete]
 
