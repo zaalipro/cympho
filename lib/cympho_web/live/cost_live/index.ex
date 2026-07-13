@@ -127,6 +127,39 @@ defmodule CymphoWeb.CostLive.Index do
     |> format_percentage()
   end
 
+  @doc """
+  Humane, plain-language read on where spend sits inside the active budget
+  envelope so a large-but-safe number stays calm instead of alarming.
+  """
+  def spend_pace(summary) do
+    limit = decimal_or_zero(summary.budget_limit)
+    spent = decimal_or_zero(summary.budget_spent)
+
+    if Decimal.gt?(limit, Decimal.new("0")) do
+      pct = Decimal.to_float(Decimal.mult(Decimal.div(spent, limit), 100))
+      pct_label = budget_spent_percentage(summary)
+      envelope = format_cost(limit)
+
+      cond do
+        pct >= 100 ->
+          %{tone: :over, text: "Over the #{envelope} envelope — agents pause"}
+
+        pct >= 80 ->
+          %{tone: :watch, text: "Watch — #{pct_label} of the #{envelope} envelope"}
+
+        true ->
+          %{tone: :calm, text: "Calm — #{pct_label} of the #{envelope} envelope"}
+      end
+    else
+      %{tone: :none, text: "No company budget set yet"}
+    end
+  end
+
+  def spend_pace_text_class(:over), do: "text-brand"
+  def spend_pace_text_class(:watch), do: "text-amber-400"
+  def spend_pace_text_class(:calm), do: "text-text-tertiary"
+  def spend_pace_text_class(_tone), do: "text-text-quaternary"
+
   def budget_utilization_pct(budget) do
     pct = Budget.utilization_percentage(budget)
     format_percentage(pct)

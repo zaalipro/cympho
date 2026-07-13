@@ -23,9 +23,12 @@
               name="search[query]"
               value={@query}
               placeholder="Search issues, agents, projects, goals..."
-              class="h-12 w-full rounded-2xl border-0 bg-transparent pl-11 pr-4 text-base text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-0"
+              class="h-12 w-full rounded-2xl border-0 bg-transparent pl-11 pr-16 text-base text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-0"
               autocomplete="off"
             />
+            <kbd class="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 select-none items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10px] font-510 text-text-quaternary sm:inline-flex">
+              Enter
+            </kbd>
           </div>
           <button
             type="submit"

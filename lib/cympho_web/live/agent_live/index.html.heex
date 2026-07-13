@@ -109,9 +109,13 @@
           </span>
           <span class={[
             "mt-0.5 block truncate text-sm font-590",
-            if((@status_counts[:error] || 0) > 0, do: "text-brand", else: "text-text-primary")
+            if((@status_counts[:error] || 0) > 0, do: "text-red-300", else: "text-text-primary")
           ]}>
-            {@status_counts[:error] || 0} in error
+            <%= if (@status_counts[:error] || 0) > 0 do %>
+              {@status_counts[:error]} in error
+            <% else %>
+              All clear
+            <% end %>
           </span>
         </span>
       </div>
@@ -284,10 +288,36 @@
       </div>
     </.panel>
 
+    <div
+      :if={agents_needing_attention(@agents) != []}
+      data-testid="agents-needing-attention"
+      class="mb-4 rounded-lg border border-red-500/25 bg-red-500/[0.06] px-4 py-3"
+    >
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <p class="text-sm font-590 text-red-200">
+          {length(agents_needing_attention(@agents))} {plural_noun(
+            length(agents_needing_attention(@agents)),
+            "agent"
+          )} stuck in error
+        </p>
+        <p class="text-xs text-text-tertiary">Open a profile to see the failure and recover.</p>
+        <div class="flex flex-wrap gap-1.5">
+          <.app_link
+            :for={agent <- agents_needing_attention(@agents)}
+            navigate={~p"/agents/#{agent.id}"}
+            class="inline-flex items-center gap-1.5 rounded-full border border-red-500/25 bg-canvas/40 px-2.5 py-1 text-xs font-510 text-red-200 transition hover:border-red-400/50 hover:text-red-100"
+          >
+            <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-400"></span>
+            {agent.name}
+          </.app_link>
+        </div>
+      </div>
+    </div>
+
     <.panel :if={Enum.empty?(@agents)}>
       <.empty_state
         title="No agents yet"
-        message="Create the CEO, CTO, and engineering operators that run the company."
+        message="Your workforce starts here. Hire a CEO, CTO, or your first engineer and Cympho routes queued work to them automatically."
       >
         <:actions>
           <.app_link
@@ -305,29 +335,36 @@
         :for={{group, agents} <- agent_groups(@agents)}
         class="overflow-visible"
       >
-        <div class="flex items-center justify-between border-b border-border px-4 py-3">
-          <div>
+        <div class="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div class="flex min-w-0 items-baseline gap-2">
             <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               {role_label(group)}
             </h2>
-            <p class="mt-0.5 text-xs text-text-quaternary">{length(agents)} agent(s)</p>
+            <span class="text-xs tabular-nums text-text-quaternary">{length(agents)}</span>
           </div>
+          <p class={[
+            "truncate text-xs",
+            if(group_needs_attention?(agents), do: "text-red-200", else: "text-text-quaternary")
+          ]}>
+            {group_pulse(agents)}
+          </p>
         </div>
 
         <div class="ui-advanced-only hidden gap-4 border-b border-border bg-panel/70 px-4 py-2 text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary lg:flex lg:items-center">
           <span class="lg:w-[240px] lg:shrink-0">Agent</span>
           <span class="lg:w-[110px] lg:shrink-0">Status</span>
+          <span class="lg:w-[64px] lg:shrink-0">Load</span>
           <div class="grid min-w-0 flex-1 gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,0.8fr)]">
             <span>Health</span>
             <span>Adapter</span>
             <span>Runtime</span>
             <span>Heartbeat</span>
           </div>
-          <span class="w-[92px] shrink-0 text-right">Actions</span>
+          <span class="w-[150px] shrink-0 text-right">Actions</span>
         </div>
 
         <div
-          :for={agent <- agents}
+          :for={agent <- sort_group(agents)}
           id={"agent-row-#{agent.id}"}
           data-testid={"agent-row-#{agent.id}"}
           class="group flex flex-col gap-3 border-b border-border px-4 py-3 transition-colors last:border-b-0 hover:border-border-hover hover:bg-subtle hover:shadow-[inset_2px_0_0_0_var(--color-primary)] lg:flex-row lg:items-center lg:gap-4"
@@ -346,7 +383,7 @@
             </div>
           </.app_link>
 
-          <div class="lg:w-[110px] lg:shrink-0">
+          <div class="min-w-0 lg:w-[110px] lg:shrink-0">
             <span class={"inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-510 #{status_pill_class(agent.status)}"}>
               <span class={[
                 "h-1.5 w-1.5 shrink-0 rounded-full",
@@ -355,6 +392,21 @@
               ]}>
               </span>
               {status_label(agent.status)}
+            </span>
+            <p
+              :if={agent.status == :running && session_progress_note(@session_progress, agent.id)}
+              class="mt-1 truncate text-[11px] text-text-quaternary"
+            >
+              {session_progress_note(@session_progress, agent.id)}
+            </p>
+          </div>
+
+          <div class="lg:w-[64px] lg:shrink-0">
+            <span
+              class={"inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-510 tabular-nums #{workload_tone(workload_for(@workload, agent.id), agent.max_concurrent_jobs)}"}
+              title={"#{workload_for(@workload, agent.id)} in progress of #{agent.max_concurrent_jobs} max"}
+            >
+              {workload_for(@workload, agent.id)}/{agent.max_concurrent_jobs}
             </span>
           </div>
 
@@ -379,7 +431,13 @@
             </div>
           </div>
 
-          <div class="flex justify-end lg:ml-auto lg:w-[92px] lg:shrink-0">
+          <div class="flex items-center justify-end gap-1.5 lg:ml-auto lg:w-[150px] lg:shrink-0">
+            <.app_link
+              navigate={~p"/agents/#{agent.id}"}
+              class="hidden items-center rounded-md border border-border bg-panel px-2.5 py-1 text-xs font-510 text-text-secondary opacity-0 transition-opacity hover:border-brand/40 hover:bg-brand/10 hover:text-brand focus-visible:opacity-100 group-hover:opacity-100 lg:inline-flex"
+            >
+              Open
+            </.app_link>
             <.overflow_menu
               label={"Manage #{agent.name}"}
               trigger_text="Manage"

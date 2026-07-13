@@ -410,26 +410,28 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
     "Fix these #{count} gates before approving. The close action will stay guarded until evidence is present."
   end
 
+  # Emerald and red are reserved for the approve / return actions themselves.
+  # Gate telemetry uses amber only when something blocks; clear gates read calm.
   defp review_gate_card_class(%{blocker_count: 0}) do
-    "border-emerald-500/20 bg-emerald-500/[0.06]"
+    "border-border bg-surface/60"
   end
 
   defp review_gate_card_class(_card), do: "border-amber-500/25 bg-amber-500/[0.06]"
 
   defp review_gate_badge_class(%{blocker_count: 0}) do
-    "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
+    "border-border bg-surface text-text-tertiary"
   end
 
   defp review_gate_badge_class(_card), do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
 
   defp review_packet_card_class(%{tone: :ready}) do
-    "border-emerald-500/20 bg-emerald-500/[0.04]"
+    "border-border bg-surface/60"
   end
 
   defp review_packet_card_class(_packet), do: "border-amber-500/20 bg-amber-500/[0.04]"
 
   defp review_packet_badge_class(%{tone: :ready}) do
-    "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
+    "border-border bg-surface text-text-secondary"
   end
 
   defp review_packet_badge_class(_packet),
@@ -456,14 +458,8 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
   defp review_command_tone_class(:attention),
     do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
 
-  defp review_command_tone_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200"
-
-  defp review_command_tone_class(:active),
+  defp review_command_tone_class(tone) when tone in [:ready, :active],
     do: "border-brand/25 bg-brand/10 text-brand"
-
-  defp review_command_tone_class(:rework),
-    do: "border-blue-500/25 bg-blue-500/10 text-blue-200"
 
   defp review_command_tone_class(_),
     do: "border-border bg-surface text-text-secondary"
@@ -471,14 +467,8 @@ defmodule CymphoWeb.ReviewQueueLive.Index do
   defp review_command_action_class(:attention),
     do: "border-amber-500/25 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
 
-  defp review_command_action_class(:ready),
-    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15"
-
-  defp review_command_action_class(:active),
+  defp review_command_action_class(tone) when tone in [:ready, :active],
     do: "border-brand/25 bg-brand/10 text-brand hover:bg-brand/15"
-
-  defp review_command_action_class(:rework),
-    do: "border-blue-500/25 bg-blue-500/10 text-blue-200 hover:bg-blue-500/15"
 
   defp review_command_action_class(_),
     do:

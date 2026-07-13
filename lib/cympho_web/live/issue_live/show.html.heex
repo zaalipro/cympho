@@ -1,4 +1,5 @@
 <% issue_preflight = issue_preflight(@issue, @orchestrator_enabled?) %>
+<% gate_resolution = review_gate_resolution(assigns) %>
 
 <div
   id="issue-show"
@@ -13,6 +14,11 @@
         issue={@issue}
         editing={@editing}
         pending_wake={@pending_wake}
+      />
+      <CymphoWeb.IssueLive.Show.Header.status_digest
+        issue={@issue}
+        timeline={@timeline}
+        gate_resolution={gate_resolution}
       />
       <div
         :if={@flash["info"]}
@@ -39,8 +45,6 @@
         description_draft={@description_draft}
         delivery_brief_readiness={delivery_brief_readiness(@issue, issue_preflight)}
       />
-
-      <% gate_resolution = review_gate_resolution(assigns) %>
 
       <div class="ui-advanced-only">
         <.issue_digest_panel

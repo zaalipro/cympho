@@ -66,18 +66,24 @@
       </section>
 
       <section class="rounded-xl border border-border bg-surface p-5">
-        <h2 class="mb-4 text-sm font-590 text-text-primary">Capabilities</h2>
-        <div class="flex flex-wrap gap-2">
+        <h2 class="mb-1 text-sm font-590 text-text-primary">Permissions</h2>
+        <p
+          :if={not Enum.empty?(@plugin.capabilities || [])}
+          class="mb-3 text-sm leading-5 text-text-tertiary"
+        >
+          This plugin can {CymphoWeb.PluginLive.Index.humanized_capabilities(@plugin.capabilities)}.
+        </p>
+        <div class="ui-advanced-only flex flex-wrap gap-2">
           <span
             :for={capability <- @plugin.capabilities || []}
             class="rounded-md border border-border bg-panel px-2 py-1 text-xs text-text-secondary"
           >
             {capability}
           </span>
-          <span :if={Enum.empty?(@plugin.capabilities || [])} class="text-sm text-text-tertiary">
-            No capabilities declared.
-          </span>
         </div>
+        <span :if={Enum.empty?(@plugin.capabilities || [])} class="text-sm text-text-tertiary">
+          No permissions declared. This plugin cannot access host services yet.
+        </span>
       </section>
     </aside>
   </div>

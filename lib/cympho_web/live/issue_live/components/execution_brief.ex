@@ -1,14 +1,18 @@
 defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
   @moduledoc """
-  Stateless function component for the execution brief panel:
-  metric tiles, owner update + review signals, work narrative phase
-  cards, delegation map, CTO review queue, CEO owner update readiness,
-  and agent contribution cards.
+  Stateless function component for the execution brief panel.
+
+  Layered for reading order: the sections a human actually reads (metric
+  tiles, owner update + review signals, handoff lane, owner decision
+  packet) render open at the top; the audit-depth sections (CEO flow
+  checklist, runtime run ledger, work narrative, delegation map, CTO
+  review queue, agent contributions) collapse behind native `<details>`
+  folds (`brief_fold/1`) and auto-open only when they carry an act-now
+  state (failed/running runs, ready/blocked review queue).
 
   All summary maps (metrics, brief_lines, gaps, narrative_cards,
   delegation_cards, review_queue, owner_update, contribution_cards)
   are derived from the loaded assigns via `Helpers.*` pure functions.
-  No events; this is a read-only display panel.
   """
   use CymphoWeb, :html
 
@@ -166,201 +170,28 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
           </div>
         </div>
 
-        <div
-          :if={@ceo_flow_checklist}
-          id="issue-ceo-flow-checklist"
-          data-testid="issue-ceo-flow-checklist"
-          class="border-t border-hairline bg-surface-1/50 px-4 py-4"
-        >
-          <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div class="flex flex-wrap items-center gap-2">
-                <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                  CEO flow checklist
-                </h3>
-                <span class={ceo_flow_status_class(@ceo_flow_checklist.status)}>
-                  {@ceo_flow_checklist.status_label}
-                </span>
-              </div>
-              <p class="mt-1 text-caption text-ink-tertiary">
-                {@ceo_flow_checklist.summary}
-              </p>
-            </div>
-            <div class="max-w-sm space-y-2">
-              <p class="rounded-md border border-hairline bg-canvas px-3 py-2 text-sm text-ink-muted">
-                {@ceo_flow_checklist.next}
-              </p>
-              <button
-                :if={@ceo_flow_checklist.action}
-                type="button"
-                phx-click={@ceo_flow_checklist.action.event}
-                disabled={!@ceo_flow_checklist.action.enabled?}
-                class={[
-                  "inline-flex items-center justify-center rounded-md border px-2.5 py-1.5 text-xs font-510 transition",
-                  @ceo_flow_checklist.action.enabled? &&
-                    "border-brand/30 bg-brand/10 text-brand hover:bg-brand/15",
-                  !@ceo_flow_checklist.action.enabled? &&
-                    "cursor-not-allowed border-hairline bg-surface-1 text-ink-tertiary"
-                ]}
-              >
-                {@ceo_flow_checklist.action.label}
-              </button>
-            </div>
+        <div class="grid gap-px bg-hairline lg:grid-cols-[1fr_0.8fr]">
+          <div class="bg-surface-1/50 px-4 py-4">
+            <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Owner update
+            </h3>
+            <ul class="mt-2 space-y-2">
+              <li :for={line <- @brief_lines} class="flex gap-2 text-sm text-ink-muted">
+                <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand"></span>
+                <span>{line}</span>
+              </li>
+            </ul>
           </div>
-
-          <div
-            :if={@ceo_launch_packet}
-            id="issue-ceo-launch-packet"
-            data-testid="issue-ceo-launch-packet"
-            phx-hook="CopyToClipboard"
-            class="mb-3 rounded-md border border-hairline bg-canvas px-3 py-3"
-          >
-            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <p class="text-[10px] font-510 uppercase tracking-[0.12em] text-ink-tertiary">
-                    CEO launch packet
-                  </p>
-                  <span class={ceo_launch_packet_badge_class(@ceo_launch_packet.status)}>
-                    {@ceo_launch_packet.status_label}
-                  </span>
-                </div>
-                <p class="mt-1 text-sm text-ink-muted">
-                  {@ceo_launch_packet.next_action}
-                </p>
-              </div>
-              <button
-                type="button"
-                data-copy-text={@ceo_launch_packet.copy_text}
-                data-copy-label="Copy packet"
-                data-copy-success-label="Copied"
-                class="inline-flex shrink-0 items-center justify-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
-              >
-                Copy packet
-              </button>
-            </div>
-
-            <div class="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.75fr)]">
-              <div class="rounded-md border border-hairline bg-surface-1/50 px-3 py-2">
-                <p class="text-[10px] uppercase tracking-[0.08em] text-ink-tertiary">
-                  Owner brief readiness
-                </p>
-                <p class="mt-1 text-sm font-510 text-ink">
-                  {@ceo_launch_packet.readiness_label} ({@ceo_launch_packet.readiness_score})
-                </p>
-                <p class="mt-1 text-caption leading-5 text-ink-tertiary">
-                  {@ceo_launch_packet.readiness_next}
-                </p>
-              </div>
-              <div class="rounded-md border border-hairline bg-surface-1/50 px-3 py-2">
-                <p class="text-[10px] uppercase tracking-[0.08em] text-ink-tertiary">
-                  First-turn contract
-                </p>
-                <p class="mt-1 text-sm text-ink-muted">
-                  Return <span class="font-510 text-ink">[owner_update]</span>, <span class="font-510 text-ink">[handoff]</span>, or <span class="font-510 text-ink">[blocked]</span>.
-                </p>
-              </div>
-            </div>
-
-            <div
-              :if={@ceo_launch_packet.observe_points != []}
-              class="mt-3 rounded-md border border-hairline bg-surface-1/50 px-3 py-2.5"
-            >
-              <p class="text-[10px] uppercase tracking-[0.08em] text-ink-tertiary">
-                Observe after launch
-              </p>
-              <div class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-                <div
-                  :for={point <- @ceo_launch_packet.observe_points}
-                  class="rounded-md border border-hairline bg-canvas px-2.5 py-2"
-                >
-                  <p class="text-xs font-510 text-ink">{point.label}</p>
-                  <p class="mt-1 text-[11px] leading-4 text-ink-tertiary">
-                    {point.detail}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div
-              :if={@ceo_launch_packet.repair_scaffold}
-              id="issue-ceo-brief-repair"
-              class="mt-3 rounded-md border border-amber-500/25 bg-amber-500/[0.08] px-3 py-2.5"
-            >
-              <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div class="min-w-0">
-                  <p class="text-[10px] font-510 uppercase tracking-[0.1em] text-amber-300">
-                    Owner brief repair
-                  </p>
-                  <p class="mt-1 text-sm leading-5 text-amber-100">
-                    Copy this scaffold into the description, fill the missing lines, then return here to launch.
-                  </p>
-                </div>
-                <div class="flex shrink-0 flex-wrap gap-2">
-                  <button
-                    type="button"
-                    data-copy-text={@ceo_launch_packet.repair_scaffold}
-                    data-copy-label="Copy repair scaffold"
-                    data-copy-success-label="Copied"
-                    class="inline-flex items-center justify-center rounded-md border border-amber-500/25 bg-panel px-2.5 py-1.5 text-xs font-510 text-amber-100 transition hover:bg-amber-500/15"
-                  >
-                    Copy repair scaffold
-                  </button>
-                  <button
-                    type="button"
-                    phx-click="draft_owner_brief_repair"
-                    class="inline-flex items-center justify-center rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-xs font-510 text-amber-100 transition hover:bg-amber-500/15"
-                  >
-                    Use scaffold
-                  </button>
-                </div>
-              </div>
-              <pre class="mt-2 whitespace-pre-wrap break-words rounded border border-amber-500/15 bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-amber-100/90"><%= @ceo_launch_packet.repair_scaffold %></pre>
-            </div>
-
-            <div
-              :if={!@ceo_launch_packet.repair_scaffold}
-              class="mt-3 rounded-md border border-hairline bg-surface-1/50 px-3 py-2"
-            >
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p class="text-[10px] uppercase tracking-[0.08em] text-ink-tertiary">
-                    Focused command
-                  </p>
-                  <p class="mt-0.5 text-[10px] text-ink-tertiary">
-                    one issue only
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  data-copy-text={@ceo_launch_packet.focused_command}
-                  data-copy-label="Copy command"
-                  data-copy-success-label="Copied"
-                  class="inline-flex shrink-0 items-center justify-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
-                >
-                  Copy command
-                </button>
-              </div>
-              <code class="mt-1 block overflow-x-auto whitespace-pre rounded bg-canvas px-2 py-1.5 font-mono text-[11px] leading-5 text-ink-muted">
-                {@ceo_launch_packet.focused_command}
-              </code>
-            </div>
-          </div>
-
-          <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
-            <div
-              :for={step <- @ceo_flow_checklist.steps}
-              class={"rounded-md border px-3 py-3 #{ceo_flow_step_class(step.state)}"}
-            >
-              <div class="flex items-start justify-between gap-2">
-                <p class="text-[10px] font-510 uppercase text-ink-tertiary">{step.label}</p>
-                <span class={ceo_flow_step_badge_class(step.state)}>
-                  {step.state_label}
-                </span>
-              </div>
-              <p class="mt-2 text-sm font-510 text-ink">{step.value}</p>
-              <p class="mt-1 text-caption leading-5 text-ink-tertiary">{step.detail}</p>
-            </div>
+          <div class="bg-surface-1/50 px-4 py-4">
+            <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Review signals
+            </h3>
+            <ul class="mt-2 space-y-2">
+              <li :for={gap <- @gaps} class="flex gap-2 text-sm text-ink-muted">
+                <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"></span>
+                <span>{gap}</span>
+              </li>
+            </ul>
           </div>
         </div>
 
@@ -396,6 +227,213 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
             </div>
           </div>
         </div>
+
+        <details
+          :if={@ceo_flow_checklist}
+          id="issue-ceo-flow-checklist"
+          data-testid="issue-ceo-flow-checklist"
+          class="group/fold border-t border-hairline bg-surface-1/50"
+          open={@ceo_flow_checklist.status == :attention}
+        >
+          <summary class="flex cursor-pointer select-none list-none items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-surface-1/70 [&::-webkit-details-marker]:hidden">
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                CEO flow checklist
+              </h3>
+              <span class={ceo_flow_status_class(@ceo_flow_checklist.status)}>
+                {@ceo_flow_checklist.status_label}
+              </span>
+            </div>
+            <.icon
+              name="hero-chevron-down-mini"
+              class="h-3.5 w-3.5 shrink-0 text-ink-tertiary transition-transform group-open/fold:rotate-180"
+            />
+          </summary>
+          <div class="px-4 pb-4">
+            <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p class="text-caption text-ink-tertiary">
+                  {@ceo_flow_checklist.summary}
+                </p>
+              </div>
+              <div class="max-w-sm space-y-2">
+                <p class="rounded-md border border-hairline bg-canvas px-3 py-2 text-sm text-ink-muted">
+                  {@ceo_flow_checklist.next}
+                </p>
+                <button
+                  :if={@ceo_flow_checklist.action}
+                  type="button"
+                  phx-click={@ceo_flow_checklist.action.event}
+                  disabled={!@ceo_flow_checklist.action.enabled?}
+                  class={[
+                    "inline-flex items-center justify-center rounded-md border px-2.5 py-1.5 text-xs font-510 transition",
+                    @ceo_flow_checklist.action.enabled? &&
+                      "border-brand/30 bg-brand/10 text-brand hover:bg-brand/15",
+                    !@ceo_flow_checklist.action.enabled? &&
+                      "cursor-not-allowed border-hairline bg-surface-1 text-ink-tertiary"
+                  ]}
+                >
+                  {@ceo_flow_checklist.action.label}
+                </button>
+              </div>
+            </div>
+
+            <div
+              :if={@ceo_launch_packet}
+              id="issue-ceo-launch-packet"
+              data-testid="issue-ceo-launch-packet"
+              phx-hook="CopyToClipboard"
+              class="mb-3 rounded-md border border-hairline bg-canvas px-3 py-3"
+            >
+              <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="text-[10px] font-510 uppercase tracking-[0.12em] text-ink-tertiary">
+                      CEO launch packet
+                    </p>
+                    <span class={ceo_launch_packet_badge_class(@ceo_launch_packet.status)}>
+                      {@ceo_launch_packet.status_label}
+                    </span>
+                  </div>
+                  <p class="mt-1 text-sm text-ink-muted">
+                    {@ceo_launch_packet.next_action}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-copy-text={@ceo_launch_packet.copy_text}
+                  data-copy-label="Copy packet"
+                  data-copy-success-label="Copied"
+                  class="inline-flex shrink-0 items-center justify-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+                >
+                  Copy packet
+                </button>
+              </div>
+
+              <div class="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.75fr)]">
+                <div class="rounded-md border border-hairline bg-surface-1/50 px-3 py-2">
+                  <p class="text-[10px] uppercase tracking-[0.08em] text-ink-tertiary">
+                    Owner brief readiness
+                  </p>
+                  <p class="mt-1 text-sm font-510 text-ink">
+                    {@ceo_launch_packet.readiness_label} ({@ceo_launch_packet.readiness_score})
+                  </p>
+                  <p class="mt-1 text-caption leading-5 text-ink-tertiary">
+                    {@ceo_launch_packet.readiness_next}
+                  </p>
+                </div>
+                <div class="rounded-md border border-hairline bg-surface-1/50 px-3 py-2">
+                  <p class="text-[10px] uppercase tracking-[0.08em] text-ink-tertiary">
+                    First-turn contract
+                  </p>
+                  <p class="mt-1 text-sm text-ink-muted">
+                    Return <span class="font-510 text-ink">[owner_update]</span>, <span class="font-510 text-ink">[handoff]</span>, or <span class="font-510 text-ink">[blocked]</span>.
+                  </p>
+                </div>
+              </div>
+
+              <div
+                :if={@ceo_launch_packet.observe_points != []}
+                class="mt-3 rounded-md border border-hairline bg-surface-1/50 px-3 py-2.5"
+              >
+                <p class="text-[10px] uppercase tracking-[0.08em] text-ink-tertiary">
+                  Observe after launch
+                </p>
+                <div class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                  <div
+                    :for={point <- @ceo_launch_packet.observe_points}
+                    class="rounded-md border border-hairline bg-canvas px-2.5 py-2"
+                  >
+                    <p class="text-xs font-510 text-ink">{point.label}</p>
+                    <p class="mt-1 text-[11px] leading-4 text-ink-tertiary">
+                      {point.detail}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                :if={@ceo_launch_packet.repair_scaffold}
+                id="issue-ceo-brief-repair"
+                class="mt-3 rounded-md border border-amber-500/25 bg-amber-500/[0.08] px-3 py-2.5"
+              >
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div class="min-w-0">
+                    <p class="text-[10px] font-510 uppercase tracking-[0.1em] text-amber-300">
+                      Owner brief repair
+                    </p>
+                    <p class="mt-1 text-sm leading-5 text-amber-100">
+                      Copy this scaffold into the description, fill the missing lines, then return here to launch.
+                    </p>
+                  </div>
+                  <div class="flex shrink-0 flex-wrap gap-2">
+                    <button
+                      type="button"
+                      data-copy-text={@ceo_launch_packet.repair_scaffold}
+                      data-copy-label="Copy repair scaffold"
+                      data-copy-success-label="Copied"
+                      class="inline-flex items-center justify-center rounded-md border border-amber-500/25 bg-panel px-2.5 py-1.5 text-xs font-510 text-amber-100 transition hover:bg-amber-500/15"
+                    >
+                      Copy repair scaffold
+                    </button>
+                    <button
+                      type="button"
+                      phx-click="draft_owner_brief_repair"
+                      class="inline-flex items-center justify-center rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-xs font-510 text-amber-100 transition hover:bg-amber-500/15"
+                    >
+                      Use scaffold
+                    </button>
+                  </div>
+                </div>
+                <pre class="mt-2 whitespace-pre-wrap break-words rounded border border-amber-500/15 bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-amber-100/90"><%= @ceo_launch_packet.repair_scaffold %></pre>
+              </div>
+
+              <div
+                :if={!@ceo_launch_packet.repair_scaffold}
+                class="mt-3 rounded-md border border-hairline bg-surface-1/50 px-3 py-2"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p class="text-[10px] uppercase tracking-[0.08em] text-ink-tertiary">
+                      Focused command
+                    </p>
+                    <p class="mt-0.5 text-[10px] text-ink-tertiary">
+                      one issue only
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    data-copy-text={@ceo_launch_packet.focused_command}
+                    data-copy-label="Copy command"
+                    data-copy-success-label="Copied"
+                    class="inline-flex shrink-0 items-center justify-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+                  >
+                    Copy command
+                  </button>
+                </div>
+                <code class="mt-1 block overflow-x-auto whitespace-pre rounded bg-canvas px-2 py-1.5 font-mono text-[11px] leading-5 text-ink-muted">
+                  {@ceo_launch_packet.focused_command}
+                </code>
+              </div>
+            </div>
+
+            <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
+              <div
+                :for={step <- @ceo_flow_checklist.steps}
+                class={"rounded-md border px-3 py-3 #{ceo_flow_step_class(step.state)}"}
+              >
+                <div class="flex items-start justify-between gap-2">
+                  <p class="text-[10px] font-510 uppercase text-ink-tertiary">{step.label}</p>
+                  <span class={ceo_flow_step_badge_class(step.state)}>
+                    {step.state_label}
+                  </span>
+                </div>
+                <p class="mt-2 text-sm font-510 text-ink">{step.value}</p>
+                <p class="mt-1 text-caption leading-5 text-ink-tertiary">{step.detail}</p>
+              </div>
+            </div>
+          </div>
+        </details>
 
         <div
           id="owner-decision-packet"
@@ -466,27 +504,17 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
           </div>
         </div>
 
-        <div class="border-t border-hairline bg-surface-1/45 px-4 py-4">
-          <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                Runtime run ledger
-              </h3>
-              <p class="mt-1 text-caption text-ink-tertiary">
-                Latest agent runs with status, duration, owner, and captured runtime detail.
-                <span :if={@run_history[:total] > length(@run_ledger)} class="block">
-                  Showing the newest entries keeps long-running issues responsive.
-                </span>
-              </p>
-            </div>
-            <span class="rounded-full border border-hairline bg-canvas px-2.5 py-1 text-caption text-ink-muted">
-              <%= if @run_history[:total] > length(@run_ledger) do %>
-                Latest {length(@run_ledger)} of {@run_history[:total]} runs
-              <% else %>
-                {length(@run_ledger)} shown
-              <% end %>
+        <.brief_fold
+          title="Runtime run ledger"
+          badge={run_ledger_badge(@run_history, @run_ledger)}
+          open={runs_need_attention?(@run_ledger)}
+        >
+          <p class="mb-3 text-caption text-ink-tertiary">
+            Latest agent runs with status, duration, owner, and captured runtime detail.
+            <span :if={@run_history[:total] > length(@run_ledger)} class="block">
+              Showing the newest entries keeps long-running issues responsive.
             </span>
-          </div>
+          </p>
 
           <div
             :if={Enum.empty?(@run_ledger)}
@@ -572,45 +600,12 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
               </div>
             </div>
           </div>
-        </div>
+        </.brief_fold>
 
-        <div class="grid gap-px bg-hairline lg:grid-cols-[1fr_0.8fr]">
-          <div class="bg-surface-1/50 px-4 py-4">
-            <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Owner update
-            </h3>
-            <ul class="mt-2 space-y-2">
-              <li :for={line <- @brief_lines} class="flex gap-2 text-sm text-ink-muted">
-                <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand"></span>
-                <span>{line}</span>
-              </li>
-            </ul>
-          </div>
-          <div class="bg-surface-1/50 px-4 py-4">
-            <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Review signals
-            </h3>
-            <ul class="mt-2 space-y-2">
-              <li :for={gap <- @gaps} class="flex gap-2 text-sm text-ink-muted">
-                <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"></span>
-                <span>{gap}</span>
-              </li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="border-t border-hairline px-4 py-4">
-          <div class="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                Work narrative
-              </h3>
-              <p class="mt-1 text-caption text-ink-tertiary">
-                Condensed owner-readable phases before the raw activity stream.
-              </p>
-            </div>
-            <span class="text-caption text-ink-tertiary">{length(@narrative_cards)} phases</span>
-          </div>
+        <.brief_fold title="Work narrative" badge={"#{length(@narrative_cards)} phases"}>
+          <p class="mb-3 text-caption text-ink-tertiary">
+            Condensed owner-readable phases before the raw activity stream.
+          </p>
 
           <div class="grid gap-3 xl:grid-cols-3">
             <div
@@ -637,22 +632,15 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
               </ul>
             </div>
           </div>
-        </div>
+        </.brief_fold>
 
-        <div class="border-t border-hairline px-4 py-4">
-          <div class="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                Delegation map
-              </h3>
-              <p class="mt-1 text-caption text-ink-tertiary">
-                How CEO/CTO work fans out into product, design, engineering, and review.
-              </p>
-            </div>
-            <span class="text-caption text-ink-tertiary">
-              {length(@child_health_cards)} tracked sub-issues
-            </span>
-          </div>
+        <.brief_fold
+          title="Delegation map"
+          badge={"#{length(@child_health_cards)} tracked sub-issues"}
+        >
+          <p class="mb-3 text-caption text-ink-tertiary">
+            How CEO/CTO work fans out into product, design, engineering, and review.
+          </p>
 
           <div class="grid gap-3 xl:grid-cols-4">
             <div
@@ -692,143 +680,130 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
               </div>
             </div>
           </div>
-        </div>
+        </.brief_fold>
 
-        <div class="grid gap-px border-t border-hairline bg-hairline lg:grid-cols-[1fr_0.85fr]">
-          <div class="bg-surface-1/45 px-4 py-4">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                  CTO review queue
-                </h3>
-                <p class="mt-1 text-caption text-ink-tertiary">
-                  Which delegated work is ready to inspect before it reaches the CEO.
+        <.brief_fold
+          title="CTO review queue"
+          badge={"#{length(@review_queue.ready)} ready"}
+          open={@review_queue.ready != [] or @review_queue.blocked != []}
+        >
+          <div class="grid gap-3 lg:grid-cols-[1fr_0.85fr]">
+            <div class="min-w-0">
+              <p class="text-caption text-ink-tertiary">
+                Which delegated work is ready to inspect before it reaches the CEO.
+              </p>
+
+              <div
+                :if={!Enum.empty?(@child_health_cards)}
+                id="issue-delegated-dispatch-control"
+                class="mt-3 rounded-md border border-hairline bg-canvas px-3 py-2.5"
+              >
+                <p class="text-[10px] uppercase tracking-[0.08em] text-ink-tertiary">
+                  Dispatch delegated work
+                </p>
+                <p class="mt-1 text-caption leading-5 text-ink-tertiary">
+                  {@child_dispatch_action.detail}
+                  <span :if={@child_dispatch_action.disabled_reason}>
+                    {@child_dispatch_action.disabled_reason}
+                  </span>
+                </p>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    phx-click="resolve_review_gate"
+                    phx-value-action="queue_child_dispatch"
+                    disabled={!@child_dispatch_action.enabled?}
+                    class={[
+                      "inline-flex min-h-8 items-center justify-center rounded-md border px-2.5 py-1.5 text-xs font-510 transition",
+                      @child_dispatch_action.enabled? &&
+                        "border-brand/30 bg-brand/10 text-brand hover:bg-brand/15",
+                      !@child_dispatch_action.enabled? &&
+                        "cursor-not-allowed border-hairline bg-surface-1 text-ink-tertiary"
+                    ]}
+                  >
+                    {@child_dispatch_action.label}
+                  </button>
+                  <.app_link
+                    navigate={"/operations?parent_issue_id=#{@issue.id}#delegated-work-queue"}
+                    class="inline-flex min-h-8 items-center justify-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+                  >
+                    Open queue
+                  </.app_link>
+                </div>
+              </div>
+
+              <div class="mt-3 grid gap-2 sm:grid-cols-4">
+                <div class="rounded-md bg-canvas px-3 py-2">
+                  <p class="text-[10px] uppercase text-ink-tertiary">Ready</p>
+                  <p class="mt-1 text-lg font-510 text-emerald-300">{length(@review_queue.ready)}</p>
+                </div>
+                <div class="rounded-md bg-canvas px-3 py-2">
+                  <p class="text-[10px] uppercase text-ink-tertiary">Missing</p>
+                  <p class="mt-1 text-lg font-510 text-amber-300">{length(@review_queue.missing)}</p>
+                </div>
+                <div class="rounded-md bg-canvas px-3 py-2">
+                  <p class="text-[10px] uppercase text-ink-tertiary">Blocked</p>
+                  <p class="mt-1 text-lg font-510 text-brand">{length(@review_queue.blocked)}</p>
+                </div>
+                <div class="rounded-md bg-canvas px-3 py-2">
+                  <p class="text-[10px] uppercase text-ink-tertiary">Closed</p>
+                  <p class="mt-1 text-lg font-510 text-ink">{length(@review_queue.closed)}</p>
+                </div>
+              </div>
+
+              <div class="mt-3 divide-y divide-hairline rounded-md border border-hairline bg-canvas">
+                <.app_link
+                  :for={child <- @review_queue.items}
+                  navigate={~p"/issues/#{child.issue_id}"}
+                  class="flex items-start justify-between gap-3 px-3 py-2 hover:bg-surface-1"
+                >
+                  <div class="min-w-0">
+                    <p class="truncate text-sm font-510 text-ink">{child.title}</p>
+                    <p class="mt-1 text-caption text-ink-tertiary">{child.next}</p>
+                  </div>
+                  <span class={child_health_state_class(child.state)}>{child.review_label}</span>
+                </.app_link>
+                <p
+                  :if={Enum.empty?(@review_queue.items)}
+                  class="px-3 py-3 text-sm text-ink-tertiary"
+                >
+                  No delegated child work has been created yet.
                 </p>
               </div>
-              <span class="rounded-full border border-hairline bg-canvas px-2.5 py-1 text-caption text-ink-muted">
-                {length(@review_queue.ready)} ready
-              </span>
             </div>
 
-            <div
-              :if={!Enum.empty?(@child_health_cards)}
-              id="issue-delegated-dispatch-control"
-              class="mt-3 rounded-md border border-hairline bg-canvas px-3 py-2.5"
-            >
-              <p class="text-[10px] uppercase tracking-[0.08em] text-ink-tertiary">
-                Dispatch delegated work
-              </p>
-              <p class="mt-1 text-caption leading-5 text-ink-tertiary">
-                {@child_dispatch_action.detail}
-                <span :if={@child_dispatch_action.disabled_reason}>
-                  {@child_dispatch_action.disabled_reason}
-                </span>
-              </p>
-              <div class="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  phx-click="resolve_review_gate"
-                  phx-value-action="queue_child_dispatch"
-                  disabled={!@child_dispatch_action.enabled?}
-                  class={[
-                    "inline-flex min-h-8 items-center justify-center rounded-md border px-2.5 py-1.5 text-xs font-510 transition",
-                    @child_dispatch_action.enabled? &&
-                      "border-brand/30 bg-brand/10 text-brand hover:bg-brand/15",
-                    !@child_dispatch_action.enabled? &&
-                      "cursor-not-allowed border-hairline bg-surface-1 text-ink-tertiary"
-                  ]}
-                >
-                  {@child_dispatch_action.label}
-                </button>
-                <.app_link
-                  navigate={"/operations?parent_issue_id=#{@issue.id}#delegated-work-queue"}
-                  class="inline-flex min-h-8 items-center justify-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
-                >
-                  Open queue
-                </.app_link>
-              </div>
-            </div>
-
-            <div class="mt-3 grid gap-2 sm:grid-cols-4">
-              <div class="rounded-md bg-canvas px-3 py-2">
-                <p class="text-[10px] uppercase text-ink-tertiary">Ready</p>
-                <p class="mt-1 text-lg font-510 text-emerald-300">{length(@review_queue.ready)}</p>
-              </div>
-              <div class="rounded-md bg-canvas px-3 py-2">
-                <p class="text-[10px] uppercase text-ink-tertiary">Missing</p>
-                <p class="mt-1 text-lg font-510 text-amber-300">{length(@review_queue.missing)}</p>
-              </div>
-              <div class="rounded-md bg-canvas px-3 py-2">
-                <p class="text-[10px] uppercase text-ink-tertiary">Blocked</p>
-                <p class="mt-1 text-lg font-510 text-brand">{length(@review_queue.blocked)}</p>
-              </div>
-              <div class="rounded-md bg-canvas px-3 py-2">
-                <p class="text-[10px] uppercase text-ink-tertiary">Closed</p>
-                <p class="mt-1 text-lg font-510 text-ink">{length(@review_queue.closed)}</p>
-              </div>
-            </div>
-
-            <div class="mt-3 divide-y divide-hairline rounded-md border border-hairline bg-canvas">
-              <.app_link
-                :for={child <- @review_queue.items}
-                navigate={~p"/issues/#{child.issue_id}"}
-                class="flex items-start justify-between gap-3 px-3 py-2 hover:bg-surface-1"
-              >
-                <div class="min-w-0">
-                  <p class="truncate text-sm font-510 text-ink">{child.title}</p>
-                  <p class="mt-1 text-caption text-ink-tertiary">{child.next}</p>
+            <div class="min-w-0">
+              <h4 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                CEO owner update readiness
+              </h4>
+              <div class="mt-3 rounded-lg border border-hairline bg-canvas px-4 py-3">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-510 text-ink">{@owner_update.title}</p>
+                    <p class="mt-1 text-caption text-ink-tertiary">{@owner_update.summary}</p>
+                  </div>
+                  <span class={delegation_status_class(@owner_update.status)}>
+                    {@owner_update.status_label}
+                  </span>
                 </div>
-                <span class={child_health_state_class(child.state)}>{child.review_label}</span>
-              </.app_link>
-              <p
-                :if={Enum.empty?(@review_queue.items)}
-                class="px-3 py-3 text-sm text-ink-tertiary"
-              >
-                No delegated child work has been created yet.
-              </p>
-            </div>
-          </div>
-
-          <div class="bg-surface-1/45 px-4 py-4">
-            <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              CEO owner update readiness
-            </h3>
-            <div class="mt-3 rounded-lg border border-hairline bg-canvas px-4 py-3">
-              <div class="flex items-start justify-between gap-3">
-                <div>
-                  <p class="text-sm font-510 text-ink">{@owner_update.title}</p>
-                  <p class="mt-1 text-caption text-ink-tertiary">{@owner_update.summary}</p>
-                </div>
-                <span class={delegation_status_class(@owner_update.status)}>
-                  {@owner_update.status_label}
-                </span>
+                <ul class="mt-3 space-y-2">
+                  <li
+                    :for={line <- @owner_update.evidence}
+                    class="flex gap-2 text-caption text-ink-tertiary"
+                  >
+                    <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand/70"></span>
+                    <span>{line}</span>
+                  </li>
+                </ul>
+                <p class="mt-3 rounded-md bg-surface-1 px-3 py-2 text-sm text-ink-muted">
+                  {@owner_update.next}
+                </p>
               </div>
-              <ul class="mt-3 space-y-2">
-                <li
-                  :for={line <- @owner_update.evidence}
-                  class="flex gap-2 text-caption text-ink-tertiary"
-                >
-                  <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand/70"></span>
-                  <span>{line}</span>
-                </li>
-              </ul>
-              <p class="mt-3 rounded-md bg-surface-1 px-3 py-2 text-sm text-ink-muted">
-                {@owner_update.next}
-              </p>
             </div>
           </div>
-        </div>
+        </.brief_fold>
 
-        <div class="border-t border-hairline px-4 py-4">
-          <div class="mb-3 flex items-center justify-between gap-3">
-            <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-              Agent contributions
-            </h3>
-            <span class="text-caption text-ink-tertiary">
-              {length(@contribution_cards)} agents
-            </span>
-          </div>
-
+        <.brief_fold title="Agent contributions" badge={"#{length(@contribution_cards)} agents"}>
           <div
             :if={Enum.empty?(@contribution_cards)}
             class="rounded-lg border border-dashed border-hairline px-4 py-5 text-sm text-ink-tertiary"
@@ -884,10 +859,52 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
               </dl>
             </div>
           </div>
-        </div>
+        </.brief_fold>
       </div>
     </section>
     """
+  end
+
+  # Collapsible section shell for the execution brief. Keeps every audit
+  # section reachable while letting the default reading path stay short:
+  # owner update, review signals, and handoff stay open; the rest folds.
+  attr :title, :string, required: true
+  attr :badge, :string, default: nil
+  attr :open, :boolean, default: false
+  slot :inner_block, required: true
+
+  defp brief_fold(assigns) do
+    ~H"""
+    <details class="group/fold border-t border-hairline" open={@open}>
+      <summary class="flex cursor-pointer select-none list-none items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-surface-1/50 [&::-webkit-details-marker]:hidden">
+        <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+          {@title}
+        </h3>
+        <div class="flex items-center gap-2">
+          <span :if={@badge} class="text-caption text-ink-tertiary">{@badge}</span>
+          <.icon
+            name="hero-chevron-down-mini"
+            class="h-3.5 w-3.5 shrink-0 text-ink-tertiary transition-transform group-open/fold:rotate-180"
+          />
+        </div>
+      </summary>
+      <div class="px-4 pb-4">
+        {render_slot(@inner_block)}
+      </div>
+    </details>
+    """
+  end
+
+  defp run_ledger_badge(run_history, run_ledger) do
+    if run_history[:total] > length(run_ledger) do
+      "Latest #{length(run_ledger)} of #{run_history[:total]} runs"
+    else
+      "#{length(run_ledger)} shown"
+    end
+  end
+
+  defp runs_need_attention?(run_ledger) do
+    Enum.any?(run_ledger, &(&1.status in ["failed", "timed_out", "running", "pending", "queued"]))
   end
 
   defp assign_owner_decision_packet(assigns) do

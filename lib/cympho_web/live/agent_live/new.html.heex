@@ -1,4 +1,4 @@
-<.page size="wide" class="ember-aurora">
+<.page size="wide" data-ui-complex-page class="ember-aurora">
   <div class="relative z-[1]">
     <%= if @pending_approval_id do %>
       <div class="mb-5 rounded-lg border border-blue-500/20 bg-blue-500/10 px-4 py-3">
@@ -99,10 +99,56 @@
           </div>
 
           <div class="space-y-8 p-5 sm:p-6">
+            <section
+              data-testid="new-agent-identity-section"
+              class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4 sm:px-5"
+            >
+              <div>
+                <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                  1 · Identity and reporting
+                </p>
+                <p class="mt-1 text-sm leading-5 text-text-tertiary">
+                  Give the agent a clear role and manager so handoffs land in the right part of the org.
+                </p>
+              </div>
+
+              <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_220px_220px]">
+                <.input field={@form[:name]} label="Name" required placeholder="Elixir Engineer" />
+                <.input
+                  field={@form[:role]}
+                  type="select"
+                  label="Role"
+                  required
+                  options={role_options()}
+                />
+                <.input
+                  field={@form[:parent_id]}
+                  type="select"
+                  label="Reports to"
+                  options={@reports_to_options}
+                />
+              </div>
+
+              <div class="flex items-start gap-2 rounded-lg border border-brand/20 bg-brand/[0.05] px-3 py-2.5">
+                <div class={"mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md font-serif text-[11px] font-590 #{role_avatar_class(role_value)}"}>
+                  {role_name |> String.first() |> String.upcase()}
+                </div>
+                <div class="min-w-0">
+                  <p class="text-sm font-590 text-text-primary">{role_name}</p>
+                  <p class="mt-0.5 text-xs leading-5 text-text-tertiary">
+                    {role_blurb(role_value)}
+                  </p>
+                  <p class="mt-1 text-[11px] font-510 text-text-quaternary">
+                    {role_reports_to_hint(role_value)}
+                  </p>
+                </div>
+              </div>
+            </section>
+
             <section data-testid="new-agent-runtime-section" class="space-y-4">
               <div>
                 <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                  Runtime profile
+                  2 · Runtime profile
                 </p>
                 <p class="mt-1 text-sm leading-5 text-text-tertiary">
                   Pick the execution backend before tuning adapter-specific details.
@@ -191,41 +237,10 @@
               </div>
             </section>
 
-            <section
-              data-testid="new-agent-identity-section"
-              class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4 sm:px-5"
-            >
+            <section data-testid="new-agent-adapter-section" class="ui-advanced-only space-y-4">
               <div>
                 <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                  Identity and reporting
-                </p>
-                <p class="mt-1 text-sm leading-5 text-text-tertiary">
-                  Give the agent a clear role and manager so handoffs land in the right part of the org.
-                </p>
-              </div>
-
-              <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_220px_220px]">
-                <.input field={@form[:name]} label="Name" required placeholder="Elixir Engineer" />
-                <.input
-                  field={@form[:role]}
-                  type="select"
-                  label="Role"
-                  required
-                  options={role_options()}
-                />
-                <.input
-                  field={@form[:parent_id]}
-                  type="select"
-                  label="Reports to"
-                  options={@reports_to_options}
-                />
-              </div>
-            </section>
-
-            <section data-testid="new-agent-adapter-section" class="space-y-4">
-              <div>
-                <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                  Adapter configuration
+                  3 · Adapter configuration
                 </p>
                 <p class="mt-1 text-sm leading-5 text-text-tertiary">
                   Runtime profiles fill this in automatically; use custom settings only when needed.
@@ -560,11 +575,11 @@
             >
               <div>
                 <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-                  Operating guide
+                  4 · Operating guide
                 </p>
                 <p class="mt-1 text-sm leading-5 text-text-tertiary">
-                  Role templates set the base loop. Keep edits focused on evidence, handoff, and
-                  recovery expectations.
+                  Role templates set the base loop — the defaults below already work. Edit only to
+                  add company-specific rules.
                 </p>
               </div>
 
@@ -613,8 +628,12 @@
               >
                 Cancel
               </.app_link>
-              <.button type="submit" variant="primary" class="min-h-[40px] w-full sm:w-auto">
-                Create Agent
+              <.button
+                type="submit"
+                variant="primary"
+                class="cta-glow min-h-[40px] w-full sm:w-auto"
+              >
+                Hire {role_name}
               </.button>
             </div>
           </div>

@@ -360,6 +360,20 @@ defmodule CymphoWeb.GoalLive.Index do
   def progress_width(percent) when is_integer(percent), do: "width: #{max(min(percent, 100), 0)}%"
   def progress_width(_percent), do: "width: 0%"
 
+  # Quiets zeroed counts so real numbers carry the accent, not empty ones.
+  def count_color(0, _color), do: "text-text-quaternary"
+  def count_color(_count, color), do: color
+
+  # Staleness signal: a goal with open work that has not moved in a week.
+  defp goal_idle_days(%{last_activity_at: %DateTime{} = at, open: open}) when open > 0 do
+    case DateTime.diff(DateTime.utc_now(), at, :day) do
+      days when days >= 7 -> days
+      _ -> nil
+    end
+  end
+
+  defp goal_idle_days(_health), do: nil
+
   defp plural_suffix(1), do: ""
   defp plural_suffix(_), do: "s"
 

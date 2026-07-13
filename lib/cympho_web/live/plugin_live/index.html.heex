@@ -210,64 +210,89 @@
       >
         <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div class="min-w-0 flex-1">
-            <div class="mb-2 flex flex-wrap items-center gap-2">
+            <div class="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
               <.app_link
                 navigate={~p"/plugins/#{plugin.id}"}
                 class="truncate text-sm font-590 text-text-primary hover:text-brand"
               >
                 {plugin.name}
               </.app_link>
-              <span class={[
-                "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510",
-                status_class(plugin.status)
-              ]}>
-                {status_label(plugin.status)}
-              </span>
-              <span class={["text-xs font-510", enabled_class(plugin.enabled)]}>
-                {enabled_label(plugin.enabled)}
+              <.plugin_state enabled={plugin.enabled} />
+              <span
+                :if={plugin_error?(plugin)}
+                class="inline-flex items-center gap-1 rounded-md border border-red-500/25 bg-red-500/10 px-2 py-0.5 text-xs font-510 text-red-300"
+              >
+                <.icon name="hero-exclamation-triangle-mini" class="h-3 w-3" /> Error
               </span>
             </div>
             <p class="line-clamp-2 max-w-3xl text-sm leading-5 text-text-tertiary">
               {plugin.description || "No description provided."}
             </p>
+
+            <details
+              :if={capability_count(plugin.capabilities) > 0}
+              class="group/cap mt-2.5 max-w-3xl"
+            >
+              <summary class="inline-flex cursor-pointer list-none items-center gap-1.5 text-xs font-510 text-text-tertiary transition-colors hover:text-text-secondary [&::-webkit-details-marker]:hidden">
+                <.icon
+                  name="hero-shield-check-mini"
+                  class="h-3.5 w-3.5 text-text-quaternary"
+                /> What this plugin can do
+                <.icon
+                  name="hero-chevron-down-mini"
+                  class="h-3.5 w-3.5 text-text-quaternary transition-transform group-open/cap:rotate-180"
+                />
+              </summary>
+              <p class="mt-1.5 pl-5 text-xs leading-5 text-text-tertiary">
+                This plugin can: {humanized_capabilities(plugin.capabilities)}.
+              </p>
+            </details>
+
             <div class="ui-advanced-only mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-quaternary">
               <span>{plugin.identifier}</span>
               <span>v{plugin.version}</span>
+              <span>{status_label(plugin.status)}</span>
               <span>{company_name(plugin)}</span>
               <span>{project_name(plugin)}</span>
               <span>{capability_count(plugin.capabilities)} capabilities</span>
             </div>
           </div>
 
-          <div class="flex shrink-0 flex-wrap items-center gap-2">
+          <div class="flex shrink-0 items-center gap-1">
             <button
               type="button"
               phx-click="toggle_plugin"
               phx-value-id={plugin.id}
-              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+              class="rounded-lg border border-border bg-button px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
             >
               {if plugin.enabled, do: "Disable", else: "Enable"}
             </button>
             <.app_link
               navigate={~p"/plugins/#{plugin.id}/settings"}
-              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+              aria-label="Plugin settings"
+              title="Settings"
+              class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-quaternary opacity-70 transition-colors hover:bg-button hover:text-text-primary group-hover:opacity-100"
             >
-              Settings
+              <.icon name="hero-adjustments-horizontal-mini" class="h-4 w-4" />
             </.app_link>
             <.app_link
               navigate={~p"/plugins/#{plugin.id}/edit"}
-              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+              aria-label="Edit plugin"
+              title="Edit"
+              class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-quaternary opacity-70 transition-colors hover:bg-button hover:text-text-primary group-hover:opacity-100"
             >
-              Edit
+              <.icon name="hero-pencil-square-mini" class="h-4 w-4" />
             </.app_link>
             <button
               type="button"
               phx-click="delete"
               phx-value-id={plugin.id}
               data-confirm="Delete this plugin?"
-              class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-510 text-red-400 transition-colors hover:bg-red-500/15"
+              aria-label="Delete plugin"
+              title="Delete"
+              class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-quaternary opacity-70 transition-colors hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
             >
-              Delete
+              <.icon name="hero-trash-mini" class="h-4 w-4" />
             </button>
           </div>
         </div>

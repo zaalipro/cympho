@@ -63,6 +63,69 @@ defmodule CymphoWeb.GoalLive.Show do
   def status_label(:in_review), do: "In review"
   def status_label(s), do: s |> to_string() |> String.capitalize()
 
+  @doc "Rolls the raw status counts into a single on-track glance."
+  def goal_summary(status_counts) do
+    total = status_counts |> Map.values() |> Enum.sum()
+    done = Map.get(status_counts, :done, 0)
+
+    %{
+      total: total,
+      done: done,
+      open:
+        Map.get(status_counts, :backlog, 0) + Map.get(status_counts, :todo, 0) +
+          Map.get(status_counts, :in_progress, 0),
+      in_review: Map.get(status_counts, :in_review, 0),
+      blocked: Map.get(status_counts, :blocked, 0),
+      percent: if(total > 0, do: round(done / total * 100), else: 0)
+    }
+  end
+
+  def count_color(0, _color), do: "text-text-quaternary"
+  def count_color(_count, color), do: color
+
+  def progress_width(percent) when is_integer(percent),
+    do: "width: #{max(min(percent, 100), 0)}%"
+
+  def progress_width(_percent), do: "width: 0%"
+
+  # True when an issue moved in the last week — powers the "what moved" grouping.
+  def recent_issue?(%{updated_at: %DateTime{} = at}),
+    do: DateTime.diff(DateTime.utc_now(), at, :day) <= 7
+
+  def recent_issue?(_issue), do: false
+
+  def moved_label(%DateTime{} = at) do
+    case DateTime.diff(DateTime.utc_now(), at, :day) do
+      0 -> "today"
+      d -> "#{d}d ago"
+    end
+  end
+
+  def moved_label(_at), do: nil
+
+  attr :issue, :map, required: true
+
+  def issue_row(assigns) do
+    ~H"""
+    <.app_link
+      navigate={~p"/issues/#{@issue.id}"}
+      class="group flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-surface-2 hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
+    >
+      <.badge variant="status" value={to_string(@issue.status)} />
+      <span :if={@issue.identifier} class="font-mono text-caption text-ink-tertiary shrink-0">
+        {@issue.identifier}
+      </span>
+      <span class="flex-1 truncate text-body text-ink-muted group-hover:text-ink">
+        {@issue.title}
+      </span>
+      <span :if={moved_label(@issue.updated_at)} class="shrink-0 text-caption text-ink-tertiary">
+        {moved_label(@issue.updated_at)}
+      </span>
+      <.badge variant="priority" value={to_string(@issue.priority)} />
+    </.app_link>
+    """
+  end
+
   defp get_scoped_goal(socket, id) do
     with {:ok, goal} <- Goals.get_goal(id),
          :ok <- authorize_goal(socket, goal) do

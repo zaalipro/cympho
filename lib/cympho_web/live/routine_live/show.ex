@@ -1,5 +1,9 @@
 defmodule CymphoWeb.RoutineLive.Show do
   use CymphoWeb, :live_view
+
+  import CymphoWeb.RoutineLive.FormHelpers,
+    only: [schedule_summary: 1, next_run: 1, routine_run_dot: 1]
+
   alias Cympho.Routines
   alias Cympho.RoutineTriggers
 
@@ -7,8 +11,7 @@ defmodule CymphoWeb.RoutineLive.Show do
   def mount(%{"id" => id}, _session, socket) do
     case get_scoped_routine(socket, id) do
       {:ok, routine} ->
-        runs = RoutineTriggers.list_runs(routine.id, limit: 50)
-        {:ok, assign(socket, routine: routine, runs: runs)}
+        {:ok, assign_routine(socket, routine)}
 
       {:error, :not_found} ->
         {:ok, push_navigate(socket, to: ~p"/")}
@@ -19,13 +22,10 @@ defmodule CymphoWeb.RoutineLive.Show do
   def handle_params(%{"id" => id}, _url, socket) do
     case get_scoped_routine(socket, id) do
       {:ok, routine} ->
-        runs = RoutineTriggers.list_runs(routine.id, limit: 50)
-
         {:noreply,
          socket
          |> assign(:page_title, routine.name)
-         |> assign(:routine, routine)
-         |> assign(:runs, runs)}
+         |> assign_routine(routine)}
 
       {:error, :not_found} ->
         {:noreply,
@@ -33,6 +33,13 @@ defmodule CymphoWeb.RoutineLive.Show do
          |> put_flash(:error, "Routine not found")
          |> push_navigate(to: ~p"/")}
     end
+  end
+
+  defp assign_routine(socket, routine) do
+    socket
+    |> assign(:routine, routine)
+    |> assign(:runs, RoutineTriggers.list_runs(routine.id, limit: 50))
+    |> assign(:triggers, RoutineTriggers.list_triggers(routine.id))
   end
 
   @impl true
@@ -98,14 +105,43 @@ defmodule CymphoWeb.RoutineLive.Show do
     |> String.capitalize()
   end
 
-  def run_status_class("completed"), do: "border-success/20 bg-success/10 text-success"
-  def run_status_class("running"), do: "border-brand/20 bg-brand/10 text-brand"
-  def run_status_class("pending"), do: "border-amber-500/20 bg-amber-500/10 text-amber-400"
-  def run_status_class("failed"), do: "border-brand/20 bg-brand/10 text-brand"
+  def run_status_class("completed"),
+    do: "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+
+  def run_status_class("running"), do: "border-amber-500/20 bg-amber-500/10 text-amber-300"
+  def run_status_class("pending"), do: "border-amber-500/20 bg-amber-500/10 text-amber-300"
+  def run_status_class("failed"), do: "border-rose-500/25 bg-rose-500/10 text-rose-300"
   def run_status_class(_), do: "border-border bg-panel text-text-tertiary"
 
   def format_datetime(nil), do: "-"
   def format_datetime(datetime), do: Calendar.strftime(datetime, "%Y-%m-%d %H:%M")
+
+  @doc "Most recent run, or nil (runs arrive newest-first from list_runs/2)."
+  def last_run([]), do: nil
+  def last_run([run | _]), do: run
+  def last_run(_), do: nil
+
+  @doc "Only-loud-when-needed health signal for the routine header."
+  def show_alert(routine, triggers, runs) do
+    cond do
+      routine.status == :active and no_enabled_trigger?(triggers) -> :trigger_gap
+      match?(%{status: "failed"}, last_run(runs)) -> :failed
+      true -> :ok
+    end
+  end
+
+  defp no_enabled_trigger?(triggers), do: Enum.all?(triggers, &(&1.enabled == false))
+
+  def show_alert_class(:failed), do: "border-rose-500/25 bg-rose-500/[0.05]"
+  def show_alert_class(:trigger_gap), do: "border-amber-500/25 bg-amber-500/[0.05]"
+  def show_alert_class(_), do: "border-border bg-surface"
+
+  def show_alert_note(:failed), do: "The last run failed — inspect it before the next trigger."
+
+  def show_alert_note(:trigger_gap),
+    do: "This routine is active but has no enabled trigger, so it cannot run on its own yet."
+
+  def show_alert_note(_), do: nil
 
   defp get_scoped_routine(socket, id) do
     case current_company_id(socket) do

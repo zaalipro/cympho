@@ -57,7 +57,7 @@ defmodule CymphoWeb.ProjectLiveTest do
       assert html =~ "Project queue signals"
       assert html =~ "Flow Project"
       assert html =~ "No repository configured"
-      assert html =~ "1 active goals"
+      assert html =~ "1 active goal"
       assert html =~ "25% complete"
       assert html =~ ~s(href="/issues?project_id=#{project.id}")
     end

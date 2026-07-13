@@ -804,6 +804,72 @@ defmodule CymphoWeb.AgentLive.New do
 
   defp role_label(role), do: Agent.role_label(role)
 
+  def role_avatar_class(role) when is_binary(role) do
+    role |> Agent.normalize_role() |> CymphoWeb.Format.role_avatar_class()
+  end
+
+  def role_avatar_class(role), do: CymphoWeb.Format.role_avatar_class(role)
+
+  @doc """
+  One line of "what this role actually does" so the hire choice is made
+  on behavior, not job-title vibes.
+  """
+  def role_blurb(role) when is_binary(role) do
+    role |> Agent.normalize_role() |> role_blurb()
+  end
+
+  def role_blurb(:ceo),
+    do: "Triages incoming work, sets priorities, and delegates to the right role."
+
+  def role_blurb(:cto),
+    do: "Owns technical direction, reviews engineering output, and unblocks delivery."
+
+  def role_blurb(:engineer),
+    do: "Picks up coding issues, ships changes as PRs, and reports verified results."
+
+  def role_blurb(:release_engineer),
+    do: "Prepares releases, merges verified work, and keeps deploys healthy."
+
+  def role_blurb(:qa_engineer),
+    do: "Tests delivered work against acceptance criteria and files regressions."
+
+  def role_blurb(:product_manager),
+    do: "Turns goals into scoped issues with clear acceptance criteria."
+
+  def role_blurb(:designer),
+    do: "Produces design specs and reviews UI work for consistency."
+
+  def role_blurb(:researcher),
+    do: "Investigates questions and returns sourced, decision-ready findings."
+
+  def role_blurb(:marketer),
+    do: "Plans and executes growth campaigns with measurable outcomes."
+
+  def role_blurb(:content_strategist),
+    do: "Writes and structures content that matches the brand voice."
+
+  def role_blurb(:sales_development),
+    do: "Qualifies leads and drafts outreach for the sales pipeline."
+
+  def role_blurb(:customer_support),
+    do: "Answers customer issues and escalates product problems with context."
+
+  def role_blurb(_), do: "Works assigned issues and reports progress owners can read."
+
+  @doc "Default reporting line for a role, used as hire-form guidance."
+  def role_reports_to_hint(role) when is_binary(role) do
+    role |> Agent.normalize_role() |> role_reports_to_hint()
+  end
+
+  def role_reports_to_hint(:ceo), do: "Reports to the board"
+  def role_reports_to_hint(:cto), do: "Usually reports to the CEO"
+
+  def role_reports_to_hint(role)
+      when role in [:engineer, :release_engineer, :qa_engineer],
+      do: "Usually reports to the CTO"
+
+  def role_reports_to_hint(_), do: "Usually reports to the CEO"
+
   defp adapter_label(:claude_code), do: "Claude Code"
   defp adapter_label(:codex), do: "Codex"
   defp adapter_label(:cursor), do: "Cursor"

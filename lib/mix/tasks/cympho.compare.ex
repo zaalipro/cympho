@@ -1454,7 +1454,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(heartbeat_source, "@max_issue_run_limit 200"),
       String.contains?(issue_live_source, "load_issue_run_history"),
       String.contains?(issue_live_source, "run_history"),
-      String.contains?(execution_brief_source, "Latest {length(@run_ledger)} of"),
+      String.contains?(execution_brief_source, "run_history[:total]"),
       String.contains?(execution_brief_source, "long-running issues responsive")
     ]
 

@@ -66,6 +66,30 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
           </div>
         </div>
 
+        <div
+          :if={@panel.alert}
+          data-testid="issue-swarm-alert"
+          class="mt-4 flex flex-col gap-2 rounded-md border border-red-500/25 bg-red-500/[0.07] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div class="flex min-w-0 items-center gap-2.5">
+            <span aria-hidden="true" class="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-400">
+            </span>
+            <div class="min-w-0">
+              <p class="text-xs font-590 text-red-200">Swarm needs recovery</p>
+              <p class="mt-0.5 truncate text-[11px] leading-4 text-ink-tertiary">
+                {@panel.alert.type_label}: {@panel.alert.message}
+              </p>
+            </div>
+          </div>
+          <a
+            :if={@panel.queue_path}
+            href={@panel.queue_path}
+            class="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs font-510 text-red-100 transition hover:bg-red-500/15"
+          >
+            Open queue to recover
+          </a>
+        </div>
+
         <div class="mt-4 grid gap-2 md:grid-cols-3">
           <div :for={step <- @panel.steps} class={step_class(step.state)}>
             <div class="flex items-center justify-between gap-2">
@@ -298,7 +322,15 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
       |> Enum.reverse()
       |> Enum.map(&event_row/1)
 
-    Map.put(panel, :events, events)
+    panel
+    |> Map.put(:events, events)
+    |> Map.put(:alert, latest_error_event(events))
+  end
+
+  # Surface the most recent error event as a one-line recovery banner so a
+  # stuck/failed swarm reads at a glance without scanning the log.
+  defp latest_error_event(events) do
+    Enum.find(events, &(&1.status == "error"))
   end
 
   defp event_row(event) do

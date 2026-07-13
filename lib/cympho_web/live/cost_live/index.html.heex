@@ -183,7 +183,12 @@
       <div class="ember-stat bg-surface border border-border rounded-xl p-5">
         <div class="flex items-center justify-between mb-2">
           <span class="text-text-secondary text-xs uppercase tracking-wider">Total Cost</span>
-          <svg class="w-5 h-5 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg
+            class="w-5 h-5 text-text-quaternary"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
             <path
               stroke-linecap="round"
               stroke-linejoin="round"
@@ -208,7 +213,7 @@
         <div class="flex items-center justify-between mb-2">
           <span class="text-text-secondary text-xs uppercase tracking-wider">Total Tokens</span>
           <svg
-            class="w-5 h-5 text-purple-400"
+            class="w-5 h-5 text-text-quaternary"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -231,7 +236,7 @@
         <div class="flex items-center justify-between mb-2">
           <span class="text-text-secondary text-xs uppercase tracking-wider">Budget Limit</span>
           <svg
-            class="w-5 h-5 text-green-400"
+            class="w-5 h-5 text-text-quaternary"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -254,7 +259,7 @@
         <div class="flex items-center justify-between mb-2">
           <span class="text-text-secondary text-xs uppercase tracking-wider">Budget Spent</span>
           <svg
-            class="w-5 h-5 text-amber-400"
+            class="w-5 h-5 text-text-quaternary"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -270,12 +275,9 @@
         <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
           {format_cost(@summary.budget_spent)}
         </div>
-        <div class="text-xs text-text-quaternary mt-1">
-          <%= if Decimal.gt?(@summary.budget_limit, 0) do %>
-            {budget_spent_percentage(@summary)}
-          <% else %>
-            N/A
-          <% end %>
+        <% pace = spend_pace(@summary) %>
+        <div class={["text-xs mt-1 leading-5", spend_pace_text_class(pace.tone)]}>
+          {pace.text}
         </div>
       </div>
     </div>

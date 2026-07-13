@@ -179,6 +179,24 @@ defmodule CymphoWeb.SkillLive.Index do
       else: first_company_id(companies)
   end
 
+  attr :enabled, :boolean, required: true
+
+  def skill_state(assigns) do
+    ~H"""
+    <span class={[
+      "inline-flex items-center gap-1.5 text-xs font-510",
+      (@enabled && "text-text-tertiary") || "text-text-quaternary"
+    ]}>
+      <span class={[
+        "h-1.5 w-1.5 rounded-full",
+        (@enabled && "bg-emerald-400/80") || "bg-text-quaternary/60"
+      ]}>
+      </span>
+      {(@enabled && "Enabled") || "Disabled"}
+    </span>
+    """
+  end
+
   attr :label, :string, required: true
   attr :value, :any, required: true
   attr :tone, :atom, default: :neutral
@@ -262,20 +280,6 @@ defmodule CymphoWeb.SkillLive.Index do
     "inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
   end
 
-  def status_class(true), do: "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
-  def status_class(false), do: "border-border bg-subtle text-text-tertiary"
-  def status_label(true), do: "Enabled"
-  def status_label(false), do: "Disabled"
-
-  def manifest_class(skill) do
-    if valid_manifest?(skill),
-      do: "border-emerald-500/20 bg-emerald-500/10 text-emerald-300",
-      else: "border-red-500/20 bg-red-500/10 text-red-300"
-  end
-
-  def manifest_label(skill),
-    do: if(valid_manifest?(skill), do: "Manifest ready", else: "Manifest gap")
-
   def scope_label(%{company: %{name: name}}) when is_binary(name), do: name
   def scope_label(_skill), do: "Global"
 
@@ -293,6 +297,8 @@ defmodule CymphoWeb.SkillLive.Index do
   end
 
   def capability_count(_skill), do: 0
+
+  def skill_manifest_gap?(skill), do: not valid_manifest?(skill)
 
   defp valid_manifest?(%{manifest: manifest}) do
     match?({:ok, _}, Cympho.Skills.Manifest.validate(manifest))

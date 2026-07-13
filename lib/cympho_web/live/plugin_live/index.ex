@@ -141,15 +141,6 @@ defmodule CymphoWeb.PluginLive.Index do
     assign(socket, :plugin_health, Plugins.health_summary(socket.assigns[:selected_company_id]))
   end
 
-  def status_class("active"), do: "border-success/20 bg-success/10 text-success"
-  def status_class("installed"), do: "border-brand/20 bg-brand/10 text-brand"
-
-  def status_class("disabled"),
-    do: "border-text-quaternary/20 bg-text-quaternary/10 text-text-tertiary"
-
-  def status_class("error"), do: "border-brand/20 bg-brand/10 text-brand"
-  def status_class(_), do: "border-border bg-surface text-text-tertiary"
-
   def status_label(nil), do: "Unknown"
 
   def status_label(status) do
@@ -159,13 +150,42 @@ defmodule CymphoWeb.PluginLive.Index do
     |> String.capitalize()
   end
 
-  def enabled_label(true), do: "Enabled"
-  def enabled_label(false), do: "Disabled"
-  def enabled_label(_), do: "Unknown"
+  def plugin_error?(%{status: "error"}), do: true
+  def plugin_error?(_plugin), do: false
 
-  def enabled_class(true), do: "text-success"
-  def enabled_class(false), do: "text-text-quaternary"
-  def enabled_class(_), do: "text-text-tertiary"
+  attr :enabled, :boolean, required: true
+
+  def plugin_state(assigns) do
+    ~H"""
+    <span class={[
+      "inline-flex items-center gap-1.5 text-xs font-510",
+      (@enabled && "text-text-tertiary") || "text-text-quaternary"
+    ]}>
+      <span class={[
+        "h-1.5 w-1.5 rounded-full",
+        (@enabled && "bg-emerald-400/80") || "bg-text-quaternary/60"
+      ]}>
+      </span>
+      {(@enabled && "Enabled") || "Disabled"}
+    </span>
+    """
+  end
+
+  def humanize_capability(capability) do
+    capability
+    |> to_string()
+    |> String.replace(["_", ":", "-", "."], " ")
+    |> String.trim()
+  end
+
+  def humanized_capabilities(capabilities) when is_list(capabilities) do
+    capabilities
+    |> Enum.map(&humanize_capability/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join(", ")
+  end
+
+  def humanized_capabilities(_capabilities), do: ""
 
   def company_name(%{company: %{name: name}}) when is_binary(name), do: name
   def company_name(_), do: "Global"

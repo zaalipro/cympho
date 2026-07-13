@@ -173,18 +173,19 @@
       >
         <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div class="min-w-0 flex-1">
-            <div class="mb-2 flex flex-wrap items-center gap-2">
+            <div class="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
               <.app_link
                 navigate={~p"/skills/#{skill.id}"}
                 class="truncate text-sm font-590 text-text-primary hover:text-brand"
               >
                 {skill.name}
               </.app_link>
-              <span class={"inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510 #{status_class(skill.enabled)}"}>
-                {status_label(skill.enabled)}
-              </span>
-              <span class={"inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510 #{manifest_class(skill)}"}>
-                {manifest_label(skill)}
+              <.skill_state enabled={skill.enabled} />
+              <span
+                :if={skill_manifest_gap?(skill)}
+                class="inline-flex items-center gap-1 rounded-md border border-red-500/25 bg-red-500/10 px-2 py-0.5 text-xs font-510 text-red-300"
+              >
+                <.icon name="hero-exclamation-triangle-mini" class="h-3 w-3" /> Manifest gap
               </span>
             </div>
 
@@ -201,29 +202,33 @@
             </div>
           </div>
 
-          <div class="flex shrink-0 flex-wrap items-center gap-2">
+          <div class="flex shrink-0 items-center gap-1">
             <button
               type="button"
               phx-click="toggle_skill"
               phx-value-id={skill.id}
-              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+              class="rounded-lg border border-border bg-button px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
             >
               {if skill.enabled, do: "Disable", else: "Enable"}
             </button>
             <.app_link
               navigate={~p"/skills/#{skill.id}/edit"}
-              class="rounded-lg border border-border bg-button px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+              aria-label="Edit skill"
+              title="Edit"
+              class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-quaternary opacity-70 transition-colors hover:bg-button hover:text-text-primary group-hover:opacity-100"
             >
-              Edit
+              <.icon name="hero-pencil-square-mini" class="h-4 w-4" />
             </.app_link>
             <button
               type="button"
               phx-click="delete"
               phx-value-id={skill.id}
               data-confirm="Delete this skill?"
-              class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-510 text-red-400 transition-colors hover:bg-red-500/15"
+              aria-label="Delete skill"
+              title="Delete"
+              class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-quaternary opacity-70 transition-colors hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
             >
-              Delete
+              <.icon name="hero-trash-mini" class="h-4 w-4" />
             </button>
           </div>
         </div>

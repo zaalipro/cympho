@@ -261,13 +261,26 @@ defmodule CymphoWeb.SettingsLive.Index do
     Map.get(events, event, true)
   end
 
-  defp channel_toggle_class(true) do
-    "rounded-lg border border-success/20 bg-success/10 px-3 py-1.5 text-xs font-510 text-success transition-colors hover:bg-success/15"
+  # A real on/off switch: the physical control plus a colored word so the
+  # channel's state is unambiguous at rest (emerald = on, quiet gray = off).
+  defp switch_track_class(true) do
+    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-success/40 bg-success/30 transition-colors"
   end
 
-  defp channel_toggle_class(false) do
-    "rounded-lg border border-border bg-button px-3 py-1.5 text-xs font-510 text-text-tertiary transition-colors hover:bg-button-hover hover:text-text-primary"
+  defp switch_track_class(false) do
+    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-border bg-subtle transition-colors hover:bg-button-hover"
   end
+
+  defp switch_knob_class(true) do
+    "inline-block h-4 w-4 translate-x-[18px] rounded-full bg-success shadow-sm transition-transform"
+  end
+
+  defp switch_knob_class(false) do
+    "inline-block h-4 w-4 translate-x-0.5 rounded-full bg-text-quaternary shadow-sm transition-transform"
+  end
+
+  defp status_word_class(true), do: "text-xs font-590 text-success"
+  defp status_word_class(false), do: "text-xs font-510 text-text-quaternary"
 
   defp event_toggle_class(true) do
     "flex w-full items-center justify-between rounded-lg border border-success/20 bg-success/10 px-3 py-2 text-left text-xs font-510 text-success transition-colors hover:bg-success/15"

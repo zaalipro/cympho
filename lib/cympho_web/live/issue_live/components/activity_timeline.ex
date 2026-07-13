@@ -158,7 +158,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
         <div class="flex-1 min-w-0">
           <div
             :if={entry.type == :comment}
-            class={"rounded-lg border border-border bg-surface p-4 transition-colors hover:border-border-hover #{if entry.data.author_type == "system", do: "border-dashed bg-subtle", else: ""}"}
+            class={comment_card_class(entry.data)}
           >
             <div
               :if={entry.data.author_type != "system"}
@@ -181,7 +181,10 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
                 >
                   Agent
                 </span>
-                <span class={"rounded border px-1.5 py-0.5 text-[10px] font-510 #{comment_category_class(entry.data)}"}>
+                <span
+                  :if={tagged_comment?(entry.data)}
+                  class={"rounded border px-1.5 py-0.5 text-[10px] font-510 #{comment_category_class(entry.data)}"}
+                >
                   {comment_category_label(entry.data)}
                 </span>
               </div>
@@ -497,5 +500,22 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
       </div>
     </div>
     """
+  end
+
+  # Owner-facing tagged comments ([owner_update], [decision], [blocked],
+  # [review], [handoff], [delivery]) read louder than routine agent chatter;
+  # routine notes lose their chip and recede into the audit trail.
+  defp tagged_comment?(comment),
+    do: Cympho.IssueDigest.comment_category(comment) != :routine
+
+  defp comment_card_class(%{author_type: "system"}),
+    do: "rounded-lg border border-dashed border-border bg-subtle p-4"
+
+  defp comment_card_class(comment) do
+    if tagged_comment?(comment) do
+      "rounded-lg border border-border bg-surface p-4 shadow-[inset_2px_0_0_0_var(--color-primary)] transition-colors hover:border-border-hover"
+    else
+      "rounded-lg border border-border/60 bg-surface/60 p-4 transition-colors hover:border-border-hover"
+    end
   end
 end

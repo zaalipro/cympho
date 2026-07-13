@@ -4,11 +4,19 @@ defmodule CymphoWeb.IssueLive.Show.Header do
   breadcrumb / identifier strip and the title-hero block (title, status
   badge, priority badge, pending-wake badge, assignee display, project link).
 
-  All events (`start_editing`, `save_title`, `cancel_editing`) bubble to
-  the parent LiveView since the parent owns the `editing` assign and the
-  issue mutation flow.
+  Also renders `status_digest/1`, the answer-first strip under the title:
+  one sentence for "do I need to act?", the last timeline event, and at
+  most one primary action pulled from the review-gate resolution.
+
+  All events (`start_editing`, `save_title`, `cancel_editing`,
+  `resolve_review_gate`, and gate live-events) bubble to the parent
+  LiveView since the parent owns the `editing` assign and the issue
+  mutation flow.
   """
   use CymphoWeb, :html
+
+  import CymphoWeb.IssueLive.Show.Helpers,
+    only: [format_timeline_timestamp: 1, run_status_label: 1, count_suffix: 1]
 
   attr :issue, :map, required: true
   attr :editing, :any, default: nil
@@ -104,6 +112,135 @@ defmodule CymphoWeb.IssueLive.Show.Header do
     </div>
     """
   end
+
+  attr :issue, :map, required: true
+  attr :timeline, :list, default: []
+  attr :gate_resolution, :map, required: true
+
+  def status_digest(assigns) do
+    assigns =
+      assigns
+      |> assign(:digest, digest_state(assigns.issue, assigns.gate_resolution))
+      |> assign(:last_event, last_event_line(assigns.timeline))
+      |> assign(:primary_action, digest_primary_action(assigns.gate_resolution))
+
+    ~H"""
+    <div
+      id="issue-status-digest"
+      data-testid="issue-status-digest"
+      class={["mx-4 lg:mx-6 mb-4 rounded-lg border px-4 py-3", digest_shell_class(@digest.tone)]}
+    >
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex min-w-0 items-center gap-2.5">
+          <span class={digest_dot_class(@digest.tone)} aria-hidden="true"></span>
+          <div class="min-w-0">
+            <p class="text-sm font-510 leading-5 text-ink">{@digest.headline}</p>
+            <p :if={@last_event} class="mt-0.5 truncate text-caption text-ink-tertiary">
+              Last: {@last_event}
+            </p>
+          </div>
+        </div>
+        <div :if={@primary_action} class="shrink-0">
+          <a
+            :if={@primary_action.type == :anchor}
+            href={@primary_action.href}
+            class={digest_action_class(@digest.tone)}
+          >
+            {@primary_action.label}
+          </a>
+          <button
+            :if={@primary_action.type == :event}
+            type="button"
+            phx-click="resolve_review_gate"
+            phx-value-action={@primary_action.action}
+            class={digest_action_class(@digest.tone)}
+          >
+            {@primary_action.label}
+          </button>
+          <button
+            :if={@primary_action.type == :live_event}
+            type="button"
+            phx-click={@primary_action.event}
+            data-confirm={Map.get(@primary_action, :confirm)}
+            class={digest_action_class(@digest.tone)}
+          >
+            {@primary_action.label}
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  defp digest_state(issue, gate_resolution) do
+    decision_pending? =
+      Enum.any?(gate_resolution.actions, fn action ->
+        Map.get(action, :event) == "accept_owner_verification"
+      end)
+
+    cond do
+      terminal_issue?(issue) ->
+        %{tone: :quiet, headline: "Closed — nothing needs you here."}
+
+      decision_pending? ->
+        %{tone: :urgent, headline: "A decision is waiting on you: accept or request revision."}
+
+      gate_resolution.active? and gate_resolution.mode == :pre_runtime ->
+        %{tone: :attention, headline: "Waiting on launch — no agent run has started yet."}
+
+      gate_resolution.active? ->
+        count = length(gate_resolution.blockers)
+
+        %{
+          tone: :attention,
+          headline: "Agents need #{count} thing#{count_suffix(count)} before this can move on."
+        }
+
+      true ->
+        %{tone: :quiet, headline: "Nothing needs you right now — agents have what they need."}
+    end
+  end
+
+  defp last_event_line([]), do: nil
+
+  defp last_event_line(timeline) do
+    entry = List.last(timeline)
+    "#{entry_summary(entry)} · #{format_timeline_timestamp(entry.timestamp)}"
+  end
+
+  defp entry_summary(%{type: :comment, data: %{author_type: "system"}}), do: "System note"
+  defp entry_summary(%{type: :comment, data: %{author_type: "agent"}}), do: "Agent comment"
+  defp entry_summary(%{type: :comment}), do: "Comment"
+
+  defp entry_summary(%{type: :run, data: %{status: status}}),
+    do: "Run #{run_status_label(status) |> String.downcase()}"
+
+  defp entry_summary(%{type: :work_product}), do: "Work product attached"
+  defp entry_summary(%{type: :interaction}), do: "Agent request"
+  defp entry_summary(%{type: :tool_call_trace}), do: "Tool call"
+  defp entry_summary(_entry), do: "Activity"
+
+  defp digest_primary_action(%{actions: actions}) do
+    Enum.find(actions, fn action ->
+      action.type in [:live_event, :event, :anchor] and Map.get(action, :enabled?, true)
+    end)
+  end
+
+  defp digest_shell_class(:urgent), do: "border-brand/30 bg-brand/[0.08]"
+  defp digest_shell_class(:attention), do: "border-amber-500/25 bg-amber-500/[0.06]"
+  defp digest_shell_class(:quiet), do: "border-hairline bg-surface-1/40"
+
+  defp digest_dot_class(:urgent), do: "h-2 w-2 shrink-0 rounded-full bg-brand animate-pulse"
+  defp digest_dot_class(:attention), do: "h-2 w-2 shrink-0 rounded-full bg-amber-400"
+  defp digest_dot_class(:quiet), do: "h-2 w-2 shrink-0 rounded-full bg-emerald-400/80"
+
+  defp digest_action_class(:urgent),
+    do:
+      "cta-glow inline-flex items-center justify-center rounded-md bg-brand px-3 py-1.5 text-xs font-590 text-on-primary transition hover:bg-brand/90"
+
+  defp digest_action_class(_tone),
+    do:
+      "inline-flex items-center justify-center rounded-md border border-border bg-panel px-3 py-1.5 text-xs font-510 text-ink-muted transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
 
   defp title_class(issue) do
     if swarm_issue?(issue) do

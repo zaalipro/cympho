@@ -158,10 +158,14 @@ defmodule CymphoWeb.WorkspaceLive.Index do
               >
                 <div class="flex min-w-0 items-start justify-between gap-3">
                   <div class="min-w-0">
-                    <h3 class="truncate text-sm font-590 text-text-primary">
-                      {workspace.name}
-                    </h3>
-                    <p class="mt-1 truncate text-xs text-text-tertiary">
+                    <div class="flex items-center gap-2">
+                      <span class={["h-2 w-2 shrink-0 rounded-full", workspace_dot_class(item.level)]}>
+                      </span>
+                      <h3 class="truncate text-sm font-590 text-text-primary">
+                        {workspace.name}
+                      </h3>
+                    </div>
+                    <p class="mt-1 truncate pl-4 text-xs text-text-tertiary">
                       {workspace_location(workspace)}
                     </p>
                   </div>
@@ -216,6 +220,12 @@ defmodule CymphoWeb.WorkspaceLive.Index do
                       {workspace_ref(workspace)}
                     </span>
                   <% end %>
+                </div>
+
+                <div class="mt-3 flex items-center justify-end border-t border-border pt-3">
+                  <span class="inline-flex items-center gap-1 text-xs font-510 text-text-tertiary transition-colors group-hover:text-brand">
+                    Open workspace <span class="hero-arrow-right-mini h-4 w-4"></span>
+                  </span>
                 </div>
               </.app_link>
             <% end %>
@@ -427,6 +437,11 @@ defmodule CymphoWeb.WorkspaceLive.Index do
     do: "hover:shadow-[inset_3px_0_0_rgb(52_211_153)]"
 
   defp workspace_inventory_border_class(_), do: ""
+
+  defp workspace_dot_class(:critical), do: "bg-red-400"
+  defp workspace_dot_class(:warning), do: "bg-amber-400"
+  defp workspace_dot_class(:healthy), do: "bg-emerald-400"
+  defp workspace_dot_class(_level), do: "bg-text-quaternary"
 
   defp workspace_metric_text(:critical), do: "text-red-300"
   defp workspace_metric_text(:warning), do: "text-amber-300"

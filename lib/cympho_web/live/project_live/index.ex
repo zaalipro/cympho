@@ -173,4 +173,11 @@ defmodule CymphoWeb.ProjectLive.Index do
 
   def progress_width(percent) when is_integer(percent), do: "width: #{max(min(percent, 100), 0)}%"
   def progress_width(_percent), do: "width: 0%"
+
+  # Quiets zeroed counts so the accent lands on numbers that matter.
+  def count_color(0, _color), do: "text-text-quaternary"
+  def count_color(_count, color), do: color
+
+  def active_goal_label(1), do: "1 active goal"
+  def active_goal_label(count), do: "#{count} active goals"
 end

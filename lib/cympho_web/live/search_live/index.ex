@@ -546,9 +546,13 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@issues != []} class="space-y-2">
-      <h2 :if={@section_title} class="mb-3 text-card-title text-text-primary">
-        {@section_title}
-      </h2>
+      <div :if={@section_title} class="mb-3 flex items-center gap-2">
+        <.icon name="hero-document-text-mini" class="h-4 w-4 text-text-quaternary" />
+        <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+          {@section_title}
+        </h2>
+        <span class="font-mono text-xs text-text-quaternary">{length(@issues)}</span>
+      </div>
       <div class="space-y-2">
         <.app_link
           :for={issue <- @issues}
@@ -590,9 +594,13 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@agents != []} class="space-y-2">
-      <h2 :if={@section_title} class="mb-3 text-card-title text-text-primary">
-        {@section_title}
-      </h2>
+      <div :if={@section_title} class="mb-3 flex items-center gap-2">
+        <.icon name="hero-sparkles-mini" class="h-4 w-4 text-text-quaternary" />
+        <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+          {@section_title}
+        </h2>
+        <span class="font-mono text-xs text-text-quaternary">{length(@agents)}</span>
+      </div>
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         <.app_link
           :for={agent <- @agents}
@@ -628,9 +636,13 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@projects != []} class="space-y-2">
-      <h2 :if={@section_title} class="mb-3 text-card-title text-text-primary">
-        {@section_title}
-      </h2>
+      <div :if={@section_title} class="mb-3 flex items-center gap-2">
+        <.icon name="hero-folder-mini" class="h-4 w-4 text-text-quaternary" />
+        <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+          {@section_title}
+        </h2>
+        <span class="font-mono text-xs text-text-quaternary">{length(@projects)}</span>
+      </div>
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         <.app_link
           :for={project <- @projects}
@@ -654,9 +666,13 @@ defmodule CymphoWeb.SearchLive.Index do
 
     ~H"""
     <div :if={@goals != []} class="space-y-2">
-      <h2 :if={@section_title} class="mb-3 text-card-title text-text-primary">
-        {@section_title}
-      </h2>
+      <div :if={@section_title} class="mb-3 flex items-center gap-2">
+        <.icon name="hero-flag-mini" class="h-4 w-4 text-text-quaternary" />
+        <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+          {@section_title}
+        </h2>
+        <span class="font-mono text-xs text-text-quaternary">{length(@goals)}</span>
+      </div>
       <div class="space-y-2">
         <.app_link
           :for={goal <- @goals}

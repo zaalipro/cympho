@@ -106,12 +106,12 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
               align="right"
             />
           </div>
-          <div class="flex items-center justify-between gap-3">
+          <div :if={@issue.due_on} class="flex items-center justify-between gap-3">
             <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Due
             </span>
-            <span class={["text-caption", (@issue.due_on && "text-ink") || "text-ink-tertiary"]}>
-              {(@issue.due_on && Calendar.strftime(@issue.due_on, "%b %-d, %Y")) || "—"}
+            <span class="text-caption text-ink">
+              {Calendar.strftime(@issue.due_on, "%b %-d, %Y")}
             </span>
           </div>
         </div>
@@ -873,9 +873,9 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
           </form>
         </details>
 
-        <hr :if={!Enum.empty?(@documents)} class="border-hairline" />
+        <hr :if={!Enum.empty?(@documents)} class="ui-advanced-only border-hairline" />
 
-        <div :if={!Enum.empty?(@documents)} class="space-y-2">
+        <div :if={!Enum.empty?(@documents)} class="ui-advanced-only space-y-2">
           <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
             Documents
           </span>
@@ -1836,11 +1836,13 @@ defmodule CymphoWeb.IssueLive.Show.Sidebar do
   defp issue_goal(%{goal: goal}), do: goal
   defp issue_goal(_issue), do: nil
 
+  # Floating (no goal) is informational, not act-now, so it stays neutral —
+  # amber is reserved for states that need the operator immediately.
   defp mission_context_class(issue) do
     if issue_goal(issue) do
       "rounded-md border border-emerald-500/20 bg-emerald-500/[0.07] p-3 text-emerald-100"
     else
-      "rounded-md border border-amber-500/25 bg-amber-500/[0.08] p-3 text-amber-100"
+      "rounded-md border border-hairline bg-surface-1/55 p-3 text-ink-muted"
     end
   end
 

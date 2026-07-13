@@ -271,7 +271,32 @@ defmodule CymphoWeb.ApprovalLive.Index do
   defp parse_status(_), do: nil
 
   defp approval_type_label(nil), do: "none"
-  defp approval_type_label(approval), do: approval.type || "approval"
+  defp approval_type_label(approval), do: humanize_type(approval.type)
+
+  @doc "Human words for a gate slug: \"launch_gate\" -> \"Launch gate\"."
+  def humanize_type(nil), do: "Approval"
+
+  def humanize_type(type) when is_binary(type) do
+    type
+    |> String.replace(["_", "-"], " ")
+    |> String.capitalize()
+  end
+
+  def approval_age(%DateTime{} = inserted_at) do
+    seconds = DateTime.diff(DateTime.utc_now(), inserted_at, :second)
+
+    cond do
+      seconds < 60 -> "just now"
+      seconds < 3600 -> "waiting #{div(seconds, 60)}m"
+      seconds < 86_400 -> "waiting #{div(seconds, 3600)}h"
+      true -> "waiting #{div(seconds, 86_400)}d"
+    end
+  end
+
+  def approval_age(_), do: nil
+
+  def queue_section_label(nil), do: "Decision queue"
+  def queue_section_label(status), do: "#{format_status(status)} approvals"
 
   defp format_status(nil), do: "All"
 
@@ -331,22 +356,26 @@ defmodule CymphoWeb.ApprovalLive.Index do
   def approval_row_action_label(:pending), do: "Review decision"
   def approval_row_action_label(_status), do: "View record"
 
-  def approval_row_action_class(:pending) do
-    "inline-flex h-8 w-full items-center justify-center rounded-lg bg-primary px-3 text-xs font-510 text-white transition-colors hover:bg-primary-hover md:w-auto"
-  end
-
   def approval_row_action_class(_status) do
-    "inline-flex h-8 w-full items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary md:w-auto"
+    "inline-flex shrink-0 items-center text-xs font-510 text-text-tertiary underline decoration-border underline-offset-4 transition-colors hover:text-text-primary"
   end
 
-  def approval_empty_title(nil), do: "No approvals queued"
+  def approval_card_class(:pending) do
+    "rounded-xl border border-brand/30 bg-surface-1 shadow-[inset_2px_0_0_0_var(--color-primary)] transition-colors hover:border-brand/45"
+  end
+
+  def approval_card_class(_status) do
+    "rounded-lg border border-border/70 bg-surface-1/60 transition-colors hover:border-border-hover hover:bg-subtle"
+  end
+
+  def approval_empty_title(nil), do: "Nothing waiting on you"
 
   def approval_empty_title(status) do
     "No #{status |> format_status() |> String.downcase()} approvals in this lane"
   end
 
   def approval_empty_detail(nil) do
-    "When agents request budget, deployment, hiring, or external-access approval, the decision packet will land here."
+    "Every gate is clear and the company is running itself. When an agent needs a budget, deployment, hiring, or external-access call, the decision packet will land here."
   end
 
   def approval_empty_detail(_status) do
@@ -361,9 +390,13 @@ defmodule CymphoWeb.ApprovalLive.Index do
     "inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
   end
 
-  def status_badge_class(:pending), do: "bg-yellow-500/20 text-yellow-400"
-  def status_badge_class(:approved), do: "bg-green-500/20 text-green-400"
-  def status_badge_class(:denied), do: "bg-brand/20 text-brand"
-  def status_badge_class(:cancelled), do: "bg-gray-500/20 text-gray-400"
-  def status_badge_class(_), do: "bg-white/5 text-text-quaternary"
+  @doc """
+  Whether to show the calm "nothing waiting on you" strip above a queue
+  that still holds resolved history: no pending work, no active filter,
+  but at least one settled record below.
+  """
+  def all_clear_with_history?(command, status_filter) do
+    is_nil(status_filter) && command.pending_count == 0 &&
+      Enum.any?(command.counts, fn {status, count} -> status != :pending && count > 0 end)
+  end
 end

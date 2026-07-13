@@ -1,5 +1,6 @@
 defmodule CymphoWeb.RoutineLive.Index do
   use CymphoWeb, :live_view
+  import CymphoWeb.RoutineLive.FormHelpers, only: [schedule_summary: 1, next_run: 1, raw_cron: 1]
   alias Cympho.Repo
   alias Cympho.Routines
   alias Cympho.Routines.Routine
@@ -98,7 +99,8 @@ defmodule CymphoWeb.RoutineLive.Index do
   end
 
   defp fetch_routines(socket, cursor) do
-    Routines.list_routines_page(company_id: current_company_id(socket), after: cursor)
+    page = Routines.list_routines_page(company_id: current_company_id(socket), after: cursor)
+    %{page | entries: Repo.preload(page.entries, [:triggers, :runs])}
   end
 
   defp refresh_routines(socket) do
@@ -293,22 +295,195 @@ defmodule CymphoWeb.RoutineLive.Index do
     |> String.capitalize()
   end
 
-  def routine_status_class(:active), do: "border-success/20 bg-success/10 text-success"
-  def routine_status_class(:paused), do: "border-amber-500/20 bg-amber-500/10 text-amber-400"
+  # ── Smart routine card ─────────────────────────────────────────────────────
+  # Each card answers "is it healthy and when does it run next?". Only a routine
+  # that needs a person right now (failed / stuck / missing trigger) is loud.
 
-  def routine_status_class(:archived),
-    do: "border-text-quaternary/20 bg-text-quaternary/10 text-text-tertiary"
+  attr :id, :string, required: true
+  attr :routine, :map, required: true
+  attr :density, :string, required: true
 
-  def routine_status_class(_), do: "border-border bg-surface text-text-tertiary"
+  def routine_card(assigns) do
+    routine = assigns.routine
+    signal = routine_card_signal(routine)
 
-  def routine_priority_class(:critical), do: "border-brand/25 bg-brand/10 text-brand"
-  def routine_priority_class(:high), do: "border-amber-500/25 bg-amber-500/10 text-amber-400"
-  def routine_priority_class(:medium), do: "border-brand/25 bg-brand/10 text-brand"
+    assigns =
+      assigns
+      |> assign(:signal, signal)
+      |> assign(:pill, routine_signal_pill(signal))
+      |> assign(:outcome, routine_last_outcome(routine))
+      |> assign(:next, next_run(routine.triggers))
+      |> assign(:schedule, schedule_summary(routine.triggers))
+      |> assign(:cron, raw_cron(routine.triggers))
 
-  def routine_priority_class(:low),
-    do: "border-text-quaternary/20 bg-text-quaternary/10 text-text-tertiary"
+    ~H"""
+    <article
+      id={@id}
+      class={[
+        "group card-lift rounded-xl border transition-colors",
+        routine_signal_card_class(@signal),
+        if(@density == "compact", do: "p-3", else: "p-4")
+      ]}
+    >
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <div class="flex min-w-0 items-center gap-2">
+            <span
+              class={["h-2 w-2 shrink-0 rounded-full", routine_status_dot(@routine.status)]}
+              title={"Status: #{routine_label(@routine.status)}"}
+            >
+            </span>
+            <.app_link
+              navigate={~p"/routines/#{@routine.id}"}
+              class="truncate text-sm font-590 text-text-primary hover:text-brand"
+            >
+              {@routine.name}
+            </.app_link>
+            <span
+              :if={@pill}
+              class={["shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-590", elem(@pill, 1)]}
+            >
+              {elem(@pill, 0)}
+            </span>
+          </div>
 
-  def routine_priority_class(_), do: "border-border bg-surface text-text-tertiary"
+          <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-tertiary">
+            <span class="inline-flex items-center gap-1.5" title={@cron && "cron: #{@cron}"}>
+              <.icon name="hero-clock-mini" class="h-3.5 w-3.5 text-text-quaternary" />
+              {@schedule}
+            </span>
+            <span :if={@next} class="text-text-quaternary">Next run {@next}</span>
+            <span :if={@outcome} class="inline-flex items-center gap-1.5">
+              <span class={["h-1.5 w-1.5 rounded-full", @outcome.dot]}></span> Last {@outcome.label}
+            </span>
+            <span class="uppercase tracking-[0.1em] text-[10px] text-text-quaternary">
+              {routine_label(@routine.status)}
+            </span>
+          </div>
+
+          <p
+            :if={@density == "detailed"}
+            class="mt-2 max-w-3xl text-sm leading-5 text-text-tertiary"
+          >
+            {@routine.description || "No description provided."}
+          </p>
+          <div
+            :if={@density == "detailed"}
+            class="ui-advanced-only mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-text-quaternary"
+          >
+            <span>{routine_label(@routine.priority)} priority</span>
+            <span>{routine_label(@routine.concurrency_policy)}</span>
+            <span>Catch-up: {routine_label(@routine.catch_up_policy)}</span>
+            <span>Cap {@routine.catch_up_cap}</span>
+          </div>
+        </div>
+
+        <div class="flex shrink-0 items-center gap-1.5">
+          <.app_link
+            navigate={~p"/routines/#{@routine.id}"}
+            class="inline-flex min-h-[32px] items-center rounded-lg border border-brand/25 bg-brand/10 px-3 py-1.5 text-xs font-590 text-brand transition-colors hover:bg-brand/15"
+          >
+            Open
+          </.app_link>
+          <div class="flex items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+            <.app_link
+              navigate={~p"/routines/#{@routine.id}/edit"}
+              class="rounded-lg border border-border bg-button px-2.5 py-1.5 text-xs font-510 text-text-tertiary transition-colors hover:bg-button-hover hover:text-text-primary"
+            >
+              Edit
+            </.app_link>
+            <button
+              :if={@routine.status == :active}
+              type="button"
+              class="rounded-lg border border-border bg-button px-2.5 py-1.5 text-xs font-510 text-text-tertiary transition-colors hover:bg-button-hover hover:text-text-primary"
+              phx-click="pause_routine"
+              phx-value-id={@routine.id}
+              data-confirm="Pause this routine? It stops creating work until resumed."
+            >
+              Pause
+            </button>
+            <button
+              :if={@routine.status == :paused}
+              type="button"
+              class="rounded-lg border border-success/20 bg-success/10 px-2.5 py-1.5 text-xs font-510 text-success transition-colors hover:bg-success/15"
+              phx-click="resume_routine"
+              phx-value-id={@routine.id}
+              data-confirm="Resume this routine? It will create work on its next trigger."
+            >
+              Resume
+            </button>
+            <button
+              :if={@routine.status != :archived}
+              type="button"
+              class="rounded-lg border border-border bg-button px-2.5 py-1.5 text-xs font-510 text-text-tertiary transition-colors hover:bg-button-hover hover:text-rose-300"
+              phx-click="delete_routine"
+              phx-value-id={@routine.id}
+              data-confirm="Archive this routine? It stops running and moves out of the active list."
+            >
+              Archive
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+    """
+  end
+
+  # Highest-urgency signal wins; only failed/stale/trigger_gap are "act now".
+  def routine_card_signal(routine) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    stale_before = DateTime.add(now, -@stale_run_after_seconds, :second)
+    recent_failure_after = DateTime.add(now, -@recent_failure_window_seconds, :second)
+
+    cond do
+      routine.status == :archived -> :archived
+      has_recent_failure?(routine, recent_failure_after) -> :failed
+      has_stale_run?(routine, stale_before) -> :stale
+      routine.status == :active and without_enabled_trigger?(routine) -> :trigger_gap
+      routine.status == :paused -> :paused
+      true -> :ok
+    end
+  end
+
+  def routine_signal_card_class(:failed),
+    do: "border-rose-500/35 bg-rose-500/[0.05] hover:border-rose-500/50"
+
+  def routine_signal_card_class(:stale),
+    do: "border-rose-500/30 bg-rose-500/[0.04] hover:border-rose-500/45"
+
+  def routine_signal_card_class(:trigger_gap),
+    do: "border-amber-500/30 bg-amber-500/[0.04] hover:border-amber-500/45"
+
+  def routine_signal_card_class(_),
+    do: "border-border bg-surface hover:border-border-hover hover:bg-surface-hover"
+
+  def routine_signal_pill(:failed),
+    do: {"Failed recently", "border-rose-500/30 bg-rose-500/10 text-rose-300"}
+
+  def routine_signal_pill(:stale),
+    do: {"Run stuck", "border-rose-500/30 bg-rose-500/10 text-rose-300"}
+
+  def routine_signal_pill(:trigger_gap),
+    do: {"Needs a trigger", "border-amber-500/30 bg-amber-500/10 text-amber-300"}
+
+  def routine_signal_pill(_), do: nil
+
+  def routine_status_dot(:active), do: "bg-emerald-400/70"
+  def routine_status_dot(:paused), do: "bg-amber-400/70"
+  def routine_status_dot(_), do: "bg-text-quaternary/40"
+
+  def routine_last_outcome(%{runs: []}), do: nil
+
+  def routine_last_outcome(%{runs: runs}) when is_list(runs) do
+    run = Enum.max_by(runs, &(&1.triggered_at || ~U[1970-01-01 00:00:00Z]), DateTime)
+
+    %{
+      dot: CymphoWeb.RoutineLive.FormHelpers.routine_run_dot(run.status),
+      label: routine_label(run.status)
+    }
+  end
+
+  def routine_last_outcome(_), do: nil
 
   attr :label, :string, required: true
   attr :value, :integer, required: true

@@ -7,7 +7,7 @@
           <div class={
           "h-2 rounded-full transition-all duration-300 " <>
           cond do
-            idx < @current_step -> "w-6 bg-brand"
+            idx < @current_step -> "w-6 bg-brand/55"
             idx == @current_step -> "w-2 bg-brand shadow-[0_0_12px_2px_rgb(var(--color-primary-rgb)/0.6)]"
             true -> "w-2 bg-white/10"
           end
@@ -26,6 +26,12 @@
         </h1>
         <p class="text-sm text-text-secondary">
           {@steps |> Enum.at(@current_step) |> Map.get(:description)}
+        </p>
+        <p
+          :if={step_outcome(@steps |> Enum.at(@current_step) |> Map.get(:id))}
+          class="mx-auto mt-3 max-w-md text-xs leading-5 text-text-tertiary"
+        >
+          {step_outcome(@steps |> Enum.at(@current_step) |> Map.get(:id))}
         </p>
       </div>
       
@@ -240,6 +246,9 @@
       
 <!-- Shortcuts step -->
       <div :if={@current_step == 2} class="ember-glass p-6 mb-6">
+        <p class="mb-4 text-xs leading-5 text-text-tertiary">
+          Nothing to fill in here — just a few keys that make Cympho faster to move around.
+        </p>
         <div class="stagger-children space-y-3">
           <div class="flex items-center justify-between text-sm">
             <span class="text-text-secondary">Command palette</span>
@@ -403,7 +412,7 @@
           <button
             type="button"
             phx-click="next_step"
-            class="cta-glow bg-brand hover:bg-accent text-on-primary font-510 text-sm px-5 py-2.5 rounded-button transition-colors min-h-[44px]"
+            class={nav_cta_class(@current_step)}
           >
             {if @current_step == length(@steps) - 1 do
               "Get Started"

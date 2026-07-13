@@ -161,4 +161,29 @@ defmodule CymphoWeb.OnboardingLive.Index do
   end
 
   defp role_label(role), do: Agent.role_label(role)
+
+  # What the operator walks away with after each step — states the payoff, not
+  # just the inputs, so the wizard feels like progress rather than a form.
+  defp step_outcome(:welcome),
+    do: "One click sets up a CEO, CTO, specialist agents, a goal, a project, and seed issues."
+
+  defp step_outcome(:workspace),
+    do: "Pick a blueprint and we create the agents and their first issues for you."
+
+  defp step_outcome(:shortcuts),
+    do:
+      "Optional — these just help you move faster once you're inside. Press ? anytime to see them again."
+
+  defp step_outcome(:ready), do: "Everything below is live. Open any item to start working."
+  defp step_outcome(_), do: nil
+
+  # Only the step's true next action glows; the footer recedes when the card
+  # already holds the primary action (create company / open the workspace).
+  defp nav_cta_class(step) when step in [1, 3] do
+    "border border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary font-510 text-sm px-5 py-2.5 rounded-button transition-colors min-h-[44px]"
+  end
+
+  defp nav_cta_class(_step) do
+    "cta-glow bg-brand hover:bg-accent text-on-primary font-510 text-sm px-5 py-2.5 rounded-button transition-colors min-h-[44px]"
+  end
 end

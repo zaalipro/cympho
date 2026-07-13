@@ -215,10 +215,7 @@
             </span>
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <.badge variant="pill" value={project.prefix} />
-                  <.badge variant="status" value={to_string(project.status)} />
-                </div>
+                <.badge variant="pill" value={project.prefix} />
                 <h3 class="mt-3 truncate text-base font-650 text-text-primary">{project.name}</h3>
               </div>
               <span class={[
@@ -242,6 +239,21 @@
               No description yet.
             </p>
 
+            <div
+              :if={state == :blocked}
+              class="mt-3 flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-2.5 py-2 text-[11px] font-510 text-red-200/90"
+            >
+              <span class="hero-hand-raised-mini h-3.5 w-3.5 shrink-0"></span>
+              {health.blocked} blocked — needs attention.
+            </div>
+            <div
+              :if={state == :review}
+              class="mt-3 flex items-center gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.06] px-2.5 py-2 text-[11px] font-510 text-cyan-200/90"
+            >
+              <span class="hero-eye-mini h-3.5 w-3.5 shrink-0"></span>
+              {health.in_review} in review — waiting on a decision.
+            </div>
+
             <div class="mt-4 flex items-center gap-2 rounded-lg border border-border bg-surface-1 px-3 py-2 text-xs text-text-tertiary">
               <.icon name="hero-link-mini" class="h-3.5 w-3.5 shrink-0" />
               <span :if={project.repo_url not in [nil, ""]} class="truncate">
@@ -259,26 +271,34 @@
             <div class="ui-advanced-only mt-5 grid grid-cols-4 gap-2">
               <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
                 <p class="text-[10px] font-650 uppercase text-text-quaternary">Open</p>
-                <p class="mt-1 font-serif text-xl font-590 text-text-primary">{health.open}</p>
+                <p class={"mt-1 font-serif text-xl font-590 #{count_color(health.open, "text-text-primary")}"}>
+                  {health.open}
+                </p>
               </div>
               <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
                 <p class="text-[10px] font-650 uppercase text-text-quaternary">Review</p>
-                <p class="mt-1 font-serif text-xl font-590 text-cyan-300">{health.in_review}</p>
+                <p class={"mt-1 font-serif text-xl font-590 #{count_color(health.in_review, "text-cyan-300")}"}>
+                  {health.in_review}
+                </p>
               </div>
               <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
                 <p class="text-[10px] font-650 uppercase text-text-quaternary">Blocked</p>
-                <p class="mt-1 font-serif text-xl font-590 text-red-300">{health.blocked}</p>
+                <p class={"mt-1 font-serif text-xl font-590 #{count_color(health.blocked, "text-red-300")}"}>
+                  {health.blocked}
+                </p>
               </div>
               <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
                 <p class="text-[10px] font-650 uppercase text-text-quaternary">Done</p>
-                <p class="mt-1 font-serif text-xl font-590 text-emerald-300">{health.done}</p>
+                <p class={"mt-1 font-serif text-xl font-590 #{count_color(health.done, "text-emerald-300")}"}>
+                  {health.done}
+                </p>
               </div>
             </div>
 
             <div class="mt-4">
               <div class="mb-2 flex items-center justify-between gap-3 text-xs text-text-tertiary">
                 <span>{health.progress_percent}% complete</span>
-                <span>{health.active_goals} active goals</span>
+                <span>{active_goal_label(health.active_goals)}</span>
               </div>
               <div class="h-2 overflow-hidden rounded-full bg-surface-2">
                 <div
@@ -289,10 +309,10 @@
               </div>
             </div>
 
-            <div class="mt-5 flex flex-wrap items-center gap-2">
+            <div class="mt-auto flex items-center gap-2 pt-5">
               <.app_link
                 navigate={~p"/projects/#{project.id}"}
-                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                class="inline-flex items-center gap-1.5 rounded-lg border border-brand/25 bg-brand/10 px-3 py-1.5 text-xs font-590 text-brand transition-colors hover:bg-brand/15"
               >
                 <.icon name="hero-arrow-right-mini" class="h-3.5 w-3.5" /> Open
               </.app_link>
@@ -304,12 +324,13 @@
               </.app_link>
               <button
                 type="button"
-                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                aria-label={"Archive #{project.name}"}
+                class="ml-auto inline-flex items-center justify-center rounded-lg border border-transparent p-1.5 text-text-quaternary transition-colors hover:border-border hover:bg-surface hover:text-text-secondary"
                 phx-click="delete_project"
                 phx-value-id={project.id}
                 data-confirm="Archive this project?"
               >
-                <.icon name="hero-archive-box-mini" class="h-3.5 w-3.5" /> Archive
+                <.icon name="hero-archive-box-mini" class="h-3.5 w-3.5" />
               </button>
             </div>
           </div>

@@ -112,6 +112,55 @@ defmodule CymphoWeb.GoalLiveTest do
     end
   end
 
+  describe "Goals show" do
+    test "renders progress glance and linked work grouping", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, goal} =
+        Goals.create_goal(%{
+          title: "Show page mission",
+          company_id: company.id,
+          goal_type: :mission
+        })
+
+      for status <- [:todo, :done] do
+        {:ok, _issue} =
+          Issues.create_issue(%{
+            title: "Show page #{status}",
+            company_id: company.id,
+            goal_id: goal.id,
+            status: status
+          })
+      end
+
+      {:ok, _view, html} = live(conn, "/goals/#{goal.id}")
+
+      assert html =~ "Linked work"
+      assert html =~ "% complete"
+      assert html =~ "Moved this week"
+      assert html =~ "Show page todo"
+      assert html =~ "2 shown"
+    end
+
+    test "shows a reassuring empty state when nothing is linked", %{
+      conn: conn,
+      current_company: company
+    } do
+      {:ok, goal} =
+        Goals.create_goal(%{
+          title: "Empty show mission",
+          company_id: company.id,
+          goal_type: :mission
+        })
+
+      {:ok, _view, html} = live(conn, "/goals/#{goal.id}")
+
+      assert html =~ "No issues linked yet"
+      assert html =~ "Nothing linked yet"
+    end
+  end
+
   describe "Goals new" do
     test "renders the alignment planning form", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/goals/new")

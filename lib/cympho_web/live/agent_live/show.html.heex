@@ -11,6 +11,43 @@
       </span>
     </div>
 
+    <%!-- ── Error recovery banner (leads the page when stuck) ─────── --%>
+    <div
+      :if={@agent.status == :error}
+      data-testid="agent-error-banner"
+      class="mb-4 rounded-lg border border-red-500/30 bg-red-500/[0.08] px-4 py-3"
+    >
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="min-w-0">
+          <p class="text-sm font-590 text-red-200">{@agent.name} is stuck in error</p>
+          <p class="mt-1 text-sm leading-5 text-text-tertiary">
+            <%= if @latest_run && @latest_run.status == "failed" && @latest_run.error_reason do %>
+              Last run failed: {String.slice(@latest_run.error_reason, 0, 160)}
+            <% else %>
+              The last session did not finish cleanly. A fresh heartbeat usually recovers it.
+            <% end %>
+          </p>
+        </div>
+        <div class="flex shrink-0 flex-wrap items-center gap-2">
+          <button
+            type="button"
+            phx-click="run_heartbeat"
+            class="cta-glow inline-flex items-center gap-2 rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary hover:bg-accent-hover"
+          >
+            Retry with heartbeat
+          </button>
+          <button
+            type="button"
+            phx-click="set_tab"
+            phx-value-tab="runs"
+            class="inline-flex items-center rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+          >
+            See what failed
+          </button>
+        </div>
+      </div>
+    </div>
+
     <%!-- ── Top action bar ────────────────────────────────────────── --%>
     <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div class="flex items-center gap-4">
@@ -42,6 +79,17 @@
               {@agent.title}
             </span>
           </div>
+          <% focus_issue = current_focus_issue(@recent_issues) %>
+          <.app_link
+            :if={focus_issue}
+            navigate={~p"/issues/#{focus_issue.id}"}
+            class="mt-1.5 inline-flex max-w-full items-center gap-1.5 truncate text-sm text-text-secondary hover:text-brand"
+          >
+            <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-brand cympho-pulse-dot"></span>
+            <span class="truncate">
+              Working on {focus_issue.identifier} · {focus_issue.title}
+            </span>
+          </.app_link>
         </div>
       </div>
 
@@ -404,7 +452,7 @@
         </div>
 
         <div :if={!@latest_run} class="px-4 py-8 text-center text-sm text-text-tertiary">
-          No runs recorded yet.
+          No runs yet — the first one starts when work is assigned or a heartbeat fires.
         </div>
 
         <div :if={@latest_run} class="px-4 py-3">
@@ -470,7 +518,13 @@
           :if={Enum.empty?(@recent_issues)}
           class="px-4 py-8 text-center text-sm text-text-tertiary"
         >
-          No issues yet for this agent.
+          <p>Nothing assigned yet — this agent is ready for work.</p>
+          <.app_link
+            navigate={~p"/issues/new?assignee_id=#{@agent.id}"}
+            class="mt-2 inline-flex text-xs font-510 text-brand hover:text-accent-hover"
+          >
+            Assign the first task
+          </.app_link>
         </div>
 
         <div :if={!Enum.empty?(@recent_issues)} class="divide-y divide-border">

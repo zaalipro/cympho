@@ -204,15 +204,31 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
                   </p>
                 </div>
 
-                <a
-                  :if={preview_href(svc)}
-                  href={preview_href(svc)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                <div
+                  :if={preview_href(svc) || connection_string(svc)}
+                  id={"ws-svc-conn-#{svc.id}"}
+                  phx-hook="CopyToClipboard"
+                  class="flex shrink-0 items-center gap-2"
                 >
-                  <.icon name="hero-arrow-top-right-on-square-mini" class="h-3.5 w-3.5" /> Preview
-                </a>
+                  <button
+                    :if={connection_string(svc)}
+                    type="button"
+                    data-copy-text={connection_string(svc)}
+                    data-copy-success-label="Copied"
+                    class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    <.icon name="hero-clipboard-document" class="h-3.5 w-3.5" /> Copy
+                  </button>
+                  <a
+                    :if={preview_href(svc)}
+                    href={preview_href(svc)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    <.icon name="hero-arrow-top-right-on-square-mini" class="h-3.5 w-3.5" /> Preview
+                  </a>
+                </div>
               </div>
             </div>
           </div>
@@ -445,6 +461,10 @@ defmodule CymphoWeb.WorkspaceLive.ShowWorkspace do
     do: "/preview/#{id}"
 
   defp preview_href(_service), do: nil
+
+  defp connection_string(%{url: url}) when is_binary(url) and url != "", do: url
+  defp connection_string(%{port: port}) when is_integer(port), do: "localhost:#{port}"
+  defp connection_string(_service), do: nil
 
   defp status_label(nil), do: "Unknown"
 

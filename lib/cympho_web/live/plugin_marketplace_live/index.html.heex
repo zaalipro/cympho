@@ -90,80 +90,72 @@
     </p>
     <div class="stagger-children grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       <%= for plugin <- filtered_plugins(@available_plugins, @search_query, @company_id || "") do %>
-        <div class="card-lift bg-surface border border-border rounded-xl p-5 flex flex-col">
+        <div class={[
+          "card-lift bg-surface border rounded-xl p-5 flex flex-col transition-colors",
+          (plugin.is_installed && "border-success/25") || "border-border"
+        ]}>
           <%!-- Header --%>
-          <div class="flex items-start justify-between mb-3">
-            <div class="flex-1">
-              <h3 class="font-serif text-sm font-510 text-text-primary">{plugin.name}</h3>
-              <p class="text-xs text-text-tertiary mt-0.5">
-                by {plugin.author} • v{plugin.version}
+          <div class="flex items-start justify-between gap-3 mb-3">
+            <div class="min-w-0">
+              <h3 class="font-serif text-sm font-510 text-text-primary truncate">
+                {plugin.name}
+              </h3>
+              <p class="text-xs text-text-tertiary mt-0.5 truncate">
+                by {plugin.author} · v{plugin.version}
               </p>
             </div>
-            <div class="flex items-center gap-1 bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded text-xs font-510">
-              <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+            <span class="inline-flex shrink-0 items-center gap-1 text-xs text-text-tertiary">
+              <svg class="w-3 h-3 text-amber-400/70" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
               </svg>
               {plugin.rating}
-            </div>
+            </span>
           </div>
 
           <%!-- Description --%>
-          <p class="text-xs text-text-secondary flex-1 mb-4">{plugin.description}</p>
+          <p class="text-xs leading-5 text-text-secondary line-clamp-2 flex-1 mb-4">
+            {plugin.description}
+          </p>
 
-          <%!-- Capabilities --%>
+          <%!-- Permissions (human-readable) --%>
           <div class="flex flex-wrap gap-1 mb-4">
             <%= for cap <- plugin.capabilities do %>
-              <span class="bg-surface text-text-tertiary text-xs px-2 py-0.5 rounded">
-                {cap}
+              <span class="bg-subtle text-text-tertiary text-xs px-2 py-0.5 rounded">
+                {CymphoWeb.PluginLive.Index.humanize_capability(cap)}
               </span>
             <% end %>
           </div>
 
           <%!-- Stats --%>
-          <div class="flex items-center gap-4 text-xs text-text-tertiary mb-4">
-            <div class="flex items-center gap-1">
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                />
-              </svg>
+          <div class="flex items-center gap-4 text-xs text-text-quaternary mb-4">
+            <span class="flex items-center gap-1" title="Installs">
+              <.icon name="hero-arrow-down-tray-mini" class="w-3.5 h-3.5" />
               {plugin.downloads}
-            </div>
+            </span>
             <a
               href={plugin.documentation_url}
               target="_blank"
               rel="noopener noreferrer"
               class="flex items-center gap-1 hover:text-brand transition-colors"
             >
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
-              </svg>
-              Docs
+              <.icon name="hero-document-text-mini" class="w-3.5 h-3.5" /> Docs
             </a>
           </div>
 
           <%!-- Actions --%>
           <div class="flex items-center gap-2">
             <%= if plugin.is_installed do %>
-              <span class="flex-1 text-center bg-success/10 text-success text-xs font-510 px-3 py-2 rounded-lg">
-                Installed
+              <span class="flex-1 inline-flex items-center justify-center gap-1.5 text-center bg-success/10 text-success text-xs font-510 px-3 py-2 rounded-lg">
+                <.icon name="hero-check-circle-mini" class="w-4 h-4" /> Installed
               </span>
             <% else %>
               <button
                 type="button"
                 phx-click="install"
                 phx-value-identifier={plugin.identifier}
-                class="flex-1 cta-glow bg-brand hover:bg-accent text-on-primary text-xs font-510 px-3 py-2 rounded-button transition-colors"
+                class="flex-1 inline-flex items-center justify-center gap-1.5 cta-glow bg-brand hover:bg-accent text-on-primary text-xs font-510 px-3 py-2 rounded-button transition-colors"
               >
-                Install
+                <.icon name="hero-arrow-down-tray-mini" class="w-4 h-4" /> Install
               </button>
             <% end %>
           </div>

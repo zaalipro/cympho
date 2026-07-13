@@ -52,7 +52,7 @@ defmodule CymphoWeb.ApprovalLiveTest do
       assert html =~ ~s(data-testid="approval-row-#{pending.id}")
       assert html =~ "Decision queue"
       assert html =~ "Resolve 1 pending approval before agents proceed."
-      assert html =~ "Oldest: launch_gate"
+      assert html =~ "Oldest: Launch gate"
       assert html =~ "Review pending"
       assert html =~ ~s(href="/approvals?status=pending")
       assert html =~ "Queue pressure"

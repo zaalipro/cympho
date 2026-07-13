@@ -95,7 +95,15 @@ defmodule CymphoWeb.IssueLive.Show.Description do
             </button>
           </div>
         </div>
-        <pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border border-amber-500/15 bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-amber-100/90"><%= @delivery_brief_readiness.repair_scaffold %></pre>
+        <details class="group/scaffold mt-2">
+          <summary class="inline-flex cursor-pointer select-none list-none items-center gap-1 text-[11px] font-510 text-amber-100/80 transition hover:text-amber-50 [&::-webkit-details-marker]:hidden">
+            <.icon
+              name="hero-chevron-down-mini"
+              class="h-3.5 w-3.5 transition-transform group-open/scaffold:rotate-180"
+            /> Preview scaffold
+          </summary>
+          <pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border border-amber-500/15 bg-canvas px-3 py-2 font-mono text-[11px] leading-5 text-amber-100/90"><%= @delivery_brief_readiness.repair_scaffold %></pre>
+        </details>
       </div>
 
       <form

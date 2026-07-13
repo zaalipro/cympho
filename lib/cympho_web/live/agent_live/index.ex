@@ -24,6 +24,7 @@ defmodule CymphoWeb.AgentLive.Index do
       |> assign(:current_agent, full_agent)
       |> assign(:status_counts, status_counts(company_id))
       |> assign(:org_health, org_health_snapshot(company_id))
+      |> assign(:workload, workload_counts(company_id))
       |> assign(:session_progress, %{})
 
     if connected?(socket) do
@@ -120,7 +121,10 @@ defmodule CymphoWeb.AgentLive.Index do
 
     schedule_progress_update()
 
-    {:noreply, assign(socket, :session_progress, progress)}
+    {:noreply,
+     socket
+     |> assign(:session_progress, progress)
+     |> assign(:workload, workload_counts(current_company_id(socket)))}
   end
 
   @impl true
@@ -203,6 +207,29 @@ defmodule CymphoWeb.AgentLive.Index do
     |> Enum.group_by(&group_key/1)
     |> Enum.sort_by(fn {key, _agents} -> group_rank(key) end)
   end
+
+  @doc """
+  One-line summary for a role group header so a manager can skip
+  whole groups at a glance: "2 running · 1 needs attention" etc.
+  """
+  def group_pulse(agents) do
+    running = Enum.count(agents, &(&1.status == :running))
+    stuck = Enum.count(agents, &(&1.status == :error))
+    free = Enum.count(agents, &(&1.status in [:idle, :active]))
+
+    [
+      stuck > 0 && "#{stuck} need#{if stuck == 1, do: "s", else: ""} attention",
+      running > 0 && "#{running} running",
+      free > 0 && "#{free} free"
+    ]
+    |> Enum.filter(& &1)
+    |> case do
+      [] -> "all quiet"
+      parts -> Enum.join(parts, " · ")
+    end
+  end
+
+  def group_needs_attention?(agents), do: Enum.any?(agents, &(&1.status == :error))
 
   def agent_initials(%{name: name}) when is_binary(name) do
     name
@@ -364,6 +391,24 @@ defmodule CymphoWeb.AgentLive.Index do
   defp org_health_snapshot(nil), do: OrgHealth.snapshot(nil)
   defp org_health_snapshot(company_id), do: OrgHealth.snapshot(company_id)
 
+  defp workload_counts(nil), do: %{}
+  defp workload_counts(company_id), do: Agents.count_active_assignments_by_company(company_id)
+
+  def workload_for(workload, agent_id), do: Map.get(workload || %{}, agent_id, 0)
+
+  def workload_tone(active, max_jobs) do
+    cond do
+      is_integer(max_jobs) and max_jobs > 0 and active >= max_jobs ->
+        "border-amber-500/30 bg-amber-500/10 text-amber-200"
+
+      active > 0 ->
+        "border-border bg-panel text-text-secondary"
+
+      true ->
+        "border-border bg-panel text-text-quaternary"
+    end
+  end
+
   defp refresh_org_health(socket) do
     assign(socket, :org_health, org_health_snapshot(current_company_id(socket)))
   end
@@ -425,6 +470,40 @@ defmodule CymphoWeb.AgentLive.Index do
 
   defp plural_noun(1, singular), do: singular
   defp plural_noun(_count, singular), do: singular <> "s"
+
+  @doc """
+  Orders agents inside a role group so what needs a human lands first:
+  stuck, then working, then free, then everything asleep or gone.
+  """
+  def sort_group(agents) do
+    Enum.sort_by(agents, fn agent -> {status_rank(agent.status), agent.name || ""} end)
+  end
+
+  defp status_rank(:error), do: 0
+  defp status_rank(:running), do: 1
+  defp status_rank(:active), do: 2
+  defp status_rank(:idle), do: 3
+  defp status_rank(:pending_approval), do: 4
+  defp status_rank(status) when status in [:sleeping, :paused], do: 5
+  defp status_rank(_), do: 6
+
+  def agents_needing_attention(agents) do
+    agents |> Enum.filter(&(&1.status == :error)) |> Enum.sort_by(&(&1.name || ""))
+  end
+
+  def session_progress_note(progress, agent_id) do
+    case Map.get(progress || %{}, agent_id) do
+      %{issue: %{identifier: identifier}, elapsed_seconds: elapsed}
+      when is_binary(identifier) ->
+        "on #{identifier} · #{format_elapsed(elapsed)}"
+
+      %{elapsed_seconds: elapsed} when is_integer(elapsed) and elapsed > 0 ->
+        "working · #{format_elapsed(elapsed)}"
+
+      _ ->
+        nil
+    end
+  end
 
   defp group_key(%{role: role}) do
     if role in Agent.role_options(), do: role, else: :other

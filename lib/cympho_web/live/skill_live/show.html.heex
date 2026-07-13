@@ -36,9 +36,33 @@
       </div>
       <div>
         <p class="text-xs font-510 uppercase tracking-wide text-text-quaternary">Status</p>
-        <p class="mt-1 text-sm text-text-primary">
-          {if @skill.enabled, do: "Enabled", else: "Disabled"}
+        <p class={[
+          "mt-1 inline-flex items-center gap-1.5 text-sm font-510",
+          (@skill.enabled && "text-text-primary") || "text-text-tertiary"
+        ]}>
+          <span class={[
+            "h-1.5 w-1.5 rounded-full",
+            (@skill.enabled && "bg-emerald-400/80") || "bg-text-quaternary/60"
+          ]}>
+          </span>
+          {if @skill.enabled, do: "Enabled for agents", else: "Disabled"}
         </p>
+      </div>
+
+      <% capabilities =
+        List.wrap(@skill.manifest["capabilities"] || @skill.manifest[:capabilities]) %>
+      <div :if={capabilities != []}>
+        <p class="text-xs font-510 uppercase tracking-wide text-text-quaternary">
+          This skill can
+        </p>
+        <div class="mt-2 flex flex-wrap gap-1.5">
+          <span
+            :for={capability <- capabilities}
+            class="rounded-md border border-border bg-subtle px-2 py-0.5 text-xs text-text-secondary"
+          >
+            {capability}
+          </span>
+        </div>
       </div>
     </.panel>
   </div>

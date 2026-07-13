@@ -189,6 +189,55 @@ defmodule CymphoWeb.BudgetLive.Index do
     end
   end
 
+  @doc """
+  Plain-language health state for a single budget, so a glance reads as
+  "Healthy — 40% used" rather than a bare percentage.
+  """
+  def budget_state(budget) do
+    used = utilization_percentage(budget)
+
+    cond do
+      budget.status == "exhausted" ->
+        %{tone: :exhausted, word: "Exhausted", detail: exhausted_detail(budget)}
+
+      budget.status == "cancelled" ->
+        %{tone: :cancelled, word: "Cancelled", detail: "no longer enforced"}
+
+      Budgets.Budget.at_threshold?(budget) ->
+        %{tone: :watch, word: "Watch", detail: "#{used} used"}
+
+      true ->
+        %{tone: :ok, word: "Healthy", detail: "#{used} used"}
+    end
+  end
+
+  defp exhausted_detail(%{hard_stop: true}), do: "agents paused"
+  defp exhausted_detail(_budget), do: "over the cap"
+
+  @doc """
+  One calm sentence describing what happens to autonomous runs when this
+  budget is spent, based on the guardrail's hard-stop setting.
+  """
+  def guardrail_note(%{hard_stop: true}),
+    do: "Hard stop — agents pause when this cap is reached."
+
+  def guardrail_note(_budget),
+    do: "Soft cap — spend is tracked but agents keep running."
+
+  def budget_dot_class(:exhausted), do: "bg-brand"
+  def budget_dot_class(:watch), do: "bg-amber-400"
+  def budget_dot_class(:cancelled), do: "bg-text-quaternary"
+  def budget_dot_class(_tone), do: "bg-emerald-400"
+
+  def budget_state_text_class(:exhausted), do: "text-brand"
+  def budget_state_text_class(:watch), do: "text-amber-400"
+  def budget_state_text_class(:cancelled), do: "text-text-quaternary"
+  def budget_state_text_class(_tone), do: "text-emerald-400"
+
+  def budget_card_accent(:exhausted), do: "hover:shadow-[inset_3px_0_0_var(--color-primary)]"
+  def budget_card_accent(:watch), do: "hover:shadow-[inset_3px_0_0_rgb(251_191_36)]"
+  def budget_card_accent(_tone), do: "hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
+
   defp build_budget_command(%{total: 0}, _budgets) do
     %{
       tone: :setup,

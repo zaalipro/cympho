@@ -77,7 +77,6 @@ defmodule CymphoWeb.OrgChartLive do
       id="org-chart-page"
       class="ember-aurora min-h-screen bg-canvas px-4 py-5 sm:px-6 lg:px-8"
       phx-hook="OrgChartExport"
-      id="org-chart-export"
     >
       <div class="relative z-[1] mx-auto max-w-7xl">
         <.header>
@@ -308,12 +307,33 @@ defmodule CymphoWeb.OrgChartLive do
           </p>
         </div>
 
-        <div
-          :if={not Enum.empty?(@org_chart)}
-          id="org-chart-export-area"
-          class="cympho-panel overflow-x-auto px-5 py-8"
-        >
-          <.render_tree nodes={@org_chart} level={0} />
+        <div :if={not Enum.empty?(@org_chart)} class="cympho-panel overflow-hidden">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border px-5 py-3">
+            <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Reporting tree
+            </h2>
+            <div class="flex flex-wrap items-center gap-3 text-[11px] text-text-quaternary">
+              <span class="inline-flex items-center gap-1.5">
+                <span class="h-1.5 w-1.5 rounded-full" style="background-color: #5db872"></span>
+                Running
+              </span>
+              <span class="inline-flex items-center gap-1.5">
+                <span class="h-1.5 w-1.5 rounded-full" style="background-color: #6B7280"></span> Idle
+              </span>
+              <span class="inline-flex items-center gap-1.5">
+                <span class="h-1.5 w-1.5 rounded-full" style="background-color: #e8a55a"></span>
+                Paused
+              </span>
+              <span class="inline-flex items-center gap-1.5">
+                <span class="h-1.5 w-1.5 rounded-full" style="background-color: #D97757"></span>
+                Needs attention
+              </span>
+              <span class="hidden sm:inline">· Click a card for stats</span>
+            </div>
+          </div>
+          <div id="org-chart-export-area" class="overflow-x-auto px-5 py-8">
+            <.render_tree nodes={@org_chart} level={0} />
+          </div>
         </div>
         
     <!-- Agent Stats Panel -->
@@ -531,17 +551,27 @@ defmodule CymphoWeb.OrgChartLive do
 
   def agent_card(assigns) do
     ~H"""
-    <div class="card-lift group block w-56 rounded-xl border border-border bg-surface px-4 py-3 hover:border-border-hover hover:bg-surface-hover">
-      <div class="mb-3 flex items-start gap-3">
-        <div class={"flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-590 #{role_avatar_class(@node.role)}"}>
+    <div class={[
+      "card-lift group block w-56 rounded-xl border bg-surface px-4 py-3 hover:bg-surface-hover",
+      if(@node.status == :error,
+        do: "border-red-500/30 hover:border-red-400/50",
+        else: "border-border hover:border-border-hover"
+      )
+    ]}>
+      <div class="flex items-start gap-3">
+        <div class={"flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-serif text-xs font-590 #{role_avatar_class(@node.role)}"}>
           {initials(@node.name)}
         </div>
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2">
             <h3 class="truncate text-sm font-590 text-text-primary">{@node.name}</h3>
             <span
-              class="h-1.5 w-1.5 shrink-0 rounded-full"
+              class={[
+                "h-1.5 w-1.5 shrink-0 rounded-full",
+                @node.status == :running && "cympho-pulse-dot"
+              ]}
               style={"background-color: #{status_color(@node.status)}"}
+              title={status_title(@node.status)}
             >
             </span>
           </div>
@@ -551,12 +581,16 @@ defmodule CymphoWeb.OrgChartLive do
         </div>
       </div>
 
-      <div class="flex items-center justify-between gap-3 border-t border-border pt-3 text-xs">
-        <span class="rounded-md border border-border bg-panel px-2 py-1 text-text-secondary">
-          {role_label(@node.role)}
-        </span>
+      <div class="mt-3 flex items-center justify-between gap-3 border-t border-border pt-2.5 text-xs">
         <span class="truncate text-text-quaternary">
-          {length(@node.children)} reports
+          <%= if @node.children == [] do %>
+            {role_label(@node.role)}
+          <% else %>
+            {length(@node.children)} direct {plural_noun(length(@node.children), "report")}
+          <% end %>
+        </span>
+        <span class="shrink-0 text-text-quaternary opacity-0 transition-opacity group-hover:opacity-100 group-hover:text-brand">
+          Details →
         </span>
       </div>
     </div>
@@ -633,6 +667,10 @@ defmodule CymphoWeb.OrgChartLive do
   def role_color(:customer_support), do: "#6abf8f"
 
   def role_label(role), do: Agent.role_label(role)
+
+  def status_title(status) do
+    status |> to_string() |> String.replace("_", " ") |> String.capitalize()
+  end
 
   def status_color(:idle), do: "#6B7280"
   def status_color(:running), do: "#5db872"

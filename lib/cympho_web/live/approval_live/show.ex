@@ -155,6 +155,46 @@ defmodule CymphoWeb.ApprovalLive.Show do
 
   defp payload_keys(_payload), do: []
 
+  @doc """
+  Payload rendered as readable `{label, value}` pairs for a definition
+  list — the human-first view of the decision evidence. Nested values are
+  compacted to JSON; the raw dump stays behind advanced disclosure.
+  """
+  def payload_entries(payload) when is_map(payload) do
+    payload
+    |> Enum.map(fn {key, value} -> {humanize_key(key), payload_value(value)} end)
+    |> Enum.sort_by(&elem(&1, 0))
+  end
+
+  def payload_entries(_payload), do: []
+
+  defp humanize_key(key) do
+    key
+    |> to_string()
+    |> String.replace(["_", "-"], " ")
+    |> String.capitalize()
+  end
+
+  defp payload_value(value) when is_binary(value), do: value
+  defp payload_value(value) when is_number(value) or is_boolean(value), do: to_string(value)
+  defp payload_value(nil), do: "—"
+
+  defp payload_value(value) do
+    case Jason.encode(value) do
+      {:ok, json} -> json
+      _ -> inspect(value)
+    end
+  end
+
+  @doc "Human words for a gate slug: \"release_gate\" -> \"Release gate\"."
+  def humanize_type(nil), do: "Approval"
+
+  def humanize_type(type) when is_binary(type) do
+    type
+    |> String.replace(["_", "-"], " ")
+    |> String.capitalize()
+  end
+
   defp requested_by_label(%{requested_by: %{name: name}}) when is_binary(name) and name != "",
     do: name
 
@@ -181,29 +221,21 @@ defmodule CymphoWeb.ApprovalLive.Show do
   defp pluralize(1, word), do: word
   defp pluralize(_count, word), do: word <> "s"
 
-  def decision_packet_tone(:pending), do: "border-amber-500/25 bg-amber-500/10"
-  def decision_packet_tone(:approved), do: "border-emerald-500/25 bg-emerald-500/10"
-  def decision_packet_tone(:denied), do: "border-brand/25 bg-brand/10"
-  def decision_packet_tone(:cancelled), do: "border-border bg-surface-1"
+  # Pending is the only accented state — resolved records read as a calm,
+  # settled ledger. Emerald and red are reserved for the Approve/Deny actions.
+  def decision_packet_tone(:pending), do: "border-brand/30 bg-brand/[0.06]"
   def decision_packet_tone(_), do: "border-border bg-surface-1"
 
   def decision_packet_status_class(:pending),
-    do: "border-amber-500/30 bg-amber-500/10 text-amber-300"
+    do: "border-brand/30 bg-brand/10 text-brand"
 
-  def decision_packet_status_class(:approved),
-    do: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-
-  def decision_packet_status_class(:denied), do: "border-brand/30 bg-brand/10 text-brand"
-  def decision_packet_status_class(:cancelled), do: "border-border bg-surface text-text-tertiary"
-  def decision_packet_status_class(_), do: "border-border bg-surface text-text-tertiary"
+  def decision_packet_status_class(_),
+    do: "border-border bg-surface text-text-tertiary"
 
   def detail_stat_class do
     "rounded-lg border border-border bg-surface-1 px-4 py-3"
   end
 
-  def status_badge_class(:pending), do: "bg-yellow-500/20 text-yellow-400"
-  def status_badge_class(:approved), do: "bg-green-500/20 text-green-400"
-  def status_badge_class(:denied), do: "bg-brand/20 text-brand"
-  def status_badge_class(:cancelled), do: "bg-gray-500/20 text-gray-400"
-  def status_badge_class(_), do: "bg-white/5 text-text-quaternary"
+  def status_badge_class(:pending), do: "bg-brand/15 text-brand"
+  def status_badge_class(_), do: "bg-surface text-text-tertiary"
 end

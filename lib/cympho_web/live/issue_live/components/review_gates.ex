@@ -1,7 +1,8 @@
 defmodule CymphoWeb.IssueLive.Show.ReviewGates do
   @moduledoc """
   Stateless function component for the review-gate region:
-    * Next-owner banner
+    * Quiet one-line all-clear strip when no gates are active
+    * Next-owner banner (only while gates are active)
     * Cleared-nudges banner (when no gates are active)
     * Active review-gate panel (blockers list + auto-nudge buttons +
       embedded work-product form)
@@ -53,7 +54,19 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
       |> assign(:next_owner, next_owner)
 
     ~H"""
-    <section class="px-4 lg:px-6 pb-5">
+    <section :if={!@gate_resolution[:active?]} class="px-4 lg:px-6 pb-5">
+      <div
+        id="issue-next-owner"
+        class="flex items-center gap-2.5 rounded-lg border border-hairline bg-surface-1/30 px-4 py-2.5"
+      >
+        <span aria-hidden="true" class="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400/80"></span>
+        <p class="min-w-0 text-caption text-ink-tertiary">
+          Review gates are clear — no owner action required. The evidence below is for audit and handoff.
+        </p>
+      </div>
+    </section>
+
+    <section :if={@gate_resolution[:active?]} class="px-4 lg:px-6 pb-5">
       <div
         id="issue-next-owner"
         class="ember-glass px-4 py-3.5"

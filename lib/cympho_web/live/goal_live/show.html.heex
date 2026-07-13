@@ -16,11 +16,38 @@
     </:actions>
   </.header>
 
+  <% summary = goal_summary(@status_counts) %>
+
   <.panel class="mb-5 p-5">
-    <div class="flex flex-wrap items-center gap-2 mb-3">
+    <div class="flex flex-wrap items-center gap-2 mb-4">
       <.badge variant="status" value={to_string(@goal.status)} />
       <.badge variant="priority" value={to_string(@goal.priority)} />
     </div>
+
+    <div :if={summary.total > 0}>
+      <div class="mb-1.5 flex items-center justify-between text-caption text-ink-tertiary">
+        <span class="font-510 text-text-secondary">{summary.percent}% complete</span>
+        <span class="tabular-nums">{summary.done}/{summary.total} issues done</span>
+      </div>
+      <div class="h-2 overflow-hidden rounded-full bg-surface-2">
+        <div
+          class="progress-spring h-full rounded-full bg-emerald-400"
+          style={progress_width(summary.percent)}
+        >
+        </div>
+      </div>
+    </div>
+
+    <div
+      :if={summary.total == 0}
+      class="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2.5 text-caption font-510 text-amber-200/90"
+    >
+      <span class="hero-link-mini h-4 w-4 shrink-0"></span>
+      No issues linked yet — link work so this goal can start showing progress.
+    </div>
+
+    <hr class="ember-rule my-4" />
+
     <p
       :if={@goal.description not in [nil, ""]}
       class="text-body text-ink-muted whitespace-pre-wrap leading-relaxed"
@@ -37,41 +64,55 @@
       :for={status <- [:backlog, :todo, :in_progress, :in_review, :done, :blocked]}
       class="ember-stat bg-surface-1 border border-hairline rounded-md px-3 py-2.5"
     >
+      <% count = Map.get(@status_counts, status, 0) %>
       <div class="text-eyebrow text-ink-tertiary uppercase">{status_label(status)}</div>
-      <div class="text-card-title text-ink mt-0.5">{Map.get(@status_counts, status, 0)}</div>
+      <div class={"text-card-title mt-0.5 #{count_color(count, "text-ink")}"}>{count}</div>
     </div>
   </div>
+
+  <% {recent, earlier} = Enum.split_with(@issues, &recent_issue?/1) %>
 
   <.panel>
     <div class="p-5">
       <div class="flex items-center justify-between mb-2">
-        <h2 class="text-card-title text-ink">Issues</h2>
+        <h2 class="text-card-title text-ink">Linked work</h2>
         <span class="text-caption text-ink-tertiary">{length(@issues)} shown</span>
       </div>
       <hr class="ember-rule mb-4" />
 
       <div
         :if={Enum.empty?(@issues)}
-        class="text-caption text-ink-tertiary border border-dashed border-hairline rounded-md px-3 py-6 text-center"
+        class="border border-dashed border-hairline rounded-md px-4 py-8 text-center"
       >
-        No issues linked to this goal yet.
+        <p class="text-body text-ink-muted">Nothing linked yet — and that's fine.</p>
+        <p class="mt-1 text-caption text-ink-tertiary">
+          Link an issue to this goal and its progress will show up here.
+        </p>
       </div>
 
-      <ul
-        :if={!Enum.empty?(@issues)}
-        class="border border-hairline rounded-md divide-y divide-hairline overflow-hidden bg-surface-1/40"
-      >
-        <li :for={issue <- @issues} class="hover:bg-surface-2 transition-colors duration-100">
-          <.app_link navigate={~p"/issues/#{issue.id}"} class="flex items-center gap-3 px-3 py-2">
-            <.badge variant="status" value={to_string(issue.status)} />
-            <span :if={issue.identifier} class="font-mono text-caption text-ink-tertiary shrink-0">
-              {issue.identifier}
-            </span>
-            <span class="flex-1 truncate text-body text-ink-muted">{issue.title}</span>
-            <.badge variant="priority" value={to_string(issue.priority)} />
-          </.app_link>
-        </li>
-      </ul>
+      <div :if={!Enum.empty?(@issues)} class="space-y-4">
+        <div :if={recent != []}>
+          <p class="mb-2 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Moved this week
+          </p>
+          <ul class="border border-hairline rounded-md divide-y divide-hairline overflow-hidden bg-surface-1/40">
+            <li :for={issue <- recent}>
+              <.issue_row issue={issue} />
+            </li>
+          </ul>
+        </div>
+
+        <div :if={earlier != []}>
+          <p class="mb-2 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Earlier
+          </p>
+          <ul class="border border-hairline rounded-md divide-y divide-hairline overflow-hidden bg-surface-1/40">
+            <li :for={issue <- earlier}>
+              <.issue_row issue={issue} />
+            </li>
+          </ul>
+        </div>
+      </div>
     </div>
   </.panel>
 

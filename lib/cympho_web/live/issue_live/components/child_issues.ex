@@ -30,7 +30,7 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
       <div class="border-y border-hairline bg-surface-1/25">
         <div class="flex items-center justify-between gap-3 px-1 py-3">
           <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
-            Decomposition
+            Sub-issues
           </h2>
           <span class="text-caption text-ink-tertiary">
             {length(@child_tree)} {if length(@child_tree) == 1, do: "issue", else: "issues"} in subtree

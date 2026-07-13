@@ -1723,6 +1723,14 @@ defmodule CymphoWeb.AgentLive.Show do
     |> String.upcase()
   end
 
+  @doc """
+  The issue this agent is actively working right now, if any — surfaced
+  next to the identity block so "what is it doing?" needs no digging.
+  """
+  def current_focus_issue(recent_issues) do
+    Enum.find(recent_issues || [], &(&1.status == :in_progress))
+  end
+
   def health_pill_class(:healthy), do: "border-success/25 bg-success/10 text-success"
   def health_pill_class(:degraded), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
   def health_pill_class(:unhealthy), do: "border-brand/25 bg-brand/10 text-brand"

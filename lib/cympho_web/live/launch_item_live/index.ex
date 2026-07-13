@@ -297,16 +297,23 @@ defmodule CymphoWeb.LaunchItemLive.Index do
                 <article
                   :for={item <- @launch_items}
                   id={"launch-item-#{item.id}"}
-                  class="card-lift rounded-2xl border border-border bg-surface/70 p-4 shadow-sm"
+                  class={[
+                    "group card-lift rounded-2xl border p-4 shadow-sm transition-colors",
+                    launch_card_class(item)
+                  ]}
                 >
                   <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
-                      <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                        Launch item
-                      </p>
-                      <h3 class="mt-1 truncate text-base font-590 text-text-primary">
-                        {item.title}
-                      </h3>
+                      <div class="flex min-w-0 items-center gap-2">
+                        <span
+                          class={["h-2 w-2 shrink-0 rounded-full", launch_status_dot(item.status)]}
+                          title={"Status: #{status_label(item.status)}"}
+                        >
+                        </span>
+                        <h3 class="truncate text-base font-590 text-text-primary">
+                          {item.title}
+                        </h3>
+                      </div>
                       <p class="mt-1 text-sm text-text-tertiary">
                         Owner: {owner_label(item.owner_user)}
                       </p>
@@ -318,7 +325,10 @@ defmodule CymphoWeb.LaunchItemLive.Index do
                       phx-value-id={item.id}
                       class={[
                         "shrink-0 rounded-full border px-3 py-1.5 text-xs font-590 transition",
-                        blocked_badge_class(item.is_blocked)
+                        blocked_badge_class(item.is_blocked),
+                        unless(item.is_blocked,
+                          do: "opacity-70 group-hover:opacity-100 focus:opacity-100"
+                        )
                       ]}
                     >
                       {blocked_toggle_label(item.is_blocked)}
@@ -401,8 +411,17 @@ defmodule CymphoWeb.LaunchItemLive.Index do
                     ]}>
                       {status_label(item.status)}
                     </span>
-                    <span class="rounded-full border border-border bg-panel px-2.5 py-1 font-590 uppercase tracking-[0.08em] text-text-tertiary">
-                      {if item.is_blocked, do: "Blocked", else: "Clear"}
+                    <span
+                      :if={item.is_blocked}
+                      class="rounded-full border border-rose-500/25 bg-rose-500/10 px-2.5 py-1 font-590 uppercase tracking-[0.08em] text-rose-300"
+                    >
+                      Blocked
+                    </span>
+                    <span
+                      :if={item.status == "completed" and not item.is_blocked}
+                      class="inline-flex items-center gap-1 text-emerald-300/80"
+                    >
+                      <.icon name="hero-check-circle-mini" class="h-3.5 w-3.5" /> Done
                     </span>
                   </div>
                 </article>
@@ -573,4 +592,13 @@ defmodule CymphoWeb.LaunchItemLive.Index do
 
   def blocked_toggle_label(true), do: "Unblock"
   def blocked_toggle_label(false), do: "Mark blocked"
+
+  # Blocked wins (act-now, quiet rose); completed settles back; else neutral.
+  def launch_card_class(%{is_blocked: true}), do: "border-rose-500/25 bg-rose-500/[0.04]"
+  def launch_card_class(%{status: "completed"}), do: "border-border/70 bg-surface/40 opacity-80"
+  def launch_card_class(_), do: "border-border bg-surface/70"
+
+  def launch_status_dot("completed"), do: "bg-emerald-400/70"
+  def launch_status_dot("in_progress"), do: "bg-sky-400/70"
+  def launch_status_dot(_), do: "bg-text-quaternary/40"
 end

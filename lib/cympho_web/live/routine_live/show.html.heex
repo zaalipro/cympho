@@ -36,32 +36,88 @@
       </:actions>
     </.header>
 
-    <div class="mb-6 grid grid-cols-1 gap-3 md:grid-cols-4">
-      <div class="ember-stat rounded-xl border border-border bg-surface p-4">
-        <div class="text-xs text-text-quaternary">Status</div>
-        <div class="mt-2 text-sm font-590 text-text-primary">
-          {routine_label(@routine.status)}
+    <section class={[
+      "mb-6 rounded-2xl border p-5 shadow-card",
+      show_alert_class(show_alert(@routine, @triggers, @runs))
+    ]}>
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0">
+          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Health at a glance
+          </p>
+          <div class="mt-2 flex flex-wrap items-center gap-x-6 gap-y-3">
+            <div>
+              <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                Schedule
+              </p>
+              <p class="mt-1 text-sm font-590 text-text-primary">{schedule_summary(@triggers)}</p>
+            </div>
+            <div>
+              <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                Next run
+              </p>
+              <p class="mt-1 text-sm font-590 text-text-primary">
+                {next_run(@triggers) || "Manual only"}
+              </p>
+            </div>
+            <div>
+              <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                Last run
+              </p>
+              <p class="mt-1 flex items-center gap-1.5 text-sm font-590 text-text-primary">
+                <span
+                  :if={last_run(@runs)}
+                  class={["h-2 w-2 rounded-full", routine_run_dot(last_run(@runs).status)]}
+                >
+                </span>
+                {if run = last_run(@runs), do: routine_label(run.status), else: "No runs yet"}
+              </p>
+            </div>
+          </div>
+          <p
+            :if={show_alert_note(show_alert(@routine, @triggers, @runs))}
+            class="mt-3 text-sm leading-6 text-current/80"
+          >
+            {show_alert_note(show_alert(@routine, @triggers, @runs))}
+          </p>
+        </div>
+
+        <div class="ui-advanced-only grid grid-cols-2 gap-3">
+          <div class="rounded-xl border border-border bg-surface/70 px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Priority
+            </p>
+            <p class="mt-1 text-sm font-590 text-text-primary">
+              {routine_label(@routine.priority)}
+            </p>
+          </div>
+          <div class="rounded-xl border border-border bg-surface/70 px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Concurrency
+            </p>
+            <p class="mt-1 text-sm font-590 text-text-primary">
+              {routine_label(@routine.concurrency_policy)}
+            </p>
+          </div>
+          <div class="rounded-xl border border-border bg-surface/70 px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Catch-up
+            </p>
+            <p class="mt-1 text-sm font-590 text-text-primary">
+              {routine_label(@routine.catch_up_policy)}
+            </p>
+          </div>
+          <div class="rounded-xl border border-border bg-surface/70 px-3 py-2">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Status
+            </p>
+            <p class="mt-1 text-sm font-590 text-text-primary">
+              {routine_label(@routine.status)}
+            </p>
+          </div>
         </div>
       </div>
-      <div class="ember-stat rounded-xl border border-border bg-surface p-4">
-        <div class="text-xs text-text-quaternary">Priority</div>
-        <div class="mt-2 text-sm font-590 text-text-primary">
-          {routine_label(@routine.priority)}
-        </div>
-      </div>
-      <div class="ui-advanced-only ember-stat rounded-xl border border-border bg-surface p-4">
-        <div class="text-xs text-text-quaternary">Concurrency</div>
-        <div class="mt-2 text-sm font-590 text-text-primary">
-          {routine_label(@routine.concurrency_policy)}
-        </div>
-      </div>
-      <div class="ui-advanced-only ember-stat rounded-xl border border-border bg-surface p-4">
-        <div class="text-xs text-text-quaternary">Catch-up</div>
-        <div class="mt-2 text-sm font-590 text-text-primary">
-          {routine_label(@routine.catch_up_policy)}
-        </div>
-      </div>
-    </div>
+    </section>
 
     <section class="ember-glass overflow-hidden">
       <div class="flex items-center justify-between border-b border-white/10 px-4 py-3">
@@ -90,9 +146,10 @@
             >
               <td class="px-4 py-3">
                 <span class={[
-                  "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-510",
+                  "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-510",
                   run_status_class(run.status)
                 ]}>
+                  <span class={["h-1.5 w-1.5 rounded-full", routine_run_dot(run.status)]}></span>
                   {routine_label(run.status)}
                 </span>
               </td>

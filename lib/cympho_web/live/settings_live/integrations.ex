@@ -319,14 +319,12 @@ defmodule CymphoWeb.SettingsLive.Integrations do
 
   defp agrenting_error(_reason), do: "Agrenting did not accept the connection."
 
+  # Done reads as calm emerald; anything still to set up stays neutral gray
+  # (a checklist posture, not an alarm) so setup never feels like an error.
   defp mcp_tone_class(:ready), do: "border-success/25 bg-success/10 text-success"
-  defp mcp_tone_class(:attention), do: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-  defp mcp_tone_class(:blocked), do: "border-red-500/25 bg-red-500/10 text-red-300"
   defp mcp_tone_class(_tone), do: "border-border bg-surface text-text-tertiary"
 
   defp mcp_step_card_class(:ready), do: "border-success/20 bg-success/[0.06]"
-  defp mcp_step_card_class(:attention), do: "border-amber-500/20 bg-amber-500/[0.06]"
-  defp mcp_step_card_class(:blocked), do: "border-red-500/20 bg-red-500/[0.06]"
   defp mcp_step_card_class(_tone), do: "border-border bg-surface"
 
   defp mcp_error(:missing_company), do: "Select a company before creating MCP keys."
