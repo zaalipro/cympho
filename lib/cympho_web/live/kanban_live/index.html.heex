@@ -295,7 +295,7 @@
           :for={metric <- flow_metrics}
           class={["ember-stat rounded-lg border px-2 py-1.5 text-center", metric.class]}
         >
-          <div class="font-mono text-base font-590 leading-none tabular-nums">
+          <div class="font-serif text-lg font-590 leading-none">
             {metric.count}
           </div>
           <div class="mt-1 truncate text-[10px] font-590">{metric.label}</div>
@@ -328,7 +328,7 @@
           >
             <div class="flex items-baseline justify-between gap-2">
               <span class="text-xs font-590">{metric.label}</span>
-              <span class="font-mono text-xl font-590 leading-none tabular-nums">
+              <span class="font-serif text-2xl font-590 leading-none">
                 {metric.count}
               </span>
             </div>
@@ -499,9 +499,11 @@
                           />
                         </svg>
                       </button>
+                      <span class={"h-1.5 w-1.5 shrink-0 rounded-full " <> column_dot_class(status)}>
+                      </span>
                       <h2 class="text-sm font-510 text-text-primary">{status_label(status)}</h2>
                     </div>
-                    <span class={"text-xs px-2 py-0.5 rounded-full font-510 " <> if(exceeded, do: "bg-brand/20 text-brand", else: "bg-surface text-text-quaternary")}>
+                    <span class={"font-serif text-sm px-2 py-0.5 rounded-full font-590 " <> if(exceeded, do: "bg-brand/20 text-brand", else: "bg-surface text-text-quaternary")}>
                       {count}{if limit, do: "/#{limit}", else: ""}
                     </span>
                   </div>

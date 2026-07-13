@@ -210,7 +210,7 @@ defmodule CymphoWeb.ProjectLive.Show do
       <p class="text-[10px] font-590 uppercase leading-3 tracking-[0.12em] text-text-quaternary">
         {@label}
       </p>
-      <p class={"mt-1 font-mono text-xl font-590 leading-none tabular-nums #{metric_text(@tone)}"}>
+      <p class={"mt-1 font-serif text-2xl font-590 leading-none #{metric_text(@tone)}"}>
         {@value}
       </p>
     </div>

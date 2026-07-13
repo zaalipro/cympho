@@ -182,7 +182,7 @@
                     Project workspaces isolate agent execution and previews.
                   </p>
                 </div>
-                <span class="font-mono text-sm font-590 text-text-primary">
+                <span class="font-serif text-lg font-590 text-text-primary">
                   {length(@project_workspaces)}
                 </span>
               </div>
@@ -213,7 +213,7 @@
                     Values are encrypted and injected into project-scoped agent runs.
                   </p>
                 </div>
-                <span class="font-mono text-sm font-590 text-text-primary">
+                <span class="font-serif text-lg font-590 text-text-primary">
                   {length(@env_keys)}
                 </span>
               </div>
@@ -273,13 +273,13 @@
                     {goal_type_label(goal.goal_type)} / {progress.done} of {progress.total} issues done
                   </p>
                 </div>
-                <span class="shrink-0 font-mono text-sm font-590 text-text-secondary">
+                <span class="shrink-0 font-serif text-lg font-590 text-text-secondary">
                   {progress.percent}%
                 </span>
               </div>
               <div class="mt-3 h-2 overflow-hidden rounded-full bg-surface">
                 <div
-                  class="h-full rounded-full bg-emerald-400"
+                  class="progress-spring h-full rounded-full bg-emerald-400"
                   style={progress_width(progress.percent)}
                 />
               </div>

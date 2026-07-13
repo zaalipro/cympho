@@ -151,6 +151,34 @@ defmodule Cympho.HeartbeatEngine.WakeupQueue do
   end
 
   @doc """
+  Returns agent ids that have at least one pending wake older than the cutoff.
+
+  Wake delivery is a PubSub broadcast to the agent's heartbeat process; the
+  broadcast is fire-and-forget, so a dead heartbeat process (crash, node
+  restart) strands the persisted wake. The watchdog uses this query to find
+  strandees and re-trigger their heartbeat loop.
+  """
+  @spec agent_ids_with_stale_pending(pos_integer(), pos_integer()) :: [String.t()]
+  def agent_ids_with_stale_pending(older_than_minutes, limit \\ 100)
+      when is_integer(older_than_minutes) and older_than_minutes > 0 do
+    cutoff = DateTime.utc_now() |> DateTime.add(-older_than_minutes * 60, :second)
+
+    AgentWake
+    |> join(:inner, [w], a in Cympho.Agents.Agent, on: a.id == w.agent_id)
+    |> where([w], w.status == "pending")
+    |> where([w], w.inserted_at < ^cutoff)
+    |> where(
+      [w, a],
+      a.status not in [:paused, :terminated, :offline, :pending_approval] and
+        a.governance_status not in ["paused", "terminated", "pending_approval"]
+    )
+    |> group_by([w], w.agent_id)
+    |> select([w], w.agent_id)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
   Returns the count of pending wakes for an agent.
   """
   @spec pending_count(String.t()) :: non_neg_integer()

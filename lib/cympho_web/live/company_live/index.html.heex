@@ -1,280 +1,291 @@
-<div class="px-4 py-6 sm:px-6 lg:px-8 max-w-7xl mx-auto space-y-6">
-  <.header title={@page_title}>
-    <:actions>
-      <.app_link
-        navigate={~p"/companies/import"}
-        class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
-      >
-        <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Import
-      </.app_link>
-      <.app_link
-        navigate={~p"/companies/new"}
-        class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-      >
-        <.icon name="hero-plus-mini" class="h-4 w-4" /> New company
-      </.app_link>
-    </:actions>
-  </.header>
-
-  <div
-    :if={@flash && @flash[:info]}
-    class="rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"
-  >
-    {@flash[:info]}
-  </div>
-
-  <div
-    :if={@flash && @flash[:error]}
-    class="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400"
-  >
-    {@flash[:error]}
-  </div>
-
-  <section
-    data-testid="company-launch-command"
-    class="overflow-hidden rounded-xl border border-border bg-surface"
-  >
-    <div class="grid gap-0 lg:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
-      <div class="p-6 lg:p-8">
-        <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-brand/20 bg-brand/10 px-3 py-1 text-xs font-510 text-brand">
-          <.icon name="hero-building-office-2-mini" class="h-4 w-4" /> Company launch console
-        </div>
-        <h2 class="font-serif text-2xl font-510 text-text-primary">
-          Launch autonomous companies from working blueprints
-        </h2>
-        <p class="mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
-          Create a complete operating company with a CEO, CTO, specialist agents, a mission goal,
-          project, and first work queue. Use import when you are restoring a portable company export.
-        </p>
-
-        <div class="mt-6 flex flex-wrap gap-3">
-          <.app_link
-            navigate={~p"/onboarding"}
-            class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-5 py-3 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-          >
-            <.icon name="hero-sparkles-mini" class="h-4 w-4" /> Build from blueprint
-          </.app_link>
-          <.app_link
-            navigate={~p"/companies/import"}
-            class="inline-flex items-center gap-2 rounded-button border border-border bg-subtle px-5 py-3 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
-          >
-            <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Import company
-          </.app_link>
-        </div>
-      </div>
-
-      <div class="border-t border-border bg-subtle/60 p-6 lg:border-l lg:border-t-0 lg:p-8">
-        <div class="mb-4 flex items-center justify-between gap-3">
-          <div>
-            <div class="text-xs font-510 uppercase tracking-wider text-text-tertiary">
-              Launch posture
-            </div>
-            <div class="mt-1 text-sm font-510 text-text-primary">
-              {@launch_summary.launch_posture.label}
-            </div>
-          </div>
-          <span class={[
-            "inline-flex rounded-full border px-3 py-1 text-xs font-510",
-            posture_badge_class(@launch_summary.launch_posture.tone)
-          ]}>
-            {String.capitalize(to_string(@launch_summary.launch_posture.tone))}
-          </span>
-        </div>
-        <p class="text-xs leading-5 text-text-secondary">
-          {@launch_summary.launch_posture.detail}
-        </p>
-
-        <div class="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-3">
-          <div class="rounded-lg border border-border bg-surface p-4">
-            <div class="text-2xl font-510 text-text-primary">
-              {@launch_summary.total_companies}
-            </div>
-            <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-              Companies
-            </div>
-          </div>
-          <div class="rounded-lg border border-border bg-surface p-4">
-            <div class="text-2xl font-510 text-text-primary">
-              {@launch_summary.blueprint_count}
-            </div>
-            <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-              Blueprints
-            </div>
-          </div>
-          <div class="rounded-lg border border-border bg-surface p-4">
-            <div class="text-2xl font-510 text-text-primary">
-              {@launch_summary.active_companies}
-            </div>
-            <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-              Active
-            </div>
-          </div>
-          <div class="rounded-lg border border-border bg-surface p-4">
-            <div class="text-2xl font-510 text-text-primary">
-              {@launch_summary.default_agent_count}
-            </div>
-            <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-              Default agents
-            </div>
-          </div>
-          <div class="rounded-lg border border-border bg-surface p-4">
-            <div class="text-2xl font-510 text-text-primary">
-              {@launch_summary.capability_count}
-            </div>
-            <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-              Capabilities
-            </div>
-          </div>
-          <div class="rounded-lg border border-border bg-surface p-4">
-            <div class="text-2xl font-510 text-text-primary">
-              {@launch_summary.seed_issue_count}
-            </div>
-            <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-              Seed issues
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section
-    data-testid="company-blueprint-strip"
-    class="rounded-xl border border-border bg-surface p-6"
-  >
-    <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <h3 class="font-serif text-xl font-510 text-text-primary">Blueprint catalog</h3>
-        <p class="mt-1 text-sm text-text-secondary">
-          Each blueprint creates a real org chart, project, mission goal, and starting queue.
+<div class="ember-aurora px-4 py-6 sm:px-6 lg:px-8">
+  <div class="relative z-[1] mx-auto max-w-7xl space-y-6">
+    <.header>
+      <div class="min-w-0">
+        <span class="ember-eyebrow">Operating companies</span>
+        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+          {@page_title}
+        </h1>
+        <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+          Launch, import, and govern autonomous companies from working blueprints.
         </p>
       </div>
-      <.app_link
-        navigate={~p"/onboarding"}
-        class="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-subtle px-3 py-2 text-xs font-510 text-text-primary hover:border-brand/40 hover:text-brand"
-      >
-        View all {@launch_summary.blueprint_count}
-        <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
-      </.app_link>
+      <:actions>
+        <.app_link
+          navigate={~p"/companies/import"}
+          class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
+        >
+          <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Import
+        </.app_link>
+        <.app_link
+          navigate={~p"/companies/new"}
+          class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-4 py-2 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+        >
+          <.icon name="hero-plus-mini" class="h-4 w-4" /> New company
+        </.app_link>
+      </:actions>
+    </.header>
+
+    <div
+      :if={@flash && @flash[:info]}
+      class="rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"
+    >
+      {@flash[:info]}
     </div>
 
-    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-      <.app_link
-        :for={blueprint <- @featured_blueprints}
-        navigate={~p"/onboarding"}
-        class="group flex min-h-[150px] flex-col justify-between rounded-lg border border-border bg-subtle p-4 text-left transition-colors hover:border-brand/40 hover:bg-surface-hover"
-      >
+    <div
+      :if={@flash && @flash[:error]}
+      class="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400"
+    >
+      {@flash[:error]}
+    </div>
+
+    <section
+      data-testid="company-launch-command"
+      class="ember-glass overflow-hidden"
+    >
+      <div class="grid gap-0 lg:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
+        <div class="p-6 lg:p-8">
+          <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-brand/20 bg-brand/10 px-3 py-1 text-xs font-510 text-brand">
+            <.icon name="hero-building-office-2-mini" class="h-4 w-4" /> Company launch console
+          </div>
+          <h2 class="font-serif text-2xl font-510 text-text-primary">
+            Launch autonomous companies from working blueprints
+          </h2>
+          <p class="mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
+            Create a complete operating company with a CEO, CTO, specialist agents, a mission goal,
+            project, and first work queue. Use import when you are restoring a portable company export.
+          </p>
+
+          <div class="mt-6 flex flex-wrap gap-3">
+            <.app_link
+              navigate={~p"/onboarding"}
+              class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-5 py-3 text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+            >
+              <.icon name="hero-sparkles-mini" class="h-4 w-4" /> Build from blueprint
+            </.app_link>
+            <.app_link
+              navigate={~p"/companies/import"}
+              class="inline-flex items-center gap-2 rounded-button border border-border bg-subtle px-5 py-3 text-sm font-510 text-text-primary transition-colors hover:border-brand/40 hover:text-brand"
+            >
+              <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Import company
+            </.app_link>
+          </div>
+        </div>
+
+        <div class="border-t border-border bg-subtle/60 p-6 lg:border-l lg:border-t-0 lg:p-8">
+          <div class="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <div class="text-xs font-510 uppercase tracking-wider text-text-tertiary">
+                Launch posture
+              </div>
+              <div class="mt-1 text-sm font-510 text-text-primary">
+                {@launch_summary.launch_posture.label}
+              </div>
+            </div>
+            <span class={[
+              "inline-flex rounded-full border px-3 py-1 text-xs font-510",
+              posture_badge_class(@launch_summary.launch_posture.tone)
+            ]}>
+              {String.capitalize(to_string(@launch_summary.launch_posture.tone))}
+            </span>
+          </div>
+          <p class="text-xs leading-5 text-text-secondary">
+            {@launch_summary.launch_posture.detail}
+          </p>
+
+          <div class="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-3">
+            <div class="ember-stat rounded-lg border border-border bg-surface p-4">
+              <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
+                {@launch_summary.total_companies}
+              </div>
+              <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
+                Companies
+              </div>
+            </div>
+            <div class="ember-stat rounded-lg border border-border bg-surface p-4">
+              <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
+                {@launch_summary.blueprint_count}
+              </div>
+              <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
+                Blueprints
+              </div>
+            </div>
+            <div class="ember-stat rounded-lg border border-border bg-surface p-4">
+              <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
+                {@launch_summary.active_companies}
+              </div>
+              <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
+                Active
+              </div>
+            </div>
+            <div class="ember-stat rounded-lg border border-border bg-surface p-4">
+              <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
+                {@launch_summary.default_agent_count}
+              </div>
+              <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
+                Default agents
+              </div>
+            </div>
+            <div class="ember-stat rounded-lg border border-border bg-surface p-4">
+              <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
+                {@launch_summary.capability_count}
+              </div>
+              <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
+                Capabilities
+              </div>
+            </div>
+            <div class="ember-stat rounded-lg border border-border bg-surface p-4">
+              <div class="font-serif text-2xl font-510 tabular-nums text-text-primary">
+                {@launch_summary.seed_issue_count}
+              </div>
+              <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
+                Seed issues
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section
+      data-testid="company-blueprint-strip"
+      class="rounded-xl border border-border bg-surface p-6"
+    >
+      <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div class="text-sm font-510 text-text-primary group-hover:text-brand">
-            {blueprint.name}
-          </div>
-          <p class="mt-2 line-clamp-3 text-xs leading-5 text-text-secondary">
-            {blueprint.description}
+          <h3 class="font-serif text-xl font-510 text-text-primary">Blueprint catalog</h3>
+          <p class="mt-1 text-sm text-text-secondary">
+            Each blueprint creates a real org chart, project, mission goal, and starting queue.
           </p>
         </div>
-        <div class="mt-4 flex items-center justify-between gap-3 text-xs text-text-tertiary">
-          <span>
-            {blueprint.default_agent_count} agents · {blueprint.seed_issue_count} issues
-          </span>
+        <.app_link
+          navigate={~p"/onboarding"}
+          class="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-subtle px-3 py-2 text-xs font-510 text-text-primary hover:border-brand/40 hover:text-brand"
+        >
+          View all {@launch_summary.blueprint_count}
           <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
-        </div>
-      </.app_link>
-    </div>
-  </section>
-
-  <section data-testid="company-fleet" class="rounded-xl border border-border bg-surface p-6">
-    <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <h3 class="font-serif text-xl font-510 text-text-primary">Company fleet</h3>
-        <p class="mt-1 text-sm text-text-secondary">
-          Open a company to manage members, pause or resume autonomy, export backups, or tune governance.
-        </p>
-      </div>
-    </div>
-
-    <div id="companies-grid" phx-update="stream" class="grid gap-3 lg:grid-cols-2">
-      <div
-        id="companies-empty"
-        class="only:block hidden rounded-lg border border-border bg-subtle p-8 text-center text-sm text-text-secondary"
-      >
-        No companies yet. Launch one from a blueprint to create a working autonomous org.
+        </.app_link>
       </div>
 
-      <article
-        :for={{dom_id, company} <- @streams.companies}
-        id={dom_id}
-        class="rounded-lg border border-border bg-subtle p-5 transition-colors hover:border-border-hover hover:bg-surface-hover"
-      >
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2">
-              <.app_link
-                navigate={~p"/companies/#{company}"}
-                class="truncate text-base font-510 text-text-primary hover:text-brand"
-              >
-                {company.name}
-              </.app_link>
-              <span class={[
-                "rounded-full border px-2 py-0.5 text-[11px] font-510 uppercase tracking-wider",
-                if(company.status == "active",
-                  do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300",
-                  else: "border-amber-500/25 bg-amber-500/10 text-amber-200"
-                )
-              ]}>
-                {company.status}
-              </span>
+      <div class="stagger-children grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <.app_link
+          :for={blueprint <- @featured_blueprints}
+          navigate={~p"/onboarding"}
+          class="group flex min-h-[150px] flex-col justify-between rounded-lg border border-border bg-subtle p-4 text-left transition-colors hover:border-brand/40 hover:bg-surface-hover hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
+        >
+          <div>
+            <div class="text-sm font-510 text-text-primary group-hover:text-brand">
+              {blueprint.name}
             </div>
-            <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
-              <code class="rounded bg-black/20 px-2 py-1">{company.slug}</code>
-              <span>Created {format_inserted_at(company)}</span>
-            </div>
-            <p
-              :if={company.description}
-              class="mt-3 line-clamp-2 text-sm leading-6 text-text-secondary"
-            >
-              {company.description}
+            <p class="mt-2 line-clamp-3 text-xs leading-5 text-text-secondary">
+              {blueprint.description}
             </p>
           </div>
-
-          <div class="flex shrink-0 flex-wrap gap-2 sm:justify-end">
-            <.app_link
-              navigate={~p"/companies/#{company}/export"}
-              class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:border-brand/40 hover:text-brand"
-            >
-              <.icon name="hero-arrow-down-tray-mini" class="h-4 w-4" /> Export
-            </.app_link>
-            <.app_link
-              navigate={~p"/companies/#{company}/edit"}
-              class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:border-brand/40 hover:text-brand"
-            >
-              <.icon name="hero-pencil-square-mini" class="h-4 w-4" /> Edit
-            </.app_link>
-            <button
-              phx-click="delete_company"
-              phx-value-id={company.id}
-              class="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-510 text-red-300 hover:bg-red-500/15"
-              data-confirm={"Delete #{company.name}? This removes the company workspace from the fleet and cannot be undone."}
-            >
-              <.icon name="hero-trash-mini" class="h-4 w-4" /> Delete
-            </button>
+          <div class="mt-4 flex items-center justify-between gap-3 text-xs text-text-tertiary">
+            <span>
+              {blueprint.default_agent_count} agents · {blueprint.seed_issue_count} issues
+            </span>
+            <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
           </div>
+        </.app_link>
+      </div>
+    </section>
+
+    <section data-testid="company-fleet" class="rounded-xl border border-border bg-surface p-6">
+      <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3 class="font-serif text-xl font-510 text-text-primary">Company fleet</h3>
+          <p class="mt-1 text-sm text-text-secondary">
+            Open a company to manage members, pause or resume autonomy, export backups, or tune governance.
+          </p>
         </div>
-      </article>
-    </div>
+      </div>
 
-    <.infinite_scroll_footer
-      id="companies"
-      has_more={@infinite_scroll[:companies][:has_more?] || false}
+      <div id="companies-grid" phx-update="stream" class="grid gap-3 lg:grid-cols-2">
+        <div
+          id="companies-empty"
+          class="only:block hidden rounded-lg border border-border bg-subtle p-8 text-center text-sm text-text-secondary"
+        >
+          No companies yet. Launch one from a blueprint to create a working autonomous org.
+        </div>
+
+        <article
+          :for={{dom_id, company} <- @streams.companies}
+          id={dom_id}
+          class="rounded-lg border border-border bg-subtle p-5 transition-colors hover:border-border-hover hover:bg-surface-hover hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
+        >
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <.app_link
+                  navigate={~p"/companies/#{company}"}
+                  class="truncate text-base font-510 text-text-primary hover:text-brand"
+                >
+                  {company.name}
+                </.app_link>
+                <span class={[
+                  "rounded-full border px-2 py-0.5 text-[11px] font-510 uppercase tracking-wider",
+                  if(company.status == "active",
+                    do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300",
+                    else: "border-amber-500/25 bg-amber-500/10 text-amber-200"
+                  )
+                ]}>
+                  {company.status}
+                </span>
+              </div>
+              <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
+                <code class="rounded bg-black/20 px-2 py-1">{company.slug}</code>
+                <span>Created {format_inserted_at(company)}</span>
+              </div>
+              <p
+                :if={company.description}
+                class="mt-3 line-clamp-2 text-sm leading-6 text-text-secondary"
+              >
+                {company.description}
+              </p>
+            </div>
+
+            <div class="flex shrink-0 flex-wrap gap-2 sm:justify-end">
+              <.app_link
+                navigate={~p"/companies/#{company}/export"}
+                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:border-brand/40 hover:text-brand"
+              >
+                <.icon name="hero-arrow-down-tray-mini" class="h-4 w-4" /> Export
+              </.app_link>
+              <.app_link
+                navigate={~p"/companies/#{company}/edit"}
+                class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:border-brand/40 hover:text-brand"
+              >
+                <.icon name="hero-pencil-square-mini" class="h-4 w-4" /> Edit
+              </.app_link>
+              <button
+                phx-click="delete_company"
+                phx-value-id={company.id}
+                class="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-510 text-red-300 hover:bg-red-500/15"
+                data-confirm={"Delete #{company.name}? This removes the company workspace from the fleet and cannot be undone."}
+              >
+                <.icon name="hero-trash-mini" class="h-4 w-4" /> Delete
+              </button>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <.infinite_scroll_footer
+        id="companies"
+        has_more={@infinite_scroll[:companies][:has_more?] || false}
+      />
+    </section>
+
+    <.live_component
+      :if={@live_action in [:new, :edit]}
+      module={CymphoWeb.CompanyLive.FormComponent}
+      id={@company.id || :new}
+      title={@page_title}
+      action={@live_action}
+      company={@company}
+      patch={@live_action == :edit}
     />
-  </section>
-
-  <.live_component
-    :if={@live_action in [:new, :edit]}
-    module={CymphoWeb.CompanyLive.FormComponent}
-    id={@company.id || :new}
-    title={@page_title}
-    action={@live_action}
-    company={@company}
-    patch={@live_action == :edit}
-  />
+  </div>
 </div>

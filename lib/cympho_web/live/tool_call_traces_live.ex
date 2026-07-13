@@ -447,548 +447,568 @@ defmodule CymphoWeb.ToolCallTracesLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="p-6 lg:p-8 max-w-6xl mx-auto w-full min-w-0">
-      <.header title="Tool Call Traces" subtitle="Browse and verify immutable tool-call chains." />
+    <div class="ember-aurora p-6 lg:p-8 w-full min-w-0">
+      <div class="relative z-[1] mx-auto max-w-6xl">
+        <.header>
+          <div class="min-w-0">
+            <span class="ember-eyebrow">Runtime evidence</span>
+            <h1 class="ember-ink mt-4 font-serif text-[clamp(26px,4vw,40px)] font-510 leading-[1.08] tracking-[-0.02em]">
+              Tool Call Traces
+            </h1>
+            <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+              Browse and verify immutable tool-call chains.
+            </p>
+          </div>
+        </.header>
 
-      <section
-        id="trace-command"
-        data-testid="trace-command"
-        class="mb-6 overflow-hidden rounded-lg border border-border bg-panel"
-      >
-        <div class="border-b border-border bg-gradient-to-b from-surface-2/50 to-transparent px-5 py-4">
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                  Trace command
+        <section
+          id="trace-command"
+          data-testid="trace-command"
+          class="mb-6 ember-glass overflow-hidden"
+        >
+          <div class="border-b border-white/10 bg-gradient-to-b from-surface-2/50 to-transparent px-5 py-4">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                    Trace command
+                  </p>
+                  <span class={[
+                    "rounded-full border px-2 py-0.5 text-[11px] font-510",
+                    trace_command_badge_class(@trace_command.tone)
+                  ]}>
+                    {@trace_command.badge}
+                  </span>
+                </div>
+                <h2 class="mt-2 text-lg font-590 tracking-tight text-text-primary">
+                  {@trace_command.title}
+                </h2>
+                <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
+                  {@trace_command.summary}
                 </p>
-                <span class={[
-                  "rounded-full border px-2 py-0.5 text-[11px] font-510",
-                  trace_command_badge_class(@trace_command.tone)
-                ]}>
-                  {@trace_command.badge}
-                </span>
               </div>
-              <h2 class="mt-2 text-lg font-590 tracking-tight text-text-primary">
-                {@trace_command.title}
-              </h2>
-              <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
-                {@trace_command.summary}
-              </p>
+
+              <button
+                :if={@trace_command.action_event}
+                type="button"
+                phx-click={@trace_command.action_event}
+                class={[
+                  "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
+                  trace_command_action_class(@trace_command.tone)
+                ]}
+              >
+                <span class="hero-shield-check-mini h-4 w-4"></span>
+                {@trace_command.action_label}
+              </button>
+
+              <a
+                :if={@trace_command.action_path}
+                href={@trace_command.action_path}
+                class={[
+                  "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
+                  trace_command_action_class(@trace_command.tone)
+                ]}
+              >
+                <span class="hero-arrow-right-mini h-4 w-4"></span>
+                {@trace_command.action_label}
+              </a>
             </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
+            <div :for={metric <- @trace_command.metrics} class="bg-surface px-4 py-3">
+              <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+                {metric.label}
+              </p>
+              <p class="mt-1 font-mono text-sm font-590 text-text-primary">{metric.value}</p>
+            </div>
+          </div>
+        </section>
+
+        <div class="mb-6 flex flex-wrap gap-4 items-center justify-between">
+          <div class="flex gap-2">
+            <button
+              type="button"
+              class="cta-glow rounded-button bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+              phx-click="verify_integrity"
+            >
+              Verify Integrity
+            </button>
 
             <button
-              :if={@trace_command.action_event}
+              :if={!@export_data_json}
               type="button"
-              phx-click={@trace_command.action_event}
-              class={[
-                "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
-                trace_command_action_class(@trace_command.tone)
-              ]}
+              class="rounded-lg border border-border bg-button px-4 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+              phx-click="export_json"
             >
-              <span class="hero-shield-check-mini h-4 w-4"></span>
-              {@trace_command.action_label}
+              Export JSON
             </button>
 
             <a
-              :if={@trace_command.action_path}
-              href={@trace_command.action_path}
-              class={[
-                "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-510 transition-colors",
-                trace_command_action_class(@trace_command.tone)
-              ]}
+              :if={@export_data_json}
+              download={"tool-traces-#{Date.utc_today()}.json"}
+              href={"data:application/json;charset=utf-8,#{URI.encode(@export_data_json)}"}
+              class="inline-flex items-center gap-2 rounded-lg border border-success/20 bg-success/10 px-4 py-2 min-h-[40px] text-sm font-510 text-success transition-colors hover:bg-success/15"
             >
-              <span class="hero-arrow-right-mini h-4 w-4"></span>
-              {@trace_command.action_label}
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                />
+              </svg>
+              Download JSON
+            </a>
+
+            <button
+              :if={!@export_data_csv}
+              type="button"
+              class="rounded-lg border border-border bg-button px-4 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+              phx-click="export_csv"
+            >
+              Export CSV
+            </button>
+
+            <a
+              :if={@export_data_csv}
+              download={"tool-traces-#{Date.utc_today()}.csv"}
+              href={"data:text/csv;charset=utf-8,#{URI.encode(@export_data_csv)}"}
+              class="inline-flex items-center gap-2 rounded-lg border border-success/20 bg-success/10 px-4 py-2 min-h-[40px] text-sm font-510 text-success transition-colors hover:bg-success/15"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                />
+              </svg>
+              Download CSV
             </a>
           </div>
-        </div>
 
-        <div class="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
-          <div :for={metric <- @trace_command.metrics} class="bg-surface px-4 py-3">
-            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-              {metric.label}
-            </p>
-            <p class="mt-1 font-mono text-sm font-590 text-text-primary">{metric.value}</p>
+          <div class={"text-sm font-510 " <> integrity_status_color(@integrity_status)}>
+            {integrity_status_label(@integrity_status)}
           </div>
         </div>
-      </section>
 
-      <div class="mb-6 flex flex-wrap gap-4 items-center justify-between">
-        <div class="flex gap-2">
-          <button
-            type="button"
-            class="cta-glow rounded-button bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-            phx-click="verify_integrity"
-          >
-            Verify Integrity
-          </button>
-
-          <button
-            :if={!@export_data_json}
-            type="button"
-            class="rounded-lg border border-border bg-button px-4 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-            phx-click="export_json"
-          >
-            Export JSON
-          </button>
-
-          <a
-            :if={@export_data_json}
-            download={"tool-traces-#{Date.utc_today()}.json"}
-            href={"data:application/json;charset=utf-8,#{URI.encode(@export_data_json)}"}
-            class="inline-flex items-center gap-2 rounded-lg border border-success/20 bg-success/10 px-4 py-2 min-h-[40px] text-sm font-510 text-success transition-colors hover:bg-success/15"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+        <form
+          id="trace-filters"
+          phx-submit="filter"
+          class="mb-6 scroll-mt-6 bg-surface border border-border rounded-xl p-4"
+        >
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div>
+              <label class="block text-xs font-510 text-text-secondary mb-1.5">Tool Name</label>
+              <input
+                type="text"
+                name="filter[tool_name]"
+                value={@filters.tool_name}
+                placeholder="Filter by tool name..."
+                class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
               />
-            </svg>
-            Download JSON
-          </a>
-
-          <button
-            :if={!@export_data_csv}
-            type="button"
-            class="rounded-lg border border-border bg-button px-4 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-            phx-click="export_csv"
-          >
-            Export CSV
-          </button>
-
-          <a
-            :if={@export_data_csv}
-            download={"tool-traces-#{Date.utc_today()}.csv"}
-            href={"data:text/csv;charset=utf-8,#{URI.encode(@export_data_csv)}"}
-            class="inline-flex items-center gap-2 rounded-lg border border-success/20 bg-success/10 px-4 py-2 min-h-[40px] text-sm font-510 text-success transition-colors hover:bg-success/15"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-              />
-            </svg>
-            Download CSV
-          </a>
-        </div>
-
-        <div class={"text-sm font-510 " <> integrity_status_color(@integrity_status)}>
-          {integrity_status_label(@integrity_status)}
-        </div>
-      </div>
-
-      <form
-        id="trace-filters"
-        phx-submit="filter"
-        class="mb-6 scroll-mt-6 bg-surface border border-border rounded-xl p-4"
-      >
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-          <div>
-            <label class="block text-xs font-510 text-text-secondary mb-1.5">Tool Name</label>
-            <input
-              type="text"
-              name="filter[tool_name]"
-              value={@filters.tool_name}
-              placeholder="Filter by tool name..."
-              class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
-            />
-          </div>
-
-          <div>
-            <label class="block text-xs font-510 text-text-secondary mb-1.5">Status</label>
-            <.select_menu
-              name="filter[status]"
-              value={@filters.status || ""}
-              options={[
-                {"All Statuses", ""},
-                {"Success", "success"},
-                {"Error", "error"},
-                {"Pending", "pending"},
-                {"Timeout", "timeout"}
-              ]}
-            />
-          </div>
-
-          <div>
-            <label class="block text-xs font-510 text-text-secondary mb-1.5">Agent</label>
-            <.select_menu
-              name="filter[agent_id]"
-              value={@filters.agent_id || ""}
-              options={[{"All Agents", ""} | Enum.map(@agents, &{&1.name, &1.id})]}
-            />
-          </div>
-
-          <div>
-            <label class="block text-xs font-510 text-text-secondary mb-1.5">Issue ID</label>
-            <input
-              type="text"
-              name="filter[issue_id]"
-              value={@filters.issue_id}
-              placeholder="Filter by issue ID..."
-              class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
-            />
-          </div>
-        </div>
-
-        <div class="flex gap-2">
-          <button
-            type="submit"
-            class="cta-glow rounded-button bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-on-primary transition-colors hover:bg-accent"
-          >
-            Apply Filters
-          </button>
-
-          <button
-            type="button"
-            class="rounded-lg border border-border bg-button px-4 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
-            phx-click="clear_filters"
-          >
-            Clear Filters
-          </button>
-        </div>
-      </form>
-
-      <%= if @statistics do %>
-        <div class="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div class="bg-surface border border-border rounded-xl p-4">
-            <div class="text-text-secondary text-sm mb-1">Total Calls</div>
-            <div class="text-2xl font-590 text-text-primary">{@statistics.total_calls}</div>
-          </div>
-
-          <div class="bg-surface border border-border rounded-xl p-4">
-            <div class="text-text-secondary text-sm mb-1">Success</div>
-            <div class="text-2xl font-590 text-green-400">{@statistics.success_calls}</div>
-          </div>
-
-          <div class="bg-surface border border-border rounded-xl p-4">
-            <div class="text-text-secondary text-sm mb-1">Errors</div>
-            <div class="text-2xl font-590 text-brand">{@statistics.error_calls}</div>
-          </div>
-
-          <div class="bg-surface border border-border rounded-xl p-4">
-            <div class="text-text-secondary text-sm mb-1">Pending</div>
-            <div class="text-2xl font-590 text-yellow-400">{@statistics.pending_calls}</div>
-          </div>
-        </div>
-      <% end %>
-
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 min-w-0">
-        <div class="lg:col-span-2 min-w-0">
-          <div
-            id="traces-table"
-            class="scroll-mt-6 bg-surface border border-border rounded-xl overflow-hidden"
-          >
-            <div class="px-4 py-3 border-b border-border">
-              <h2 class="text-sm font-590 text-text-primary">Traces</h2>
             </div>
 
-            <div class="overflow-x-auto">
-              <table class="w-full">
-                <thead class="bg-subtle">
-                  <tr>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                      Seq
-                    </th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                      Tool
-                    </th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                      Actor
-                    </th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th class="hidden px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider md:table-cell">
-                      Time
-                    </th>
-                    <th class="hidden px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider md:table-cell">
-                      Chain Hash
-                    </th>
-                  </tr>
-                </thead>
-                <tbody id="traces-tbody" phx-update="stream" class="divide-y divide-border">
-                  <tr id="traces-empty" class="only:table-row hidden">
-                    <td colspan="6" class="p-8 text-center">
-                      <div class="mx-auto max-w-md">
-                        <p class="text-sm font-590 text-text-primary">
-                          {if filters_active?(@filters),
-                            do: "No traces match these filters",
-                            else: "No tool evidence captured yet"}
-                        </p>
-                        <p class="mt-1 text-sm leading-5 text-text-tertiary">
-                          {if filters_active?(@filters),
-                            do:
-                              "Clear filters to return to the full trace chain, or open Operations if you expected runtime activity.",
-                            else:
-                              "Launch runtime from Operations; every agent tool call will land here with arguments, result, actor, and chain hash."}
-                        </p>
-                        <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
-                          <button
-                            :if={filters_active?(@filters)}
-                            type="button"
-                            phx-click="clear_filters"
-                            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-                          >
-                            Clear filters
-                          </button>
-                          <a
-                            href="/operations#runtime-launch-checklist"
-                            class="inline-flex items-center gap-1.5 rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-xs font-510 text-brand transition-colors hover:bg-brand/15"
-                          >
-                            Open Operations
-                          </a>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr
-                    :for={{dom_id, trace} <- @streams.traces}
-                    id={dom_id}
-                    class={
-                      if @selected_trace && @selected_trace.id == trace.id,
-                        do: "bg-brand/10 cursor-pointer",
-                        else: "hover:bg-subtle cursor-pointer"
-                    }
-                    phx-click="select_trace"
-                    phx-value-id={trace.id}
-                  >
-                    <td class="px-4 py-3 whitespace-nowrap text-sm text-text-primary">
-                      {trace.sequence_number}
-                    </td>
-                    <td class="px-4 py-3 text-sm text-text-primary">
-                      <div class="font-medium">{trace.tool_name}</div>
-                      <div class="text-xs text-text-secondary">{trace.trace_type}</div>
-                    </td>
-                    <td class="px-4 py-3 text-sm text-text-secondary">
-                      <div class="flex items-center gap-1">
-                        <span class="text-xs capitalize">{trace.actor_type}</span>
-                        <%= if trace.actor_type == "agent" && trace.agent do %>
-                          <span class="text-xs text-text-tertiary">({trace.agent.name})</span>
-                        <% end %>
-                      </div>
-                    </td>
-                    <td class={"px-4 py-3 whitespace-nowrap text-sm " <> status_color(trace.status)}>
-                      <span class="inline-flex items-center">
-                        <span class="mr-1">{status_icon(trace.status)}</span>
-                        {String.capitalize(trace.status)}
-                      </span>
-                    </td>
-                    <td class="hidden px-4 py-3 whitespace-nowrap text-sm text-text-secondary md:table-cell">
-                      {format_datetime(trace.occurred_at)}
-                    </td>
-                    <td class="hidden px-4 py-3 text-xs text-text-secondary font-mono md:table-cell">
-                      {String.slice(trace.chain_hash, 0..7)}...
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <div>
+              <label class="block text-xs font-510 text-text-secondary mb-1.5">Status</label>
+              <.select_menu
+                name="filter[status]"
+                value={@filters.status || ""}
+                options={[
+                  {"All Statuses", ""},
+                  {"Success", "success"},
+                  {"Error", "error"},
+                  {"Pending", "pending"},
+                  {"Timeout", "timeout"}
+                ]}
+              />
+            </div>
+
+            <div>
+              <label class="block text-xs font-510 text-text-secondary mb-1.5">Agent</label>
+              <.select_menu
+                name="filter[agent_id]"
+                value={@filters.agent_id || ""}
+                options={[{"All Agents", ""} | Enum.map(@agents, &{&1.name, &1.id})]}
+              />
+            </div>
+
+            <div>
+              <label class="block text-xs font-510 text-text-secondary mb-1.5">Issue ID</label>
+              <input
+                type="text"
+                name="filter[issue_id]"
+                value={@filters.issue_id}
+                placeholder="Filter by issue ID..."
+                class="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+              />
             </div>
           </div>
-          <.infinite_scroll_footer
-            id="traces"
-            has_more={@infinite_scroll[:traces][:has_more?] || false}
-          />
-        </div>
 
-        <%= if @selected_trace do %>
-          <div class="lg:col-span-1">
-            <div class="bg-surface border border-border rounded-xl sticky top-4">
-              <div class="px-4 py-3 border-b border-border flex items-center justify-between">
-                <h2 class="text-sm font-590 text-text-primary">Trace Details</h2>
-                <button
-                  type="button"
-                  class="p-1 hover:bg-surface-hover rounded"
-                  phx-click="close_trace_details"
-                >
-                  <svg
-                    class="w-5 h-5 text-text-secondary"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
+          <div class="flex gap-2">
+            <button
+              type="submit"
+              class="cta-glow rounded-button bg-brand px-4 py-2 min-h-[40px] text-sm font-510 text-on-primary transition-colors hover:bg-accent"
+            >
+              Apply Filters
+            </button>
 
-              <div class="p-4 space-y-4">
-                <% recovery = trace_recovery(@selected_trace) %>
-                <div
-                  :if={recovery}
-                  id={"trace-recovery-#{@selected_trace.id}"}
-                  class="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-3"
-                >
-                  <div class="flex flex-wrap items-center justify-between gap-2">
-                    <p class="text-xs font-590 uppercase tracking-[0.12em] text-amber-200">
-                      {recovery.title}
-                    </p>
-                    <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-510 text-amber-200">
-                      {String.capitalize(@selected_trace.status)}
-                    </span>
-                  </div>
-                  <p class="mt-2 text-xs leading-5 text-text-tertiary">
-                    {recovery.summary}
-                  </p>
-                  <div class="mt-3 flex flex-wrap gap-2">
-                    <a
-                      :if={recovery.issue_path}
-                      href={recovery.issue_path}
-                      class="inline-flex items-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-brand/40 hover:bg-surface-hover hover:text-text-primary"
-                    >
-                      Open issue
-                    </a>
-                    <a
-                      href={recovery.operations_path}
-                      class="inline-flex items-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-brand/40 hover:bg-surface-hover hover:text-text-primary"
-                    >
-                      Open runtime failures
-                    </a>
-                  </div>
-                  <div
-                    :if={recovery.focused_command}
-                    id={"trace-focused-command-#{@selected_trace.id}"}
-                    phx-hook="CopyToClipboard"
-                    class="mt-3 rounded-md border border-border bg-canvas px-3 py-2"
-                  >
-                    <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <span class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                        Focused relaunch
-                      </span>
-                      <button
-                        type="button"
-                        data-copy-text={recovery.focused_command}
-                        data-copy-label="Copy command"
-                        class="rounded-md border border-border bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                      >
-                        Copy command
-                      </button>
-                    </div>
-                    <code class="block whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-text-secondary">
-                      {recovery.focused_command}
-                    </code>
-                  </div>
-                </div>
+            <button
+              type="button"
+              class="rounded-lg border border-border bg-button px-4 py-2 min-h-[40px] text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+              phx-click="clear_filters"
+            >
+              Clear Filters
+            </button>
+          </div>
+        </form>
 
-                <div>
-                  <div class="text-xs text-text-secondary mb-1">Sequence Number</div>
-                  <div class="text-sm font-mono text-text-primary">
-                    {@selected_trace.sequence_number}
-                  </div>
-                </div>
+        <%= if @statistics do %>
+          <div class="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="bg-surface border border-border rounded-xl p-4">
+              <div class="text-text-secondary text-sm mb-1">Total Calls</div>
+              <div class="text-2xl font-590 text-text-primary">{@statistics.total_calls}</div>
+            </div>
 
-                <div>
-                  <div class="text-xs text-text-secondary mb-1">Tool Name</div>
-                  <div class="text-sm font-medium text-text-primary">{@selected_trace.tool_name}</div>
-                </div>
+            <div class="bg-surface border border-border rounded-xl p-4">
+              <div class="text-text-secondary text-sm mb-1">Success</div>
+              <div class="text-2xl font-590 text-green-400">{@statistics.success_calls}</div>
+            </div>
 
-                <div>
-                  <div class="text-xs text-text-secondary mb-1">Trace Type</div>
-                  <div class="text-sm text-text-primary">{@selected_trace.trace_type}</div>
-                </div>
+            <div class="bg-surface border border-border rounded-xl p-4">
+              <div class="text-text-secondary text-sm mb-1">Errors</div>
+              <div class="text-2xl font-590 text-brand">{@statistics.error_calls}</div>
+            </div>
 
-                <div>
-                  <div class="text-xs text-text-secondary mb-1">Status</div>
-                  <div class={"text-sm font-medium " <> status_color(@selected_trace.status)}>
-                    <span class="inline-flex items-center">
-                      <span class="mr-1">{status_icon(@selected_trace.status)}</span>
-                      {String.capitalize(@selected_trace.status)}
-                    </span>
-                  </div>
-                </div>
-
-                <div>
-                  <div class="text-xs text-text-secondary mb-1">Occurred At</div>
-                  <div class="text-sm text-text-primary">
-                    {format_datetime(@selected_trace.occurred_at)}
-                  </div>
-                </div>
-
-                <div>
-                  <div class="text-xs text-text-secondary mb-1">Content Hash</div>
-                  <div class="text-xs font-mono text-text-secondary break-all">
-                    {@selected_trace.content_hash}
-                  </div>
-                </div>
-
-                <div>
-                  <div class="text-xs text-text-secondary mb-1">Previous Hash</div>
-                  <div class="text-xs font-mono text-text-secondary break-all">
-                    {@selected_trace.prev_hash || "None (genesis trace)"}
-                  </div>
-                </div>
-
-                <div>
-                  <div class="text-xs text-text-secondary mb-1">Chain Hash</div>
-                  <div class="text-xs font-mono text-text-secondary break-all">
-                    {@selected_trace.chain_hash}
-                  </div>
-                </div>
-
-                <div>
-                  <div class="text-xs text-text-secondary mb-1">Actor Type</div>
-                  <div class="text-sm text-text-primary capitalize">{@selected_trace.actor_type}</div>
-                </div>
-
-                <div>
-                  <div class="text-xs text-text-secondary mb-1">Actor ID</div>
-                  <div class="text-sm font-mono text-text-primary">{@selected_trace.actor_id}</div>
-                </div>
-
-                <%= if @selected_trace.actor_type == "agent" && @selected_trace.agent do %>
-                  <div>
-                    <div class="text-xs text-text-secondary mb-1">Agent Name</div>
-                    <div class="text-sm text-text-primary">{@selected_trace.agent.name}</div>
-                  </div>
-                <% end %>
-
-                <%= if @selected_trace.agent_id do %>
-                  <div>
-                    <div class="text-xs text-text-secondary mb-1">Original Agent ID</div>
-                    <div class="text-sm font-mono text-text-primary">{@selected_trace.agent_id}</div>
-                  </div>
-                <% end %>
-
-                <%= if @selected_trace.issue_id do %>
-                  <div>
-                    <div class="text-xs text-text-secondary mb-1">Issue ID</div>
-                    <div class="text-sm font-mono text-text-primary">{@selected_trace.issue_id}</div>
-                  </div>
-                <% end %>
-
-                <%= if @selected_trace.tool_arguments != %{} do %>
-                  <div>
-                    <div class="text-xs text-text-secondary mb-2">Tool Arguments</div>
-                    <pre class="bg-black/[0.3] rounded p-3 text-xs text-text-secondary overflow-x-auto"><%= format_json(@selected_trace.tool_arguments) %></pre>
-                  </div>
-                <% end %>
-
-                <%= if @selected_trace.tool_result do %>
-                  <div>
-                    <div class="text-xs text-text-secondary mb-2">Tool Result</div>
-                    <pre class="bg-black/[0.3] rounded p-3 text-xs text-text-secondary overflow-x-auto max-h-40 overflow-y-auto"><%= @selected_trace.tool_result %></pre>
-                  </div>
-                <% end %>
-
-                <%= if @selected_trace.error_message do %>
-                  <div>
-                    <div class="text-xs text-text-secondary mb-2">Error Message</div>
-                    <pre class="bg-red-500/10 border border-red-500/30 rounded p-3 text-xs text-red-400 overflow-x-auto"><%= @selected_trace.error_message %></pre>
-                  </div>
-                <% end %>
-              </div>
+            <div class="bg-surface border border-border rounded-xl p-4">
+              <div class="text-text-secondary text-sm mb-1">Pending</div>
+              <div class="text-2xl font-590 text-yellow-400">{@statistics.pending_calls}</div>
             </div>
           </div>
         <% end %>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 min-w-0">
+          <div class="lg:col-span-2 min-w-0">
+            <div
+              id="traces-table"
+              class="scroll-mt-6 bg-surface border border-border rounded-xl overflow-hidden"
+            >
+              <div class="px-4 py-3 border-b border-border">
+                <h2 class="text-sm font-590 text-text-primary">Traces</h2>
+              </div>
+
+              <div class="overflow-x-auto">
+                <table class="w-full">
+                  <thead class="bg-subtle">
+                    <tr>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
+                        Seq
+                      </th>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
+                        Tool
+                      </th>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
+                        Actor
+                      </th>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th class="hidden px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider md:table-cell">
+                        Time
+                      </th>
+                      <th class="hidden px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider md:table-cell">
+                        Chain Hash
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody id="traces-tbody" phx-update="stream" class="divide-y divide-border">
+                    <tr id="traces-empty" class="only:table-row hidden">
+                      <td colspan="6" class="p-8 text-center">
+                        <div class="mx-auto max-w-md">
+                          <p class="text-sm font-590 text-text-primary">
+                            {if filters_active?(@filters),
+                              do: "No traces match these filters",
+                              else: "No tool evidence captured yet"}
+                          </p>
+                          <p class="mt-1 text-sm leading-5 text-text-tertiary">
+                            {if filters_active?(@filters),
+                              do:
+                                "Clear filters to return to the full trace chain, or open Operations if you expected runtime activity.",
+                              else:
+                                "Launch runtime from Operations; every agent tool call will land here with arguments, result, actor, and chain hash."}
+                          </p>
+                          <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+                            <button
+                              :if={filters_active?(@filters)}
+                              type="button"
+                              phx-click="clear_filters"
+                              class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                            >
+                              Clear filters
+                            </button>
+                            <a
+                              href="/operations#runtime-launch-checklist"
+                              class="inline-flex items-center gap-1.5 rounded-lg border border-brand/25 bg-brand/10 px-3 py-2 text-xs font-510 text-brand transition-colors hover:bg-brand/15"
+                            >
+                              Open Operations
+                            </a>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr
+                      :for={{dom_id, trace} <- @streams.traces}
+                      id={dom_id}
+                      class={
+                        if @selected_trace && @selected_trace.id == trace.id,
+                          do: "bg-brand/10 cursor-pointer",
+                          else: "hover:bg-subtle cursor-pointer"
+                      }
+                      phx-click="select_trace"
+                      phx-value-id={trace.id}
+                    >
+                      <td class="px-4 py-3 whitespace-nowrap text-sm text-text-primary">
+                        {trace.sequence_number}
+                      </td>
+                      <td class="px-4 py-3 text-sm text-text-primary">
+                        <div class="font-medium">{trace.tool_name}</div>
+                        <div class="text-xs text-text-secondary">{trace.trace_type}</div>
+                      </td>
+                      <td class="px-4 py-3 text-sm text-text-secondary">
+                        <div class="flex items-center gap-1">
+                          <span class="text-xs capitalize">{trace.actor_type}</span>
+                          <%= if trace.actor_type == "agent" && trace.agent do %>
+                            <span class="text-xs text-text-tertiary">({trace.agent.name})</span>
+                          <% end %>
+                        </div>
+                      </td>
+                      <td class={"px-4 py-3 whitespace-nowrap text-sm " <> status_color(trace.status)}>
+                        <span class="inline-flex items-center">
+                          <span class="mr-1">{status_icon(trace.status)}</span>
+                          {String.capitalize(trace.status)}
+                        </span>
+                      </td>
+                      <td class="hidden px-4 py-3 whitespace-nowrap text-sm text-text-secondary md:table-cell">
+                        {format_datetime(trace.occurred_at)}
+                      </td>
+                      <td class="hidden px-4 py-3 text-xs text-text-secondary font-mono md:table-cell">
+                        {String.slice(trace.chain_hash, 0..7)}...
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <.infinite_scroll_footer
+              id="traces"
+              has_more={@infinite_scroll[:traces][:has_more?] || false}
+            />
+          </div>
+
+          <%= if @selected_trace do %>
+            <div class="lg:col-span-1">
+              <div class="bg-surface border border-border rounded-xl sticky top-4">
+                <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+                  <h2 class="text-sm font-590 text-text-primary">Trace Details</h2>
+                  <button
+                    type="button"
+                    class="p-1 hover:bg-surface-hover rounded"
+                    phx-click="close_trace_details"
+                  >
+                    <svg
+                      class="w-5 h-5 text-text-secondary"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                </div>
+
+                <div class="p-4 space-y-4">
+                  <% recovery = trace_recovery(@selected_trace) %>
+                  <div
+                    :if={recovery}
+                    id={"trace-recovery-#{@selected_trace.id}"}
+                    class="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-3"
+                  >
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <p class="text-xs font-590 uppercase tracking-[0.12em] text-amber-200">
+                        {recovery.title}
+                      </p>
+                      <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-510 text-amber-200">
+                        {String.capitalize(@selected_trace.status)}
+                      </span>
+                    </div>
+                    <p class="mt-2 text-xs leading-5 text-text-tertiary">
+                      {recovery.summary}
+                    </p>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      <a
+                        :if={recovery.issue_path}
+                        href={recovery.issue_path}
+                        class="inline-flex items-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-brand/40 hover:bg-surface-hover hover:text-text-primary"
+                      >
+                        Open issue
+                      </a>
+                      <a
+                        href={recovery.operations_path}
+                        class="inline-flex items-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-brand/40 hover:bg-surface-hover hover:text-text-primary"
+                      >
+                        Open runtime failures
+                      </a>
+                    </div>
+                    <div
+                      :if={recovery.focused_command}
+                      id={"trace-focused-command-#{@selected_trace.id}"}
+                      phx-hook="CopyToClipboard"
+                      class="mt-3 rounded-md border border-border bg-canvas px-3 py-2"
+                    >
+                      <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <span class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                          Focused relaunch
+                        </span>
+                        <button
+                          type="button"
+                          data-copy-text={recovery.focused_command}
+                          data-copy-label="Copy command"
+                          class="rounded-md border border-border bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                        >
+                          Copy command
+                        </button>
+                      </div>
+                      <code class="block whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-text-secondary">
+                        {recovery.focused_command}
+                      </code>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="text-xs text-text-secondary mb-1">Sequence Number</div>
+                    <div class="text-sm font-mono text-text-primary">
+                      {@selected_trace.sequence_number}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="text-xs text-text-secondary mb-1">Tool Name</div>
+                    <div class="text-sm font-medium text-text-primary">
+                      {@selected_trace.tool_name}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="text-xs text-text-secondary mb-1">Trace Type</div>
+                    <div class="text-sm text-text-primary">{@selected_trace.trace_type}</div>
+                  </div>
+
+                  <div>
+                    <div class="text-xs text-text-secondary mb-1">Status</div>
+                    <div class={"text-sm font-medium " <> status_color(@selected_trace.status)}>
+                      <span class="inline-flex items-center">
+                        <span class="mr-1">{status_icon(@selected_trace.status)}</span>
+                        {String.capitalize(@selected_trace.status)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="text-xs text-text-secondary mb-1">Occurred At</div>
+                    <div class="text-sm text-text-primary">
+                      {format_datetime(@selected_trace.occurred_at)}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="text-xs text-text-secondary mb-1">Content Hash</div>
+                    <div class="text-xs font-mono text-text-secondary break-all">
+                      {@selected_trace.content_hash}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="text-xs text-text-secondary mb-1">Previous Hash</div>
+                    <div class="text-xs font-mono text-text-secondary break-all">
+                      {@selected_trace.prev_hash || "None (genesis trace)"}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="text-xs text-text-secondary mb-1">Chain Hash</div>
+                    <div class="text-xs font-mono text-text-secondary break-all">
+                      {@selected_trace.chain_hash}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="text-xs text-text-secondary mb-1">Actor Type</div>
+                    <div class="text-sm text-text-primary capitalize">
+                      {@selected_trace.actor_type}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="text-xs text-text-secondary mb-1">Actor ID</div>
+                    <div class="text-sm font-mono text-text-primary">{@selected_trace.actor_id}</div>
+                  </div>
+
+                  <%= if @selected_trace.actor_type == "agent" && @selected_trace.agent do %>
+                    <div>
+                      <div class="text-xs text-text-secondary mb-1">Agent Name</div>
+                      <div class="text-sm text-text-primary">{@selected_trace.agent.name}</div>
+                    </div>
+                  <% end %>
+
+                  <%= if @selected_trace.agent_id do %>
+                    <div>
+                      <div class="text-xs text-text-secondary mb-1">Original Agent ID</div>
+                      <div class="text-sm font-mono text-text-primary">
+                        {@selected_trace.agent_id}
+                      </div>
+                    </div>
+                  <% end %>
+
+                  <%= if @selected_trace.issue_id do %>
+                    <div>
+                      <div class="text-xs text-text-secondary mb-1">Issue ID</div>
+                      <div class="text-sm font-mono text-text-primary">
+                        {@selected_trace.issue_id}
+                      </div>
+                    </div>
+                  <% end %>
+
+                  <%= if @selected_trace.tool_arguments != %{} do %>
+                    <div>
+                      <div class="text-xs text-text-secondary mb-2">Tool Arguments</div>
+                      <pre class="bg-black/[0.3] rounded p-3 text-xs text-text-secondary overflow-x-auto"><%= format_json(@selected_trace.tool_arguments) %></pre>
+                    </div>
+                  <% end %>
+
+                  <%= if @selected_trace.tool_result do %>
+                    <div>
+                      <div class="text-xs text-text-secondary mb-2">Tool Result</div>
+                      <pre class="bg-black/[0.3] rounded p-3 text-xs text-text-secondary overflow-x-auto max-h-40 overflow-y-auto"><%= @selected_trace.tool_result %></pre>
+                    </div>
+                  <% end %>
+
+                  <%= if @selected_trace.error_message do %>
+                    <div>
+                      <div class="text-xs text-text-secondary mb-2">Error Message</div>
+                      <pre class="bg-red-500/10 border border-red-500/30 rounded p-3 text-xs text-red-400 overflow-x-auto"><%= @selected_trace.error_message %></pre>
+                    </div>
+                  <% end %>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        </div>
       </div>
     </div>
     """

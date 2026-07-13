@@ -33,6 +33,8 @@ defmodule Cympho.Orchestrator do
     turn_count: 0,
     tool_traces: %{},
     fallback_errors: [],
+    adapter_session_seen?: false,
+    adapter_session_misses: 0,
     opts: []
   ]
 
@@ -60,6 +62,11 @@ defmodule Cympho.Orchestrator do
   alias Cympho.Issues.Issue
 
   @heartbeat_tick_interval 30_000
+  # Consecutive heartbeat ticks (30s apart) the adapter session may be
+  # missing from AdapterSessions after having been seen, before we treat
+  # the worker as dead. Two ticks tolerates a race with late registration
+  # or a brief re-register between retries.
+  @adapter_session_liveness_misses 2
   @adapter_failure_circuit_breaker_threshold 3
   @no_progress_circuit_breaker_threshold 3
   @completion_contract_blocker_keys MapSet.new([
@@ -83,14 +90,21 @@ defmodule Cympho.Orchestrator do
   """
   @spec start_and_run(map(), String.t()) :: {:ok, pid()} | {:error, atom()}
   def start_and_run(%{id: issue_id} = issue, agent_id, opts \\ []) when is_binary(agent_id) do
-    # `GenServer.start_link/3` with a `:name` is itself the atomic gate via the
+    # `GenServer.start/3` with a `:name` is itself the atomic gate via the
     # Registry — a redundant `Registry.lookup` before it creates a TOCTOU window
     # where a concurrent caller can win and we incorrectly report a permanent
     # `:already_started` (which the dispatcher then treats as a dispatch failure
     # and retries with backoff).
+    #
+    # Intentionally NOT linked to the caller: sessions are started by the
+    # dispatcher, agent heartbeats, and LiveViews, and must survive any of
+    # them going away (a closed browser tab must not abort an agent run, and
+    # an orchestrator crash must not take down its caller). The dispatcher
+    # monitors the returned pid for slot cleanup; the watchdog and boot-time
+    # orphan recovery cover brutal kills.
     name = via_tuple(issue_id)
 
-    case GenServer.start_link(__MODULE__, {issue, agent_id, opts}, name: name) do
+    case GenServer.start(__MODULE__, {issue, agent_id, opts}, name: name) do
       {:ok, pid} ->
         {:ok, pid}
 
@@ -171,9 +185,44 @@ defmodule Cympho.Orchestrator do
       {:error, error} ->
         handle_preflight_or_resolution_error(session, error)
     end
+  rescue
+    exception ->
+      # A crash while preparing the runtime must not strand the issue in
+      # :in_progress with no follow-up — fail the run, leave an operator
+      # comment, and park the issue instead of crash-looping every poll.
+      Logger.error("[Orchestrator] runtime preparation crashed",
+        issue_id: session.issue.id,
+        agent_id: session.agent_id,
+        error: Exception.message(exception)
+      )
+
+      handle_preflight_error(session, {:preflight_crashed, Exception.message(exception)})
+  end
+
+  # Stale adapter-session messages. After a provider fallback or no-work
+  # retry the previous worker is gone, but a late message from it (or from
+  # the liveness prod racing a real terminal message) must not be processed
+  # as if it belonged to the current attempt — that would double-finalize
+  # the run or trigger a second fallback.
+  @impl true
+  def handle_info({event, msg_session_id, _payload}, %__MODULE__{session_id: current} = session)
+      when event in [:tool_call_detected, :turn_completed, :turn_ended_with_error] and
+             not is_nil(current) and msg_session_id != current do
+    Logger.warning("[Orchestrator] Ignoring message from stale adapter session",
+      issue_id: session.issue.id,
+      agent_id: session.agent_id,
+      event: event
+    )
+
+    {:noreply, session}
   end
 
   @impl true
+  def handle_info({:session_started, session_id}, %__MODULE__{session_id: current} = session)
+      when not is_nil(current) and session_id != current do
+    {:noreply, session}
+  end
+
   def handle_info({:session_started, session_id}, %__MODULE__{} = session) do
     _ = Instrumenter.record_session_event(session, "started")
     {:noreply, %{session | session_id: session_id}}
@@ -246,6 +295,35 @@ defmodule Cympho.Orchestrator do
     reset_adapter_failure(agent_id)
 
     {:stop, :normal, session}
+  rescue
+    exception ->
+      # An exception while processing a completed turn must still end in a
+      # terminal outcome: fail the run, park the issue with an operator
+      # comment, and free the agent — never crash and strand the issue.
+      Logger.error("[Orchestrator] crashed while processing completed turn",
+        issue_id: session.issue.id,
+        agent_id: session.agent_id,
+        error: Exception.message(exception)
+      )
+
+      fail_engine_run(session, {:turn_processing_crashed, Exception.message(exception)})
+
+      message =
+        "Cympho crashed while processing the agent's response (#{Exception.message(exception)})."
+
+      # Only block if the crash left the issue mid-flight. If the agent's
+      # actions already resolved it (handoff, review, done) before the
+      # crash, blocking would undo legitimate progress.
+      case Issues.get_issue(session.issue.id) do
+        {:ok, %Issue{status: :in_progress} = latest} ->
+          block_issue_with_comment(latest, message <> " Issue blocked for operator review.")
+
+        _ ->
+          create_system_comment(session.issue, message)
+      end
+
+      set_agent_idle(session.agent_id)
+      {:stop, :normal, session}
   end
 
   @impl true
@@ -275,6 +353,17 @@ defmodule Cympho.Orchestrator do
             finish_failed_session(session, reason)
         end
     end
+  rescue
+    exception ->
+      # Retry/fallback plumbing must not crash the failure path — that
+      # would skip blocking the issue and leave it stuck in :in_progress.
+      Logger.error("[Orchestrator] crashed while handling session error",
+        issue_id: session.issue.id,
+        agent_id: session.agent_id,
+        error: Exception.message(exception)
+      )
+
+      finish_failed_session(session, reason)
   end
 
   @impl true
@@ -284,7 +373,7 @@ defmodule Cympho.Orchestrator do
 
     case check_company_status(session) do
       :ok ->
-        {:noreply, session}
+        check_adapter_session_liveness(session)
 
       {:stop, :company_paused} ->
         Logger.warning(
@@ -299,7 +388,12 @@ defmodule Cympho.Orchestrator do
 
         release_issue_after_adapter_error(session.issue)
         set_agent_idle(session.agent_id)
-        {:stop, :normal, session}
+
+        # A shutdown-shaped reason (unlike :normal) makes terminate/2 cancel
+        # the live adapter session and the engine run. Stopping :normal here
+        # left the CLI process running and the run stuck in "running" until
+        # the watchdog noticed.
+        {:stop, {:shutdown, :company_paused}, session}
     end
   end
 
@@ -321,19 +415,61 @@ defmodule Cympho.Orchestrator do
     {:noreply, state}
   end
 
+  # The orchestrator records a run heartbeat on every tick, which masks the
+  # run from the watchdog's stale detection — so a dead adapter worker (one
+  # that crashed without sending a terminal message) would keep this session
+  # alive forever. Adapters register their worker with AdapterSessions for
+  # the lifetime of the run; once we have seen the session registered, its
+  # sustained disappearance without a terminal message means the worker died.
+  # Route that through the normal error path so retries/fallbacks/blocking
+  # apply.
+  defp check_adapter_session_liveness(%__MODULE__{session_id: nil} = session),
+    do: {:noreply, session}
+
+  defp check_adapter_session_liveness(%__MODULE__{} = session) do
+    registered? = adapter_session_registered?(session.session_id)
+
+    cond do
+      registered? ->
+        {:noreply, %{session | adapter_session_seen?: true, adapter_session_misses: 0}}
+
+      not session.adapter_session_seen? ->
+        # Never observed registered — adapters like agrenting/mock don't
+        # register, so absence is not evidence of death.
+        {:noreply, session}
+
+      session.adapter_session_misses + 1 < @adapter_session_liveness_misses ->
+        {:noreply, %{session | adapter_session_misses: session.adapter_session_misses + 1}}
+
+      true ->
+        Logger.warning("[Orchestrator] adapter worker disappeared without a terminal message",
+          issue_id: session.issue.id,
+          agent_id: session.agent_id,
+          component: "orchestrator"
+        )
+
+        send(self(), {:turn_ended_with_error, session.session_id, :adapter_worker_died})
+        {:noreply, session}
+    end
+  end
+
+  defp adapter_session_registered?(session_id) do
+    Cympho.AdapterSessions.registered?(session_id)
+  rescue
+    _ -> false
+  catch
+    :exit, _ -> false
+  end
+
   defp finish_failed_session(%__MODULE__{} = session, reason) do
     issue = session.issue
     agent_id = session.agent_id
 
     error_body = Error.comment(reason, adapter: session_adapter_name(session))
 
-    {:ok, _comment} =
-      Comments.create_comment(%{
-        body: error_body,
-        author_type: "agent",
-        author_id: agent_id,
-        issue_id: issue.id
-      })
+    # Best-effort comment: a comment failure must never prevent the issue
+    # from being blocked and the agent from being released below.
+    create_agent_comment(issue, agent_id, error_body)
 
     block_issue(issue)
 
@@ -601,7 +737,17 @@ defmodule Cympho.Orchestrator do
 
     session_id = module.run(session.issue, session.agent_id, self(), opts)
 
-    %{session | session_id: session_id, runtime_context: runtime_context}
+    # Reset adapter-session liveness tracking for the new attempt — the new
+    # adapter may not register with AdapterSessions at all (e.g. remote
+    # marketplace adapters), and inheriting `seen?` from a previous adapter
+    # would false-positive the dead-worker detector.
+    %{
+      session
+      | session_id: session_id,
+        runtime_context: runtime_context,
+        adapter_session_seen?: false,
+        adapter_session_misses: 0
+    }
   end
 
   defp runtime_wake_context(%__MODULE__{no_work_retry_count: count}) when count > 0 do
@@ -1405,10 +1551,22 @@ defmodule Cympho.Orchestrator do
     block_issue(issue)
   end
 
-  defp block_issue(%Issue{} = issue) do
+  @block_issue_attempts 3
+
+  defp block_issue(issue, attempts_left \\ @block_issue_attempts)
+
+  defp block_issue(%Issue{id: issue_id}, 0) do
+    Logger.warning(
+      "[Orchestrator] Gave up blocking issue #{issue_id} after #{@block_issue_attempts} stale-entry retries"
+    )
+
+    :ok
+  end
+
+  defp block_issue(%Issue{} = issue, attempts_left) do
     case Issues.get_issue(issue.id) do
       {:ok, latest_issue} ->
-        do_block_issue(latest_issue)
+        do_block_issue(latest_issue, attempts_left)
 
       {:error, reason} ->
         Logger.warning(
@@ -1419,11 +1577,11 @@ defmodule Cympho.Orchestrator do
     end
   end
 
-  defp block_issue(issue) do
+  defp block_issue(issue, _attempts_left) do
     Issues.transition_issue(issue, :blocked)
   end
 
-  defp do_block_issue(%Issue{} = issue) do
+  defp do_block_issue(%Issue{} = issue, attempts_left) do
     case Issues.update_issue(issue, %{
            status: :blocked,
            assignee_id: nil,
@@ -1452,12 +1610,19 @@ defmodule Cympho.Orchestrator do
     end
   rescue
     Ecto.StaleEntryError ->
-      Logger.warning("[Orchestrator] Issue #{issue.id} changed while marking runtime failure")
-      :ok
+      # Concurrent write bumped lock_version between our reload and update.
+      # Refetch and retry (bounded) instead of leaving the issue un-parked.
+      Logger.warning("[Orchestrator] Issue #{issue.id} changed while blocking, retrying")
+      block_issue(%Issue{id: issue.id}, attempts_left - 1)
   end
 
   defp set_agent_idle(agent_id) do
     case safe_get_agent(agent_id) do
+      {:ok, %{status: status}} when status in [:paused, :terminated, :pending_approval] ->
+        # An operator (or a circuit breaker) parked this agent mid-run;
+        # finishing the session must not silently resurrect it.
+        :ok
+
       {:ok, agent} ->
         Agents.update_agent(agent, %{status: :idle})
 

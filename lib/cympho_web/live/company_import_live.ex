@@ -169,52 +169,63 @@ defmodule CymphoWeb.CompanyImportLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="p-6 lg:p-8 max-w-6xl mx-auto">
-      <.header title="Import Company">
-        <:actions>
-          <.app_link
-            navigate={~p"/companies"}
-            class="text-text-secondary hover:text-text-primary text-sm"
-          >
-            Back to Companies
-          </.app_link>
-        </:actions>
-      </.header>
-
-      <section
-        data-testid="company-import-command"
-        class="mb-6 overflow-hidden rounded-xl border border-border bg-surface"
-      >
-        <div class="grid gap-0 lg:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.65fr)]">
-          <div class="p-6 lg:p-8">
-            <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-brand/20 bg-brand/10 px-3 py-1 text-xs font-510 text-brand">
-              <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Company portability
-            </div>
-            <h2 class="font-serif text-2xl font-510 text-text-primary">
-              {import_command_title(@step, @import_data, @import_result)}
-            </h2>
-            <p class="mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
-              {import_command_summary(@step, @import_data, @import_result)}
+    <div class="ember-aurora p-6 lg:p-8">
+      <div class="relative z-[1] mx-auto max-w-6xl">
+        <.header>
+          <div class="min-w-0">
+            <span class="ember-eyebrow">Portability</span>
+            <h1 class="ember-ink mt-4 font-serif text-[clamp(28px,4vw,42px)] font-510 leading-[1.08] tracking-[-0.02em]">
+              Import Company
+            </h1>
+            <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+              Restore a portable company export into this instance.
             </p>
           </div>
+          <:actions>
+            <.app_link
+              navigate={~p"/companies"}
+              class="rounded-lg border border-border bg-button px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-button-hover hover:text-text-primary"
+            >
+              Back to Companies
+            </.app_link>
+          </:actions>
+        </.header>
 
-          <div class="border-t border-border bg-subtle/60 p-6 lg:border-l lg:border-t-0 lg:p-8">
-            <div class="grid grid-cols-2 gap-3">
-              <div
-                :for={metric <- import_command_metrics(@step, @import_data, @import_result)}
-                class="rounded-lg border border-border bg-surface p-4"
-              >
-                <div class="text-lg font-510 text-text-primary">{metric.value}</div>
-                <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
-                  {metric.label}
+        <section
+          data-testid="company-import-command"
+          class="mb-6 ember-glass overflow-hidden"
+        >
+          <div class="grid gap-0 lg:grid-cols-[minmax(0,1.35fr)_minmax(300px,0.65fr)]">
+            <div class="p-6 lg:p-8">
+              <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-brand/20 bg-brand/10 px-3 py-1 text-xs font-510 text-brand">
+                <.icon name="hero-arrow-up-tray-mini" class="h-4 w-4" /> Company portability
+              </div>
+              <h2 class="font-serif text-2xl font-510 text-text-primary">
+                {import_command_title(@step, @import_data, @import_result)}
+              </h2>
+              <p class="mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
+                {import_command_summary(@step, @import_data, @import_result)}
+              </p>
+            </div>
+
+            <div class="border-t border-border bg-subtle/60 p-6 lg:border-l lg:border-t-0 lg:p-8">
+              <div class="grid grid-cols-2 gap-3">
+                <div
+                  :for={metric <- import_command_metrics(@step, @import_data, @import_result)}
+                  class="rounded-lg border border-border bg-surface p-4"
+                >
+                  <div class="text-lg font-510 text-text-primary">{metric.value}</div>
+                  <div class="mt-1 text-xs font-510 uppercase tracking-wider text-text-tertiary">
+                    {metric.label}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {render_step(assigns)}
+        {render_step(assigns)}
+      </div>
     </div>
     """
   end

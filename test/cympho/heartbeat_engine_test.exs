@@ -359,6 +359,162 @@ defmodule Cympho.HeartbeatEngineTest do
     end
   end
 
+  describe "terminal transition races" do
+    test "recover_stale_run loses to a run that already completed" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: insert_issue(),
+          adapter: "claude_local"
+        })
+
+      {:ok, started} = HeartbeatEngine.start_run(run)
+      {:ok, _completed} = HeartbeatEngine.complete_run(started, %{})
+
+      # Watchdog holds a stale struct that still says "running".
+      assert {:error, {:invalid_status, "completed"}} =
+               HeartbeatEngine.recover_stale_run(started)
+
+      reloaded = Cympho.Repo.get!(Run, started.id)
+      assert reloaded.status == "completed"
+      assert is_nil(reloaded.error_reason)
+    end
+
+    test "complete_run loses to a run the watchdog already recovered" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: insert_issue(),
+          adapter: "claude_local"
+        })
+
+      {:ok, started} = HeartbeatEngine.start_run(run)
+      {:ok, _recovered} = HeartbeatEngine.recover_stale_run(started)
+
+      assert {:error, {:invalid_status, "failed"}} =
+               HeartbeatEngine.complete_run(started, %{cost_usd: Decimal.new("1.00")})
+
+      reloaded = Cympho.Repo.get!(Run, started.id)
+      assert reloaded.status == "failed"
+      assert reloaded.error_reason == "stale_run_recovered"
+    end
+
+    test "cancel_run loses to a run that already completed" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: insert_issue(),
+          adapter: "claude_local"
+        })
+
+      {:ok, started} = HeartbeatEngine.start_run(run)
+      {:ok, _completed} = HeartbeatEngine.complete_run(started, %{})
+
+      assert {:error, {:invalid_status, "completed"}} = HeartbeatEngine.cancel_run(started)
+      assert Cympho.Repo.get!(Run, started.id).status == "completed"
+    end
+
+    test "record_heartbeat with a stale struct cannot re-touch a finished run" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          agent_id: agent_id,
+          issue_id: insert_issue(),
+          adapter: "claude_local"
+        })
+
+      {:ok, started} = HeartbeatEngine.start_run(run)
+      {:ok, recovered} = HeartbeatEngine.recover_stale_run(started)
+
+      Process.sleep(1100)
+
+      # Late heartbeat from the (dead) session must not move the terminal
+      # run's liveness timestamp.
+      assert {:ok, _} = HeartbeatEngine.record_heartbeat(started)
+
+      reloaded = Cympho.Repo.get!(Run, started.id)
+      assert reloaded.status == "failed"
+      assert DateTime.compare(reloaded.last_heartbeat_at, recovered.last_heartbeat_at) == :eq
+    end
+  end
+
+  describe "budget gate" do
+    test "allows run creation when the active agent budget has headroom" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      insert_budget(agent_id, limit: "100.00", spent: "10.00")
+
+      assert {:ok, _run} =
+               HeartbeatEngine.create_run(%{
+                 agent_id: agent_id,
+                 issue_id: insert_issue(),
+                 adapter: "claude_local"
+               })
+    end
+
+    test "blocks run creation with an operator signal when the budget is exhausted" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      insert_budget(agent_id, limit: "10.00", spent: "9.50")
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :budget_exhausted} =
+                   HeartbeatEngine.create_run(%{
+                     agent_id: agent_id,
+                     issue_id: insert_issue(),
+                     adapter: "claude_local"
+                   })
+        end)
+
+      assert log =~ "budget exhausted"
+    end
+  end
+
+  describe "count_stale_runs_for_company/2" do
+    test "counts only stale running runs in the company" do
+      agent_id = Ecto.UUID.generate()
+      insert_agent(agent_id)
+      issue_id = insert_issue()
+      issue = Cympho.Repo.get!(Cympho.Issues.Issue, issue_id)
+
+      {:ok, run} =
+        HeartbeatEngine.create_run(%{
+          company_id: issue.company_id,
+          agent_id: agent_id,
+          issue_id: issue_id,
+          adapter: "claude_local"
+        })
+
+      {:ok, started} = HeartbeatEngine.start_run(run)
+
+      assert HeartbeatEngine.count_stale_runs_for_company(issue.company_id, 15) == 0
+
+      stale_time =
+        DateTime.utc_now()
+        |> DateTime.add(-30 * 60, :second)
+        |> DateTime.truncate(:second)
+
+      started
+      |> Ecto.Changeset.change(%{last_heartbeat_at: stale_time})
+      |> Cympho.Repo.update!()
+
+      assert HeartbeatEngine.count_stale_runs_for_company(issue.company_id, 15) == 1
+      assert HeartbeatEngine.count_stale_runs_for_company(Ecto.UUID.generate(), 15) == 0
+    end
+  end
+
   describe "list_runs_for_issue/2" do
     test "bounds issue run history by default and exposes total count" do
       agent_id = Ecto.UUID.generate()
@@ -449,6 +605,18 @@ defmodule Cympho.HeartbeatEngineTest do
       name: "test-agent-#{:rand.uniform(10_000)}",
       role: :engineer,
       status: :idle
+    })
+  end
+
+  defp insert_budget(agent_id, opts) do
+    Cympho.Repo.insert!(%Cympho.Budgets.Budget{
+      name: "budget-#{:rand.uniform(10_000)}",
+      scope_type: "agent",
+      scope_id: agent_id,
+      agent_id: agent_id,
+      limit_amount: Decimal.new(Keyword.fetch!(opts, :limit)),
+      spent_amount: Decimal.new(Keyword.fetch!(opts, :spent)),
+      status: "active"
     })
   end
 

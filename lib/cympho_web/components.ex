@@ -574,7 +574,7 @@ defmodule CymphoWeb.Components do
         aria-describedby={@has_errors && @error_id}
         aria-invalid={@has_errors}
         class={[
-          "w-full bg-surface border rounded-xl px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors",
+          "w-full bg-surface border rounded-xl px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 transition duration-150",
           input_border_class(@errors)
         ]}
         {@rest}
@@ -634,12 +634,18 @@ defmodule CymphoWeb.Components do
         aria-describedby={@has_errors && @error_id}
         aria-invalid={@has_errors}
         class={[
-          "w-full bg-surface border rounded-xl px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-colors",
+          "w-full bg-surface border rounded-xl px-3.5 py-2 text-sm text-text-primary placeholder:text-text-quaternary focus:outline-none focus:ring-2 transition duration-150",
           input_border_class(@errors)
         ]}
         {@rest}
       />
-      <p :if={@has_errors} id={@error_id} class="text-xs text-error" aria-live="polite">
+      <p
+        :if={@has_errors}
+        id={@error_id}
+        class="flex items-center gap-1 text-xs text-error"
+        aria-live="polite"
+      >
+        <span class="hero-exclamation-circle-mini h-3.5 w-3.5 shrink-0" aria-hidden="true"></span>
         {Enum.at(@errors, 0)}
       </p>
     </div>
@@ -664,7 +670,7 @@ defmodule CymphoWeb.Components do
         button_variant(@variant),
         button_size(@size),
         @class,
-        @disabled && "cursor-not-allowed opacity-50"
+        @disabled && "cursor-not-allowed opacity-50 saturate-50"
       ]}
       {@rest}
     >
@@ -744,10 +750,10 @@ defmodule CymphoWeb.Components do
         aria-expanded="false"
         class={[
           "flex w-full items-center gap-2 h-9 px-2.5 rounded-input text-left",
-          "bg-surface border text-caption text-ink transition-colors duration-100",
+          "bg-surface border text-caption text-ink transition duration-150",
           "focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed",
-          (@invalid && "border-error focus:ring-error/40 focus:border-error") ||
-            "border-hairline hover:border-hairline-strong focus:ring-primary/40 focus:border-primary"
+          (@invalid && "border-error focus:ring-red-500/40 focus:border-error") ||
+            "border-hairline hover:border-hairline-strong focus:ring-primary/30 focus:border-primary focus:shadow-[0_0_16px_-4px_rgb(var(--color-primary-rgb)/0.35)]"
         ]}
       >
         <span
@@ -756,7 +762,7 @@ defmodule CymphoWeb.Components do
         >
           {@selected_label || @placeholder}
         </span>
-        <span class="hero-chevron-down-mini w-3.5 h-3.5 shrink-0 text-ink-tertiary" />
+        <span class="hero-chevron-down-mini w-3.5 h-3.5 shrink-0 text-ink-tertiary transition-transform duration-200 [[aria-expanded=true]_&]:rotate-180" />
       </button>
 
       <div
@@ -778,7 +784,9 @@ defmodule CymphoWeb.Components do
             aria-selected={to_string(val == @value)}
             class={[
               "flex items-center gap-2 mx-1 px-2.5 h-8 rounded-sm cursor-pointer select-none",
-              "text-caption text-ink hover:bg-surface-3 data-[select-active=true]:bg-surface-3"
+              "text-caption text-ink transition-colors duration-100",
+              "hover:bg-surface-3 data-[select-active=true]:bg-surface-3",
+              "data-[select-selected=true]:bg-brand/[0.06]"
             ]}
           >
             <span class="min-w-0 flex-1 truncate">{label}</span>
@@ -832,13 +840,19 @@ defmodule CymphoWeb.Components do
     do: "cta-glow bg-brand text-on-primary font-590 hover:bg-accent-hover"
 
   defp button_variant("secondary"),
-    do: "bg-button text-text-primary border border-border hover:bg-button-hover"
+    do:
+      "bg-button text-text-primary border border-border shadow-[inset_0_1px_0_0_var(--shadow-inset-highlight)] hover:bg-button-hover hover:border-hairline-strong"
 
-  defp button_variant("ghost"), do: "text-text-secondary hover:bg-surface-hover"
-  defp button_variant("danger"), do: "bg-error text-canvas hover:bg-red-600"
+  defp button_variant("ghost"),
+    do: "text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+
+  defp button_variant("danger"),
+    do:
+      "bg-error text-canvas font-590 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12)] hover:bg-red-600 hover:shadow-[0_0_20px_-4px_rgb(var(--color-error-rgb)/0.45)]"
 
   defp button_variant(_),
-    do: "bg-button text-text-primary border border-border hover:bg-button-hover"
+    do:
+      "bg-button text-text-primary border border-border shadow-[inset_0_1px_0_0_var(--shadow-inset-highlight)] hover:bg-button-hover hover:border-hairline-strong"
 
   defp button_size("sm"), do: "px-3 py-1.5 text-xs"
   defp button_size("lg"), do: "px-6 py-3 text-base"
@@ -873,8 +887,12 @@ defmodule CymphoWeb.Components do
   defp format_input_error(message) when is_binary(message), do: message
   defp format_input_error(message), do: inspect(message)
 
-  defp input_border_class([]), do: "border-border"
-  defp input_border_class(_), do: "border-error/60"
+  defp input_border_class([]),
+    do:
+      "border-border hover:border-hairline-strong focus:ring-brand/25 focus:border-brand focus:shadow-[0_0_16px_-4px_rgb(var(--color-primary-rgb)/0.35)]"
+
+  defp input_border_class(_),
+    do: "border-red-500/60 focus:ring-red-500/25 focus:border-error"
 
   defp input_error_id(_field, _name, id) when is_binary(id), do: "#{id}-error"
   defp input_error_id(field, name, _id), do: "input-error-#{input_name(field, name) || "unknown"}"

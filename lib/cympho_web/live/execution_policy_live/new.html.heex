@@ -1,9 +1,13 @@
 <.settings_layout active={:policies}>
   <div class="space-y-5">
-    <.header
-      title={@page_title}
-      subtitle="Create a reusable execution guardrail for autonomous issues."
-    >
+    <.header>
+      <span class="ember-eyebrow">New guardrail</span>
+      <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+        {@page_title}
+      </h1>
+      <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+        Create a reusable execution guardrail for autonomous issues.
+      </p>
       <:actions>
         <.app_link
           navigate={~p"/settings/policies"}
@@ -13,6 +17,8 @@
         </.app_link>
       </:actions>
     </.header>
+
+    <hr class="ember-rule" />
 
     <.form
       id="execution-policy-form"
@@ -25,10 +31,10 @@
 
       <.panel class="overflow-hidden">
         <div class="border-b border-border px-5 py-4">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
             Governance stage plan
           </p>
-          <h2 class="mt-1 text-lg font-590 text-text-primary">
+          <h2 class="mt-1 font-serif text-[19px] font-510 leading-snug text-text-primary">
             Build executor, reviewer, and approver handoffs
           </h2>
           <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
@@ -40,7 +46,7 @@
         <div class="space-y-6 p-5">
           <section class="space-y-4">
             <div>
-              <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
                 Policy identity
               </p>
               <p class="mt-1 text-sm text-text-tertiary">
@@ -59,7 +65,7 @@
 
           <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
             <div>
-              <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
                 Stage builder
               </p>
               <p class="mt-1 text-sm text-text-tertiary">
@@ -209,7 +215,7 @@
 
           <section class="space-y-4">
             <div>
-              <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
                 Stage payload
               </p>
               <p class="mt-1 text-sm text-text-tertiary">
@@ -252,9 +258,9 @@
       <aside class="space-y-4">
         <section
           data-testid="execution-policy-setup-checklist"
-          class="rounded-xl border border-border bg-panel p-4 shadow-card"
+          class="card-lift rounded-xl border border-border bg-panel p-4 shadow-card"
         >
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
             Setup checklist
           </p>
           <div class="mt-4 space-y-3">
@@ -294,11 +300,13 @@
           </div>
         </section>
 
-        <section class="rounded-xl border border-brand/25 bg-brand/10 p-4">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
+        <section class="card-lift rounded-xl border border-brand/25 bg-brand/10 p-4">
+          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand">
             Default governance flow
           </p>
-          <p class="mt-2 text-sm font-590 text-text-primary">Executor to reviewer to approver</p>
+          <p class="mt-2 font-serif text-base font-510 text-text-primary">
+            Executor to reviewer to approver
+          </p>
           <p class="mt-1 text-xs leading-5 text-text-tertiary">
             The default policy starts with engineer execution, CTO review, and CEO approval.
           </p>

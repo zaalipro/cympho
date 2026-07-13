@@ -90,6 +90,37 @@ defmodule Cympho.Routing.LlmClassifierTest do
         assert {:ok, :engineer} = LlmClassifier.classify(%{title: "x", description: ""})
       end
     end
+
+    test "recovers a role from prose when exactly one role token appears" do
+      with_mock Finch,
+        build: fn _m, _u, _h, _b -> :req end,
+        request: fn :req, _n, _o ->
+          {:ok,
+           %Finch.Response{
+             status: 200,
+             body: response_body("The best fit is: engineer."),
+             headers: []
+           }}
+        end do
+        assert {:ok, :engineer} = LlmClassifier.classify(%{title: "x", description: ""})
+      end
+    end
+
+    test "ambiguous prose with multiple role tokens stays invalid_response" do
+      with_mock Finch,
+        build: fn _m, _u, _h, _b -> :req end,
+        request: fn :req, _n, _o ->
+          {:ok,
+           %Finch.Response{
+             status: 200,
+             body: response_body("Could be engineer or designer."),
+             headers: []
+           }}
+        end do
+        assert {:error, :invalid_response} =
+                 LlmClassifier.classify(%{title: "x", description: ""})
+      end
+    end
   end
 
   describe "configured?/0" do

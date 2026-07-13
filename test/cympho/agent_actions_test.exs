@@ -109,6 +109,155 @@ defmodule Cympho.AgentActionsTest do
 
       assert {:error, {:invalid_uuid, "to_agent_id"}} = AgentActions.parse(body)
     end
+
+    test "recovers a plain ```json fence carrying an actions payload" do
+      body = """
+      Summary of my work.
+
+      ```json
+      {"actions":[{"type":"comment","body":"Recovered from plain json fence"}]}
+      ```
+      """
+
+      assert {:ok, [%{"type" => "comment", "body" => "Recovered from plain json fence"}]} =
+               AgentActions.parse(body)
+    end
+
+    test "recovers an unfenced actions object embedded in prose" do
+      body = """
+      Here is the outcome. {"actions": [{"type": "comment", "body": "bare object"}]} Done.
+      """
+
+      assert {:ok, [%{"type" => "comment", "body" => "bare object"}]} = AgentActions.parse(body)
+    end
+
+    test "recovers fence label variants (caps, underscore)" do
+      caps = """
+      ```CYMPHO-ACTIONS
+      {"actions":[{"type":"comment","body":"caps"}]}
+      ```
+      """
+
+      underscore = """
+      ```cympho_actions
+      {"actions":[{"type":"comment","body":"underscore"}]}
+      ```
+      """
+
+      assert {:ok, [%{"body" => "caps"}]} = AgentActions.parse(caps)
+      assert {:ok, [%{"body" => "underscore"}]} = AgentActions.parse(underscore)
+    end
+
+    test "repairs a trailing comma in the actions array" do
+      body = """
+      ```cympho-actions
+      {"actions":[{"type":"comment","body":"trailing comma"},]}
+      ```
+      """
+
+      assert {:ok, [%{"type" => "comment", "body" => "trailing comma"}]} =
+               AgentActions.parse(body)
+    end
+
+    test "repairs raw newlines inside a JSON string" do
+      body = """
+      ```cympho-actions
+      {"actions":[{"type":"comment","body":"line one
+      line two"}]}
+      ```
+      """
+
+      assert {:ok, [%{"type" => "comment", "body" => comment}]} = AgentActions.parse(body)
+      assert comment =~ "line one"
+      assert comment =~ "line two"
+    end
+
+    test "recovers a truncated block cut mid-output" do
+      body = """
+      ```cympho-actions
+      {"actions":[{"type":"comment","body":"partial resul
+      """
+
+      assert {:ok, [%{"type" => "comment", "body" => comment}]} = AgentActions.parse(body)
+      assert comment =~ "partial resul"
+    end
+
+    test "accepts a bare list payload and a single action object payload" do
+      list_body = """
+      ```cympho-actions
+      [{"type":"comment","body":"bare list"}]
+      ```
+      """
+
+      single_body = """
+      ```cympho-actions
+      {"type":"comment","body":"single object"}
+      ```
+      """
+
+      assert {:ok, [%{"body" => "bare list"}]} = AgentActions.parse(list_body)
+      assert {:ok, [%{"body" => "single object"}]} = AgentActions.parse(single_body)
+    end
+
+    test "collapses byte-identical duplicate blocks but rejects distinct ones" do
+      duplicated = """
+      ```cympho-actions
+      {"actions":[{"type":"comment","body":"dup"}]}
+      ```
+
+      To restate:
+
+      ```cympho-actions
+      {"actions":[{"type":"comment","body":"dup"}]}
+      ```
+      """
+
+      distinct = """
+      ```cympho-actions
+      {"actions":[{"type":"comment","body":"first"}]}
+      ```
+      ```cympho-actions
+      {"actions":[{"type":"comment","body":"second"}]}
+      ```
+      """
+
+      assert {:ok, [%{"body" => "dup"}]} = AgentActions.parse(duplicated)
+      assert {:error, :multiple_action_blocks} = AgentActions.parse(distinct)
+    end
+
+    test "converts an unknown action type into a skip marker when valid actions exist" do
+      body = """
+      ```cympho-actions
+      {"actions":[{"type":"ship_money"},{"type":"comment","body":"still executes"}]}
+      ```
+      """
+
+      assert {:ok,
+              [
+                %{"type" => "skip_unsupported", "original_type" => "ship_money"},
+                %{"type" => "comment", "body" => "still executes"}
+              ]} = AgentActions.parse(body)
+    end
+
+    test "a batch of only unknown actions still fails hard" do
+      body = """
+      ```cympho-actions
+      {"actions":[{"type":"ship_money"}]}
+      ```
+      """
+
+      assert {:error, {:unsupported_action, "ship_money"}} = AgentActions.parse(body)
+    end
+
+    test "unparseable JSON still reports a precise decode error" do
+      body = """
+      ```cympho-actions
+      this is not json at all
+      ```
+      """
+
+      assert {:error, {:invalid_json, _message}} = AgentActions.parse(body)
+    end
   end
 
   describe "execute/3" do
@@ -1360,6 +1509,78 @@ defmodule Cympho.AgentActionsTest do
       assert work_product.title == "Implementation notes"
       assert work_product.kind == "document"
       assert work_product.payload["files"] == ["README.md"]
+    end
+
+    test "a retried attach_work_product does not double-create the artifact", %{
+      issue: issue,
+      engineer: engineer
+    } do
+      actions = [
+        %{
+          "type" => "attach_work_product",
+          "kind" => "document",
+          "title" => "Retry-safe notes"
+        }
+      ]
+
+      assert {:ok, %{results: [%{work_product_id: id}]}} =
+               AgentActions.execute(issue, engineer, actions)
+
+      assert {:ok, %{results: [%{work_product_id: ^id, duplicate: true}]}} =
+               AgentActions.execute(issue, engineer, actions)
+
+      assert [%{id: ^id}] = WorkProducts.list_work_products(issue.id)
+    end
+
+    test "a retried comment does not double-post", %{issue: issue, engineer: engineer} do
+      actions = [%{"type" => "comment", "body" => "Retry-safe status update."}]
+
+      assert {:ok, %{results: [%{type: "comment", comment_id: id}]}} =
+               AgentActions.execute(issue, engineer, actions)
+
+      assert {:ok, %{results: [%{type: "comment", comment_id: ^id, duplicate: true}]}} =
+               AgentActions.execute(issue, engineer, actions)
+
+      matching =
+        issue.id
+        |> Comments.list_comments()
+        |> Enum.filter(&(&1.body == "Retry-safe status update."))
+
+      assert length(matching) == 1
+    end
+
+    test "an executor crash degrades to {:error, {:action_crashed, reason}} instead of raising",
+         %{issue: issue, engineer: engineer} do
+      # A map body has no String.Chars implementation — historically this
+      # raised out of execute/3 and killed the orchestrator run.
+      actions = [%{"type" => "comment", "body" => %{"oops" => true}}]
+
+      assert {:error, {:action_crashed, reason}} = AgentActions.execute(issue, engineer, actions)
+      assert is_binary(reason)
+    end
+
+    test "an unknown action in a batch is skipped with a system comment while the rest execute",
+         %{issue: issue, engineer: engineer} do
+      body = """
+      ```cympho-actions
+      {"actions":[{"type":"launch_rocket"},{"type":"comment","body":"Known action ran."}]}
+      ```
+      """
+
+      assert {:ok, actions} = AgentActions.parse(body)
+
+      assert {:ok, %{results: results}} = AgentActions.execute(issue, engineer, actions)
+
+      assert [%{type: "skip_unsupported", skipped: true}, %{type: "comment"}] = results
+
+      comments = Comments.list_comments(issue.id)
+
+      assert Enum.any?(comments, fn c ->
+               c.author_type == "system" and
+                 String.contains?(c.body, ~s(Skipped unsupported action "launch_rocket"))
+             end)
+
+      assert Enum.any?(comments, &(&1.body == "Known action ran."))
     end
 
     test "text-only chat adapter can attach documents but not code-change claims", %{

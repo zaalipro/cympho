@@ -164,7 +164,7 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
       <div class="px-5 py-4">
         <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p class="text-sm font-590 text-text-primary">{form_title(@form_mode)}</p>
+            <p class="font-serif text-base font-510 text-text-primary">{form_title(@form_mode)}</p>
             <p class="mt-1 text-xs leading-5 text-text-tertiary">
               Use company scope for provider keys unless a single agent or project needs a separate quota.
             </p>
@@ -232,15 +232,15 @@ defmodule CymphoWeb.SecretsLive.FormComponent do
             <button
               type="button"
               phx-click={@on_cancel}
-              class="px-4 py-2 bg-surface hover:bg-surface-hover text-text-secondary rounded-lg text-sm font-medium transition-colors"
+              class="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
             >
               Cancel
             </button>
             <button
               type="submit"
-              class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+              class="cta-glow inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
             >
-              {submit_label(@form_mode)}
+              <.icon name="hero-shield-check-mini" class="h-4 w-4" /> {submit_label(@form_mode)}
             </button>
           </div>
         </.form>

@@ -34,7 +34,7 @@ defmodule CymphoWeb.Components.UserMenu do
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 transition-colors"
         ]}
       >
-        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/15 text-[11px] font-590 text-brand">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-brand/25 bg-brand/15 text-[11px] font-590 text-brand shadow-[0_0_12px_-2px_rgb(var(--color-primary-rgb)/0.35)]">
           {@initials}
         </span>
         <span class="flex-1 truncate text-left text-[13px] font-510">
@@ -80,7 +80,7 @@ defmodule CymphoWeb.Components.UserMenu do
         </div>
 
         <div class="py-1">
-          <p class="px-3 pt-1.5 pb-0.5 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+          <p class="px-3 pt-1.5 pb-0.5 font-serif text-[12px] font-510 italic tracking-[0.02em] text-brand/80">
             More
           </p>
           <.menu_link
@@ -222,9 +222,10 @@ defmodule CymphoWeb.Components.UserMenu do
 
   defp menu_row_class(active?) do
     [
-      "group flex w-full items-center gap-2.5 px-3 py-1.5 text-[13px] font-510 transition-colors",
+      "group flex w-full items-center gap-2.5 px-3 py-1.5 text-[13px] font-510 transition-[background-color,color,box-shadow] duration-150",
       "text-text-secondary hover:bg-surface-3 hover:text-text-primary",
-      active? && "bg-surface-3 text-text-primary"
+      "hover:shadow-[inset_2px_0_0_0_var(--color-primary)]",
+      active? && "bg-surface-3 text-text-primary shadow-[inset_2px_0_0_0_var(--color-primary)]"
     ]
   end
 

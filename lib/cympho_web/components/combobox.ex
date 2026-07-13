@@ -64,10 +64,10 @@ defmodule CymphoWeb.Components.Combobox do
         class={[
           "inline-flex items-center gap-1.5 px-2.5 h-7 rounded-md max-w-full",
           "text-caption text-ink whitespace-nowrap",
-          "bg-surface-1 hover:bg-surface-2 border border-hairline",
-          "transition-colors duration-100",
+          "bg-surface-1 hover:bg-surface-2 border border-hairline hover:border-hairline-strong",
+          "transition-colors duration-150",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas",
-          length(@selected_ids) > 0 && "border-hairline-strong",
+          length(@selected_ids) > 0 && "border-brand/30 bg-brand/[0.06]",
           @trigger_class
         ]}
         aria-haspopup="listbox"
@@ -82,7 +82,7 @@ defmodule CymphoWeb.Components.Combobox do
         data-combobox-popover
         class={[
           "hidden absolute z-50 mt-1 w-64 rounded-lg",
-          "bg-surface-2 border border-hairline shadow-elevated",
+          "cympho-menu-panel bg-surface-2 border border-hairline shadow-elevated",
           "overflow-hidden",
           @align == "right" && "right-0",
           @align == "left" && "left-0"
@@ -98,7 +98,8 @@ defmodule CymphoWeb.Components.Combobox do
             class={[
               "w-full px-2 h-7 rounded-sm bg-surface-1",
               "text-caption text-ink placeholder:text-ink-tertiary",
-              "border border-hairline focus:border-primary focus:outline-none"
+              "border border-hairline transition-colors duration-150",
+              "focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             ]}
             autocomplete="off"
           />
@@ -113,8 +114,9 @@ defmodule CymphoWeb.Components.Combobox do
             data-combobox-selected={to_string(opt.id in @selected_ids)}
             class={[
               "flex items-center gap-2 px-2.5 h-7 mx-1 rounded-sm cursor-pointer",
-              "text-caption text-ink",
-              "hover:bg-surface-3 data-[combobox-active=true]:bg-surface-3"
+              "text-caption text-ink transition-colors duration-100",
+              "hover:bg-surface-3 data-[combobox-active=true]:bg-surface-3",
+              "data-[combobox-selected=true]:bg-brand/[0.06]"
             ]}
             role="option"
             aria-selected={to_string(opt.id in @selected_ids)}
@@ -152,7 +154,7 @@ defmodule CymphoWeb.Components.Combobox do
           <button
             type="button"
             data-combobox-clear
-            class="w-full px-2.5 h-7 rounded-sm text-caption text-ink-muted hover:bg-surface-3 hover:text-ink text-left"
+            class="w-full px-2.5 h-7 rounded-sm text-caption text-ink-muted transition-colors duration-100 hover:bg-surface-3 hover:text-ink text-left"
           >
             Clear selection
           </button>
@@ -180,7 +182,7 @@ defmodule CymphoWeb.Components.Combobox do
 
   defp chevron(assigns) do
     ~H"""
-    <span class="hero-chevron-down-mini text-ink-tertiary w-3.5 h-3.5" />
+    <span class="hero-chevron-down-mini text-ink-tertiary w-3.5 h-3.5 shrink-0 transition-transform duration-200 [[aria-expanded=true]_&]:rotate-180" />
     """
   end
 end

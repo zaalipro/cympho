@@ -952,7 +952,7 @@ defmodule CymphoWeb.InboxLive.Index do
     if current == status do
       "border-brand bg-brand/15 text-text-primary"
     else
-      "border-border bg-surface text-text-tertiary hover:bg-surface-hover hover:text-text-secondary"
+      "border-border bg-surface text-text-tertiary hover:border-border-hover hover:bg-surface-hover hover:text-text-secondary"
     end
   end
 

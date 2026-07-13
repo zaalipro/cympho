@@ -98,16 +98,24 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
   @spec select_agent(atom(), [Cympho.Agents.Agent.t()]) ::
           {:ok, Cympho.Agents.Agent.t()} | {:error, :no_agent_available}
   def select_agent(role, eligible_agents) do
-    eligible_agents
-    |> Enum.filter(fn agent -> agent.role == role and agent.status != :error end)
-    |> filter_repo_delivery_capable(role)
+    candidates =
+      eligible_agents
+      |> Enum.filter(fn agent -> agent.role == role and agent.status != :error end)
+      |> filter_repo_delivery_capable(role)
+
+    # Batch both load metrics in two grouped queries instead of two queries
+    # per candidate inside the sort.
+    estimated_loads = estimated_loads_by_agent(candidates)
+    count_loads = count_loads_by_agent(candidates)
+
+    candidates
     |> Enum.sort_by(fn agent ->
       # Weighted load: prefer the agent with the smallest sum of
       # `estimated_minutes` across in-flight issues; fall back to raw
       # count and name for stable ordering. Issues without an estimate
       # contribute the configured default (60 min) so they aren't free.
-      {repo_capability_rank(role, agent), agent_estimated_load(agent), agent_count_load(agent),
-       agent.name}
+      {repo_capability_rank(role, agent), Map.get(estimated_loads, agent.id, 0),
+       Map.get(count_loads, agent.id, 0), agent.name}
     end)
     |> List.first()
     |> case do
@@ -151,8 +159,21 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
     end)
   end
 
-  defp agent_count_load(agent) do
-    Cympho.Agents.count_active_assignments(agent.id)
+  defp count_loads_by_agent([]), do: %{}
+
+  defp count_loads_by_agent(agents) do
+    import Ecto.Query, warn: false
+    alias Cympho.Issues.Issue
+
+    agent_ids = Enum.map(agents, & &1.id)
+
+    Cympho.Repo.all(
+      from i in Issue,
+        where: i.assignee_id in ^agent_ids and i.status == :in_progress,
+        group_by: i.assignee_id,
+        select: {i.assignee_id, count(i.id)}
+    )
+    |> Map.new()
   end
 
   defp filter_repo_delivery_capable(agents, role) when role in @repo_delivery_roles do
@@ -173,24 +194,26 @@ defmodule Cympho.Orchestrator.Dispatcher.Router do
 
   @default_estimate_minutes 60
 
-  # Sum of `monitor_state["estimated_minutes"]` across this agent's in-flight
+  # Sum of `monitor_state["estimated_minutes"]` across each agent's in-flight
   # issues. Issues with no estimate contribute the default, so a brand-new
   # issue can't slip in for free.
-  defp agent_estimated_load(agent) do
+  defp estimated_loads_by_agent([]), do: %{}
+
+  defp estimated_loads_by_agent(agents) do
     import Ecto.Query, warn: false
     alias Cympho.Issues.Issue
 
-    estimates =
-      Cympho.Repo.all(
-        from i in Issue,
-          where:
-            i.assignee_id == ^agent.id and
-              i.status in ^[:todo, :in_progress, :in_review, :blocked],
-          select: i.monitor_state
-      )
+    agent_ids = Enum.map(agents, & &1.id)
 
-    Enum.reduce(estimates, 0, fn ms, acc ->
-      acc + estimate_minutes(ms)
+    Cympho.Repo.all(
+      from i in Issue,
+        where:
+          i.assignee_id in ^agent_ids and
+            i.status in ^[:todo, :in_progress, :in_review, :blocked],
+        select: {i.assignee_id, i.monitor_state}
+    )
+    |> Enum.reduce(%{}, fn {agent_id, ms}, acc ->
+      Map.update(acc, agent_id, estimate_minutes(ms), &(&1 + estimate_minutes(ms)))
     end)
   end
 

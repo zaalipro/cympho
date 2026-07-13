@@ -336,31 +336,55 @@ defmodule Cympho.Orchestrator.Dispatcher do
     {:noreply, new_state}
   end
 
+  # Orchestrator process went down. Normal terminations already sent
+  # :session_ended from terminate/2; this covers brutal kills (exit signals
+  # that skip terminate) so the concurrency slot is freed and a stranded
+  # :in_progress issue is released for re-dispatch instead of waiting for
+  # the next watchdog sweep.
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %State{} = state) do
+    case Map.pop(state.monitors, ref) do
+      {nil, monitors} ->
+        {:noreply, %{state | monitors: monitors}}
+
+      {issue_id, monitors} ->
+        unless graceful_down_reason?(reason) do
+          release_crashed_session_issue(issue_id, reason)
+        end
+
+        {:noreply,
+         %{
+           state
+           | monitors: monitors,
+             running_issue_ids: MapSet.delete(state.running_issue_ids, issue_id)
+         }}
+    end
+  end
+
   @impl true
   def handle_info({:EXIT, _from, _reason}, %State{} = state) do
     {:noreply, state}
   end
 
-  # Graceful shutdown: on SIGTERM (or supervisor stop) the BEAM is about to
-  # die and any in-flight orchestrators will be killed. Release the issues
-  # they were running back to :todo so a different node — or this node on
-  # next boot — can pick them up cleanly. The boot-time orphan recovery
-  # would catch these eventually, but releasing here means no observable
-  # window where an issue is "owned" by a dead process.
+  # Graceful shutdown: release issues stranded by dead sessions back to
+  # :todo so this node on next boot can pick them up cleanly. Orchestrators
+  # are deliberately not linked to the dispatcher, so a session may still be
+  # live here — releasing its issue out from under it would double-dispatch
+  # the same work, so those are skipped (boot-time orphan recovery catches
+  # them if the whole node is going down).
   @impl true
   def terminate(reason, %State{running_issue_ids: running}) do
     Logger.info(
-      "[Dispatcher] terminating (reason=#{inspect(reason)}); releasing #{MapSet.size(running)} in-flight issues"
+      "[Dispatcher] terminating (reason=#{inspect(reason)}); reconciling #{MapSet.size(running)} in-flight issues"
     )
 
     Enum.each(MapSet.to_list(running), fn issue_id ->
       try do
-        case Cympho.Issues.get_issue(issue_id) do
-          {:ok, %{status: :in_progress} = issue} ->
-            _ = Cympho.Issues.force_release_issue(issue, :todo)
-
-          _ ->
-            :ok
+        with nil <- Orchestrator.whereis(issue_id),
+             {:ok, %{status: :in_progress} = issue} <- Cympho.Issues.get_issue(issue_id) do
+          _ = Cympho.Issues.force_release_issue(issue, :todo)
+        else
+          _ -> :ok
         end
       rescue
         # Best-effort: never raise from terminate or we delay supervisor shutdown.
@@ -375,6 +399,62 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   defp schedule_poll do
     Process.send_after(self(), :poll, @poll_interval)
+  end
+
+  # Reasons where terminate/2 ran (or nothing abnormal happened), so the
+  # orchestrator already finalized its run and released its checkout. The
+  # runtime-stop shapes come from `Orchestrator.stop/2` callers, which go
+  # through GenServer.stop and therefore always run terminate/2.
+  defp graceful_down_reason?(:normal), do: true
+  defp graceful_down_reason?(:shutdown), do: true
+  defp graceful_down_reason?({:shutdown, _detail}), do: true
+  defp graceful_down_reason?({:runtime_stop, _detail}), do: true
+  defp graceful_down_reason?(:operator_stop), do: true
+  defp graceful_down_reason?(:issue_terminal), do: true
+  defp graceful_down_reason?(:issue_deleted), do: true
+  defp graceful_down_reason?(_reason), do: false
+
+  defp release_crashed_session_issue(issue_id, reason) do
+    Logger.warning(
+      "[Dispatcher] orchestrator for issue #{issue_id} went down (#{inspect(reason)}); checking for stranded checkout"
+    )
+
+    # Only clean up when the crashed session actually stranded the issue —
+    # a replacement orchestrator means someone else owns it now. Registry
+    # cleanup is async relative to our DOWN message, so a still-listed-but-
+    # dead pid counts as "no orchestrator".
+    live_orchestrator? =
+      case Orchestrator.whereis(issue_id) do
+        nil -> false
+        pid -> Process.alive?(pid)
+      end
+
+    unless live_orchestrator? do
+      # Finalize the dead session's runs first (also releases the checkout
+      # it held), then release the issue if it is still stranded.
+      _ = HeartbeatEngine.cancel_active_runs_for_issue(issue_id, "Orchestrator crashed")
+
+      case Issues.get_issue(issue_id) do
+        {:ok, %Issue{status: :in_progress} = issue} ->
+          case Issues.force_release_issue(issue, :todo) do
+            {:ok, _released} ->
+              Logger.warning("[Dispatcher] released issue #{issue_id} after orchestrator crash")
+
+            {:error, release_reason} ->
+              Logger.error(
+                "[Dispatcher] failed to release issue #{issue_id} after orchestrator crash: #{inspect(release_reason)}"
+              )
+          end
+
+        _ ->
+          :ok
+      end
+    end
+  rescue
+    error ->
+      Logger.error("[Dispatcher] crash-release failed for issue #{issue_id}: #{inspect(error)}")
+
+      :ok
   end
 
   defp stop_company_runtime(company_id, reason, running_issue_ids) do
@@ -548,8 +628,27 @@ defmodule Cympho.Orchestrator.Dispatcher do
 
   defp do_poll(%State{} = state, company_id \\ nil) do
     state
+    |> prune_stale_retries()
     |> reconcile_running()
     |> fetch_and_dispatch(company_id)
+  end
+
+  # Retry entries are deleted on successful dispatch, but issues that get
+  # cancelled/completed/deleted while backing off would leave their entries
+  # in the map forever. An entry whose retry window elapsed more than two
+  # max-backoff periods ago means the issue stopped being a candidate —
+  # drop it. If it becomes runnable again it simply restarts at attempt 1.
+  defp prune_stale_retries(%State{retry_attempts: retries} = state)
+       when map_size(retries) == 0,
+       do: state
+
+  defp prune_stale_retries(%State{retry_attempts: retries} = state) do
+    cutoff = :os.system_time(:millisecond) - 2 * @max_backoff_ms
+
+    %{
+      state
+      | retry_attempts: Map.filter(retries, fn {_id, entry} -> entry.next_retry_at > cutoff end)
+    }
   end
 
   defp reconcile_running(%State{running_issue_ids: running} = state) do
@@ -561,17 +660,16 @@ defmodule Cympho.Orchestrator.Dispatcher do
   end
 
   defp do_reconcile_running(%State{running_issue_ids: running} = state) do
+    # One lightweight id-only query instead of a fully-preloaded get_issue
+    # per running issue per poll.
     stopped_ids =
-      Enum.flat_map(MapSet.to_list(running), fn issue_id ->
-        case Issues.get_issue(issue_id) do
-          {:ok, issue} when issue.status in @terminal_states ->
-            Orchestrator.stop(issue_id, :issue_terminal)
-            [issue_id]
+      Cympho.Repo.all(
+        from i in Issue,
+          where: i.id in ^MapSet.to_list(running) and i.status in ^@terminal_states,
+          select: i.id
+      )
 
-          _ ->
-            []
-        end
-      end)
+    Enum.each(stopped_ids, &Orchestrator.stop(&1, :issue_terminal))
 
     case stopped_ids do
       [] ->
@@ -598,19 +696,42 @@ defmodule Cympho.Orchestrator.Dispatcher do
       # Per-company cap: count how many running issues belong to each
       # company, then drop candidates whose company has hit its
       # `max_concurrent_runs` limit. Companies without a configured limit
-      # use the global default (`@max_concurrent`).
+      # use the global default (`@max_concurrent`). The count is updated as
+      # dispatches succeed within this poll so a single poll cannot burst a
+      # company past its cap.
       running_by_company = running_issues_by_company(running)
 
       ready_candidates =
-        candidates
-        |> Enum.reject(fn issue ->
+        Enum.reject(candidates, fn issue ->
           MapSet.member?(running, issue.id) ||
-            (retries[issue.id] && retries[issue.id].next_retry_at > now) ||
-            company_at_capacity?(issue, running_by_company)
+            (retries[issue.id] && retries[issue.id].next_retry_at > now)
         end)
-        |> Enum.take(available_slots)
 
-      Enum.reduce(ready_candidates, state, &dispatch_issue/2)
+      {state, _by_company, _slots} =
+        Enum.reduce_while(
+          ready_candidates,
+          {state, running_by_company, available_slots},
+          fn
+            _issue, {state, by_co, 0} ->
+              {:halt, {state, by_co, 0}}
+
+            issue, {state, by_co, slots} ->
+              if company_at_capacity?(issue, by_co) do
+                {:cont, {state, by_co, slots}}
+              else
+                new_state = dispatch_issue(issue, state)
+
+                if MapSet.member?(new_state.running_issue_ids, issue.id) do
+                  {:cont,
+                   {new_state, Map.update(by_co, issue.company_id, 1, &(&1 + 1)), slots - 1}}
+                else
+                  {:cont, {new_state, by_co, slots}}
+                end
+              end
+          end
+        )
+
+      state
     end
   end
 
@@ -744,22 +865,28 @@ defmodule Cympho.Orchestrator.Dispatcher do
     case Issues.checkout_issue(issue, agent, required_role) do
       {:ok, checked_out} ->
         case Orchestrator.start_and_run(checked_out, agent.id) do
-          {:ok, _pid} ->
-            new_running = MapSet.put(state.running_issue_ids, issue.id)
-            new_retries = Map.delete(state.retry_attempts, issue.id)
+          {:ok, pid} ->
+            # Monitor the orchestrator so a brutal kill (which skips
+            # terminate/2 and therefore never sends :session_ended) still
+            # frees the concurrency slot and releases the issue.
+            ref = Process.monitor(pid)
 
-            new_state = %{
+            %{
               state
-              | running_issue_ids: new_running,
-                retry_attempts: new_retries
+              | running_issue_ids: MapSet.put(state.running_issue_ids, issue.id),
+                retry_attempts: Map.delete(state.retry_attempts, issue.id),
+                monitors: Map.put(state.monitors, ref, issue.id)
             }
-
-            new_state
 
           {:error, reason} ->
             Logger.warning(
               "[Dispatcher] Failed to start orchestrator for issue #{issue.id}: #{inspect(reason)}"
             )
+
+            # Undo the checkout: it moved the issue to :in_progress, which
+            # the candidate query never selects, so without this release the
+            # scheduled retry could never re-dispatch the issue.
+            _ = Issues.force_release_issue(checked_out, :todo)
 
             record_dispatch_failure(issue, state, :orchestrator_start_failed)
         end
@@ -827,7 +954,9 @@ defmodule Cympho.Orchestrator.Dispatcher do
           {:ok, Cympho.Agents.Agent.t()} | {:error, :no_agent_available}
   def preview_agent_for_issue(%Cympho.Issues.Issue{} = issue), do: agent_for_issue(issue)
 
-  defp record_dispatch_failure(%Cympho.Issues.Issue{} = issue, %State{} = state, reason) do
+  @doc false
+  # Public for testing — retry bookkeeping for failed dispatches.
+  def record_dispatch_failure(%Cympho.Issues.Issue{} = issue, %State{} = state, reason) do
     # When the fallback chain has nothing to assign — every role from the
     # issue's primary role through every fallback is empty or busy — wake
     # the CEO so they can decide between hiring a new agent (`spawn_agent`),
@@ -840,28 +969,23 @@ defmodule Cympho.Orchestrator.Dispatcher do
     current_entry = state.retry_attempts[issue.id]
     attempts = if current_entry, do: current_entry.attempts, else: 0
 
-    if attempts >= @max_retries do
-      Logger.error(
-        "[Dispatcher] Issue #{issue.id} exceeded max retries (#{@max_retries}) for #{reason}, will not retry"
-      )
+    # Attempts past @max_retries keep retrying at the max backoff interval
+    # rather than giving up: permanently abandoning a :todo issue would be a
+    # silent stuck state, while the old "stop tracking" behavior actually
+    # retried on EVERY poll with an error log each time. Cap the counter so
+    # the backoff math stays bounded.
+    next_attempts = min(attempts + 1, @max_retries)
+    backoff_ms = backoff_ms_for_attempt(attempts)
+    next_retry_at = :os.system_time(:millisecond) + backoff_ms
 
-      state
-    else
-      next_attempts = attempts + 1
-      # Cap exponential backoff so a long-running flake doesn't push retries
-      # hours into the future.
-      backoff_ms = backoff_ms_for_attempt(attempts)
-      next_retry_at = :os.system_time(:millisecond) + backoff_ms
+    new_retry_entry = %{attempts: next_attempts, next_retry_at: next_retry_at}
+    new_retries = Map.put(state.retry_attempts, issue.id, new_retry_entry)
 
-      new_retry_entry = %{attempts: next_attempts, next_retry_at: next_retry_at}
-      new_retries = Map.put(state.retry_attempts, issue.id, new_retry_entry)
+    Logger.info(
+      "[Dispatcher] Scheduling retry #{next_attempts}/#{@max_retries} for issue #{issue.id} in #{backoff_ms}ms (reason: #{inspect(reason)})"
+    )
 
-      Logger.info(
-        "[Dispatcher] Scheduling retry #{next_attempts}/#{@max_retries} for issue #{issue.id} in #{backoff_ms}ms (reason: #{reason})"
-      )
-
-      %{state | retry_attempts: new_retries}
-    end
+    %{state | retry_attempts: new_retries}
   end
 
   # Best-effort escalation. If the company has no CEO this no-ops; the issue

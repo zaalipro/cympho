@@ -1,18 +1,26 @@
 <.settings_layout active={:adapters}>
-  <.header
-    title={@page_title}
-    subtitle="Bring your own agent runtime, test adapter health, and see whether the company is ready to launch work."
-  >
+  <.header>
+    <span class="ember-eyebrow">
+      Runtime fleet · {List.first(@runtime_readiness.stats).value} healthy
+    </span>
+    <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+      {@page_title}
+    </h1>
+    <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+      Bring your own agent runtime, test adapter health, and see whether the company is ready to launch work.
+    </p>
     <:actions>
       <button
         type="button"
         phx-click="refresh_health"
-        class="bg-surface hover:bg-surface-hover border border-border text-text-secondary hover:text-text-primary font-510 text-sm px-4 py-2 min-h-[44px] rounded-lg transition-colors inline-flex items-center gap-2"
+        class="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
       >
         <.icon name="hero-arrow-path-mini" class="h-4 w-4" /> Refresh Health
       </button>
     </:actions>
   </.header>
+
+  <hr class="ember-rule mb-6" />
 
   <div
     :if={@flash && @flash[:info]}
@@ -46,8 +54,12 @@
     <div class="border-b border-border/70 px-5 py-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-          <p class="text-eyebrow uppercase text-text-quaternary">Adapter Status Overview</p>
-          <h2 class="mt-1 text-card-title text-text-primary">Runtime readiness</h2>
+          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Adapter Status Overview
+          </p>
+          <h2 class="mt-1 font-serif text-[19px] font-510 text-text-primary">
+            Runtime readiness
+          </h2>
           <p class="mt-2 max-w-3xl text-sm leading-6 text-text-secondary">
             {@runtime_readiness.summary}
           </p>
@@ -69,10 +81,12 @@
       <div class="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
         <div
           :for={stat <- @runtime_readiness.stats}
-          class="rounded-lg border border-border bg-surface-1 px-4 py-3"
+          class="ember-stat rounded-lg border border-border bg-surface-1 px-4 py-3"
         >
           <p class="text-eyebrow uppercase text-text-quaternary">{stat.label}</p>
-          <p class="mt-3 font-mono text-2xl font-590 text-text-primary">{stat.value}</p>
+          <p class="mt-3 font-serif text-2xl font-590 text-text-primary tabular-nums">
+            {stat.value}
+          </p>
           <p class="mt-1 text-xs text-text-tertiary">{stat.note}</p>
         </div>
       </div>
@@ -80,7 +94,7 @@
       <div class="min-w-0 rounded-lg border border-border bg-surface-1 px-4 py-3">
         <p class="text-eyebrow uppercase text-text-quaternary">First attention</p>
         <%= if @runtime_readiness.attention_adapter do %>
-          <p class="mt-3 truncate text-sm font-590 text-text-primary">
+          <p class="mt-3 truncate font-serif text-sm font-510 text-text-primary">
             {@runtime_readiness.attention_adapter.name}
           </p>
           <p class="mt-1 text-xs text-text-tertiary">
@@ -96,9 +110,14 @@
     </div>
 
     <div class="ui-advanced-only grid gap-2 border-t border-border/70 px-5 py-4 sm:grid-cols-2 xl:grid-cols-4">
-      <div :for={lane <- @runtime_readiness.lanes} class={runtime_lane_class(lane.tone)}>
+      <div
+        :for={lane <- @runtime_readiness.lanes}
+        class={["ember-stat", runtime_lane_class(lane.tone)]}
+      >
         <p class="text-eyebrow uppercase text-text-quaternary">{lane.label}</p>
-        <p class="mt-3 font-mono text-2xl font-590 text-text-primary">{lane.value}</p>
+        <p class="mt-3 font-serif text-2xl font-590 text-text-primary tabular-nums">
+          {lane.value}
+        </p>
         <p class="mt-1 text-xs capitalize text-text-tertiary">{lane.state}</p>
       </div>
     </div>
@@ -115,9 +134,10 @@
           </div>
           <%= with health <- Map.get(@health, adapter.key, %{status: :unknown}) do %>
             <span class={[
-              "inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-510",
+              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-510",
               health_status_class(health.status)
             ]}>
+              <span class={["h-1.5 w-1.5 rounded-full", health_dot_class(health.status)]}></span>
               {health_status_label(health.status)}
             </span>
           <% end %>
@@ -174,9 +194,9 @@
     :if={Enum.empty?(@adapters)}
     class="flex flex-col items-center justify-center py-20 text-center"
   >
-    <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
+    <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-brand/20 bg-brand/10 text-brand shadow-[0_0_24px_rgba(217,119,87,0.12)]">
       <svg
-        class="w-6 h-6 text-text-tertiary"
+        class="w-6 h-6"
         fill="none"
         stroke="currentColor"
         viewBox="0 0 24 24"

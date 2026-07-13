@@ -100,29 +100,37 @@
         <div class="grid grid-cols-2 gap-2 px-5 py-5 sm:grid-cols-3 xl:grid-cols-6">
           <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
             <p class="text-eyebrow uppercase text-text-quaternary">Projects</p>
-            <p class="mt-1 text-card-title text-text-primary">
+            <p class="mt-1 font-serif text-2xl font-590 text-text-primary">
               {@project_overview.total_projects}
             </p>
           </div>
           <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
             <p class="text-eyebrow uppercase text-text-quaternary">Open</p>
-            <p class="mt-1 text-card-title text-text-primary">{@project_overview.open_issues}</p>
+            <p class="mt-1 font-serif text-2xl font-590 text-text-primary">
+              {@project_overview.open_issues}
+            </p>
           </div>
           <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
             <p class="text-eyebrow uppercase text-text-quaternary">Blocked</p>
-            <p class="mt-1 text-card-title text-red-300">{@project_overview.blocked_projects}</p>
+            <p class="mt-1 font-serif text-2xl font-590 text-red-300">
+              {@project_overview.blocked_projects}
+            </p>
           </div>
           <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
             <p class="text-eyebrow uppercase text-text-quaternary">Review</p>
-            <p class="mt-1 text-card-title text-cyan-300">{@project_overview.review_projects}</p>
+            <p class="mt-1 font-serif text-2xl font-590 text-cyan-300">
+              {@project_overview.review_projects}
+            </p>
           </div>
           <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
             <p class="text-eyebrow uppercase text-text-quaternary">Goals</p>
-            <p class="mt-1 text-card-title text-emerald-300">{@project_overview.active_goals}</p>
+            <p class="mt-1 font-serif text-2xl font-590 text-emerald-300">
+              {@project_overview.active_goals}
+            </p>
           </div>
           <div class="ember-stat rounded-lg border border-border bg-surface-1 px-3 py-3">
             <p class="text-eyebrow uppercase text-text-quaternary">No Repo</p>
-            <p class="mt-1 text-card-title text-amber-300">
+            <p class="mt-1 font-serif text-2xl font-590 text-amber-300">
               {@project_overview.missing_repo_projects}
             </p>
           </div>
@@ -137,25 +145,25 @@
         <div class="space-y-3 p-5">
           <div class="flex items-center justify-between rounded-lg border border-border bg-surface-1 px-3 py-2.5">
             <span class="text-sm text-text-tertiary">Blocked projects</span>
-            <span class="font-mono text-sm font-650 text-red-300">
+            <span class="font-serif text-lg font-590 text-red-300">
               {@project_overview.blocked_projects}
             </span>
           </div>
           <div class="flex items-center justify-between rounded-lg border border-border bg-surface-1 px-3 py-2.5">
             <span class="text-sm text-text-tertiary">Waiting review</span>
-            <span class="font-mono text-sm font-650 text-cyan-300">
+            <span class="font-serif text-lg font-590 text-cyan-300">
               {@project_overview.review_projects}
             </span>
           </div>
           <div class="flex items-center justify-between rounded-lg border border-border bg-surface-1 px-3 py-2.5">
             <span class="text-sm text-text-tertiary">Idle active projects</span>
-            <span class="font-mono text-sm font-650 text-amber-300">
+            <span class="font-serif text-lg font-590 text-amber-300">
               {@project_overview.idle_projects}
             </span>
           </div>
           <div class="flex items-center justify-between rounded-lg border border-border bg-surface-1 px-3 py-2.5">
             <span class="text-sm text-text-tertiary">Missing repos</span>
-            <span class="font-mono text-sm font-650 text-text-primary">
+            <span class="font-serif text-lg font-590 text-text-primary">
               {@project_overview.missing_repo_projects}
             </span>
           </div>
@@ -166,7 +174,7 @@
     <.infinite_scroll
       id="projects"
       has_more={@infinite_scroll[:projects][:has_more?] || false}
-      container_class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
+      container_class="stagger-children grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
       end_label="All projects loaded"
     >
       <:empty>
@@ -251,19 +259,19 @@
             <div class="ui-advanced-only mt-5 grid grid-cols-4 gap-2">
               <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
                 <p class="text-[10px] font-650 uppercase text-text-quaternary">Open</p>
-                <p class="mt-1 text-lg font-650 text-text-primary">{health.open}</p>
+                <p class="mt-1 font-serif text-xl font-590 text-text-primary">{health.open}</p>
               </div>
               <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
                 <p class="text-[10px] font-650 uppercase text-text-quaternary">Review</p>
-                <p class="mt-1 text-lg font-650 text-cyan-300">{health.in_review}</p>
+                <p class="mt-1 font-serif text-xl font-590 text-cyan-300">{health.in_review}</p>
               </div>
               <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
                 <p class="text-[10px] font-650 uppercase text-text-quaternary">Blocked</p>
-                <p class="mt-1 text-lg font-650 text-red-300">{health.blocked}</p>
+                <p class="mt-1 font-serif text-xl font-590 text-red-300">{health.blocked}</p>
               </div>
               <div class="ember-stat rounded-lg border border-border bg-surface-1 px-2.5 py-2">
                 <p class="text-[10px] font-650 uppercase text-text-quaternary">Done</p>
-                <p class="mt-1 text-lg font-650 text-emerald-300">{health.done}</p>
+                <p class="mt-1 font-serif text-xl font-590 text-emerald-300">{health.done}</p>
               </div>
             </div>
 

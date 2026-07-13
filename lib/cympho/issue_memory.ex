@@ -39,6 +39,23 @@ defmodule Cympho.IssueMemory do
 
   @memory_categories [:delivery, :review, :owner_update, :handoff, :blocked, :decision]
 
+  # Precompile one regex per field label — `extract_fields/1` probes every
+  # label per comment, and rebuilding + recompiling these on each call is
+  # pure waste on the hot prompt-assembly path.
+  @field_labels_alternation @field_labels
+                            |> Enum.sort_by(&String.length/1, :desc)
+                            |> Enum.map_join("|", &Regex.escape/1)
+
+  @field_start ~S/(?:^|[\r\n]|(?<![[:alnum:]])[ \t])/
+
+  @field_regexes Map.new(@field_labels, fn label ->
+                   {label,
+                    Regex.compile!(
+                      "#{@field_start}#{Regex.escape(label)}:\\s*(.*?)(?=#{@field_start}(?:#{@field_labels_alternation}):|\\z)",
+                      "is"
+                    )}
+                 end)
+
   def build(issue, runs \\ [], work_products \\ [], child_issues \\ [], agents \\ []) do
     comments = issue |> comments_for_issue() |> Enum.reject(&auto_nudge_system_comment?/1)
 
@@ -518,15 +535,8 @@ defmodule Cympho.IssueMemory do
   end
 
   defp extract_field(body, label) do
-    labels =
-      @field_labels
-      |> Enum.sort_by(&String.length/1, :desc)
-      |> Enum.map(&Regex.escape/1)
-      |> Enum.join("|")
-
-    field_start = ~S/(?:^|[\r\n]|(?<![[:alnum:]])[ \t])/
-
-    ~r/#{field_start}#{Regex.escape(label)}:\s*(.*?)(?=#{field_start}(?:#{labels}):|\z)/is
+    @field_regexes
+    |> Map.fetch!(label)
     |> Regex.run(body, capture: :all_but_first)
     |> case do
       [value] -> compact(value, 240)

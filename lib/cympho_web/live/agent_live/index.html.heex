@@ -1,411 +1,434 @@
-<.page size="wide" data-ui-complex-page>
-  <.header title={@page_title}>
-    <p class="ui-advanced-only mt-1 max-w-2xl text-body-sm text-text-tertiary">
-      Autonomous operators, runtime health, and execution capacity.
-    </p>
-    <:actions>
-      <.app_link
-        navigate={~p"/org-chart"}
-        class="ui-advanced-only inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-      >
-        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
-          />
-        </svg>
-        Org Chart
-      </.app_link>
-      <.app_link
-        navigate={~p"/agents/remote"}
-        class="ui-advanced-only inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-      >
-        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z"
-          />
-        </svg>
-        Hire Remote
-      </.app_link>
-      <.app_link
-        navigate={~p"/agents/new"}
-        class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary hover:bg-accent-hover"
-      >
-        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M12 4v16m8-8H4"
-          />
-        </svg>
-        New Agent
-      </.app_link>
-    </:actions>
-  </.header>
-
-  <div
-    :if={@flash && @flash[:info]}
-    class="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"
-  >
-    {@flash[:info]}
-  </div>
-
-  <div
-    :if={@flash && @flash[:error]}
-    class="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300"
-  >
-    {@flash[:error]}
-  </div>
-
-  <div class="ui-simple-only stagger-children mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-    <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-      <span class="ui-simple-icon">
-        <span class="hero-play-mini h-4 w-4"></span>
-      </span>
-      <span class="min-w-0">
-        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Running
-        </span>
-        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-          {@status_counts[:running] || 0} working now
-        </span>
-      </span>
-    </div>
-    <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-      <span class="ui-simple-icon">
-        <span class="hero-moon-mini h-4 w-4"></span>
-      </span>
-      <span class="min-w-0">
-        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Idle
-        </span>
-        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-          {@status_counts[:idle] || 0} ready for work
-        </span>
-      </span>
-    </div>
-    <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
-      <span class="ui-simple-icon">
-        <span class="hero-exclamation-triangle-mini h-4 w-4"></span>
-      </span>
-      <span class="min-w-0">
-        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Needs attention
-        </span>
-        <span class={[
-          "mt-0.5 block truncate text-sm font-590",
-          if((@status_counts[:error] || 0) > 0, do: "text-brand", else: "text-text-primary")
-        ]}>
-          {@status_counts[:error] || 0} in error
-        </span>
-      </span>
-    </div>
-    <a
-      href={~p"/operations#runtime-staffing-gaps"}
-      class="ui-simple-card group flex min-w-0 items-center gap-3 px-3 py-3 transition hover:border-border-hover hover:bg-surface-hover"
-    >
-      <span class="ui-simple-icon">
-        <span class="hero-user-group-mini h-4 w-4"></span>
-      </span>
-      <span class="min-w-0">
-        <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Coverage
-        </span>
-        <span class="mt-0.5 block truncate text-sm font-590 text-text-primary group-hover:text-brand">
-          {(@org_health && @org_health.label) || "No queued work"}
-        </span>
-      </span>
-    </a>
-  </div>
-
-  <div class="ui-advanced-only mb-4 grid grid-cols-2 gap-3 md:grid-cols-5">
-    <.metric label="Idle" value={@status_counts[:idle] || 0} />
-    <.metric label="Running" value={@status_counts[:running] || 0} tone="brand" />
-    <.metric label="Error" value={@status_counts[:error] || 0} tone="danger" />
-    <.metric
-      label="Paused"
-      value={(@status_counts[:sleeping] || 0) + (@status_counts[:paused] || 0)}
-      tone="warning"
-    />
-    <.metric
-      label="Stopped"
-      value={(@status_counts[:offline] || 0) + (@status_counts[:terminated] || 0)}
-    />
-  </div>
-
-  <.panel
-    :if={@org_health}
-    id="agent-role-coverage"
-    data-testid="agent-role-coverage"
-    class="ui-advanced-only mb-4 overflow-hidden"
-  >
-    <div class="flex flex-col gap-4 px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
+<.page size="wide" data-ui-complex-page class="ember-aurora">
+  <div class="relative z-[1]">
+    <.header>
       <div class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            Role coverage
-          </p>
-          <span class={"inline-flex rounded-full border px-2 py-0.5 text-[11px] font-510 #{org_health_badge_class(@org_health.level)}"}>
-            {@org_health.label}
-          </span>
-        </div>
-        <h2 class="mt-1 text-base font-590 text-text-primary">
-          Team coverage for queued autonomous work
-        </h2>
-        <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
-          {@org_health.summary}
+        <span class="ember-eyebrow">
+          Roster · {@status_counts[:running] || 0} running now
+        </span>
+        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+          {@page_title}
+        </h1>
+        <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+          Autonomous operators, runtime health, and execution capacity.
         </p>
       </div>
-
-      <div class="flex flex-wrap gap-2">
-        <.app_link
-          navigate={~p"/operations#runtime-staffing-gaps"}
-          class="inline-flex items-center justify-center rounded-md border border-border bg-panel px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
-        >
-          Open staffing view
-        </.app_link>
-        <.app_link
-          :if={@org_health.role_demand_gaps != []}
-          navigate={
-            ~p"/agents/new?#{new_agent_query_for_gap(List.first(@org_health.role_demand_gaps))}"
-          }
-          class="inline-flex items-center justify-center rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-590 text-amber-100 transition-colors hover:bg-amber-500/15"
-        >
-          {first_staffing_gap_label(@org_health)}
-        </.app_link>
-      </div>
-    </div>
-
-    <div class="grid border-t border-border bg-panel/40 text-sm md:grid-cols-4">
-      <div class="border-b border-border px-4 py-3 md:border-b-0 md:border-r">
-        <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Active agents
-        </p>
-        <p class="mt-1 font-mono text-2xl font-590 text-text-primary">
-          {@org_health.metrics.total_agents}
-        </p>
-      </div>
-      <div class="border-b border-border px-4 py-3 md:border-b-0 md:border-r">
-        <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Unstaffed roles
-        </p>
-        <p class="mt-1 font-mono text-2xl font-590 text-text-primary">
-          {@org_health.metrics.role_demand_gaps}
-        </p>
-      </div>
-      <div class="border-b border-border px-4 py-3 md:border-b-0 md:border-r">
-        <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Waiting issues
-        </p>
-        <p class="mt-1 font-mono text-2xl font-590 text-text-primary">
-          {@org_health.metrics.unstaffed_role_issues}
-        </p>
-      </div>
-      <div class="px-4 py-3">
-        <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-          Adapter risk
-        </p>
-        <p class="mt-1 font-mono text-2xl font-590 text-text-primary">
-          {@org_health.metrics.degraded_agents}
-        </p>
-      </div>
-    </div>
-
-    <div
-      :if={@org_health.role_demand_gaps == []}
-      class="border-t border-border px-4 py-3 text-sm text-text-tertiary"
-    >
-      Queued work has active role coverage.
-    </div>
-
-    <div
-      :if={@org_health.role_demand_gaps != []}
-      class="divide-y divide-amber-500/15 border-t border-amber-500/20 bg-amber-500/[0.04]"
-    >
-      <div
-        :for={gap <- @org_health.role_demand_gaps}
-        class="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center"
-      >
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <p class="text-sm font-590 text-text-primary">{gap.label}</p>
-            <span class={"rounded-full border px-2 py-0.5 text-[10px] font-510 #{org_metric_tone_class(:warning)}"}>
-              {gap.open_issues} open {plural_noun(gap.open_issues, "issue")}
-            </span>
-            <span
-              :if={gap.suggested_parent}
-              class="rounded-full border border-border bg-panel px-2 py-0.5 text-[10px] font-510 text-text-tertiary"
-            >
-              Reports to {gap.suggested_parent.name}
-            </span>
-          </div>
-
-          <div :if={gap.examples != []} class="mt-2 flex max-w-4xl flex-wrap gap-1.5">
-            <.app_link
-              :for={example <- gap.examples}
-              navigate={~p"/issues/#{example.id}"}
-              class="max-w-full truncate rounded-md border border-border bg-canvas px-2 py-1 text-[11px] text-text-tertiary transition hover:border-brand/40 hover:text-brand"
-              title={issue_example_label(example)}
-            >
-              {issue_example_label(example)}
-            </.app_link>
-          </div>
-        </div>
-
-        <.app_link
-          navigate={~p"/agents/new?#{new_agent_query_for_gap(gap)}"}
-          class="inline-flex items-center justify-center rounded-md border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-590 text-brand transition hover:border-brand/50 hover:bg-brand/15"
-        >
-          Hire {gap.label}
-        </.app_link>
-      </div>
-    </div>
-  </.panel>
-
-  <.panel :if={Enum.empty?(@agents)}>
-    <.empty_state
-      title="No agents yet"
-      message="Create the CEO, CTO, and engineering operators that run the company."
-    >
       <:actions>
         <.app_link
-          navigate={~p"/agents/new"}
-          class="cta-glow rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary hover:bg-accent-hover"
+          navigate={~p"/org-chart"}
+          class="ui-advanced-only inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
         >
-          Create agent
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
+            />
+          </svg>
+          Org Chart
+        </.app_link>
+        <.app_link
+          navigate={~p"/agents/remote"}
+          class="ui-advanced-only inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+        >
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z"
+            />
+          </svg>
+          Hire Remote
+        </.app_link>
+        <.app_link
+          navigate={~p"/agents/new"}
+          class="inline-flex items-center gap-2 cta-glow rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary hover:bg-accent-hover"
+        >
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 4v16m8-8H4"
+            />
+          </svg>
+          New Agent
         </.app_link>
       </:actions>
-    </.empty_state>
-  </.panel>
+    </.header>
 
-  <div :if={!Enum.empty?(@agents)} class="space-y-4">
-    <.panel
-      :for={{group, agents} <- agent_groups(@agents)}
-      class="overflow-visible"
+    <div
+      :if={@flash && @flash[:info]}
+      class="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success"
     >
-      <div class="flex items-center justify-between border-b border-border px-4 py-3">
-        <div>
-          <h2 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-            {role_label(group)}
+      {@flash[:info]}
+    </div>
+
+    <div
+      :if={@flash && @flash[:error]}
+      class="mb-4 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300"
+    >
+      {@flash[:error]}
+    </div>
+
+    <div class="ui-simple-only stagger-children mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
+        <span class="ui-simple-icon">
+          <span class="hero-play-mini h-4 w-4"></span>
+        </span>
+        <span class="min-w-0">
+          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+            Running
+          </span>
+          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
+            {@status_counts[:running] || 0} working now
+          </span>
+        </span>
+      </div>
+      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
+        <span class="ui-simple-icon">
+          <span class="hero-moon-mini h-4 w-4"></span>
+        </span>
+        <span class="min-w-0">
+          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+            Idle
+          </span>
+          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
+            {@status_counts[:idle] || 0} ready for work
+          </span>
+        </span>
+      </div>
+      <div class="ui-simple-card flex min-w-0 items-center gap-3 px-3 py-3">
+        <span class="ui-simple-icon">
+          <span class="hero-exclamation-triangle-mini h-4 w-4"></span>
+        </span>
+        <span class="min-w-0">
+          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+            Needs attention
+          </span>
+          <span class={[
+            "mt-0.5 block truncate text-sm font-590",
+            if((@status_counts[:error] || 0) > 0, do: "text-brand", else: "text-text-primary")
+          ]}>
+            {@status_counts[:error] || 0} in error
+          </span>
+        </span>
+      </div>
+      <a
+        href={~p"/operations#runtime-staffing-gaps"}
+        class="ui-simple-card group flex min-w-0 items-center gap-3 px-3 py-3 transition hover:border-border-hover hover:bg-surface-hover"
+      >
+        <span class="ui-simple-icon">
+          <span class="hero-user-group-mini h-4 w-4"></span>
+        </span>
+        <span class="min-w-0">
+          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+            Coverage
+          </span>
+          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary group-hover:text-brand">
+            {(@org_health && @org_health.label) || "No queued work"}
+          </span>
+        </span>
+      </a>
+    </div>
+
+    <div class="ui-advanced-only stagger-children mb-4 grid grid-cols-2 gap-3 md:grid-cols-5">
+      <.metric class="ember-stat" label="Idle" value={@status_counts[:idle] || 0} />
+      <.metric
+        class="ember-stat"
+        label="Running"
+        value={@status_counts[:running] || 0}
+        tone="brand"
+      />
+      <.metric class="ember-stat" label="Error" value={@status_counts[:error] || 0} tone="danger" />
+      <.metric
+        class="ember-stat"
+        label="Paused"
+        value={(@status_counts[:sleeping] || 0) + (@status_counts[:paused] || 0)}
+        tone="warning"
+      />
+      <.metric
+        class="ember-stat"
+        label="Stopped"
+        value={(@status_counts[:offline] || 0) + (@status_counts[:terminated] || 0)}
+      />
+    </div>
+
+    <.panel
+      :if={@org_health}
+      id="agent-role-coverage"
+      data-testid="agent-role-coverage"
+      class="ui-advanced-only ember-glass mb-4 overflow-hidden"
+    >
+      <div class="flex flex-col gap-4 px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Role coverage
+            </p>
+            <span class={"inline-flex rounded-full border px-2 py-0.5 text-[11px] font-510 #{org_health_badge_class(@org_health.level)}"}>
+              {@org_health.label}
+            </span>
+          </div>
+          <h2 class="mt-1 text-base font-590 text-text-primary">
+            Team coverage for queued autonomous work
           </h2>
-          <p class="mt-0.5 text-xs text-text-quaternary">{length(agents)} agent(s)</p>
+          <p class="mt-1 max-w-3xl text-sm leading-5 text-text-tertiary">
+            {@org_health.summary}
+          </p>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <.app_link
+            navigate={~p"/operations#runtime-staffing-gaps"}
+            class="inline-flex items-center justify-center rounded-md border border-border bg-panel px-3 py-2 text-xs font-510 text-text-secondary transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+          >
+            Open staffing view
+          </.app_link>
+          <.app_link
+            :if={@org_health.role_demand_gaps != []}
+            navigate={
+              ~p"/agents/new?#{new_agent_query_for_gap(List.first(@org_health.role_demand_gaps))}"
+            }
+            class="inline-flex items-center justify-center rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-590 text-amber-100 transition-colors hover:bg-amber-500/15"
+          >
+            {first_staffing_gap_label(@org_health)}
+          </.app_link>
         </div>
       </div>
 
-      <div class="ui-advanced-only hidden gap-4 border-b border-border bg-panel/70 px-4 py-2 text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary lg:flex lg:items-center">
-        <span class="lg:w-[240px] lg:shrink-0">Agent</span>
-        <span class="lg:w-[110px] lg:shrink-0">Status</span>
-        <div class="grid min-w-0 flex-1 gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,0.8fr)]">
-          <span>Health</span>
-          <span>Adapter</span>
-          <span>Runtime</span>
-          <span>Heartbeat</span>
+      <div class="grid border-t border-border bg-panel/40 text-sm md:grid-cols-4">
+        <div class="ember-stat border-b border-border px-4 py-3 md:border-b-0 md:border-r">
+          <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+            Active agents
+          </p>
+          <p class="mt-1 font-serif text-2xl font-590 tabular-nums text-text-primary">
+            {@org_health.metrics.total_agents}
+          </p>
         </div>
-        <span class="w-[92px] shrink-0 text-right">Actions</span>
+        <div class="ember-stat border-b border-border px-4 py-3 md:border-b-0 md:border-r">
+          <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+            Unstaffed roles
+          </p>
+          <p class="mt-1 font-serif text-2xl font-590 tabular-nums text-text-primary">
+            {@org_health.metrics.role_demand_gaps}
+          </p>
+        </div>
+        <div class="ember-stat border-b border-border px-4 py-3 md:border-b-0 md:border-r">
+          <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+            Waiting issues
+          </p>
+          <p class="mt-1 font-serif text-2xl font-590 tabular-nums text-text-primary">
+            {@org_health.metrics.unstaffed_role_issues}
+          </p>
+        </div>
+        <div class="ember-stat px-4 py-3">
+          <p class="text-[11px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+            Adapter risk
+          </p>
+          <p class="mt-1 font-serif text-2xl font-590 tabular-nums text-text-primary">
+            {@org_health.metrics.degraded_agents}
+          </p>
+        </div>
       </div>
 
       <div
-        :for={agent <- agents}
-        id={"agent-row-#{agent.id}"}
-        data-testid={"agent-row-#{agent.id}"}
-        class="group flex flex-col gap-3 border-b border-border px-4 py-3 last:border-b-0 hover:bg-surface-hover/60 lg:flex-row lg:items-center lg:gap-4"
+        :if={@org_health.role_demand_gaps == []}
+        class="border-t border-border px-4 py-3 text-sm text-text-tertiary"
       >
-        <.app_link navigate={~p"/agents/#{agent.id}"} class="min-w-0 lg:w-[240px] lg:shrink-0">
-          <div class="flex min-w-0 items-center gap-3">
-            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-gradient-to-br from-brand/20 to-brand/5 text-xs font-590 text-brand">
-              {agent_initials(agent)}
+        Queued work has active role coverage.
+      </div>
+
+      <div
+        :if={@org_health.role_demand_gaps != []}
+        class="divide-y divide-amber-500/15 border-t border-amber-500/20 bg-amber-500/[0.04]"
+      >
+        <div
+          :for={gap <- @org_health.role_demand_gaps}
+          class="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center"
+        >
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <p class="text-sm font-590 text-text-primary">{gap.label}</p>
+              <span class={"rounded-full border px-2 py-0.5 text-[10px] font-510 #{org_metric_tone_class(:warning)}"}>
+                {gap.open_issues} open {plural_noun(gap.open_issues, "issue")}
+              </span>
+              <span
+                :if={gap.suggested_parent}
+                class="rounded-full border border-border bg-panel px-2 py-0.5 text-[10px] font-510 text-text-tertiary"
+              >
+                Reports to {gap.suggested_parent.name}
+              </span>
             </div>
-            <div class="min-w-0">
-              <p class="truncate text-sm font-590 text-text-primary">{agent.name}</p>
-              <p class="mt-0.5 truncate text-xs text-text-tertiary">
-                {agent.title || "Role: #{role_label(agent.role)}"}
-              </p>
+
+            <div :if={gap.examples != []} class="mt-2 flex max-w-4xl flex-wrap gap-1.5">
+              <.app_link
+                :for={example <- gap.examples}
+                navigate={~p"/issues/#{example.id}"}
+                class="max-w-full truncate rounded-md border border-border bg-canvas px-2 py-1 text-[11px] text-text-tertiary transition hover:border-brand/40 hover:text-brand"
+                title={issue_example_label(example)}
+              >
+                {issue_example_label(example)}
+              </.app_link>
             </div>
           </div>
-        </.app_link>
 
-        <div class="lg:w-[110px] lg:shrink-0">
-          <span class={"inline-flex rounded-full border px-2 py-0.5 text-xs font-510 #{status_pill_class(agent.status)}"}>
-            {status_label(agent.status)}
-          </span>
-        </div>
-
-        <div class="ui-advanced-only grid min-w-0 flex-1 gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,0.8fr)] lg:items-center lg:gap-4">
-          <div>
-            <span class={"inline-flex rounded-full border px-2 py-0.5 text-xs font-510 #{health_pill_class(agent.health_status)}"}>
-              {agent.health_status |> to_string() |> String.replace("_", " ")}
-            </span>
-          </div>
-
-          <div class="truncate text-xs text-text-tertiary">
-            {adapter_label(Map.get(agent, :adapter))}
-          </div>
-
-          <div class="min-w-0 text-xs">
-            <p class="truncate font-mono text-text-secondary">{runtime_command(agent)}</p>
-            <p class="mt-0.5 truncate text-text-quaternary">{runtime_model(agent)}</p>
-          </div>
-
-          <div class="text-xs text-text-quaternary">
-            {format_heartbeat(agent)}
-          </div>
-        </div>
-
-        <div class="flex justify-end lg:ml-auto lg:w-[92px] lg:shrink-0">
-          <.overflow_menu
-            label={"Manage #{agent.name}"}
-            trigger_text="Manage"
-            data-testid={"agent-manage-menu-#{agent.id}"}
+          <.app_link
+            navigate={~p"/agents/new?#{new_agent_query_for_gap(gap)}"}
+            class="inline-flex items-center justify-center rounded-md border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-590 text-brand transition hover:border-brand/50 hover:bg-brand/15"
           >
-            <.menu_item navigate={~p"/agents/#{agent.id}"}>View profile</.menu_item>
-            <.menu_item navigate={~p"/agents/#{agent.id}/edit"}>Edit settings</.menu_item>
-            <.menu_item
-              :if={agent.status == :running}
-              phx-click="kill_session"
-              phx-value-id={agent.id}
-              data-confirm="Stop this agent's session?"
-            >
-              Stop session
-            </.menu_item>
-            <.menu_item
-              :if={agent.status == :idle}
-              phx-click="pause_agent"
-              phx-value-id={agent.id}
-            >
-              Pause
-            </.menu_item>
-            <.menu_item
-              :if={agent.status in [:sleeping, :paused]}
-              phx-click="resume_agent"
-              phx-value-id={agent.id}
-            >
-              Resume
-            </.menu_item>
-            <.menu_item
-              danger
-              phx-click="terminate_agent"
-              phx-value-id={agent.id}
-              data-confirm="Terminate this agent? This will stop any running sessions."
-            >
-              Terminate
-            </.menu_item>
-            <.menu_item
-              danger
-              phx-click="delete_agent"
-              phx-value-id={agent.id}
-              data-confirm="Delete this agent?"
-            >
-              Delete
-            </.menu_item>
-          </.overflow_menu>
+            Hire {gap.label}
+          </.app_link>
         </div>
       </div>
     </.panel>
+
+    <.panel :if={Enum.empty?(@agents)}>
+      <.empty_state
+        title="No agents yet"
+        message="Create the CEO, CTO, and engineering operators that run the company."
+      >
+        <:actions>
+          <.app_link
+            navigate={~p"/agents/new"}
+            class="cta-glow rounded-button bg-brand px-3 py-2 text-sm font-590 text-on-primary hover:bg-accent-hover"
+          >
+            Create agent
+          </.app_link>
+        </:actions>
+      </.empty_state>
+    </.panel>
+
+    <div :if={!Enum.empty?(@agents)} class="stagger-children space-y-4">
+      <.panel
+        :for={{group, agents} <- agent_groups(@agents)}
+        class="overflow-visible"
+      >
+        <div class="flex items-center justify-between border-b border-border px-4 py-3">
+          <div>
+            <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              {role_label(group)}
+            </h2>
+            <p class="mt-0.5 text-xs text-text-quaternary">{length(agents)} agent(s)</p>
+          </div>
+        </div>
+
+        <div class="ui-advanced-only hidden gap-4 border-b border-border bg-panel/70 px-4 py-2 text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary lg:flex lg:items-center">
+          <span class="lg:w-[240px] lg:shrink-0">Agent</span>
+          <span class="lg:w-[110px] lg:shrink-0">Status</span>
+          <div class="grid min-w-0 flex-1 gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,0.8fr)]">
+            <span>Health</span>
+            <span>Adapter</span>
+            <span>Runtime</span>
+            <span>Heartbeat</span>
+          </div>
+          <span class="w-[92px] shrink-0 text-right">Actions</span>
+        </div>
+
+        <div
+          :for={agent <- agents}
+          id={"agent-row-#{agent.id}"}
+          data-testid={"agent-row-#{agent.id}"}
+          class="group flex flex-col gap-3 border-b border-border px-4 py-3 transition-colors last:border-b-0 hover:border-border-hover hover:bg-subtle hover:shadow-[inset_2px_0_0_0_var(--color-primary)] lg:flex-row lg:items-center lg:gap-4"
+        >
+          <.app_link navigate={~p"/agents/#{agent.id}"} class="min-w-0 lg:w-[240px] lg:shrink-0">
+            <div class="flex min-w-0 items-center gap-3">
+              <div class={"flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-white/[0.06] to-transparent ring-1 ring-border font-serif text-xs font-590 #{role_avatar_class(agent.role)}"}>
+                {agent_initials(agent)}
+              </div>
+              <div class="min-w-0">
+                <p class="truncate text-sm font-590 text-text-primary">{agent.name}</p>
+                <p class="mt-0.5 truncate text-xs text-text-tertiary">
+                  {agent.title || "Role: #{role_label(agent.role)}"}
+                </p>
+              </div>
+            </div>
+          </.app_link>
+
+          <div class="lg:w-[110px] lg:shrink-0">
+            <span class={"inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-510 #{status_pill_class(agent.status)}"}>
+              <span class={[
+                "h-1.5 w-1.5 shrink-0 rounded-full",
+                agent.status == :running && "cympho-pulse-dot",
+                status_dot_class(agent.status)
+              ]}>
+              </span>
+              {status_label(agent.status)}
+            </span>
+          </div>
+
+          <div class="ui-advanced-only grid min-w-0 flex-1 gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.4fr)_minmax(0,0.8fr)] lg:items-center lg:gap-4">
+            <div>
+              <span class={"inline-flex rounded-full border px-2 py-0.5 text-xs font-510 #{health_pill_class(agent.health_status)}"}>
+                {agent.health_status |> to_string() |> String.replace("_", " ")}
+              </span>
+            </div>
+
+            <div class="truncate text-xs text-text-tertiary">
+              {adapter_label(Map.get(agent, :adapter))}
+            </div>
+
+            <div class="min-w-0 text-xs">
+              <p class="truncate font-mono text-text-secondary">{runtime_command(agent)}</p>
+              <p class="mt-0.5 truncate text-text-quaternary">{runtime_model(agent)}</p>
+            </div>
+
+            <div class="text-xs text-text-quaternary">
+              {format_heartbeat(agent)}
+            </div>
+          </div>
+
+          <div class="flex justify-end lg:ml-auto lg:w-[92px] lg:shrink-0">
+            <.overflow_menu
+              label={"Manage #{agent.name}"}
+              trigger_text="Manage"
+              data-testid={"agent-manage-menu-#{agent.id}"}
+            >
+              <.menu_item navigate={~p"/agents/#{agent.id}"}>View profile</.menu_item>
+              <.menu_item navigate={~p"/agents/#{agent.id}/edit"}>Edit settings</.menu_item>
+              <.menu_item
+                :if={agent.status == :running}
+                phx-click="kill_session"
+                phx-value-id={agent.id}
+                data-confirm="Stop this agent's session?"
+              >
+                Stop session
+              </.menu_item>
+              <.menu_item
+                :if={agent.status == :idle}
+                phx-click="pause_agent"
+                phx-value-id={agent.id}
+              >
+                Pause
+              </.menu_item>
+              <.menu_item
+                :if={agent.status in [:sleeping, :paused]}
+                phx-click="resume_agent"
+                phx-value-id={agent.id}
+              >
+                Resume
+              </.menu_item>
+              <.menu_item
+                danger
+                phx-click="terminate_agent"
+                phx-value-id={agent.id}
+                data-confirm="Terminate this agent? This will stop any running sessions."
+              >
+                Terminate
+              </.menu_item>
+              <.menu_item
+                danger
+                phx-click="delete_agent"
+                phx-value-id={agent.id}
+                data-confirm="Delete this agent?"
+              >
+                Delete
+              </.menu_item>
+            </.overflow_menu>
+          </div>
+        </div>
+      </.panel>
+    </div>
   </div>
 </.page>

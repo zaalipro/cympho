@@ -15,10 +15,13 @@ defmodule Cympho.HeartbeatEngine do
   import Ecto.Query, warn: false
   alias Cympho.Repo
   alias Cympho.Adapters.Error, as: AdapterError
+  alias Cympho.Budgets.Budget
   alias Cympho.HeartbeatEngine.Run
   alias Cympho.{Agents, Issues, Workspace}
   alias Cympho.Issues.Issue
   require Logger
+
+  @active_run_statuses ~w(pending queued running)
 
   @default_budget_allocation Decimal.new("5.00")
   @stale_threshold_minutes 15
@@ -46,10 +49,16 @@ defmodule Cympho.HeartbeatEngine do
   @doc """
   Transitions a pending run to running. Resolves workspace and injects secrets.
   """
-  @spec start_run(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | atom()}
+  @spec start_run(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
   def start_run(%Run{status: "pending"} = run) do
     with {:ok, workspace_path} <- resolve_workspace(run),
-         {:ok, run} <- apply_start(run, workspace_path) do
+         {:ok, run} <-
+           finalize_run(run, ["pending"], fn current ->
+             Run.start_changeset(current, %{
+               workspace_path: workspace_path,
+               budget_allocated: @default_budget_allocation
+             })
+           end) do
       log_audit(run, "run_started")
       CymphoWeb.Events.broadcast_run_status(run, :run_started)
       {:ok, run}
@@ -61,11 +70,10 @@ defmodule Cympho.HeartbeatEngine do
   @doc """
   Records a successful completion. Updates costs, tokens, and continuation summary.
   """
-  @spec complete_run(Run.t(), map()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t()}
+  @spec complete_run(Run.t(), map()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
   def complete_run(%Run{status: "running"} = run, result_attrs) do
     run
-    |> Run.complete_changeset(result_attrs)
-    |> Repo.update()
+    |> finalize_run(["running"], &Run.complete_changeset(&1, result_attrs))
     |> tap_ok(fn updated ->
       release_terminal_run_checkout(updated)
       log_audit(updated, "run_completed")
@@ -80,18 +88,19 @@ defmodule Cympho.HeartbeatEngine do
   @doc """
   Marks a run as failed with an error reason.
   """
-  @spec fail_run(Run.t(), term()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t()}
+  @spec fail_run(Run.t(), term()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
   def fail_run(%Run{status: "running"} = run, error_reason) do
-    attrs =
-      AdapterError.run_attrs(error_reason, run.run_metadata || %{},
-        adapter: run.adapter,
-        detail: run.log_excerpt
-      )
-      |> Map.take([:error_reason, :log_excerpt, :run_metadata])
-
     run
-    |> Run.fail_changeset(attrs)
-    |> Repo.update()
+    |> finalize_run(["running"], fn current ->
+      attrs =
+        AdapterError.run_attrs(error_reason, current.run_metadata || %{},
+          adapter: current.adapter,
+          detail: current.log_excerpt
+        )
+        |> Map.take([:error_reason, :log_excerpt, :run_metadata])
+
+      Run.fail_changeset(current, attrs)
+    end)
     |> tap_ok(fn updated ->
       release_terminal_run_checkout(updated)
       log_audit(updated, "run_failed")
@@ -103,12 +112,24 @@ defmodule Cympho.HeartbeatEngine do
 
   @doc """
   Records a heartbeat tick on an active run for liveness tracking.
+
+  Guarded by run status in SQL so a heartbeat racing a terminal transition
+  (watchdog recovery, completion) cannot re-touch a finished run.
   """
-  @spec record_heartbeat(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t()}
+  @spec record_heartbeat(Run.t()) :: {:ok, Run.t()}
   def record_heartbeat(%Run{status: "running"} = run) do
-    run
-    |> Run.heartbeat_changeset()
-    |> Repo.update()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {count, _} =
+      Run
+      |> where([r], r.id == ^run.id and r.status == "running")
+      |> Repo.update_all(set: [last_heartbeat_at: now])
+
+    if count == 1 do
+      {:ok, %{run | last_heartbeat_at: now}}
+    else
+      {:ok, run}
+    end
   end
 
   def record_heartbeat(%Run{} = run), do: {:ok, run}
@@ -116,13 +137,14 @@ defmodule Cympho.HeartbeatEngine do
   @doc """
   Cancels a run that is pending or running.
   """
-  @spec cancel_run(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t()}
+  @spec cancel_run(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
   def cancel_run(%Run{status: status} = run) when status in ~w(pending queued running) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     run
-    |> change(%{status: "cancelled", completed_at: now, last_heartbeat_at: now})
-    |> Repo.update()
+    |> finalize_run(@active_run_statuses, fn current ->
+      change(current, %{status: "cancelled", completed_at: now, last_heartbeat_at: now})
+    end)
     |> tap_ok(fn updated ->
       release_terminal_run_checkout(updated)
       log_audit(updated, "run_cancelled")
@@ -284,13 +306,21 @@ defmodule Cympho.HeartbeatEngine do
   # Budget checks
   # ---------------------------------------------------------------------------
 
-  defp check_budget(agent, _issue_id) do
+  defp check_budget(agent, issue_id) do
     budget = get_agent_budget(agent)
 
-    if budget == nil or Decimal.compare(budget.remaining, @default_budget_allocation) != :lt do
+    if budget == nil or
+         Decimal.compare(Budget.available_amount(budget), @default_budget_allocation) != :lt do
       :ok
     else
-      Logger.warning("HeartbeatEngine: budget exhausted for agent #{agent.id}")
+      Logger.warning("HeartbeatEngine: budget exhausted, blocking run creation",
+        agent_id: agent.id,
+        issue_id: issue_id,
+        component: "heartbeat_engine",
+        budget_id: budget.id,
+        budget_remaining: Decimal.to_string(Budget.available_amount(budget))
+      )
+
       {:error, :budget_exhausted}
     end
   end
@@ -299,7 +329,16 @@ defmodule Cympho.HeartbeatEngine do
     budgets = Cympho.Budgets.list_budgets(scope_type: "agent", scope_id: agent.id)
     Enum.find(budgets, &(&1.status == "active"))
   rescue
-    _ -> nil
+    error ->
+      # A broken budget read must not block the run (fail-open for liveness),
+      # but it must leave an operator signal instead of vanishing silently.
+      Logger.error("HeartbeatEngine: budget lookup failed, allowing run",
+        agent_id: agent.id,
+        component: "heartbeat_engine",
+        error: inspect(error)
+      )
+
+      nil
   end
 
   # ---------------------------------------------------------------------------
@@ -393,6 +432,43 @@ defmodule Cympho.HeartbeatEngine do
   end
 
   @doc """
+  Counts running runs for a company whose heartbeat is older than the threshold.
+
+  Cheap aggregate for readiness/health surfaces polled on an interval — avoids
+  hydrating run structs when only the backlog size matters.
+  """
+  @spec count_stale_runs_for_company(String.t(), pos_integer()) :: non_neg_integer()
+  def count_stale_runs_for_company(company_id, threshold_minutes \\ @stale_threshold_minutes)
+      when is_binary(company_id) do
+    threshold_minutes
+    |> stale_runs_query()
+    |> exclude(:order_by)
+    |> exclude(:limit)
+    |> where([r], r.company_id == ^company_id)
+    |> select([r], count(r.id))
+    |> Repo.one()
+  end
+
+  @doc """
+  Counts pending or queued runs for a company that never started within the threshold.
+  """
+  @spec count_stale_waiting_runs_for_company(String.t(), pos_integer()) :: non_neg_integer()
+  def count_stale_waiting_runs_for_company(
+        company_id,
+        threshold_minutes \\ @stale_threshold_minutes
+      )
+      when is_binary(company_id) do
+    threshold = DateTime.add(DateTime.utc_now(), -threshold_minutes * 60, :second)
+
+    Run
+    |> where([r], r.company_id == ^company_id)
+    |> where([r], r.status in ["pending", "queued"])
+    |> where([r], r.inserted_at < ^threshold)
+    |> select([r], count(r.id))
+    |> Repo.one()
+  end
+
+  @doc """
   Finds pending or queued runs that never started within the threshold.
   """
   @spec find_stale_waiting_runs_for_company(String.t(), pos_integer()) :: [Run.t()]
@@ -414,19 +490,25 @@ defmodule Cympho.HeartbeatEngine do
 
   @doc """
   Recovers a stale run by marking it failed and optionally re-queuing.
+
+  Uses a compare-and-swap on run status so recovery racing a genuinely
+  finishing run cannot overwrite a completed/failed run. Returns
+  `{:error, {:invalid_status, status}}` when the run already reached a
+  terminal state.
   """
-  @spec recover_stale_run(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t()}
+  @spec recover_stale_run(Run.t()) :: {:ok, Run.t()} | {:error, Ecto.Changeset.t() | term()}
   def recover_stale_run(%Run{} = run) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     run
-    |> change(%{
-      status: "failed",
-      error_reason: "stale_run_recovered",
-      completed_at: now,
-      last_heartbeat_at: now
-    })
-    |> Repo.update()
+    |> finalize_run(@active_run_statuses, fn current ->
+      change(current, %{
+        status: "failed",
+        error_reason: "stale_run_recovered",
+        completed_at: now,
+        last_heartbeat_at: now
+      })
+    end)
     |> tap_ok(fn updated ->
       release_terminal_run_checkout(updated)
       log_audit(updated, "run_recovered_stale")
@@ -530,15 +612,41 @@ defmodule Cympho.HeartbeatEngine do
   # Helpers
   # ---------------------------------------------------------------------------
 
-  defp apply_start(run, workspace_path) do
-    attrs = %{
-      workspace_path: workspace_path,
-      budget_allocated: @default_budget_allocation
-    }
+  # Compare-and-swap terminal transition: reloads the run under a row lock and
+  # only applies the changeset when the current status is still in
+  # `expected_statuses`. This makes watchdog recovery, cancellation, and normal
+  # completion mutually exclusive — the first writer wins and later racers get
+  # `{:error, {:invalid_status, status}}` instead of corrupting a finished run.
+  #
+  # Deliberately avoids `Repo.rollback` for the lost-race paths: callers such
+  # as agent-action batches invoke run finalization inside their own outer
+  # transaction, and a nested rollback would abort the whole batch instead of
+  # just reporting this run as already finished.
+  defp finalize_run(%Run{id: id}, expected_statuses, changeset_fun) do
+    result =
+      Repo.transaction(fn ->
+        current =
+          Run
+          |> where([r], r.id == ^id)
+          |> lock("FOR UPDATE")
+          |> Repo.one()
 
-    run
-    |> Run.start_changeset(attrs)
-    |> Repo.update()
+        cond do
+          is_nil(current) ->
+            {:error, :not_found}
+
+          current.status not in expected_statuses ->
+            {:error, {:invalid_status, current.status}}
+
+          true ->
+            Repo.update(changeset_fun.(current))
+        end
+      end)
+
+    case result do
+      {:ok, inner} -> inner
+      {:error, _reason} = error -> error
+    end
   end
 
   defp tap_ok({:ok, val}, fun) do

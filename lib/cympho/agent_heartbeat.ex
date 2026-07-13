@@ -27,10 +27,12 @@ defmodule Cympho.AgentHeartbeat do
           current_issue_id: String.t() | nil,
           started_at: DateTime.t() | nil,
           timer_ref: reference() | nil,
-          available_skills: list(map()) | nil
+          available_skills: list(map()) | nil,
+          wake_pending: boolean()
         }
 
   @default_heartbeat_interval :timer.seconds(60)
+  @min_heartbeat_interval :timer.seconds(5)
 
   def child_spec(opts) do
     %{
@@ -214,7 +216,7 @@ defmodule Cympho.AgentHeartbeat do
   def init(agent_id) do
     # Use default interval in init to avoid DB queries during startup.
     # Tests often exit before init completes, causing sandbox disconnect errors.
-    timer_ref = Process.send_after(self(), :heartbeat, @default_heartbeat_interval)
+    timer_ref = Process.send_after(self(), {:heartbeat, :timer}, @default_heartbeat_interval)
 
     Phoenix.PubSub.subscribe(
       Cympho.PubSub,
@@ -226,7 +228,8 @@ defmodule Cympho.AgentHeartbeat do
       status: :idle,
       current_issue_id: nil,
       started_at: nil,
-      timer_ref: timer_ref
+      timer_ref: timer_ref,
+      wake_pending: false
     }
 
     {:ok, state}
@@ -234,11 +237,48 @@ defmodule Cympho.AgentHeartbeat do
 
   @impl true
   def handle_info(:heartbeat, state) do
+    # External trigger (trigger_heartbeat/1 or a wake broadcast): an event
+    # happened, so nudging the dispatcher is warranted.
+    run_heartbeat(state, _event_triggered? = true)
+  end
+
+  @impl true
+  def handle_info({:heartbeat, :timer}, state) do
+    # Periodic tick: the dispatcher already self-polls on its own interval,
+    # so nudging it from every agent's timer tick just multiplies dispatcher
+    # poll load by the fleet size for no added liveness.
+    run_heartbeat(state, _event_triggered? = false)
+  end
+
+  @impl true
+  def handle_info(:shutdown, state) do
+    {:stop, :normal, state}
+  end
+
+  @impl true
+  def handle_info({:wakeup_enqueued, _agent_id, _wake}, state) do
+    # Coalesce wake bursts: one :heartbeat message per drain, no matter how
+    # many wakes were broadcast while it was queued.
+    if state.wake_pending do
+      {:noreply, state}
+    else
+      send(self(), :heartbeat)
+      {:noreply, %{state | wake_pending: true}}
+    end
+  end
+
+  defp run_heartbeat(state, event_triggered?) do
+    # Cancel any still-armed timer before rescheduling. Event-triggered
+    # heartbeats arrive out of band; without this cancel each wake would
+    # leave the old timer running and permanently add another heartbeat
+    # loop for this agent (timer multiplication).
+    cancel_heartbeat_timer(state.timer_ref)
+    state = %{state | timer_ref: nil, wake_pending: false}
     agent_id = state.agent_id
 
     cond do
       delegate_to_dispatcher?() and Process.whereis(Dispatcher) ->
-        _ = Dispatcher.poll_now()
+        if event_triggered?, do: _ = Dispatcher.poll_now()
         timer_ref = schedule_heartbeat(agent_id)
         {:noreply, %{state | timer_ref: timer_ref}}
 
@@ -251,21 +291,18 @@ defmodule Cympho.AgentHeartbeat do
     end
   end
 
-  @impl true
-  def handle_info(:shutdown, state) do
-    {:stop, :normal, state}
-  end
+  defp cancel_heartbeat_timer(nil), do: :ok
 
-  @impl true
-  def handle_info({:wakeup_enqueued, _agent_id, _wake}, state) do
-    send(self(), :heartbeat)
-    {:noreply, state}
+  defp cancel_heartbeat_timer(timer_ref) do
+    Process.cancel_timer(timer_ref)
+    :ok
   end
 
   defp do_heartbeat(state) do
     agent_id = state.agent_id
 
     with {:ok, agent} <- Agents.get_agent(agent_id),
+         {:ok, agent} <- maybe_recover_error_status(agent),
          :ok <- check_agent_runtime_available(agent) do
       do_heartbeat_for_available_agent(state, agent)
     else
@@ -278,6 +315,28 @@ defmodule Cympho.AgentHeartbeat do
         {:noreply, %{state | timer_ref: timer_ref}}
     end
   end
+
+  # A transient failure (orchestrator start error, adapter blip) marks the
+  # agent :error, and :error is in the runtime skip-list — without recovery
+  # the agent's own heartbeat would refuse to run forever: a permanent silent
+  # sleep, since nothing else resets :error automatically. Reset to :idle at
+  # most once per heartbeat tick so transient errors self-heal at a bounded
+  # retry rate. Persistent failures still trip the adapter circuit breaker
+  # into :paused, which is deliberately not auto-recovered.
+  defp maybe_recover_error_status(%{status: :error} = agent) do
+    Logger.info("[AgentHeartbeat] recovering agent from error status",
+      agent_id: agent.id,
+      company_id: agent.company_id,
+      component: "agent_heartbeat"
+    )
+
+    case Agents.update_agent(agent, %{status: :idle}) do
+      {:ok, recovered} -> {:ok, recovered}
+      {:error, _reason} -> {:skip, :error_status_recovery_failed}
+    end
+  end
+
+  defp maybe_recover_error_status(agent), do: {:ok, agent}
 
   defp do_heartbeat_for_available_agent(state, agent) do
     agent_id = state.agent_id
@@ -435,7 +494,7 @@ defmodule Cympho.AgentHeartbeat do
 
   defp schedule_heartbeat(agent_id) do
     interval = heartbeat_interval(agent_id)
-    Process.send_after(self(), :heartbeat, interval)
+    Process.send_after(self(), {:heartbeat, :timer}, interval)
   end
 
   defp delegate_to_dispatcher? do
@@ -448,7 +507,10 @@ defmodule Cympho.AgentHeartbeat do
     case Agents.get_agent(agent_id) do
       {:ok, agent} ->
         config = agent.heartbeat_config || %{}
-        Map.get(config, "interval_ms", @default_heartbeat_interval)
+
+        config
+        |> Map.get("interval_ms", @default_heartbeat_interval)
+        |> normalize_interval()
 
       {:error, _} ->
         @default_heartbeat_interval
@@ -457,6 +519,13 @@ defmodule Cympho.AgentHeartbeat do
     Ecto.Query.CastError ->
       @default_heartbeat_interval
   end
+
+  # A malformed `interval_ms` (zero, negative, or non-integer) must not crash
+  # the heartbeat loop or turn it into a hot spin — clamp to a sane floor.
+  defp normalize_interval(interval) when is_integer(interval) and interval > 0,
+    do: max(interval, @min_heartbeat_interval)
+
+  defp normalize_interval(_interval), do: @default_heartbeat_interval
 
   defp fetch_next_todo_issue(agent) do
     project_id = agent.project_id

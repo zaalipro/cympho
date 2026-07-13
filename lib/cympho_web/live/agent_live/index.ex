@@ -5,7 +5,7 @@ defmodule CymphoWeb.AgentLive.Index do
   alias Cympho.Agents.RuntimeEnv
   alias Cympho.OrgHealth
 
-  import CymphoWeb.Format, only: [status_pill_class: 1]
+  import CymphoWeb.Format, only: [status_pill_class: 1, role_avatar_class: 1]
 
   @impl true
   def mount(_params, session, socket) do
@@ -177,6 +177,13 @@ defmodule CymphoWeb.AgentLive.Index do
         {:noreply, put_flash(socket, :error, "Failed to terminate agent")}
     end
   end
+
+  def status_dot_class(:running), do: "bg-brand"
+  def status_dot_class(:active), do: "bg-success"
+  def status_dot_class(:idle), do: "bg-amber-300"
+  def status_dot_class(:error), do: "bg-red-400"
+  def status_dot_class(status) when status in [:sleeping, :paused], do: "bg-amber-300/60"
+  def status_dot_class(_), do: "bg-gray-500"
 
   def status_label(:idle), do: "Idle"
   def status_label(:running), do: "Running"

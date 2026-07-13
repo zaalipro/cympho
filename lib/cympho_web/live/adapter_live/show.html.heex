@@ -1,21 +1,27 @@
 <.settings_layout active={:adapters}>
-  <div class="flex items-center gap-3 mb-6">
-    <.app_link
-      navigate={~p"/settings/adapters"}
-      class="text-text-tertiary hover:text-text-secondary transition-colors"
-    >
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-      </svg>
-    </.app_link>
-    <h1 class="text-lg font-510 text-text-primary">{@page_title}</h1>
-    <span class={[
-      "inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-510",
-      health_status_class(@health.status)
-    ]}>
-      {health_status_label(@health.status)}
-    </span>
-  </div>
+  <.header>
+    <span class="ember-eyebrow">Runtime adapter</span>
+    <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+      {@page_title}
+    </h1>
+    <:actions>
+      <span class={[
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-510",
+        health_status_class(@health.status)
+      ]}>
+        <span class={["h-1.5 w-1.5 rounded-full", health_dot_class(@health.status)]}></span>
+        {health_status_label(@health.status)}
+      </span>
+      <.app_link
+        navigate={~p"/settings/adapters"}
+        class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+      >
+        <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> All adapters
+      </.app_link>
+    </:actions>
+  </.header>
+
+  <hr class="ember-rule mb-6" />
 
   <div
     :if={@flash && @flash[:info]}
@@ -35,9 +41,11 @@
     <!-- Left column: Health & Details -->
     <div class="space-y-6">
       <!-- Health Panel -->
-      <div class="bg-surface border border-border rounded-xl p-5 space-y-4">
+      <div class="card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card">
         <div class="flex items-center justify-between">
-          <h2 class="font-serif text-sm font-510 text-text-primary">Health Status</h2>
+          <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Health Status
+          </h2>
           <div class="flex items-center gap-2">
             <button
               type="button"
@@ -59,13 +67,19 @@
         <div class="space-y-3">
           <div class="flex items-center justify-between text-xs">
             <span class="text-text-tertiary">Status</span>
-            <span class={health_status_class(@health.status)}>
+            <span class={[
+              "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-510",
+              health_status_class(@health.status)
+            ]}>
+              <span class={["h-1.5 w-1.5 rounded-full", health_dot_class(@health.status)]}></span>
               {health_status_label(@health.status)}
             </span>
           </div>
           <div class="flex items-center justify-between text-xs">
             <span class="text-text-tertiary">Last Checked</span>
-            <span class="text-text-secondary">{format_datetime(@health.checked_at)}</span>
+            <span class="font-serif tabular-nums text-text-secondary">
+              {format_datetime(@health.checked_at)}
+            </span>
           </div>
           <div
             :if={@health.message}
@@ -77,8 +91,10 @@
       </div>
       
 <!-- Adapter Details -->
-      <div class="bg-surface border border-border rounded-xl p-5 space-y-4">
-        <h2 class="font-serif text-sm font-510 text-text-primary">Details</h2>
+      <div class="card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card">
+        <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+          Details
+        </h2>
         <div class="space-y-3">
           <div class="flex items-center justify-between text-xs">
             <span class="text-text-tertiary">Key</span>
@@ -101,9 +117,11 @@
 <!-- Center + Right columns: Config & Agents -->
     <div class="lg:col-span-2 space-y-6">
       <!-- Configuration -->
-      <div class="bg-surface border border-border rounded-xl p-5 space-y-4">
+      <div class="card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card">
         <div class="flex items-center justify-between">
-          <h2 class="font-serif text-sm font-510 text-text-primary">Configuration</h2>
+          <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Configuration
+          </h2>
           <span class="text-xs text-text-tertiary">{length(@config_schema)} fields</span>
         </div>
 
@@ -148,9 +166,11 @@
       </div>
       
 <!-- Assigned Agents -->
-      <div class="bg-surface border border-border rounded-xl p-5 space-y-4">
+      <div class="card-lift space-y-4 rounded-xl border border-border bg-surface p-5 shadow-card">
         <div class="flex items-center justify-between">
-          <h2 class="font-serif text-sm font-510 text-text-primary">Assigned Agents</h2>
+          <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Assigned Agents
+          </h2>
           <span class="text-xs text-text-tertiary">{length(@agents)} agent(s)</span>
         </div>
 

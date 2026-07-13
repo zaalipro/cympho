@@ -1406,6 +1406,13 @@ defmodule CymphoWeb.AgentLive.Show do
   def status_label(:paused), do: "paused"
   def status_label(other), do: other |> to_string()
 
+  def status_dot_class(:running), do: "bg-brand"
+  def status_dot_class(:active), do: "bg-success"
+  def status_dot_class(:idle), do: "bg-amber-300"
+  def status_dot_class(:error), do: "bg-red-400"
+  def status_dot_class(status) when status in [:sleeping, :paused], do: "bg-amber-300/60"
+  def status_dot_class(_), do: "bg-gray-500"
+
   def role_label(role), do: Agent.role_label(role)
 
   def wake_reason_label("issue_commented"), do: "Comment received"

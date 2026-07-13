@@ -75,13 +75,4 @@ defmodule Cympho.HeartbeatEngine.RunTest do
       assert changeset.changes.completed_at
     end
   end
-
-  describe "heartbeat_changeset/1" do
-    test "updates last_heartbeat_at" do
-      run = %Run{status: "running", id: Ecto.UUID.generate()}
-      changeset = Run.heartbeat_changeset(run)
-
-      assert changeset.changes.last_heartbeat_at
-    end
-  end
 end

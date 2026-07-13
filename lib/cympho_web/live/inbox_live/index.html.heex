@@ -266,17 +266,23 @@
     <.infinite_scroll
       id="inbox"
       has_more={@infinite_scroll[:inbox_items][:has_more?] || false}
-      container_class={if @digest_density == "compact", do: "grid gap-1.5", else: "grid gap-3"}
+      container_class={
+        if @digest_density == "compact",
+          do: "stagger-children grid gap-1.5",
+          else: "stagger-children grid gap-3"
+      }
     >
       <:empty>
-        <div class="rounded-lg border border-dashed border-border bg-panel px-6 py-16 text-center">
-          <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-lg border border-border bg-surface">
-            <span class="hero-inbox-mini h-6 w-6 text-text-tertiary"></span>
+        <div class="ember-glass px-6 py-16 text-center">
+          <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-brand/25 bg-brand/10 text-brand">
+            <span class="hero-check-circle-mini h-7 w-7"></span>
           </div>
-          <p class="mt-4 text-sm font-590 text-text-secondary">No inbox items match this view.</p>
-          <p class="mx-auto mt-1 max-w-md text-sm text-text-quaternary">
-            Agent handoffs, review requests, and issue updates will appear here as the autonomous
-            workflow runs.
+          <p class="ember-ink mx-auto mt-5 font-serif text-[22px] font-510 tracking-[-0.01em]">
+            Inbox zero
+          </p>
+          <p class="mx-auto mt-2 max-w-md text-sm leading-6 text-text-tertiary">
+            Nothing needs you here right now. Agent handoffs, review requests, and issue updates
+            will surface as the autonomous workflow runs.
           </p>
         </div>
       </:empty>
@@ -284,9 +290,12 @@
         :for={{dom_id, item} <- @streams.inbox_items}
         id={dom_id}
         class={[
-          "group border border-hairline bg-surface-1 shadow-card transition-all hover:border-border-hover hover:bg-surface-hover/40 hover:shadow-raised",
+          "group border border-hairline bg-surface-1 transition-all hover:border-border-hover hover:bg-surface-hover/40 hover:shadow-raised",
           if(@digest_density == "compact", do: "rounded-lg", else: "rounded-2xl"),
-          item.status == "unread" && "border-l-2 border-l-brand"
+          if(item.status == "unread",
+            do: "border-l-2 border-l-brand shadow-raised",
+            else: "shadow-card"
+          )
         ]}
       >
         <div class={[
@@ -320,7 +329,7 @@
             <%= if item.issue do %>
               <.app_link
                 navigate={issue_link(item.issue)}
-                class="block min-w-0 text-base font-590 leading-6 text-text-primary hover:text-brand"
+                class={"block min-w-0 text-base leading-6 hover:text-brand #{if item.status == "unread", do: "font-590 text-text-primary", else: "font-510 text-text-secondary"}"}
               >
                 <span class="font-mono text-xs text-text-quaternary">
                   {item.issue.identifier || "Issue"}
@@ -419,6 +428,7 @@
               phx-value-agent_id={item.agent_id}
               class={[
                 "rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary",
+                "lg:opacity-0 lg:transition-opacity lg:duration-200 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100",
                 @digest_density == "compact" && "hidden"
               ]}
             >
@@ -432,6 +442,7 @@
               phx-value-agent_id={item.agent_id}
               class={[
                 "rounded-lg border border-border bg-surface px-3 py-2 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-red-300",
+                "lg:opacity-0 lg:transition-opacity lg:duration-200 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100",
                 @digest_density == "compact" && "hidden"
               ]}
             >

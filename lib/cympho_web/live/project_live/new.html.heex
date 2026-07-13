@@ -1,169 +1,175 @@
-<.page size="wide">
-  <.header
-    title="New project"
-    subtitle="Group related issues, link to a repo, and configure environment variables for agents."
-  >
-    <:actions>
-      <.app_link
-        navigate={~p"/projects"}
-        class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-      >
-        Cancel
-      </.app_link>
-    </:actions>
-  </.header>
+<.page size="wide" class="ember-aurora">
+  <div class="relative z-[1]">
+    <.header>
+      <span class="ember-eyebrow">New workstream</span>
+      <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+        New project
+      </h1>
+      <p class="mt-2 max-w-2xl text-body-sm text-text-tertiary">
+        Group related issues, link to a repo, and configure environment variables for agents.
+      </p>
+      <:actions>
+        <.app_link
+          navigate={~p"/projects"}
+          class="rounded-lg border border-border bg-panel px-3 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+        >
+          Cancel
+        </.app_link>
+      </:actions>
+    </.header>
 
-  <.form
-    for={@form}
-    phx-submit="save"
-    class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
-  >
-    <.panel class="overflow-hidden">
-      <div class="border-b border-border px-5 py-4">
-        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Project launch plan
-        </p>
-        <h2 class="mt-1 text-lg font-590 text-text-primary">
-          Create the workstream command center
-        </h2>
-        <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
-          Give agents a clear operating boundary, repo context, and issue identifier before work
-          starts landing here.
-        </p>
-      </div>
+    <.form
+      for={@form}
+      phx-submit="save"
+      class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
+    >
+      <section class="ember-glass overflow-hidden">
+        <div class="border-b border-border px-5 py-4">
+          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Project launch plan
+          </p>
+          <h2 class="mt-1 text-lg font-590 text-text-primary">
+            Create the workstream command center
+          </h2>
+          <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
+            Give agents a clear operating boundary, repo context, and issue identifier before work
+            starts landing here.
+          </p>
+        </div>
 
-      <div class="space-y-6 p-5">
-        <section class="space-y-4">
-          <div>
-            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Operating boundary
-            </p>
-            <p class="mt-1 text-sm text-text-tertiary">
-              Describe what belongs in this project so intake and handoffs do not blur together.
-            </p>
-          </div>
+        <div class="space-y-6 p-5">
+          <section class="space-y-4">
+            <div>
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Operating boundary
+              </p>
+              <p class="mt-1 text-sm text-text-tertiary">
+                Describe what belongs in this project so intake and handoffs do not blur together.
+              </p>
+            </div>
 
-          <.input field={@form[:name]} label="Name" required placeholder="Acme Backend" />
-          <.input
-            field={@form[:description]}
-            label="Responsibility brief"
-            type="textarea"
-            rows={5}
-            placeholder="What this project owns, what agents should optimize for, and what evidence proves progress."
-          />
-        </section>
-
-        <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
-          <div>
-            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Repository and identifier
-            </p>
-            <p class="mt-1 text-sm text-text-tertiary">
-              Prefixes become issue IDs. Repo URLs give runtime workspaces a concrete code target.
-            </p>
-          </div>
-
-          <div class="grid gap-4 md:grid-cols-[minmax(0,160px)_minmax(0,1fr)]">
-            <.input field={@form[:prefix]} label="Prefix" required placeholder="ACME" />
+            <.input field={@form[:name]} label="Name" required placeholder="Acme Backend" />
             <.input
-              field={@form[:repo_url]}
-              label="Repository URL"
-              placeholder="https://github.com/owner/repo"
+              field={@form[:description]}
+              label="Responsibility brief"
+              type="textarea"
+              rows={5}
+              placeholder="What this project owns, what agents should optimize for, and what evidence proves progress."
             />
-          </div>
-        </section>
+          </section>
 
-        <section class="space-y-4">
-          <div>
-            <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-              Workspace posture
-            </p>
-            <p class="mt-1 text-sm text-text-tertiary">
-              Keep active work visible and give the sidebar a stable visual marker.
-            </p>
-          </div>
-
-          <div class="grid gap-5 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
-            <.input
-              type="select"
-              field={@form[:status]}
-              label="Status"
-              value={@form[:status].value || :active}
-              options={[{"Active", "active"}, {"Archived", "archived"}]}
-            />
-            <.color_swatch_picker field={@form[:color]} label="Sidebar color" />
-          </div>
-        </section>
-      </div>
-    </.panel>
-
-    <aside class="space-y-4">
-      <section
-        data-testid="project-setup-checklist"
-        class="rounded-xl border border-border bg-panel p-4 shadow-card"
-      >
-        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-          Setup checklist
-        </p>
-        <div class="mt-4 space-y-3">
-          <div class="flex gap-3">
-            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
-              1
-            </span>
+          <section class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4">
             <div>
-              <p class="text-sm font-590 text-text-primary">Define ownership</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                The project brief should tell agents what work belongs here.
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Repository and identifier
+              </p>
+              <p class="mt-1 text-sm text-text-tertiary">
+                Prefixes become issue IDs. Repo URLs give runtime workspaces a concrete code target.
               </p>
             </div>
-          </div>
-          <div class="flex gap-3">
-            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
-              2
-            </span>
+
+            <div class="grid gap-4 md:grid-cols-[minmax(0,160px)_minmax(0,1fr)]">
+              <.input field={@form[:prefix]} label="Prefix" required placeholder="ACME" />
+              <.input
+                field={@form[:repo_url]}
+                label="Repository URL"
+                placeholder="https://github.com/owner/repo"
+              />
+            </div>
+          </section>
+
+          <section class="space-y-4">
             <div>
-              <p class="text-sm font-590 text-text-primary">Connect the codebase</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Add the repo now or attach it later from the project command center.
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Workspace posture
+              </p>
+              <p class="mt-1 text-sm text-text-tertiary">
+                Keep active work visible and give the sidebar a stable visual marker.
               </p>
             </div>
-          </div>
-          <div class="flex gap-3">
-            <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
-              3
-            </span>
-            <div>
-              <p class="text-sm font-590 text-text-primary">Add goals and secrets after save</p>
-              <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                Goals align work; project secrets make runtime execution reproducible.
-              </p>
+
+            <div class="grid gap-5 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
+              <.input
+                type="select"
+                field={@form[:status]}
+                label="Status"
+                value={@form[:status].value || :active}
+                options={[{"Active", "active"}, {"Archived", "archived"}]}
+              />
+              <.color_swatch_picker field={@form[:color]} label="Sidebar color" />
             </div>
-          </div>
+          </section>
         </div>
       </section>
 
-      <section class="rounded-xl border border-brand/25 bg-brand/10 p-4">
-        <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
-          Create behavior
-        </p>
-        <p class="mt-2 text-sm font-590 text-text-primary">Creates an active workstream</p>
-        <p class="mt-1 text-xs leading-5 text-text-tertiary">
-          After save, open the project command center to attach environments, secrets, goals, and
-          active issues.
-        </p>
-      </section>
-    </aside>
+      <aside class="space-y-4">
+        <section
+          data-testid="project-setup-checklist"
+          class="rounded-xl border border-border bg-panel p-4 shadow-card"
+        >
+          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            Setup checklist
+          </p>
+          <div class="mt-4 space-y-3">
+            <div class="flex gap-3">
+              <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
+                1
+              </span>
+              <div>
+                <p class="text-sm font-590 text-text-primary">Define ownership</p>
+                <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                  The project brief should tell agents what work belongs here.
+                </p>
+              </div>
+            </div>
+            <div class="flex gap-3">
+              <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
+                2
+              </span>
+              <div>
+                <p class="text-sm font-590 text-text-primary">Connect the codebase</p>
+                <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                  Add the repo now or attach it later from the project command center.
+                </p>
+              </div>
+            </div>
+            <div class="flex gap-3">
+              <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
+                3
+              </span>
+              <div>
+                <p class="text-sm font-590 text-text-primary">Add goals and secrets after save</p>
+                <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                  Goals align work; project secrets make runtime execution reproducible.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
 
-    <div class="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end lg:col-span-2">
-      <.app_link
-        navigate={~p"/projects"}
-        class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-      >
-        Cancel
-      </.app_link>
-      <.button type="submit" variant="primary" class="min-h-[40px] w-full sm:w-auto">
-        Create project
-      </.button>
-    </div>
-  </.form>
+        <section class="rounded-xl border border-brand/25 bg-brand/10 p-4">
+          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
+            Create behavior
+          </p>
+          <p class="mt-2 text-sm font-590 text-text-primary">Creates an active workstream</p>
+          <p class="mt-1 text-xs leading-5 text-text-tertiary">
+            After save, open the project command center to attach environments, secrets, goals, and
+            active issues.
+          </p>
+        </section>
+      </aside>
+
+      <div class="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-end lg:col-span-2">
+        <.app_link
+          navigate={~p"/projects"}
+          class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+        >
+          Cancel
+        </.app_link>
+        <.button type="submit" variant="primary" class="min-h-[40px] w-full sm:w-auto">
+          Create project
+        </.button>
+      </div>
+    </.form>
+  </div>
 </.page>

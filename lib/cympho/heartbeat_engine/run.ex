@@ -107,11 +107,4 @@ defmodule Cympho.HeartbeatEngine.Run do
     |> put_change(:completed_at, now)
     |> put_change(:last_heartbeat_at, now)
   end
-
-  def heartbeat_changeset(run) do
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
-
-    run
-    |> change(%{last_heartbeat_at: now})
-  end
 end

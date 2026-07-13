@@ -29,7 +29,9 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
       <div class="border-t border-border/60 pt-5">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div class="min-w-0">
-            <h2 class="text-eyebrow text-ink-tertiary uppercase">Activity</h2>
+            <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Activity
+            </h2>
             <p class="mt-1 text-caption text-ink-tertiary">
               {timeline_summary(@timeline, @timeline_filter)}
             </p>
@@ -84,7 +86,7 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
       <div
         :for={entry <- @visible_timeline}
         id={"entry-#{entry.type}-#{entry.id}"}
-        class="flex gap-3"
+        class="group relative isolate flex gap-3 before:absolute before:left-[15.5px] before:top-9 before:-bottom-4 before:-z-10 before:w-px before:bg-gradient-to-b before:from-brand/30 before:via-border before:to-border/40 before:content-[''] last:before:hidden"
       >
         <div class="flex-shrink-0 flex flex-col items-center gap-1">
           <div class={
@@ -94,13 +96,13 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
 
                 cond do
                   author_type == "agent" ->
-                    "w-8 h-8 rounded-full bg-brand/20 text-brand flex items-center justify-center text-xs font-510"
+                    "w-8 h-8 rounded-full bg-brand/15 ring-1 ring-brand/30 text-brand flex items-center justify-center font-serif text-xs font-510"
 
                   author_type == "system" ->
                     "w-8 h-8 rounded-full bg-subtle border border-dashed border-border/50 flex items-center justify-center text-text-quaternary"
 
                   true ->
-                    "w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-510"
+                    "w-8 h-8 rounded-full bg-blue-500/15 ring-1 ring-blue-400/30 text-blue-400 flex items-center justify-center font-serif text-xs font-510"
                 end
 
               :interaction ->
@@ -151,13 +153,12 @@ defmodule CymphoWeb.IssueLive.Show.ActivityTimeline do
                 "•"
             end}
           </div>
-          <div class="w-0.5 flex-1 bg-border/30 min-h-[8px]"></div>
         </div>
 
         <div class="flex-1 min-w-0">
           <div
             :if={entry.type == :comment}
-            class={"rounded-lg border border-border bg-surface p-4 #{if entry.data.author_type == "system", do: "border-dashed bg-subtle", else: ""}"}
+            class={"rounded-lg border border-border bg-surface p-4 transition-colors hover:border-border-hover #{if entry.data.author_type == "system", do: "border-dashed bg-subtle", else: ""}"}
           >
             <div
               :if={entry.data.author_type != "system"}

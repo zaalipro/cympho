@@ -212,33 +212,66 @@ defmodule Cympho.AgentRunner do
     env = [{"ANTHROPIC_API_KEY", anthropic_api_key} | runtime_env(runtime_env) ++ env_whitelist()]
 
     port =
-      Port.open({:spawn, cmd}, [
-        :binary,
-        :exit_status,
-        :use_stdio,
-        :stderr_to_stdout,
-        cd: cwd,
-        env: port_env(env)
-      ])
+      try do
+        Port.open({:spawn, cmd}, [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :stderr_to_stdout,
+          cd: cwd,
+          env: port_env(env)
+        ])
+      rescue
+        exception ->
+          # A spawn failure (missing binary, bad cwd) must surface as a
+          # failed run, not a silently dead worker the orchestrator waits on.
+          send(
+            recipient_pid,
+            {:turn_ended_with_error, session_id, {:spawn_failed, Exception.message(exception)}}
+          )
+
+          exit(:normal)
+      end
 
     send(recipient_pid, {:session_started, session_id})
 
-    loop(port, session_id, recipient_pid, stall_timeout, nil)
+    # Arm the stall watchdog immediately. Without this first tick the
+    # watchdog never fires and a hung adapter that produces no output at
+    # all blocks the run forever. Seed last_output_time with "now" so
+    # silence-from-the-start also counts as a stall.
+    schedule_stall_check(stall_timeout)
+
+    loop(port, session_id, recipient_pid, stall_timeout, %{
+      last_output_time: System.system_time(:millisecond),
+      turn_completed?: false,
+      buffer: ""
+    })
   end
 
-  defp loop(port, session_id, recipient_pid, stall_timeout, last_output_time) do
+  defp loop(port, session_id, recipient_pid, stall_timeout, state) do
     receive do
-      {port, {:data, output}} ->
-        new_last_output = System.system_time(:millisecond)
+      {^port, {:data, output}} ->
+        buffer = state.buffer <> output
 
-        case parse_json_output(output) do
+        state = %{
+          state
+          | last_output_time: System.system_time(:millisecond),
+            buffer: buffer
+        }
+
+        case parse_json_output(buffer) do
           {:ok, result} ->
             case Cympho.Adapters.ProviderFailure.detect(result) do
               :ok ->
                 # Extract and send tool calls if present
                 extract_and_send_tool_calls(result, session_id, recipient_pid)
                 send(recipient_pid, {:turn_completed, session_id, result})
-                loop(port, session_id, recipient_pid, stall_timeout, new_last_output)
+
+                loop(port, session_id, recipient_pid, stall_timeout, %{
+                  state
+                  | turn_completed?: true,
+                    buffer: ""
+                })
 
               {:error, reason} ->
                 close_port(port)
@@ -246,14 +279,34 @@ defmodule Cympho.AgentRunner do
             end
 
           :continue ->
-            loop(port, session_id, recipient_pid, stall_timeout, new_last_output)
+            loop(port, session_id, recipient_pid, stall_timeout, %{state | buffer: ""})
+
+          :incomplete ->
+            # Looks like the head of a JSON document split across port
+            # chunks — keep accumulating; exit_status settles the outcome.
+            loop(port, session_id, recipient_pid, stall_timeout, state)
 
           {:error, reason} ->
             send(recipient_pid, {:turn_ended_with_error, session_id, reason})
         end
 
       {^port, {:exit_status, 0}} ->
-        :ok
+        # A clean exit that never produced a parseable turn is still a
+        # failed run — the orchestrator would otherwise wait on a
+        # turn_completed that never comes.
+        cond do
+          state.turn_completed? ->
+            :ok
+
+          String.trim(state.buffer) != "" ->
+            send(
+              recipient_pid,
+              {:turn_ended_with_error, session_id, {:parse_error, state.buffer}}
+            )
+
+          true ->
+            send(recipient_pid, {:turn_ended_with_error, session_id, :no_output})
+        end
 
       {^port, {:exit_status, code}} ->
         send(recipient_pid, {:turn_ended_with_error, session_id, {:exit_code, code}})
@@ -261,12 +314,12 @@ defmodule Cympho.AgentRunner do
       :stall_check ->
         now = System.system_time(:millisecond)
 
-        if last_output_time && now - last_output_time > stall_timeout do
+        if now - state.last_output_time > stall_timeout do
           close_port(port)
           send(recipient_pid, {:turn_ended_with_error, session_id, :stall_timeout})
         else
           schedule_stall_check(stall_timeout)
-          loop(port, session_id, recipient_pid, stall_timeout, last_output_time)
+          loop(port, session_id, recipient_pid, stall_timeout, state)
         end
 
       {:cancel_session, ^session_id, reason} ->
@@ -288,18 +341,33 @@ defmodule Cympho.AgentRunner do
   defp parse_json_output(output) do
     trimmed = String.trim(output)
 
-    if trimmed == "" or String.starts_with?(trimmed, "Thinking") do
-      :continue
-    else
-      case Jason.decode(trimmed) do
-        {:ok, result} -> {:ok, result}
-        {:error, _} -> Cympho.Adapters.ProviderFailure.detect(trimmed) |> parse_error(output)
-      end
+    cond do
+      trimmed == "" or String.starts_with?(trimmed, "Thinking") ->
+        :continue
+
+      true ->
+        case Jason.decode(trimmed) do
+          {:ok, result} ->
+            {:ok, result}
+
+          {:error, _} ->
+            case Cympho.Adapters.ProviderFailure.detect(trimmed) do
+              # Provider failure text takes priority — surface it as-is.
+              {:error, reason} ->
+                {:error, reason}
+
+              :ok ->
+                # A JSON document head that doesn't decode yet is likely a
+                # result split across port chunks — wait for the rest.
+                if String.starts_with?(trimmed, "{") or String.starts_with?(trimmed, "[") do
+                  :incomplete
+                else
+                  {:error, {:parse_error, output}}
+                end
+            end
+        end
     end
   end
-
-  defp parse_error(:ok, output), do: {:error, {:parse_error, output}}
-  defp parse_error({:error, reason}, _output), do: {:error, reason}
 
   defp api_key do
     Application.get_env(:cympho, :anthropic_api_key) ||

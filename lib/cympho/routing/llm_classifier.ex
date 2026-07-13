@@ -115,8 +115,22 @@ defmodule Cympho.Routing.LlmClassifier do
     role_string = role_from_json || cleaned
 
     case Agent.normalize_role(role_string) do
-      nil -> :error
+      nil -> scan_role_token(cleaned)
       role -> {:ok, role}
+    end
+  end
+
+  # Last-resort recovery for prose-wrapped answers ("The role is: engineer.").
+  # Only accepts the response when exactly one distinct role appears in it —
+  # ambiguous prose still falls back to the keyword router upstream.
+  defp scan_role_token(cleaned) do
+    cleaned
+    |> String.split(~r/[^a-z_]+/, trim: true)
+    |> Enum.filter(&(&1 in Agent.role_strings()))
+    |> Enum.uniq()
+    |> case do
+      [role] -> {:ok, Agent.normalize_role(role)}
+      _ -> :error
     end
   end
 

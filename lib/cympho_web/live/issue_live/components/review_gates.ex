@@ -56,12 +56,12 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
     <section class="px-4 lg:px-6 pb-5">
       <div
         id="issue-next-owner"
-        class="rounded-lg border border-hairline bg-surface-1/45 px-4 py-3"
+        class="ember-glass px-4 py-3.5"
       >
         <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-              <span class="text-[11px] font-590 uppercase tracking-wider text-ink-tertiary">
+              <span class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
                 Next owner
               </span>
               <span class={next_owner_status_class(@next_owner.status)}>
@@ -75,7 +75,9 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
               </span>
             </div>
             <div class="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <h2 class="text-base font-590 text-ink">{@next_owner.owner}</h2>
+              <h2 class="font-serif text-lg font-510 tracking-[-0.01em] text-ink">
+                {@next_owner.owner}
+              </h2>
               <span class="text-xs text-ink-tertiary">{@next_owner.role}</span>
             </div>
             <p class="mt-1 max-w-4xl text-sm leading-5 text-ink-muted">
@@ -115,7 +117,9 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
         <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
             <div class="flex flex-wrap items-center gap-2">
-              <h2 class="text-sm font-590 text-ink">Review nudges satisfied</h2>
+              <h2 class="font-serif text-[15px] font-510 tracking-[-0.01em] text-ink">
+                Review nudges satisfied
+              </h2>
               <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-510 text-emerald-200">
                 Cleared
               </span>
@@ -142,7 +146,7 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
         <div class="flex flex-col gap-3 border-b border-amber-500/20 px-4 py-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div class="flex flex-wrap items-center gap-2">
-              <h2 class="text-sm font-590 text-ink">
+              <h2 class="font-serif text-[15px] font-510 tracking-[-0.01em] text-ink">
                 {if @gate_resolution.mode == :pre_runtime,
                   do: "Start runtime first",
                   else: "Resolve review gates"}
@@ -214,7 +218,9 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
         >
           <div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h3 class="text-sm font-590 text-ink">Auto-nudges</h3>
+              <h3 class="font-serif text-sm font-510 italic tracking-[0.02em] text-ink">
+                Auto-nudges
+              </h3>
               <p class="mt-1 text-xs leading-5 text-ink-tertiary">
                 Queue the right agent into inbox and wake them with the exact missing evidence.
               </p>
@@ -227,7 +233,7 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
           <div class="grid gap-3 xl:grid-cols-2">
             <div
               :for={nudge <- @gate_resolution.nudges}
-              class="rounded-lg border border-hairline bg-surface-1/70 px-3 py-3"
+              class="rounded-lg border border-hairline bg-surface-1/70 px-3 py-3 transition-colors hover:border-border-hover"
             >
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
@@ -293,7 +299,9 @@ defmodule CymphoWeb.IssueLive.Show.ReviewGates do
         >
           <div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h3 class="text-sm font-590 text-ink">Attach artifact evidence</h3>
+              <h3 class="font-serif text-sm font-510 italic tracking-[0.02em] text-ink">
+                Attach artifact evidence
+              </h3>
               <p class="mt-1 text-xs leading-5 text-ink-tertiary">
                 Add a deliverable, spec, URL, or other proof so reviewers can see what changed.
               </p>

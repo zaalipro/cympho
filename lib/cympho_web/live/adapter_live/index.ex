@@ -253,6 +253,11 @@ defmodule CymphoWeb.AdapterLive.Index do
   defp health_status_class(:unhealthy), do: "bg-brand/20 text-brand"
   defp health_status_class(_), do: "bg-text-quaternary/20 text-text-quaternary"
 
+  defp health_dot_class(:healthy), do: "bg-success animate-pulse"
+  defp health_dot_class(:degraded), do: "bg-amber-400 animate-pulse"
+  defp health_dot_class(:unhealthy), do: "bg-brand animate-pulse"
+  defp health_dot_class(_), do: "bg-text-quaternary"
+
   defp health_status_label(:healthy), do: "Healthy"
   defp health_status_label(:degraded), do: "Degraded"
   defp health_status_label(:unhealthy), do: "Unhealthy"

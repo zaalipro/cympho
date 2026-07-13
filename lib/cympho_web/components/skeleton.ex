@@ -8,7 +8,7 @@ defmodule CymphoWeb.Components.Skeleton do
 
   def skeleton(assigns) do
     ~H"""
-    <div class={[]} {@rest}>
+    <div class={@class} {@rest}>
       <%= case @variant do %>
         <% "list" -> %>
           <div class="space-y-3">

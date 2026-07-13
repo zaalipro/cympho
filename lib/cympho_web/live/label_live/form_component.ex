@@ -5,19 +5,25 @@ defmodule CymphoWeb.LabelLive.FormComponent do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="label-form">
+    <div class="ember-glass p-5">
+      <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+        {if @label.id, do: "Edit label", else: "New label"}
+      </p>
       <.simple_form
         for={@form}
         as={:label}
         phx-submit="save"
         phx-target={@myself}
+        class="mt-4 space-y-4"
       >
         <.input field={@form[:name]} label="Name" />
         <.input field={@form[:color]} label="Color" placeholder="#FF0000" />
         <.input field={@form[:project_id]} label="Project ID" />
 
         <:actions>
-          <.button type="submit">{if @label.id, do: "Update Label", else: "Create Label"}</.button>
+          <.button type="submit" variant="primary" class="cta-glow">
+            {if @label.id, do: "Update Label", else: "Create Label"}
+          </.button>
         </:actions>
       </.simple_form>
     </div>

@@ -377,10 +377,18 @@ defmodule Cympho.AgentPromptContract do
 
   defp normalize_role(_role), do: :agent
 
+  # Tags (`[delivery]`) match anywhere; labeled fields must appear as
+  # `Label:` so prose that merely names the labels ("I'll add Verification
+  # later") does not satisfy the contract.
   defp field_present?(body, field) do
-    body
-    |> String.downcase()
-    |> String.contains?(field |> to_string() |> String.downcase())
+    down = String.downcase(body)
+    target = field |> to_string() |> String.downcase()
+
+    if String.starts_with?(target, "[") do
+      String.contains?(down, target)
+    else
+      String.contains?(down, target <> ":")
+    end
   end
 
   defp plural(1), do: ""

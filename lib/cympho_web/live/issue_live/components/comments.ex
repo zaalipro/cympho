@@ -13,7 +13,7 @@ defmodule CymphoWeb.IssueLive.Show.Comments do
   def comments(assigns) do
     ~H"""
     <div id="issue-comments" class="p-4 lg:p-6 border-t border-border bg-surface/50">
-      <div class="mb-2 text-xs font-510 uppercase tracking-wider text-text-secondary">
+      <div class="mb-2 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
         Add Comment
       </div>
       <form id="comment-form" phx-submit="add_comment" class="space-y-3">
@@ -24,22 +24,22 @@ defmodule CymphoWeb.IssueLive.Show.Comments do
             phx-click="use_comment_template"
             phx-value-template={template.key}
             title={template.hint}
-            class="inline-flex items-center gap-1 rounded-md border border-border bg-canvas px-2 py-1 text-[11px] font-510 text-text-tertiary transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+            class="inline-flex items-center gap-1 rounded-full border border-border bg-canvas px-2.5 py-1 text-[11px] font-510 text-text-tertiary transition-colors hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
           >
             {template.label}
           </button>
         </div>
         <div class="flex gap-2">
-          <div class="flex-1">
+          <div class="flex-1 rounded-xl transition-shadow focus-within:shadow-[0_0_0_3px_rgb(217_119_87_/_0.14)]">
             <.input
               field={@comment_form[:body]}
               type="textarea"
-              placeholder="Add a comment, or choose a template above..."
+              placeholder="Leave a note for the agents — or pick a template above…"
               class="min-h-[60px] max-h-[200px] resize-y"
               rows={2}
             />
           </div>
-          <.button type="submit" class="self-end" aria-label="Send comment">
+          <.button type="submit" class="cta-glow self-end" aria-label="Send comment">
             <.icon name="hero-paper-airplane" class="w-4 h-4" />
             <span>Send</span>
           </.button>

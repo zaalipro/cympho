@@ -116,46 +116,48 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
         <div class="border-b border-hairline px-4 py-3">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 class="text-sm font-510 text-ink">Execution brief</h2>
+              <h2 class="font-serif text-[15px] font-510 tracking-[-0.01em] text-ink">
+                Execution brief
+              </h2>
               <p class="mt-1 text-caption text-ink-tertiary">
                 What has happened, what is missing, and who has touched this issue.
               </p>
             </div>
-            <span class="rounded-full border border-hairline bg-canvas px-2.5 py-1 text-caption text-ink-muted">
+            <span class="rounded-full border border-hairline bg-canvas px-2.5 py-1 font-serif text-caption text-ink-muted">
               {@metrics.tool_calls} tool calls
             </span>
           </div>
         </div>
 
         <div class="grid gap-px bg-hairline sm:grid-cols-2 xl:grid-cols-4">
-          <div class="bg-canvas px-4 py-3">
+          <div class="ember-stat bg-canvas px-4 py-3">
             <p class="text-eyebrow text-ink-tertiary uppercase">Agent notes</p>
-            <p class="mt-1 text-xl font-510 text-ink">
+            <p class="mt-1 font-serif text-xl font-510 text-ink">
               {@metrics.agent_comments}
               <span class="text-sm text-ink-tertiary">/ {@metrics.comments}</span>
             </p>
           </div>
-          <div class="bg-canvas px-4 py-3">
+          <div class="ember-stat bg-canvas px-4 py-3">
             <p class="text-eyebrow text-ink-tertiary uppercase">Runs</p>
-            <p class="mt-1 text-xl font-510 text-ink">
+            <p class="mt-1 font-serif text-xl font-510 text-ink">
               {@metrics.runs}
               <span :if={@metrics.failed_runs > 0} class="text-sm text-brand">
                 {@metrics.failed_runs} failed
               </span>
             </p>
           </div>
-          <div class="bg-canvas px-4 py-3">
+          <div class="ember-stat bg-canvas px-4 py-3">
             <p class="text-eyebrow text-ink-tertiary uppercase">Artifacts</p>
-            <p class="mt-1 text-xl font-510 text-ink">
+            <p class="mt-1 font-serif text-xl font-510 text-ink">
               {@metrics.work_products}
               <span :if={@metrics.code_products > 0} class="text-sm text-ink-tertiary">
                 {@metrics.code_products} code
               </span>
             </p>
           </div>
-          <div class="bg-canvas px-4 py-3">
+          <div class="ember-stat bg-canvas px-4 py-3">
             <p class="text-eyebrow text-ink-tertiary uppercase">Sub-issues</p>
-            <p class="mt-1 text-xl font-510 text-ink">
+            <p class="mt-1 font-serif text-xl font-510 text-ink">
               {@metrics.child_issues}
               <span :if={@metrics.open_child_issues > 0} class="text-sm text-amber-300">
                 {@metrics.open_child_issues} open
@@ -173,7 +175,9 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
           <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div class="flex flex-wrap items-center gap-2">
-                <h3 class="text-eyebrow text-ink-tertiary uppercase">CEO flow checklist</h3>
+                <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                  CEO flow checklist
+                </h3>
                 <span class={ceo_flow_status_class(@ceo_flow_checklist.status)}>
                   {@ceo_flow_checklist.status_label}
                 </span>
@@ -363,7 +367,9 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
         <div class="border-t border-hairline bg-surface-1/50 px-4 py-4">
           <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 class="text-eyebrow text-ink-tertiary uppercase">Handoff lane</h3>
+              <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Handoff lane
+              </h3>
               <p class="mt-1 text-caption text-ink-tertiary">
                 Assigned owner, current runtime signal, and the next action for this issue.
               </p>
@@ -399,7 +405,9 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
           <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div class="flex flex-wrap items-center gap-2">
-                <h3 class="text-eyebrow text-ink-tertiary uppercase">Owner decision packet</h3>
+                <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                  Owner decision packet
+                </h3>
                 <span class={owner_decision_packet_badge_class(@owner_decision_packet.status)}>
                   {@owner_decision_packet.status_label}
                 </span>
@@ -461,7 +469,9 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
         <div class="border-t border-hairline bg-surface-1/45 px-4 py-4">
           <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 class="text-eyebrow text-ink-tertiary uppercase">Runtime run ledger</h3>
+              <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Runtime run ledger
+              </h3>
               <p class="mt-1 text-caption text-ink-tertiary">
                 Latest agent runs with status, duration, owner, and captured runtime detail.
                 <span :if={@run_history[:total] > length(@run_ledger)} class="block">
@@ -566,7 +576,9 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
 
         <div class="grid gap-px bg-hairline lg:grid-cols-[1fr_0.8fr]">
           <div class="bg-surface-1/50 px-4 py-4">
-            <h3 class="text-eyebrow text-ink-tertiary uppercase">Owner update</h3>
+            <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Owner update
+            </h3>
             <ul class="mt-2 space-y-2">
               <li :for={line <- @brief_lines} class="flex gap-2 text-sm text-ink-muted">
                 <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand"></span>
@@ -575,7 +587,9 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
             </ul>
           </div>
           <div class="bg-surface-1/50 px-4 py-4">
-            <h3 class="text-eyebrow text-ink-tertiary uppercase">Review signals</h3>
+            <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Review signals
+            </h3>
             <ul class="mt-2 space-y-2">
               <li :for={gap <- @gaps} class="flex gap-2 text-sm text-ink-muted">
                 <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"></span>
@@ -588,7 +602,9 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
         <div class="border-t border-hairline px-4 py-4">
           <div class="mb-3 flex items-center justify-between gap-3">
             <div>
-              <h3 class="text-eyebrow text-ink-tertiary uppercase">Work narrative</h3>
+              <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Work narrative
+              </h3>
               <p class="mt-1 text-caption text-ink-tertiary">
                 Condensed owner-readable phases before the raw activity stream.
               </p>
@@ -626,7 +642,9 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
         <div class="border-t border-hairline px-4 py-4">
           <div class="mb-3 flex items-center justify-between gap-3">
             <div>
-              <h3 class="text-eyebrow text-ink-tertiary uppercase">Delegation map</h3>
+              <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Delegation map
+              </h3>
               <p class="mt-1 text-caption text-ink-tertiary">
                 How CEO/CTO work fans out into product, design, engineering, and review.
               </p>
@@ -680,7 +698,9 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
           <div class="bg-surface-1/45 px-4 py-4">
             <div class="flex items-start justify-between gap-3">
               <div>
-                <h3 class="text-eyebrow text-ink-tertiary uppercase">CTO review queue</h3>
+                <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                  CTO review queue
+                </h3>
                 <p class="mt-1 text-caption text-ink-tertiary">
                   Which delegated work is ready to inspect before it reaches the CEO.
                 </p>
@@ -770,7 +790,9 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
           </div>
 
           <div class="bg-surface-1/45 px-4 py-4">
-            <h3 class="text-eyebrow text-ink-tertiary uppercase">CEO owner update readiness</h3>
+            <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              CEO owner update readiness
+            </h3>
             <div class="mt-3 rounded-lg border border-hairline bg-canvas px-4 py-3">
               <div class="flex items-start justify-between gap-3">
                 <div>
@@ -799,7 +821,9 @@ defmodule CymphoWeb.IssueLive.Show.ExecutionBrief do
 
         <div class="border-t border-hairline px-4 py-4">
           <div class="mb-3 flex items-center justify-between gap-3">
-            <h3 class="text-eyebrow text-ink-tertiary uppercase">Agent contributions</h3>
+            <h3 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Agent contributions
+            </h3>
             <span class="text-caption text-ink-tertiary">
               {length(@contribution_cards)} agents
             </span>

@@ -12,6 +12,90 @@ defmodule Cympho.AutonomyReadinessTest do
   alias Cympho.Skills
   alias Cympho.Workspaces
 
+  describe "liveness signal" do
+    test "warns when the watchdog is disabled, with an actionable summary" do
+      company = create_company("liveness-disabled")
+
+      snapshot = AutonomyReadiness.snapshot(company.id)
+      liveness = Enum.find(snapshot.signals, &(&1.key == :liveness))
+
+      # :start_heartbeat_watchdog? is false in test env and the process is
+      # not running, so the signal must say how to enable it.
+      assert liveness.level == :warning
+      assert liveness.health_label == "Watchdog disabled"
+      assert liveness.summary =~ "CYMPHO_START_HEARTBEAT_WATCHDOG"
+    end
+
+    test "flags an enabled-but-dead watchdog as critical" do
+      company = create_company("liveness-dead")
+
+      original = Application.get_env(:cympho, :start_heartbeat_watchdog?, true)
+      Application.put_env(:cympho, :start_heartbeat_watchdog?, true)
+      on_exit(fn -> Application.put_env(:cympho, :start_heartbeat_watchdog?, original) end)
+
+      snapshot = AutonomyReadiness.snapshot(company.id)
+      liveness = Enum.find(snapshot.signals, &(&1.key == :liveness))
+
+      assert liveness.level == :critical
+      assert liveness.health_label == "Watchdog down"
+    end
+
+    test "reports pending recovery counts when runs are stalled" do
+      company = create_company("liveness-stale")
+
+      pid =
+        case start_supervised(Cympho.HeartbeatEngine.Watchdog) do
+          {:ok, pid} -> pid
+          {:error, {:already_started, pid}} -> pid
+        end
+
+      assert Process.alive?(pid)
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Liveness Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, issue} =
+        Cympho.Issues.create_issue(%{
+          title: "Stale run issue",
+          status: :todo,
+          company_id: company.id,
+          assignee_id: agent.id
+        })
+
+      {:ok, run} =
+        Cympho.HeartbeatEngine.create_run(%{
+          company_id: company.id,
+          agent_id: agent.id,
+          issue_id: issue.id,
+          adapter: "process"
+        })
+
+      {:ok, started} = Cympho.HeartbeatEngine.start_run(run)
+
+      stale_time =
+        DateTime.utc_now()
+        |> DateTime.add(-30 * 60, :second)
+        |> DateTime.truncate(:second)
+
+      started
+      |> Ecto.Changeset.change(%{last_heartbeat_at: stale_time})
+      |> Repo.update!()
+
+      snapshot = AutonomyReadiness.snapshot(company.id)
+      liveness = Enum.find(snapshot.signals, &(&1.key == :liveness))
+
+      assert liveness.level == :warning
+      assert liveness.health_label == "Recovery pending"
+      assert liveness.metric >= 1
+      assert liveness.summary =~ "stalled mid-run"
+    end
+  end
+
   describe "snapshot/1" do
     test "rolls focused subsystem health into one readiness answer" do
       company = create_company("blocked")
@@ -29,12 +113,14 @@ defmodule Cympho.AutonomyReadinessTest do
                :workspaces,
                :routines,
                :runtime,
-               :agent_guides
+               :agent_guides,
+               :liveness
              ]
 
       assert Enum.any?(snapshot.signals, &(&1.key == :org and &1.level == :critical))
       assert Enum.any?(snapshot.signals, &(&1.key == :runtime))
       assert Enum.any?(snapshot.signals, &(&1.key == :agent_guides))
+      assert Enum.any?(snapshot.signals, &(&1.key == :liveness))
     end
 
     test "exposes operating primitive readiness" do
@@ -158,8 +244,10 @@ defmodule Cympho.AutonomyReadinessTest do
 
       snapshot = AutonomyReadiness.snapshot(company.id)
 
+      # 4 warnings: runtime, agent guides, org health, and liveness (the
+      # watchdog is disabled in test env, which reads as a liveness warning).
       assert snapshot.level == :warning
-      assert snapshot.summary =~ "3 readiness areas need review"
+      assert snapshot.summary =~ "4 readiness areas need review"
       assert snapshot.summary =~ "3 setup areas still need configuration"
       refute snapshot.summary =~ "area need review"
     end

@@ -56,7 +56,9 @@ defmodule CymphoWeb.Components.IssueDigest do
         <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2">
-              <h2 class="text-sm font-510 text-ink">Executive digest</h2>
+              <h2 class="font-serif text-[15px] font-510 italic tracking-[0.02em] text-ink">
+                Executive digest
+              </h2>
               <span class={"rounded-full border px-2.5 py-1 text-caption font-510 #{digest_state_class(@digest.state)}"}>
                 {@digest.label}
               </span>
@@ -142,7 +144,9 @@ defmodule CymphoWeb.Components.IssueDigest do
         <div class="mt-4 rounded-md border border-hairline bg-canvas px-3 py-3">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div class="min-w-0">
-              <p class="text-eyebrow uppercase text-ink-tertiary">Digest actions</p>
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Digest actions
+              </p>
               <p class="mt-1 text-sm leading-5 text-ink-muted">
                 Resolve the highest-signal gaps from here without hunting through the full timeline.
               </p>
@@ -226,7 +230,9 @@ defmodule CymphoWeb.Components.IssueDigest do
         <div class="mt-4 rounded-md border border-hairline bg-canvas">
           <div class="flex flex-col gap-2 border-b border-hairline px-3 py-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p class="text-eyebrow uppercase text-ink-tertiary">What happened so far</p>
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                What happened so far
+              </p>
               <p class="mt-1 text-sm leading-5 text-ink-muted">
                 Compact operational memory from agent comments, runs, artifacts, and sub-issues.
               </p>
@@ -268,7 +274,9 @@ defmodule CymphoWeb.Components.IssueDigest do
         <div class="mt-4 rounded-md border border-hairline bg-canvas">
           <div class="flex flex-col gap-2 border-b border-hairline px-3 py-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p class="text-eyebrow uppercase text-ink-tertiary">Role run summaries</p>
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Role run summaries
+              </p>
               <p class="mt-1 text-sm leading-5 text-ink-muted">
                 The short version of what delivery, review, owner update, and runtime evidence say right now.
               </p>
@@ -324,7 +332,9 @@ defmodule CymphoWeb.Components.IssueDigest do
         <div class="mt-4 rounded-md border border-hairline bg-canvas">
           <div class="flex flex-col gap-2 border-b border-hairline px-3 py-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p class="text-eyebrow uppercase text-ink-tertiary">Completion contract</p>
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Completion contract
+              </p>
               <p class="mt-1 text-sm leading-5 text-ink-muted">
                 What each role must leave behind before this issue can be trusted as complete.
               </p>
@@ -508,7 +518,9 @@ defmodule CymphoWeb.Components.IssueDigest do
         <div class="mt-4 rounded-md border border-hairline bg-canvas">
           <div class="flex flex-col gap-2 border-b border-hairline px-3 py-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p class="text-eyebrow uppercase text-ink-tertiary">Agent-by-agent ledger</p>
+              <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Agent-by-agent ledger
+              </p>
               <p class="mt-1 text-sm leading-5 text-ink-muted">
                 What each role has contributed, the evidence it produced, and the next follow-up.
               </p>
@@ -608,7 +620,9 @@ defmodule CymphoWeb.Components.IssueDigest do
           <div class="flex flex-col gap-2 border-b border-hairline px-3 py-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div class="flex flex-wrap items-center gap-2">
-                <p class="text-eyebrow uppercase text-ink-tertiary">Review readiness</p>
+                <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                  Review readiness
+                </p>
                 <span class={"rounded-full border px-2 py-0.5 text-[10px] font-510 #{review_readiness_class(@digest.review_readiness.status)}"}>
                   {@digest.review_readiness.label}
                 </span>
@@ -661,7 +675,7 @@ defmodule CymphoWeb.Components.IssueDigest do
             </div>
             <div class="mt-2 h-1.5 rounded-full bg-surface-1">
               <div
-                class={"h-1.5 rounded-full #{digest_bar_class(@digest.coverage.score)}"}
+                class={"h-1.5 rounded-full progress-spring #{digest_bar_class(@digest.coverage.score)}"}
                 style={"width: #{@digest.coverage.score}%"}
               >
               </div>

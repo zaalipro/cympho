@@ -16,13 +16,22 @@ defmodule CymphoWeb.CoreComponents do
       class={"fixed inset-0 z-50 flex items-center justify-center #{if @show, do: "", else: "hidden"}"}
     >
       <div
-        class="fixed inset-0 bg-black/40 backdrop-blur-sm animate-fade-in"
+        class="fixed inset-0 bg-overlay backdrop-blur-md animate-fade-in"
         phx-click={@on_cancel}
       />
       <div class="dialog-enter relative bg-panel border border-border rounded-2xl shadow-dialog p-6 max-w-lg w-full mx-4 z-10">
-        <h2 :if={@title} class="text-card-title text-text-primary mb-4">{@title}</h2>
+        <button
+          :if={@title}
+          type="button"
+          phx-click={@on_cancel}
+          aria-label="Close"
+          class="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-text-quaternary transition-colors duration-150 hover:bg-surface-hover hover:text-text-primary"
+        >
+          <.icon name="hero-x-mark-mini" class="h-4 w-4" />
+        </button>
+        <h2 :if={@title} class="text-card-title text-text-primary mb-4 pr-10">{@title}</h2>
         {render_slot(@inner_block)}
-        <div :if={@footer != []} class="mt-4">
+        <div :if={@footer != []} class="mt-5 border-t border-border pt-4">
           {render_slot(@footer)}
         </div>
       </div>

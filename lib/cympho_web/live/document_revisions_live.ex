@@ -44,7 +44,10 @@ defmodule CymphoWeb.DocumentRevisionsLive do
     ~H"""
     <div class="flex items-center justify-between mb-4">
       <div>
-        <h3 class="font-serif text-lg font-semibold text-text-primary">Document History</h3>
+        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+          Version history
+        </p>
+        <h3 class="mt-1 font-serif text-lg font-semibold text-text-primary">Document History</h3>
         <p class="text-sm text-text-tertiary mt-1">
           {@revisions_count} revision{if @revisions_count != 1, do: "s"}
         </p>
@@ -74,10 +77,10 @@ defmodule CymphoWeb.DocumentRevisionsLive do
       <div
         :for={revision <- @revisions}
         id={"revision-#{revision.id}"}
-        class="flex items-start gap-3 p-3 rounded-lg bg-subtle border border-border hover:bg-surface-hover transition-colors"
+        class="flex items-start gap-3 p-3 rounded-lg bg-subtle border border-border transition-colors hover:bg-surface-hover hover:border-border-hover hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
       >
         <div class="flex-shrink-0">
-          <div class="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs font-semibold">
+          <div class="w-8 h-8 rounded-full bg-brand/15 text-brand flex items-center justify-center text-xs font-semibold">
             {String.first(revision.author_type || "A")}
           </div>
         </div>
@@ -89,7 +92,7 @@ defmodule CymphoWeb.DocumentRevisionsLive do
             </span>
             <span
               :if={is_current_revision?(revision, @current_revision_id)}
-              class="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400"
+              class="text-xs px-2 py-0.5 rounded-full border border-success/25 bg-success/10 text-success"
             >
               Current
             </span>

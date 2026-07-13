@@ -37,7 +37,8 @@ defmodule CymphoWeb.Components.ColorSwatchPicker do
           title={name}
           aria-label={"Set color to #{name}"}
           class={[
-            "h-7 w-7 rounded-full border transition-transform hover:scale-110",
+            "flex h-7 w-7 items-center justify-center rounded-full border",
+            "transition-transform duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] hover:scale-110 active:scale-95",
             "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas focus-visible:ring-brand"
           ]}
           style={"background-color: #{hex}; border-color: #{if @field.value == hex, do: "white", else: "rgba(255,255,255,0.15)"}"}
@@ -64,11 +65,12 @@ defmodule CymphoWeb.Components.ColorSwatchPicker do
             value={@field.value}
             placeholder="#D97757"
             maxlength="7"
-            class="w-28 bg-surface border border-border rounded-xl px-2.5 py-1.5 text-xs font-mono text-text-primary focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
+            class="w-28 bg-surface border border-border rounded-xl px-2.5 py-1.5 text-xs font-mono text-text-primary transition duration-150 hover:border-hairline-strong focus:outline-none focus:ring-2 focus:ring-brand/25 focus:border-brand focus:shadow-[0_0_16px_-4px_rgb(var(--color-primary-rgb)/0.35)]"
           />
         </div>
       </div>
-      <p :if={@field.errors != []} class="text-xs text-red-400">
+      <p :if={@field.errors != []} class="flex items-center gap-1 text-xs text-error">
+        <span class="hero-exclamation-triangle-mini h-3.5 w-3.5 shrink-0" aria-hidden="true"></span>
         {Enum.map_join(@field.errors, ", ", fn {msg, _} -> msg end)}
       </p>
     </div>

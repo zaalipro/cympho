@@ -121,44 +121,253 @@ defmodule Cympho.AgentActions do
 
   @doc """
   Parses exactly one fenced `cympho-actions` JSON block from an agent response.
+
+  Recovery is best-effort: fence-label typos, generic ```json fences, bare
+  `{"actions": ...}` payloads, truncated blocks, trailing commas, and raw
+  newlines inside strings are repaired conservatively. Multiple *distinct*
+  blocks stay a `:multiple_action_blocks` error (the prompt contract requires
+  exactly one); byte-identical or semantically equal duplicates collapse.
   """
   @spec parse(String.t()) :: {:ok, [action()]} | {:error, atom() | tuple()}
   def parse(text) when is_binary(text) do
-    case action_block_jsons(text) do
-      [] ->
-        {:error, :missing_action_block}
-
-      [_one, _two | _] ->
-        {:error, :multiple_action_blocks}
-
-      [json] when byte_size(json) > @max_block_bytes ->
+    case extract_action_json(text) do
+      {:ok, json} when byte_size(json) > @max_block_bytes ->
         {:error, {:action_block_too_large, byte_size(json), @max_block_bytes}}
 
-      [json] ->
-        json
-        |> Jason.decode()
-        |> case do
-          {:ok, decoded} -> validate_payload(decoded)
-          {:error, error} -> {:error, {:invalid_json, Exception.message(error)}}
-        end
+      {:ok, json} ->
+        decode_action_json(json)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
   def parse(_), do: {:error, :missing_action_block}
 
   @action_block_patterns [
-    ~r/```(?:cympho-actions|cympo-actions)\s*\n(.*?)```/s,
-    ~r/(?:^|\n)\s*(?:cympho-actions|cympo-actions)\s*\n\s*```json\s*\n(.*?)```/s
+    ~r/```(?:cympho[-_ ]?actions|cympo-actions)[ \t\r]*\n(.*?)```/is,
+    ~r/(?:^|\n)\s*(?:cympho[-_ ]?actions|cympo-actions)\s*\n\s*```json\s*\n(.*?)```/is
   ]
 
-  defp action_block_jsons(text) do
-    @action_block_patterns
-    |> Enum.flat_map(fn pattern ->
+  @unclosed_action_block_pattern ~r/```(?:cympho[-_ ]?actions|cympo-actions)[ \t\r]*\n(.*)\z/is
+  @generic_block_pattern ~r/```[\w.-]*[ \t\r]*\n(.*?)```/s
+
+  defp extract_action_json(text) do
+    case dedup_action_jsons(marked_block_jsons(text)) do
+      [json] -> {:ok, json}
+      [_one, _two | _] -> {:error, :multiple_action_blocks}
+      [] -> extract_fallback_action_json(text)
+    end
+  end
+
+  # No well-formed cympho-actions block. Try, in order: a truncated
+  # (unclosed) marked fence, generic code fences carrying an actions payload,
+  # then a bare `{"actions": ...}` object in prose.
+  defp extract_fallback_action_json(text) do
+    case Regex.run(@unclosed_action_block_pattern, text, capture: :all_but_first) do
+      [tail] ->
+        # The block never closed — take a balanced object from the first
+        # brace so trailing prose doesn't poison the decode.
+        case bare_action_json(tail) do
+          {:ok, json} -> {:ok, json}
+          {:error, _} -> {:ok, tail}
+        end
+
+      nil ->
+        case dedup_action_jsons(generic_block_jsons(text)) do
+          [json] -> {:ok, json}
+          [_one, _two | _] -> {:error, :multiple_action_blocks}
+          [] -> bare_action_json(text)
+        end
+    end
+  end
+
+  defp marked_block_jsons(text) do
+    Enum.flat_map(@action_block_patterns, fn pattern ->
       Regex.scan(pattern, text, capture: :all_but_first)
       |> Enum.map(fn [json] -> json end)
     end)
-    |> Enum.uniq()
   end
+
+  defp generic_block_jsons(text) do
+    @generic_block_pattern
+    |> Regex.scan(text, capture: :all_but_first)
+    |> Enum.map(fn [block] -> block end)
+    |> Enum.filter(&actions_payload_candidate?/1)
+  end
+
+  defp actions_payload_candidate?(block) do
+    trimmed = String.trim(block)
+    String.starts_with?(trimmed, "{") and String.contains?(trimmed, ~s("actions"))
+  end
+
+  defp bare_action_json(text) do
+    case Regex.run(~r/\{\s*"actions"\s*:/, text, return: :index) do
+      [{start, _len}] ->
+        {:ok, text |> binary_part(start, byte_size(text) - start) |> take_balanced_json()}
+
+      nil ->
+        {:error, :missing_action_block}
+    end
+  end
+
+  # Collapse duplicate candidates: identical after trim, or decoding to the
+  # same JSON term (agents sometimes repeat the block verbatim).
+  defp dedup_action_jsons(candidates) do
+    candidates
+    |> Enum.map(&String.trim/1)
+    |> Enum.uniq_by(fn candidate ->
+      case Jason.decode(candidate) do
+        {:ok, decoded} -> {:decoded, decoded}
+        {:error, _} -> {:raw, candidate}
+      end
+    end)
+  end
+
+  defp decode_action_json(json) do
+    case Jason.decode(json) do
+      {:ok, decoded} ->
+        validate_payload(decoded)
+
+      {:error, error} ->
+        case repair_and_decode(json) do
+          {:ok, decoded} ->
+            Logger.warning("recovered malformed cympho-actions JSON",
+              component: "agent_actions"
+            )
+
+            validate_payload(decoded)
+
+          :error ->
+            {:error, {:invalid_json, Exception.message(error)}}
+        end
+    end
+  end
+
+  # Conservative repair for LLM-damaged JSON: escape raw control characters
+  # inside strings, drop trailing commas, and close truncated brackets. Only
+  # accepted when the repaired text strictly decodes.
+  defp repair_and_decode(json) do
+    {scrubbed, in_string, stack} = scrub_json(json)
+
+    completed =
+      if in_string or stack != [] do
+        string_closer = if in_string, do: "\"", else: ""
+
+        [
+          scrubbed
+          |> String.trim_trailing()
+          |> String.trim_trailing(",")
+          |> Kernel.<>(string_closer <> List.to_string(stack))
+        ]
+      else
+        []
+      end
+
+    Enum.find_value([scrubbed | completed], :error, fn candidate ->
+      case Jason.decode(candidate) do
+        {:ok, decoded} -> {:ok, decoded}
+        {:error, _} -> nil
+      end
+    end)
+  end
+
+  # Single pass over the JSON tracking string/escape state and the stack of
+  # expected closers. Inside strings: escape raw newlines/tabs. Outside
+  # strings: drop a comma directly followed by a closing brace/bracket.
+  defp scrub_json(json), do: scrub_json(json, false, false, [], [])
+
+  defp scrub_json(<<>>, in_string, _escaped, stack, acc) do
+    {acc |> Enum.reverse() |> IO.iodata_to_binary(), in_string, stack}
+  end
+
+  defp scrub_json(<<char::utf8, rest::binary>>, true, true, stack, acc),
+    do: scrub_json(rest, true, false, stack, [<<char::utf8>> | acc])
+
+  defp scrub_json(<<?\\, rest::binary>>, true, false, stack, acc),
+    do: scrub_json(rest, true, true, stack, ["\\" | acc])
+
+  defp scrub_json(<<?", rest::binary>>, true, false, stack, acc),
+    do: scrub_json(rest, false, false, stack, ["\"" | acc])
+
+  defp scrub_json(<<?\n, rest::binary>>, true, false, stack, acc),
+    do: scrub_json(rest, true, false, stack, ["\\n" | acc])
+
+  defp scrub_json(<<?\r, rest::binary>>, true, false, stack, acc),
+    do: scrub_json(rest, true, false, stack, ["\\r" | acc])
+
+  defp scrub_json(<<?\t, rest::binary>>, true, false, stack, acc),
+    do: scrub_json(rest, true, false, stack, ["\\t" | acc])
+
+  defp scrub_json(<<char::utf8, rest::binary>>, true, false, stack, acc),
+    do: scrub_json(rest, true, false, stack, [<<char::utf8>> | acc])
+
+  defp scrub_json(<<?", rest::binary>>, false, _escaped, stack, acc),
+    do: scrub_json(rest, true, false, stack, ["\"" | acc])
+
+  defp scrub_json(<<?{, rest::binary>>, false, _escaped, stack, acc),
+    do: scrub_json(rest, false, false, [?} | stack], ["{" | acc])
+
+  defp scrub_json(<<?[, rest::binary>>, false, _escaped, stack, acc),
+    do: scrub_json(rest, false, false, [?] | stack], ["[" | acc])
+
+  defp scrub_json(<<char, rest::binary>>, false, _escaped, [char | stack], acc)
+       when char in [?}, ?]],
+       do: scrub_json(rest, false, false, stack, [<<char>> | acc])
+
+  # Mismatched closer — pass through so decoding fails loudly.
+  defp scrub_json(<<char, rest::binary>>, false, _escaped, stack, acc)
+       when char in [?}, ?]],
+       do: scrub_json(rest, false, false, stack, [<<char>> | acc])
+
+  defp scrub_json(<<?,, rest::binary>>, false, _escaped, stack, acc) do
+    case next_meaningful_char(rest) do
+      char when char in [?}, ?]] -> scrub_json(rest, false, false, stack, acc)
+      _ -> scrub_json(rest, false, false, stack, ["," | acc])
+    end
+  end
+
+  defp scrub_json(<<char::utf8, rest::binary>>, false, _escaped, stack, acc),
+    do: scrub_json(rest, false, false, stack, [<<char::utf8>> | acc])
+
+  defp next_meaningful_char(<<char, rest::binary>>) when char in [?\s, ?\t, ?\n, ?\r],
+    do: next_meaningful_char(rest)
+
+  defp next_meaningful_char(<<char, _::binary>>), do: char
+  defp next_meaningful_char(<<>>), do: nil
+
+  # Extracts a brace-balanced JSON object from the head of `binary`,
+  # respecting strings. If it never balances (truncated output), the whole
+  # remainder is returned and the repair pass closes it.
+  defp take_balanced_json(binary), do: take_balanced_json(binary, false, false, 0, [])
+
+  defp take_balanced_json(<<>>, _in_string, _escaped, _depth, acc),
+    do: acc |> Enum.reverse() |> IO.iodata_to_binary()
+
+  defp take_balanced_json(<<char::utf8, rest::binary>>, true, true, depth, acc),
+    do: take_balanced_json(rest, true, false, depth, [<<char::utf8>> | acc])
+
+  defp take_balanced_json(<<?\\, rest::binary>>, true, false, depth, acc),
+    do: take_balanced_json(rest, true, true, depth, ["\\" | acc])
+
+  defp take_balanced_json(<<?", rest::binary>>, in_string, false, depth, acc),
+    do: take_balanced_json(rest, not in_string, false, depth, ["\"" | acc])
+
+  defp take_balanced_json(<<?{, rest::binary>>, false, _escaped, depth, acc),
+    do: take_balanced_json(rest, false, false, depth + 1, ["{" | acc])
+
+  defp take_balanced_json(<<?}, rest::binary>>, false, _escaped, depth, acc) do
+    acc = ["}" | acc]
+
+    if depth <= 1 do
+      acc |> Enum.reverse() |> IO.iodata_to_binary()
+    else
+      take_balanced_json(rest, false, false, depth - 1, acc)
+    end
+  end
+
+  defp take_balanced_json(<<char::utf8, rest::binary>>, in_string, _escaped, depth, acc),
+    do: take_balanced_json(rest, in_string, false, depth, [<<char::utf8>> | acc])
 
   @doc """
   Executes validated actions for an issue and agent.
@@ -242,7 +451,9 @@ defmodule Cympho.AgentActions do
         initial_issue = Issues.get_issue!(issue.id)
 
         {final_issue, results} =
-          Enum.reduce(actions, {initial_issue, []}, fn action, {current_issue, acc} ->
+          actions
+          |> Enum.with_index()
+          |> Enum.reduce({initial_issue, []}, fn {action, index}, {current_issue, acc} ->
             with :ok <- authorize_action(action, current_issue, agent),
                  {:ok, action_result} <- execute_action(current_issue, agent, action) do
               log_action(current_issue, agent, action, action_result)
@@ -257,7 +468,19 @@ defmodule Cympho.AgentActions do
 
               {next_issue, [action_result | acc]}
             else
-              {:error, reason} -> Repo.rollback(reason)
+              {:error, reason} ->
+                Logger.warning("agent action batch rolled back",
+                  issue_id: issue.id,
+                  agent_id: agent.id,
+                  company_id: issue.company_id,
+                  component: "agent_actions",
+                  action_type: action["type"],
+                  action_index: index,
+                  batch_size: length(actions),
+                  reason: inspect(reason)
+                )
+
+                Repo.rollback(reason)
             end
           end)
 
@@ -279,6 +502,20 @@ defmodule Cympho.AgentActions do
         maybe_emit_rejection_comment(issue, reason)
         {:error, reason}
     end
+  rescue
+    exception ->
+      # An executor crash (bad data, unexpected state) must degrade to a
+      # failed batch with a reason — never crash the orchestrator run. The
+      # transaction already rolled back when the exception propagated.
+      Logger.error("agent action batch crashed",
+        issue_id: issue.id,
+        agent_id: agent.id,
+        company_id: issue.company_id,
+        component: "agent_actions",
+        reason: Exception.message(exception)
+      )
+
+      {:error, {:action_crashed, Exception.message(exception)}}
   end
 
   defp maybe_emit_rejection_comment(%Issue{} = issue, :no_supervisor_to_review) do
@@ -443,22 +680,12 @@ defmodule Cympho.AgentActions do
          %Issue{} = issue,
          {:delivery_brief_too_thin, role, next_prompt, missing, scaffold}
        ) do
-    missing =
-      missing
-      |> Enum.reject(&blank?/1)
-      |> Enum.join(", ")
-
-    missing_part =
-      if missing == "" do
-        ""
-      else
-        " Missing delivery signals: #{missing}."
-      end
-
-    system_comment(
+    too_thin_comment(
       issue,
-      "create_issue rejected: #{Agent.role_label(role)} delivery brief is too thin. " <>
-        "#{next_prompt}.#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+      "create_issue rejected: #{Agent.role_label(role)} delivery brief is too thin. #{next_prompt}.",
+      "delivery",
+      missing,
+      scaffold
     )
   end
 
@@ -466,22 +693,12 @@ defmodule Cympho.AgentActions do
          %Issue{} = issue,
          {:mission_initiative_too_thin, title, next_prompt, missing, scaffold}
        ) do
-    missing =
-      missing
-      |> Enum.reject(&blank?/1)
-      |> Enum.join(", ")
-
-    missing_part =
-      if missing == "" do
-        ""
-      else
-        " Missing initiative signals: #{missing}."
-      end
-
-    system_comment(
+    too_thin_comment(
       issue,
-      "seed_mission_issues rejected: initiative #{inspect(title)} is too thin for mission seeding. " <>
-        "#{next_prompt}.#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+      "seed_mission_issues rejected: initiative #{inspect(title)} is too thin for mission seeding. #{next_prompt}.",
+      "initiative",
+      missing,
+      scaffold
     )
   end
 
@@ -489,22 +706,12 @@ defmodule Cympho.AgentActions do
          %Issue{} = issue,
          {:spec_review_delivery_brief_too_thin, role, next_prompt, missing, scaffold}
        ) do
-    missing =
-      missing
-      |> Enum.reject(&blank?/1)
-      |> Enum.join(", ")
-
-    missing_part =
-      if missing == "" do
-        ""
-      else
-        " Missing delivery signals: #{missing}."
-      end
-
-    system_comment(
+    too_thin_comment(
       issue,
-      "approve_issue rejected: #{Agent.role_label(role)} release brief is too thin for runtime dispatch. " <>
-        "#{next_prompt}.#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+      "approve_issue rejected: #{Agent.role_label(role)} release brief is too thin for runtime dispatch. #{next_prompt}.",
+      "delivery",
+      missing,
+      scaffold
     )
   end
 
@@ -512,22 +719,12 @@ defmodule Cympho.AgentActions do
          %Issue{} = issue,
          {:delegate_delivery_brief_too_thin, role, next_prompt, missing, scaffold}
        ) do
-    missing =
-      missing
-      |> Enum.reject(&blank?/1)
-      |> Enum.join(", ")
-
-    missing_part =
-      if missing == "" do
-        ""
-      else
-        " Missing delivery signals: #{missing}."
-      end
-
-    system_comment(
+    too_thin_comment(
       issue,
-      "delegate rejected: #{Agent.role_label(role)} directive is too thin for runtime dispatch. " <>
-        "#{next_prompt}.#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+      "delegate rejected: #{Agent.role_label(role)} directive is too thin for runtime dispatch. #{next_prompt}.",
+      "delivery",
+      missing,
+      scaffold
     )
   end
 
@@ -535,22 +732,12 @@ defmodule Cympho.AgentActions do
          %Issue{} = issue,
          {:handoff_delivery_brief_too_thin, role, next_prompt, missing, scaffold}
        ) do
-    missing =
-      missing
-      |> Enum.reject(&blank?/1)
-      |> Enum.join(", ")
-
-    missing_part =
-      if missing == "" do
-        ""
-      else
-        " Missing delivery signals: #{missing}."
-      end
-
-    system_comment(
+    too_thin_comment(
       issue,
-      "handoff rejected: #{Agent.role_label(role)} directive is too thin for runtime dispatch. " <>
-        "#{next_prompt}.#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+      "handoff rejected: #{Agent.role_label(role)} directive is too thin for runtime dispatch. #{next_prompt}.",
+      "delivery",
+      missing,
+      scaffold
     )
   end
 
@@ -558,22 +745,12 @@ defmodule Cympho.AgentActions do
          %Issue{} = issue,
          {:intervene_delivery_brief_too_thin, mode, role, next_prompt, missing, scaffold}
        ) do
-    missing =
-      missing
-      |> Enum.reject(&blank?/1)
-      |> Enum.join(", ")
-
-    missing_part =
-      if missing == "" do
-        ""
-      else
-        " Missing delivery signals: #{missing}."
-      end
-
-    system_comment(
+    too_thin_comment(
       issue,
-      "intervene #{mode} rejected: #{Agent.role_label(role)} recovery directive is too thin for runtime dispatch. " <>
-        "#{next_prompt}.#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+      "intervene #{mode} rejected: #{Agent.role_label(role)} recovery directive is too thin for runtime dispatch. #{next_prompt}.",
+      "delivery",
+      missing,
+      scaffold
     )
   end
 
@@ -581,22 +758,12 @@ defmodule Cympho.AgentActions do
          %Issue{} = issue,
          {:request_changes_feedback_too_thin, role, missing, scaffold}
        ) do
-    missing =
-      missing
-      |> Enum.reject(&blank?/1)
-      |> Enum.join(", ")
-
-    missing_part =
-      if missing == "" do
-        ""
-      else
-        " Missing review signals: #{missing}."
-      end
-
-    system_comment(
+    too_thin_comment(
       issue,
-      "request_changes rejected: #{Agent.role_label(role)} review feedback is too thin for another delivery run." <>
-        "#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+      "request_changes rejected: #{Agent.role_label(role)} review feedback is too thin for another delivery run.",
+      "review",
+      missing,
+      scaffold
     )
   end
 
@@ -604,22 +771,12 @@ defmodule Cympho.AgentActions do
          %Issue{} = issue,
          {:force_fix_pr_feedback_too_thin, missing, scaffold}
        ) do
-    missing =
-      missing
-      |> Enum.reject(&blank?/1)
-      |> Enum.join(", ")
-
-    missing_part =
-      if missing == "" do
-        ""
-      else
-        " Missing review signals: #{missing}."
-      end
-
-    system_comment(
+    too_thin_comment(
       issue,
-      "force_fix_pr rejected: PR fix feedback is too thin for another delivery run." <>
-        "#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+      "force_fix_pr rejected: PR fix feedback is too thin for another delivery run.",
+      "review",
+      missing,
+      scaffold
     )
   end
 
@@ -627,22 +784,12 @@ defmodule Cympho.AgentActions do
          %Issue{} = issue,
          {:block_issue_reason_too_thin, missing, scaffold}
        ) do
-    missing =
-      missing
-      |> Enum.reject(&blank?/1)
-      |> Enum.join(", ")
-
-    missing_part =
-      if missing == "" do
-        ""
-      else
-        " Missing blocker signals: #{missing}."
-      end
-
-    system_comment(
+    too_thin_comment(
       issue,
-      "block_issue rejected: blocker reason is too thin to recover later." <>
-        "#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+      "block_issue rejected: blocker reason is too thin to recover later.",
+      "blocker",
+      missing,
+      scaffold
     )
   end
 
@@ -650,22 +797,12 @@ defmodule Cympho.AgentActions do
          %Issue{} = issue,
          {:approval_note_too_thin, role, missing, scaffold}
        ) do
-    missing =
-      missing
-      |> Enum.reject(&blank?/1)
-      |> Enum.join(", ")
-
-    missing_part =
-      if missing == "" do
-        ""
-      else
-        " Missing approval signals: #{missing}."
-      end
-
-    system_comment(
+    too_thin_comment(
       issue,
-      "approve_issue rejected: #{Agent.role_label(role)} approval note is too thin for owner memory." <>
-        "#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+      "approve_issue rejected: #{Agent.role_label(role)} approval note is too thin for owner memory.",
+      "approval",
+      missing,
+      scaffold
     )
   end
 
@@ -673,22 +810,12 @@ defmodule Cympho.AgentActions do
          %Issue{} = issue,
          {:escalation_reason_too_thin, missing, scaffold}
        ) do
-    missing =
-      missing
-      |> Enum.reject(&blank?/1)
-      |> Enum.join(", ")
-
-    missing_part =
-      if missing == "" do
-        ""
-      else
-        " Missing escalation signals: #{missing}."
-      end
-
-    system_comment(
+    too_thin_comment(
       issue,
-      "escalate rejected: escalation reason is too thin for a supervisor to act." <>
-        "#{missing_part}\n\nRepair scaffold:\n#{scaffold}"
+      "escalate rejected: escalation reason is too thin for a supervisor to act.",
+      "escalation",
+      missing,
+      scaffold
     )
   end
 
@@ -1062,11 +1189,44 @@ defmodule Cympho.AgentActions do
       true ->
         actions
         |> Enum.map(&validate_action/1)
+        |> skip_unsupported_among_valid()
         |> collect_validated()
     end
   end
 
+  # Recover common payload-shape drift: a bare list of actions, or a single
+  # action object at the top level.
+  defp validate_payload(actions) when is_list(actions),
+    do: validate_payload(%{"actions" => actions})
+
+  defp validate_payload(%{"type" => _} = action), do: validate_payload(%{"actions" => [action]})
+
+  defp validate_payload(%{} = payload) do
+    case normalize_string_keys(payload) do
+      %{"actions" => _} = normalized when normalized != payload -> validate_payload(normalized)
+      _ -> {:error, :missing_actions}
+    end
+  end
+
   defp validate_payload(_), do: {:error, :missing_actions}
+
+  # An unknown action type must not abort a batch that also carries valid
+  # actions — convert it to a skip marker (executed as a warning comment) so
+  # the known actions still run. A batch of only unknown types keeps the
+  # hard `{:unsupported_action, type}` error.
+  defp skip_unsupported_among_valid(results) do
+    if Enum.any?(results, &match?({:ok, _}, &1)) do
+      Enum.map(results, fn
+        {:error, {:unsupported_action, type}} ->
+          {:ok, %{"type" => "skip_unsupported", "original_type" => type}}
+
+        other ->
+          other
+      end)
+    else
+      results
+    end
+  end
 
   defp validate_action(%{} = action) do
     action = normalize_string_keys(action)
@@ -1537,8 +1697,42 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "comment"} = action) do
-    with {:ok, comment} <- maybe_agent_comment(issue, agent, action["body"]) do
-      {:ok, %{type: "comment", comment_id: comment.id}}
+    body = action["body"] |> to_string() |> String.trim()
+
+    case recent_duplicate_comment(issue, agent, body) do
+      %{id: comment_id} ->
+        # A retried run re-emitting the same comment must not double-post.
+        {:ok, %{type: "comment", comment_id: comment_id, duplicate: true}}
+
+      nil ->
+        with {:ok, comment} <- maybe_agent_comment(issue, agent, action["body"]) do
+          {:ok, %{type: "comment", comment_id: comment.id}}
+        end
+    end
+  end
+
+  # Parse-time marker for an unknown action type in an otherwise-valid batch.
+  # Surface it as a system comment so the agent self-corrects next turn, but
+  # never fail the batch over it.
+  defp execute_action(issue, agent, %{"type" => "skip_unsupported"} = action) do
+    original_type = action["original_type"]
+
+    Logger.warning("skipped unsupported agent action",
+      issue_id: issue.id,
+      agent_id: agent.id,
+      company_id: issue.company_id,
+      component: "agent_actions",
+      action_type: original_type
+    )
+
+    with {:ok, _comment} <-
+           system_comment(
+             issue,
+             "Skipped unsupported action #{inspect(original_type)}. " <>
+               "Supported types: #{Enum.join(@supported_types, ", ")}. " <>
+               "The other actions in this batch were executed."
+           ) do
+      {:ok, %{type: "skip_unsupported", original_type: original_type, skipped: true}}
     end
   end
 
@@ -1571,23 +1765,32 @@ defmodule Cympho.AgentActions do
   end
 
   defp execute_action(issue, agent, %{"type" => "attach_work_product"} = action) do
-    attrs = %{
-      issue_id: issue.id,
-      created_by_agent_id: agent.id,
-      kind: action["kind"] || "other",
-      title: action["title"],
-      description: action["description"] || "",
-      url: action["url"],
-      payload: action["payload"] || %{},
-      metadata: action["metadata"] || %{}
-    }
+    kind = action["kind"] || "other"
 
-    case WorkProducts.create_work_product(attrs) do
-      {:ok, work_product} ->
-        {:ok, %{type: "attach_work_product", work_product_id: work_product.id}}
+    case recent_duplicate_work_product(issue, agent, action["title"], kind) do
+      %{id: work_product_id} ->
+        # Retried run re-attaching the same artifact — keep the original.
+        {:ok, %{type: "attach_work_product", work_product_id: work_product_id, duplicate: true}}
 
-      error ->
-        error
+      nil ->
+        attrs = %{
+          issue_id: issue.id,
+          created_by_agent_id: agent.id,
+          kind: kind,
+          title: action["title"],
+          description: action["description"] || "",
+          url: action["url"],
+          payload: action["payload"] || %{},
+          metadata: action["metadata"] || %{}
+        }
+
+        case WorkProducts.create_work_product(attrs) do
+          {:ok, work_product} ->
+            {:ok, %{type: "attach_work_product", work_product_id: work_product.id}}
+
+          error ->
+            error
+        end
     end
   end
 
@@ -4415,6 +4618,43 @@ defmodule Cympho.AgentActions do
     end
   end
 
+  # Idempotency guard for retried runs: the same agent re-posting the exact
+  # same comment body on the same issue within the window is a replay, not a
+  # new signal.
+  @duplicate_comment_window_minutes 5
+  defp recent_duplicate_comment(_issue, _agent, ""), do: nil
+
+  defp recent_duplicate_comment(%Issue{} = issue, %Agent{} = agent, body) do
+    since = DateTime.add(DateTime.utc_now(), -@duplicate_comment_window_minutes, :minute)
+
+    from(c in Cympho.Comments.Comment,
+      where:
+        c.issue_id == ^issue.id and c.author_type == "agent" and c.author_id == ^agent.id and
+          c.body == ^body and c.inserted_at >= ^since,
+      select: %{id: c.id},
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  # Same guard for artifacts: identical title + kind from the same agent on
+  # the same issue within the window is a replayed attach, not a new artifact.
+  defp recent_duplicate_work_product(%Issue{} = issue, %Agent{} = agent, title, kind)
+       when is_binary(title) do
+    since = DateTime.add(DateTime.utc_now(), -@duplicate_comment_window_minutes, :minute)
+
+    from(wp in Cympho.WorkProducts.IssueWorkProduct,
+      where:
+        wp.issue_id == ^issue.id and wp.created_by_agent_id == ^agent.id and
+          wp.title == ^title and wp.kind == ^kind and wp.inserted_at >= ^since,
+      select: %{id: wp.id},
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  defp recent_duplicate_work_product(_issue, _agent, _title, _kind), do: nil
+
   defp maybe_agent_comment(_issue, _agent, nil), do: {:ok, %{id: nil}}
   defp maybe_agent_comment(_issue, _agent, ""), do: {:ok, %{id: nil}}
 
@@ -4511,6 +4751,24 @@ defmodule Cympho.AgentActions do
       author_id: "00000000-0000-0000-0000-000000000000",
       issue_id: issue.id
     })
+  end
+
+  # Shared shape for all "too thin" rejection comments: lead sentence,
+  # optional missing-signal list, and a repair scaffold the agent can fill in.
+  defp too_thin_comment(issue, lead, signal_label, missing, scaffold) do
+    missing =
+      missing
+      |> Enum.reject(&blank?/1)
+      |> Enum.join(", ")
+
+    missing_part =
+      if missing == "" do
+        ""
+      else
+        " Missing #{signal_label} signals: #{missing}."
+      end
+
+    system_comment(issue, "#{lead}#{missing_part}\n\nRepair scaffold:\n#{scaffold}")
   end
 
   defp created_issue_note(%Issue{} = created) do

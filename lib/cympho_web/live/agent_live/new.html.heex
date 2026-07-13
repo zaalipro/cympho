@@ -1,681 +1,682 @@
-<.page size="wide">
-  <%= if @pending_approval_id do %>
-    <div class="mb-5 rounded-lg border border-blue-500/20 bg-blue-500/10 px-4 py-3">
-      <p class="text-sm leading-5 text-blue-300">
-        Agent hire requires board approval. A request has been submitted and is pending review.
-        <.app_link
-          navigate={~p"/board-approvals/#{@pending_approval_id}"}
-          class="text-blue-300 underline hover:text-blue-200"
-        >
-          View approval request
-        </.app_link>
-      </p>
-    </div>
-  <% end %>
-
-  <.header>
-    <div class="min-w-0">
-      <span class="ember-eyebrow">Agent hire</span>
-      <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
-        New Agent
-      </h1>
-      <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-        Create an autonomous teammate with a role, operating instructions, and runtime adapter.
-      </p>
-    </div>
-    <:actions>
-      <.app_link
-        navigate={~p"/agents"}
-        class="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
-      >
-        Cancel
-      </.app_link>
-    </:actions>
-  </.header>
-
-  <div
-    :if={@hire_context}
-    data-testid="hire-demand-context"
-    class="mb-5 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3"
-  >
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-      <div class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
-          <p class="text-xs font-590 uppercase tracking-[0.12em] text-amber-200">
-            Demand-backed hire
-          </p>
-          <span class="rounded-full border border-amber-500/25 bg-canvas/40 px-2 py-0.5 text-[11px] font-510 text-amber-100">
-            {@hire_context.open_issues} open {plural_noun(@hire_context.open_issues, "issue")}
-          </span>
-        </div>
-        <p class="mt-1 text-sm leading-5 text-amber-50">
-          Queued work needs a {@hire_context.label}. This form is prefilled with the matching
-          role, playbook, and reporting line.
-        </p>
-        <div :if={@hire_context.examples != []} class="mt-2 flex flex-wrap gap-1.5">
+<.page size="wide" class="ember-aurora">
+  <div class="relative z-[1]">
+    <%= if @pending_approval_id do %>
+      <div class="mb-5 rounded-lg border border-blue-500/20 bg-blue-500/10 px-4 py-3">
+        <p class="text-sm leading-5 text-blue-300">
+          Agent hire requires board approval. A request has been submitted and is pending review.
           <.app_link
-            :for={example <- @hire_context.examples}
-            navigate={~p"/issues/#{example.id}"}
-            class="max-w-full truncate rounded-md border border-amber-500/20 bg-panel px-2 py-1 text-[11px] text-text-tertiary transition hover:border-amber-400/40 hover:text-amber-100"
-            title={issue_example_label(example)}
+            navigate={~p"/board-approvals/#{@pending_approval_id}"}
+            class="text-blue-300 underline hover:text-blue-200"
           >
-            {issue_example_label(example)}
+            View approval request
           </.app_link>
-        </div>
+        </p>
       </div>
-      <p
-        :if={@hire_context.suggested_parent}
-        class="shrink-0 rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs text-text-secondary"
-      >
-        Reports to {@hire_context.suggested_parent.name}
-      </p>
-    </div>
-  </div>
+    <% end %>
 
-  <div id="new-agent-config-fields" phx-hook="AdapterConfigFields">
-    <.form
-      for={@form}
-      id="new-agent-form"
-      phx-change="validate"
-      phx-submit="save"
-      class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
+    <.header>
+      <div class="min-w-0">
+        <span class="ember-eyebrow">Agent hire</span>
+        <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+          New Agent
+        </h1>
+        <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+          Create an autonomous teammate with a role, operating instructions, and runtime adapter.
+        </p>
+      </div>
+      <:actions>
+        <.app_link
+          navigate={~p"/agents"}
+          class="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+        >
+          Cancel
+        </.app_link>
+      </:actions>
+    </.header>
+
+    <div
+      :if={@hire_context}
+      data-testid="hire-demand-context"
+      class="mb-5 rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3"
     >
-      <% role_value = @form[:role].value || "engineer" %>
-      <% role_name = role_label(role_value) %>
-
-      <.panel class="ember-glass overflow-hidden">
-        <div class="border-b border-border px-5 py-4 sm:px-6">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            Agent launch plan
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <p class="text-xs font-590 uppercase tracking-[0.12em] text-amber-200">
+              Demand-backed hire
+            </p>
+            <span class="rounded-full border border-amber-500/25 bg-canvas/40 px-2 py-0.5 text-[11px] font-510 text-amber-100">
+              {@hire_context.open_issues} open {plural_noun(@hire_context.open_issues, "issue")}
+            </span>
+          </div>
+          <p class="mt-1 text-sm leading-5 text-amber-50">
+            Queued work needs a {@hire_context.label}. This form is prefilled with the matching
+            role, playbook, and reporting line.
           </p>
-          <h2 class="mt-1 text-lg font-590 text-text-primary">
-            Configure the operator before work enters the queue
-          </h2>
-          <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
-            Choose the role, reporting line, runtime profile, and operating guide that decide how this
-            agent picks up work and hands it off.
-          </p>
-        </div>
-
-        <div class="space-y-8 p-5 sm:p-6">
-          <section data-testid="new-agent-runtime-section" class="space-y-4">
-            <div>
-              <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-                Runtime profile
-              </p>
-              <p class="mt-1 text-sm leading-5 text-text-tertiary">
-                Pick the execution backend before tuning adapter-specific details.
-              </p>
-            </div>
-
-            <div
-              data-testid="new-agent-runtime-profile"
-              class="rounded-lg border border-border bg-surface/70 px-4 py-4"
+          <div :if={@hire_context.examples != []} class="mt-2 flex flex-wrap gap-1.5">
+            <.app_link
+              :for={example <- @hire_context.examples}
+              navigate={~p"/issues/#{example.id}"}
+              class="max-w-full truncate rounded-md border border-amber-500/20 bg-panel px-2 py-1 text-[11px] text-text-tertiary transition hover:border-amber-400/40 hover:text-amber-100"
+              title={issue_example_label(example)}
             >
-              <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
+              {issue_example_label(example)}
+            </.app_link>
+          </div>
+        </div>
+        <p
+          :if={@hire_context.suggested_parent}
+          class="shrink-0 rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs text-text-secondary"
+        >
+          Reports to {@hire_context.suggested_parent.name}
+        </p>
+      </div>
+    </div>
+
+    <div id="new-agent-config-fields" phx-hook="AdapterConfigFields">
+      <.form
+        for={@form}
+        id="new-agent-form"
+        phx-change="validate"
+        phx-submit="save"
+        class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
+      >
+        <% role_value = @form[:role].value || "engineer" %>
+        <% role_name = role_label(role_value) %>
+
+        <.panel class="ember-glass overflow-hidden">
+          <div class="border-b border-border px-5 py-4 sm:px-6">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Agent launch plan
+            </p>
+            <h2 class="mt-1 text-lg font-590 text-text-primary">
+              Configure the operator before work enters the queue
+            </h2>
+            <p class="mt-1 max-w-3xl text-sm leading-6 text-text-tertiary">
+              Choose the role, reporting line, runtime profile, and operating guide that decide how this
+              agent picks up work and hands it off.
+            </p>
+          </div>
+
+          <div class="space-y-8 p-5 sm:p-6">
+            <section data-testid="new-agent-runtime-section" class="space-y-4">
+              <div>
+                <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                  Runtime profile
+                </p>
+                <p class="mt-1 text-sm leading-5 text-text-tertiary">
+                  Pick the execution backend before tuning adapter-specific details.
+                </p>
+              </div>
+
+              <div
+                data-testid="new-agent-runtime-profile"
+                class="rounded-lg border border-border bg-surface/70 px-4 py-4"
+              >
+                <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
+                  <div class="space-y-1.5">
+                    <label
+                      for="new-agent-runtime-profile-select"
+                      class="block text-xs font-510 text-text-secondary"
+                    >
+                      Runtime profile
+                    </label>
+                    <select
+                      id="new-agent-runtime-profile-select"
+                      name="agent[runtime_profile_id]"
+                      class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                    >
+                      <option
+                        :for={profile <- @runtime_profiles}
+                        value={profile.id}
+                        data-adapter={profile.adapter || ""}
+                        selected={profile.id == @selected_runtime_profile_id}
+                      >
+                        {profile.name}
+                      </option>
+                    </select>
+                    <p class="text-xs leading-5 text-text-quaternary">
+                      Profiles apply adapter, command, model, and endpoint defaults before the agent is
+                      created. Choose Custom for raw adapter fields.
+                    </p>
+                  </div>
+
+                  <div class="rounded-lg border border-border bg-panel px-3 py-3">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="rounded-full border border-brand/30 bg-brand/10 px-2 py-0.5 text-[11px] font-510 text-brand">
+                        {@runtime_profile.posture}
+                      </span>
+                      <span
+                        :if={@runtime_profile.adapter}
+                        class="rounded-full border border-border bg-canvas px-2 py-0.5 text-[11px] font-510 text-text-tertiary"
+                      >
+                        {adapter_label(@runtime_profile.adapter)}
+                      </span>
+                      <span
+                        :if={runtime_profile_concurrency(@runtime_profile)}
+                        class="rounded-full border border-success/25 bg-success/10 px-2 py-0.5 text-[11px] font-510 text-success"
+                      >
+                        {runtime_profile_concurrency(@runtime_profile)} slot{if runtime_profile_concurrency(
+                                                                                  @runtime_profile
+                                                                                ) == 1,
+                                                                                do: "",
+                                                                                else: "s"}
+                      </span>
+                      <% capability = runtime_profile_capability(@runtime_profile) %>
+                      <span
+                        :if={capability}
+                        class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{capability.class}"}
+                      >
+                        {capability.label}
+                      </span>
+                    </div>
+                    <p class="mt-2 text-sm font-590 text-text-primary">{@runtime_profile.name}</p>
+                    <p class="mt-1 text-xs leading-5 text-text-quaternary">
+                      {@runtime_profile.description}
+                    </p>
+                    <div class="mt-3 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+                      <p class="font-mono text-xs text-text-secondary">
+                        {runtime_profile_summary(@runtime_profile)}
+                      </p>
+                      <.app_link
+                        :if={runtime_profile_secret_setup_path(@runtime_profile)}
+                        navigate={runtime_profile_secret_setup_path(@runtime_profile)}
+                        class="inline-flex shrink-0 items-center justify-center rounded-md border border-brand/25 bg-brand/10 px-2.5 py-1.5 text-xs font-510 text-brand transition hover:bg-brand/15"
+                      >
+                        Add required key
+                      </.app_link>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section
+              data-testid="new-agent-identity-section"
+              class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4 sm:px-5"
+            >
+              <div>
+                <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                  Identity and reporting
+                </p>
+                <p class="mt-1 text-sm leading-5 text-text-tertiary">
+                  Give the agent a clear role and manager so handoffs land in the right part of the org.
+                </p>
+              </div>
+
+              <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_220px_220px]">
+                <.input field={@form[:name]} label="Name" required placeholder="Elixir Engineer" />
+                <.input
+                  field={@form[:role]}
+                  type="select"
+                  label="Role"
+                  required
+                  options={role_options()}
+                />
+                <.input
+                  field={@form[:parent_id]}
+                  type="select"
+                  label="Reports to"
+                  options={@reports_to_options}
+                />
+              </div>
+            </section>
+
+            <section data-testid="new-agent-adapter-section" class="space-y-4">
+              <div>
+                <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                  Adapter configuration
+                </p>
+                <p class="mt-1 text-sm leading-5 text-text-tertiary">
+                  Runtime profiles fill this in automatically; use custom settings only when needed.
+                </p>
+              </div>
+
+              <div class="max-w-md">
+                <.input
+                  field={@form[:adapter]}
+                  type="select"
+                  label="Adapter"
+                  required
+                  value={@selected_adapter}
+                  options={adapter_options()}
+                />
+              </div>
+
+              <div
+                data-adapter-panel="codex"
+                hidden={@selected_adapter != "codex"}
+                class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+              >
                 <div class="space-y-1.5">
                   <label
-                    for="new-agent-runtime-profile-select"
+                    for="new-agent-codex-model"
                     class="block text-xs font-510 text-text-secondary"
                   >
-                    Runtime profile
+                    Codex model
                   </label>
                   <select
-                    id="new-agent-runtime-profile-select"
-                    name="agent[runtime_profile_id]"
+                    id="new-agent-codex-model"
+                    name="agent[model]"
                     class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                   >
                     <option
-                      :for={profile <- @runtime_profiles}
-                      value={profile.id}
-                      data-adapter={profile.adapter || ""}
-                      selected={profile.id == @selected_runtime_profile_id}
+                      :for={{label, value} <- codex_model_options()}
+                      value={value}
+                      selected={value == @runtime_model}
                     >
-                      {profile.name}
+                      {label}
                     </option>
                   </select>
-                  <p class="text-xs leading-5 text-text-quaternary">
-                    Profiles apply adapter, command, model, and endpoint defaults before the agent is
-                    created. Choose Custom for raw adapter fields.
+                  <p class="text-xs text-text-quaternary">
+                    Passed to Codex CLI as <code>--model</code>. Command is fixed to <code>codex</code>.
                   </p>
                 </div>
-
-                <div class="rounded-lg border border-border bg-panel px-3 py-3">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="rounded-full border border-brand/30 bg-brand/10 px-2 py-0.5 text-[11px] font-510 text-brand">
-                      {@runtime_profile.posture}
-                    </span>
-                    <span
-                      :if={@runtime_profile.adapter}
-                      class="rounded-full border border-border bg-canvas px-2 py-0.5 text-[11px] font-510 text-text-tertiary"
-                    >
-                      {adapter_label(@runtime_profile.adapter)}
-                    </span>
-                    <span
-                      :if={runtime_profile_concurrency(@runtime_profile)}
-                      class="rounded-full border border-success/25 bg-success/10 px-2 py-0.5 text-[11px] font-510 text-success"
-                    >
-                      {runtime_profile_concurrency(@runtime_profile)} slot{if runtime_profile_concurrency(
-                                                                                @runtime_profile
-                                                                              ) == 1,
-                                                                              do: "",
-                                                                              else: "s"}
-                    </span>
-                    <% capability = runtime_profile_capability(@runtime_profile) %>
-                    <span
-                      :if={capability}
-                      class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{capability.class}"}
-                    >
-                      {capability.label}
-                    </span>
-                  </div>
-                  <p class="mt-2 text-sm font-590 text-text-primary">{@runtime_profile.name}</p>
-                  <p class="mt-1 text-xs leading-5 text-text-quaternary">
-                    {@runtime_profile.description}
-                  </p>
-                  <div class="mt-3 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
-                    <p class="font-mono text-xs text-text-secondary">
-                      {runtime_profile_summary(@runtime_profile)}
-                    </p>
-                    <.app_link
-                      :if={runtime_profile_secret_setup_path(@runtime_profile)}
-                      navigate={runtime_profile_secret_setup_path(@runtime_profile)}
-                      class="inline-flex shrink-0 items-center justify-center rounded-md border border-brand/25 bg-brand/10 px-2.5 py-1.5 text-xs font-510 text-brand transition hover:bg-brand/15"
-                    >
-                      Add required key
-                    </.app_link>
-                  </div>
+                <div class="rounded-lg border border-border bg-canvas px-3 py-2 text-xs">
+                  <p class="font-mono text-text-secondary">codex --model {@runtime_model}</p>
+                  <p class="mt-1 text-text-quaternary">Stored in agent config.</p>
                 </div>
               </div>
-            </div>
-          </section>
 
-          <section
-            data-testid="new-agent-identity-section"
-            class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4 sm:px-5"
-          >
-            <div>
-              <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-                Identity and reporting
-              </p>
-              <p class="mt-1 text-sm leading-5 text-text-tertiary">
-                Give the agent a clear role and manager so handoffs land in the right part of the org.
-              </p>
-            </div>
-
-            <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_220px_220px]">
-              <.input field={@form[:name]} label="Name" required placeholder="Elixir Engineer" />
-              <.input
-                field={@form[:role]}
-                type="select"
-                label="Role"
-                required
-                options={role_options()}
-              />
-              <.input
-                field={@form[:parent_id]}
-                type="select"
-                label="Reports to"
-                options={@reports_to_options}
-              />
-            </div>
-          </section>
-
-          <section data-testid="new-agent-adapter-section" class="space-y-4">
-            <div>
-              <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-                Adapter configuration
-              </p>
-              <p class="mt-1 text-sm leading-5 text-text-tertiary">
-                Runtime profiles fill this in automatically; use custom settings only when needed.
-              </p>
-            </div>
-
-            <div class="max-w-md">
-              <.input
-                field={@form[:adapter]}
-                type="select"
-                label="Adapter"
-                required
-                value={@selected_adapter}
-                options={adapter_options()}
-              />
-            </div>
-
-            <div
-              data-adapter-panel="codex"
-              hidden={@selected_adapter != "codex"}
-              class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto]"
-            >
-              <div class="space-y-1.5">
-                <label
-                  for="new-agent-codex-model"
-                  class="block text-xs font-510 text-text-secondary"
-                >
-                  Codex model
-                </label>
-                <select
-                  id="new-agent-codex-model"
-                  name="agent[model]"
-                  class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                >
-                  <option
-                    :for={{label, value} <- codex_model_options()}
-                    value={value}
-                    selected={value == @runtime_model}
-                  >
-                    {label}
-                  </option>
-                </select>
-                <p class="text-xs text-text-quaternary">
-                  Passed to Codex CLI as <code>--model</code>. Command is fixed to <code>codex</code>.
-                </p>
-              </div>
-              <div class="rounded-lg border border-border bg-canvas px-3 py-2 text-xs">
-                <p class="font-mono text-text-secondary">codex --model {@runtime_model}</p>
-                <p class="mt-1 text-text-quaternary">Stored in agent config.</p>
-              </div>
-            </div>
-
-            <div
-              data-adapter-panel="cursor"
-              hidden={@selected_adapter != "cursor"}
-              class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
-            >
-              <div class="space-y-1.5">
-                <label
-                  for="new-agent-cursor-command"
-                  class="block text-xs font-510 text-text-secondary"
-                >
-                  Cursor command
-                </label>
-                <input
-                  id="new-agent-cursor-command"
-                  name="agent[runtime_command]"
-                  value={@runtime_command || "agent"}
-                  placeholder="agent"
-                  class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                />
-              </div>
-              <div class="space-y-1.5">
-                <label
-                  for="new-agent-cursor-model"
-                  class="block text-xs font-510 text-text-secondary"
-                >
-                  Cursor model
-                </label>
-                <select
-                  id="new-agent-cursor-model"
-                  name="agent[model]"
-                  class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                >
-                  <option
-                    :for={{label, value} <- cursor_model_options()}
-                    value={value}
-                    selected={value == @runtime_model}
-                  >
-                    {label}
-                  </option>
-                </select>
-              </div>
-            </div>
-
-            <div
-              data-adapter-panel="openclaw"
-              hidden={@selected_adapter != "openclaw"}
-              class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
-            >
-              <div class="space-y-1.5">
-                <label
-                  for="new-agent-openclaw-provider"
-                  class="block text-xs font-510 text-text-secondary"
-                >
-                  Model provider
-                </label>
-                <select
-                  id="new-agent-openclaw-provider"
-                  name="agent[provider]"
-                  class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                >
-                  <option
-                    :for={{label, value} <- openclaw_provider_options()}
-                    value={value}
-                    selected={value == @runtime_provider}
-                  >
-                    {label}
-                  </option>
-                </select>
-              </div>
-              <div class="space-y-1.5">
-                <label
-                  for="new-agent-openclaw-model"
-                  class="block text-xs font-510 text-text-secondary"
-                >
-                  Provider model
-                </label>
-                <select
-                  id="new-agent-openclaw-model"
-                  name="agent[model]"
-                  class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                >
-                  <option
-                    :for={{provider, label, value} <- openclaw_provider_model_options()}
-                    value={value}
-                    data-provider={provider}
-                    hidden={provider != @runtime_provider}
-                    disabled={provider != @runtime_provider}
-                    selected={provider == @runtime_provider and value == @runtime_model}
-                  >
-                    {label}
-                  </option>
-                </select>
-              </div>
-              <div class="space-y-1.5">
-                <label
-                  for="new-agent-openclaw-endpoint"
-                  class="block text-xs font-510 text-text-secondary"
-                >
-                  Gateway endpoint
-                </label>
-                <input
-                  id="new-agent-openclaw-endpoint"
-                  name="agent[openclaw_endpoint]"
-                  value={@openclaw_endpoint}
-                  placeholder="http://localhost:18789"
-                  class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                />
-              </div>
-              <div class="grid gap-3 sm:grid-cols-2">
+              <div
+                data-adapter-panel="cursor"
+                hidden={@selected_adapter != "cursor"}
+                class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
+              >
                 <div class="space-y-1.5">
                   <label
-                    for="new-agent-openclaw-runtime"
+                    for="new-agent-cursor-command"
                     class="block text-xs font-510 text-text-secondary"
                   >
-                    Runtime
-                  </label>
-                  <select
-                    id="new-agent-openclaw-runtime"
-                    name="agent[openclaw_runtime]"
-                    class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                  >
-                    <option value="subagent" selected={@openclaw_runtime == "subagent"}>
-                      Subagent
-                    </option>
-                    <option value="acp" selected={@openclaw_runtime == "acp"}>ACP harness</option>
-                  </select>
-                </div>
-                <div class="space-y-1.5">
-                  <label
-                    for="new-agent-openclaw-harness"
-                    class="block text-xs font-510 text-text-secondary"
-                  >
-                    Harness id
+                    Cursor command
                   </label>
                   <input
-                    id="new-agent-openclaw-harness"
-                    name="agent[openclaw_harness_id]"
-                    value={@openclaw_harness_id}
+                    id="new-agent-cursor-command"
+                    name="agent[runtime_command]"
+                    value={@runtime_command || "agent"}
+                    placeholder="agent"
+                    class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  />
+                </div>
+                <div class="space-y-1.5">
+                  <label
+                    for="new-agent-cursor-model"
+                    class="block text-xs font-510 text-text-secondary"
+                  >
+                    Cursor model
+                  </label>
+                  <select
+                    id="new-agent-cursor-model"
+                    name="agent[model]"
+                    class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  >
+                    <option
+                      :for={{label, value} <- cursor_model_options()}
+                      value={value}
+                      selected={value == @runtime_model}
+                    >
+                      {label}
+                    </option>
+                  </select>
+                </div>
+              </div>
+
+              <div
+                data-adapter-panel="openclaw"
+                hidden={@selected_adapter != "openclaw"}
+                class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
+              >
+                <div class="space-y-1.5">
+                  <label
+                    for="new-agent-openclaw-provider"
+                    class="block text-xs font-510 text-text-secondary"
+                  >
+                    Model provider
+                  </label>
+                  <select
+                    id="new-agent-openclaw-provider"
+                    name="agent[provider]"
+                    class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  >
+                    <option
+                      :for={{label, value} <- openclaw_provider_options()}
+                      value={value}
+                      selected={value == @runtime_provider}
+                    >
+                      {label}
+                    </option>
+                  </select>
+                </div>
+                <div class="space-y-1.5">
+                  <label
+                    for="new-agent-openclaw-model"
+                    class="block text-xs font-510 text-text-secondary"
+                  >
+                    Provider model
+                  </label>
+                  <select
+                    id="new-agent-openclaw-model"
+                    name="agent[model]"
+                    class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  >
+                    <option
+                      :for={{provider, label, value} <- openclaw_provider_model_options()}
+                      value={value}
+                      data-provider={provider}
+                      hidden={provider != @runtime_provider}
+                      disabled={provider != @runtime_provider}
+                      selected={provider == @runtime_provider and value == @runtime_model}
+                    >
+                      {label}
+                    </option>
+                  </select>
+                </div>
+                <div class="space-y-1.5">
+                  <label
+                    for="new-agent-openclaw-endpoint"
+                    class="block text-xs font-510 text-text-secondary"
+                  >
+                    Gateway endpoint
+                  </label>
+                  <input
+                    id="new-agent-openclaw-endpoint"
+                    name="agent[openclaw_endpoint]"
+                    value={@openclaw_endpoint}
+                    placeholder="http://localhost:18789"
+                    class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  />
+                </div>
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <div class="space-y-1.5">
+                    <label
+                      for="new-agent-openclaw-runtime"
+                      class="block text-xs font-510 text-text-secondary"
+                    >
+                      Runtime
+                    </label>
+                    <select
+                      id="new-agent-openclaw-runtime"
+                      name="agent[openclaw_runtime]"
+                      class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                    >
+                      <option value="subagent" selected={@openclaw_runtime == "subagent"}>
+                        Subagent
+                      </option>
+                      <option value="acp" selected={@openclaw_runtime == "acp"}>
+                        ACP harness
+                      </option>
+                    </select>
+                  </div>
+                  <div class="space-y-1.5">
+                    <label
+                      for="new-agent-openclaw-harness"
+                      class="block text-xs font-510 text-text-secondary"
+                    >
+                      Harness id
+                    </label>
+                    <input
+                      id="new-agent-openclaw-harness"
+                      name="agent[openclaw_harness_id]"
+                      value={@openclaw_harness_id}
+                      placeholder="codex"
+                      class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div
+                data-adapter-panel="openai_chat"
+                hidden={@selected_adapter != "openai_chat"}
+                class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
+              >
+                <div class="space-y-1.5">
+                  <label
+                    for="new-agent-openai-chat-model"
+                    class="block text-xs font-510 text-text-secondary"
+                  >
+                    Chat model
+                  </label>
+                  <input
+                    id="new-agent-openai-chat-model"
+                    name="agent[model]"
+                    value={@runtime_model}
+                    placeholder="qwen3.7-plus"
+                    class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  />
+                </div>
+                <div class="space-y-1.5">
+                  <label
+                    for="new-agent-openai-chat-endpoint"
+                    class="block text-xs font-510 text-text-secondary"
+                  >
+                    Chat completions URL
+                  </label>
+                  <input
+                    id="new-agent-openai-chat-endpoint"
+                    name="agent[openai_chat_endpoint]"
+                    value={@openai_chat_endpoint}
+                    placeholder="https://example.com/v1/chat/completions"
+                    class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  />
+                </div>
+                <p class="text-xs leading-5 text-text-quaternary sm:col-span-2">
+                  Calls an OpenAI-compatible chat completions provider. Keep API keys in Secrets.
+                </p>
+              </div>
+
+              <div
+                data-adapter-panel="process"
+                hidden={@selected_adapter != "process"}
+                class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
+              >
+                <div class="space-y-1.5">
+                  <label
+                    for="new-agent-process-preset"
+                    class="block text-xs font-510 text-text-secondary"
+                  >
+                    Process preset
+                  </label>
+                  <select
+                    id="new-agent-process-preset"
+                    name="agent[process_preset]"
+                    class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  >
+                    <option
+                      :for={{label, value} <- process_preset_options()}
+                      value={value}
+                      selected={value == @process_preset}
+                    >
+                      {label}
+                    </option>
+                  </select>
+                </div>
+                <div class="space-y-1.5">
+                  <label
+                    for="new-agent-process-provider"
+                    class="block text-xs font-510 text-text-secondary"
+                  >
+                    Provider family
+                  </label>
+                  <select
+                    id="new-agent-process-provider"
+                    name="agent[provider]"
+                    class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  >
+                    <option
+                      :for={{label, value} <- process_provider_options()}
+                      value={value}
+                      selected={value == @runtime_provider}
+                    >
+                      {label}
+                    </option>
+                  </select>
+                </div>
+                <div class="space-y-1.5">
+                  <label
+                    for="new-agent-process-model"
+                    class="block text-xs font-510 text-text-secondary"
+                  >
+                    Model
+                  </label>
+                  <select
+                    id="new-agent-process-model"
+                    name="agent[model]"
+                    class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                  >
+                    <option
+                      :for={{provider, label, value} <- process_provider_model_options()}
+                      value={value}
+                      data-provider={provider}
+                      hidden={provider != @runtime_provider}
+                      disabled={provider != @runtime_provider}
+                      selected={provider == @runtime_provider and value == @runtime_model}
+                    >
+                      {label}
+                    </option>
+                  </select>
+                </div>
+                <div class="space-y-1.5">
+                  <label
+                    for="new-agent-process-command"
+                    class="block text-xs font-510 text-text-secondary"
+                  >
+                    Command
+                  </label>
+                  <input
+                    id="new-agent-process-command"
+                    name="agent[runtime_command]"
+                    value={@runtime_command}
                     placeholder="codex"
                     class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                   />
                 </div>
               </div>
-            </div>
+            </section>
 
-            <div
-              data-adapter-panel="openai_chat"
-              hidden={@selected_adapter != "openai_chat"}
-              class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
+            <section
+              data-testid="new-agent-guide-section"
+              class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4 sm:px-5"
             >
-              <div class="space-y-1.5">
-                <label
-                  for="new-agent-openai-chat-model"
-                  class="block text-xs font-510 text-text-secondary"
-                >
-                  Chat model
-                </label>
-                <input
-                  id="new-agent-openai-chat-model"
-                  name="agent[model]"
-                  value={@runtime_model}
-                  placeholder="qwen3.7-plus"
-                  class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                />
+              <div>
+                <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                  Operating guide
+                </p>
+                <p class="mt-1 text-sm leading-5 text-text-tertiary">
+                  Role templates set the base loop. Keep edits focused on evidence, handoff, and
+                  recovery expectations.
+                </p>
               </div>
-              <div class="space-y-1.5">
-                <label
-                  for="new-agent-openai-chat-endpoint"
-                  class="block text-xs font-510 text-text-secondary"
-                >
-                  Chat completions URL
-                </label>
-                <input
-                  id="new-agent-openai-chat-endpoint"
-                  name="agent[openai_chat_endpoint]"
-                  value={@openai_chat_endpoint}
-                  placeholder="https://example.com/v1/chat/completions"
-                  class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                />
-              </div>
-              <p class="text-xs leading-5 text-text-quaternary sm:col-span-2">
-                Calls an OpenAI-compatible chat completions provider. Keep API keys in Secrets.
-              </p>
-            </div>
 
-            <div
-              data-adapter-panel="process"
-              hidden={@selected_adapter != "process"}
-              class="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 sm:grid-cols-2"
-            >
+              <.input
+                field={@form[:instructions]}
+                label="Instructions"
+                type="textarea"
+                rows={16}
+                placeholder="Describe the agent's responsibilities, constraints, and working style."
+              />
+
               <div class="space-y-1.5">
-                <label
-                  for="new-agent-process-preset"
-                  class="block text-xs font-510 text-text-secondary"
-                >
-                  Process preset
+                <label class="block text-xs font-510 text-text-secondary">
+                  Environment Variables
                 </label>
-                <select
-                  id="new-agent-process-preset"
-                  name="agent[process_preset]"
-                  class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                >
-                  <option
-                    :for={{label, value} <- process_preset_options()}
-                    value={value}
-                    selected={value == @process_preset}
-                  >
-                    {label}
-                  </option>
-                </select>
+                <textarea
+                  name="agent[env_text]"
+                  rows="4"
+                  placeholder={
+                    ~s(ANTHROPIC_BASE_URL=https://api.anthropic.com\nANTHROPIC_AUTH_TOKEN=...)
+                  }
+                  class="w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-text-primary placeholder-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                ><%= @env_text %></textarea>
+                <p class="text-xs leading-5 text-text-quaternary">
+                  One <code>KEY=VALUE</code>
+                  per line. Forwarded to the adapter subprocess. Sensitive
+                  values, including API keys, should go in Secrets because secrets override these on
+                  conflict.
+                </p>
               </div>
-              <div class="space-y-1.5">
-                <label
-                  for="new-agent-process-provider"
-                  class="block text-xs font-510 text-text-secondary"
-                >
-                  Provider family
-                </label>
-                <select
-                  id="new-agent-process-provider"
-                  name="agent[provider]"
-                  class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                >
-                  <option
-                    :for={{label, value} <- process_provider_options()}
-                    value={value}
-                    selected={value == @runtime_provider}
-                  >
-                    {label}
-                  </option>
-                </select>
+            </section>
+          </div>
+
+          <div
+            data-testid="new-agent-form-actions"
+            class="flex flex-col gap-3 border-t border-border bg-surface/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+          >
+            <p class="max-w-2xl text-xs leading-5 text-text-tertiary">
+              New agents start with this role contract, runtime profile, and reporting line. Demand-backed
+              hires also pick up waiting matching work after save.
+            </p>
+            <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+              <.app_link
+                navigate={~p"/agents"}
+                class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
+              >
+                Cancel
+              </.app_link>
+              <.button type="submit" variant="primary" class="min-h-[40px] w-full sm:w-auto">
+                Create Agent
+              </.button>
+            </div>
+          </div>
+        </.panel>
+
+        <aside class="space-y-4 lg:sticky lg:top-6">
+          <section data-testid="new-agent-setup-checklist" class="ember-glass p-4">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Hire checklist
+            </p>
+            <div class="mt-4 space-y-3">
+              <div class="flex gap-3">
+                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
+                  1
+                </span>
+                <div>
+                  <p class="text-sm font-590 text-text-primary">Match role to backlog</p>
+                  <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                    The role controls auto-assignment, prompt contract, and handoff behavior.
+                  </p>
+                </div>
               </div>
-              <div class="space-y-1.5">
-                <label
-                  for="new-agent-process-model"
-                  class="block text-xs font-510 text-text-secondary"
-                >
-                  Model
-                </label>
-                <select
-                  id="new-agent-process-model"
-                  name="agent[model]"
-                  class="h-10 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                >
-                  <option
-                    :for={{provider, label, value} <- process_provider_model_options()}
-                    value={value}
-                    data-provider={provider}
-                    hidden={provider != @runtime_provider}
-                    disabled={provider != @runtime_provider}
-                    selected={provider == @runtime_provider and value == @runtime_model}
-                  >
-                    {label}
-                  </option>
-                </select>
+              <div class="flex gap-3">
+                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
+                  2
+                </span>
+                <div>
+                  <p class="text-sm font-590 text-text-primary">Choose runtime capacity</p>
+                  <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                    Chat profiles are cheap for triage; process profiles are better for repo delivery.
+                  </p>
+                </div>
               </div>
-              <div class="space-y-1.5">
-                <label
-                  for="new-agent-process-command"
-                  class="block text-xs font-510 text-text-secondary"
-                >
-                  Command
-                </label>
-                <input
-                  id="new-agent-process-command"
-                  name="agent[runtime_command]"
-                  value={@runtime_command}
-                  placeholder="codex"
-                  class="h-10 w-full rounded-lg border border-border bg-panel px-3 font-mono text-sm text-text-primary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-                />
+              <div class="flex gap-3">
+                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
+                  3
+                </span>
+                <div>
+                  <p class="text-sm font-590 text-text-primary">Keep secrets out of env</p>
+                  <p class="mt-1 text-xs leading-5 text-text-tertiary">
+                    Store provider keys in Secrets so runtime injection stays auditable.
+                  </p>
+                </div>
               </div>
             </div>
           </section>
 
           <section
-            data-testid="new-agent-guide-section"
-            class="space-y-4 rounded-lg border border-border bg-surface/70 px-4 py-4 sm:px-5"
+            data-testid="new-agent-role-guide"
+            class="rounded-xl border border-brand/25 bg-brand/10 p-4"
           >
-            <div>
-              <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
-                Operating guide
-              </p>
-              <p class="mt-1 text-sm leading-5 text-text-tertiary">
-                Role templates set the base loop. Keep edits focused on evidence, handoff, and
-                recovery expectations.
-              </p>
-            </div>
-
-            <.input
-              field={@form[:instructions]}
-              label="Instructions"
-              type="textarea"
-              rows={16}
-              placeholder="Describe the agent's responsibilities, constraints, and working style."
-            />
-
-            <div class="space-y-1.5">
-              <label class="block text-xs font-510 text-text-secondary">
-                Environment Variables
-              </label>
-              <textarea
-                name="agent[env_text]"
-                rows="4"
-                placeholder={
-                  ~s(ANTHROPIC_BASE_URL=https://api.anthropic.com\nANTHROPIC_AUTH_TOKEN=...)
-                }
-                class="w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-text-primary placeholder-text-quaternary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
-              ><%= @env_text %></textarea>
-              <p class="text-xs leading-5 text-text-quaternary">
-                One <code>KEY=VALUE</code>
-                per line. Forwarded to the adapter subprocess. Sensitive
-                values, including API keys, should go in Secrets because secrets override these on
-                conflict.
-              </p>
-            </div>
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Selected role
+            </p>
+            <p class="mt-2 text-sm font-590 text-text-primary">{role_name}</p>
+            <p class="mt-1 text-xs leading-5 text-text-tertiary">
+              This hire will receive the {role_name} playbook, including owner-readable updates,
+              explicit handoffs, and recoverable blockers.
+            </p>
           </section>
-        </div>
-
-        <div
-          data-testid="new-agent-form-actions"
-          class="flex flex-col gap-3 border-t border-border bg-surface/40 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6"
-        >
-          <p class="max-w-2xl text-xs leading-5 text-text-tertiary">
-            New agents start with this role contract, runtime profile, and reporting line. Demand-backed
-            hires also pick up waiting matching work after save.
-          </p>
-          <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
-            <.app_link
-              navigate={~p"/agents"}
-              class="inline-flex min-h-[40px] items-center justify-center rounded-lg px-4 py-2 text-sm font-510 text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-            >
-              Cancel
-            </.app_link>
-            <.button type="submit" variant="primary" class="min-h-[40px] w-full sm:w-auto">
-              Create Agent
-            </.button>
-          </div>
-        </div>
-      </.panel>
-
-      <aside class="space-y-4 lg:sticky lg:top-6">
-        <section
-          data-testid="new-agent-setup-checklist"
-          class="rounded-xl border border-border bg-panel p-4 shadow-card"
-        >
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            Hire checklist
-          </p>
-          <div class="mt-4 space-y-3">
-            <div class="flex gap-3">
-              <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/10 text-xs font-590 text-success">
-                1
-              </span>
-              <div>
-                <p class="text-sm font-590 text-text-primary">Match role to backlog</p>
-                <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                  The role controls auto-assignment, prompt contract, and handoff behavior.
-                </p>
-              </div>
-            </div>
-            <div class="flex gap-3">
-              <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/10 text-xs font-590 text-brand">
-                2
-              </span>
-              <div>
-                <p class="text-sm font-590 text-text-primary">Choose runtime capacity</p>
-                <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                  Chat profiles are cheap for triage; process profiles are better for repo delivery.
-                </p>
-              </div>
-            </div>
-            <div class="flex gap-3">
-              <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 text-xs font-590 text-amber-200">
-                3
-              </span>
-              <div>
-                <p class="text-sm font-590 text-text-primary">Keep secrets out of env</p>
-                <p class="mt-1 text-xs leading-5 text-text-tertiary">
-                  Store provider keys in Secrets so runtime injection stays auditable.
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section
-          data-testid="new-agent-role-guide"
-          class="rounded-xl border border-brand/25 bg-brand/10 p-4"
-        >
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-brand">
-            Selected role
-          </p>
-          <p class="mt-2 text-sm font-590 text-text-primary">{role_name}</p>
-          <p class="mt-1 text-xs leading-5 text-text-tertiary">
-            This hire will receive the {role_name} playbook, including owner-readable updates,
-            explicit handoffs, and recoverable blockers.
-          </p>
-        </section>
-      </aside>
-    </.form>
+        </aside>
+      </.form>
+    </div>
   </div>
 </.page>

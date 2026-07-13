@@ -96,9 +96,60 @@ defmodule Cympho.Orchestrator.BacklogPlannerTest do
       assert reset.status == :todo
       assert reset.assignee_id == ceo.id
     end
+
+    test "does not yank a planning issue out from under a live orchestrator",
+         %{company: company, ceo: ceo} do
+      unless Process.whereis(Cympho.OrchestratorRegistry) do
+        start_supervised!({Registry, keys: :unique, name: Cympho.OrchestratorRegistry})
+      end
+
+      {:ok, issue} = BacklogPlanner.ensure_planning_issue(company.id, ceo)
+      {:ok, in_progress} = Issues.update_issue(issue, %{status: :in_progress})
+
+      # Register a fake live orchestrator for the planning issue.
+      test_pid = self()
+
+      holder =
+        spawn(fn ->
+          Registry.register(Cympho.OrchestratorRegistry, issue.id, nil)
+          send(test_pid, :registered)
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive :registered, 1_000
+
+      # Releasing now would double-dispatch the CEO's active session.
+      assert {:error, :planning_issue_in_use} =
+               BacklogPlanner.ensure_planning_issue(company.id, ceo)
+
+      assert Issues.get_issue!(issue.id).status == :in_progress
+
+      Process.exit(holder, :kill)
+      wait_until_unregistered(issue.id)
+
+      # Once the session is gone the reset works again.
+      {:ok, reset} = BacklogPlanner.ensure_planning_issue(company.id, ceo)
+      assert reset.id == in_progress.id
+      assert reset.status == :todo
+    end
   end
 
   ## helpers
+
+  defp wait_until_unregistered(issue_id, attempts \\ 40)
+
+  defp wait_until_unregistered(_issue_id, 0), do: :timeout
+
+  defp wait_until_unregistered(issue_id, attempts) do
+    case Cympho.Orchestrator.whereis(issue_id) do
+      nil ->
+        :ok
+
+      _pid ->
+        Process.sleep(25)
+        wait_until_unregistered(issue_id, attempts - 1)
+    end
+  end
 
   defp cancel_all_issues(company_id) do
     issues =

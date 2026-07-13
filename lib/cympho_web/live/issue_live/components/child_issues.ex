@@ -29,15 +29,17 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
     >
       <div class="border-y border-hairline bg-surface-1/25">
         <div class="flex items-center justify-between gap-3 px-1 py-3">
-          <h2 class="text-eyebrow text-ink-tertiary uppercase">Decomposition</h2>
+          <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Decomposition
+          </h2>
           <span class="text-caption text-ink-tertiary">
             {length(@child_tree)} {if length(@child_tree) == 1, do: "issue", else: "issues"} in subtree
           </span>
         </div>
-        <div class="divide-y divide-hairline">
+        <div class="divide-y divide-hairline stagger-children">
           <div
             :for={node <- @child_tree}
-            class="group flex items-start gap-3 py-3 hover:bg-surface-1/60 transition-colors"
+            class="group flex items-start gap-3 py-3 transition-colors hover:bg-subtle hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
             style={"padding-left: #{node.depth * 18 + 4}px;"}
           >
             <% health = Map.get(@health_by_child_id, node.issue.id) %>
@@ -55,9 +57,9 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
               <div class="flex flex-wrap items-center gap-2">
                 <.app_link
                   navigate={~p"/issues/#{node.issue.id}"}
-                  class="min-w-0 truncate text-sm font-510 text-ink transition-colors hover:text-primary"
+                  class="min-w-0 truncate text-sm font-510 text-ink transition-colors hover:text-brand"
                 >
-                  <span class="font-mono text-caption text-ink-tertiary">
+                  <span class="rounded border border-hairline bg-surface-1/70 px-1.5 py-0.5 font-mono text-[10px] tracking-[0.05em] text-ink-tertiary">
                     {node.issue.identifier || "CYM-?"}
                   </span>
                   <span class="ml-2">{node.issue.title}</span>
@@ -117,7 +119,7 @@ defmodule CymphoWeb.IssueLive.Show.ChildIssues do
                 </span>
               </div>
               <p :if={health} class="mt-2 text-caption text-ink-tertiary">
-                Next: {health.next}
+                <span class="font-serif italic text-brand/80">Next:</span> {health.next}
               </p>
             </div>
             <div class="flex shrink-0 flex-col items-end gap-1 pr-1">

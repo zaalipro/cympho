@@ -262,6 +262,98 @@ defmodule Cympho.AgentRunnerTest do
       assert snippet =~ "unable to proceed"
       refute_receive {:turn_completed, ^session_id, _result}, 100
     end
+
+    test "a command that hangs with no output at all fails with :stall_timeout" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-hang-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      command = Path.join(tmp_dir, "fake-claude")
+      File.write!(command, "#!/bin/sh\nsleep 60\n")
+      File.chmod!(command, 0o755)
+
+      recipient = self()
+      issue = %{id: "hang-command", title: "Hang command", description: "Never speaks"}
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", recipient,
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 300
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+      assert_receive {:turn_ended_with_error, ^session_id, :stall_timeout}, @receive_timeout
+    end
+
+    test "a clean exit with no output fails with :no_output instead of ending silently" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-silent-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      command = Path.join(tmp_dir, "fake-claude")
+      File.write!(command, "#!/bin/sh\nexit 0\n")
+      File.chmod!(command, 0o755)
+
+      recipient = self()
+      issue = %{id: "silent-command", title: "Silent command", description: "Says nothing"}
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", recipient,
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 1_000
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+      assert_receive {:turn_ended_with_error, ^session_id, :no_output}, @receive_timeout
+      refute_receive {:turn_completed, ^session_id, _result}, 100
+    end
+
+    test "a JSON result split across output chunks is reassembled" do
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "cympho-agent-runner-chunked-#{System.unique_integer()}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+      command = Path.join(tmp_dir, "fake-claude")
+
+      # Emit the JSON head, flush, pause so the port delivers two chunks,
+      # then emit the tail.
+      File.write!(
+        command,
+        """
+        #!/bin/sh
+        printf '%s' '{"type":"result","content":[{"type":"text","te'
+        sleep 1
+        printf '%s\\n' 'xt":"chunked"}]}'
+        """
+      )
+
+      File.chmod!(command, 0o755)
+
+      recipient = self()
+      issue = %{id: "chunked-command", title: "Chunked command", description: "Splits output"}
+
+      session_id =
+        AgentRunner.run(issue, "agent-1", recipient,
+          cwd: tmp_dir,
+          config: %{"command" => command},
+          env: %{"ANTHROPIC_API_KEY" => "test-key"},
+          stall_timeout: 5_000
+        )
+
+      assert_receive {:session_started, ^session_id}, @receive_timeout
+      assert_receive {:turn_completed, ^session_id, result}, @receive_timeout
+      assert resume_probe_text(result) == "chunked"
+    end
   end
 
   defp write_resume_probe!(dir) do

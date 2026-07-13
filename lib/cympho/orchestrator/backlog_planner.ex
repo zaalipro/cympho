@@ -214,6 +214,14 @@ defmodule Cympho.Orchestrator.BacklogPlanner do
       issue.status == :todo and issue.assignee_id == ceo_id ->
         {:ok, issue}
 
+      # A live orchestrator is mid-run on the planning issue (planning
+      # issues don't count toward `active_issue_count`, so a long CEO
+      # planning session plus an expired cooldown lands here). Releasing
+      # it now would yank the issue out from under the running session and
+      # double-dispatch it.
+      Cympho.Orchestrator.whereis(issue.id) != nil ->
+        {:error, :planning_issue_in_use}
+
       true ->
         # `force_release_issue` clears assignee + flips status. Then we
         # re-attach the CEO as assignee in a follow-up update so the

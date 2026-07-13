@@ -110,6 +110,7 @@ defmodule Cympho.OrchestratorTest do
         ]) do
           assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent.id)
           assert is_pid(pid)
+          monitor_ref = Process.monitor(pid)
           assert eventually_adapter_session_registered?(session_id)
 
           assert {:ok, _updated, runtime_stop} =
@@ -120,7 +121,10 @@ defmodule Cympho.OrchestratorTest do
           assert runtime_stop.adapter_sessions_cancel_confirmed == 1
           assert runtime_stop.adapter_sessions_still_registered == 0
           assert_receive {:adapter_session_cancelled, {:runtime_stop, "operator stop"}}, 1_000
-          assert_receive {:EXIT, ^pid, {:runtime_stop, "operator stop"}}, 1_000
+
+          assert_receive {:DOWN, ^monitor_ref, :process, ^pid, {:runtime_stop, "operator stop"}},
+                         1_000
+
           refute Process.alive?(pid)
         end
       after
@@ -184,6 +188,7 @@ defmodule Cympho.OrchestratorTest do
            ]}
         ]) do
           assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent.id)
+          monitor_ref = Process.monitor(pid)
           assert_receive {:adapter_worker_started, worker}, 1_000
           assert eventually_adapter_session_registered?(session_id)
 
@@ -201,7 +206,10 @@ defmodule Cympho.OrchestratorTest do
                  )
 
           assert_receive {:adapter_session_cancelled, {:runtime_stop, "operator stop"}}, 1_000
-          assert_receive {:EXIT, ^pid, {:runtime_stop, "operator stop"}}, 1_000
+
+          assert_receive {:DOWN, ^monitor_ref, :process, ^pid, {:runtime_stop, "operator stop"}},
+                         1_000
+
           assert Process.alive?(worker)
 
           send(worker, :shutdown)
@@ -244,11 +252,16 @@ defmodule Cympho.OrchestratorTest do
                      adapter_config: %{}
                    )
 
+          monitor_ref = Process.monitor(pid)
+
           assert {:ok, %Run{status: "running"}} =
                    wait_for_latest_run_status(checked_out.id, "running")
 
           GenServer.stop(pid, {:runtime_stop, "focused runtime expired"})
-          assert_receive {:EXIT, ^pid, {:runtime_stop, "focused runtime expired"}}, 1_000
+
+          assert_receive {:DOWN, ^monitor_ref, :process, ^pid,
+                          {:runtime_stop, "focused runtime expired"}},
+                         1_000
 
           assert {:ok, %Run{status: "cancelled", completed_at: completed_at}} =
                    wait_for_latest_run_status(checked_out.id, "cancelled")
@@ -360,7 +373,7 @@ defmodule Cympho.OrchestratorTest do
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
         send(pid, {:turn_completed, session_id, result})
-        Process.sleep(150)
+        assert :ok = wait_until_stopped(pid)
 
         comments = Comments.list_comments(issue.id)
 
@@ -832,7 +845,7 @@ defmodule Cympho.OrchestratorTest do
       ]) do
         assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
         send(pid, {:turn_completed, session_id, result})
-        Process.sleep(150)
+        assert :ok = wait_until_stopped(pid)
 
         comments = Comments.list_comments(issue.id)
 
@@ -1230,6 +1243,314 @@ defmodule Cympho.OrchestratorTest do
     end
   end
 
+  describe "robustness" do
+    test "caller death does not kill an in-flight session (no start link)", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+         ]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
+           get_run: fn _ -> {:ok, %{id: Ecto.UUID.generate()}} end,
+           start_run: fn _ -> :ok end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, _pid, _opts -> make_ref() end
+         ]}
+      ]) do
+        parent = self()
+
+        caller =
+          spawn(fn ->
+            {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+            send(parent, {:started, pid})
+            exit(:crashed_caller)
+          end)
+
+        caller_ref = Process.monitor(caller)
+        assert_receive {:started, orchestrator_pid}, 1_000
+        assert_receive {:DOWN, ^caller_ref, :process, ^caller, :crashed_caller}, 1_000
+
+        # The orchestrator must survive its caller's abnormal exit.
+        Process.sleep(50)
+        assert Process.alive?(orchestrator_pid)
+
+        Orchestrator.stop(issue.id)
+      end
+    end
+
+    test "stale adapter-session messages are ignored after a retry swaps sessions", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      MockAdapter.clear()
+      on_exit(fn -> MockAdapter.clear() end)
+
+      retry_result = %{
+        "content" => [
+          %{
+            "type" => "text",
+            "text" => """
+            Retry completed.
+
+            ```cympho-actions
+            {"actions":[{"type":"comment","body":"Retry run produced useful work."}]}
+            ```
+            """
+          }
+        ]
+      }
+
+      # First attempt fails with no_output (triggers the same-runtime retry);
+      # the second attempt goes :silent so the orchestrator stays alive while
+      # we inject a stale message from the first session.
+      MockAdapter.script(agent_id, issue.id, [
+        %{error: :no_output},
+        %{result: retry_result}
+      ])
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn %{config: config} -> {:ok, MockAdapter, config} end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert :ok = wait_until_stopped(pid)
+
+        runs = Cympho.HeartbeatEngine.list_runs_for_issue(issue.id)
+        assert Enum.count(runs, &(&1.status == "failed")) == 1
+        assert Enum.count(runs, &(&1.status == "completed")) == 1
+      end
+    end
+
+    test "stale session error does not double-fail the current attempt", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      session_id = "session-current"
+      run_id = Ecto.UUID.generate()
+      test_pid = self()
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+         ]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+           start_run: fn _ -> :ok end,
+           fail_run: fn _run, reason ->
+             send(test_pid, {:run_failed, reason})
+             {:ok, %{id: run_id}}
+           end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert wait_for_session_id(pid, session_id)
+
+        # A late error from a PREVIOUS adapter session must be dropped.
+        send(pid, {:turn_ended_with_error, "session-stale-old", :stall_timeout})
+        Process.sleep(100)
+
+        assert Process.alive?(pid)
+        refute_received {:run_failed, _reason}
+
+        Orchestrator.stop(issue.id)
+      end
+    end
+
+    test "comment failure during session failure still blocks the issue and idles the agent",
+         %{
+           agent_id: agent_id,
+           issue: issue
+         } do
+      session_id = "session-comment-crash"
+      run_id = Ecto.UUID.generate()
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{status: :in_progress, assignee_id: agent_id})
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+         ]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id}} end,
+           start_run: fn _ -> :ok end,
+           fail_run: fn _run, _reason -> {:ok, %{id: run_id}} end
+         ]},
+        {Cympho.Comments, [],
+         [
+           create_comment: fn _ -> {:error, :database_down} end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, _pid, _opts -> session_id end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert wait_for_session_id(pid, session_id)
+
+        send(pid, {:turn_ended_with_error, session_id, {:exit_code, 1}})
+        assert :ok = wait_until_stopped(pid)
+
+        # Despite the comment failing, the issue must be parked and the
+        # agent released — no stuck :in_progress state.
+        assert Issues.get_issue!(issue.id).status == :blocked
+        assert Repo.get!(Agent, agent_id).status == :idle
+      end
+    end
+
+    test "company pause during a session cancels the adapter session and the run", %{
+      company: company,
+      agent: agent,
+      issue: issue
+    } do
+      session_id = "session-company-paused-tick"
+      run_id = Ecto.UUID.generate()
+      parent = self()
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {:ok, checked_out} =
+        Issues.update_issue(issue, %{
+          status: :in_progress,
+          assignee_id: agent.id,
+          checked_out_at: now,
+          started_at: now
+        })
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+         ]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id, status: "running"}} end,
+           start_run: fn _ -> :ok end,
+           record_heartbeat: fn _ -> {:ok, %{id: run_id}} end,
+           cancel_run: fn run ->
+             send(parent, :run_cancelled)
+             {:ok, Map.put(run, :status, "cancelled")}
+           end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, recipient_pid, _opts ->
+             worker =
+               spawn(fn ->
+                 receive do
+                   {:cancel_session, ^session_id, reason} ->
+                     send(parent, {:adapter_session_cancelled, reason})
+                 end
+               end)
+
+             Cympho.AdapterSessions.register(session_id, worker)
+             send(recipient_pid, {:session_started, session_id})
+             session_id
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(checked_out, agent.id)
+        assert wait_for_session_id(pid, session_id)
+        assert eventually_adapter_session_registered?(session_id)
+
+        {:ok, _paused} = Companies.update_company(company, %{status: "paused"})
+
+        monitor_ref = Process.monitor(pid)
+        send(pid, :heartbeat_tick)
+
+        assert_receive {:DOWN, ^monitor_ref, :process, ^pid, {:shutdown, :company_paused}},
+                       1_000
+
+        # terminate/2 must cancel both the adapter session and the run —
+        # stopping :normal used to leak the CLI process and leave the run
+        # "running" until the watchdog swept it.
+        assert_receive {:adapter_session_cancelled, {:shutdown, :company_paused}}, 1_000
+        assert_receive :run_cancelled, 1_000
+
+        assert Issues.get_issue!(issue.id).status == :todo
+      end
+    end
+
+    test "dead adapter worker is detected by session liveness and fails the run", %{
+      agent_id: agent_id,
+      issue: issue
+    } do
+      session_id = "session-dead-worker"
+      run_id = Ecto.UUID.generate()
+
+      {:ok, issue} =
+        Issues.update_issue(issue, %{status: :in_progress, assignee_id: agent_id})
+
+      with_mocks([
+        {Cympho.Adapters, [],
+         [
+           resolve: fn _ -> {:ok, Cympho.Adapters.ClaudeCodeAdapter, %{}} end
+         ]},
+        {Cympho.HeartbeatEngine, [],
+         [
+           create_run: fn _ -> {:ok, %{id: run_id}} end,
+           get_run: fn ^run_id -> {:ok, %{id: run_id, status: "running"}} end,
+           start_run: fn _ -> :ok end,
+           record_heartbeat: fn _ -> {:ok, %{id: run_id}} end,
+           fail_run: fn _run, _reason -> {:ok, %{id: run_id, status: "failed"}} end
+         ]},
+        {Cympho.AgentRunner, [],
+         [
+           run: fn _issue, _agent_id, recipient_pid, _opts ->
+             # Worker registers, then dies WITHOUT sending a terminal
+             # message — the classic zombie session.
+             worker = spawn(fn -> Process.sleep(:infinity) end)
+             Cympho.AdapterSessions.register(session_id, worker)
+             send(recipient_pid, {:session_started, session_id})
+             session_id
+           end
+         ]}
+      ]) do
+        assert {:ok, pid} = Orchestrator.start_and_run(issue, agent_id)
+        assert wait_for_session_id(pid, session_id)
+        assert eventually_adapter_session_registered?(session_id)
+
+        # Tick once while registered so the orchestrator records the session
+        # as seen.
+        send(pid, :heartbeat_tick)
+        Process.sleep(50)
+
+        # Kill the worker (unregisters via monitor in AdapterSessions).
+        %{sessions: sessions} = :sys.get_state(Cympho.AdapterSessions)
+        %{pid: worker} = Map.fetch!(sessions, session_id)
+        Process.exit(worker, :kill)
+        assert eventually_adapter_session_unregistered?(session_id)
+
+        # Two consecutive misses trip the detector.
+        send(pid, :heartbeat_tick)
+        Process.sleep(50)
+        send(pid, :heartbeat_tick)
+
+        assert :ok = wait_until_stopped(pid)
+        assert Issues.get_issue!(issue.id).status == :blocked
+      end
+    end
+  end
+
   describe "unexpected messages" do
     test "catch-all handle_info and handle_cast keep the orchestrator alive", %{
       issue: issue,
@@ -1340,6 +1661,19 @@ defmodule Cympho.OrchestratorTest do
     else
       Process.sleep(10)
       eventually_adapter_session_registered?(session_id, attempts - 1)
+    end
+  end
+
+  defp eventually_adapter_session_unregistered?(session_id, attempts \\ 20)
+
+  defp eventually_adapter_session_unregistered?(_session_id, 0), do: false
+
+  defp eventually_adapter_session_unregistered?(session_id, attempts) do
+    if Cympho.AdapterSessions.registered?(session_id) do
+      Process.sleep(10)
+      eventually_adapter_session_unregistered?(session_id, attempts - 1)
+    else
+      true
     end
   end
 end

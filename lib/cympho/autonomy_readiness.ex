@@ -7,7 +7,7 @@ defmodule Cympho.AutonomyReadiness do
   recurring automation posture.
   """
 
-  alias Cympho.{Costs, Goals, RuntimeOperations}
+  alias Cympho.{Costs, Goals, HeartbeatEngine, RuntimeOperations}
 
   @foundation_signals [
     %{
@@ -51,6 +51,7 @@ defmodule Cympho.AutonomyReadiness do
       @foundation_signals
       |> Enum.map(&build_signal(&1, company_id))
       |> Kernel.++(operation_signals(operations))
+      |> Kernel.++([liveness_signal(company_id)])
 
     score = readiness_score(signals)
     level = readiness_level(signals)
@@ -163,6 +164,55 @@ defmodule Cympho.AutonomyReadiness do
       path: "/operations",
       action_label: "Open Operations"
     }
+  end
+
+  # Self-heal posture: without a running watchdog, stale runs and stranded
+  # wakes are never recovered and the company cannot run unattended. The
+  # counts are two indexed aggregates, cheap enough for the dashboard's
+  # 30-second refresh.
+  defp liveness_signal(company_id) do
+    watchdog_enabled? = Application.get_env(:cympho, :start_heartbeat_watchdog?, true)
+    watchdog_running? = Process.whereis(Cympho.HeartbeatEngine.Watchdog) != nil
+    stale = safe_count(fn -> HeartbeatEngine.count_stale_runs_for_company(company_id) end)
+
+    waiting =
+      safe_count(fn -> HeartbeatEngine.count_stale_waiting_runs_for_company(company_id) end)
+
+    {level, health_label, summary} =
+      cond do
+        watchdog_enabled? and not watchdog_running? ->
+          {:critical, "Watchdog down",
+           "The heartbeat watchdog is enabled but not running, so stalled runs will never self-recover. Restart the app or check supervisor logs for repeated watchdog crashes."}
+
+        not watchdog_running? ->
+          {:warning, "Watchdog disabled",
+           "The heartbeat watchdog is disabled, so stalled runs will not self-recover. Set CYMPHO_START_HEARTBEAT_WATCHDOG=1 and restart before running unattended."}
+
+        stale + waiting > 0 ->
+          {:warning, "Recovery pending",
+           "#{stale + waiting} #{plural(stale + waiting, "run")} #{verb(stale + waiting)} recovery (#{stale} stalled mid-run, #{waiting} never started). The watchdog will retry on its next pass; use Recover stale runs to clear them now."}
+
+        true ->
+          {:healthy, "Self-healing",
+           "Watchdog is running and no runs are stalled or waiting on recovery."}
+      end
+
+    %{
+      key: :liveness,
+      label: "Liveness",
+      level: level,
+      health_label: health_label,
+      summary: summary,
+      metric: stale + waiting,
+      path: "/operations#runtime-services",
+      action_label: "Open runtime services"
+    }
+  end
+
+  defp safe_count(fun) do
+    fun.()
+  rescue
+    _ -> 0
   end
 
   defp build_signal(config, company_id) do
@@ -596,7 +646,7 @@ defmodule Cympho.AutonomyReadiness do
   end
 
   defp readiness_summary(:healthy, _signals) do
-    "Org, runtime, agent guides, plugins, workspaces, and routines are ready for autonomous execution."
+    "Org, runtime, liveness, agent guides, plugins, workspaces, and routines are ready for autonomous execution."
   end
 
   defp count_level(signals, level), do: Enum.count(signals, &(&1.level == level))

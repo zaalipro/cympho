@@ -1,50 +1,111 @@
 <.settings_layout active={:policies}>
   <.header>
-    Execution Policy: {@execution_policy.name}
+    <span class="ember-eyebrow">
+      Policy dossier · {stage_count_label(@execution_policy.stage_configs)}
+    </span>
+    <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+      {@execution_policy.name}
+    </h1>
+    <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+      The staged sequence that governs who executes, reviews, and approves autonomous work under this policy.
+    </p>
     <:actions>
-      <.link
-        navigate={~p"/settings/policies/#{@execution_policy.id}/edit"}
-        class="phx-btn-secondary"
+      <.app_link
+        navigate={~p"/settings/policies"}
+        class="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-510 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
       >
-        Edit
-      </.link>
+        <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> All policies
+      </.app_link>
+      <.app_link
+        navigate={~p"/settings/policies/#{@execution_policy.id}/edit"}
+        class="cta-glow inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
+      >
+        <.icon name="hero-pencil-square-mini" class="h-4 w-4" /> Edit policy
+      </.app_link>
     </:actions>
   </.header>
 
-  <div class="mt-4">
-    <p class="text-sm text-zinc-500">
-      Stages: <span class="font-medium">{length(@execution_policy.stage_configs)}</span>
-    </p>
-  </div>
+  <hr class="ember-rule mb-5" />
 
-  <.header class="mt-8">Stage Configs</.header>
+  <section class="ember-glass overflow-hidden">
+    <div class="flex flex-wrap items-end justify-between gap-3 px-5 py-4">
+      <div class="min-w-0">
+        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+          Execution sequence
+        </p>
+        <p class="mt-1 max-w-xl text-sm leading-5 text-text-tertiary">
+          Each stage hands work forward only when its participant and gates are satisfied.
+        </p>
+      </div>
+      <div class="text-right">
+        <p class="font-serif text-3xl font-590 leading-none tabular-nums text-text-primary">
+          {length(@execution_policy.stage_configs)}
+        </p>
+        <p class="mt-1 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          Stages
+        </p>
+      </div>
+    </div>
 
-  <div class="mt-4 overflow-x-auto">
-    <table class="w-full text-sm text-left">
-      <thead>
-        <tr class="border-b border-zinc-200">
-          <th class="pb-2 font-medium">Order</th>
-          <th class="pb-2 font-medium">Type</th>
-          <th class="pb-2 font-medium">Participant</th>
-        </tr>
-      </thead>
-      <tbody>
-        <%= for {stage, idx} <- Enum.with_index(@execution_policy.stage_configs) do %>
-          <tr class="border-b border-zinc-100">
-            <td class="py-2">{idx + 1}</td>
-            <td class="py-2">
-              {stage["type"] || stage[:type]}
-            </td>
-            <td class="py-2">
-              {stage["participant_id"] || stage[:participant_id] || raw("&mdash;")}
-            </td>
-          </tr>
-        <% end %>
-      </tbody>
-    </table>
+    <hr class="ember-rule" />
 
     <%= if @execution_policy.stage_configs == [] do %>
-      <p class="mt-4 text-sm text-zinc-500">No stages configured.</p>
+      <div class="flex flex-col items-center justify-center px-6 py-16 text-center">
+        <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-brand/20 bg-brand/10 text-brand shadow-[0_0_24px_rgba(217,119,87,0.12)]">
+          <.icon name="hero-queue-list-mini" class="h-6 w-6" />
+        </div>
+        <p class="font-serif text-base font-510 text-text-primary">No stages configured.</p>
+        <p class="mt-1 max-w-sm text-xs leading-5 text-text-tertiary">
+          Add executor, reviewer, and approver stages before assigning this policy to work.
+        </p>
+      </div>
+    <% else %>
+      <ol class="divide-y divide-border">
+        <li
+          :for={{stage, idx} <- Enum.with_index(@execution_policy.stage_configs)}
+          class="flex flex-col gap-3 border-l-2 border-transparent px-5 py-4 transition-colors hover:border-border-hover hover:bg-subtle hover:shadow-[inset_2px_0_0_0_var(--color-primary)] sm:flex-row sm:items-center sm:gap-5"
+        >
+          <div class="flex shrink-0 items-baseline gap-2">
+            <span class="font-serif text-2xl font-590 leading-none tabular-nums text-brand/80">
+              {String.pad_leading(to_string(idx + 1), 2, "0")}
+            </span>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-510 capitalize text-text-secondary">
+                {stage["type"] || stage[:type]}
+              </span>
+              <%= if (pid = stage["participant_id"] || stage[:participant_id]) && pid != "" do %>
+                <span class="rounded-md border border-border bg-canvas/60 px-2.5 py-1 font-mono text-xs text-text-secondary">
+                  {pid}
+                </span>
+              <% else %>
+                <span class="text-xs text-text-quaternary">No participant assigned</span>
+              <% end %>
+            </div>
+            <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+              <span
+                :if={truthy_flag(stage, "require_different_actor")}
+                class="rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-brand"
+              >
+                Different actor
+              </span>
+              <span
+                :if={truthy_flag(stage, "require_human")}
+                class="rounded-full border border-cyan-500/25 bg-cyan-500/10 px-2 py-0.5 text-cyan-300"
+              >
+                Human required
+              </span>
+              <span
+                :if={truthy_flag(stage, "auto_advance")}
+                class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-amber-300"
+              >
+                Auto-advance
+              </span>
+            </div>
+          </div>
+        </li>
+      </ol>
     <% end %>
-  </div>
+  </section>
 </.settings_layout>

@@ -8,7 +8,7 @@ defmodule Cympho.AgentPrompt do
 
   Structure (top to bottom):
 
-    1. Issue block      — id, title, description, status, priority
+    1. Current task     — id, title, description, status, priority, assignee
     2. Agent block      — identity + role playbook + per-agent overrides
     3. Context block    — company/project/goal/lineage/parent
     4. History block    — recent comments, sub-issues, siblings, decisions
@@ -73,7 +73,6 @@ defmodule Cympho.AgentPrompt do
       current_task_block(issue, agent),
       wake_context_block(wake_context, agent),
       triggering_comment_block(issue, wake_context),
-      issue_block(issue),
       attachments_block(issue),
       external_intake_block(issue, role_of(agent)),
       owner_brief_readiness_block(issue, role_of(agent)),
@@ -382,6 +381,19 @@ defmodule Cympho.AgentPrompt do
     |> String.trim()
   end
 
+  defp wake_preamble("manual_dispatch", %{"source" => "review_nudge"} = metadata, _role) do
+    detail =
+      metadata_value(metadata, "prompt") || metadata_value(metadata, "summary") ||
+        "see the review nudge comment on this issue"
+
+    """
+    A review nudge dispatched you because this issue is stuck waiting on your part of the review loop. #{detail}
+
+    Required this turn: complete the named contract action with the required tagged fields. A comment without the required action or fields will re-trigger this nudge and eventually escalate past you.
+    """
+    |> String.trim()
+  end
+
   defp wake_preamble("manual_dispatch", %{"source" => "demand_backed_hire"} = metadata, role) do
     assigned_role = Map.get(metadata, "role") || role_label(role)
 
@@ -635,6 +647,52 @@ defmodule Cympho.AgentPrompt do
     |> String.trim()
   end
 
+  defp wake_preamble(reason, metadata, _role)
+       when reason in ["review_nudge_re_emit", "review_nudge_escalated"] do
+    detail =
+      metadata_value(metadata, "prompt") || metadata_value(metadata, "summary") ||
+        "see the latest review nudge comment"
+
+    escalated_line =
+      if reason == "review_nudge_escalated" do
+        " Earlier nudges to the assignee went unanswered, so this was escalated to you."
+      else
+        " An earlier identical nudge went unanswered — do not repeat the same non-action."
+      end
+
+    """
+    This issue is stuck in its review loop and the nudge fired again.#{escalated_line} #{detail}
+
+    Required this turn: complete the named contract action (delivery packet, review verdict, or owner update) with the required tagged fields, or `block_issue`/`escalate` with the exact missing input. Comment-only replies keep the loop stuck.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble(reason, _metadata, _role)
+       when reason in ["issue_created", "child_created"] do
+    """
+    This issue was just created and routed to you as its first owner. Read the brief and acceptance criteria above, then execute: produce evidence, run or name the verification, and finish with `submit_review`, `handoff`, `escalate`, or a `[blocked]` blocker. Do not reply with only an acknowledgement or a plan restatement.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("child_status_changed", metadata, _role) do
+    child = metadata_value(metadata, "child_id") || "a child issue"
+    status = metadata_value(metadata, "child_status") || "a new status"
+
+    """
+    Child issue #{child} moved to `#{status}`. If it is in review and you own that review, inspect its evidence now and decide (`approve_issue` or `request_changes` when you have governance authority; otherwise a tagged `[review]` comment naming what is missing). If nothing is actionable for you yet, say so briefly in a `comment` — do not restart delegated work.
+    """
+    |> String.trim()
+  end
+
+  defp wake_preamble("company_resumed", _metadata, _role) do
+    """
+    The company was resumed after a pause. Treat prior context as possibly stale: re-read the issue status and latest comments, then continue from the most recent restart packet with a concrete lifecycle action.
+    """
+    |> String.trim()
+  end
+
   defp wake_preamble(_other, _metadata, _role), do: nil
 
   defp current_task_block(issue, agent) do
@@ -787,20 +845,6 @@ defmodule Cympho.AgentPrompt do
   defp format_timestamp(%DateTime{} = timestamp), do: DateTime.to_iso8601(timestamp)
   defp format_timestamp(%NaiveDateTime{} = timestamp), do: NaiveDateTime.to_iso8601(timestamp)
   defp format_timestamp(timestamp), do: to_string(timestamp)
-
-  defp issue_block(issue) do
-    """
-    Issue ID: #{field(issue, :id) || "unknown"}
-    Identifier: #{field(issue, :identifier) || "unassigned"}
-    Title: #{field(issue, :title) || "Untitled"}
-    Status: #{field(issue, :status) || "unknown"}
-    Priority: #{field(issue, :priority) || "medium"}
-    Assigned role: #{field(issue, :assigned_role) || "inferred"}
-
-    #{field(issue, :description) || "No description provided."}
-    """
-    |> String.trim()
-  end
 
   defp attachments_block(issue) do
     issue_id = field(issue, :id)
@@ -1641,15 +1685,15 @@ defmodule Cympho.AgentPrompt do
     The block must contain JSON with an `actions` array. The server will ignore
     any requested side effect that is not represented in this block.
 
-    Every response that advances, reviews, blocks, delegates, or completes work MUST include a `comment` action. Start the comment body with one purpose tag: `[owner_update]`, `[decision]`, `[handoff]`, `[review]`, `[blocked]`, or `[delivery]`. Then state the fields that match your role:
-    - Delivery agents: `[delivery] What happened: ... Files changed: ... Evidence produced: ... Verification: ... Risks: ... Current state: ... Next decision: ... Restart packet: ...` (`Files changed` can name documents, campaigns, research artifacts, QA plans, or support assets when no code changed.)
-    - CTO review: `[review] Verdict: accepted/request changes/blocked. What happened: ... Evidence inspected: ... Verification: ... Gaps: ... Follow-up issues: ... Next decision: ... Restart packet: ...`
-    - CEO owner update: `[owner_update] What happened: ... Business status: shipped/not shipped/ready for owner signoff. Evidence inspected: ... Verification: ... Remaining risk: ... Current state: ... Next decision: ... Owner decision needed: ... Restart packet: ...`
-      If you will also use `block_issue` only to wait for owner verification, do not call the business status `shipped`; use `ready for owner signoff` or `not shipped until owner accepts`.
-    - Blocked work: `[blocked] Cause: ...\nAttempted fix: ...\nNeeds: ...\nCurrent state: ...\nNext decision: ...\nRestart packet: ...`
-      Thin `block_issue` reasons are rejected; include cause, needs, current state, next decision, and restart packet so the issue can recover later.
-      If you emit a `block_issue` action, its JSON `reason` must be the full tagged blocker note with escaped newlines between labels: `"[blocked] Cause: ...\\nAttempted fix: ...\\nNeeds: ...\\nCurrent state: ...\\nNext decision: ...\\nRestart packet: ..."`. Do not rely on the prose summary or a separate `comment` action to satisfy this; the server validates `block_issue.reason` directly.
-    Never emit `attach_work_product`, `submit_review`, `approve_issue`, `request_changes`, `block_issue`, `handoff`, or a meaningful `create_issue` without a paired owner-readable `comment`. The issue page uses these comments as the owner-facing execution record and groups noisy activity by those tags.
+    Format rules — violations fail the whole run:
+    - Exactly one `cympho-actions` fence per reply; zero blocks or two blocks are both rejected.
+    - JSON only inside the fence: double-quoted keys, no prose, no comments, no trailing commas, no nested code fences.
+    - Newlines inside JSON string values must be escaped as `\\n`.
+    - Never end with prose or silence. If you are stuck, emit a `comment` naming the blocker plus the strongest lifecycle action your role allows (`escalate` or `handoff` for delivery roles, `block_issue` for CEO/CTO). A reply without an actions block wastes the turn and is retried as a failed run.
+
+    Every response that advances, reviews, blocks, delegates, or completes work MUST include a `comment` action. Start the comment body with one purpose tag: `[owner_update]`, `[decision]`, `[handoff]`, `[review]`, `[blocked]`, or `[delivery]`, then fill in the exact labeled fields shown in the "## Role completion contract" section for YOUR role — the server audits those labels, and mistagged or thin notes are rejected. Never emit `attach_work_product`, `submit_review`, `approve_issue`, `request_changes`, `block_issue`, `handoff`, or a meaningful `create_issue` without a paired owner-readable `comment`. The issue page uses these comments as the owner-facing execution record and groups noisy activity by those tags.
+
+    Blocked work uses `[blocked] Cause: ...\nAttempted fix: ...\nNeeds: ...\nCurrent state: ...\nNext decision: ...\nRestart packet: ...`. Thin `block_issue` reasons are rejected, and `escalate.reason` is validated against the same labels. If you emit `block_issue`, its JSON `reason` must be the full tagged blocker note with escaped newlines between labels: `"[blocked] Cause: ...\\nAttempted fix: ...\\nNeeds: ...\\nCurrent state: ...\\nNext decision: ...\\nRestart packet: ..."` — the server validates `block_issue.reason` directly; a prose summary or separate `comment` action does not satisfy it.
 
     Treat your final response summary as run memory. Include objective, actions taken, files changed or artifacts, validation, risks/gaps, current state, next decision, and restart packet. Avoid vague endings like "done", "fixed", or "tests passed" without the decision context; Cympho folds your summary and tagged comment into the issue memory panel.
 
@@ -1670,6 +1714,9 @@ defmodule Cympho.AgentPrompt do
     ### MUST NOT emit
     - `submit_review` — you have no supervisor; use `approve_issue` to close work. The server will reject `submit_review` from the CEO with `:no_supervisor_to_review`.
     - `escalate` — you are the top of the org chart; the server rejects this with `:no_supervisor_to_escalate`.
+
+    ### Done means
+    Every CEO turn ends in exactly one exit: `approve_issue`/`request_changes` when reviewing evidence, `[handoff]`/`delegate`/`create_issue` plus `block_issue` when delegating, or `[owner_update]` plus `block_issue` when waiting on owner signoff. There is no human to nudge you — a turn that only comments leaves the company stalled.
 
     ### When to use `seed_mission_issues`
     Use this action when a `mission_idle` wake fires or when a fresh mission goal needs decomposition. Required fields: `goal_id` (a mission-type Goal id) and `initiatives` (a list of `{title, description, role, priority?}` objects, max 8). Each initiative description must include enough outcome/context/done/evidence signal for CTO spec review; the server rejects title-only or vague initiatives. Each initiative becomes a sibling issue under the mission goal and routes immediately to CTO for spec review before its proposed role receives it. Prefer this over emitting many `create_issue` actions: it captures the full plan atomically and the company can run autonomously from one batch.
@@ -1708,6 +1755,9 @@ defmodule Cympho.AgentPrompt do
     """
     ### Allowed actions for your role (CTO)
     - `create_issue`, `submit_review`, `approve_issue`, `request_changes`, `block_issue`, `comment`, `attach_work_product`, `set_pr_url`, `handoff`, `spawn_agent`, `delegate`, `escalate`, `intervene`, `merge_pr`, `force_fix_pr`, `cancel_issue`
+
+    ### Done means
+    Every CTO turn ends in exactly one exit: `approve_issue`/`request_changes` on submitted work, `create_issue` children plus `block_issue` on the current CTO issue when splitting, `submit_review` to CEO when your own artifact is ready, or `escalate`/`block_issue` when stuck. A comment-only turn stalls the engineering loop.
 
     Use `submit_review` (routes to CEO) when you've personally produced a small non-repo artifact or when a repo-capable runtime actually produced the file/test/PR evidence. If this turn is running through a chat-only adapter and the issue asks for implementation, UI, code, tests, or a PR, do not "just implement" it even when it is tiny — delegate, create a repo-capable child issue, hand off by role, or block with the missing runtime need. Use `approve_issue`/`request_changes` to gate engineering submissions you receive. For engineer, QA, or release-engineer rework, `request_changes.reason` must include `Evidence inspected:`, concrete `Required changes:` bullets, `Verification required:`, and `Next action:`. `force_fix_pr.reason` follows the same concrete feedback contract. Thin review feedback is rejected because it wastes another delivery run.
 
@@ -1749,6 +1799,9 @@ defmodule Cympho.AgentPrompt do
 
     ### MUST NOT emit
     - `approve_issue`, `request_changes`, `block_issue` — those are governance roles' (CEO/CTO) job.
+
+    ### Done means
+    The wake that ran you is answered with its matching action (`merge_pr`, `resolve_conflict`, or `force_fix_pr`) plus a tagged comment. If you cannot act (branch protection, missing access, ambiguous state), `escalate` with the full reason packet — never end with only prose.
     """
     |> String.trim()
   end
@@ -1756,11 +1809,13 @@ defmodule Cympho.AgentPrompt do
   defp role_action_guidance(:engineer) do
     """
     ### Allowed actions for your role (engineer)
-    - `comment`, `attach_work_product`, `set_pr_url`, `submit_review`, `create_issue` (rare — only for genuine follow-up), `escalate`, `resolve_conflict`
+    - `comment`, `attach_work_product`, `set_pr_url`, `submit_review`, `create_issue` (rare — only for genuine follow-up), `escalate`, `resolve_conflict`, `handoff` (only when the issue is genuinely the wrong role for you)
 
     ### MUST NOT emit
     - `approve_issue`, `request_changes`, `block_issue` — governance actions reserved for CEO/CTO. The server will reject with `:unauthorized_action`.
-    - `handoff` — only when an issue is genuinely the wrong role for you; otherwise complete the work or `submit_review` with a blocked note.
+
+    ### Done means
+    Reviewable evidence exists (artifact or PR plus a named verification) and you emitted `submit_review` to `cto`. Every turn must end in exactly one of: `submit_review` with evidence, `escalate` with the full reason packet, or `handoff` to the right role with a `[handoff]` comment. Never end with the issue still `in_progress` and only prose.
 
     ### When to use `escalate`
     Use this when you've genuinely tried and the issue is unsolvable as scoped (ambiguous requirements, missing dependencies you cannot resolve, scope larger than this issue can hold). Optional `to_role` defaults to your supervisor's role. The server marks the issue `:blocked`, assigns it to your supervisor, and wakes them with `escalation_from_subordinate`. `reason` must include cause, attempted fix, needs, current state, next decision, and restart packet; thin escalation reasons are rejected. Do not escalate routine bugs — fix or `submit_review` with a clear blocker note.
@@ -1771,10 +1826,13 @@ defmodule Cympho.AgentPrompt do
   defp role_action_guidance(:product_manager) do
     """
     ### Allowed actions for your role (product manager)
-    - `create_issue`, `submit_review`, `comment`, `attach_work_product`
+    - `create_issue`, `submit_review`, `comment`, `attach_work_product`, `escalate`, `handoff`
 
     ### MUST NOT emit
     - `approve_issue`, `request_changes`, `block_issue` — governance actions reserved for CEO/CTO.
+
+    ### Done means
+    A reviewable spec/criteria artifact is attached and you emitted `submit_review` (to `ceo` for scope approval, or back to the requesting role). If you cannot produce the artifact, `escalate` with the full reason packet or `handoff` to the right role — never end with only prose.
     """
     |> String.trim()
   end
@@ -1782,10 +1840,13 @@ defmodule Cympho.AgentPrompt do
   defp role_action_guidance(:designer) do
     """
     ### Allowed actions for your role (designer)
-    - `submit_review`, `comment`, `attach_work_product`
+    - `submit_review`, `comment`, `attach_work_product`, `escalate`, `handoff`
 
     ### MUST NOT emit
     - `approve_issue`, `request_changes`, `block_issue` — governance actions reserved for CEO/CTO.
+
+    ### Done means
+    A design artifact covering states, edge cases, and responsive/accessibility behavior is attached and you emitted `submit_review`. If you cannot produce the artifact, `escalate` with the full reason packet or `handoff` to the right role — never end with only prose.
     """
     |> String.trim()
   end
@@ -1793,13 +1854,15 @@ defmodule Cympho.AgentPrompt do
   defp role_action_guidance(:qa_engineer) do
     """
     ### Allowed actions for your role (QA engineer)
-    - `comment`, `attach_work_product`, `submit_review`, `create_issue` (for reproducible defects or follow-up coverage), `escalate`
+    - `comment`, `attach_work_product`, `submit_review`, `create_issue` (for reproducible defects or follow-up coverage), `escalate`, `handoff`
 
     ### MUST NOT emit
     - `approve_issue`, `request_changes`, `block_issue` — governance actions reserved for CEO/CTO.
 
     Focus on reproducible evidence: test plan, coverage matrix, failed/passing scenarios, screenshots or logs summarized as artifacts, and concrete follow-up issues for defects.
-    If you escalate, `reason` must include cause, attempted fix, needs, current state, next decision, and restart packet; thin escalation reasons are rejected.
+
+    ### Done means
+    A QA artifact (test plan/matrix with pass-fail results) is attached, defects are filed as `create_issue` children, and you emitted `submit_review`. If you cannot test, `escalate` with the full reason packet — thin escalation reasons are rejected; never end with only prose.
     """
     |> String.trim()
   end
@@ -1807,13 +1870,16 @@ defmodule Cympho.AgentPrompt do
   defp role_action_guidance(role) when role in @business_delivery_roles do
     """
     ### Allowed actions for your role (#{role_label(role)})
-    - `create_issue`, `submit_review`, `comment`, `attach_work_product`, `escalate`
+    - `create_issue`, `submit_review`, `comment`, `attach_work_product`, `escalate`, `handoff`
 
     ### MUST NOT emit
     - `approve_issue`, `request_changes`, `block_issue` — governance actions reserved for CEO/CTO.
     - `set_pr_url` unless your work genuinely produced a pull request.
 
     Produce reviewable business artifacts: research briefs, campaign plans, copy drafts, outreach lists, support responses, or customer evidence. Attach the artifact and submit review to your supervisor with the next business decision. If you escalate, `reason` must include cause, attempted fix, needs, current state, next decision, and restart packet; thin escalation reasons are rejected.
+
+    ### Done means
+    The business artifact is attached and you emitted `submit_review` with the next decision named. If you cannot produce it, `escalate` with the full reason packet or `handoff` to the right role — never end with only prose.
     """
     |> String.trim()
   end

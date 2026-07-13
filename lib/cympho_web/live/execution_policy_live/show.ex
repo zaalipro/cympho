@@ -29,4 +29,15 @@ defmodule CymphoWeb.ExecutionPolicyLive.Show do
          |> push_navigate(to: ~p"/settings/policies")}
     end
   end
+
+  def stage_count_label(stage_configs) do
+    case length(stage_configs) do
+      1 -> "1 stage"
+      count -> "#{count} stages"
+    end
+  end
+
+  def truthy_flag(stage, key) do
+    (Map.get(stage, key) || Map.get(stage, String.to_atom(key))) in [true, "true", 1, "1", "on"]
+  end
 end

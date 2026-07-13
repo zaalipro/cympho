@@ -97,6 +97,85 @@ defmodule Cympho.AgentPromptWakeContextTest do
     assert prompt =~ "Do not implement code"
   end
 
+  test "review nudge dispatch surfaces the nudge prompt and required action", %{
+    engineer: engineer,
+    issue: issue
+  } do
+    prompt =
+      AgentPrompt.build(issue, engineer,
+        wake_context:
+          {"manual_dispatch",
+           %{
+             "source" => "review_nudge",
+             "prompt" => "PWK-1 needs delivery evidence for the missing work product."
+           }}
+      )
+
+    assert prompt =~ "review nudge dispatched you"
+    assert prompt =~ "PWK-1 needs delivery evidence for the missing work product."
+    assert prompt =~ "complete the named contract action"
+  end
+
+  test "re-emitted and escalated review nudges warn against comment-only replies", %{
+    cto: cto,
+    issue: issue
+  } do
+    re_emit =
+      AgentPrompt.build(issue, cto,
+        wake_context: {"review_nudge_re_emit", %{"summary" => "CTO review is overdue."}}
+      )
+
+    escalated =
+      AgentPrompt.build(issue, cto,
+        wake_context: {"review_nudge_escalated", %{"summary" => "CTO review is overdue."}}
+      )
+
+    assert re_emit =~ "the nudge fired again"
+    assert re_emit =~ "do not repeat the same non-action"
+    assert re_emit =~ "CTO review is overdue."
+    assert re_emit =~ "Comment-only replies keep the loop stuck"
+
+    assert escalated =~ "escalated to you"
+    assert escalated =~ "Comment-only replies keep the loop stuck"
+  end
+
+  test "issue_created and child_created wakes push the first owner to execute", %{
+    engineer: engineer,
+    issue: issue
+  } do
+    for reason <- ["issue_created", "child_created"] do
+      prompt = AgentPrompt.build(issue, engineer, wake_context: {reason, %{}})
+
+      assert prompt =~ "routed to you as its first owner"
+      assert prompt =~ "Do not reply with only an acknowledgement"
+    end
+  end
+
+  test "child_status_changed wake tells the supervisor to review the child", %{
+    cto: cto,
+    issue: issue
+  } do
+    prompt =
+      AgentPrompt.build(issue, cto,
+        wake_context:
+          {"child_status_changed", %{"child_id" => "child-9", "child_status" => "in_review"}}
+      )
+
+    assert prompt =~ "Child issue child-9 moved to `in_review`"
+    assert prompt =~ "inspect its evidence now"
+    assert prompt =~ "do not restart delegated work"
+  end
+
+  test "company_resumed wake tells agents to re-orient from the restart packet", %{
+    engineer: engineer,
+    issue: issue
+  } do
+    prompt = AgentPrompt.build(issue, engineer, wake_context: {"company_resumed", %{}})
+
+    assert prompt =~ "resumed after a pause"
+    assert prompt =~ "most recent restart packet"
+  end
+
   test "no wake context produces no preamble", %{ceo: ceo, issue: issue} do
     prompt = AgentPrompt.build(issue, ceo, wake_context: nil)
     refute prompt =~ "Why you're running this turn"

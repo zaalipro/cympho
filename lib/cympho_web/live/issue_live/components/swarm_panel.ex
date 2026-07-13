@@ -31,11 +31,15 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
         <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2">
-              <span class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-brand/20 bg-brand/10 text-brand">
-                <.icon name="hero-bolt-mini" class="h-4 w-4" />
+              <span class="ember-eyebrow">{@panel.eyebrow}</span>
+              <span class={phase_badge_class(@panel.phase_state)}>
+                <span
+                  :if={@panel.phase_state in [:active, :waiting]}
+                  class={phase_pulse_class(@panel.phase_state)}
+                >
+                </span>
+                {@panel.phase_label}
               </span>
-              <p class="text-eyebrow uppercase text-ink-tertiary">{@panel.eyebrow}</p>
-              <span class={phase_badge_class(@panel.phase_state)}>{@panel.phase_label}</span>
             </div>
             <p class="ui-advanced-only mt-2 max-w-3xl text-sm leading-6 text-ink-secondary">
               {@panel.summary}
@@ -51,11 +55,13 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
           </div>
 
           <div class="grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-md border border-hairline bg-hairline sm:grid-cols-4 xl:w-80 xl:grid-cols-2">
-            <div :for={metric <- @panel.metrics} class="bg-canvas px-3 py-2.5">
+            <div :for={metric <- @panel.metrics} class="ember-stat bg-canvas px-3 py-2.5">
               <p class="text-[10px] font-590 uppercase tracking-[0.1em] text-ink-tertiary">
                 {metric.label}
               </p>
-              <p class="mt-1 break-words text-sm font-510 leading-5 text-ink">{metric.value}</p>
+              <p class="mt-1 break-words font-serif text-sm font-510 leading-5 text-ink">
+                {metric.value}
+              </p>
             </div>
           </div>
         </div>
@@ -76,11 +82,18 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
         >
           <div class="flex flex-wrap items-center justify-between gap-3 border-b border-hairline px-3 py-2.5">
             <div class="flex min-w-0 items-center gap-2">
-              <span class="inline-flex h-6 w-6 items-center justify-center rounded-md border border-teal-500/20 bg-teal-500/10 text-teal-300">
+              <span class="relative inline-flex h-6 w-6 items-center justify-center rounded-md border border-teal-500/20 bg-teal-500/10 text-teal-300">
                 <.icon name="hero-signal-mini" class="h-3.5 w-3.5" />
+                <span
+                  :if={@panel.events != []}
+                  class="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 animate-pulse rounded-full bg-teal-300"
+                >
+                </span>
               </span>
               <div class="min-w-0">
-                <h2 class="text-xs font-590 text-ink">Live swarm log</h2>
+                <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-ink">
+                  Live swarm log
+                </h2>
                 <p class="text-[11px] text-ink-tertiary">
                   Launch, worker, CTO, and CEO handoff events.
                 </p>
@@ -142,8 +155,10 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
         >
           <div :if={@panel.workers != []} class="min-w-0">
             <div class="flex items-center justify-between gap-3">
-              <h2 class="text-eyebrow uppercase text-ink-tertiary">Worker packets</h2>
-              <span class="text-caption text-ink-tertiary">
+              <h2 class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+                Worker packets
+              </h2>
+              <span class="font-serif text-caption text-ink-tertiary">
                 {@panel.worker_done}/{@panel.worker_total} closed
               </span>
             </div>
@@ -151,7 +166,7 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
               <.app_link
                 :for={worker <- @panel.workers}
                 navigate={~p"/issues/#{worker.id}"}
-                class="group rounded-md border border-hairline bg-canvas px-3 py-2.5 transition hover:border-border-hover hover:bg-surface-1"
+                class="group card-lift rounded-md border border-hairline bg-canvas px-3 py-2.5 transition hover:border-border-hover hover:bg-surface-1"
               >
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0">
@@ -873,19 +888,25 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
 
   defp phase_badge_class(:complete),
     do:
-      "rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-590 text-emerald-300"
+      "inline-flex items-center gap-1.5 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-590 text-emerald-300"
 
   defp phase_badge_class(:active),
     do:
-      "rounded-full border border-brand/25 bg-brand/10 px-2.5 py-1 text-[11px] font-590 text-brand"
+      "inline-flex items-center gap-1.5 rounded-full border border-brand/25 bg-brand/10 px-2.5 py-1 text-[11px] font-590 text-brand"
 
   defp phase_badge_class(:waiting),
     do:
-      "rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-1 text-[11px] font-590 text-amber-300"
+      "inline-flex items-center gap-1.5 rounded-full border border-amber-500/25 bg-amber-500/10 px-2.5 py-1 text-[11px] font-590 text-amber-300"
 
   defp phase_badge_class(_),
     do:
-      "rounded-full border border-hairline bg-surface-1 px-2.5 py-1 text-[11px] font-590 text-ink-tertiary"
+      "inline-flex items-center gap-1.5 rounded-full border border-hairline bg-surface-1 px-2.5 py-1 text-[11px] font-590 text-ink-tertiary"
+
+  defp phase_pulse_class(:active),
+    do: "h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-brand"
+
+  defp phase_pulse_class(_state),
+    do: "h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-300/80"
 
   defp step_class(:complete),
     do: "rounded-md border border-emerald-500/20 bg-emerald-500/[0.07] px-3 py-2.5"
@@ -899,7 +920,10 @@ defmodule CymphoWeb.IssueLive.Show.SwarmPanel do
   defp step_class(_), do: step_class(:waiting)
 
   defp step_dot_class(:complete), do: "h-2 w-2 rounded-full bg-emerald-400"
-  defp step_dot_class(:active), do: "h-2 w-2 rounded-full bg-brand"
+
+  defp step_dot_class(:active),
+    do: "h-2 w-2 animate-pulse rounded-full bg-brand shadow-[0_0_8px_1px_rgb(217_119_87_/_0.55)]"
+
   defp step_dot_class(:waiting), do: "h-2 w-2 rounded-full bg-amber-300/80"
   defp step_dot_class(_), do: "h-2 w-2 rounded-full bg-ink-tertiary"
 

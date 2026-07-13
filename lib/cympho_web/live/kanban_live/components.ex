@@ -192,6 +192,16 @@ defmodule CymphoWeb.KanbanLive.Components do
   defp empty_column_message(:blocked), do: "No blockers"
   defp empty_column_message(:cancelled), do: "No cancelled work"
 
+  @doc "Filled status dot for a column header, keyed to status."
+  def column_dot_class(:backlog), do: "bg-text-quaternary"
+  def column_dot_class(:todo), do: "bg-sky-500"
+  def column_dot_class(:in_progress), do: "bg-brand"
+  def column_dot_class(:in_review), do: "bg-amber-500"
+  def column_dot_class(:blocked), do: "bg-brand"
+  def column_dot_class(:done), do: "bg-emerald-500"
+  def column_dot_class(:cancelled), do: "bg-text-tertiary"
+  def column_dot_class(_), do: "bg-border"
+
   @doc "2px left-accent color for a column header, keyed to status."
   def column_accent_class(:backlog), do: "border-l-text-quaternary"
   def column_accent_class(:todo), do: "border-l-sky-500"

@@ -193,6 +193,153 @@ defmodule Cympho.AgentHeartbeatTest do
     end
   end
 
+  describe "wake burst coalescing" do
+    test "multiple wakeup broadcasts self-send only one heartbeat" do
+      state = %{
+        agent_id: Ecto.UUID.generate(),
+        status: :idle,
+        current_issue_id: nil,
+        started_at: nil,
+        timer_ref: nil,
+        wake_pending: false
+      }
+
+      {:noreply, after_first} =
+        AgentHeartbeat.handle_info({:wakeup_enqueued, state.agent_id, nil}, state)
+
+      assert after_first.wake_pending
+      assert_received :heartbeat
+
+      {:noreply, after_second} =
+        AgentHeartbeat.handle_info({:wakeup_enqueued, state.agent_id, nil}, after_first)
+
+      assert after_second.wake_pending
+      refute_received :heartbeat
+    end
+  end
+
+  describe "heartbeat timer hygiene" do
+    test "an out-of-band heartbeat cancels the pending timer instead of stacking loops" do
+      stale_timer = Process.send_after(self(), :never_fires, 600_000)
+
+      state = %{
+        agent_id: Ecto.UUID.generate(),
+        status: :idle,
+        current_issue_id: nil,
+        started_at: nil,
+        timer_ref: stale_timer,
+        wake_pending: true
+      }
+
+      {:noreply, new_state} = AgentHeartbeat.handle_info(:heartbeat, state)
+
+      # Old timer must be dead and exactly one new timer armed.
+      assert Process.read_timer(stale_timer) == false
+      assert is_reference(new_state.timer_ref)
+      refute new_state.wake_pending
+      refute_received :never_fires
+
+      Process.cancel_timer(new_state.timer_ref)
+    end
+
+    test "a zero or negative configured interval is clamped, not a hot spin" do
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Clamped Interval Agent",
+          role: :engineer,
+          status: :idle,
+          heartbeat_config: %{"interval_ms" => 0}
+        })
+
+      state = %{
+        agent_id: agent.id,
+        status: :idle,
+        current_issue_id: nil,
+        started_at: nil,
+        timer_ref: nil,
+        wake_pending: false
+      }
+
+      {:noreply, new_state} = AgentHeartbeat.handle_info({:heartbeat, :timer}, state)
+
+      remaining = Process.read_timer(new_state.timer_ref)
+      assert is_integer(remaining)
+      assert remaining > 1_000
+
+      Process.cancel_timer(new_state.timer_ref)
+    end
+  end
+
+  describe "error status self-recovery" do
+    setup do
+      original = Application.get_env(:cympho, :agent_heartbeat, [])
+
+      Application.put_env(
+        :cympho,
+        :agent_heartbeat,
+        Keyword.put(original, :delegate_to_dispatcher, false)
+      )
+
+      on_exit(fn -> Application.put_env(:cympho, :agent_heartbeat, original) end)
+      :ok
+    end
+
+    test "a heartbeat resets a transient :error agent back to :idle" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Error Recovery",
+          slug: "error-recovery-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Errored Agent",
+          role: :engineer,
+          status: :error,
+          company_id: company.id
+        })
+
+      {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+
+      send(pid, :heartbeat)
+      Process.sleep(100)
+
+      assert Repo.get!(Agents.Agent, agent.id).status == :idle
+
+      AgentHeartbeat.stop_for_agent(agent.id)
+    end
+
+    test "does not resurrect a paused agent" do
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Paused Stays Paused",
+          slug: "paused-stays-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent} =
+        Agents.create_agent(%{
+          name: "Paused Agent",
+          role: :engineer,
+          status: :idle,
+          company_id: company.id
+        })
+
+      {:ok, paused} = Agents.pause_agent(agent.id, "operator pause")
+      assert paused.status == :paused
+
+      {:ok, pid} = AgentHeartbeat.start_for_agent(agent.id)
+      Ecto.Adapters.SQL.Sandbox.allow(Cympho.Repo, pid, self())
+
+      send(pid, :heartbeat)
+      Process.sleep(100)
+
+      assert Repo.get!(Agents.Agent, agent.id).status == :paused
+
+      AgentHeartbeat.stop_for_agent(agent.id)
+    end
+  end
+
   describe "lifecycle" do
     test "agent heartbeat process starts and stops cleanly" do
       agent_id = Ecto.UUID.generate()

@@ -123,90 +123,95 @@ defmodule CymphoWeb.PromptInspectorLive do
   def render(assigns) do
     ~H"""
     <% stats = prompt_stats(@prompt) %>
-    <.page size="content">
-      <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 class="text-2xl font-590 tracking-tight text-text-primary">Prompt Inspector</h1>
-          <p class="mt-1 text-sm text-text-tertiary">Dev runtime prompt preview</p>
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-510 text-text-tertiary">
-            {stats.sections} sections
-          </span>
-          <span class="rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-510 text-text-tertiary">
-            {stats.chars} chars
-          </span>
-        </div>
-      </div>
-
-      <.panel class="overflow-hidden">
-        <form phx-change="preview" class="grid gap-4 p-5 md:grid-cols-2">
-          <label class="flex min-w-0 flex-col gap-1.5">
-            <span class="text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
-              Agent
+    <.page size="content" class="ember-aurora">
+      <div class="relative z-[1]">
+        <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div class="min-w-0">
+            <span class="ember-eyebrow">Dev telemetry</span>
+            <h1 class="ember-ink mt-4 font-serif text-[clamp(26px,4vw,38px)] font-510 leading-[1.08] tracking-[-0.02em]">
+              Prompt Inspector
+            </h1>
+            <p class="mt-2 text-sm text-text-tertiary">Dev runtime prompt preview</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="rounded-full border border-border bg-surface px-2.5 py-1 font-mono text-xs font-510 text-text-tertiary">
+              {stats.sections} sections
             </span>
-            <.select_menu
-              name="agent_id"
-              value={@agent_id || ""}
-              options={[{"No agent (issue context only)", ""} | @agents]}
-            />
-          </label>
-
-          <label class="flex min-w-0 flex-col gap-1.5">
-            <span class="text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
-              Issue
-            </span>
-            <.select_menu
-              name="issue_id"
-              value={@issue_id || ""}
-              options={[{"Pick an issue", ""} | @issues]}
-            />
-          </label>
-        </form>
-
-        <div
-          :if={@error}
-          class="border-t border-border bg-brand/[0.06] px-5 py-3 text-sm text-brand"
-        >
-          {@error}
-        </div>
-      </.panel>
-
-      <div :if={@prompt} class="mt-4 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <.panel class="h-fit p-4">
-          <h2 class="text-sm font-590 text-text-primary">Prompt Signals</h2>
-          <div class="mt-3 grid gap-2">
-            <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{signal_class(stats.action_contract?)}"}>
-              Action contract
-            </span>
-            <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{signal_class(stats.digest?)}"}>
-              Digest checklist
-            </span>
-            <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{signal_class(stats.owner_revision?)}"}>
-              Owner revision
+            <span class="rounded-full border border-border bg-surface px-2.5 py-1 font-mono text-xs font-510 text-text-tertiary">
+              {stats.chars} chars
             </span>
           </div>
-        </.panel>
+        </div>
 
         <.panel class="overflow-hidden">
+          <form phx-change="preview" class="grid gap-4 p-5 md:grid-cols-2">
+            <label class="flex min-w-0 flex-col gap-1.5">
+              <span class="text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                Agent
+              </span>
+              <.select_menu
+                name="agent_id"
+                value={@agent_id || ""}
+                options={[{"No agent (issue context only)", ""} | @agents]}
+              />
+            </label>
+
+            <label class="flex min-w-0 flex-col gap-1.5">
+              <span class="text-[11px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                Issue
+              </span>
+              <.select_menu
+                name="issue_id"
+                value={@issue_id || ""}
+                options={[{"Pick an issue", ""} | @issues]}
+              />
+            </label>
+          </form>
+
           <div
-            id="prompt-inspector-copy"
-            phx-hook="CopyToClipboard"
-            class="flex items-center justify-between gap-3 border-b border-border px-4 py-3"
+            :if={@error}
+            class="border-t border-border bg-brand/[0.06] px-5 py-3 text-sm text-brand"
           >
-            <h2 class="text-sm font-590 text-text-primary">Generated Prompt</h2>
-            <button
-              type="button"
-              data-copy-text={@prompt}
-              data-copy-label="Copy prompt"
-              data-copy-success-label="Copied"
-              class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
-            >
-              Copy prompt
-            </button>
+            {@error}
           </div>
-          <pre class="max-h-[70vh] overflow-auto whitespace-pre-wrap p-4 font-mono text-xs leading-6 text-text-secondary">{@prompt}</pre>
         </.panel>
+
+        <div :if={@prompt} class="mt-4 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+          <.panel class="h-fit p-4">
+            <h2 class="text-sm font-590 text-text-primary">Prompt Signals</h2>
+            <div class="mt-3 grid gap-2">
+              <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{signal_class(stats.action_contract?)}"}>
+                Action contract
+              </span>
+              <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{signal_class(stats.digest?)}"}>
+                Digest checklist
+              </span>
+              <span class={"rounded-full border px-2.5 py-1 text-xs font-510 #{signal_class(stats.owner_revision?)}"}>
+                Owner revision
+              </span>
+            </div>
+          </.panel>
+
+          <.panel class="overflow-hidden">
+            <div
+              id="prompt-inspector-copy"
+              phx-hook="CopyToClipboard"
+              class="flex items-center justify-between gap-3 border-b border-border px-4 py-3"
+            >
+              <h2 class="text-sm font-590 text-text-primary">Generated Prompt</h2>
+              <button
+                type="button"
+                data-copy-text={@prompt}
+                data-copy-label="Copy prompt"
+                data-copy-success-label="Copied"
+                class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
+              >
+                Copy prompt
+              </button>
+            </div>
+            <pre class="max-h-[70vh] overflow-auto whitespace-pre-wrap p-4 font-mono text-xs leading-6 text-text-secondary">{@prompt}</pre>
+          </.panel>
+        </div>
       </div>
     </.page>
     """

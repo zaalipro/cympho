@@ -147,10 +147,10 @@ defmodule CymphoWeb.Components.DatePicker do
         aria-expanded="false"
         class={[
           "flex w-full items-center gap-2 h-9 px-2.5 rounded-input text-left",
-          "bg-surface border text-caption text-ink transition-colors duration-100",
+          "bg-surface border text-caption text-ink transition duration-150",
           "focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed",
-          (@invalid && "border-error focus:ring-error/40 focus:border-error") ||
-            "border-hairline hover:border-hairline-strong focus:ring-primary/40 focus:border-primary"
+          (@invalid && "border-error focus:ring-red-500/40 focus:border-error") ||
+            "border-hairline hover:border-hairline-strong focus:ring-primary/30 focus:border-primary focus:shadow-[0_0_16px_-4px_rgb(var(--color-primary-rgb)/0.35)]"
         ]}
       >
         <span class={[@icon, "w-4 h-4 shrink-0 text-ink-tertiary"]} aria-hidden="true"></span>
@@ -166,7 +166,7 @@ defmodule CymphoWeb.Components.DatePicker do
         aria-modal="false"
         class={[
           "hidden absolute left-0 top-full z-50 p-2",
-          "rounded-lg bg-surface-2 border border-hairline shadow-elevated",
+          "cympho-menu-panel rounded-lg bg-surface-2 border border-hairline shadow-elevated",
           @popover_width
         ]}
       >

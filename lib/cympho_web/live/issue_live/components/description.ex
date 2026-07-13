@@ -26,11 +26,11 @@ defmodule CymphoWeb.IssueLive.Show.Description do
           <div :if={@issue.description not in [nil, ""]} class="min-w-0 flex-1">
             <p
               :if={swarm_issue?(@issue)}
-              class="mb-2 text-eyebrow uppercase text-ink-tertiary"
+              class="mb-2 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90"
             >
               Owner brief
             </p>
-            <p class="ui-simple-only max-w-4xl text-sm leading-6 text-ink-muted">
+            <p class="ui-simple-only max-w-[70ch] text-sm leading-6 text-ink-muted">
               {compact_description(@issue.description, simple_description_limit(@issue))}
             </p>
             <p class={["ui-advanced-only", description_text_class(@issue)]}>
@@ -42,9 +42,9 @@ defmodule CymphoWeb.IssueLive.Show.Description do
             type="button"
             phx-click="start_editing"
             phx-value-field="description"
-            class="flex-1 text-left text-caption text-ink-tertiary hover:text-ink-muted transition-colors"
+            class="flex-1 text-left font-serif text-sm italic text-ink-tertiary hover:text-ink-muted transition-colors"
           >
-            Add description…
+            Add a description — give the next agent something to work from…
           </button>
           <button
             :if={@issue.description not in [nil, ""]}
@@ -101,11 +101,11 @@ defmodule CymphoWeb.IssueLive.Show.Description do
       <form
         :if={@editing == "description"}
         phx-submit="save_description"
-        class="rounded-lg border border-hairline bg-surface-1 p-3 space-y-3"
+        class="rounded-lg border border-hairline bg-surface-1 p-3 space-y-3 transition-shadow focus-within:border-brand/40 focus-within:shadow-[0_0_0_3px_rgb(217_119_87_/_0.12)]"
       >
         <textarea
           name="description"
-          class="w-full bg-transparent text-body text-ink placeholder:text-ink-tertiary focus:outline-none min-h-[140px] resize-y"
+          class="w-full bg-transparent text-body leading-relaxed text-ink placeholder:text-ink-tertiary focus:outline-none min-h-[140px] resize-y"
           autofocus
         ><%= @description_draft || @issue.description %></textarea>
         <div class="flex items-center gap-2 border-t border-hairline pt-3">
@@ -135,9 +135,9 @@ defmodule CymphoWeb.IssueLive.Show.Description do
 
   defp description_text_class(issue) do
     if swarm_issue?(issue) do
-      "max-w-4xl whitespace-pre-wrap text-sm leading-6 text-ink-muted"
+      "max-w-[72ch] whitespace-pre-wrap text-sm leading-6 text-ink-muted"
     else
-      "whitespace-pre-wrap text-body leading-relaxed text-ink-muted"
+      "max-w-[72ch] whitespace-pre-wrap text-body leading-relaxed text-ink-muted"
     end
   end
 

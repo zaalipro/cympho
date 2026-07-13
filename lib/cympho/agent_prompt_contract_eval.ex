@@ -173,6 +173,14 @@ defmodule Cympho.AgentPromptContractEval do
         :catch,
         "Thin CEO update",
         "[owner_update] Done."
+      ),
+      example(
+        :ceo_owner_update_unfilled,
+        :ceo,
+        :role_output,
+        :catch,
+        "CEO update names fields without filling them",
+        "[owner_update] What happened: work is complete. I still owe the business status, evidence inspected, verification, remaining risk, current state, next decision, owner decision needed, and restart packet."
       )
     ]
   end
@@ -194,6 +202,14 @@ defmodule Cympho.AgentPromptContractEval do
         :catch,
         "Thin CTO review",
         "[review] Looks okay."
+      ),
+      example(
+        :cto_review_unfilled,
+        :cto,
+        :role_output,
+        :catch,
+        "CTO review names fields without filling them",
+        "[review] Verdict: accepted. What happened: reviewed the work. Evidence inspected, verification, gaps, follow-up issues, next decision, and restart packet will follow in a later comment."
       )
     ]
   end
@@ -215,6 +231,14 @@ defmodule Cympho.AgentPromptContractEval do
         :catch,
         "Thin #{role_label(role)} delivery",
         "Done, please review."
+      ),
+      example(
+        :"#{role}_delivery_unfilled",
+        role,
+        :role_output,
+        :catch,
+        "#{role_label(role)} delivery names labels without filling them",
+        "[delivery] What happened: I finished the task. I will share the files changed, evidence produced, and verification later; risks, current state, next decision, and restart packet still need writing."
       )
     ]
   end
@@ -318,10 +342,17 @@ defmodule Cympho.AgentPromptContractEval do
     "Blocked-work response is missing: #{Enum.join(missing_fields, ", ")}."
   end
 
+  # Mirrors AgentPromptContract.field_present?/2: tags match anywhere,
+  # labeled fields must appear as `Label:` to count as filled in.
   defp field_present?(body, field) do
-    body
-    |> String.downcase()
-    |> String.contains?(field |> to_string() |> String.downcase())
+    down = String.downcase(body)
+    target = field |> to_string() |> String.downcase()
+
+    if String.starts_with?(target, "[") do
+      String.contains?(down, target)
+    else
+      String.contains?(down, target <> ":")
+    end
   end
 
   defp normalize_role(role), do: Agent.normalize_role(role) || :engineer

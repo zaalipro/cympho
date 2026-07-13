@@ -19,15 +19,24 @@ defmodule CymphoWeb.IssueLive.Show.Header do
     <div class="flex items-center gap-3 px-4 lg:px-6 py-3 border-b border-hairline">
       <.app_link
         navigate={~p"/issues"}
-        class="inline-flex items-center gap-1.5 text-caption text-ink-tertiary hover:text-ink-muted transition-colors"
+        class="group inline-flex items-center gap-1.5 text-caption text-ink-tertiary hover:text-ink-muted transition-colors"
       >
-        <.icon name="hero-arrow-left-mini" class="w-3.5 h-3.5" /> Issues
+        <.icon
+          name="hero-arrow-left-mini"
+          class="w-3.5 h-3.5 transition-transform duration-200 group-hover:-translate-x-0.5"
+        /> Issues
       </.app_link>
-      <span class="text-ink-tertiary">·</span>
-      <span :if={@issue.identifier} class="font-mono text-caption text-ink-tertiary">
+      <span aria-hidden="true" class="h-3.5 w-px bg-hairline-strong"></span>
+      <span
+        :if={@issue.identifier}
+        class="rounded-md border border-hairline bg-surface-1/70 px-2 py-0.5 font-mono text-[11px] tracking-[0.05em] text-ink-muted"
+      >
         {@issue.identifier}
       </span>
-      <span :if={!@issue.identifier} class="font-mono text-caption text-ink-tertiary">
+      <span
+        :if={!@issue.identifier}
+        class="rounded-md border border-hairline bg-surface-1/70 px-2 py-0.5 font-mono text-[11px] tracking-[0.05em] text-ink-muted"
+      >
         #{@issue.issue_number}
       </span>
     </div>
@@ -55,7 +64,7 @@ defmodule CymphoWeb.IssueLive.Show.Header do
           type="text"
           name="title"
           value={@issue.title}
-          class="flex-1 bg-surface-1 border border-hairline rounded-md px-3 h-9 text-headline text-ink focus:outline-none focus:border-primary"
+          class="flex-1 bg-surface-1 border border-hairline rounded-md px-3 h-10 font-serif text-lg text-ink transition-shadow focus:outline-none focus:border-brand/60 focus:shadow-[0_0_0_3px_rgb(217_119_87_/_0.15)]"
           autofocus
         />
         <.button type="submit" size="sm">Save</.button>
@@ -77,16 +86,16 @@ defmodule CymphoWeb.IssueLive.Show.Header do
           :if={@issue.assignee}
           class="inline-flex items-center gap-1.5 text-caption text-ink-muted"
         >
-          <span class="w-4 h-4 rounded-full bg-brand/20 flex items-center justify-center text-[10px] font-510 text-brand">
+          <span class="w-4 h-4 rounded-full bg-brand/15 ring-1 ring-brand/30 flex items-center justify-center text-[10px] font-510 text-brand">
             {String.first(@issue.assignee.name) || "?"}
           </span>
           {@issue.assignee.name}
         </span>
         <span :if={@issue.project} class="text-caption text-ink-tertiary">
-          in
+          <span class="font-serif italic">in</span>
           <.app_link
             navigate={~p"/projects/#{@issue.project.id}"}
-            class="text-ink-muted hover:text-ink hover:underline"
+            class="text-ink-muted hover:text-brand hover:underline underline-offset-2 transition-colors"
           >
             {@issue.project.name}
           </.app_link>
@@ -98,9 +107,9 @@ defmodule CymphoWeb.IssueLive.Show.Header do
 
   defp title_class(issue) do
     if swarm_issue?(issue) do
-      "flex-1 text-2xl font-590 leading-tight text-ink md:text-3xl"
+      "flex-1 font-serif text-[clamp(24px,3.2vw,34px)] font-510 leading-[1.12] tracking-[-0.018em] text-ink"
     else
-      "flex-1 text-headline leading-tight text-ink"
+      "flex-1 font-serif text-[clamp(20px,2.6vw,28px)] font-510 leading-[1.15] tracking-[-0.015em] text-ink"
     end
   end
 

@@ -121,6 +121,26 @@ defmodule Cympho.AgentPromptContractEvalTest do
       assert "Next decision" in missing
     end
 
+    test "labels mentioned in prose without values do not satisfy the contract" do
+      body =
+        "[delivery] What happened: done. I will add the files changed, evidence produced, " <>
+          "verification, risks, current state, next decision, and restart packet later."
+
+      assert %{status: :attention, missing_fields: missing} =
+               AgentPromptContract.audit_response(:engineer, body)
+
+      assert "Files changed" in missing
+      assert "Evidence produced" in missing
+      assert "Verification" in missing
+      assert "Risks" in missing
+      assert "Current state" in missing
+      assert "Next decision" in missing
+      assert "Restart packet" in missing
+      # The tag and the one filled `Label:` field still count.
+      refute "[delivery]" in missing
+      refute "What happened" in missing
+    end
+
     test "blocked fixture must include cause, attempted fix, needs, state, and decision" do
       assert %{status: :ok, missing_fields: []} =
                AgentPromptContractEval.audit_blocked_response(fixture("blocked_good.md"))

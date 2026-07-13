@@ -270,6 +270,56 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
     end
   end
 
+  describe "agent_ids_with_stale_pending/2" do
+    test "returns agents whose pending wakes are older than the cutoff", %{
+      agent: agent,
+      issue: issue
+    } do
+      {:ok, wake} =
+        WakeupQueue.enqueue(%{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: "issue_commented"
+        })
+
+      # Fresh wakes are not stale.
+      assert WakeupQueue.agent_ids_with_stale_pending(15) == []
+
+      old_time =
+        DateTime.utc_now()
+        |> DateTime.add(-60 * 60, :second)
+        |> DateTime.truncate(:second)
+
+      wake
+      |> Ecto.Changeset.change(%{inserted_at: old_time})
+      |> Cympho.Repo.update!()
+
+      assert agent.id in WakeupQueue.agent_ids_with_stale_pending(15)
+    end
+
+    test "ignores consumed wakes", %{agent: agent, issue: issue} do
+      {:ok, wake} =
+        WakeupQueue.enqueue(%{
+          agent_id: agent.id,
+          issue_id: issue.id,
+          reason: "issue_commented"
+        })
+
+      old_time =
+        DateTime.utc_now()
+        |> DateTime.add(-60 * 60, :second)
+        |> DateTime.truncate(:second)
+
+      wake
+      |> Ecto.Changeset.change(%{inserted_at: old_time})
+      |> Cympho.Repo.update!()
+
+      :ok = WakeupQueue.consume_for(agent.id, issue.id)
+
+      refute agent.id in WakeupQueue.agent_ids_with_stale_pending(15)
+    end
+  end
+
   describe "consume_for/2" do
     test "marks pending wakes for an agent and issue as consumed", %{agent: agent, issue: issue} do
       {:ok, _wake} =

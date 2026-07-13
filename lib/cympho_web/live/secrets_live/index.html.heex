@@ -1,15 +1,26 @@
 <.settings_layout active={:secrets}>
-  <.header title={@page_title}>
+  <.header>
+    <span class="ember-eyebrow">
+      Vault · {@runtime_credential_guide.ready_count} of {@runtime_credential_guide.total_count} lanes ready
+    </span>
+    <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
+      {@page_title}
+    </h1>
+    <p class="ui-advanced-only mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
+      Encrypted, company-scoped credentials. Values are sealed on save and never shown again.
+    </p>
     <:actions>
       <button
         type="button"
         phx-click="show_create_form"
-        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+        class="cta-glow inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
       >
-        Add Secret
+        <.icon name="hero-plus-mini" class="h-4 w-4" /> Add Secret
       </button>
     </:actions>
   </.header>
+
+  <hr class="ember-rule mb-4" />
 
   <div
     :if={@secret_action_error}
@@ -35,23 +46,23 @@
   <section
     id="runtime-credential-guide"
     data-testid="runtime-credential-guide"
-    class="ui-advanced-only mb-4 overflow-hidden rounded-lg border border-border bg-panel"
+    class="ember-glass ui-advanced-only mb-4 overflow-hidden"
   >
-    <div class="border-b border-border bg-gradient-to-b from-surface-2/50 to-transparent px-5 py-4">
+    <div class="border-b border-hairline px-5 py-4">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
-            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
               Runtime credential cockpit
             </p>
             <span class={[
-              "rounded-full border px-2 py-0.5 text-[11px] font-510",
+              "rounded-full border px-2.5 py-1 text-[11px] font-510",
               runtime_credential_badge_class(@runtime_credential_guide.status)
             ]}>
               {@runtime_credential_guide.ready_count} of {@runtime_credential_guide.total_count} ready
             </span>
           </div>
-          <h2 class="mt-2 text-lg font-590 tracking-tight text-text-primary">
+          <h2 class="mt-2 font-serif text-[19px] font-510 tracking-tight text-text-primary">
             Provider coverage for autonomous agents
           </h2>
           <p class="mt-1 max-w-2xl text-sm leading-5 text-text-tertiary">
@@ -73,7 +84,7 @@
         :for={profile <- @runtime_credential_guide.profiles}
         data-testid={"runtime-credential-profile-#{profile.id}"}
         class={[
-          "rounded-lg border p-4 transition-colors",
+          "card-lift rounded-xl border p-4 transition-colors",
           credential_profile_class(profile.ready)
         ]}
       >
@@ -84,7 +95,7 @@
             </div>
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <h3 class="text-sm font-590 text-text-primary">{profile.title}</h3>
+                <h3 class="font-serif text-sm font-510 text-text-primary">{profile.title}</h3>
                 <span class={[
                   "rounded-full border px-2 py-0.5 text-[11px] font-510",
                   credential_profile_status_class(profile.ready)
@@ -134,39 +145,39 @@
 
   <div
     :if={@rotation_summary.total > 0}
-    class="ui-advanced-only mb-4 rounded-lg border border-border bg-panel p-4"
+    class="card-lift ui-advanced-only mb-4 rounded-xl border border-border bg-panel p-4 shadow-card"
   >
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <p class="text-xs font-590 uppercase tracking-[0.1em] text-text-quaternary">
+        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
           Rotation posture
         </p>
         <p class="mt-1 text-sm text-text-secondary">
           {@rotation_summary.needs_rotation} of {@rotation_summary.total} active secrets need rotation attention.
         </p>
       </div>
-      <div class="grid grid-cols-3 overflow-hidden rounded-md border border-border bg-border text-center">
-        <div class="bg-surface px-3 py-2">
-          <p class="font-mono text-sm font-590 leading-none text-emerald-300">
+      <div class="grid grid-cols-3 overflow-hidden rounded-lg border border-hairline bg-hairline text-center">
+        <div class="ember-stat bg-surface px-4 py-2.5">
+          <p class="font-serif text-lg font-590 leading-none text-emerald-300 tabular-nums">
             {@rotation_summary.fresh}
           </p>
-          <p class="mt-1 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+          <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
             Fresh
           </p>
         </div>
-        <div class="bg-surface px-3 py-2">
-          <p class="font-mono text-sm font-590 leading-none text-amber-300">
+        <div class="ember-stat bg-surface px-4 py-2.5">
+          <p class="font-serif text-lg font-590 leading-none text-amber-300 tabular-nums">
             {@rotation_summary.due_soon}
           </p>
-          <p class="mt-1 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+          <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
             Due
           </p>
         </div>
-        <div class="bg-surface px-3 py-2">
-          <p class="font-mono text-sm font-590 leading-none text-red-300">
+        <div class="ember-stat bg-surface px-4 py-2.5">
+          <p class="font-serif text-lg font-590 leading-none text-red-300 tabular-nums">
             {@rotation_summary.overdue}
           </p>
-          <p class="mt-1 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
+          <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.08em] text-text-quaternary">
             Overdue
           </p>
         </div>
@@ -182,23 +193,13 @@
   >
     <:empty>
       <div class="flex flex-col items-center justify-center py-20 text-center">
-        <div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center mb-4">
-          <svg
-            class="w-6 h-6 text-text-tertiary"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-            />
-          </svg>
+        <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-brand/20 bg-brand/10 text-brand shadow-[0_0_24px_rgba(217,119,87,0.12)]">
+          <.icon name="hero-lock-closed" class="h-6 w-6" />
         </div>
         <div class="mb-4 max-w-md">
-          <p class="text-sm font-590 text-text-primary">No runtime secrets stored yet</p>
+          <p class="font-serif text-base font-510 text-text-primary">
+            No runtime secrets stored yet
+          </p>
           <p class="mt-1 text-sm leading-5 text-text-tertiary">
             Add a company-scoped provider key before assigning autonomous work. Runtime preflight uses these encrypted secrets to inject agent credentials.
           </p>
@@ -206,9 +207,9 @@
         <button
           type="button"
           phx-click="show_create_form"
-          class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+          class="cta-glow inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-510 text-white transition-colors hover:bg-primary-hover"
         >
-          Add runtime secret
+          <.icon name="hero-plus-mini" class="h-4 w-4" /> Add runtime secret
         </button>
       </div>
     </:empty>
@@ -217,12 +218,15 @@
       :for={{dom_id, secret} <- @streams.secrets}
       id={dom_id}
       data-testid={"secret-row-#{secret.id}"}
-      class="border border-border rounded-lg p-4 hover:bg-subtle transition-colors"
+      class="rounded-xl border border-border p-4 transition-colors hover:border-border-hover hover:bg-subtle hover:shadow-[inset_2px_0_0_0_var(--color-primary)]"
     >
       <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div class="min-w-0 flex-1">
           <% rotation = secret_rotation(secret) %>
           <div class="mb-2 flex flex-wrap items-center gap-2">
+            <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-canvas/60 text-text-tertiary">
+              <.icon name="hero-lock-closed-mini" class="h-3.5 w-3.5" />
+            </span>
             <h3 class="break-all font-serif text-lg font-semibold text-text-primary">
               {secret.key}
             </h3>
@@ -232,7 +236,7 @@
             ]}>
               {format_scope(secret.scope)}
             </span>
-            <span class="text-xs text-text-quaternary">
+            <span class="rounded-md border border-border bg-canvas/60 px-1.5 py-0.5 font-mono text-xs text-text-quaternary">
               v{secret.version}
             </span>
             <span class={[
