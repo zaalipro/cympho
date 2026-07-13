@@ -1006,7 +1006,7 @@ defmodule Mix.Tasks.Cympho.Compare do
       String.contains?(inbox_live_source, "build_human_action_items"),
       String.contains?(inbox_live_source, "human_action_count"),
       String.contains?(inbox_live_source, "Needs my action"),
-      String.contains?(inbox_template_source, "My action")
+      String.contains?(inbox_template_source, "inbox-action-queue")
     ]
 
     if Enum.all?(checks) do

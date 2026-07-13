@@ -282,6 +282,56 @@ defmodule CymphoWeb.KanbanLiveTest do
       assert html =~ "data-kanban-column"
       assert html =~ "data-issue-id"
     end
+
+    test "resting cards show priority only when elevated", %{
+      issue_backlog: high_issue,
+      issue_todo: medium_issue
+    } do
+      {:ok, _view, html} = live(conn(), "/kanban")
+      doc = Floki.parse_document!(html)
+
+      high_card_text = doc |> Floki.find("[data-issue-id='#{high_issue.id}']") |> Floki.text()
+      medium_card_text = doc |> Floki.find("[data-issue-id='#{medium_issue.id}']") |> Floki.text()
+
+      assert high_card_text =~ "High"
+      refute medium_card_text =~ "Medium"
+    end
+
+    test "assigned cards show an initials avatar with role context" do
+      {:ok, agent} =
+        create_agent(%{
+          name: "Ivy Chen",
+          role: :engineer,
+          status: :idle,
+          adapter: :process,
+          config: %{"command" => "echo"}
+        })
+
+      {:ok, issue} =
+        create_issue(%{
+          title: "Avatar card",
+          description: "Shows who is on it.",
+          status: :in_progress,
+          priority: :medium,
+          assignee_id: agent.id
+        })
+
+      {:ok, _view, html} = live(conn(), "/kanban")
+
+      card =
+        html
+        |> Floki.parse_document!()
+        |> Floki.find("[data-issue-id='#{issue.id}']")
+
+      avatar_titles =
+        card
+        |> Floki.find("span[title]")
+        |> Floki.attribute("title")
+        |> Enum.join(" ")
+
+      assert Floki.text(card) =~ "IC"
+      assert avatar_titles =~ "Ivy Chen · engineer"
+    end
   end
 
   describe "Transitions" do
@@ -525,6 +575,11 @@ defmodule CymphoWeb.KanbanLiveTest do
       :ok = Issues.delete_issue(issue)
       {:ok, _view, html} = live(conn(), "/kanban")
       assert html =~ "Nothing queued up"
+    end
+
+    test "empty columns invite a drop" do
+      {:ok, _view, html} = live(conn(), "/kanban")
+      assert html =~ "Drag a card here"
     end
   end
 

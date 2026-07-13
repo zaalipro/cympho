@@ -4,7 +4,6 @@ defmodule CymphoWeb.IssueLive.Index do
   import CymphoWeb.Components.IssueDigest, only: [issue_digest_card: 1]
 
   alias Cympho.Issues
-  alias Cympho.IssueDigest
   alias Cympho.Agents
   alias Cympho.Projects
   alias Cympho.Labels
@@ -156,6 +155,10 @@ defmodule CymphoWeb.IssueLive.Index do
   def handle_event("filter_label", %{"label_id" => label_id}, socket) do
     {:noreply,
      push_patch(socket, to: build_url(socket, %{"label_id" => label_id, "page" => "1"}))}
+  end
+
+  def handle_event("filter_triage", %{"triage" => triage}, socket) do
+    {:noreply, push_patch(socket, to: build_url(socket, %{"triage" => triage, "page" => "1"}))}
   end
 
   def handle_event("combobox_status", %{"selected" => v}, socket),
@@ -395,12 +398,21 @@ defmodule CymphoWeb.IssueLive.Index do
     end
   end
 
-  defp triage_lane_count_class(current, lane) do
+  defp triage_lane_count_class(_current, "blocked", count) when count > 0, do: "text-red-300"
+  defp triage_lane_count_class(_current, _lane, 0), do: "text-text-quaternary"
+
+  defp triage_lane_count_class(current, lane, _count) do
     if current == lane do
       "text-brand"
     else
       "text-text-primary"
     end
+  end
+
+  defp triage_lane_label(key) do
+    Enum.find_value(triage_lanes(%{}), "Lane", fn lane ->
+      if lane.key == key, do: lane.label
+    end)
   end
 
   defp attention_queue(issues) do
@@ -456,15 +468,12 @@ defmodule CymphoWeb.IssueLive.Index do
   defp attention_item(_issue), do: nil
 
   defp attention_item(issue, rank, action, detail) do
-    digest = IssueDigest.build(issue)
-
     %{
       issue: issue,
       rank: rank,
       action: action,
       detail: detail,
-      digest_label: digest.label,
-      digest_headline: digest.headline,
+      age: humane_age(issue.updated_at),
       path: "/issues/#{issue.id}"
     }
   end
@@ -477,16 +486,34 @@ defmodule CymphoWeb.IssueLive.Index do
   defp priority_rank(:low), do: 3
   defp priority_rank(_), do: 4
 
-  defp attention_action_class("Unblock"), do: "border-brand/25 bg-brand/10 text-brand"
+  # Alarm tones (red/amber) only for act-now; everything else reads calm.
+  defp attention_action_class("Unblock"), do: "border-red-500/25 bg-red-500/10 text-red-300"
   defp attention_action_class("Add CEO"), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
-  defp attention_action_class("Launch CEO"), do: "border-sky-500/25 bg-sky-500/10 text-sky-300"
+  defp attention_action_class("Launch CEO"), do: "border-brand/25 bg-brand/10 text-brand"
   defp attention_action_class("Review"), do: "border-brand/25 bg-brand/10 text-brand"
+  defp attention_action_class("Dispatch"), do: "border-brand/25 bg-brand/10 text-brand"
 
   defp attention_action_class("Assign owner"),
     do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
 
-  defp attention_action_class("Observe"), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
   defp attention_action_class(_), do: "border-border bg-panel text-text-secondary"
+
+  defp attention_dot_class("Unblock"), do: "bg-red-400"
+  defp attention_dot_class(action) when action in ["Add CEO", "Assign owner"], do: "bg-amber-400"
+
+  defp attention_dot_class(action) when action in ["Launch CEO", "Review", "Dispatch"],
+    do: "bg-brand"
+
+  defp attention_dot_class(_), do: "bg-text-quaternary"
+
+  defp attention_reason("Unblock"), do: "Blocked"
+  defp attention_reason("Add CEO"), do: "No CEO agent"
+  defp attention_reason("Launch CEO"), do: "Ready to launch"
+  defp attention_reason("Review"), do: "Awaiting your review"
+  defp attention_reason("Assign owner"), do: "No owner"
+  defp attention_reason("Dispatch"), do: "Queued, unstarted"
+  defp attention_reason("Observe"), do: "In flight"
+  defp attention_reason(_), do: "Needs a look"
 
   defp launch_readiness_by_issue(issues, socket) do
     orchestrator_enabled? = socket.assigns[:orchestrator_enabled?] || false
@@ -580,26 +607,106 @@ defmodule CymphoWeb.IssueLive.Index do
 
   defp issue_description(_), do: "No description"
 
+  # In-flight statuses read calm (brand/neutral); alarm tones only for blocked.
   defp status_badge_class(:backlog), do: "bg-text-quaternary/15 text-text-tertiary"
   defp status_badge_class(:todo), do: "bg-brand/12 text-brand"
-  defp status_badge_class(:in_progress), do: "bg-amber-500/15 text-amber-300"
+  defp status_badge_class(:in_progress), do: "bg-brand/12 text-brand"
   defp status_badge_class(:in_review), do: "bg-sky-500/15 text-sky-300"
   defp status_badge_class(:done), do: "bg-success/15 text-success"
-  defp status_badge_class(:blocked), do: "bg-brand/15 text-brand"
+  defp status_badge_class(:blocked), do: "bg-red-500/15 text-red-300"
   defp status_badge_class(:cancelled), do: "bg-text-quaternary/15 text-text-tertiary"
   defp status_badge_class(_), do: "bg-subtle text-text-secondary"
 
-  defp priority_badge_class(:critical), do: "bg-brand/15 text-brand"
-  defp priority_badge_class(:high), do: "bg-orange-500/15 text-orange-300"
-  defp priority_badge_class(:medium), do: "bg-amber-500/15 text-amber-300"
-  defp priority_badge_class(:low), do: "bg-text-quaternary/15 text-text-tertiary"
+  # Only escalated priorities get an accent; medium/low stay quiet.
+  defp priority_badge_class(:critical), do: "bg-red-500/15 text-red-300"
+  defp priority_badge_class(:high), do: "bg-amber-500/15 text-amber-300"
+  defp priority_badge_class(:medium), do: "bg-text-quaternary/12 text-text-tertiary"
+  defp priority_badge_class(:low), do: "bg-text-quaternary/12 text-text-quaternary"
   defp priority_badge_class(_), do: "bg-subtle text-text-secondary"
+
+  defp humane_age(nil), do: nil
+
+  defp humane_age(%DateTime{} = at) do
+    minutes = div(DateTime.diff(DateTime.utc_now(), at, :second), 60)
+
+    cond do
+      minutes < 1 -> "just now"
+      minutes < 60 -> "#{minutes}m"
+      minutes < 60 * 24 -> "#{div(minutes, 60)}h"
+      minutes < 60 * 24 * 7 -> "#{div(minutes, 60 * 24)}d quiet"
+      true -> "#{div(minutes, 60 * 24 * 7)}w quiet"
+    end
+  end
+
+  defp humane_age(_), do: nil
+
+  defp issue_age(issue), do: humane_age(issue.updated_at || issue.inserted_at)
 
   defp filters_active?(assigns) do
     assigns.current_status != "" or assigns.current_priority != "" or
       assigns.current_search != "" or assigns.current_assignee_id != "" or
       assigns.current_project_id != "" or assigns.current_label_id != "" or
       assigns.current_triage != ""
+  end
+
+  # One chip per active filter: {label, clear_event, clear_value_key}.
+  defp active_filter_chips(assigns) do
+    [
+      chip(assigns.current_triage != "", "Lane: #{triage_lane_label(assigns.current_triage)}",
+        event: "filter_triage",
+        key: "triage"
+      ),
+      chip(assigns.current_search != "", ~s(Search: "#{assigns.current_search}"),
+        event: "search",
+        key: "search"
+      ),
+      chip(
+        assigns.current_status != "",
+        "Status: #{status_label(safe_existing_atom(assigns.current_status))}",
+        event: "filter_status",
+        key: "status"
+      ),
+      chip(
+        assigns.current_priority != "",
+        "Priority: #{String.capitalize(assigns.current_priority)}",
+        event: "filter_priority",
+        key: "priority"
+      ),
+      chip(
+        assigns.current_assignee_id != "",
+        "Assignee: #{name_for(assigns.agents, assigns.current_assignee_id)}",
+        event: "filter_assignee",
+        key: "assignee_id"
+      ),
+      chip(
+        assigns.current_project_id != "",
+        "Project: #{name_for(assigns.projects, assigns.current_project_id)}",
+        event: "filter_project",
+        key: "project_id"
+      ),
+      chip(
+        assigns.current_label_id != "",
+        "Label: #{name_for(assigns.labels, assigns.current_label_id)}",
+        event: "filter_label",
+        key: "label_id"
+      )
+    ]
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp chip(false, _label, _opts), do: nil
+
+  defp chip(true, label, opts),
+    do: %{label: label, event: opts[:event], key: opts[:key]}
+
+  defp safe_existing_atom(value) do
+    String.to_existing_atom(value)
+  rescue
+    ArgumentError -> value
+  end
+
+  defp name_for(items, id) do
+    Enum.find_value(items, "Selected", fn item -> if item.id == id, do: item.name end)
   end
 
   defp pluralize(1, word), do: word

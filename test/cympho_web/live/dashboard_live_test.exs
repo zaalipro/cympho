@@ -249,13 +249,13 @@ defmodule CymphoWeb.DashboardLiveTest do
 
       {:ok, _view, html} = live(conn, "/dashboard")
 
-      assert html =~ "Owner action plan"
+      assert html =~ "Needs you"
       assert html =~ "Needs setup"
       assert html =~ "Review mode is on"
       assert html =~ "Agent execution is disabled, so it is safe to inspect and edit the company."
       assert html =~ "Enable runtime when ready"
       assert html =~ ~s(href="/operations#runtime-launch-checklist")
-      assert html =~ "Up next"
+      assert html =~ "Later"
       assert html =~ "blocked issue"
       assert html =~ "Review blockers"
       assert html =~ ~s(href="/kanban")
@@ -337,7 +337,7 @@ defmodule CymphoWeb.DashboardLiveTest do
 
       {:ok, _view, html} = live(conn, "/dashboard")
 
-      assert html =~ "Owner action plan"
+      assert html =~ "Needs you"
       assert html =~ "Owner decision"
       assert html =~ "CEO owner update needs decision"
       assert html =~ "1 CEO owner update is ready for acceptance or revision."

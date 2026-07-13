@@ -503,7 +503,16 @@
                       </span>
                       <h2 class="text-sm font-510 text-text-primary">{status_label(status)}</h2>
                     </div>
-                    <span class={"font-serif text-sm px-2 py-0.5 rounded-full font-590 " <> if(exceeded, do: "bg-brand/20 text-brand", else: "bg-surface text-text-quaternary")}>
+                    <span
+                      class={"font-serif text-sm px-2 py-0.5 rounded-full font-590 " <> column_count_class(status, count, exceeded)}
+                      title={
+                        cond do
+                          exceeded -> "Over the WIP limit of #{limit}"
+                          limit -> "WIP limit #{limit}"
+                          true -> nil
+                        end
+                      }
+                    >
                       {count}{if limit, do: "/#{limit}", else: ""}
                     </span>
                   </div>
@@ -520,12 +529,13 @@
                           <%= for issue <- group_issues do %>
                             <% launch_readiness = Map.get(@launch_readiness_by_issue, issue.id) %>
                             <div
-                              class="bg-surface-2 border border-hairline rounded-lg p-2.5 space-y-1.5 hover:bg-surface-3 transition-colors duration-100 cursor-grab active:cursor-grabbing mb-2 min-h-[64px]"
+                              class="group bg-surface-2 border border-hairline rounded-lg p-2.5 space-y-1.5 hover:bg-surface-3 transition-colors duration-100 cursor-grab active:cursor-grabbing mb-2 min-h-[64px]"
                               data-issue-id={issue.id}
                             >
                               <div class="text-sm font-590 text-text-primary leading-snug line-clamp-2 sm:line-clamp-1">
                                 {issue.title}
                               </div>
+                              <.card_meta issue={issue} show_assignee={false} class="mt-1.5" />
                               <.issue_digest_card
                                 issue={issue}
                                 density={@digest_density}
@@ -543,28 +553,6 @@
                                   {launch_readiness.target}
                                 </span>
                               </.link>
-                              <div class="flex items-center gap-2 flex-wrap">
-                                <span class={"text-[10px] font-510 px-2 py-1 rounded-full " <> priority_class(issue.priority)}>
-                                  {issue.priority}
-                                </span>
-                                <span class="text-xs text-text-quaternary">
-                                  {length(issue.comments)} comments
-                                </span>
-                                <%= if issue.assignee do %>
-                                  <span class="text-xs text-text-quaternary truncate max-w-[100px]">
-                                    {issue.assignee.name}
-                                  </span>
-                                <% end %>
-                                <%= if issue.github_pr_url do %>
-                                  <a
-                                    href={issue.github_pr_url}
-                                    target="_blank"
-                                    class="text-xs text-accent hover:text-accent-hover"
-                                  >
-                                    PR
-                                  </a>
-                                <% end %>
-                              </div>
                             </div>
                           <% end %>
                         </div>

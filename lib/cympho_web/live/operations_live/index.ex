@@ -979,6 +979,86 @@ defmodule CymphoWeb.OperationsLive.Index do
      }}
   end
 
+  attr :label, :string, required: true
+  attr :hint, :string, default: nil
+  attr :class, :string, default: nil
+
+  defp chapter_heading(assigns) do
+    ~H"""
+    <div class={["flex items-center gap-3 pt-1", @class]}>
+      <p class="shrink-0 font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+        {@label}
+      </p>
+      <hr class="ember-rule min-w-0 flex-1" />
+      <p :if={@hint} class="shrink-0 text-[11px] leading-4 text-text-quaternary">{@hint}</p>
+    </div>
+    """
+  end
+
+  attr :label, :string, required: true
+  attr :value, :integer, required: true
+  attr :tone, :atom, default: :idle
+
+  defp pulse_stat(assigns) do
+    ~H"""
+    <div class="ember-stat min-w-[76px] bg-surface/60 px-4 py-2.5">
+      <div class="flex items-center gap-1.5">
+        <span class={["h-1.5 w-1.5 shrink-0 rounded-full", pulse_stat_dot_class(@tone, @value)]}>
+        </span>
+        <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+          {@label}
+        </p>
+      </div>
+      <p class={[
+        "mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums",
+        pulse_stat_value_class(@tone, @value)
+      ]}>
+        {@value}
+      </p>
+    </div>
+    """
+  end
+
+  defp pulse_stat_dot_class(_tone, value) when value <= 0, do: "bg-text-quaternary/40"
+  defp pulse_stat_dot_class(:running, _value), do: "animate-pulse bg-emerald-400"
+  defp pulse_stat_dot_class(:waiting, _value), do: "animate-pulse bg-amber-400"
+  defp pulse_stat_dot_class(:stale, _value), do: "animate-pulse bg-brand"
+  defp pulse_stat_dot_class(_tone, _value), do: "bg-text-quaternary/40"
+
+  defp pulse_stat_value_class(_tone, value) when value <= 0, do: "text-text-quaternary"
+  defp pulse_stat_value_class(:running, _value), do: "text-emerald-300"
+  defp pulse_stat_value_class(:waiting, _value), do: "text-amber-300"
+  defp pulse_stat_value_class(:stale, _value), do: "text-brand"
+  defp pulse_stat_value_class(_tone, _value), do: "text-text-primary"
+
+  attr :label, :string, required: true
+  attr :value, :any, required: true
+  attr :detail, :string, default: nil
+  attr :value_class, :string, default: "text-text-secondary"
+  attr :class, :string, default: nil
+
+  defp quiet_stat(assigns) do
+    ~H"""
+    <div class={["min-w-0", @class]}>
+      <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">{@label}</p>
+      <p class={["mt-1.5 font-mono text-[15px] font-590 leading-none tabular-nums", @value_class]}>
+        {@value}
+      </p>
+      <p :if={@detail} class="mt-1.5 truncate text-[11px] text-text-quaternary">{@detail}</p>
+    </div>
+    """
+  end
+
+  defp now_waiting_count(wake_queue, review_nudges) do
+    Map.get(wake_queue.counts, :pending_comments, 0) +
+      Map.get(review_nudges.counts, :active, 0)
+  end
+
+  defp now_stale_count(capacity, wake_queue) do
+    Map.get(capacity, :stale_checked_out_issues, 0) +
+      Map.get(wake_queue.counts, :stale_comments, 0)
+  end
+
   defp status_badge_class(:running),
     do: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
 

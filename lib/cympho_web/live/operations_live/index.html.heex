@@ -142,35 +142,9 @@
         <span class="hero-list-bullet-mini h-3.5 w-3.5"></span> Open queue
       </.app_link>
     </div>
-    <div class="stagger-children mt-3 grid gap-2 sm:grid-cols-3">
-      <div class="ember-stat rounded-md border border-border bg-surface/60 px-3 py-2">
-        <div class="flex items-center gap-2 text-text-secondary">
-          <span class="hero-inbox-mini h-4 w-4 text-white"></span>
-          <span class="text-xs font-590">Delegated</span>
-        </div>
-        <p class="mt-1 font-serif text-[28px] font-510 leading-none tabular-nums text-sky-200">
-          {@delegated_work.count}
-        </p>
-      </div>
-      <div class="ember-stat rounded-md border border-border bg-surface/60 px-3 py-2">
-        <div class="flex items-center gap-2 text-text-secondary">
-          <span class="hero-check-circle-mini h-4 w-4 text-white"></span>
-          <span class="text-xs font-590">Owner</span>
-        </div>
-        <p class="mt-1 font-serif text-[28px] font-510 leading-none tabular-nums text-amber-200">
-          {@owner_signoffs.count}
-        </p>
-      </div>
-      <div class="ember-stat rounded-md border border-border bg-surface/60 px-3 py-2">
-        <div class="flex items-center gap-2 text-text-secondary">
-          <span class="hero-sparkles-mini h-4 w-4 text-white"></span>
-          <span class="text-xs font-590">CEO watch</span>
-        </div>
-        <p class="mt-1 font-serif text-[28px] font-510 leading-none tabular-nums text-emerald-200">
-          {@ceo_outcomes.counts.attention}
-        </p>
-      </div>
-    </div>
+    <p class="mt-2 text-xs leading-5 text-text-tertiary">
+      Delegated work waiting on runtime, CEO updates waiting on you, and CEO turns worth a look.
+    </p>
   </section>
 
   <section
@@ -298,6 +272,11 @@
 
   <div class="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_360px]">
     <div class="min-w-0 space-y-4">
+      <.chapter_heading
+        label="Now"
+        hint="what's running this second"
+        class="ui-advanced-only"
+      />
       <section class="ui-advanced-only ember-glass">
         <div class="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div class="min-w-0">
@@ -316,23 +295,29 @@
               {@runtime_mode.summary}
             </p>
           </div>
-          <div class="stagger-children flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
-            <div class="ember-stat bg-surface/60 px-4 py-2.5">
-              <p class="font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
-                {@runtime_mode.disabled_services}
-              </p>
-              <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                Disabled
-              </p>
+          <div class="flex shrink-0 flex-col items-stretch gap-1.5 sm:items-end">
+            <div class="stagger-children flex items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
+              <.pulse_stat label="Running" value={@capacity.running_runs} tone={:running} />
+              <.pulse_stat
+                label="Waiting"
+                value={now_waiting_count(@wake_queue, @review_nudges)}
+                tone={:waiting}
+              />
+              <.pulse_stat
+                label="Stale"
+                value={now_stale_count(@capacity, @wake_queue)}
+                tone={:stale}
+              />
             </div>
-            <div class="ember-stat bg-surface/60 px-4 py-2.5">
-              <p class="font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
-                {@runtime_mode.not_running_services}
-              </p>
-              <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                Not running
-              </p>
-            </div>
+            <p class="text-[11px] leading-4 text-text-quaternary">
+              {@runtime_mode.disabled_services} disabled · {@runtime_mode.not_running_services} not running ·
+              <a
+                href="#runtime-capacity"
+                class="text-text-tertiary transition hover:text-text-primary"
+              >
+                capacity details
+              </a>
+            </p>
           </div>
         </div>
         <div id="runtime-launch-checklist" class="scroll-mt-6 border-t border-border px-5 py-4">
@@ -585,7 +570,7 @@
                     {step.label}
                   </p>
                   <p class={[
-                    "font-serif text-[28px] font-510 leading-none tabular-nums",
+                    "font-serif text-[20px] font-510 leading-none tabular-nums",
                     ceo_flow_step_value_class(step.state)
                   ]}>
                     {step.value}
@@ -973,6 +958,12 @@
           </div>
         </div>
       </section>
+
+      <.chapter_heading
+        label="Queue"
+        hint="what's waiting, and on whom"
+        class="ui-advanced-only pt-3"
+      />
 
       <section
         id="owner-signoff-queue"
@@ -1420,6 +1411,366 @@
       </section>
 
       <section
+        id="review-nudges"
+        class="ui-advanced-only rounded-lg border border-border bg-panel scroll-mt-6"
+      >
+        <div class="border-b border-border px-5 py-4">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 class="text-sm font-590 text-text-primary">Review Nudges</h2>
+              <p class="mt-1 text-xs text-text-quaternary">
+                Evidence, review, and owner-update requests waiting across the company.
+              </p>
+              <hr class="ember-rule mt-3" />
+            </div>
+            <div class="stagger-children flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-text-primary">
+                  {@review_nudges.counts.active}
+                </p>
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                  Active
+                </p>
+              </div>
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-brand">
+                  {@review_nudges.counts.stale}
+                </p>
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                  Stale
+                </p>
+              </div>
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-blue-300">
+                  {@review_nudges.counts.running}
+                </p>
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                  Running
+                </p>
+              </div>
+              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-emerald-300">
+                  {@review_nudges.counts.cleared}
+                </p>
+                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                  Cleared
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          :if={@review_nudges.counts.total == 0}
+          class="px-5 py-10 text-center text-sm text-text-tertiary"
+        >
+          No review nudges have been queued yet.
+        </div>
+
+        <div
+          :if={@review_nudges.counts.total > 0}
+          class="grid min-w-0 gap-px bg-border lg:grid-cols-2"
+        >
+          <div class="min-w-0 bg-panel p-5">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                By agent
+              </h3>
+              <span class="text-xs text-text-quaternary">
+                {@review_nudges.counts.active} active
+              </span>
+            </div>
+            <div :if={@review_nudges.by_agent == []} class="mt-4 text-sm text-text-tertiary">
+              No active agent nudges.
+            </div>
+            <div :if={@review_nudges.by_agent != []} class="mt-4 space-y-2">
+              <div
+                :for={group <- @review_nudges.by_agent}
+                class="rounded-lg border border-border bg-surface px-3 py-2"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <p class="truncate text-sm font-510 text-text-primary">{group.label}</p>
+                  <span class="font-mono text-xs tabular-nums text-text-quaternary">
+                    {group.count}
+                  </span>
+                </div>
+                <p class="mt-1 text-xs text-text-quaternary">
+                  {group.stale} stale · {group.running} running
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="min-w-0 bg-panel p-5">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                By blocker
+              </h3>
+              <span class="text-xs text-text-quaternary">Top wait states</span>
+            </div>
+            <div :if={@review_nudges.by_blocker == []} class="mt-4 text-sm text-text-tertiary">
+              No active blocker groups.
+            </div>
+            <div :if={@review_nudges.by_blocker != []} class="mt-4 space-y-2">
+              <div
+                :for={group <- @review_nudges.by_blocker}
+                class="rounded-lg border border-border bg-surface px-3 py-2"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <p class="truncate text-sm font-510 text-text-primary">{group.label}</p>
+                  <span class="font-mono text-xs tabular-nums text-text-quaternary">
+                    {group.count}
+                  </span>
+                </div>
+                <p class="mt-1 text-xs text-text-quaternary">
+                  {group.stale} stale · {group.running} running
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div :if={@review_nudges.active != []} class="border-t border-border">
+          <div class="border-b border-border px-5 py-3">
+            <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+              Active queue
+            </h3>
+          </div>
+          <div class="divide-y divide-border">
+            <div :for={nudge <- @review_nudges.active} class="px-5 py-4">
+              <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{nudge_badge_class(nudge.lifecycle)}"}>
+                      {nudge.status_label}
+                    </span>
+                    <span class="text-xs text-text-quaternary">
+                      Waiting {format_duration(nudge.age_seconds)}
+                    </span>
+                    <span class="text-xs text-text-quaternary">·</span>
+                    <span class="text-xs text-text-quaternary">
+                      {Enum.join(nudge.blocker_labels, ", ")}
+                    </span>
+                  </div>
+                  <p class="mt-2 truncate text-sm font-590 text-text-primary">
+                    {nudge.issue_identifier || short_id(nudge.issue_id)} · {nudge.issue_title}
+                  </p>
+                  <p class="mt-1 text-xs leading-5 text-text-tertiary">{nudge.summary}</p>
+                  <p class="mt-1 text-xs text-text-quaternary">Owner: {nudge.agent_name}</p>
+                </div>
+
+                <div class="flex shrink-0 flex-wrap gap-2 xl:justify-end">
+                  <.app_link
+                    :if={nudge.issue}
+                    navigate={~p"/issues/#{nudge.issue.id}"}
+                    class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    Open issue
+                  </.app_link>
+                  <.app_link
+                    :if={nudge.next_action}
+                    navigate={nudge.next_action.path}
+                    class="rounded-md border border-brand/30 bg-brand/10 px-2.5 py-1.5 text-xs font-510 text-brand hover:bg-brand/15"
+                  >
+                    {nudge.next_action.label}
+                  </.app_link>
+                  <.app_link
+                    :if={nudge.agent}
+                    navigate={~p"/agents/#{nudge.agent.id}?tab=inbox"}
+                    class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    Open agent
+                  </.app_link>
+                  <button
+                    type="button"
+                    phx-click="clear_review_nudge"
+                    phx-value-id={nudge.id}
+                    class="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-510 text-emerald-300 hover:bg-emerald-500/15"
+                  >
+                    Mark handled
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div :if={@review_nudges.cleared != []} class="border-t border-border">
+          <div class="border-b border-border px-5 py-3">
+            <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+              Recently cleared
+            </h3>
+          </div>
+          <div class="divide-y divide-border">
+            <div
+              :for={nudge <- @review_nudges.cleared}
+              class="flex flex-wrap items-center justify-between gap-3 px-5 py-3"
+            >
+              <div class="min-w-0">
+                <p class="truncate text-sm font-510 text-text-primary">
+                  {nudge.issue_identifier || short_id(nudge.issue_id)} · {nudge.issue_title}
+                </p>
+                <p class="mt-0.5 text-xs text-text-quaternary">
+                  {Enum.join(nudge.blocker_labels, ", ")} · {nudge.agent_name}
+                </p>
+              </div>
+              <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{nudge_badge_class(nudge.lifecycle)}"}>
+                {nudge.status_label}
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="wake-backlog"
+        class="ui-advanced-only rounded-lg border border-border bg-panel scroll-mt-6"
+      >
+        <div class="border-b border-border px-5 py-4">
+          <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div class="min-w-0">
+              <h2 class="text-sm font-590 text-text-primary">Wake Backlog</h2>
+              <p class="mt-1 text-xs leading-5 text-text-quaternary">
+                Stale comment wakes that still occupy agent queue room. Clearing them leaves issue comments intact.
+              </p>
+              <hr class="ember-rule mt-3" />
+            </div>
+            <div class="flex shrink-0 flex-wrap items-stretch gap-2">
+              <div class="stagger-children flex overflow-hidden rounded-md border border-border bg-border">
+                <div class="min-w-[84px] bg-panel px-3 py-2 text-center">
+                  <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-text-primary">
+                    {@wake_queue.counts.pending_comments}
+                  </p>
+                  <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                    Pending
+                  </p>
+                </div>
+                <div class="min-w-[84px] bg-panel px-3 py-2 text-center">
+                  <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-amber-300">
+                    {@wake_queue.counts.stale_comments}
+                  </p>
+                  <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                    Stale
+                  </p>
+                </div>
+              </div>
+              <button
+                :if={@wake_queue.counts.stale_comments > 0}
+                type="button"
+                phx-click="clear_stale_comment_wakes"
+                class="inline-flex items-center justify-center rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs font-590 text-amber-200 transition hover:bg-amber-500/15"
+              >
+                Clear stale wakes
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="px-5 py-4">
+          <div class="rounded-md border border-border bg-surface px-3 py-2.5">
+            <p class="text-sm leading-5 text-text-tertiary">{@wake_queue.summary}</p>
+            <p class="mt-1 text-xs text-text-quaternary">
+              Stale threshold: {@wake_queue.stale_after_minutes} minutes
+            </p>
+          </div>
+        </div>
+
+        <div
+          :if={@wake_queue.counts.stale_comments == 0}
+          class="border-t border-border px-5 py-8 text-center text-sm text-text-tertiary"
+        >
+          No stale comment wakes are holding queue slots.
+        </div>
+
+        <div
+          :if={@wake_queue.counts.stale_comments > 0}
+          class="grid min-w-0 gap-px border-t border-border bg-border lg:grid-cols-[280px_minmax(0,1fr)]"
+        >
+          <div class="min-w-0 bg-panel p-5">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                By agent
+              </h3>
+              <span class="text-xs text-text-quaternary">
+                {@wake_queue.counts.stale_comments} stale
+              </span>
+            </div>
+            <div :if={@wake_queue.by_agent == []} class="mt-4 text-sm text-text-tertiary">
+              No stale agent groups.
+            </div>
+            <div :if={@wake_queue.by_agent != []} class="mt-4 space-y-2">
+              <div
+                :for={group <- @wake_queue.by_agent}
+                class="rounded-lg border border-border bg-surface px-3 py-2"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <p class="truncate text-sm font-510 text-text-primary">{group.label}</p>
+                  <span class="font-mono text-xs tabular-nums text-text-quaternary">
+                    {group.count}
+                  </span>
+                </div>
+                <p class="mt-1 text-xs text-text-quaternary">
+                  Oldest waiting {format_duration(group.oldest_seconds)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="min-w-0 divide-y divide-border bg-panel">
+            <div class="px-5 py-3">
+              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
+                Oldest stale wakes
+              </h3>
+            </div>
+            <div :for={wake <- @wake_queue.entries} class="px-5 py-4">
+              <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-510 text-amber-300">
+                      {wake.reason_label}
+                    </span>
+                    <span class="text-xs text-text-quaternary">
+                      Waiting {format_duration(wake.age_seconds)}
+                    </span>
+                  </div>
+                  <p class="mt-2 truncate text-sm font-590 text-text-primary">
+                    {wake.issue_identifier || short_id(wake.issue_id)} · {wake.issue_title ||
+                      "Untitled issue"}
+                  </p>
+                  <p class="mt-1 text-xs text-text-quaternary">
+                    Owner: {wake.agent_name}
+                  </p>
+                </div>
+
+                <div class="flex shrink-0 flex-wrap gap-2 xl:justify-end">
+                  <.app_link
+                    :if={wake.issue}
+                    navigate={~p"/issues/#{wake.issue.id}"}
+                    class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    Open issue
+                  </.app_link>
+                  <.app_link
+                    :if={wake.agent}
+                    navigate={~p"/agents/#{wake.agent.id}?tab=inbox"}
+                    class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    Open agent
+                  </.app_link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <.chapter_heading
+        label="Ledger"
+        hint="history and telemetry — read when curious"
+        class="ui-advanced-only pt-3"
+      />
+
+      <section
         id="ceo-outcome-monitor"
         class="ui-advanced-only scroll-mt-20 rounded-lg border border-border bg-panel md:scroll-mt-6"
       >
@@ -1445,21 +1796,27 @@
               data-testid="ceo-outcome-health-strip"
               class="stagger-children grid min-w-0 grid-cols-3 gap-px overflow-hidden rounded-md border border-border bg-border"
             >
+              <.quiet_stat
+                label="Signal"
+                value={ceo_outcome_signal_count(@ceo_outcomes.counts)}
+                class="bg-surface/70 px-3 py-2.5"
+              />
+              <.quiet_stat
+                label="Receipts"
+                value={"#{@ceo_outcomes.counts.receipt_complete}/#{@ceo_outcomes.counts.receipt_checked}"}
+                class="bg-surface/70 px-3 py-2.5"
+              />
               <div class="ember-stat min-w-0 bg-surface/70 px-3 py-2.5">
-                <p class="text-[11px] font-510 text-text-quaternary">Signal</p>
-                <p class="mt-1 font-serif text-[28px] font-510 leading-none tabular-nums text-emerald-300">
-                  {ceo_outcome_signal_count(@ceo_outcomes.counts)}
+                <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+                  Attention
                 </p>
-              </div>
-              <div class="ember-stat min-w-0 bg-surface/70 px-3 py-2.5">
-                <p class="text-[11px] font-510 text-text-quaternary">Receipts</p>
-                <p class="mt-1 font-serif text-[28px] font-510 leading-none tabular-nums text-teal-300">
-                  {@ceo_outcomes.counts.receipt_complete}/{@ceo_outcomes.counts.receipt_checked}
-                </p>
-              </div>
-              <div class="ember-stat min-w-0 bg-surface/70 px-3 py-2.5">
-                <p class="text-[11px] font-510 text-text-quaternary">Attention</p>
-                <p class="mt-1 font-serif text-[28px] font-510 leading-none tabular-nums text-amber-300">
+                <p class={[
+                  "mt-1 font-serif text-[28px] font-510 leading-none tabular-nums",
+                  if(@ceo_outcomes.counts.attention > 0,
+                    do: "text-amber-300",
+                    else: "text-text-quaternary"
+                  )
+                ]}>
                   {@ceo_outcomes.counts.attention}
                 </p>
               </div>
@@ -1472,13 +1829,18 @@
           >
             <div
               :for={metric <- ceo_outcome_metric_cards(@ceo_outcomes.counts)}
-              class="ember-stat min-w-0 rounded-md border border-border bg-surface/60 px-3 py-2.5"
+              class="min-w-0 rounded-md border border-border bg-surface/60 px-3 py-2"
             >
-              <p class="text-[11px] font-510 text-text-quaternary">{metric.label}</p>
-              <p class={"mt-1 font-serif text-[28px] font-510 leading-none tabular-nums #{metric.value_class}"}>
-                {metric.value}
-              </p>
-              <p class="ui-advanced-only mt-1 text-[11px] leading-4 text-text-tertiary">
+              <div class="flex items-baseline justify-between gap-2">
+                <p class="truncate text-[11px] font-510 text-text-quaternary">{metric.label}</p>
+                <p class={[
+                  "font-mono text-[15px] font-590 leading-none tabular-nums",
+                  if(metric.value > 0, do: metric.value_class, else: "text-text-quaternary")
+                ]}>
+                  {metric.value}
+                </p>
+              </div>
+              <p class="ui-advanced-only mt-1 truncate text-[11px] leading-4 text-text-tertiary">
                 {metric.detail}
               </p>
             </div>
@@ -1631,23 +1993,32 @@
 
             <div class="stagger-children flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
               <div class="ember-stat min-w-[68px] bg-panel px-3 py-2 text-center">
-                <p class="font-serif text-[28px] font-510 leading-none tabular-nums text-brand">
+                <p class={[
+                  "font-serif text-[28px] font-510 leading-none tabular-nums",
+                  if(@doctor.counts.critical > 0, do: "text-brand", else: "text-text-quaternary")
+                ]}>
                   {@doctor.counts.critical}
                 </p>
                 <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Fix
                 </p>
               </div>
-              <div class="ember-stat min-w-[68px] bg-panel px-3 py-2 text-center">
-                <p class="font-serif text-[28px] font-510 leading-none tabular-nums text-amber-300">
+              <div class="min-w-[68px] bg-panel px-3 py-2 text-center">
+                <p class={[
+                  "font-mono text-[15px] font-590 leading-none tabular-nums",
+                  if(@doctor.counts.warning > 0,
+                    do: "text-amber-300",
+                    else: "text-text-quaternary"
+                  )
+                ]}>
                   {@doctor.counts.warning}
                 </p>
                 <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
                   Watch
                 </p>
               </div>
-              <div class="ember-stat min-w-[68px] bg-panel px-3 py-2 text-center">
-                <p class="font-serif text-[28px] font-510 leading-none tabular-nums text-emerald-300">
+              <div class="min-w-[68px] bg-panel px-3 py-2 text-center">
+                <p class="font-mono text-[15px] font-590 leading-none tabular-nums text-text-quaternary">
                   {@doctor.counts.ok}
                 </p>
                 <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
@@ -2440,35 +2811,20 @@
           </div>
         </div>
         <div class="stagger-children mt-4 grid divide-y divide-border overflow-hidden rounded-md border border-border sm:grid-cols-4 sm:divide-x sm:divide-y-0">
-          <div class="ember-stat px-4 py-3">
-            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-              Agents
-            </p>
-            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
-              {@capacity.total_agents}
-            </p>
-          </div>
-          <div class="ember-stat px-4 py-3">
-            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-              Total slots
-            </p>
-            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
-              {@capacity.total_slots}
-            </p>
-          </div>
-          <div class="ember-stat px-4 py-3">
-            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-              Local CLI slots
-            </p>
-            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
-              {@capacity.local_slots}
-            </p>
-          </div>
+          <.quiet_stat label="Agents" value={@capacity.total_agents} class="px-4 py-3" />
+          <.quiet_stat label="Total slots" value={@capacity.total_slots} class="px-4 py-3" />
+          <.quiet_stat label="Local CLI slots" value={@capacity.local_slots} class="px-4 py-3" />
           <div class="ember-stat px-4 py-3">
             <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
               Held slots
             </p>
-            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
+            <p class={[
+              "mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums",
+              if(@capacity.running_runs > 0,
+                do: "text-text-primary",
+                else: "text-text-quaternary"
+              )
+            ]}>
               {@capacity.running_runs}
             </p>
             <p class="mt-2 font-mono text-[11px] tabular-nums text-text-quaternary">
@@ -2654,406 +3010,36 @@
           </span>
         </div>
         <div class="stagger-children mt-4 grid divide-y divide-border overflow-hidden rounded-md border border-border sm:grid-cols-4 sm:divide-x sm:divide-y-0">
-          <div class="ember-stat px-4 py-3">
-            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-              BEAM memory
-            </p>
-            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
-              {format_memory(@host.memory_bytes)}
-            </p>
-            <p class="mt-2 text-[11px] text-text-quaternary">
-              {format_memory(@host.process_memory_bytes)} process heap
-            </p>
-          </div>
-          <div class="ember-stat px-4 py-3">
-            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-              BEAM processes
-            </p>
-            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
-              {@host.process_count}
-            </p>
-            <p class="mt-2 font-mono text-[11px] tabular-nums text-text-quaternary">
-              {@host.process_usage_percent}% of limit
-            </p>
-          </div>
-          <div class="ember-stat px-4 py-3">
-            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-              Schedulers
-            </p>
-            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
-              {@host.schedulers_online}
-            </p>
-            <p class="mt-2 text-[11px] text-text-quaternary">Online CPU schedulers</p>
-          </div>
-          <div class="ember-stat px-4 py-3">
-            <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-              Run queue
-            </p>
-            <p class="mt-1.5 font-serif text-[28px] font-510 leading-none tabular-nums text-text-primary">
-              {@host.run_queue}
-            </p>
-            <p class="mt-2 text-[11px] text-text-quaternary">Runnable BEAM work</p>
-          </div>
+          <.quiet_stat
+            label="BEAM memory"
+            value={format_memory(@host.memory_bytes)}
+            detail={"#{format_memory(@host.process_memory_bytes)} process heap"}
+            class="px-4 py-3"
+          />
+          <.quiet_stat
+            label="BEAM processes"
+            value={@host.process_count}
+            detail={"#{@host.process_usage_percent}% of limit"}
+            class="px-4 py-3"
+          />
+          <.quiet_stat
+            label="Schedulers"
+            value={@host.schedulers_online}
+            detail="Online CPU schedulers"
+            class="px-4 py-3"
+          />
+          <.quiet_stat
+            label="Run queue"
+            value={@host.run_queue}
+            detail="Runnable BEAM work"
+            class="px-4 py-3"
+          />
         </div>
         <div class="mt-4 rounded-md border border-border border-l-2 border-l-amber-500/70 bg-surface px-3 py-2.5">
           <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-tertiary">
             External CLI memory
           </p>
           <p class="mt-1 text-sm leading-5 text-text-tertiary">{@host.cli_note}</p>
-        </div>
-      </section>
-
-      <section
-        id="review-nudges"
-        class="ui-advanced-only rounded-lg border border-border bg-panel scroll-mt-6"
-      >
-        <div class="border-b border-border px-5 py-4">
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <h2 class="text-sm font-590 text-text-primary">Review Nudges</h2>
-              <p class="mt-1 text-xs text-text-quaternary">
-                Evidence, review, and owner-update requests waiting across the company.
-              </p>
-              <hr class="ember-rule mt-3" />
-            </div>
-            <div class="stagger-children flex shrink-0 items-stretch gap-px overflow-hidden rounded-md border border-border bg-border">
-              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
-                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-text-primary">
-                  {@review_nudges.counts.active}
-                </p>
-                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                  Active
-                </p>
-              </div>
-              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
-                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-brand">
-                  {@review_nudges.counts.stale}
-                </p>
-                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                  Stale
-                </p>
-              </div>
-              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
-                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-blue-300">
-                  {@review_nudges.counts.running}
-                </p>
-                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                  Running
-                </p>
-              </div>
-              <div class="min-w-[64px] bg-panel px-3 py-2 text-center">
-                <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-emerald-300">
-                  {@review_nudges.counts.cleared}
-                </p>
-                <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                  Cleared
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div
-          :if={@review_nudges.counts.total == 0}
-          class="px-5 py-10 text-center text-sm text-text-tertiary"
-        >
-          No review nudges have been queued yet.
-        </div>
-
-        <div
-          :if={@review_nudges.counts.total > 0}
-          class="grid min-w-0 gap-px bg-border lg:grid-cols-2"
-        >
-          <div class="min-w-0 bg-panel p-5">
-            <div class="flex items-center justify-between gap-3">
-              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-                By agent
-              </h3>
-              <span class="text-xs text-text-quaternary">
-                {@review_nudges.counts.active} active
-              </span>
-            </div>
-            <div :if={@review_nudges.by_agent == []} class="mt-4 text-sm text-text-tertiary">
-              No active agent nudges.
-            </div>
-            <div :if={@review_nudges.by_agent != []} class="mt-4 space-y-2">
-              <div
-                :for={group <- @review_nudges.by_agent}
-                class="rounded-lg border border-border bg-surface px-3 py-2"
-              >
-                <div class="flex items-center justify-between gap-3">
-                  <p class="truncate text-sm font-510 text-text-primary">{group.label}</p>
-                  <span class="font-mono text-xs tabular-nums text-text-quaternary">
-                    {group.count}
-                  </span>
-                </div>
-                <p class="mt-1 text-xs text-text-quaternary">
-                  {group.stale} stale · {group.running} running
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div class="min-w-0 bg-panel p-5">
-            <div class="flex items-center justify-between gap-3">
-              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-                By blocker
-              </h3>
-              <span class="text-xs text-text-quaternary">Top wait states</span>
-            </div>
-            <div :if={@review_nudges.by_blocker == []} class="mt-4 text-sm text-text-tertiary">
-              No active blocker groups.
-            </div>
-            <div :if={@review_nudges.by_blocker != []} class="mt-4 space-y-2">
-              <div
-                :for={group <- @review_nudges.by_blocker}
-                class="rounded-lg border border-border bg-surface px-3 py-2"
-              >
-                <div class="flex items-center justify-between gap-3">
-                  <p class="truncate text-sm font-510 text-text-primary">{group.label}</p>
-                  <span class="font-mono text-xs tabular-nums text-text-quaternary">
-                    {group.count}
-                  </span>
-                </div>
-                <p class="mt-1 text-xs text-text-quaternary">
-                  {group.stale} stale · {group.running} running
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div :if={@review_nudges.active != []} class="border-t border-border">
-          <div class="border-b border-border px-5 py-3">
-            <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-              Active queue
-            </h3>
-          </div>
-          <div class="divide-y divide-border">
-            <div :for={nudge <- @review_nudges.active} class="px-5 py-4">
-              <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{nudge_badge_class(nudge.lifecycle)}"}>
-                      {nudge.status_label}
-                    </span>
-                    <span class="text-xs text-text-quaternary">
-                      Waiting {format_duration(nudge.age_seconds)}
-                    </span>
-                    <span class="text-xs text-text-quaternary">·</span>
-                    <span class="text-xs text-text-quaternary">
-                      {Enum.join(nudge.blocker_labels, ", ")}
-                    </span>
-                  </div>
-                  <p class="mt-2 truncate text-sm font-590 text-text-primary">
-                    {nudge.issue_identifier || short_id(nudge.issue_id)} · {nudge.issue_title}
-                  </p>
-                  <p class="mt-1 text-xs leading-5 text-text-tertiary">{nudge.summary}</p>
-                  <p class="mt-1 text-xs text-text-quaternary">Owner: {nudge.agent_name}</p>
-                </div>
-
-                <div class="flex shrink-0 flex-wrap gap-2 xl:justify-end">
-                  <.app_link
-                    :if={nudge.issue}
-                    navigate={~p"/issues/#{nudge.issue.id}"}
-                    class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                  >
-                    Open issue
-                  </.app_link>
-                  <.app_link
-                    :if={nudge.next_action}
-                    navigate={nudge.next_action.path}
-                    class="rounded-md border border-brand/30 bg-brand/10 px-2.5 py-1.5 text-xs font-510 text-brand hover:bg-brand/15"
-                  >
-                    {nudge.next_action.label}
-                  </.app_link>
-                  <.app_link
-                    :if={nudge.agent}
-                    navigate={~p"/agents/#{nudge.agent.id}?tab=inbox"}
-                    class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                  >
-                    Open agent
-                  </.app_link>
-                  <button
-                    type="button"
-                    phx-click="clear_review_nudge"
-                    phx-value-id={nudge.id}
-                    class="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-510 text-emerald-300 hover:bg-emerald-500/15"
-                  >
-                    Mark handled
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div :if={@review_nudges.cleared != []} class="border-t border-border">
-          <div class="border-b border-border px-5 py-3">
-            <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-              Recently cleared
-            </h3>
-          </div>
-          <div class="divide-y divide-border">
-            <div
-              :for={nudge <- @review_nudges.cleared}
-              class="flex flex-wrap items-center justify-between gap-3 px-5 py-3"
-            >
-              <div class="min-w-0">
-                <p class="truncate text-sm font-510 text-text-primary">
-                  {nudge.issue_identifier || short_id(nudge.issue_id)} · {nudge.issue_title}
-                </p>
-                <p class="mt-0.5 text-xs text-text-quaternary">
-                  {Enum.join(nudge.blocker_labels, ", ")} · {nudge.agent_name}
-                </p>
-              </div>
-              <span class={"rounded-full border px-2 py-0.5 text-[11px] font-510 #{nudge_badge_class(nudge.lifecycle)}"}>
-                {nudge.status_label}
-              </span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section
-        id="wake-backlog"
-        class="ui-advanced-only rounded-lg border border-border bg-panel scroll-mt-6"
-      >
-        <div class="border-b border-border px-5 py-4">
-          <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-            <div class="min-w-0">
-              <h2 class="text-sm font-590 text-text-primary">Wake Backlog</h2>
-              <p class="mt-1 text-xs leading-5 text-text-quaternary">
-                Stale comment wakes that still occupy agent queue room. Clearing them leaves issue comments intact.
-              </p>
-              <hr class="ember-rule mt-3" />
-            </div>
-            <div class="flex shrink-0 flex-wrap items-stretch gap-2">
-              <div class="stagger-children flex overflow-hidden rounded-md border border-border bg-border">
-                <div class="min-w-[84px] bg-panel px-3 py-2 text-center">
-                  <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-text-primary">
-                    {@wake_queue.counts.pending_comments}
-                  </p>
-                  <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                    Pending
-                  </p>
-                </div>
-                <div class="min-w-[84px] bg-panel px-3 py-2 text-center">
-                  <p class="font-mono text-[16px] font-590 leading-none tabular-nums text-amber-300">
-                    {@wake_queue.counts.stale_comments}
-                  </p>
-                  <p class="mt-1.5 text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                    Stale
-                  </p>
-                </div>
-              </div>
-              <button
-                :if={@wake_queue.counts.stale_comments > 0}
-                type="button"
-                phx-click="clear_stale_comment_wakes"
-                class="inline-flex items-center justify-center rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs font-590 text-amber-200 transition hover:bg-amber-500/15"
-              >
-                Clear stale wakes
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="px-5 py-4">
-          <div class="rounded-md border border-border bg-surface px-3 py-2.5">
-            <p class="text-sm leading-5 text-text-tertiary">{@wake_queue.summary}</p>
-            <p class="mt-1 text-xs text-text-quaternary">
-              Stale threshold: {@wake_queue.stale_after_minutes} minutes
-            </p>
-          </div>
-        </div>
-
-        <div
-          :if={@wake_queue.counts.stale_comments == 0}
-          class="border-t border-border px-5 py-8 text-center text-sm text-text-tertiary"
-        >
-          No stale comment wakes are holding queue slots.
-        </div>
-
-        <div
-          :if={@wake_queue.counts.stale_comments > 0}
-          class="grid min-w-0 gap-px border-t border-border bg-border lg:grid-cols-[280px_minmax(0,1fr)]"
-        >
-          <div class="min-w-0 bg-panel p-5">
-            <div class="flex items-center justify-between gap-3">
-              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-                By agent
-              </h3>
-              <span class="text-xs text-text-quaternary">
-                {@wake_queue.counts.stale_comments} stale
-              </span>
-            </div>
-            <div :if={@wake_queue.by_agent == []} class="mt-4 text-sm text-text-tertiary">
-              No stale agent groups.
-            </div>
-            <div :if={@wake_queue.by_agent != []} class="mt-4 space-y-2">
-              <div
-                :for={group <- @wake_queue.by_agent}
-                class="rounded-lg border border-border bg-surface px-3 py-2"
-              >
-                <div class="flex items-center justify-between gap-3">
-                  <p class="truncate text-sm font-510 text-text-primary">{group.label}</p>
-                  <span class="font-mono text-xs tabular-nums text-text-quaternary">
-                    {group.count}
-                  </span>
-                </div>
-                <p class="mt-1 text-xs text-text-quaternary">
-                  Oldest waiting {format_duration(group.oldest_seconds)}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div class="min-w-0 divide-y divide-border bg-panel">
-            <div class="px-5 py-3">
-              <h3 class="text-xs font-590 uppercase tracking-[0.08em] text-text-quaternary">
-                Oldest stale wakes
-              </h3>
-            </div>
-            <div :for={wake <- @wake_queue.entries} class="px-5 py-4">
-              <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-510 text-amber-300">
-                      {wake.reason_label}
-                    </span>
-                    <span class="text-xs text-text-quaternary">
-                      Waiting {format_duration(wake.age_seconds)}
-                    </span>
-                  </div>
-                  <p class="mt-2 truncate text-sm font-590 text-text-primary">
-                    {wake.issue_identifier || short_id(wake.issue_id)} · {wake.issue_title ||
-                      "Untitled issue"}
-                  </p>
-                  <p class="mt-1 text-xs text-text-quaternary">
-                    Owner: {wake.agent_name}
-                  </p>
-                </div>
-
-                <div class="flex shrink-0 flex-wrap gap-2 xl:justify-end">
-                  <.app_link
-                    :if={wake.issue}
-                    navigate={~p"/issues/#{wake.issue.id}"}
-                    class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                  >
-                    Open issue
-                  </.app_link>
-                  <.app_link
-                    :if={wake.agent}
-                    navigate={~p"/agents/#{wake.agent.id}?tab=inbox"}
-                    class="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-510 text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                  >
-                    Open agent
-                  </.app_link>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       </section>
 

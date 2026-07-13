@@ -289,7 +289,7 @@ defmodule CymphoWeb.InboxLiveTest do
       {:ok, _view, html} = live(conn, "/inbox?status=action&density=detailed")
 
       assert html =~ "Needs my action"
-      assert html =~ "My action"
+      assert html =~ "Needs you"
       assert html =~ "Handle your assigned blockers"
       assert html =~ "Approve production credentials"
       assert html =~ "Only the owner can create the provider key."

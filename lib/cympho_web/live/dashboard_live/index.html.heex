@@ -1,14 +1,10 @@
 <.page size="wide" data-ui-complex-page class="ember-aurora">
-  <% primary_next =
-    @primary_next_action || %{path: ~p"/operations", label: "Open Operations", action: "Open"} %>
-
   <div class="relative z-10">
     <%!-- ============================================================
          Hero — molten editorial greeting. Aurora field drifts behind;
-         the headline carries a terracotta→amber gradient tail and the
-         status line rides in an ember eyebrow chip.
+         the status line rides in an ember eyebrow chip.
          ============================================================ --%>
-    <div class="mb-10 px-1 pt-2">
+    <div class="mb-8 px-1 pt-2">
       <.header>
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
@@ -68,224 +64,157 @@
       </.header>
     </div>
 
-    <div class="ui-simple-only stagger-children mb-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-      <a
-        href={Map.get(primary_next, :path, ~p"/operations")}
-        class="ui-simple-card group flex min-w-0 items-center gap-3 px-3 py-3 transition hover:border-border-hover hover:bg-surface-hover"
-      >
-        <span class="ui-simple-icon">
-          <span class="hero-sparkles-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            Next
+    <%!-- ============================================================
+         Needs you — the one row that answers "does anything need ME
+         right now?". Each card is one decision with one CTA. When
+         nothing needs the owner, a single calm all-clear card.
+         Lower-priority items collapse behind a "Later" disclosure.
+         ============================================================ --%>
+    <section aria-label="Needs you" class="mb-5">
+      <div class="mb-3 flex flex-wrap items-end justify-between gap-3 px-1">
+        <div class="min-w-0">
+          <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+            Needs you
+          </p>
+          <p class="mt-0.5 text-xs text-text-quaternary">
+            Decisions only you can make — everything else runs itself.
+          </p>
+        </div>
+        <a
+          href="/operations"
+          class="shrink-0 text-xs font-590 text-text-tertiary hover:text-text-primary"
+        >
+          Open Operations →
+        </a>
+      </div>
+
+      <div class="stagger-children grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <.signoff_card
+          :if={@owner_signoff_decision}
+          decision={@owner_signoff_decision}
+          action={@owner_signoff_action}
+        />
+        <%= if @all_clear? do %>
+          <.all_clear_card />
+        <% else %>
+          <.needs_you_card :for={action <- @needs_you_actions} action={action} />
+        <% end %>
+      </div>
+
+      <details :if={@later_actions != []} class="group mt-3 px-1">
+        <summary class="flex cursor-pointer list-none items-center gap-2 rounded-md px-2 py-1.5 text-xs font-590 text-text-tertiary transition hover:bg-surface/40 hover:text-text-primary [&::-webkit-details-marker]:hidden">
+          <span class="hero-chevron-right-mini h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90">
           </span>
-          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary group-hover:text-brand">
-            {Map.get(primary_next, :label, "Open Operations")}
-          </span>
-        </span>
-      </a>
-      <a
-        href={~p"/operations"}
-        class="ui-simple-card group flex min-w-0 items-center gap-3 px-3 py-3 transition hover:border-border-hover hover:bg-surface-hover"
-      >
-        <span class="ui-simple-icon">
-          <span class="hero-bolt-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            Mode
-          </span>
-          <span class={[
-            "mt-0.5 block truncate text-sm font-590",
-            mode_text_class(@operating_mode)
-          ]}>
-            {status_label(@operating_mode)}
-          </span>
-        </span>
-      </a>
-      <a
-        href={~p"/operations#runtime-capacity"}
-        class="ui-simple-card group flex min-w-0 items-center gap-3 px-3 py-3 transition hover:border-border-hover hover:bg-surface-hover"
-      >
-        <span class="ui-simple-icon">
-          <span class="hero-cpu-chip-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            Capacity
-          </span>
-          <span class="mt-0.5 block truncate text-sm font-590 text-text-primary">
-            {@runtime_capacity.label}
-          </span>
-        </span>
-      </a>
-      <a
-        href={~p"/issues?status=blocked"}
-        class="ui-simple-card group flex min-w-0 items-center gap-3 px-3 py-3 transition hover:border-border-hover hover:bg-surface-hover"
-      >
-        <span class="ui-simple-icon">
-          <span class="hero-no-symbol-mini h-4 w-4"></span>
-        </span>
-        <span class="min-w-0">
-          <span class="block text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-            Blocked
-          </span>
-          <span class={[
-            "mt-0.5 block truncate text-sm font-590",
-            if(@blocked_work > 0, do: "text-brand", else: "text-text-primary")
-          ]}>
-            {@blocked_work} needs action
-          </span>
-        </span>
-      </a>
-    </div>
+          Later — {length(@later_actions)} lower-priority {pluralize(
+            length(@later_actions),
+            "item"
+          )}, nothing urgent
+        </summary>
+        <ul class="mt-1.5 space-y-1">
+          <li :for={{action, idx} <- Enum.with_index(@later_actions, 1)} class="group/row min-w-0">
+            <a
+              href={Map.get(action, :path, "/operations")}
+              class="flex items-start gap-3 rounded-md border-l-2 border-transparent py-1 pl-3 pr-2 transition hover:border-brand hover:bg-surface/40"
+              title={Map.get(action, :detail)}
+            >
+              <span class="mt-0.5 w-5 shrink-0 font-mono text-[11px] tabular-nums text-text-quaternary">
+                {String.pad_leading(Integer.to_string(idx), 2, "0")}
+              </span>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-510 text-text-primary">
+                  {action.label}
+                </span>
+                <span class="block truncate text-[11px] text-text-quaternary">
+                  {Map.get(action, :action)} · {Map.get(action, :detail)}
+                </span>
+              </span>
+            </a>
+          </li>
+        </ul>
+      </details>
+    </section>
 
     <%!-- ============================================================
-         Operating-mode strip — three columns, properly proportioned
-         so descriptions stop truncating. Right column hosts the
-         radial pressure gauge (replaces the old 1.5px flat bar).
+         Company health — one glanceable card: operating mode, agent
+         roll-up with a pulse dot, the four numbers that change
+         decisions, and the runtime capacity gauge.
          ============================================================ --%>
-    <div class="ember-glass ui-advanced-only mb-5 grid grid-cols-1 gap-3 p-5 xl:grid-cols-[minmax(220px,0.85fr)_minmax(0,1.75fr)_minmax(280px,0.95fr)] xl:gap-5">
-      <section class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            Operating mode
+    <section aria-label="Company health" class="ember-glass mb-5 p-5">
+      <div class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(220px,0.95fr)_minmax(0,1.35fr)_minmax(250px,0.95fr)] lg:items-center">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+              Company health
+            </p>
+            <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-510 #{mode_badge_class(@operating_mode)}"}>
+              {status_label(@operating_mode)}
+            </span>
+          </div>
+          <div class="mt-3 flex items-center gap-2.5">
+            <span
+              class={[
+                "cympho-pulse-dot h-2.5 w-2.5 shrink-0 rounded-full",
+                rollup_dot_class(@agent_rollup.level)
+              ]}
+              style={"--cympho-pulse-color: #{rollup_pulse_color(@agent_rollup.level)};"}
+            >
+            </span>
+            <p class="min-w-0 truncate text-sm font-590 text-text-primary">
+              {@agent_rollup.headline}
+            </p>
+          </div>
+          <p class="mt-1.5 text-xs leading-4 text-text-tertiary">
+            {mode_description(@operating_mode)}
           </p>
-          <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-510 #{mode_badge_class(@operating_mode)}"}>
-            {status_label(@operating_mode)}
-          </span>
         </div>
-        <p class="mt-2 text-sm leading-5 text-text-tertiary">
-          <%= case @operating_mode do %>
-            <% :review -> %>
-              Inspect and edit safely without provider spend.
-            <% :autonomous -> %>
-              Runtime is enabled and agents can pick up queued work.
-            <% :low_power -> %>
-              Runtime is live, but only high and critical queued work auto-dispatches.
-            <% :paused -> %>
-              Autonomy is paused; work stays visible.
-            <% _ -> %>
-              Finish setup so agents have a mission and roster.
-          <% end %>
-        </p>
-      </section>
 
-      <section class="min-w-0 border-y border-border/70 py-3 xl:border-x xl:border-y-0 xl:px-5 xl:py-0">
-        <div class="flex items-center justify-between gap-3">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            Owner action plan
-          </p>
+        <div class="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border/60 sm:grid-cols-4">
+          <div class="bg-surface/60 px-3 py-2.5">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Running
+            </p>
+            <p class="mt-1 font-serif text-[24px] font-510 leading-none tabular-nums text-text-primary">
+              {@running_work}
+            </p>
+          </div>
+          <div class="bg-surface/60 px-3 py-2.5">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Queued
+            </p>
+            <p class="mt-1 font-serif text-[24px] font-510 leading-none tabular-nums text-text-primary">
+              {@queued_work}
+            </p>
+          </div>
           <a
-            href="/operations"
-            class="shrink-0 text-xs font-590 text-brand hover:text-accent-hover"
+            href={~p"/issues?status=blocked"}
+            class="group bg-surface/60 px-3 py-2.5 transition hover:bg-surface-hover"
           >
-            Open Operations →
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary group-hover:text-text-tertiary">
+              Blocked
+            </p>
+            <p class={[
+              "mt-1 font-serif text-[24px] font-510 leading-none tabular-nums",
+              if(@blocked_work > 0, do: "text-brand", else: "text-text-primary")
+            ]}>
+              {@blocked_work}
+            </p>
           </a>
+          <div class="bg-surface/60 px-3 py-2.5">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Agents
+            </p>
+            <p class="mt-1 font-serif text-[24px] font-510 leading-none tabular-nums text-text-primary">
+              {@active_agents}<span class="text-text-quaternary/80">/{@total_agents}</span>
+            </p>
+          </div>
         </div>
 
         <a
-          :if={@primary_next_action}
-          href={Map.get(@primary_next_action, :path, "/operations")}
-          class={"card-lift mt-3 block rounded-lg border px-3 py-3 hover:bg-surface-hover/40 #{next_action_card_class(Map.get(@primary_next_action, :tone, :ok))}"}
+          href={~p"/operations#runtime-capacity"}
+          class="group flex min-w-0 items-center gap-4 rounded-lg border border-transparent px-2 py-1.5 transition hover:border-border-hover hover:bg-surface/40"
         >
-          <div class="flex flex-wrap items-center gap-2">
-            <span class={[
-              "rounded-full border px-2 py-0.5 text-[10px] font-590 uppercase tracking-[0.1em]",
-              next_action_pill_class(Map.get(@primary_next_action, :tone, :ok))
-            ]}>
-              {primary_action_badge(@primary_next_action)}
-            </span>
-            <span class="text-[11px] font-590 text-text-quaternary">
-              {Map.get(@primary_next_action, :action, "Open")}
-            </span>
-          </div>
-          <p class="mt-2 text-sm font-590 text-text-primary">
-            {Map.get(@primary_next_action, :label)}
-          </p>
-          <p class="mt-1 line-clamp-2 text-xs leading-4 text-text-tertiary">
-            {Map.get(@primary_next_action, :detail)}
-          </p>
-        </a>
-
-        <div
-          :if={@owner_signoff_decision}
-          data-testid="dashboard-owner-signoff-actions"
-          class="mt-2 rounded-lg border border-teal-500/20 bg-teal-500/[0.05] px-3 py-2.5"
-        >
-          <p class="truncate text-xs font-590 text-text-primary">
-            {@owner_signoff_decision.issue_identifier} · {@owner_signoff_decision.issue_title}
-          </p>
-          <p class="mt-1 line-clamp-2 text-[11px] leading-4 text-text-tertiary">
-            {@owner_signoff_decision.owner_update ||
-              "CEO owner update is ready for owner decision."}
-          </p>
-          <div class="mt-2 flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              phx-click="accept_owner_verification"
-              phx-value-issue-id={@owner_signoff_decision.issue_id}
-              data-confirm="Accept this CEO owner update and close the issue?"
-              class="inline-flex items-center justify-center rounded-md border border-teal-500/25 bg-teal-500/10 px-2.5 py-1.5 text-xs font-510 text-teal-200 transition hover:bg-teal-500/15"
-            >
-              Accept and close
-            </button>
-            <button
-              type="button"
-              phx-click="request_owner_revision"
-              phx-value-issue-id={@owner_signoff_decision.issue_id}
-              data-confirm="Request a CEO revision, reopen this issue to To Do, and queue focused dispatch?"
-              class="inline-flex items-center justify-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
-            >
-              Request revision
-            </button>
-          </div>
-        </div>
-
-        <div :if={@secondary_next_actions != []} class="mt-3">
-          <p class="text-[10px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            Up next
-          </p>
-          <ul class="mt-1.5 space-y-1">
-            <li
-              :for={{action, idx} <- Enum.with_index(Enum.take(@secondary_next_actions, 5), 2)}
-              class="group min-w-0"
-            >
-              <a
-                href={Map.get(action, :path, "/operations")}
-                class="flex items-start gap-3 rounded-md border-l-2 border-transparent py-1 pl-3 pr-2 transition hover:border-brand hover:bg-surface/40"
-                title={action.detail}
-              >
-                <span class="mt-0.5 w-5 shrink-0 font-mono text-[11px] tabular-nums text-text-quaternary">
-                  {String.pad_leading(Integer.to_string(idx), 2, "0")}
-                </span>
-                <span class="min-w-0 flex-1">
-                  <span class="block truncate text-sm font-510 text-text-primary group-hover:text-text-primary">
-                    {action.label}
-                  </span>
-                  <span class="block truncate text-[11px] font-590 text-brand">
-                    {action.action}
-                  </span>
-                </span>
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <section class="min-w-0">
-        <div class="flex items-center justify-between gap-3">
-          <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-            Runtime capacity
-          </p>
-          <span class={"inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-510 #{capacity_badge_class(@runtime_capacity.level)}"}>
-            {@runtime_capacity.local_slots} local slots
-          </span>
-        </div>
-        <div class="mt-3 flex items-center gap-4">
           <div class={["relative shrink-0", capacity_text_class(@runtime_capacity.level)]}>
-            <svg viewBox="0 0 50 50" class="h-16 w-16 -rotate-90">
+            <svg viewBox="0 0 50 50" class="h-14 w-14 -rotate-90">
               <circle
                 cx="25"
                 cy="25"
@@ -306,28 +235,29 @@
               />
             </svg>
             <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <span class="font-mono text-[14px] font-590 leading-none tabular-nums text-text-primary">
+              <span class="font-mono text-[12px] font-590 leading-none tabular-nums text-text-primary">
                 {capacity_percent(@runtime_capacity)}%
               </span>
             </div>
           </div>
           <div class="min-w-0 flex-1">
-            <h2 class="truncate text-base font-590 text-text-primary">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Runtime capacity
+            </p>
+            <p class="mt-0.5 truncate text-sm font-590 text-text-primary">
               {@runtime_capacity.label}
-            </h2>
-            <p class="mt-0.5 text-[11px] text-text-quaternary">
+            </p>
+            <p class="mt-0.5 truncate text-[11px] text-text-quaternary">
+              {@runtime_capacity.local_slots} local slots ·
               <span class="font-mono tabular-nums text-text-tertiary">
                 {@runtime_capacity.running_runs}
               </span>
-              running · CLI/process pressure
-            </p>
-            <p class="mt-1.5 line-clamp-2 text-xs leading-4 text-text-tertiary">
-              {@runtime_capacity.summary}
+              running
             </p>
           </div>
-        </div>
-      </section>
-    </div>
+        </a>
+      </div>
+    </section>
 
     <section
       :if={@ceo_command_lane}
@@ -622,10 +552,11 @@
     </section>
 
     <%!-- ============================================================
-         Execution Health — tone-keyed tiles with gradient atmosphere,
-         monospace display-md numbers, hero-icon accents.
+         Execution Health — tone-keyed tiles with gradient atmosphere.
+         Advanced mode only; simple mode gets the same truths through
+         the "Needs you" row.
          ============================================================ --%>
-    <div class="mb-5 rounded-2xl border border-hairline bg-surface-1 p-4 shadow-card">
+    <div class="ui-advanced-only mb-5 rounded-2xl border border-hairline bg-surface-1 p-4 shadow-card">
       <div class="mb-1 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
@@ -671,10 +602,10 @@
     </div>
 
     <%!-- ============================================================
-         Work Metrics — single instrument band. Five inline columns
-         with vertical dividers. Monospace numerals + sparklines.
+         Work Metrics — single instrument band, advanced mode only.
+         The decision-driving numbers already live in Company health.
          ============================================================ --%>
-    <div class="stagger-children mb-5 grid grid-cols-2 divide-y divide-border overflow-hidden rounded-2xl border border-hairline bg-surface-1 sm:grid-cols-3 sm:divide-y-0 sm:divide-x lg:grid-cols-6">
+    <div class="ui-advanced-only stagger-children mb-5 grid grid-cols-2 divide-y divide-border overflow-hidden rounded-2xl border border-hairline bg-surface-1 sm:grid-cols-3 sm:divide-y-0 sm:divide-x lg:grid-cols-6">
       <%!-- Queued --%>
       <div class="ember-stat px-4 py-3.5 sm:border-r sm:border-border">
         <div class="flex items-center justify-between">
@@ -806,9 +737,126 @@
     </div>
 
     <%!-- ============================================================
-         Mid row — Active Agents | Twin donuts | Inbox
+         While you were away — the catch-up row. Activity ticker and
+         inbox side by side; deeper telemetry stays in advanced mode.
          ============================================================ --%>
-    <div class="stagger-children grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-stretch">
+    <section aria-label="While you were away" class="mt-5">
+      <div class="mb-3 px-1">
+        <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
+          While you were away
+        </p>
+        <p class="mt-0.5 text-xs text-text-quaternary">
+          What agents did recently — nothing here requires a response.
+        </p>
+      </div>
+
+      <div class="stagger-children grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-stretch">
+        <.panel class="overflow-hidden">
+          <div class="border-b border-border px-4 py-3">
+            <h2 class="text-sm font-590 text-text-primary">Recent Activity</h2>
+          </div>
+
+          <.empty_state
+            :if={Enum.empty?(@recent_activities)}
+            title="No recent activity"
+            message="All quiet. Agent and issue events will appear here as work happens."
+            class="py-10"
+          />
+
+          <div
+            :if={!Enum.empty?(@recent_activities)}
+            class="relative max-h-72 overflow-y-auto px-4 py-2"
+          >
+            <div class="absolute bottom-2 left-[22px] top-2 w-px bg-border"></div>
+            <ul class="relative space-y-2.5">
+              <li
+                :for={activity <- @recent_activities}
+                class={[
+                  "relative flex items-start gap-3 rounded-md py-1 pl-4 transition hover:bg-surface-hover/60",
+                  @flash_activity_id == activity.id && "cympho-activity-flash"
+                ]}
+              >
+                <span class={[
+                  "absolute left-[2px] top-2 h-2 w-2 rounded-full ring-2 ring-panel",
+                  activity_icon(activity.action)
+                ]}>
+                </span>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm text-text-primary">
+                    {activity_label(activity.action)}
+                    <span
+                      :if={activity.issue_id}
+                      class="font-mono text-[11px] text-text-quaternary"
+                    >
+                      {activity.issue_id |> String.slice(0, 8)}
+                    </span>
+                  </p>
+                  <p class="mt-0.5 font-mono text-[10px] tabular-nums text-text-quaternary">
+                    {Calendar.strftime(activity.inserted_at, "%b %d · %H:%M")}
+                  </p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </.panel>
+
+        <.panel class="flex flex-col overflow-hidden">
+          <div class="flex items-center justify-between border-b border-border px-4 py-3">
+            <div>
+              <h2 class="text-sm font-590 text-text-primary">Inbox</h2>
+              <p class="mt-0.5 text-[11px] text-text-quaternary">Latest agent inbox items</p>
+            </div>
+            <.app_link
+              navigate={~p"/inbox"}
+              class="text-xs text-text-tertiary hover:text-text-primary"
+            >
+              Open inbox →
+            </.app_link>
+          </div>
+
+          <.empty_state
+            :if={Enum.empty?(@recent_inbox)}
+            title="Inbox empty"
+            message="Nothing waiting. Agent updates will surface here as they arrive."
+            class="py-10"
+          />
+
+          <div :if={!Enum.empty?(@recent_inbox)} class="divide-y divide-border">
+            <.app_link
+              :for={item <- @recent_inbox}
+              navigate={inbox_item_link(item)}
+              class="group flex items-start gap-3 border-l-2 border-transparent px-4 py-3 transition hover:border-brand hover:bg-surface-hover/70"
+            >
+              <span class={[
+                "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+                inbox_dot(item.status)
+              ]}>
+              </span>
+              <div class="min-w-0 flex-1">
+                <p class={[
+                  "truncate text-sm text-text-primary",
+                  if(item.status == "unread", do: "font-590", else: "font-510")
+                ]}>
+                  {inbox_item_title(item)}
+                </p>
+                <p class="mt-0.5 truncate text-[11px] text-text-quaternary">
+                  {inbox_item_meta(item)}
+                </p>
+              </div>
+              <span class="ml-2 shrink-0 rounded-md border border-border/60 bg-surface/40 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-text-quaternary">
+                {Calendar.strftime(item.inserted_at, "%b %d")}
+              </span>
+            </.app_link>
+          </div>
+        </.panel>
+      </div>
+    </section>
+
+    <%!-- ============================================================
+         Deep dive — roster, status donuts, patrol, throughput,
+         routine health. Advanced mode only.
+         ============================================================ --%>
+    <div class="ui-advanced-only stagger-children mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3 lg:items-stretch">
       <.panel class="flex flex-col overflow-hidden">
         <div class="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
@@ -934,61 +982,93 @@
         </div>
       </.panel>
 
-      <.panel class="flex flex-col overflow-hidden">
-        <div class="flex items-center justify-between border-b border-border px-4 py-3">
-          <div>
-            <h2 class="text-sm font-590 text-text-primary">Inbox</h2>
-            <p class="mt-0.5 text-[11px] text-text-quaternary">Latest agent inbox items</p>
+      <.panel class="p-4" data-testid="autonomy-patrol">
+        <div class="mb-3 flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
+              Bottlenecks
+            </p>
+            <h2 class="mt-1 text-sm font-590 text-text-primary">Autonomy patrol</h2>
           </div>
-          <.app_link
-            navigate={~p"/inbox"}
-            class="text-xs text-text-tertiary hover:text-text-primary"
-          >
-            Open inbox →
-          </.app_link>
+          <span class={"shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-510 #{patrol_badge_class(@patrol_summary.level)}"}>
+            {@patrol_summary.label}
+          </span>
         </div>
 
-        <.empty_state
-          :if={Enum.empty?(@recent_inbox)}
-          title="Inbox empty"
-          message="Agent activity will surface here as it arrives."
-          class="py-10"
-        />
-
-        <div :if={!Enum.empty?(@recent_inbox)} class="divide-y divide-border">
-          <.app_link
-            :for={item <- @recent_inbox}
-            navigate={inbox_item_link(item)}
-            class="group flex items-start gap-3 border-l-2 border-transparent px-4 py-3 transition hover:border-brand hover:bg-surface-hover/70"
-          >
-            <span class={[
-              "mt-1.5 h-2 w-2 shrink-0 rounded-full",
-              inbox_dot(item.status)
+        <div class="grid grid-cols-3 divide-x divide-border overflow-hidden rounded-lg border border-border bg-surface/40">
+          <div class="px-3 py-2.5">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Stalled
+            </p>
+            <p class={[
+              "mt-1 font-mono text-[24px] font-590 leading-none tabular-nums",
+              patrol_metric_text(@patrol_summary.level)
             ]}>
-            </span>
-            <div class="min-w-0 flex-1">
-              <p class={[
-                "truncate text-sm text-text-primary",
-                if(item.status == "unread", do: "font-590", else: "font-510")
-              ]}>
-                {inbox_item_title(item)}
+              {@patrol_summary.stuck_count}
+            </p>
+          </div>
+          <div class="px-3 py-2.5">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Wakes
+            </p>
+            <p class="mt-1 font-mono text-[24px] font-590 leading-none tabular-nums text-text-primary">
+              {@patrol_summary.pending_wakes}
+            </p>
+          </div>
+          <div class="px-3 py-2.5">
+            <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
+              Blocked
+            </p>
+            <p class={[
+              "mt-1 font-mono text-[24px] font-590 leading-none tabular-nums",
+              if(@patrol_summary.blocked_count > 0, do: "text-brand", else: "text-text-primary")
+            ]}>
+              {@patrol_summary.blocked_count}
+            </p>
+          </div>
+        </div>
+
+        <p class="mt-3 text-sm leading-5 text-text-tertiary">
+          {@patrol_summary.summary}
+        </p>
+
+        <div
+          :if={Enum.empty?(@patrol_summary.issues)}
+          class="mt-4 rounded-lg border border-border bg-surface/30 px-3 py-3"
+        >
+          <p class="text-sm font-510 text-text-primary">No patrol candidates</p>
+          <p class="mt-1 text-xs leading-4 text-text-tertiary">
+            In-progress, review, and blocked work are moving inside the current thresholds.
+          </p>
+        </div>
+
+        <div :if={!Enum.empty?(@patrol_summary.issues)} class="mt-4 space-y-2">
+          <.app_link
+            :for={issue <- @patrol_summary.issues}
+            navigate={~p"/issues/#{issue.id}"}
+            class={"block rounded-lg border px-3 py-2 transition hover:bg-surface-hover/40 #{patrol_issue_class(issue.status)}"}
+          >
+            <div class="flex items-start justify-between gap-2">
+              <p class="min-w-0 flex-1 truncate text-sm font-510 text-text-primary">
+                {issue.title}
               </p>
-              <p class="mt-0.5 truncate text-[11px] text-text-quaternary">
-                {inbox_item_meta(item)}
-              </p>
+              <span class="shrink-0 rounded-md bg-canvas/70 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-text-tertiary">
+                {patrol_age(issue)}
+              </span>
             </div>
-            <span class="ml-2 shrink-0 rounded-md border border-border/60 bg-surface/40 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-text-quaternary">
-              {Calendar.strftime(item.inserted_at, "%b %d")}
-            </span>
+            <div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+              <span class="font-590 text-text-secondary">{status_label(issue.status)}</span>
+              <span class="text-text-quaternary">/</span>
+              <span class="min-w-0 truncate text-text-quaternary">
+                {patrol_route_label(issue)}
+              </span>
+            </div>
           </.app_link>
         </div>
       </.panel>
     </div>
 
-    <%!-- ============================================================
-         Bottom row — Throughput chart | Activity / Bottlenecks / Routine
-         ============================================================ --%>
-    <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(320px,1fr)]">
+    <div class="ui-advanced-only mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(320px,1fr)]">
       <.panel class="p-4">
         <div class="mb-4 flex items-center justify-between">
           <div>
@@ -1034,151 +1114,16 @@
         </div>
       </.panel>
 
-      <div class="space-y-4">
-        <.panel class="overflow-hidden">
-          <div class="border-b border-border px-4 py-3">
-            <h2 class="text-sm font-590 text-text-primary">Recent Activity</h2>
-          </div>
-
-          <.empty_state
-            :if={Enum.empty?(@recent_activities)}
-            title="No recent activity"
-            message="Agent and issue events will appear here."
-            class="py-10"
-          />
-
-          <div
-            :if={!Enum.empty?(@recent_activities)}
-            class="relative max-h-72 overflow-y-auto px-4 py-2"
-          >
-            <div class="absolute bottom-2 left-[22px] top-2 w-px bg-border"></div>
-            <ul class="relative space-y-2.5">
-              <li
-                :for={activity <- @recent_activities}
-                class={[
-                  "relative flex items-start gap-3 rounded-md py-1 pl-4 transition hover:bg-surface-hover/60",
-                  @flash_activity_id == activity.id && "cympho-activity-flash"
-                ]}
-              >
-                <span class={[
-                  "absolute left-[2px] top-2 h-2 w-2 rounded-full ring-2 ring-panel",
-                  activity_icon(activity.action)
-                ]}>
-                </span>
-                <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm text-text-primary">
-                    {activity_label(activity.action)}
-                    <span
-                      :if={activity.issue_id}
-                      class="font-mono text-[11px] text-text-quaternary"
-                    >
-                      {activity.issue_id |> String.slice(0, 8)}
-                    </span>
-                  </p>
-                  <p class="mt-0.5 font-mono text-[10px] tabular-nums text-text-quaternary">
-                    {Calendar.strftime(activity.inserted_at, "%b %d · %H:%M")}
-                  </p>
-                </div>
-              </li>
-            </ul>
-          </div>
-        </.panel>
-
-        <.panel class="p-4" data-testid="autonomy-patrol">
-          <div class="mb-3 flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <p class="text-[11px] font-590 uppercase tracking-[0.14em] text-text-quaternary">
-                Bottlenecks
-              </p>
-              <h2 class="mt-1 text-sm font-590 text-text-primary">Autonomy patrol</h2>
-            </div>
-            <span class={"shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-510 #{patrol_badge_class(@patrol_summary.level)}"}>
-              {@patrol_summary.label}
-            </span>
-          </div>
-
-          <div class="grid grid-cols-3 divide-x divide-border overflow-hidden rounded-lg border border-border bg-surface/40">
-            <div class="px-3 py-2.5">
-              <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                Stalled
-              </p>
-              <p class={[
-                "mt-1 font-mono text-[24px] font-590 leading-none tabular-nums",
-                patrol_metric_text(@patrol_summary.level)
-              ]}>
-                {@patrol_summary.stuck_count}
-              </p>
-            </div>
-            <div class="px-3 py-2.5">
-              <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                Wakes
-              </p>
-              <p class="mt-1 font-mono text-[24px] font-590 leading-none tabular-nums text-text-primary">
-                {@patrol_summary.pending_wakes}
-              </p>
-            </div>
-            <div class="px-3 py-2.5">
-              <p class="text-[10px] font-590 uppercase tracking-[0.12em] text-text-quaternary">
-                Blocked
-              </p>
-              <p class={[
-                "mt-1 font-mono text-[24px] font-590 leading-none tabular-nums",
-                if(@patrol_summary.blocked_count > 0, do: "text-brand", else: "text-text-primary")
-              ]}>
-                {@patrol_summary.blocked_count}
-              </p>
-            </div>
-          </div>
-
-          <p class="mt-3 text-sm leading-5 text-text-tertiary">
-            {@patrol_summary.summary}
-          </p>
-
-          <div
-            :if={Enum.empty?(@patrol_summary.issues)}
-            class="mt-4 rounded-lg border border-border bg-surface/30 px-3 py-3"
-          >
-            <p class="text-sm font-510 text-text-primary">No patrol candidates</p>
-            <p class="mt-1 text-xs leading-4 text-text-tertiary">
-              In-progress, review, and blocked work are moving inside the current thresholds.
-            </p>
-          </div>
-
-          <div :if={!Enum.empty?(@patrol_summary.issues)} class="mt-4 space-y-2">
-            <.app_link
-              :for={issue <- @patrol_summary.issues}
-              navigate={~p"/issues/#{issue.id}"}
-              class={"block rounded-lg border px-3 py-2 transition hover:bg-surface-hover/40 #{patrol_issue_class(issue.status)}"}
-            >
-              <div class="flex items-start justify-between gap-2">
-                <p class="min-w-0 flex-1 truncate text-sm font-510 text-text-primary">
-                  {issue.title}
-                </p>
-                <span class="shrink-0 rounded-md bg-canvas/70 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-text-tertiary">
-                  {patrol_age(issue)}
-                </span>
-              </div>
-              <div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
-                <span class="font-590 text-text-secondary">{status_label(issue.status)}</span>
-                <span class="text-text-quaternary">/</span>
-                <span class="min-w-0 truncate text-text-quaternary">
-                  {patrol_route_label(issue)}
-                </span>
-              </div>
-            </.app_link>
-          </div>
-        </.panel>
-
-        <.panel class="p-4">
-          <h2 class="mb-3 text-sm font-590 text-text-primary">Routine Health</h2>
-          <div class={"flex items-center gap-3 rounded-md px-3 py-2 " <> routine_health_bg_class(@routine_health)}>
-            <span class={"h-2.5 w-2.5 shrink-0 rounded-full " <> routine_health_dot_class(@routine_health)}>
-            </span>
-            <span class="text-sm text-text-tertiary">{@routine_health.message}</span>
-          </div>
-        </.panel>
-      </div>
+      <.panel class="p-4">
+        <h2 class="mb-3 text-sm font-590 text-text-primary">Routine Health</h2>
+        <div class={"flex items-center gap-3 rounded-md px-3 py-2 " <> routine_health_bg_class(@routine_health)}>
+          <span class={"h-2.5 w-2.5 shrink-0 rounded-full " <> routine_health_dot_class(@routine_health)}>
+          </span>
+          <span class="text-sm text-text-tertiary">{@routine_health.message}</span>
+        </div>
+      </.panel>
     </div>
+
     <%!-- ============================================================
          Prompt bar — Claude-style task entry. Reuses the quick-create
          modal (click / Enter → new issue) and the command palette

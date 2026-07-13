@@ -3,7 +3,7 @@
     <.header>
       <div class="min-w-0">
         <span class="ember-eyebrow">
-          Owner triage · {@total} open
+          Owner triage · {@total} in view
         </span>
         <h1 class="ember-ink mt-4 font-serif text-[clamp(30px,4.5vw,44px)] font-510 leading-[1.08] tracking-[-0.02em]">
           {@page_title}
@@ -88,7 +88,7 @@
             </div>
             <span class={[
               "shrink-0 font-serif text-[22px] font-510 leading-none tabular-nums",
-              triage_lane_count_class(@current_triage, lane.key)
+              triage_lane_count_class(@current_triage, lane.key, lane.count)
             ]}>
               {lane.count}
             </span>
@@ -97,76 +97,98 @@
       </div>
     </section>
 
-    <section
-      :if={@attention_queue != [] and @digest_density == "detailed"}
-      id="issue-attention-queue"
-      class="mb-4"
-    >
+    <section :if={@issues != []} id="issue-attention-queue" class="mb-4">
       <div class="mb-2 flex items-center justify-between px-1">
         <div>
           <p class="font-serif text-[13px] font-510 italic tracking-[0.02em] text-brand/90">
             Attention queue
           </p>
-          <p class="mt-0.5 text-xs text-text-tertiary">
+          <p :if={@digest_density == "detailed"} class="mt-0.5 text-xs text-text-tertiary">
             First concrete moves from the issues currently in view.
           </p>
         </div>
-        <span class="rounded-full border border-border bg-panel px-2.5 py-1 text-[11px] font-510 text-text-tertiary">
-          {length(@attention_queue)} shown
+        <span
+          :if={@attention_queue != []}
+          class="rounded-full border border-border bg-panel px-2.5 py-1 text-[11px] font-510 text-text-tertiary"
+        >
+          {length(@attention_queue)} need you
         </span>
       </div>
 
-      <div class="stagger-children grid gap-2 lg:grid-cols-4">
+      <div
+        :if={@attention_queue == []}
+        class="flex items-center gap-2 rounded-xl border border-border bg-surface/70 px-3 py-2.5"
+      >
+        <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-success"></span>
+        <p class="text-xs text-text-tertiary">
+          Nothing is stuck right now — agents are moving on their own.
+        </p>
+      </div>
+
+      <div
+        :if={@attention_queue != [] and @digest_density == "detailed"}
+        class="stagger-children grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
+      >
         <article
           :for={item <- @attention_queue}
-          class="ember-stat card-lift min-w-0 rounded-xl border border-border bg-surface/70 px-3 py-3"
+          class="ember-stat card-lift group flex min-w-0 flex-col rounded-xl border border-border bg-surface/70 px-3 py-3"
         >
-          <div class="flex items-start justify-between gap-2">
-            <div class="min-w-0">
-              <div class="flex min-w-0 items-center gap-2">
-                <span class="shrink-0 font-mono text-[11px] text-text-quaternary">
-                  {issue_identifier(item.issue)}
-                </span>
-                <span class={[
-                  "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-590",
-                  attention_action_class(item.action)
-                ]}>
-                  {item.action}
-                </span>
-              </div>
-              <p class="mt-2 line-clamp-2 text-sm font-590 leading-5 text-text-primary">
-                {item.issue.title}
-              </p>
-            </div>
+          <div class="flex items-center gap-1.5">
+            <span class={["h-1.5 w-1.5 shrink-0 rounded-full", attention_dot_class(item.action)]}>
+            </span>
+            <span class="truncate text-[10px] font-590 uppercase tracking-[0.08em] text-text-tertiary">
+              {attention_reason(item.action)}
+            </span>
+            <span :if={item.age} class="ml-auto shrink-0 text-[11px] text-text-quaternary">
+              {item.age}
+            </span>
+          </div>
+
+          <p class="mt-2 line-clamp-2 text-sm font-590 leading-5 text-text-primary">
+            {item.issue.title}
+          </p>
+          <p class="mt-1 line-clamp-2 text-xs leading-5 text-text-tertiary">{item.detail}</p>
+
+          <div class="mt-auto flex items-center justify-between gap-2 pt-3">
             <.app_link
               navigate={item.path}
-              class="shrink-0 rounded-md border border-border bg-panel px-2 py-1 text-[11px] font-510 text-text-secondary hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
+              class={"shrink-0 rounded-md border px-2.5 py-1 text-[11px] font-590 transition-[filter] hover:brightness-125 #{attention_action_class(item.action)}"}
             >
-              Open
+              {item.action}
             </.app_link>
-          </div>
-
-          <p class="mt-2 line-clamp-2 text-xs leading-5 text-text-tertiary">{item.detail}</p>
-          <div class="mt-3 rounded-md border border-border bg-canvas px-2.5 py-2">
-            <div class="flex flex-wrap items-center gap-1.5">
-              <span class="rounded-full border border-border bg-panel px-1.5 py-0.5 text-[10px] font-510 text-text-secondary">
-                {item.digest_label}
-              </span>
-              <span class="line-clamp-1 text-[11px] leading-4 text-text-tertiary">
-                {item.digest_headline}
-              </span>
-            </div>
-          </div>
-
-          <div class="mt-2 flex min-w-0 items-center justify-between gap-2 text-[11px] text-text-quaternary">
-            <span class="truncate">
-              {if item.issue.assignee, do: item.issue.assignee.name, else: "No agent assigned"}
-            </span>
-            <span class={"shrink-0 rounded-full px-2 py-0.5 #{priority_badge_class(item.issue.priority)}"}>
-              {String.capitalize(to_string(item.issue.priority))}
+            <span class="flex min-w-0 items-center gap-2 text-[11px] text-text-quaternary">
+              <span class="shrink-0 font-mono">{issue_identifier(item.issue)}</span>
+              <.app_link
+                navigate={item.path}
+                class="shrink-0 opacity-0 transition-opacity hover:text-text-secondary focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                Open
+              </.app_link>
             </span>
           </div>
         </article>
+      </div>
+
+      <div
+        :if={@attention_queue != [] and @digest_density == "compact"}
+        class="stagger-children flex flex-wrap gap-1.5"
+      >
+        <.app_link
+          :for={item <- @attention_queue}
+          navigate={item.path}
+          class="flex min-w-0 max-w-full items-center gap-2 rounded-lg border border-border bg-surface/70 px-2.5 py-1.5 transition-colors hover:border-border-hover hover:bg-subtle"
+        >
+          <span class={["h-1.5 w-1.5 shrink-0 rounded-full", attention_dot_class(item.action)]}>
+          </span>
+          <span class="truncate text-xs font-510 text-text-primary">{item.issue.title}</span>
+          <span class={[
+            "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-590",
+            attention_action_class(item.action)
+          ]}>
+            {item.action}
+          </span>
+          <span :if={item.age} class="shrink-0 text-[10px] text-text-quaternary">{item.age}</span>
+        </.app_link>
       </div>
     </section>
 
@@ -254,43 +276,68 @@
             selected={@current_label_id}
             on_change="combobox_label"
           />
-
-          <button
-            :if={filters_active?(assigns)}
-            type="button"
-            phx-click="clear_filters"
-            class="h-7 rounded-md border border-hairline bg-surface-1 px-2.5 text-caption font-510 text-ink-muted hover:bg-surface-2 hover:text-ink transition-colors duration-100"
-          >
-            Clear
-          </button>
         </div>
+      </div>
+
+      <div
+        :if={filters_active?(assigns)}
+        class="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-hairline pt-2.5"
+      >
+        <span class="text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary">
+          Showing
+        </span>
+        <button
+          :for={chip <- active_filter_chips(assigns)}
+          type="button"
+          title="Remove this filter"
+          {%{"phx-click" => chip.event, "phx-value-#{chip.key}" => ""}}
+          class="group/chip inline-flex max-w-56 items-center gap-1.5 rounded-full border border-brand/25 bg-brand/10 px-2.5 py-1 text-[11px] font-510 text-brand transition-colors hover:border-brand/40 hover:bg-brand/15"
+        >
+          <span class="truncate">{chip.label}</span>
+          <span class="hero-x-mark-mini h-3 w-3 shrink-0 opacity-60 group-hover/chip:opacity-100">
+          </span>
+        </button>
+        <button
+          type="button"
+          phx-click="clear_filters"
+          class="ml-auto shrink-0 rounded-md px-2 py-1 text-[11px] font-590 text-text-tertiary transition-colors hover:bg-subtle hover:text-text-primary"
+        >
+          Clear all
+        </button>
       </div>
     </div>
 
     <div class="mb-2 flex items-center justify-between px-1 text-xs text-text-quaternary">
-      <span>{@total} issue(s)</span>
+      <span>{@total} {pluralize(@total, "issue")}</span>
       <span :if={@total_pages > 1}>Page {@page} of {@total_pages}</span>
     </div>
 
     <.panel class="overflow-visible">
       <div class={[
-        "hidden border-b border-border bg-panel/60 px-4 py-2 text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary md:grid md:gap-4",
-        @digest_density == "compact" && "md:grid-cols-[minmax(0,1fr)_96px_90px_36px]",
+        "hidden border-b border-border bg-panel/60 text-[11px] font-510 uppercase tracking-[0.08em] text-text-quaternary md:grid md:gap-4",
+        @digest_density == "compact" &&
+          "px-3 py-1.5 md:grid-cols-[minmax(0,1fr)_72px_36px]",
         @digest_density == "detailed" &&
-          "md:grid-cols-[minmax(0,1fr)_128px_120px_120px_90px_36px]"
+          "px-4 py-2 md:grid-cols-[minmax(0,1fr)_128px_120px_90px_110px_36px]"
       ]}>
         <span>Issue</span>
         <span :if={@digest_density == "detailed"}>Launch</span>
         <span :if={@digest_density == "detailed"}>Assignee</span>
-        <span>Priority</span>
-        <span class="text-right">Activity</span>
+        <span :if={@digest_density == "detailed"}>Priority</span>
+        <span class="text-right">
+          {if @digest_density == "detailed", do: "Activity", else: "Age"}
+        </span>
         <span></span>
       </div>
 
       <.empty_state
         :if={Enum.empty?(@issues)}
         title="No issues found"
-        message="Create an issue or clear filters to see work."
+        message={
+          if filters_active?(assigns),
+            do: "Nothing matches these filters — clear them to see all work.",
+            else: "All quiet. Start by describing what you want done."
+        }
       >
         <:icon_slot>
           <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -327,9 +374,9 @@
           "transition-[background-color,box-shadow] duration-200 hover:bg-surface-2",
           "hover:shadow-[inset_2px_0_0_0_var(--color-primary)]",
           @digest_density == "compact" &&
-            "px-3 py-1.5 md:grid-cols-[minmax(0,1fr)_96px_90px_36px]",
+            "px-3 py-1 md:grid-cols-[minmax(0,1fr)_72px_36px]",
           @digest_density == "detailed" &&
-            "px-4 py-2.5 md:grid-cols-[minmax(0,1fr)_128px_120px_120px_90px_36px]"
+            "px-4 py-2.5 md:grid-cols-[minmax(0,1fr)_128px_120px_90px_110px_36px]"
         ]}
       >
         <% launch_readiness = launch_readiness_for(@launch_readiness_by_issue, issue) %>
@@ -345,8 +392,14 @@
               {issue_identifier(issue)}
             </span>
             <span class="truncate text-sm font-510 text-text-primary">{issue.title}</span>
-            <span class={"hidden rounded-full px-2 py-0.5 text-[11px] font-510 sm:inline-flex #{status_badge_class(issue.status)}"}>
+            <span class={"hidden shrink-0 rounded-full px-2 py-0.5 text-[11px] font-510 sm:inline-flex #{status_badge_class(issue.status)}"}>
               {status_label(issue.status)}
+            </span>
+            <span
+              :if={@digest_density == "compact" and issue.priority in [:critical, :high]}
+              class={"hidden shrink-0 rounded-full px-2 py-0.5 text-[11px] font-510 sm:inline-flex #{priority_badge_class(issue.priority)}"}
+            >
+              {String.capitalize(to_string(issue.priority))}
             </span>
           </div>
           <p
@@ -390,25 +443,43 @@
 
         <div
           :if={@digest_density == "detailed"}
-          class="hidden min-w-0 text-xs text-text-tertiary md:block"
+          class="hidden min-w-0 text-xs md:block"
         >
-          <span class="truncate">
+          <span class={[
+            "truncate",
+            if(issue.assignee, do: "text-text-tertiary", else: "text-text-quaternary italic")
+          ]}>
             {if issue.assignee, do: issue.assignee.name, else: "Unassigned"}
           </span>
         </div>
 
-        <div class="hidden md:block">
+        <div :if={@digest_density == "detailed"} class="hidden md:block">
           <span class={"inline-flex rounded-full px-2 py-0.5 text-[11px] font-510 #{priority_badge_class(issue.priority)}"}>
             {String.capitalize(to_string(issue.priority))}
           </span>
         </div>
 
-        <div class="hidden items-center justify-end gap-2 text-xs text-text-quaternary md:flex">
+        <div
+          :if={@digest_density == "detailed"}
+          class="hidden flex-col items-end justify-center gap-0.5 text-xs text-text-quaternary md:flex"
+        >
           <span>{length(issue.comments)} {pluralize(length(issue.comments), "comment")}</span>
+          <span :if={issue_age(issue)}>{issue_age(issue)}</span>
+        </div>
+
+        <div
+          :if={@digest_density == "compact"}
+          class="hidden justify-end text-xs text-text-quaternary md:flex"
+          title={"#{length(issue.comments)} #{pluralize(length(issue.comments), "comment")}"}
+        >
+          <span :if={issue_age(issue)}>{issue_age(issue)}</span>
         </div>
 
         <div class="flex justify-end">
-          <.overflow_menu label={"Actions for #{issue.title}"}>
+          <.overflow_menu
+            label={"Actions for #{issue.title}"}
+            class="opacity-40 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+          >
             <.menu_item navigate={~p"/issues/#{issue.id}"}>Open issue</.menu_item>
             <.menu_item
               danger

@@ -4,6 +4,14 @@ defmodule CymphoWeb.KanbanLive.Components do
   import CymphoWeb.Components.IssueDigest
   alias CymphoWeb.KanbanLive.Index
 
+  # A card counts as quietly stuck after this many hours without movement.
+  @stale_after_hours 48
+  @stale_statuses [:todo, :in_progress, :in_review]
+
+  # Columns where a high card count is a real overload signal (not an archive).
+  @overload_statuses [:todo, :in_progress, :in_review, :blocked]
+  @soft_overload_threshold 8
+
   attr :issue, :map, required: true
   attr :status, :atom, required: true
   attr :digest_density, :string, default: "detailed"
@@ -20,28 +28,17 @@ defmodule CymphoWeb.KanbanLive.Components do
       class="kanban-card-enter group min-h-[72px] cursor-grab rounded-xl border border-hairline bg-surface-2 p-3 shadow-card transition-all hover:border-border-hover hover:bg-surface-hover hover:shadow-raised active:cursor-grabbing"
       data-issue-id={@issue.id}
     >
-      <div class="flex items-center justify-between gap-2">
-        <span class="font-mono text-[11px] text-text-quaternary">
-          {@issue.identifier || "CYM-" <> String.slice(@issue.id, 0, 4)}
-        </span>
-        <span class="flex items-center gap-2">
-          <span class={"rounded-full px-1.5 py-0.5 text-[10px] font-510 " <> priority_class(@issue.priority)}>
-            {String.capitalize(to_string(@issue.priority))}
-          </span>
-          <span class={"h-1.5 w-1.5 shrink-0 rounded-full " <> status_pin_class(@issue.status)}>
-          </span>
-        </span>
-      </div>
-
-      <.pending_wake_badge :if={@pending_wake} wake={@pending_wake} class="mt-2" />
+      <.pending_wake_badge :if={@pending_wake} wake={@pending_wake} class="mb-2" />
 
       <.link
         navigate={"/issues/#{@issue.id}"}
-        class="mt-1.5 line-clamp-2 block text-sm font-590 leading-5 text-text-primary hover:text-white"
+        class="line-clamp-2 block text-sm font-590 leading-5 text-text-primary transition-colors hover:text-white"
         data-no-drag
       >
         {@issue.title}
       </.link>
+
+      <.card_meta issue={@issue} agent_heartbeat_states={@agent_heartbeat_states} class="mt-2" />
 
       <.issue_digest_card
         issue={@issue}
@@ -60,45 +57,6 @@ defmodule CymphoWeb.KanbanLive.Components do
         <span class="shrink-0">{@launch_readiness.label}</span>
         <span class="min-w-0 truncate opacity-80">{@launch_readiness.target}</span>
       </.link>
-
-      <div class="mt-2.5 flex flex-wrap items-center gap-3 text-[11px] text-text-quaternary">
-        <span class="flex items-center gap-1">
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
-            />
-          </svg>
-          {length(@issue.comments)}
-          <span class="sr-only">{pluralize(length(@issue.comments), "comment")}</span>
-        </span>
-        <%= if length(@issue.blocked_by || []) > 0 do %>
-          <span class="text-brand">
-            {length(@issue.blocked_by)} blockers
-          </span>
-        <% end %>
-        <%= if @issue.assignee do %>
-          <% hb_state = Index.get_heartbeat_state(@agent_heartbeat_states, @issue.assignee.id) %>
-          <span class="flex items-center gap-1">
-            <span class={"w-1.5 h-1.5 rounded-full " <> heartbeat_dot_color(hb_state.status)}></span>
-            <span class="max-w-[110px] truncate">
-              {@issue.assignee.name}
-            </span>
-          </span>
-        <% end %>
-        <%= if @issue.github_pr_url do %>
-          <a
-            href={@issue.github_pr_url}
-            target="_blank"
-            class="text-accent hover:text-accent-hover transition-colors"
-            title="GitHub PR"
-          >
-            PR
-          </a>
-        <% end %>
-      </div>
       <% next_statuses = Index.valid_next_statuses(@issue.status) %>
       <%= if next_statuses != [] do %>
         <div
@@ -129,6 +87,173 @@ defmodule CymphoWeb.KanbanLive.Components do
     """
   end
 
+  @doc """
+  One quiet metadata line for a board card: identifier chip, elevated-priority
+  chip (high/critical only), blocker count, stale tick, hover-revealed extras
+  (comments, PR), and the assignee avatar pinned right.
+  """
+  attr :issue, :map, required: true
+  attr :agent_heartbeat_states, :map, default: %{}
+  attr :show_assignee, :boolean, default: true
+  attr :class, :string, default: nil
+
+  def card_meta(assigns) do
+    assigns =
+      assigns
+      |> assign(:blocker_count, length(assigns.issue.blocked_by || []))
+      |> assign(:stale_hours, stale_hours(assigns.issue))
+      |> assign(:comment_count, length(assigns.issue.comments || []))
+
+    ~H"""
+    <div class={["flex min-w-0 items-center gap-2 text-[11px] text-text-quaternary", @class]}>
+      <span class="shrink-0 font-mono text-[10px] tracking-[0.02em]">
+        {@issue.identifier || "CYM-" <> String.slice(@issue.id, 0, 4)}
+      </span>
+
+      <span
+        :if={elevated_priority?(@issue.priority)}
+        class={"shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-510 " <> priority_class(@issue.priority)}
+      >
+        {String.capitalize(to_string(@issue.priority))}
+      </span>
+
+      <span :if={@blocker_count > 0} class="shrink-0 font-510 text-brand">
+        {@blocker_count} {pluralize(@blocker_count, "blocker")}
+      </span>
+
+      <span
+        :if={@stale_hours}
+        class="flex shrink-0 items-center gap-1 text-amber-300/90"
+        title={"No movement for #{stale_age_title(@stale_hours)}"}
+      >
+        <span class="h-1 w-1 rounded-full bg-amber-400"></span>
+        {stale_age_label(@stale_hours)}
+      </span>
+
+      <span class="ml-auto flex shrink-0 items-center gap-2">
+        <span class="flex items-center gap-2 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+          <span :if={@comment_count > 0} class="flex items-center gap-1">
+            <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
+              />
+            </svg>
+            {@comment_count}
+            <span class="sr-only">{pluralize(@comment_count, "comment")}</span>
+          </span>
+          <a
+            :if={@issue.github_pr_url}
+            href={@issue.github_pr_url}
+            target="_blank"
+            data-no-drag
+            class="text-accent transition-colors hover:text-accent-hover"
+            title="GitHub PR"
+          >
+            PR
+          </a>
+        </span>
+        <.assignee_avatar
+          :if={@show_assignee && @issue.assignee}
+          agent={@issue.assignee}
+          heartbeat_status={
+            Index.get_heartbeat_state(@agent_heartbeat_states, @issue.assignee.id).status
+          }
+        />
+      </span>
+    </div>
+    """
+  end
+
+  @doc """
+  Compact initials avatar with a role tint and a heartbeat presence dot, so
+  who-is-on-a-card reads in one glance on an agent-dense board.
+  """
+  attr :agent, :map, required: true
+  attr :heartbeat_status, :atom, default: nil
+
+  def assignee_avatar(assigns) do
+    ~H"""
+    <span
+      class="relative inline-flex shrink-0"
+      title={"#{@agent.name} · #{role_label(@agent)} · #{@heartbeat_status || :offline}"}
+    >
+      <span class={[
+        "flex h-5 w-5 items-center justify-center rounded-full border text-[9px] font-590 uppercase leading-none",
+        role_tint_class(@agent)
+      ]}>
+        {agent_initials(@agent.name)}
+      </span>
+      <span class={[
+        "absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 rounded-full ring-2 ring-surface-2",
+        heartbeat_dot_color(@heartbeat_status)
+      ]}>
+      </span>
+    </span>
+    """
+  end
+
+  def agent_initials(name) when is_binary(name) do
+    name
+    |> String.split(~r/\s+/, trim: true)
+    |> Enum.take(2)
+    |> Enum.map(&String.first/1)
+    |> Enum.join()
+    |> String.upcase()
+  end
+
+  def agent_initials(_name), do: "?"
+
+  defp role_label(%{role: role}) when not is_nil(role),
+    do: role |> to_string() |> String.replace("_", " ")
+
+  defp role_label(_agent), do: "agent"
+
+  defp role_tint_class(%{role: role}) when role in [:ceo, :cto],
+    do: "border-brand/30 bg-brand/15 text-brand"
+
+  defp role_tint_class(%{role: role}) when role in [:engineer, :release_engineer, :qa_engineer],
+    do: "border-sky-500/30 bg-sky-500/15 text-sky-300"
+
+  defp role_tint_class(%{role: role}) when role in [:product_manager, :designer],
+    do: "border-violet-500/30 bg-violet-500/15 text-violet-300"
+
+  defp role_tint_class(%{role: role}) when not is_nil(role),
+    do: "border-emerald-500/30 bg-emerald-500/15 text-emerald-300"
+
+  defp role_tint_class(_agent), do: "border-border bg-subtle text-text-tertiary"
+
+  defp elevated_priority?(priority), do: priority in [:high, :critical]
+
+  defp stale_hours(%{status: status, updated_at: %DateTime{} = updated_at})
+       when status in @stale_statuses do
+    hours = DateTime.diff(DateTime.utc_now(), updated_at, :hour)
+    if hours >= @stale_after_hours, do: hours
+  end
+
+  defp stale_hours(_issue), do: nil
+
+  defp stale_age_label(hours), do: "#{div(hours, 24)}d"
+
+  defp stale_age_title(hours) do
+    days = div(hours, 24)
+    "#{days} #{pluralize(days, "day")}"
+  end
+
+  @doc """
+  Class for the column-header count pill: brand when a WIP limit is exceeded,
+  a calm amber tint when an active column is clearly backed up, quiet otherwise.
+  """
+  def column_count_class(_status, _count, true = _exceeded), do: "bg-brand/20 text-brand"
+
+  def column_count_class(status, count, _exceeded)
+      when status in @overload_statuses and count > @soft_overload_threshold,
+      do: "bg-amber-500/15 text-amber-300"
+
+  def column_count_class(_status, _count, _exceeded), do: "bg-surface text-text-quaternary"
+
   attr :status, :atom, required: true
 
   def empty_column_state(assigns) do
@@ -138,6 +263,7 @@ defmodule CymphoWeb.KanbanLive.Components do
         {empty_column_icon(@status)}
       </div>
       <p class="text-xs text-text-quaternary">{empty_column_message(@status)}</p>
+      <p class="mt-1 text-[10px] text-text-quaternary/70">Drag a card here</p>
     </div>
     """
   end
@@ -240,12 +366,6 @@ defmodule CymphoWeb.KanbanLive.Components do
   defp heartbeat_dot_color(:paused), do: "bg-text-tertiary"
   defp heartbeat_dot_color(:offline), do: "bg-text-quaternary"
   defp heartbeat_dot_color(_), do: "bg-text-quaternary"
-
-  defp status_pin_class(:in_progress), do: "bg-yellow-400 animate-pulse"
-  defp status_pin_class(:blocked), do: "bg-brand"
-  defp status_pin_class(:done), do: "bg-emerald-400"
-  defp status_pin_class(:cancelled), do: "bg-text-tertiary"
-  defp status_pin_class(_), do: "bg-text-quaternary"
 
   defp compact_status_label(:backlog), do: "Backlog"
   defp compact_status_label(:todo), do: "Todo"

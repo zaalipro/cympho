@@ -231,17 +231,22 @@ defmodule CymphoWeb.DashboardLive.Index do
     running = status_count(summary.issue_status_counts, :in_progress)
     blocked = status_count(summary.issue_status_counts, :blocked)
     next_actions = next_actions(summary, company, operations)
+    signoff_decision = owner_signoff_decision(operations.owner_signoffs)
+    {signoff_action, queue_actions} = split_signoff_action(next_actions, signoff_decision)
+    queue_actions = sort_by_urgency(queue_actions)
 
     socket
     |> assign(:company, company)
     |> assign(:autonomy_status, autonomy_status(company))
     |> assign(:runtime_enabled?, Dispatcher.enabled?())
     |> assign(:operating_mode, operating_mode(company))
-    |> assign(:next_actions, next_actions)
-    |> assign(:primary_next_action, List.first(next_actions))
-    |> assign(:secondary_next_actions, Enum.drop(next_actions, 1))
+    |> assign(:owner_signoff_action, signoff_action)
+    |> assign(:needs_you_actions, Enum.take(queue_actions, 3))
+    |> assign(:later_actions, Enum.drop(queue_actions, 3))
+    |> assign(:all_clear?, is_nil(signoff_action) and all_clear?(queue_actions))
+    |> assign(:agent_rollup, agent_rollup(summary.agent_status_counts))
     |> assign(:ceo_command_lane, ceo_command_lane(operations.ceo_flow))
-    |> assign(:owner_signoff_decision, owner_signoff_decision(operations.owner_signoffs))
+    |> assign(:owner_signoff_decision, signoff_decision)
     |> assign(:execution_health, execution_health(summary, operations))
     |> assign(:queued_work, queued)
     |> assign(:running_work, running)
@@ -454,11 +459,194 @@ defmodule CymphoWeb.DashboardLive.Index do
   defp owner_signoff_decision(%{entries: [entry | _]}), do: entry
   defp owner_signoff_decision(_owner_signoffs), do: nil
 
+  # Pull the owner-signoff action out of the queue when its decision card is
+  # available — it becomes the hero "needs you" card with inline accept /
+  # revise buttons instead of competing with the rest of the queue.
+  defp split_signoff_action(actions, signoff_decision) when not is_nil(signoff_decision) do
+    case Enum.split_with(actions, &(Map.get(&1, :path) == "/operations#owner-signoff-queue")) do
+      {[signoff | _], rest} -> {signoff, rest}
+      _ -> {nil, actions}
+    end
+  end
+
+  defp split_signoff_action(actions, _signoff_decision), do: {nil, actions}
+
+  # Stable-sort the queue so the eye lands on true urgency first: danger,
+  # then attention, then ready/steady. Original order is preserved within
+  # each tone.
+  defp sort_by_urgency(actions) do
+    Enum.sort_by(actions, &tone_rank(Map.get(&1, :tone, :ok)))
+  end
+
+  defp tone_rank(:danger), do: 0
+  defp tone_rank(:attention), do: 1
+  defp tone_rank(:success), do: 2
+  defp tone_rank(:brand), do: 3
+  defp tone_rank(_tone), do: 4
+
+  # The queue falls back to a single :ok "steady" card when nothing needs the
+  # owner — that is the all-clear state.
+  defp all_clear?([]), do: true
+  defp all_clear?([%{tone: :ok}]), do: true
+  defp all_clear?(_actions), do: false
+
+  # Roll agent statuses up into one glanceable health line.
+  defp agent_rollup(counts) do
+    running = status_count(counts, :running)
+    idle = status_count(counts, :idle)
+    error = status_count(counts, :error)
+
+    {level, headline} =
+      cond do
+        error > 0 -> {:error, "#{error} #{pluralize(error, "agent")} hit an error"}
+        running > 0 -> {:running, "#{running} #{pluralize(running, "agent")} working now"}
+        idle > 0 -> {:idle, "All agents idle and ready"}
+        true -> {:none, "No agents on the roster yet"}
+      end
+
+    %{running: running, idle: idle, error: error, level: level, headline: headline}
+  end
+
+  def rollup_dot_class(:error), do: "bg-brand"
+  def rollup_dot_class(:running), do: "bg-teal-300"
+  def rollup_dot_class(:idle), do: "bg-green-400"
+  def rollup_dot_class(_), do: "bg-gray-500"
+
+  def rollup_pulse_color(:error), do: "rgba(217, 119, 87, 0.55)"
+  def rollup_pulse_color(:running), do: "rgba(93, 184, 166, 0.6)"
+  def rollup_pulse_color(_), do: "rgba(148, 163, 184, 0.35)"
+
+  def mode_description(:review), do: "Inspect and edit safely without provider spend."
+
+  def mode_description(:autonomous),
+    do: "Runtime is enabled and agents can pick up queued work."
+
+  def mode_description(:low_power),
+    do: "Runtime is live, but only high and critical queued work auto-dispatches."
+
+  def mode_description(:paused), do: "Autonomy is paused; work stays visible."
+  def mode_description(_), do: "Finish setup so agents have a mission and roster."
+
   defp primary_action_badge(%{path: "/operations#owner-signoff-queue"}), do: "Owner decision"
   defp primary_action_badge(%{tone: :danger}), do: "Fix first"
   defp primary_action_badge(%{tone: :attention}), do: "Needs setup"
   defp primary_action_badge(%{tone: :brand}), do: "Ready to run"
   defp primary_action_badge(_action), do: "Next move"
+
+  # ── Dashboard smart-card components ─────────────────────────────
+  # Compact, glanceable cards: one fact, one action, quiet metadata.
+  # Defined here (not in the shared library) because they are
+  # dashboard-specific.
+
+  attr :action, :map, required: true
+
+  defp needs_you_card(assigns) do
+    ~H"""
+    <a
+      href={Map.get(@action, :path, "/operations")}
+      class={"card-lift group flex min-w-0 flex-col rounded-xl border p-4 transition hover:bg-surface-hover/40 #{next_action_card_class(Map.get(@action, :tone, :ok))}"}
+    >
+      <span class={[
+        "self-start rounded-full border px-2 py-0.5 text-[10px] font-590 uppercase tracking-[0.1em]",
+        next_action_pill_class(Map.get(@action, :tone, :ok))
+      ]}>
+        {primary_action_badge(@action)}
+      </span>
+      <p class="mt-2.5 text-sm font-590 leading-5 text-text-primary">
+        {Map.get(@action, :label)}
+      </p>
+      <p class="mt-1 line-clamp-2 text-xs leading-4 text-text-tertiary">
+        {Map.get(@action, :detail)}
+      </p>
+      <span class="mt-auto flex items-center gap-1.5 pt-3 text-xs font-590 text-brand transition group-hover:text-accent-hover">
+        {Map.get(@action, :action, "Open")}
+        <span class="hero-arrow-up-right-mini h-3.5 w-3.5 shrink-0 transition-transform group-hover:translate-x-0.5">
+        </span>
+      </span>
+    </a>
+    """
+  end
+
+  attr :decision, :map, required: true
+  attr :action, :map, default: nil
+
+  defp signoff_card(assigns) do
+    ~H"""
+    <div
+      data-testid="dashboard-owner-signoff-actions"
+      class="card-lift flex min-w-0 flex-col rounded-xl border border-teal-500/25 bg-teal-500/[0.05] p-4 sm:col-span-2"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="rounded-full border border-teal-500/25 bg-teal-500/10 px-2 py-0.5 text-[10px] font-590 uppercase tracking-[0.1em] text-teal-300">
+          Owner decision
+        </span>
+        <a
+          :if={@action}
+          href={Map.get(@action, :path, "/operations#owner-signoff-queue")}
+          class="text-[11px] font-590 text-text-tertiary transition hover:text-text-primary"
+        >
+          {Map.get(@action, :action, "Review signoff")} →
+        </a>
+      </div>
+      <p :if={@action} class="mt-2.5 text-sm font-590 leading-5 text-text-primary">
+        {Map.get(@action, :label)}
+      </p>
+      <p :if={@action} class="mt-1 text-xs leading-4 text-text-tertiary">
+        {Map.get(@action, :detail)}
+      </p>
+      <p class="mt-2.5 truncate text-xs font-590 text-text-secondary">
+        {@decision.issue_identifier} · {@decision.issue_title}
+      </p>
+      <p class="mt-1 line-clamp-2 text-[11px] leading-4 text-text-tertiary">
+        {@decision.owner_update || "CEO owner update is ready for owner decision."}
+      </p>
+      <div class="mt-auto flex flex-wrap gap-1.5 pt-3">
+        <button
+          type="button"
+          phx-click="accept_owner_verification"
+          phx-value-issue-id={@decision.issue_id}
+          data-confirm="Accept this CEO owner update and close the issue?"
+          class="inline-flex items-center justify-center rounded-md border border-teal-500/25 bg-teal-500/10 px-2.5 py-1.5 text-xs font-510 text-teal-200 transition hover:bg-teal-500/15"
+        >
+          Accept and close
+        </button>
+        <button
+          type="button"
+          phx-click="request_owner_revision"
+          phx-value-issue-id={@decision.issue_id}
+          data-confirm="Request a CEO revision, reopen this issue to To Do, and queue focused dispatch?"
+          class="inline-flex items-center justify-center rounded-md border border-border bg-panel px-2.5 py-1.5 text-xs font-510 text-text-secondary transition hover:border-border-hover hover:bg-surface-hover hover:text-text-primary"
+        >
+          Request revision
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  defp all_clear_card(assigns) do
+    ~H"""
+    <div class="flex min-w-0 items-center gap-4 rounded-xl border border-border bg-surface/40 p-5 sm:col-span-2 xl:col-span-3">
+      <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-teal-500/20 bg-teal-500/[0.06] text-teal-300">
+        <span class="hero-check-circle-mini h-5 w-5"></span>
+      </span>
+      <div class="min-w-0">
+        <p class="text-sm font-590 text-text-primary">
+          All clear — nothing needs you right now.
+        </p>
+        <p class="mt-0.5 text-xs leading-4 text-text-tertiary">
+          Agents keep working on their own. Check the board if you want to adjust priorities.
+        </p>
+      </div>
+      <a
+        href="/kanban"
+        class="ml-auto shrink-0 text-xs font-590 text-text-tertiary transition hover:text-text-primary"
+      >
+        Scan board →
+      </a>
+    </div>
+    """
+  end
 
   defp ceo_outcome_attention_action(%{counts: %{attention: attention}})
        when is_integer(attention) and attention > 0 do
@@ -803,11 +991,6 @@ defmodule CymphoWeb.DashboardLive.Index do
   def mode_badge_class(:paused), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-400"
   def mode_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
-  def capacity_badge_class(:safe), do: "border-green-500/25 bg-green-500/10 text-green-400"
-  def capacity_badge_class(:watch), do: "border-yellow-500/25 bg-yellow-500/10 text-yellow-300"
-  def capacity_badge_class(:high), do: "border-brand/25 bg-brand/10 text-brand"
-  def capacity_badge_class(_), do: "border-border bg-surface text-text-tertiary"
-
   def capacity_bar_class(:safe), do: "bg-green-400"
   def capacity_bar_class(:watch), do: "bg-yellow-300"
   def capacity_bar_class(:high), do: "bg-brand"
@@ -914,12 +1097,6 @@ defmodule CymphoWeb.DashboardLive.Index do
   def autonomy_text_class(:active), do: "text-green-300"
   def autonomy_text_class(:paused), do: "text-yellow-300"
   def autonomy_text_class(_), do: "text-text-tertiary"
-
-  def mode_text_class(:autonomous), do: "text-green-300"
-  def mode_text_class(:low_power), do: "text-sky-300"
-  def mode_text_class(:review), do: "text-sky-300"
-  def mode_text_class(:paused), do: "text-yellow-300"
-  def mode_text_class(_), do: "text-text-tertiary"
 
   # Status tones use Claude's warm accent trinity (DESIGN.md): coral for
   # attention/alert, accent-amber for warnings, accent-teal for active work.

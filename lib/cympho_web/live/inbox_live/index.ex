@@ -940,19 +940,91 @@ defmodule CymphoWeb.InboxLive.Index do
   defp status_dot("review"), do: "bg-brand"
   defp status_dot(_), do: "bg-slate-500"
 
-  defp status_badge_class("action"), do: "bg-white/10 text-white"
-  defp status_badge_class("unread"), do: "bg-blue-500/20 text-blue-400"
-  defp status_badge_class("read"), do: "bg-gray-500/20 text-gray-400"
-  defp status_badge_class("dismissed"), do: "bg-yellow-500/20 text-yellow-400"
-  defp status_badge_class("archived"), do: "bg-surface text-text-tertiary"
-  defp status_badge_class("review"), do: "bg-brand/20 text-brand"
-  defp status_badge_class(_), do: "bg-gray-500/20 text-gray-400"
+  # One kind per row so the eye can filter by shape: who needs me (:human_action),
+  # what I must decide (:review), what's blocked on evidence (:evidence), what's
+  # new (:unread), and what's already settled (:update / :deferred).
+  defp item_kind(item) do
+    cond do
+      Map.get(item, :kind) == :human_action -> :human_action
+      Map.get(item, :kind) == :review_queue -> :review
+      Map.get(item, :review_nudge) -> :evidence
+      item.status == "unread" -> :unread
+      item.status in ["dismissed", "archived"] -> :deferred
+      true -> :update
+    end
+  end
+
+  defp kind_icon(:human_action), do: "hero-flag-mini"
+  defp kind_icon(:review), do: "hero-check-badge-mini"
+  defp kind_icon(:evidence), do: "hero-bolt-mini"
+  defp kind_icon(:unread), do: "hero-inbox-arrow-down-mini"
+  defp kind_icon(:deferred), do: "hero-archive-box-mini"
+  defp kind_icon(_), do: "hero-envelope-open-mini"
+
+  defp kind_tile_class(:human_action), do: "border-brand/30 bg-brand/15 text-brand"
+  defp kind_tile_class(:review), do: "border-brand/25 bg-brand/10 text-brand"
+  defp kind_tile_class(:evidence), do: "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  defp kind_tile_class(:unread), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
+  defp kind_tile_class(_), do: "border-border bg-surface text-text-quaternary"
+
+  defp kind_chip_label(:human_action), do: "Needs you"
+  defp kind_chip_label(:review), do: "Your review"
+  defp kind_chip_label(:unread), do: "Unread"
+  defp kind_chip_label(_), do: nil
+
+  defp kind_chip_class(:human_action), do: "border-brand/30 bg-brand/10 text-brand"
+  defp kind_chip_class(:review), do: "border-brand/25 bg-brand/10 text-brand"
+  defp kind_chip_class(:unread), do: "border-blue-500/25 bg-blue-500/10 text-blue-300"
+  defp kind_chip_class(_), do: "border-border bg-surface text-text-tertiary"
+
+  defp empty_state_heading(nil), do: "Inbox zero"
+  defp empty_state_heading("action"), do: "Nothing needs you"
+  defp empty_state_heading("unread"), do: "All caught up"
+  defp empty_state_heading("review"), do: "Review queue is clear"
+  defp empty_state_heading("read"), do: "Nothing read yet"
+  defp empty_state_heading("dismissed"), do: "Nothing set aside"
+  defp empty_state_heading("archived"), do: "Archive is empty"
+  defp empty_state_heading(_), do: "Inbox zero"
+
+  defp empty_state_detail(nil) do
+    "Nothing needs you here right now. Agent handoffs, review requests, and issue updates will surface as the autonomous workflow runs."
+  end
+
+  defp empty_state_detail("action"),
+    do: "No issues are waiting on your decision. Agents keep moving on their own from here."
+
+  defp empty_state_detail("unread"),
+    do: "Every handoff has been read. New agent handoffs land here first."
+
+  defp empty_state_detail("review"),
+    do: "No deliveries are waiting on your approve-or-request-changes call."
+
+  defp empty_state_detail("read"),
+    do: "Items you have read stay here until you dismiss or archive them."
+
+  defp empty_state_detail("dismissed"),
+    do: "Dismissed items wait here in case you want them back."
+
+  defp empty_state_detail("archived"),
+    do: "Archived items are kept here for reference."
+
+  defp empty_state_detail(_), do: empty_state_detail(nil)
 
   defp status_tab_class(current, status) do
     if current == status do
       "border-brand bg-brand/15 text-text-primary"
     else
       "border-border bg-surface text-text-tertiary hover:border-border-hover hover:bg-surface-hover hover:text-text-secondary"
+    end
+  end
+
+  # Archive-keeping filters stay quieter than the triage lanes: borderless
+  # until active so the row reads as "work first, filing second".
+  defp cleanup_tab_class(current, status) do
+    if current == status do
+      "border-brand bg-brand/15 text-text-primary"
+    else
+      "border-transparent bg-transparent text-text-quaternary hover:border-border hover:bg-surface hover:text-text-secondary"
     end
   end
 
@@ -1057,6 +1129,22 @@ defmodule CymphoWeb.InboxLive.Index do
 
   defp inbox_queue_badge_class(_), do: "border-border bg-surface text-text-tertiary"
 
-  defp format_timestamp(nil), do: "-"
-  defp format_timestamp(dt), do: Calendar.strftime(dt, "%b %d, %H:%M")
+  # Humane "3h ago"-style age keeps rows scannable; the exact stamp lives in
+  # the title tooltip via `full_timestamp/1`.
+  defp relative_time_label(nil), do: nil
+
+  defp relative_time_label(dt) do
+    seconds = DateTime.diff(DateTime.utc_now(), dt, :second)
+
+    cond do
+      seconds < 60 -> "just now"
+      seconds < 3600 -> "#{div(seconds, 60)}m ago"
+      seconds < 86_400 -> "#{div(seconds, 3600)}h ago"
+      seconds < 7 * 86_400 -> "#{div(seconds, 86_400)}d ago"
+      true -> Calendar.strftime(dt, "%b %d")
+    end
+  end
+
+  defp full_timestamp(nil), do: nil
+  defp full_timestamp(dt), do: Calendar.strftime(dt, "%b %d, %Y %H:%M UTC")
 end
