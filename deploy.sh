@@ -262,9 +262,13 @@ EOF
 
 step "Running database migrations"
 run_remote_script <<EOF || rollback_release "Migrations failed"
+# cd + RELEASE_TMP: the BEAM crashes at boot if its cwd is unreadable by
+# ${APP_USER} (sudo keeps the caller's cwd, e.g. a 0700 home dir).
 _sudo -u ${APP_USER} env bash -c '
   set -euo pipefail
   set -a; source ${ENV_FILE}; set +a
+  cd ${RELEASE_DIR}
+  export RELEASE_TMP=/tmp
   ${RELEASE_DIR}/bin/${APP_NAME} eval "Cympho.Release.migrate"
 '
 EOF
