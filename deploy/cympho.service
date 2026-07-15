@@ -15,6 +15,11 @@ Environment=PORT=4000
 # Keep the release's runtime pipe under the service's private /tmp so it works
 # regardless of ProtectSystem restrictions on /opt.
 Environment=RELEASE_TMP=/tmp
+# Agent runtime (Claude Code CLI). ProtectHome=true hides /home, so the CLI and
+# its config home live under /opt/cympho (covered by ReadWritePaths). The
+# provider base URL + auth token come from /etc/cympho.env (ANTHROPIC_*).
+Environment=HOME=/opt/cympho/claude-home
+Environment=CYMPHO_CLAUDE_COMMAND=/opt/cympho/bin/claude
 EnvironmentFile=/etc/cympho.env
 ExecStart=/opt/cympho/current/bin/cympho start
 ExecStop=/opt/cympho/current/bin/cympho stop
