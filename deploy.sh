@@ -8,13 +8,14 @@
 #     systemd (no container at runtime).
 #   * Postgres runs as a docker container bound to loopback.
 #   * nginx (already on 80/443) reverse-proxies cympho.llmotions.com with TLS
-#     from Let's Encrypt. The site config is a separate sites-available file
-#     symlinked into sites-enabled — never edited into the main nginx.conf.
+#     from Let's Encrypt (certbot --nginx). The site config is a separate
+#     sites-available file symlinked into sites-enabled — never edited into the
+#     main nginx.conf.
 #
 # Idempotent and safe to re-run; rolls the release symlink back on failure.
 #
-# Required:  CYMPHO_DEPLOY_PASSWORD   SSH (and sudo) password for the deploy user.
-# Usage:     CYMPHO_DEPLOY_PASSWORD='...' ./deploy.sh [--run-tests] [--skip-tls]
+# Target host uses SSH key auth and passwordless sudo — no password required.
+# Usage:     ./deploy.sh [--run-tests]
 
 set -euo pipefail
 
@@ -22,13 +23,11 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${SCRIPT_DIR}"
 
 # --- Target / identity -------------------------------------------------------
-# All overrides are CYMPHO_-namespaced so a generic DEPLOY_HOST/DEPLOY_USER set
-# in the shell for a *different* app can never silently hijack this deploy.
-DEPLOY_USER="${CYMPHO_DEPLOY_USER:-nick}"
-DEPLOY_HOST="${CYMPHO_DEPLOY_HOST:-home.hack.ski}"
+# GCP VPS (zaali@35.232.94.44). CYMPHO_-namespaced overrides win; the generic
+# DEPLOY_HOST/DEPLOY_USER from ~/.secrets point at the same box.
+DEPLOY_USER="${CYMPHO_DEPLOY_USER:-${DEPLOY_USER:-zaali}}"
+DEPLOY_HOST="${CYMPHO_DEPLOY_HOST:-${DEPLOY_HOST:-35.232.94.44}}"
 DEPLOY_PORT="${CYMPHO_DEPLOY_PORT:-22}"
-DEPLOY_PASSWORD="${CYMPHO_DEPLOY_PASSWORD:-}"
-DEPLOY_SUDO_PASS="${CYMPHO_DEPLOY_SUDO_PASS:-${DEPLOY_PASSWORD}}"
 DEPLOY_TARGET="${DEPLOY_USER}@${DEPLOY_HOST}"
 
 # --- App layout --------------------------------------------------------------
@@ -42,13 +41,8 @@ ENV_FILE="${CYMPHO_ENV_FILE:-/etc/cympho.env}"
 SERVICE_NAME="${CYMPHO_SERVICE_NAME:-cympho}"
 COMPOSE_PROJECT="${CYMPHO_COMPOSE_PROJECT:-cympho}"
 
-# Traefik (the edge proxy on this host) integration. The native app is exposed
-# to the Traefik container via a dynamic config file in its watched dir; Traefik
-# terminates TLS. TRAEFIK_NETWORK's host-gateway is how the container reaches
-# the native app.
-TRAEFIK_DYNAMIC_DIR="${CYMPHO_TRAEFIK_DYNAMIC_DIR:-/home/nick/homeserver-traefik-portainer/dynamic}"
-TRAEFIK_NETWORK="${CYMPHO_TRAEFIK_NETWORK:-homeserver}"
-TRAEFIK_CERTRESOLVER="${CYMPHO_TRAEFIK_CERTRESOLVER:-tlsresolver}"
+# TLS certificate contact for certbot's first issuance on this host.
+CERTBOT_EMAIL="${CYMPHO_CERTBOT_EMAIL:-admin@llmotions.com}"
 
 SKIP_TESTS="${CYMPHO_SKIP_TESTS:-1}"
 
@@ -61,17 +55,16 @@ PUBLIC_HEALTH_URL="https://${DOMAIN}/"
 
 usage() {
   cat <<EOF
-Usage: CYMPHO_DEPLOY_PASSWORD='...' ./deploy.sh [--run-tests]
+Usage: ./deploy.sh [--run-tests]
 
   --run-tests   Run 'mix test' locally before deploying (default: skip).
 
-TLS + routing are handled by the host's Traefik (a dynamic config file is
-installed into its watched dir); there is no nginx/certbot step.
+TLS + routing are handled by the host's nginx; certbot issues/renews the cert
+for ${DOMAIN} (webroot /var/www/certbot, same pattern as the other sites).
 
-Environment overrides (all CYMPHO_-namespaced): CYMPHO_DEPLOY_HOST,
-CYMPHO_DEPLOY_USER, CYMPHO_DEPLOY_PORT, CYMPHO_DEPLOY_SUDO_PASS, CYMPHO_DOMAIN,
-CYMPHO_APP_PORT, CYMPHO_DB_PORT, CYMPHO_DEPLOY_ROOT, CYMPHO_TRAEFIK_DYNAMIC_DIR,
-CYMPHO_TRAEFIK_NETWORK, CYMPHO_TRAEFIK_CERTRESOLVER, CYMPHO_SKIP_HOST_CHECK.
+Environment overrides (CYMPHO_-namespaced win over generic): CYMPHO_DEPLOY_HOST,
+CYMPHO_DEPLOY_USER, CYMPHO_DEPLOY_PORT, CYMPHO_DOMAIN, CYMPHO_APP_PORT,
+CYMPHO_DB_PORT, CYMPHO_DEPLOY_ROOT, CYMPHO_CERTBOT_EMAIL, CYMPHO_SKIP_HOST_CHECK.
 EOF
 }
 
@@ -91,12 +84,6 @@ require_cmd() {
 require_cmd ssh
 require_cmd rsync
 require_cmd curl
-require_cmd sshpass
-
-if [[ -z "${DEPLOY_PASSWORD}" ]]; then
-  echo "CYMPHO_DEPLOY_PASSWORD is not set." >&2
-  exit 1
-fi
 
 # Safety guard: the domain must point at the deploy host. If it doesn't, we're
 # almost certainly aimed at the wrong machine — abort. Best-effort (needs dig).
@@ -111,29 +98,27 @@ if [[ "${CYMPHO_SKIP_HOST_CHECK:-0}" != "1" ]] && command -v dig >/dev/null 2>&1
   fi
 fi
 
-export SSHPASS="${DEPLOY_PASSWORD}"
-
 SSH_OPTS=(
+  -o BatchMode=yes
   -o StrictHostKeyChecking=no
-  -o UserKnownHostsFile=/dev/null
   -o ConnectTimeout=20
   -p "${DEPLOY_PORT}"
 )
-RSYNC_RSH="sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p ${DEPLOY_PORT}"
+RSYNC_RSH="ssh -o BatchMode=yes -o StrictHostKeyChecking=no -p ${DEPLOY_PORT}"
 
 run_ssh() {
-  sshpass -e ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" "$@"
+  ssh "${SSH_OPTS[@]}" "${DEPLOY_TARGET}" "$@"
 }
 
-# Run a bash script on the host with `set -euo pipefail` and a `_sudo` helper
-# that feeds the sudo password over stdin (never in argv or logs).
+# Run a bash script on the host with `set -euo pipefail`. The deploy user has
+# passwordless sudo, so `_sudo` is plain sudo (kept as a helper so the remote
+# script bodies stay unchanged).
 run_remote_script() {
   local body
   body="$(cat)"
   {
-    printf 'SUDO_PASS=%q\n' "${DEPLOY_SUDO_PASS}"
     printf '%s\n' 'set -euo pipefail'
-    printf '%s\n' '_sudo() { echo "$SUDO_PASS" | sudo -S -p "" "$@"; }'
+    printf '%s\n' '_sudo() { sudo "$@"; }'
     printf '%s\n' "${body}"
   } | run_ssh "bash -s"
 }
@@ -187,7 +172,7 @@ DBENV
   cat > "\$env_tmp" <<APPENV
 APP_HOST=${DOMAIN}
 PORT=${APP_PORT}
-HTTP_BIND_IP=0.0.0.0
+HTTP_BIND_IP=127.0.0.1
 POOL_SIZE=25
 DATABASE_URL=ecto://cympho:\${DBPASS}@127.0.0.1:${DB_PORT}/cympho
 SECRET_KEY_BASE=\${SKB}
@@ -262,8 +247,8 @@ rollback_release() {
   echo "ERROR: $1" >&2
   if [[ -n "${PREVIOUS_RELEASE}" && "${PREVIOUS_RELEASE}" != "${RELEASE_DIR}" ]]; then
     echo "Rolling back to ${PREVIOUS_RELEASE}" >&2
-    run_ssh "echo '${DEPLOY_SUDO_PASS}' | sudo -S -p '' ln -sfn '${PREVIOUS_RELEASE}' '${CURRENT_LINK}'" || true
-    run_ssh "echo '${DEPLOY_SUDO_PASS}' | sudo -S -p '' systemctl restart '${SERVICE_NAME}'" || true
+    run_ssh "sudo ln -sfn '${PREVIOUS_RELEASE}' '${CURRENT_LINK}'" || true
+    run_ssh "sudo systemctl restart '${SERVICE_NAME}'" || true
   fi
   exit 1
 }
@@ -297,7 +282,7 @@ EOF
 step "Health check (${LOCAL_HEALTH_URL})"
 sleep 4
 if ! run_ssh "curl -fsS --max-time 10 '${LOCAL_HEALTH_URL}' >/dev/null"; then
-  run_ssh "echo '${DEPLOY_SUDO_PASS}' | sudo -S -p '' journalctl -u ${SERVICE_NAME} -n 60 --no-pager" || true
+  run_ssh "sudo journalctl -u ${SERVICE_NAME} -n 60 --no-pager" || true
   rollback_release "Service failed local health check"
 fi
 echo "Local health OK."
@@ -307,41 +292,67 @@ run_remote_script <<EOF || true
 ls -1dt ${RELEASES_DIR}/*/ 2>/dev/null | tail -n +6 | while read -r d; do _sudo rm -rf "\$d"; done
 EOF
 
-step "Registering route with Traefik (dynamic config file — no main config edited)"
+step "Configuring nginx site + TLS (certbot) for ${DOMAIN}"
 run_remote_script <<EOF
-dyn_dir=${TRAEFIK_DYNAMIC_DIR}
-[ -d "\$dyn_dir" ] || { echo "Traefik dynamic dir \$dyn_dir not found" >&2; exit 1; }
+site_avail=/etc/nginx/sites-available/${DOMAIN}
+site_enabled=/etc/nginx/sites-enabled/${DOMAIN}
 
-# Host-gateway of the Traefik network: how the container reaches the native app.
-gw=\$(docker network inspect ${TRAEFIK_NETWORK} -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null)
-[ -n "\$gw" ] || { echo "Could not resolve ${TRAEFIK_NETWORK} network gateway" >&2; exit 1; }
+# HTTP-only vhost first (ACME webroot + redirect); certbot upgrades it to TLS.
+if ! _sudo test -f /etc/letsencrypt/live/${DOMAIN}/fullchain.pem; then
+  tmp=\$(mktemp)
+  cat > "\$tmp" <<'NGX'
+# __DOMAIN__ -> Phoenix on 127.0.0.1:__PORT__ (managed by cympho deploy.sh)
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __DOMAIN__;
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
 
-# Written with placeholders (literal heredoc), then substituted — avoids any
-# shell/backtick escaping surprises.
-cat > "\$dyn_dir/cympho.yml" <<'DYN'
-# Managed by cympho deploy.sh — routes __DOMAIN__ to the native app.
-http:
-  routers:
-    cympho:
-      rule: "Host(\`__DOMAIN__\`)"
-      entryPoints:
-        - websecure
-      service: cympho
-      tls:
-        certResolver: __RESOLVER__
-  services:
-    cympho:
-      loadBalancer:
-        passHostHeader: true
-        servers:
-          - url: "http://__GW__:__PORT__"
-DYN
-sed -i "s|__DOMAIN__|${DOMAIN}|g; s|__RESOLVER__|${TRAEFIK_CERTRESOLVER}|g; s|__GW__|\${gw}|g; s|__PORT__|${APP_PORT}|g" "\$dyn_dir/cympho.yml"
-echo "Wrote \$dyn_dir/cympho.yml:"; cat "\$dyn_dir/cympho.yml"
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass http://127.0.0.1:__PORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Host \$host;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
+        proxy_buffering off;
+    }
+
+    access_log /var/log/nginx/cympho-access.log;
+    error_log /var/log/nginx/cympho-error.log;
+}
+NGX
+  sed -i "s|__DOMAIN__|${DOMAIN}|g; s|__PORT__|${APP_PORT}|g" "\$tmp"
+  _sudo install -m 0644 "\$tmp" "\$site_avail"
+  rm -f "\$tmp"
+  _sudo ln -sfn "\$site_avail" "\$site_enabled"
+  _sudo nginx -t
+  _sudo systemctl reload nginx
+fi
+
+# Issue the cert once DNS resolves here; certbot --nginx rewrites the vhost
+# with TLS + the HTTP->HTTPS redirect and installs auto-renewal.
+if ! _sudo test -f /etc/letsencrypt/live/${DOMAIN}/fullchain.pem; then
+  if _sudo certbot --nginx -d ${DOMAIN} --non-interactive --agree-tos -m ${CERTBOT_EMAIL} --redirect; then
+    echo "Certificate issued for ${DOMAIN}."
+  else
+    echo "WARNING: certbot failed (DNS for ${DOMAIN} may not point here yet)." >&2
+    echo "         Site is serving plain HTTP; re-run deploy.sh after DNS propagates." >&2
+  fi
+else
+  echo "Certificate for ${DOMAIN} already present."
+fi
 EOF
 
 step "Remote service status"
-run_ssh "echo '${DEPLOY_SUDO_PASS}' | sudo -S -p '' systemctl status ${SERVICE_NAME} --no-pager -l | sed -n '1,12p'" || true
+run_ssh "sudo systemctl status ${SERVICE_NAME} --no-pager -l | sed -n '1,12p'" || true
 
 step "Public check (${PUBLIC_HEALTH_URL}) — Traefik may take ~30s to obtain the cert"
 public_ok=0
@@ -352,8 +363,8 @@ done
 if [[ "${public_ok}" == "1" ]]; then
   echo "Public HTTPS OK."
 else
-  echo "WARNING: public HTTPS check failed (cert may still be issuing, or ${TRAEFIK_CERTRESOLVER}" >&2
-  echo "         can't validate ${DOMAIN}). Check: docker logs traefik | grep -i acme" >&2
+  echo "WARNING: public HTTPS check failed — most likely DNS for ${DOMAIN} has not" >&2
+  echo "         propagated to ${DEPLOY_HOST} yet. Re-run deploy.sh once it has." >&2
 fi
 
 echo
