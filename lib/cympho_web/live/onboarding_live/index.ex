@@ -28,11 +28,11 @@ defmodule CymphoWeb.OnboardingLive.Index do
     %{
       id: :launch,
       title: "Review and launch",
-      description: "Confirm the plan — launch creates everything in one transaction"
+      description: "Confirm the plan, then launch"
     },
     %{
       id: :ready,
-      title: "You're all set!",
+      title: "You're all set",
       description: "Your autonomous company is live"
     }
   ]
@@ -266,27 +266,4 @@ defmodule CymphoWeb.OnboardingLive.Index do
   end
 
   defp role_label(role), do: Agent.role_label(role)
-
-  # What the operator walks away with after each step — states the payoff, not
-  # just the inputs, so the wizard feels like progress rather than a form.
-  defp step_outcome(:welcome),
-    do:
-      "A few quick choices set up a CEO, CTO, specialist agents, a goal, a project, and seed issues."
-
-  defp step_outcome(:blueprint),
-    do: "The blueprint decides which agents get hired and what their first issues are."
-
-  defp step_outcome(:company),
-    do: "The prefix becomes your issue IDs (like ACME-1); the goal is what the CEO decomposes."
-
-  defp step_outcome(:team),
-    do:
-      "CEO and CTO are always created. Engineers do the hands-on work — name them and pick their runtime."
-
-  defp step_outcome(:launch),
-    do:
-      "One transaction creates the company, your owner seat, all agents, the goal, project, and first issues."
-
-  defp step_outcome(:ready), do: "Everything below is live. Enter Cympho to start working."
-  defp step_outcome(_), do: nil
 end

@@ -240,7 +240,7 @@ defmodule CymphoWeb.DashboardLiveTest do
       {:ok, _view, html} = live(conn, "/dashboard")
 
       assert html =~ "High pressure"
-      assert html =~ "6 local slots"
+      assert html =~ "running now"
       assert html =~ "Runtime capacity"
     end
 

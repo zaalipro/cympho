@@ -36,7 +36,7 @@ defmodule CymphoWeb.OnboardingLiveTest do
 
       # company -> team
       html = view |> element("button", "Continue") |> render_click()
-      assert html =~ "Always created."
+      assert html =~ "Owns the goal, sets direction"
       assert html =~ "Adapter"
 
       view
@@ -57,7 +57,7 @@ defmodule CymphoWeb.OnboardingLiveTest do
       assert html =~ "Ada"
 
       html = view |> element("button", "Launch autonomous company") |> render_click()
-      assert html =~ "all set!"
+      assert html =~ "all set"
       assert html =~ "Enter Cympho"
 
       company = Companies.get_company_by_slug("wizard-co")

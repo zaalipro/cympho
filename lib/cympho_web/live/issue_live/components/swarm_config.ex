@@ -84,7 +84,7 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
           </div>
           <p class="mt-2 max-w-2xl text-xs leading-5 text-text-tertiary">
             {@description ||
-              "Choose the runtime mix by cost and capability. CTO and CEO assign the worker lenses automatically."}
+              "Spin up a few temporary workers to tackle this in parallel. Your CTO reviews what they produce and hands it back."}
           </p>
         </div>
 
@@ -102,7 +102,7 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
         !@compact && "lg:grid-cols-[160px_minmax(0,1fr)]"
       ]}>
         <label class="block">
-          <span class="text-xs font-590 text-text-secondary">Temporary agents</span>
+          <span class="text-xs font-590 text-text-secondary">How many workers</span>
           <input
             type="number"
             name="swarm[agent_count]"
@@ -119,17 +119,17 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
               <span data-swarm-count>{@choice_count}</span> {runtime_choice_label(@choice_count)}
             </span>
             <span class="rounded-full border border-border bg-canvas px-2 py-0.5 text-[10px] text-text-tertiary">
-              Random choice per worker
+              Random model per worker
             </span>
             <span class="rounded-full border border-border bg-canvas px-2 py-0.5 text-[10px] text-text-tertiary">
-              CTO synthesis
+              CTO reviews
             </span>
             <span class="rounded-full border border-border bg-canvas px-2 py-0.5 text-[10px] text-text-tertiary">
-              CEO handoff
+              Back to CEO
             </span>
           </div>
           <p class="mt-2 text-[11px] leading-4 text-text-tertiary">
-            Starts with a local/reviewable runtime. Add paid providers only after their credentials are configured.
+            Starts with a free local model. Add paid ones once their keys are set up.
           </p>
         </div>
       </div>
@@ -196,7 +196,7 @@ defmodule CymphoWeb.IssueLive.Components.SwarmConfig do
               <.swarm_choice_row :for={row <- @rows} id={@id} row={row} />
               <tr data-swarm-empty-row class={[@choice_count > 0 && "hidden"]}>
                 <td colspan="4" class="px-3 py-3 text-text-tertiary">
-                  Add at least one runtime choice, or leave the defaults to use the platform runtime.
+                  Add a model, or leave the default.
                 </td>
               </tr>
             </tbody>

@@ -524,16 +524,17 @@ defmodule CymphoWeb.DashboardLive.Index do
   def rollup_pulse_color(:running), do: "rgba(93, 184, 166, 0.6)"
   def rollup_pulse_color(_), do: "rgba(148, 163, 184, 0.35)"
 
-  def mode_description(:review), do: "Inspect and edit safely without provider spend."
+  def mode_description(:review),
+    do: "Look around and make changes — nothing runs or spends money yet."
 
   def mode_description(:autonomous),
-    do: "Runtime is enabled and agents can pick up queued work."
+    do: "Agents are live and picking up work on their own."
 
   def mode_description(:low_power),
-    do: "Runtime is live, but only high and critical queued work auto-dispatches."
+    do: "Agents are live, but only urgent work runs automatically."
 
-  def mode_description(:paused), do: "Autonomy is paused; work stays visible."
-  def mode_description(_), do: "Finish setup so agents have a mission and roster."
+  def mode_description(:paused), do: "Agents are paused. Your work is safe and still here."
+  def mode_description(_), do: "Finish setup to give your agents a goal and a team."
 
   defp primary_action_badge(%{path: "/operations#owner-signoff-queue"}), do: "Owner decision"
   defp primary_action_badge(%{tone: :danger}), do: "Fix first"

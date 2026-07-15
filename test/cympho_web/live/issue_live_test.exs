@@ -402,9 +402,8 @@ defmodule CymphoWeb.IssueLiveTest do
       assert html =~ "Project"
       assert html =~ "Operating Project"
       assert html =~ "Launch Project"
-      assert html =~ "Mission context"
-      assert html =~ "Launch Mission will be attached to this issue."
-      assert html =~ "Goal-linked issues carry lineage"
+      assert html =~ "Launch Mission will be linked to this issue."
+      assert html =~ "keep the bigger outcome in view"
 
       composer_index = :binary.match(html, ~s(id="issue-intake-composer")) |> elem(0)
       mobile_summary_index = :binary.match(html, ~s(id="issue-create-mobile-summary")) |> elem(0)
@@ -841,7 +840,7 @@ defmodule CymphoWeb.IssueLiveTest do
       {:ok, view, html} = live(conn, "/issues/new")
 
       assert html =~ "Swarm mode"
-      assert html =~ "Temporary workers -&gt; CTO synthesis -&gt; CEO review"
+      assert html =~ "Split this across temporary workers, then your CTO reviews"
       refute html =~ ~s(data-testid="issue-swarm-advanced-panel")
 
       ready_description = """

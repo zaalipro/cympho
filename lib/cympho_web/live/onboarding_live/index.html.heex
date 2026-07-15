@@ -27,12 +27,6 @@
         <p class="text-sm text-text-secondary">
           {@steps |> Enum.at(@current_step) |> Map.get(:description)}
         </p>
-        <p
-          :if={step_outcome(@steps |> Enum.at(@current_step) |> Map.get(:id))}
-          class="mx-auto mt-3 max-w-md text-xs leading-5 text-text-tertiary"
-        >
-          {step_outcome(@steps |> Enum.at(@current_step) |> Map.get(:id))}
-        </p>
       </div>
 
       <div
@@ -57,7 +51,7 @@
           </div>
           <div>
             <p class="text-sm text-text-secondary mb-2">
-              Cympho turns a company goal into an operating loop: CEO, CTO, specialist agents, issues, budgets, runtime evidence, and owner signoff in one control plane.
+              Give Cympho a goal and it builds you a team — a CEO, a CTO, and specialists — that breaks the work into issues and gets it done. You stay in charge.
             </p>
             <ul class="stagger-children text-sm text-text-tertiary space-y-1.5 text-left">
               <li class="flex items-center gap-2">
@@ -248,18 +242,18 @@
           <div class="rounded-lg border border-brand/40 bg-brand/10 px-4 py-3">
             <p class="text-sm font-590 text-text-primary">CEO</p>
             <p class="mt-0.5 text-xs text-text-tertiary">
-              Owns the goal, decomposes strategy, delegates. Always created.
+              Owns the goal, sets direction, and hands work to the team.
             </p>
           </div>
           <div class="rounded-lg border border-brand/40 bg-brand/10 px-4 py-3">
             <p class="text-sm font-590 text-text-primary">CTO</p>
             <p class="mt-0.5 text-xs text-text-tertiary">
-              Turns strategy into technical plans and reviews the work. Always created.
+              Turns the plan into concrete work and reviews what's done.
             </p>
           </div>
         </div>
         <p class="mb-4 text-xs text-text-quaternary">
-          Blueprint roster: {selected_blueprint(@blueprints, @company_form).role_summary}
+          Also on the team: {selected_blueprint(@blueprints, @company_form).role_summary}
         </p>
 
         <form id="team-step-form" phx-change="update_company_form" class="space-y-4">
@@ -327,7 +321,7 @@
               </div>
             </div>
             <p class="mt-2 text-[11px] leading-4 text-text-quaternary">
-              Applies to every agent. Command can be a Claude-compatible wrapper (e.g. cz); model is exported as ANTHROPIC_MODEL.
+              Used by every agent. Leave blank to use the defaults.
             </p>
           </fieldset>
         </form>

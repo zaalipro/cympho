@@ -219,7 +219,7 @@ defmodule CymphoWeb.Components.NavRail do
           label="Low"
           tone="neutral"
           current_path={@current_path}
-          confirm="Switch runtime to low power? Only high and critical queued work will auto-dispatch."
+          confirm="Switch to low power? Only urgent work keeps running."
         />
         <.runtime_button
           :if={!company_paused?(@current_company) && company_low_power?(@current_company)}
@@ -236,7 +236,7 @@ defmodule CymphoWeb.Components.NavRail do
           label="Pause"
           tone="neutral"
           current_path={@current_path}
-          confirm="Pause runtime for this company? This releases active work but preserves queued wakes."
+          confirm="Pause your agents? Queued work is saved for later."
         />
         <.runtime_button
           :if={company_paused?(@current_company)}
@@ -252,7 +252,7 @@ defmodule CymphoWeb.Components.NavRail do
           label="Stop"
           tone="danger"
           current_path={@current_path}
-          confirm="Stop runtime for this company? This releases active work and cancels queued wakes."
+          confirm="Stop your agents and clear the queue?"
         />
       </div>
     </div>

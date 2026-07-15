@@ -7,7 +7,7 @@
           New Issue
         </h1>
         <p class="mt-2 max-w-2xl text-[15px] leading-6 text-text-tertiary">
-          Capture a clear unit of autonomous work and route it into the execution board.
+          Describe what you want done — your team takes it from there.
         </p>
       </div>
       <:actions>
@@ -111,7 +111,7 @@
                     Write the request the CEO should decide, decompose, or hand off.
                   </p>
                 </div>
-                <div class="shrink-0 rounded-md border border-border bg-panel px-3 py-2 text-right">
+                <div class="ui-advanced-only shrink-0 rounded-md border border-border bg-panel px-3 py-2 text-right">
                   <p class={[
                     "text-sm font-590",
                     case @brief_readiness.status do
@@ -176,10 +176,10 @@
                         Swarm mode
                       </span>
                       <span class="mt-1 block text-sm font-590 text-text-primary">
-                        Temporary workers -> CTO synthesis -> CEO review
+                        Split this across temporary workers, then your CTO reviews
                       </span>
                       <span class="ui-advanced-only mt-1 block max-w-2xl text-xs leading-5 text-text-tertiary">
-                        Creates one-time non-engineering agents, blocks the CEO parent, and routes delivery through CTO synthesis.
+                        Spins up a few temporary workers, then routes their work back through your CTO and CEO.
                       </span>
                     </span>
                   </label>
@@ -193,7 +193,7 @@
                   :if={swarm_enabled?(@swarm_config)}
                   id="issue-swarm-advanced-panel"
                   title="Swarm setup"
-                  description="Pick worker count and runtime choices. CTO and CEO assign worker lenses."
+                  description="Pick how many workers and which models. The rest is automatic."
                   swarm_params={@swarm_params}
                   swarm_config={@swarm_config}
                   proxy_profiles={@proxy_profiles}
@@ -384,16 +384,15 @@
               <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div class="min-w-0">
                   <p class="text-xs font-590 uppercase tracking-[0.08em] text-emerald-200">
-                    Mission context
+                    Goal
                   </p>
                   <p class="mt-1 text-sm text-text-secondary">
                     {if selected_goal,
-                      do: "#{selected_goal.title} will be attached to this issue.",
-                      else: "Choose a goal when this work should move a mission forward."}
+                      do: "#{selected_goal.title} will be linked to this issue.",
+                      else: "Link a goal if this work supports one."}
                   </p>
                   <p class="ui-advanced-only mt-1 max-w-2xl text-xs leading-5 text-text-tertiary">
-                    Goal-linked issues carry lineage into CEO decomposition, child issues, cost rollups,
-                    and owner review so agents can optimize against the business outcome.
+                    Linking a goal lets your agents keep the bigger outcome in view as they work.
                   </p>
                 </div>
                 <span class="shrink-0 rounded-full border border-emerald-500/25 bg-black/10 px-2.5 py-1 text-xs font-510 text-emerald-100">

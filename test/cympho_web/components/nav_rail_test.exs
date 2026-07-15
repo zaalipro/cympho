@@ -76,7 +76,7 @@ defmodule CymphoWeb.Components.NavRailTest do
     assert html =~ ~s(action="/runtime-control/stop")
 
     assert html =~
-             ~s(data-confirm="Stop runtime for this company? This releases active work and cancels queued wakes.")
+             ~s(data-confirm="Stop your agents and clear the queue?")
   end
 
   test "global runtime pause explains that queued wakes are preserved" do
@@ -89,7 +89,7 @@ defmodule CymphoWeb.Components.NavRailTest do
     assert html =~ ~s(action="/runtime-control/pause")
 
     assert html =~
-             ~s(data-confirm="Pause runtime for this company? This releases active work but preserves queued wakes.")
+             ~s(data-confirm="Pause your agents? Queued work is saved for later.")
   end
 
   test "global runtime controls expose low-power and full-power modes" do
