@@ -1,15 +1,41 @@
 import Config
 
+host = System.get_env("APP_HOST") || "localhost"
+
 port =
   if config_env() == :prod, do: 443, else: String.to_integer(System.get_env("PORT") || "4329")
 
+# Interface the HTTP listener binds to in prod. Defaults to loopback; deployments
+# behind a containerized proxy (e.g. Traefik) set HTTP_BIND_IP=0.0.0.0 so the
+# proxy container can reach the native app via the docker host-gateway address.
+bind_ip =
+  case System.get_env("HTTP_BIND_IP") do
+    addr when is_binary(addr) and addr != "" ->
+      {:ok, parsed} = addr |> String.to_charlist() |> :inet.parse_address()
+      parsed
+
+    _ ->
+      {127, 0, 0, 1}
+  end
+
 config :cympho, env: config_env()
 
-endpoint_config = [url: [host: System.get_env("APP_HOST") || "localhost", port: port]]
+endpoint_config = [url: [host: host, port: port]]
 
 endpoint_config =
   if config_env() == :prod do
-    Keyword.put(endpoint_config, :cache_static_manifest, "priv/static/cache_manifest.json")
+    # Behind a TLS-terminating reverse proxy: generate https URLs on 443 (for
+    # links and wss websocket upgrades), but listen for plain HTTP on PORT
+    # (default 4000). `server: true` makes `bin/cympho start` boot the web
+    # server in a release.
+    endpoint_config
+    |> Keyword.put(:url, host: host, port: 443, scheme: "https")
+    |> Keyword.put(:http,
+      ip: bind_ip,
+      port: String.to_integer(System.get_env("PORT") || "4000")
+    )
+    |> Keyword.put(:server, true)
+    |> Keyword.put(:cache_static_manifest, "priv/static/cache_manifest.json")
   else
     endpoint_config
   end
@@ -25,7 +51,10 @@ if (database_url = System.get_env("DATABASE_URL")) && config_env() != :test do
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "25")
 
-  if config_env() == :prod do
+  # Enable verified TLS to the database only when DATABASE_SSL=true (e.g. a
+  # managed Postgres). The default deployment co-locates Postgres on loopback
+  # where TLS is unnecessary, so leave it off unless explicitly requested.
+  if config_env() == :prod and System.get_env("DATABASE_SSL") == "true" do
     config :cympho, Cympho.Repo,
       ssl: [verify: :verify_peer],
       ssl_verify_host: true

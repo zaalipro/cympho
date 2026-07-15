@@ -1,0 +1,29 @@
+# Postgres for the Cympho deployment. The Phoenix app runs natively under
+# systemd (not here) and connects over loopback. Managed by deploy.sh via:
+#
+#   docker compose -p cympho --env-file /opt/cympho/db.env up -d
+#
+# Credentials come from /opt/cympho/db.env (POSTGRES_USER / POSTGRES_PASSWORD /
+# POSTGRES_DB), generated once by deploy.sh and kept in sync with DATABASE_URL.
+services:
+  db:
+    image: postgres:17
+    container_name: cympho-db
+    restart: unless-stopped
+    env_file:
+      - /opt/cympho/db.env
+    ports:
+      # Loopback only — reachable by the native app, never from the network.
+      # Host port is configurable (DB_PUBLISH_PORT) to avoid clashes with other
+      # Postgres containers on the box.
+      - "127.0.0.1:${DB_PUBLISH_PORT:-5432}:5432"
+    volumes:
+      - cympho-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  cympho-db-data:

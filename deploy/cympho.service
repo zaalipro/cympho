@@ -1,0 +1,36 @@
+[Unit]
+Description=Cympho (Phoenix release)
+After=network-online.target docker.service
+Wants=network-online.target
+# Postgres runs as a docker container; wait for docker but don't hard-require it.
+After=docker.service
+
+[Service]
+Type=simple
+User=cympho
+Group=cympho
+WorkingDirectory=/opt/cympho/current
+Environment=MIX_ENV=prod
+Environment=PORT=4000
+# Keep the release's runtime pipe under the service's private /tmp so it works
+# regardless of ProtectSystem restrictions on /opt.
+Environment=RELEASE_TMP=/tmp
+EnvironmentFile=/etc/cympho.env
+ExecStart=/opt/cympho/current/bin/cympho start
+ExecStop=/opt/cympho/current/bin/cympho stop
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+
+# Hardening — the release tree and its runtime tmp live under /opt/cympho.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/cympho
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
