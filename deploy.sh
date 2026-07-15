@@ -211,7 +211,8 @@ EOF
 step "Starting Postgres container"
 run_remote_script <<EOF
 cd ${SOURCE_DIR}
-docker compose -p ${COMPOSE_PROJECT} --env-file ${DB_ENV_FILE} up -d
+# db.env is a root-owned secret (0600), so compose must read it as root.
+_sudo docker compose -p ${COMPOSE_PROJECT} --env-file ${DB_ENV_FILE} up -d
 status=starting
 for _ in \$(seq 1 30); do
   status=\$(docker inspect -f '{{.State.Health.Status}}' cympho-db 2>/dev/null || echo starting)
@@ -230,7 +231,9 @@ step "Building release via Docker (deps + assets + release; first run is slow)"
 run_remote_script <<EOF
 cd ${SOURCE_DIR}
 docker build -f deploy/build.Dockerfile -t ${APP_NAME}-build:latest .
-rm -rf ${SOURCE_DIR}/_rel && mkdir -p ${SOURCE_DIR}/_rel
+# docker cp extracts as root (via the daemon), so a prior run's _rel is
+# root-owned — clean it with sudo, then recreate as the deploy user.
+_sudo rm -rf ${SOURCE_DIR}/_rel && mkdir -p ${SOURCE_DIR}/_rel
 cid=\$(docker create ${APP_NAME}-build:latest)
 docker cp "\${cid}:/rel/." ${SOURCE_DIR}/_rel/
 docker rm "\${cid}" >/dev/null
