@@ -15,6 +15,10 @@ defmodule CymphoWeb.Router do
     plug :require_authenticated_user
   end
 
+  pipeline :company_scoped do
+    plug :require_company
+  end
+
   pipeline :api do
     plug :accepts, ["json"]
   end
@@ -42,6 +46,9 @@ defmodule CymphoWeb.Router do
     post "/login", SessionController, :create
     delete "/logout", SessionController, :delete
 
+    get "/setup", SetupController, :new
+    post "/setup", SetupController, :create
+
     # Compiled only into dev/test builds; production releases never expose this shortcut.
     if Mix.env() in [:dev, :test] do
       get "/dev/login", DevSessionController, :login
@@ -51,6 +58,14 @@ defmodule CymphoWeb.Router do
   scope "/", CymphoWeb do
     pipe_through [:browser, :authenticated_browser]
 
+    live_session :onboarding, on_mount: [{CymphoWeb.UserAuth, :default}] do
+      live "/onboarding", OnboardingLive.Index
+    end
+  end
+
+  scope "/", CymphoWeb do
+    pipe_through [:browser, :authenticated_browser, :company_scoped]
+
     get "/switch-company/:id", CompanySwitcherController, :switch
 
     post "/issues/quick-create", QuickIssueController, :create
@@ -59,7 +74,8 @@ defmodule CymphoWeb.Router do
     post "/runtime-control/stop", RuntimeControlController, :stop
     post "/runtime-control/resume", RuntimeControlController, :resume
 
-    live_session :default, on_mount: [{CymphoWeb.UserAuth, :default}] do
+    live_session :default,
+      on_mount: [{CymphoWeb.UserAuth, :default}, {CymphoWeb.UserAuth, :require_company}] do
       live "/", DashboardLive.Index, :home
       live "/dashboard", DashboardLive.Index
       live "/operations", OperationsLive.Index
@@ -93,7 +109,6 @@ defmodule CymphoWeb.Router do
       live "/routines/new", RoutineLive.New
       live "/routines/:id", RoutineLive.Show
       live "/routines/:id/edit", RoutineLive.Edit
-      live "/onboarding", OnboardingLive.Index
       # Settings hub — one tabbed shell; each tab is its own LiveView in this
       # session (see CymphoWeb.Components.SettingsLayout). Pre-hub paths
       # (/adapters, /execution-policies, /audit-trail, /companies/:id/secrets,
@@ -139,7 +154,11 @@ defmodule CymphoWeb.Router do
     end
 
     live_session :board_governed,
-      on_mount: [{CymphoWeb.UserAuth, :default}, {CymphoWeb.Live.BoardAuth, :default}] do
+      on_mount: [
+        {CymphoWeb.UserAuth, :default},
+        {CymphoWeb.UserAuth, :require_company},
+        {CymphoWeb.Live.BoardAuth, :default}
+      ] do
       live "/agents/:id/edit", AgentLive.Edit
       live "/budgets", BudgetLive.Index
       live "/budgets/new", BudgetLive.Index, :new
@@ -151,7 +170,7 @@ defmodule CymphoWeb.Router do
     end
 
     live_session :authenticated_company_show,
-      on_mount: [{CymphoWeb.UserAuth, :default}] do
+      on_mount: [{CymphoWeb.UserAuth, :default}, {CymphoWeb.UserAuth, :require_company}] do
       live "/companies/:id", CompanyLive.Show
     end
 
@@ -169,6 +188,10 @@ defmodule CymphoWeb.Router do
 
   defp require_authenticated_user(conn, opts) do
     CymphoWeb.UserAuth.require_authenticated_user(conn, opts)
+  end
+
+  defp require_company(conn, opts) do
+    CymphoWeb.UserAuth.require_company(conn, opts)
   end
 
   # ── Public API endpoints (no auth) ──

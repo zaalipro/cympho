@@ -44,7 +44,18 @@ defmodule Cympho.IssuesTest do
     end
 
     test "filters by project_id" do
-      {:ok, project} = Projects.create_project(%{name: "Filter Project", prefix: "FP"})
+      {:ok, filter_company} =
+        Companies.create_company(%{
+          name: "Filter Co",
+          slug: "filter-co-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, project} =
+        Projects.create_project(%{
+          name: "Filter Project",
+          prefix: "FP",
+          company_id: filter_company.id
+        })
 
       {:ok, project_issue} =
         Issues.create_issue(%{
@@ -667,10 +678,17 @@ defmodule Cympho.IssuesTest do
 
   describe "list_issues_by_project/1" do
     test "returns issues scoped to a project" do
+      {:ok, scoped_company} =
+        Companies.create_company(%{
+          name: "Scoped Co",
+          slug: "scoped-co-#{System.unique_integer([:positive])}"
+        })
+
       {:ok, project} =
         Projects.create_project(%{
           name: "Test Project",
-          prefix: "TTP"
+          prefix: "TTP",
+          company_id: scoped_company.id
         })
 
       {:ok, project_issue} =
@@ -1879,10 +1897,17 @@ defmodule Cympho.IssuesTest do
   end
 
   defp insert_issue do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Insert Issue Co",
+        slug: "insert-issue-#{System.unique_integer([:positive])}"
+      })
+
     project =
       Cympho.Repo.insert!(%Cympho.Projects.Project{
         name: "Test Project #{System.unique_integer()}",
-        prefix: "TST"
+        prefix: "TST",
+        company_id: company.id
       })
 
     {:ok, issue} =
@@ -1913,10 +1938,17 @@ defmodule Cympho.IssuesTest do
 
   describe "auto-complete parent" do
     setup do
+      {:ok, parent_company} =
+        Companies.create_company(%{
+          name: "Parent Test Co",
+          slug: "parent-test-#{System.unique_integer([:positive])}"
+        })
+
       project =
         Cympho.Repo.insert!(%Cympho.Projects.Project{
           name: "Parent Test Project #{System.unique_integer()}",
-          prefix: "PCT"
+          prefix: "PCT",
+          company_id: parent_company.id
         })
 
       {:ok, parent} =

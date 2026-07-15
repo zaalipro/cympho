@@ -51,10 +51,22 @@ defmodule Cympho.Workspace.RepoUrlTest do
   alias Cympho.Projects
   alias Cympho.Workspace
 
+  # Projects now require a company; create a throwaway one per call so the
+  # existing fixtures stay self-contained.
+  defp create_project_with_company(attrs) do
+    {:ok, company} =
+      Cympho.Companies.create_company(%{
+        name: "Fixture Co",
+        slug: "fixture-co-#{System.unique_integer([:positive])}"
+      })
+
+    attrs |> Map.put_new(:company_id, company.id) |> Projects.create_project()
+  end
+
   describe "get_repo_url/1" do
     test "returns repo_url from project settings" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Test Project",
           prefix: "TP",
           settings: %{"repo_url" => "https://github.com/example/repo.git"}
@@ -65,7 +77,7 @@ defmodule Cympho.Workspace.RepoUrlTest do
 
     test "falls back to app env when project settings has no repo_url" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "No Repo Project",
           prefix: "NR"
         })
@@ -112,7 +124,7 @@ defmodule Cympho.Workspace.RepoUrlTest do
 
     test "returns error when no repo configured anywhere" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Empty Settings Project",
           prefix: "ES"
         })
@@ -131,7 +143,7 @@ defmodule Cympho.Workspace.RepoUrlTest do
 
     test "ignores empty string repo_url in project settings" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Empty Repo Project",
           prefix: "ER",
           settings: %{"repo_url" => ""}
@@ -151,7 +163,7 @@ defmodule Cympho.Workspace.RepoUrlTest do
 
     test "ignores non-string repo_url in project settings" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Bad Repo Project",
           prefix: "BR",
           settings: %{"repo_url" => 12345}
@@ -175,7 +187,7 @@ defmodule Cympho.Workspace.RepoUrlTest do
       repo_dir = local_git_repo!()
 
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Branch Project",
           prefix: "BP",
           settings: %{"repo_url" => repo_dir}

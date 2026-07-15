@@ -1926,6 +1926,9 @@ defmodule Cympho.Companies do
       normalize_engineer_count(attrs[:engineer_count] || attrs["engineer_count"] || 2)
 
     adapter = normalize_adapter(attrs[:adapter] || attrs["adapter"] || :claude_code)
+    owner_user_id = attrs[:owner_user_id] || attrs["owner_user_id"]
+    engineer_names = normalize_engineer_names(attrs[:engineer_names] || attrs["engineer_names"])
+    agent_runtime = normalize_agent_runtime(attrs[:agent_runtime] || attrs["agent_runtime"])
     seed_issue_count = length(blueprint.seed_issues)
     launch_manifest = blueprint_launch_manifest(blueprint, engineer_count)
 
@@ -1953,6 +1956,29 @@ defmodule Cympho.Companies do
           brand_color: blueprint.brand_color
         })
         |> Repo.insert!()
+
+      # Resolve the owner before inserting the membership: the membership
+      # changeset carries assoc_constraint(:user), so inserting first would
+      # raise Ecto.InvalidChangesetError on the FK instead of reaching the
+      # {:error, :owner_not_found} rollback contract.
+      if owner_user_id do
+        case Cympho.Users.get_user(owner_user_id) do
+          {:ok, user} ->
+            %CompanyMembership{}
+            |> CompanyMembership.changeset(%{
+              user_id: owner_user_id,
+              company_id: company.id,
+              role: "owner",
+              is_board_member: true
+            })
+            |> Repo.insert!()
+
+            user |> Ecto.Changeset.change(company_id: company.id) |> Repo.update!()
+
+          {:error, :not_found} ->
+            Repo.rollback(:owner_not_found)
+        end
+      end
 
       project =
         %Project{}
@@ -1990,6 +2016,7 @@ defmodule Cympho.Companies do
           title: "Chief Executive Officer",
           role: :ceo,
           adapter: adapter,
+          runtime_config: agent_runtime,
           max_concurrent_jobs: 1,
           capabilities: %{
             "strategy" => true,
@@ -2011,6 +2038,7 @@ defmodule Cympho.Companies do
           title: "Chief Technology Officer",
           role: :cto,
           adapter: adapter,
+          runtime_config: agent_runtime,
           max_concurrent_jobs: 2,
           capabilities: %{
             "architecture" => true,
@@ -2030,10 +2058,11 @@ defmodule Cympho.Companies do
               project_id: project.id,
               parent_id: cto.id,
               created_by_agent_id: cto.id,
-              name: "Engineer #{index}",
+              name: engineer_name(engineer_names, index),
               title: "Software Engineer",
               role: :engineer,
               adapter: adapter,
+              runtime_config: agent_runtime,
               max_concurrent_jobs: 1,
               capabilities: %{
                 "implementation" => true,
@@ -2058,6 +2087,7 @@ defmodule Cympho.Companies do
           title: "Product Lead",
           role: :product_manager,
           adapter: adapter,
+          runtime_config: agent_runtime,
           max_concurrent_jobs: 1,
           capabilities: %{
             "acceptance_criteria" => true,
@@ -2078,6 +2108,7 @@ defmodule Cympho.Companies do
           title: "Design Lead",
           role: :designer,
           adapter: adapter,
+          runtime_config: agent_runtime,
           max_concurrent_jobs: 1,
           capabilities: %{
             "user_flows" => true,
@@ -2102,7 +2133,8 @@ defmodule Cympho.Companies do
         create_blueprint_extra_agents!(blueprint.extra_agents, base_refs, %{
           company_id: company.id,
           project_id: project.id,
-          adapter: adapter
+          adapter: adapter,
+          runtime_config: agent_runtime
         })
 
       seed_specs = blueprint_seed_specs(blueprint, agent_refs)
@@ -2153,6 +2185,7 @@ defmodule Cympho.Companies do
           title: spec.title,
           role: spec.role,
           adapter: base_attrs.adapter,
+          runtime_config: Map.get(base_attrs, :runtime_config, %{}),
           max_concurrent_jobs: Map.get(spec, :max_concurrent_jobs, 1),
           capabilities: spec.capabilities,
           instructions: spec.instructions
@@ -2324,12 +2357,55 @@ defmodule Cympho.Companies do
 
   defp normalize_engineer_count(_count), do: 2
 
+  defp normalize_engineer_names(names) when is_list(names) do
+    Enum.map(names, fn
+      name when is_binary(name) -> String.trim(name)
+      _ -> ""
+    end)
+  end
+
+  defp normalize_engineer_names(_), do: []
+
+  defp engineer_name(names, index) do
+    case Enum.at(names, index - 1) do
+      name when is_binary(name) and name != "" -> name
+      _ -> "Engineer #{index}"
+    end
+  end
+
+  # Builds the extra runtime_config merged into every launched agent.
+  # command -> top-level "command" (read by adapters via the orchestrator's
+  # config merge); model -> "env"."ANTHROPIC_MODEL" (injected by profile_env).
+  defp normalize_agent_runtime(%{} = runtime) do
+    command = trim_or_nil(runtime["command"] || runtime[:command])
+    model = trim_or_nil(runtime["model"] || runtime[:model])
+
+    %{}
+    |> then(fn config -> if command, do: Map.put(config, "command", command), else: config end)
+    |> then(fn config ->
+      if model, do: Map.put(config, "env", %{"ANTHROPIC_MODEL" => model}), else: config
+    end)
+  end
+
+  defp normalize_agent_runtime(_), do: %{}
+
+  defp trim_or_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp trim_or_nil(_), do: nil
+
   defp create_template_agent!(attrs) do
     role = attrs[:role] || attrs["role"]
+    runtime_config = Map.merge(%{"autonomous" => true}, attrs[:runtime_config] || %{})
 
     attrs =
-      Map.update(
-        attrs,
+      attrs
+      |> Map.delete(:runtime_config)
+      |> Map.update(
         :instructions,
         RolePlaybook.default_overrides_template(role),
         &RolePlaybook.starter_overrides(role, &1)
@@ -2340,7 +2416,7 @@ defmodule Cympho.Companies do
       Map.merge(attrs, %{
         status: :idle,
         context_mode: "company",
-        runtime_config: %{"autonomous" => true}
+        runtime_config: runtime_config
       })
     )
     |> Repo.insert!()

@@ -1,7 +1,7 @@
 ---
 spec_id: 04
 feature_name: first_run_onboarding
-status: ready-for-implementation
+status: complete
 created: 2026-07-14
 last_updated: 2026-07-15
 source_prompt: |
@@ -911,7 +911,7 @@ None — no external dependencies; the feature is built entirely on libraries al
 
 ### Tasks
 
-- [ ] **TASK-001** [service] Extend `Companies.create_autonomous_company/1` with owner membership, engineer names, and agent runtime.
+- [x] **TASK-001** [service] Extend `Companies.create_autonomous_company/1` with owner membership, engineer names, and agent runtime.
   - **Paths:** `lib/cympho/companies.ex` (modified)
   - **Implements:** `REQ-006`, `REQ-007`, `DES-001`, `DES-007` · **Verifies:** `TEST-001` covering `AC-021`, `AC-022`, `AC-023`, `AC-025`, `AC-034`, `EDGE-002`, `EDGE-003`, `EDGE-004` · **Depends:** `None`
   - **Context:** The launch engine currently creates a company, project, agents, goal, and seed issues in one `Repo.transaction`, but never creates a `CompanyMembership` (the production orphan bug), names engineers `"Engineer #{index}"`, and `create_template_agent!/1` overwrites `runtime_config` with `%{"autonomous" => true}`. This task adds three optional attrs — `owner_user_id`, `engineer_names`, `agent_runtime` — all backward compatible. `Cympho.Companies.CompanyMembership` is already aliased at the top of the module (line 5); `Cympho.Users.get_user/1` returns `{:ok, user} | {:error, :not_found}`.
@@ -1203,7 +1203,7 @@ None — no external dependencies; the feature is built entirely on libraries al
   - **Done when:** `mix compile --warnings-as-errors` exits 0 and TASK-002's tests pass.
   - **Verify:** `mix compile --warnings-as-errors` — exits 0.
 
-- [ ] **TASK-002** [test] Add engine unit tests for owner membership, engineer names, and agent runtime.
+- [x] **TASK-002** [test] Add engine unit tests for owner membership, engineer names, and agent runtime.
   - **Paths:** `test/cympho/companies_onboarding_test.exs` (created)
   - **Implements:** `REQ-006`, `REQ-007`, `DES-001`, `DES-007` · **Verifies:** `TEST-001` covering `AC-021`, `AC-022`, `AC-023`, `AC-025`, `AC-034`, `EDGE-002`, `EDGE-003`, `EDGE-004` · **Depends:** `TASK-001`
   - **Context:** TASK-001 added the three new attrs to `Companies.create_autonomous_company/1`. This test file locks in the TEST-001 vector table. `Cympho.Users.create_user/1`, `Companies.get_membership/2`, `Companies.list_memberships/1`, and `Companies.get_company_by_slug/1` all exist.
@@ -1315,7 +1315,7 @@ None — no external dependencies; the feature is built entirely on libraries al
   - **Done when:** all seven tests pass.
   - **Verify:** `mix test test/cympho/companies_onboarding_test.exs` — expected output contains `0 failures`.
 
-- [ ] **TASK-003** [setup] Fix the seeds destructuring bug (`first_issue` → `seed_issues`).
+- [x] **TASK-003** [setup] Fix the seeds destructuring bug (`first_issue` → `seed_issues`).
   - **Paths:** `priv/repo/seeds.exs` (modified)
   - **Implements:** `REQ-007`, `DES-001` · **Verifies:** `TEST-007` covering `AC-034` · **Depends:** `None`
   - **Context:** `priv/repo/seeds.exs` destructures `{:ok, %{company: company, agents: agents, first_issue: issue}}` from `Companies.create_autonomous_company/1`, but the engine returns the keys `company, project, goal, blueprint, agents, seed_issues` — there is no `first_issue` key, so seeding a fresh database raises `MatchError`. This pre-existing bug blocks every fresh-DB verification gate in this spec (`mix ecto.reset`, Manual QA step 1). `mix test` is unaffected (the test alias never runs seeds).
@@ -1346,7 +1346,7 @@ case Companies.list_companies() do
   - **Done when:** `mix ecto.reset` completes and prints the seeded-company summary.
   - **Verify:** `mix ecto.reset` — output contains `Seeded autonomous company:`.
 
-- [ ] **TASK-004** [model] Require `company_id` in the Project changeset.
+- [x] **TASK-004** [model] Require `company_id` in the Project changeset.
   - **Paths:** `lib/cympho/projects/project.ex` (modified)
   - **Implements:** `REQ-008`, `DES-009` · **Verifies:** `TEST-002` covering `AC-026` · **Depends:** `None`
   - **Context:** `Cympho.Projects.Project.changeset/2` currently calls `validate_required([:name, :prefix])`, allowing a project row with a NULL `company_id` (the production orphan bug). This adds `:company_id` to the required set and a matching `foreign_key_constraint`.
@@ -1368,7 +1368,7 @@ case Companies.list_companies() do
   - **Done when:** the module compiles and TASK-005's tests pass.
   - **Verify:** `mix compile --warnings-as-errors` — exits 0.
 
-- [ ] **TASK-005** [test] Add the project company-requirement unit tests.
+- [x] **TASK-005** [test] Add the project company-requirement unit tests.
   - **Paths:** `test/cympho/projects_company_requirement_test.exs` (created)
   - **Implements:** `REQ-008`, `DES-009` · **Verifies:** `TEST-002` covering `AC-026` · **Depends:** `TASK-004`
   - **Context:** TASK-004 added `:company_id` to the Project changeset's required fields. `Cympho.Companies.create_company/1` and `Cympho.Projects.create_project/1` exist; `Cympho.DataCase` imports `errors_on/1`.
@@ -1411,7 +1411,7 @@ case Companies.list_companies() do
   - **Done when:** both tests pass.
   - **Verify:** `mix test test/cympho/projects_company_requirement_test.exs` — expected output contains `0 failures`.
 
-- [ ] **TASK-006** [test] Add `company_id` to project fixtures: wakes_test.exs, wakeup_queue_test.exs, issues_labels_test.exs.
+- [x] **TASK-006** [test] Add `company_id` to project fixtures: wakes_test.exs, wakeup_queue_test.exs, issues_labels_test.exs.
   - **Paths:** `test/cympho/wakes_test.exs` (modified), `test/cympho/heartbeat_engine/wakeup_queue_test.exs` (modified), `test/cympho/issues_labels_test.exs` (modified)
   - **Implements:** `REQ-008`, `DES-009` · **Verifies:** `TEST-007` covering `AC-026` · **Depends:** `TASK-004`
   - **Context:** TASK-004 made `company_id` required in the Project changeset, so every existing `Projects.create_project/1` call (and direct `%Project{}` insert) without a `company_id` now fails. This task threads a fixture company into the affected call sites in the listed files. Each block creates a company via `Companies.create_company/1` with a unique slug (`System.unique_integer([:positive])`) and passes its id.
@@ -1510,7 +1510,7 @@ case Companies.list_companies() do
   - **Done when:** the listed files pass.
   - **Verify:** `mix test test/cympho/wakes_test.exs test/cympho/heartbeat_engine/wakeup_queue_test.exs test/cympho/issues_labels_test.exs` — expected output contains `0 failures`.
 
-- [ ] **TASK-007** [test] Add `company_id` to project fixtures: issues_paginated_filter_test.exs, goals_test.exs, workspace_test.exs.
+- [x] **TASK-007** [test] Add `company_id` to project fixtures: issues_paginated_filter_test.exs, goals_test.exs, workspace_test.exs.
   - **Paths:** `test/cympho/issues_paginated_filter_test.exs` (modified), `test/cympho/goals_test.exs` (modified), `test/cympho/workspace_test.exs` (modified)
   - **Implements:** `REQ-008`, `DES-009` · **Verifies:** `TEST-007` covering `AC-026` · **Depends:** `TASK-004`
   - **Context:** TASK-004 made `company_id` required in the Project changeset, so every existing `Projects.create_project/1` call (and direct `%Project{}` insert) without a `company_id` now fails. This task threads a fixture company into the affected call sites in the listed files. Each block creates a company via `Companies.create_company/1` with a unique slug (`System.unique_integer([:positive])`) and passes its id.
@@ -1564,6 +1564,7 @@ case Companies.list_companies() do
 
       {:ok, project} =
         Cympho.Projects.create_project(%{name: "Proj", prefix: "PRJ", company_id: company.id})
+
       {:ok, goal} = Goals.create_goal(%{title: "Project Goal", project_id: project.id})
       {:ok, _other} = Goals.create_goal(%{title: "Other Goal"})
 >>>>>>> REPLACE
@@ -1589,6 +1590,7 @@ case Companies.list_companies() do
 
       {:ok, project} =
         Cympho.Projects.create_project(%{name: "Empty", prefix: "EMP", company_id: company.id})
+
       assert [] = Goals.list_goals_by_project(project.id)
     end
 >>>>>>> REPLACE
@@ -1749,7 +1751,7 @@ case Companies.list_companies() do
   - **Done when:** the listed files pass.
   - **Verify:** `mix test test/cympho/issues_paginated_filter_test.exs test/cympho/goals_test.exs test/cympho/workspace_test.exs` — expected output contains `0 failures`.
 
-- [ ] **TASK-008** [test] Add `company_id` to project fixtures: projects_test.exs.
+- [x] **TASK-008** [test] Add `company_id` to project fixtures: projects_test.exs.
   - **Paths:** `test/cympho/projects_test.exs` (modified)
   - **Implements:** `REQ-008`, `DES-009` · **Verifies:** `TEST-007` covering `AC-026` · **Depends:** `TASK-004`
   - **Context:** TASK-004 made `company_id` required in the Project changeset, so every existing `Projects.create_project/1` call (and direct `%Project{}` insert) without a `company_id` now fails. This task threads a fixture company into the affected call sites in the listed files. Each block creates a company via `Companies.create_company/1` with a unique slug (`System.unique_integer([:positive])`) and passes its id.
@@ -2055,7 +2057,7 @@ case Companies.list_companies() do
   - **Done when:** the listed files pass.
   - **Verify:** `mix test test/cympho/projects_test.exs` — expected output contains `0 failures`.
 
-- [ ] **TASK-009** [test] Add `company_id` to project fixtures: issues_test.exs, approvals_test.exs, github_controller_test.exs.
+- [x] **TASK-009** [test] Add `company_id` to project fixtures: issues_test.exs, approvals_test.exs, github_controller_test.exs.
   - **Paths:** `test/cympho/issues_test.exs` (modified), `test/cympho/approvals_test.exs` (modified), `test/cympho_web/controllers/github_controller_test.exs` (modified)
   - **Implements:** `REQ-008`, `DES-009` · **Verifies:** `TEST-007` covering `AC-026` · **Depends:** `TASK-004`
   - **Context:** TASK-004 made `company_id` required in the Project changeset, so every existing `Projects.create_project/1` call (and direct `%Project{}` insert) without a `company_id` now fails. This task threads a fixture company into the affected call sites in the listed files. Each block creates a company via `Companies.create_company/1` with a unique slug (`System.unique_integer([:positive])`) and passes its id.
@@ -2296,7 +2298,7 @@ case Companies.list_companies() do
   - **Verify:** `mix test test/cympho/issues_test.exs test/cympho/approvals_test.exs test/cympho_web/controllers/github_controller_test.exs` — expected output contains `0 failures`.
 
 
-- [ ] **TASK-010** [service] Add the `:require_company` on_mount hook and `require_company/2` plug to `CymphoWeb.UserAuth`.
+- [x] **TASK-010** [service] Add the `:require_company` on_mount hook and `require_company/2` plug to `CymphoWeb.UserAuth`.
   - **Paths:** `lib/cympho_web/user_auth.ex` (modified)
   - **Implements:** `REQ-003`, `DES-002` · **Verifies:** `TEST-003` covering `AC-008`, `AC-009` · **Depends:** `None`
   - **Context:** `CymphoWeb.UserAuth` already defines `on_mount(:default, ...)` (which assigns `:current_company`, nil when the user has no membership) and `require_authenticated_user/2` (which assigns `conn.assigns.current_company`). This adds the company gate in both forms: a LiveView `on_mount(:require_company, ...)` and a conn-level `require_company/2`. `Phoenix.LiveView` and `Phoenix.Controller` are fully qualified so no new imports are needed.
@@ -2353,7 +2355,7 @@ case Companies.list_companies() do
   - **Done when:** the module compiles.
   - **Verify:** `mix compile --warnings-as-errors` — exits 0.
 
-- [ ] **TASK-011** [integration] Wire the company gate into the router: new pipeline, dedicated onboarding live session, gate on three live sessions.
+- [x] **TASK-011** [integration] Wire the company gate into the router: new pipeline, dedicated onboarding live session, gate on three live sessions.
   - **Paths:** `lib/cympho_web/router.ex` (modified)
   - **Implements:** `REQ-003`, `DES-002`, `DES-010` · **Verifies:** `TEST-003` covering `AC-008`, `AC-009`, `AC-010`, `AC-011`, `EDGE-007` · **Depends:** `TASK-010`
   - **Context:** The main authenticated scope pipes through `[:browser, :authenticated_browser]` and hosts `/onboarding` inside `live_session :default`. This task adds a `:company_scoped` pipeline, moves `/onboarding` into its own gate-free live session, applies `:company_scoped` to the main scope's `pipe_through`, and appends `{CymphoWeb.UserAuth, :require_company}` to the `:default`, `:board_governed`, and `:authenticated_company_show` live sessions. `CymphoWeb.UserAuth.require_company/2` exists after TASK-010.
@@ -2482,7 +2484,7 @@ case Companies.list_companies() do
   - **Done when:** the router compiles and TASK-012's tests pass.
   - **Verify:** `mix compile --warnings-as-errors` — exits 0.
 
-- [ ] **TASK-012** [test] Add the company-gate integration tests.
+- [x] **TASK-012** [test] Add the company-gate integration tests.
   - **Paths:** `test/cympho_web/require_company_gate_test.exs` (created)
   - **Implements:** `REQ-003`, `DES-002`, `DES-010` · **Verifies:** `TEST-003` covering `AC-008`, `AC-009`, `AC-010`, `AC-011`, `EDGE-007` · **Depends:** `TASK-011`
   - **Context:** TASK-011 gated the app behind company membership. This test proves company-less users are redirected to `/onboarding` from both live and controller routes, that `/onboarding` itself stays reachable, and that users with a company pass. `CymphoWeb.ConnCase.register_and_log_in_user/1` returns `{conn, user, company}` and creates a membership; `Cympho.Users.create_user/1` exists.
@@ -2533,7 +2535,7 @@ case Companies.list_companies() do
   - **Done when:** all four tests pass.
   - **Verify:** `mix test test/cympho_web/require_company_gate_test.exs` — expected output contains `0 failures`.
 
-- [ ] **TASK-013** [test] Adapt the membership-less `user_auth_test` expectation to the gate.
+- [x] **TASK-013** [test] Adapt the membership-less `user_auth_test` expectation to the gate.
   - **Paths:** `test/cympho_web/user_auth_test.exs` (modified)
   - **Implements:** `REQ-003`, `DES-002` · **Verifies:** `TEST-007` covering `AC-008` · **Depends:** `TASK-011`
   - **Context:** The existing test "assigns nil current_company for user with no memberships" mounts `/issues` as a membership-less user and asserts a successful mount with `current_company == nil`. After TASK-011 wires the `:require_company` gate, that mount halts with a redirect to `/onboarding` — which is the new intended behavior, so the test is updated to assert it.
@@ -2585,7 +2587,7 @@ case Companies.list_companies() do
   - **Done when:** the file passes.
   - **Verify:** `mix test test/cympho_web/user_auth_test.exs` — expected output contains `0 failures`.
 
-- [ ] **TASK-014** [api] Create `CymphoWeb.SetupController` for first-run owner creation.
+- [x] **TASK-014** [api] Create `CymphoWeb.SetupController` for first-run owner creation.
   - **Paths:** `lib/cympho_web/controllers/setup_controller.ex` (created)
   - **Implements:** `REQ-001`, `DES-003`, `DES-004` · **Verifies:** `TEST-004` covering `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005`, `AC-029`, `AC-030`, `EDGE-001` · **Depends:** `None`
   - **Context:** No `/setup` route exists yet. This controller renders an inline-HTML owner-creation form when the `users` table is empty and locks itself once any user exists, guarding concurrent submits with `pg_advisory_xact_lock(7214001)`. It reuses `Cympho.Authentication.register_user/1` (Argon2-hashing), `CymphoWeb.SessionController.sign_in/2` (sets `:user_id` + `:company_id` session keys), and `Cympho.Users.User`. The inline-HTML + CSRF-token style mirrors `SessionController.sign_in_page/2`.
@@ -2757,7 +2759,7 @@ case Companies.list_companies() do
   - **Done when:** the module compiles and TASK-016's tests pass.
   - **Verify:** `mix compile --warnings-as-errors` — exits 0.
 
-- [ ] **TASK-015** [integration] Add the `/setup` routes and the zero-user `/login` redirect.
+- [x] **TASK-015** [integration] Add the `/setup` routes and the zero-user `/login` redirect.
   - **Paths:** `lib/cympho_web/router.ex` (modified), `lib/cympho_web/controllers/session_controller.ex` (modified)
   - **Implements:** `REQ-001`, `REQ-002`, `DES-003` · **Verifies:** `TEST-004` covering `AC-006`, `AC-007` · **Depends:** `TASK-014`
   - **Context:** The public `:browser` scope defines `get "/login"` / `post "/login"` and `delete "/logout"`; `SessionController.new/2` currently always renders the sign-in page. This task adds `GET/POST /setup` next to the logout route and makes `new/2` redirect to `/setup` when the `users` table is empty. `CymphoWeb.SetupController` exists after TASK-014; `SessionController` already aliases `Cympho.Repo` and `Cympho.Users.User`.
@@ -2808,7 +2810,7 @@ case Companies.list_companies() do
   - **Done when:** the router and controller compile and TASK-016's tests pass.
   - **Verify:** `mix compile --warnings-as-errors` — exits 0.
 
-- [ ] **TASK-016** [test] Add the `/setup` controller integration tests.
+- [x] **TASK-016** [test] Add the `/setup` controller integration tests.
   - **Paths:** `test/cympho_web/controllers/setup_controller_test.exs` (created)
   - **Implements:** `REQ-001`, `REQ-002`, `DES-003`, `DES-004` · **Verifies:** `TEST-004` covering `AC-001`, `AC-002`, `AC-003`, `AC-004`, `AC-005`, `AC-006`, `AC-029`, `AC-030`, `EDGE-001` · **Depends:** `TASK-015`
   - **Context:** TASK-014 and TASK-015 added the `/setup` page, the `/setup` routes, and the zero-user `/login` redirect. This file is `async: false` because it reads and mutates the global `users` count. `Cympho.Users.create_user/1` and `Cympho.Users.get_user_by_email/1` exist; `get_user_by_email/1` returns `{:ok, user} | {:error, :not_found}`.
@@ -2915,7 +2917,7 @@ case Companies.list_companies() do
   - **Done when:** all six tests pass.
   - **Verify:** `mix test test/cympho_web/controllers/setup_controller_test.exs` — expected output contains `0 failures`.
 
-- [ ] **TASK-017** [test] Seed a user in the two zero-user `/login` rendering tests.
+- [x] **TASK-017** [test] Seed a user in the two zero-user `/login` rendering tests.
   - **Paths:** `test/cympho_web/controllers/session_controller_test.exs` (modified)
   - **Implements:** `REQ-002`, `DES-003` · **Verifies:** `TEST-007` covering `AC-007` · **Depends:** `TASK-015`
   - **Context:** After TASK-015, `GET /login` redirects to `/setup` when the `users` table is empty. Two existing tests — "renders a safe return target into the sign-in form" and "drops unsafe return targets from the sign-in form" — GET `/login` on an empty DB and assert on the returned HTML. They must seed a user first so the sign-in form still renders. The `registered_user/0` helper is already defined at the bottom of this file (used by the two POST tests).
@@ -2953,7 +2955,7 @@ case Companies.list_companies() do
   - **Done when:** the full session controller test file passes.
   - **Verify:** `mix test test/cympho_web/controllers/session_controller_test.exs` — expected output contains `0 failures`.
 
-- [ ] **TASK-018** [api] Lock `POST /api/register` behind `:open_registration` and enable it in dev.
+- [x] **TASK-018** [api] Lock `POST /api/register` behind `:open_registration` and enable it in dev.
   - **Paths:** `lib/cympho_web/controllers/registration_controller.ex` (modified), `config/dev.exs` (modified)
   - **Implements:** `REQ-004`, `DES-005` · **Verifies:** `TEST-005` covering `AC-012`, `AC-013` · **Depends:** `None`
   - **Context:** `RegistrationController.create/2` currently always creates a user via `Cympho.Authentication.register_user/1`. This wraps it in an `:open_registration` app-env check (default `false`, `true` in dev) so production is invite-only. `Cympho.Authentication`, `Cympho.Users.User`, and `CymphoWeb.ErrorJSON` are already in scope. `config/dev.exs` ends with `config :phoenix, :plug_init_mode, :runtime`.
@@ -3026,7 +3028,7 @@ config :cympho, open_registration: true
   - **Done when:** the module and config compile and TASK-019's tests pass.
   - **Verify:** `mix compile --warnings-as-errors` — exits 0.
 
-- [ ] **TASK-019** [test] Add the registration-lock integration tests.
+- [x] **TASK-019** [test] Add the registration-lock integration tests.
   - **Paths:** `test/cympho_web/controllers/registration_controller_test.exs` (created)
   - **Implements:** `REQ-004`, `DES-005` · **Verifies:** `TEST-005` covering `AC-012`, `AC-013` · **Depends:** `TASK-018`
   - **Context:** TASK-018 locked `POST /api/register` behind `:open_registration`. This file is `async: false` because it mutates the global app env. `Cympho.Users.get_user_by_email/1` returns `{:ok, user} | {:error, :not_found}`.
@@ -3038,7 +3040,9 @@ config :cympho, open_registration: true
     defmodule CymphoWeb.RegistrationControllerTest do
       use CymphoWeb.ConnCase, async: false
 
-      @params %{"user" => %{"name" => "New", "email" => "new@example.com", "password" => "longenough1"}}
+      @params %{
+        "user" => %{"name" => "New", "email" => "new@example.com", "password" => "longenough1"}
+      }
 
       test "returns 403 when registration is closed (default)", %{conn: conn} do
         conn = post(conn, "/api/register", @params)
@@ -3060,7 +3064,7 @@ config :cympho, open_registration: true
   - **Done when:** both tests pass.
   - **Verify:** `mix test test/cympho_web/controllers/registration_controller_test.exs` — expected output contains `0 failures`.
 
-- [ ] **TASK-020** [ui] Rebuild the onboarding LiveView as the six-step wizard (module + template).
+- [x] **TASK-020** [ui] Rebuild the onboarding LiveView as the six-step wizard (module + template).
   - **Paths:** `lib/cympho_web/live/onboarding_live/index.ex` (modified), `lib/cympho_web/live/onboarding_live/index.html.heex` (modified)
   - **Implements:** `REQ-005`, `REQ-006`, `REQ-007`, `DES-006`, `DES-007`, `DES-008` · **Verifies:** `TEST-006` covering `AC-014`, `AC-015`, `AC-016`, `AC-017`, `AC-018`, `AC-019`, `AC-020`, `AC-024`, `EDGE-005`, `EDGE-006`, `EDGE-009`, `EDGE-010`, `EDGE-011` · **Depends:** `TASK-001`, `TASK-011`
   - **Context:** The current onboarding LiveView is a 4-step wizard whose single `#company-starter-form` submits directly to `Companies.create_autonomous_company/1` without an owner. This task replaces both files wholesale (each SEARCH block is the entire current file, so it matches exactly once): 6 steps (welcome, blueprint, company, team, launch, ready), per-step validation with exact error strings "Company name is required." / "Company name must be at least 3 characters." / "Company goal is required." / "Issue prefix must be 2-7 uppercase letters." / "Finish setup to enter Cympho.", a server-side adapter whitelist (`~w(claude_code codex cursor http)`, anything else coerced to `"claude_code"`), a rescue around the launch call that converts engine raises (`Repo.insert!` on invalid changesets) into the error banner instead of crashing the LiveView, a double-launch guard (event ignored when `bootstrap_result` is set), and a launch payload carrying `owner_user_id`, `engineer_names`, `adapter`, and `agent_runtime` (command/model). The ready step links to `/switch-company/<company id>?return_to=/issues` with the exact text "Enter Cympho". Both files are one compile unit, so they change in one task; the whole-file Form B blocks are transcription, matching Form A's no-line-cap rationale.
@@ -4537,7 +4541,7 @@ end
   - **Done when:** both files compile and TASK-021's tests pass.
   - **Verify:** `mix compile --warnings-as-errors` — exits 0.
 
-- [ ] **TASK-021** [test] Rewrite the onboarding LiveView tests for the six-step wizard.
+- [x] **TASK-021** [test] Rewrite the onboarding LiveView tests for the six-step wizard.
   - **Paths:** `test/cympho_web/live/onboarding_live_test.exs` (modified)
   - **Implements:** `REQ-005`, `REQ-006`, `REQ-007`, `DES-006` · **Verifies:** `TEST-006` covering `AC-014`, `AC-015`, `AC-016`, `AC-017`, `AC-018`, `AC-019`, `AC-020`, `AC-021`, `AC-022`, `AC-023`, `AC-024`, `EDGE-005`, `EDGE-006`, `EDGE-009`, `EDGE-010`, `EDGE-011` · **Depends:** `TASK-020`
   - **Context:** The existing test file drives the old 4-step wizard's `#company-starter-form`, which no longer exists after TASK-020. This whole-file replacement covers the full walk-through (owner membership, engineer names, runtime config), invalid-prefix blocking, blueprint refill, double-launch guard, both skip behaviors, and keeps the blueprint filter test. `Companies.list_memberships/1` preloads `:user`; the LiveCase user email matches `"live-user-"`.
@@ -4900,7 +4904,7 @@ end
   - **Done when:** all six tests pass.
   - **Verify:** `mix test test/cympho_web/live/onboarding_live_test.exs` — expected output contains `0 failures`.
 
-- [ ] **TASK-022** [migration] Add the orphan-adoption + NOT NULL migration for `projects.company_id` (Deploy B).
+- [x] **TASK-022** [migration] Add the orphan-adoption + NOT NULL migration for `projects.company_id` (Deploy B).
   - **Paths:** `priv/repo/migrations/20260715000000_require_company_on_projects.exs` (created)
   - **Implements:** `REQ-008`, `DES-009` (covers `AC-027`, `AC-028`, `EDGE-008` — verified manually per the Rollout Plan's Phase B script, not by an automated test: the local dev/test databases never contain orphans, so the adoption and raise branches only execute against production data) · **Verifies:** `N/A — mix ecto.migrate exercises only the no-orphan branch locally` · **Depends:** `TASK-004`
   - **Context:** After the changeset hardening (TASK-004), the DB column `projects.company_id` is still nullable, and production holds one orphan project ("AILogic", prefix "AILGC"). This migration adopts orphans into the oldest company (ordered `inserted_at ASC, id ASC`) and sets the column NOT NULL; it raises with the exact message "orphan projects exist but no company to adopt them" when orphans exist but no company does. **Production ordering:** this file must NOT be present in the tree during the Phase A deploy (see the Rollout Plan) — production has an orphan and zero companies until the operator completes onboarding, so a combined deploy would abort.
@@ -4948,7 +4952,7 @@ end
   - **Done when:** `mix ecto.reset` applies the migration cleanly on a fresh dev DB and the full suite passes.
   - **Verify:** `mix ecto.migrate` — output contains `Migrated 20260715000000`.
 
-- [ ] **TASK-023** [verification] Run the full verification sweep.
+- [x] **TASK-023** [verification] Run the full verification sweep.
   - **Paths:** `N/A — verification only; no file changes`.
   - **Implements:** `N/A` · **Verifies:** `TEST-007` covering `AC-007`, `AC-034` · **Depends:** `TASK-022`
   - **Context:** All implementation and test tasks are complete. This confirms formatting, a warning-free build, and a green suite across every touched subsystem (engine, gates, setup, registration, wizard, migration).
@@ -4999,6 +5003,29 @@ None
 
 <!-- One line per completed task, appended by the implementing agent: -->
 <!-- - YYYY-MM-DD — TASK-NNN — <verify command> → <first line of output> -->
+- 2026-07-15 — TASK-001 — mix compile --warnings-as-errors → Compiling 437 files (.ex)
+- 2026-07-15 — TASK-002 — mix test test/cympho/companies_onboarding_test.exs → 6 tests, 0 failures
+- 2026-07-15 — TASK-003 — mix ecto.reset → Seeded autonomous company: (Cympho Labs; exit 0)
+- 2026-07-15 — TASK-004 — mix compile --warnings-as-errors → Compiling 17 files (.ex)
+- 2026-07-15 — TASK-005 — mix test test/cympho/projects_company_requirement_test.exs → 2 tests, 0 failures
+- 2026-07-15 — TASK-006 — mix test test/cympho/wakes_test.exs test/cympho/heartbeat_engine/wakeup_queue_test.exs test/cympho/issues_labels_test.exs → 52 tests, 0 failures
+- 2026-07-15 — TASK-007 — mix test test/cympho/issues_paginated_filter_test.exs test/cympho/goals_test.exs test/cympho/workspace_test.exs → 45 tests, 0 failures
+- 2026-07-15 — TASK-008 — mix test test/cympho/projects_test.exs → 19 tests, 0 failures
+- 2026-07-15 — TASK-009 — mix test test/cympho/issues_test.exs test/cympho/approvals_test.exs test/cympho_web/controllers/github_controller_test.exs → 138 tests, 0 failures
+- 2026-07-15 — TASK-010 — mix compile --warnings-as-errors → Compiling 437 files (.ex)
+- 2026-07-15 — TASK-011 — mix compile --warnings-as-errors → Compiling 2 files (.ex)
+- 2026-07-15 — TASK-012 — mix test test/cympho_web/require_company_gate_test.exs → 4 tests, 0 failures
+- 2026-07-15 — TASK-013 — mix test test/cympho_web/user_auth_test.exs → 16 tests, 0 failures
+- 2026-07-15 — TASK-014 — mix compile --warnings-as-errors → Compiling 1 file (.ex)
+- 2026-07-15 — TASK-015 — mix compile --warnings-as-errors → Compiling 3 files (.ex)
+- 2026-07-15 — TASK-016 — mix test test/cympho_web/controllers/setup_controller_test.exs → 8 tests, 0 failures
+- 2026-07-15 — TASK-017 — mix test test/cympho_web/controllers/session_controller_test.exs → 7 tests, 0 failures
+- 2026-07-15 — TASK-018 — mix compile --warnings-as-errors → Compiling 438 files (.ex)
+- 2026-07-15 — TASK-019 — mix test test/cympho_web/controllers/registration_controller_test.exs → 2 tests, 0 failures
+- 2026-07-15 — TASK-022 — mix ecto.migrate → == Migrated 20260715000000 in 0.0s
+- 2026-07-15 — TASK-020 — mix compile --warnings-as-errors → Compiling 2 files (.ex)
+- 2026-07-15 — TASK-021 — mix test test/cympho_web/live/onboarding_live_test.exs → 9 tests, 0 failures
+- 2026-07-15 — TASK-023 — mix test → 2991 tests, 0 failures (mix format --check-formatted exits 0 after reformatting TASK-007's test/cympho/goals_test.exs; mix compile --warnings-as-errors exits 0; earlier sweep runs intermittently showed only the pre-existing environment-dependent test/cympho/adapters/registry_extended_test.exs:65 failure, confirmed failing on the unmodified base commit per this task's Troubleshooting entry)
 
 ---
 

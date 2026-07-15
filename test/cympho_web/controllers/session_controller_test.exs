@@ -3,6 +3,7 @@ defmodule CymphoWeb.SessionControllerTest do
 
   describe "login" do
     test "renders a safe return target into the sign-in form", %{conn: conn} do
+      registered_user()
       conn = get(conn, "/login?return_to=/issues/123")
 
       html = html_response(conn, 200)
@@ -10,6 +11,7 @@ defmodule CymphoWeb.SessionControllerTest do
     end
 
     test "drops unsafe return targets from the sign-in form", %{conn: conn} do
+      registered_user()
       conn = get(conn, "/login?return_to=https://evil.example/issues")
 
       html = html_response(conn, 200)

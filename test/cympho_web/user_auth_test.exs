@@ -160,8 +160,9 @@ defmodule CymphoWeb.UserAuthTest do
       assert_redirected_to_login(conn)
     end
 
-    test "assigns nil current_company for user with no memberships" do
-      # Create a user with no company memberships
+    test "redirects membership-less users into onboarding" do
+      # Create a user with no company memberships; the require_company gate
+      # sends them to the onboarding wizard instead of mounting the app.
       {:ok, lonely_user} =
         %User{}
         |> User.registration_changeset(%{
@@ -177,9 +178,7 @@ defmodule CymphoWeb.UserAuthTest do
         |> Plug.Test.init_test_session(%{})
         |> Plug.Conn.put_session("user_id", lonely_user.id)
 
-      {:ok, view, _html} = live(conn, "/issues")
-
-      assert live_assigns(view).current_company == nil
+      assert {:error, {:redirect, %{to: "/onboarding"}}} = live(conn, "/issues")
     end
 
     test "prioritizes session company_id over user.company_id", %{

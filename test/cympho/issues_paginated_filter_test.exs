@@ -7,8 +7,14 @@ defmodule Cympho.IssuesPaginatedFilterTest do
   alias Cympho.Labels
 
   setup do
+    {:ok, company} =
+      Cympho.Companies.create_company(%{
+        name: "Filter Co",
+        slug: "filter-co-#{System.unique_integer([:positive])}"
+      })
+
     {:ok, project} =
-      Projects.create_project(%{name: "FilterProj", prefix: "FP"})
+      Projects.create_project(%{name: "FilterProj", prefix: "FP", company_id: company.id})
 
     {:ok, agent} =
       Agents.create_agent(%{name: "Test Agent", role: :engineer, status: :idle})

@@ -5,7 +5,14 @@ defmodule Cympho.IssuesLabelsTest do
   alias Cympho.Projects
 
   setup do
-    {:ok, project} = Projects.create_project(%{name: "Test", prefix: "TST"})
+    {:ok, company} =
+      Cympho.Companies.create_company(%{
+        name: "Labels Co",
+        slug: "labels-co-#{System.unique_integer([:positive])}"
+      })
+
+    {:ok, project} =
+      Projects.create_project(%{name: "Test", prefix: "TST", company_id: company.id})
 
     {:ok, issue} =
       Issues.create_issue(%{title: "Test", description: "Desc", project_id: project.id})

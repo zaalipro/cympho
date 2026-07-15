@@ -69,3 +69,6 @@ config :cympho,
 config :phoenix, :stacktrace_depth, 20
 
 config :phoenix, :plug_init_mode, :runtime
+
+# Open self-registration is a dev convenience; production is invite-only.
+config :cympho, open_registration: true

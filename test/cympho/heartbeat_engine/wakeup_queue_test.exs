@@ -14,10 +14,17 @@ defmodule Cympho.HeartbeatEngine.WakeupQueueTest do
         status: :idle
       })
 
+    {:ok, company} =
+      Cympho.Companies.create_company(%{
+        name: "WakeQueue Co",
+        slug: "wake-queue-#{System.unique_integer([:positive])}"
+      })
+
     {:ok, project} =
       Cympho.Projects.create_project(%{
         name: "WakeTestProject #{System.unique_integer()}",
-        prefix: "WKP"
+        prefix: "WKP",
+        company_id: company.id
       })
 
     {:ok, issue} =

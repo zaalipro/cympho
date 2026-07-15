@@ -33,6 +33,19 @@ defmodule CymphoWeb.UserAuth do
     end
   end
 
+  # Conn-level twin of on_mount(:require_company) for non-LiveView routes.
+  def require_company(conn, _opts) do
+    case conn.assigns[:current_company] do
+      %{id: _} ->
+        conn
+
+      _ ->
+        conn
+        |> Phoenix.Controller.redirect(to: "/onboarding")
+        |> Plug.Conn.halt()
+    end
+  end
+
   # The DB is the source of truth for an authenticated user's theme. FetchTheme
   # (in the :browser pipeline) renders the `theme` cookie for the first paint,
   # before auth runs; once the user is known we override the assign and re-seed
@@ -66,6 +79,16 @@ defmodule CymphoWeb.UserAuth do
         |> subscribe_approval_badge_updates()
 
       {:cont, socket}
+    end
+  end
+
+  # Blocks company-less users from the app proper; they are funneled into
+  # /onboarding (its live_session mounts only :default) until they own a
+  # company membership. Prevents orphan rows like projects with NULL company.
+  def on_mount(:require_company, _params, _session, socket) do
+    case socket.assigns[:current_company] do
+      %{id: _} -> {:cont, socket}
+      _ -> {:halt, Phoenix.LiveView.redirect(socket, to: "/onboarding")}
     end
   end
 

@@ -9,12 +9,19 @@ defmodule CymphoWeb.GithubControllerTest do
   alias Cympho.Wakes
 
   setup do
+    {:ok, company} =
+      Cympho.Companies.create_company(%{
+        name: "Github Test Co",
+        slug: "github-test-#{System.unique_integer([:positive])}"
+      })
+
     # Create a project with a webhook secret
     {:ok, project} =
       Projects.create_project(%{
         name: "Test Project",
         prefix: "TEST",
-        github_webhook_secret: "test-webhook-secret"
+        github_webhook_secret: "test-webhook-secret",
+        company_id: company.id
       })
 
     # Create an agent to act as the creator
@@ -277,12 +284,19 @@ defmodule CymphoWeb.GithubControllerTest do
 
   describe "branch-based auto-link" do
     setup do
+      {:ok, company} =
+        Cympho.Companies.create_company(%{
+          name: "Autolink Co",
+          slug: "autolink-co-#{System.unique_integer([:positive])}"
+        })
+
       {:ok, project} =
         Projects.create_project(%{
           name: "Autolink Project",
           prefix: "AL",
           github_webhook_secret: "autolink-secret",
-          repo_url: "https://github.com/autolink-org/repo"
+          repo_url: "https://github.com/autolink-org/repo",
+          company_id: company.id
         })
 
       {:ok, issue} =

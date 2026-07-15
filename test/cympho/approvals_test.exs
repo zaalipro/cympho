@@ -298,7 +298,13 @@ defmodule Cympho.ApprovalsTest do
       if opts[:company_id] do
         %{project | company_id: opts[:company_id]}
       else
-        project
+        {:ok, company} =
+          Cympho.Companies.create_company(%{
+            name: "Approvals Co",
+            slug: "approvals-co-#{System.unique_integer([:positive])}"
+          })
+
+        %{project | company_id: company.id}
       end
 
     project = Cympho.Repo.insert!(project)

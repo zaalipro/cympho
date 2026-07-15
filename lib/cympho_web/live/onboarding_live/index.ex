@@ -8,22 +8,32 @@ defmodule CymphoWeb.OnboardingLive.Index do
     %{
       id: :welcome,
       title: "Start an autonomous company",
-      description: "Create a CEO, CTO, engineers, goal, project, and first issue"
+      description: "Create a CEO, CTO, engineers, goal, project, and first issues"
     },
     %{
-      id: :workspace,
-      title: "Company operating system",
-      description: "Set the company goal and default execution team"
+      id: :blueprint,
+      title: "Choose a blueprint",
+      description: "Pick the kind of company your agents will run"
     },
     %{
-      id: :shortcuts,
-      title: "Quick navigation",
-      description: "Learn keyboard shortcuts to move fast"
+      id: :company,
+      title: "Name the company",
+      description: "Set the company name, goal, and issue prefix"
+    },
+    %{
+      id: :team,
+      title: "Build the team",
+      description: "CEO and CTO lead by default — configure your engineers and runtime"
+    },
+    %{
+      id: :launch,
+      title: "Review and launch",
+      description: "Confirm the plan — launch creates everything in one transaction"
     },
     %{
       id: :ready,
       title: "You're all set!",
-      description: "Start managing your projects with AI agents"
+      description: "Your autonomous company is live"
     }
   ]
 
@@ -39,13 +49,18 @@ defmodule CymphoWeb.OnboardingLive.Index do
       |> assign(:blueprint_query, "")
       |> assign(:filtered_blueprints, blueprints)
       |> assign(:current_step, 0)
+      |> assign(:step_error, nil)
       |> assign(:bootstrap_result, nil)
       |> assign(:company_form, %{
         "blueprint" => "software",
         "name" => "Autonomous Software Company",
         "goal_title" => "Build and run the business autonomously",
         "issue_prefix" => "LLM",
-        "engineer_count" => "2"
+        "engineer_count" => "2",
+        "engineer_names" => [],
+        "adapter" => "claude_code",
+        "runtime_command" => "",
+        "runtime_model" => ""
       })
 
     {:ok, socket}
@@ -53,33 +68,38 @@ defmodule CymphoWeb.OnboardingLive.Index do
 
   @impl true
   def handle_event("next_step", _params, socket) do
-    current = socket.assigns.current_step
-    max = length(socket.assigns.steps) - 1
+    step = Enum.at(socket.assigns.steps, socket.assigns.current_step)
 
-    if current < max do
-      {:noreply, assign(socket, :current_step, current + 1)}
-    else
-      {:noreply, push_navigate(socket, to: ~p"/issues")}
+    case validate_step(step.id, socket.assigns.company_form) do
+      :ok ->
+        max = length(socket.assigns.steps) - 1
+        next = min(socket.assigns.current_step + 1, max)
+        {:noreply, socket |> assign(:current_step, next) |> assign(:step_error, nil)}
+
+      {:error, message} ->
+        {:noreply, assign(socket, :step_error, message)}
     end
   end
 
   def handle_event("prev_step", _params, socket) do
-    current = socket.assigns.current_step
-
-    if current > 0 do
-      {:noreply, assign(socket, :current_step, current - 1)}
-    else
-      {:noreply, socket}
-    end
+    {:noreply,
+     socket
+     |> assign(:current_step, max(socket.assigns.current_step - 1, 0))
+     |> assign(:step_error, nil)}
   end
 
   def handle_event("skip", _params, socket) do
-    {:noreply, push_navigate(socket, to: ~p"/issues")}
+    if socket.assigns[:current_company] do
+      {:noreply, push_navigate(socket, to: ~p"/issues")}
+    else
+      {:noreply, assign(socket, :step_error, "Finish setup to enter Cympho.")}
+    end
   end
 
   def handle_event("update_company_form", %{"company" => params}, socket) do
     params = maybe_apply_blueprint_defaults(params, socket.assigns.company_form)
-    {:noreply, assign(socket, :company_form, params)}
+    form = Map.merge(socket.assigns.company_form, params)
+    {:noreply, socket |> assign(:company_form, form) |> assign(:step_error, nil)}
   end
 
   def handle_event("filter_blueprints", %{"blueprint_query" => query}, socket) do
@@ -91,32 +111,111 @@ defmodule CymphoWeb.OnboardingLive.Index do
      |> assign(:filtered_blueprints, filter_blueprints(socket.assigns.blueprints, query))}
   end
 
-  def handle_event("start_autonomous_company", %{"company" => params}, socket) do
-    attrs =
-      socket.assigns.company_form
-      |> Map.merge(params)
-      |> Map.update("engineer_count", 2, &parse_engineer_count/1)
-
-    case Companies.create_autonomous_company(attrs) do
-      {:ok, result} ->
-        {:noreply,
-         socket
-         |> assign(:bootstrap_result, result)
-         |> assign(:current_step, 3)}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Could not create company: #{inspect(reason)}")}
+  # Ignores repeat clicks after a successful launch (the ready step already
+  # shows the result); a second transaction would create a duplicate company.
+  def handle_event("start_autonomous_company", _params, socket) do
+    if socket.assigns.bootstrap_result do
+      {:noreply, socket}
+    else
+      launch_company(socket)
     end
   end
 
-  defp parse_engineer_count(value) when is_integer(value), do: max(0, min(value, 8))
+  @allowed_adapters ~w(claude_code codex cursor http)
 
-  defp parse_engineer_count(value) when is_binary(value) do
-    case Integer.parse(value) do
-      {count, _} -> max(0, min(count, 8))
+  defp launch_company(socket) do
+    form = socket.assigns.company_form
+
+    with :ok <- validate_step(:company, form) do
+      attrs = %{
+        "blueprint" => form["blueprint"],
+        "name" => form["name"],
+        "goal_title" => form["goal_title"],
+        "issue_prefix" => form["issue_prefix"],
+        "engineer_count" => engineer_count(form),
+        "engineer_names" => form["engineer_names"] || [],
+        "adapter" => sanitize_adapter(form["adapter"]),
+        "agent_runtime" => %{
+          "command" => form["runtime_command"],
+          "model" => form["runtime_model"]
+        },
+        "owner_user_id" => socket.assigns.current_user.id
+      }
+
+      case create_company_safely(attrs) do
+        {:ok, result} ->
+          {:noreply,
+           socket
+           |> assign(:bootstrap_result, result)
+           |> assign(:step_error, nil)
+           |> assign(:current_step, 5)}
+
+        {:error, reason} ->
+          {:noreply, assign(socket, :step_error, "Could not create company: #{inspect(reason)}")}
+      end
+    else
+      {:error, message} ->
+        {:noreply, socket |> assign(:current_step, 2) |> assign(:step_error, message)}
+    end
+  end
+
+  # The engine uses Repo.insert! throughout, so changeset-invalid input raises
+  # out of the transaction instead of returning {:error, _}. Convert raises
+  # into the error banner rather than crashing the LiveView and losing all
+  # wizard state. Nothing persists either way — the transaction rolls back.
+  defp create_company_safely(attrs) do
+    Companies.create_autonomous_company(attrs)
+  rescue
+    error in [Ecto.InvalidChangesetError] -> {:error, error.changeset.errors}
+    error -> {:error, error}
+  end
+
+  # The <select> constrains the browser, not the client: a tampered payload
+  # could smuggle any existing atom into the agent adapter enum.
+  defp sanitize_adapter(adapter) when adapter in @allowed_adapters, do: adapter
+  defp sanitize_adapter(_), do: "claude_code"
+
+  def engineer_count(form) do
+    case Integer.parse(to_string(form["engineer_count"] || "2")) do
+      {count, _} -> count |> max(0) |> min(8)
       :error -> 2
     end
   end
+
+  def engineer_name_value(form, index) do
+    case Enum.at(form["engineer_names"] || [], index - 1) do
+      name when is_binary(name) and name != "" -> name
+      _ -> "Engineer #{index}"
+    end
+  end
+
+  def selected_blueprint(blueprints, form) do
+    Enum.find(blueprints, &(&1.key == form["blueprint"])) || List.first(blueprints)
+  end
+
+  # The prefix cap is 7 (not the schema's 10) because the launch engine
+  # truncates prefixes to 7 characters; the name minimum is 3 because the
+  # company slug derived from it must satisfy validate_length(:slug, min: 3).
+  defp validate_step(:company, form) do
+    cond do
+      String.trim(form["name"] || "") == "" ->
+        {:error, "Company name is required."}
+
+      String.length(String.trim(form["name"])) < 3 ->
+        {:error, "Company name must be at least 3 characters."}
+
+      String.trim(form["goal_title"] || "") == "" ->
+        {:error, "Company goal is required."}
+
+      not Regex.match?(~r/^[A-Z]{2,7}$/, form["issue_prefix"] || "") ->
+        {:error, "Issue prefix must be 2-7 uppercase letters."}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_step(_step, _form), do: :ok
 
   defp maybe_apply_blueprint_defaults(params, current_form) do
     selected = params["blueprint"] || current_form["blueprint"] || "software"
@@ -165,25 +264,23 @@ defmodule CymphoWeb.OnboardingLive.Index do
   # What the operator walks away with after each step — states the payoff, not
   # just the inputs, so the wizard feels like progress rather than a form.
   defp step_outcome(:welcome),
-    do: "One click sets up a CEO, CTO, specialist agents, a goal, a project, and seed issues."
-
-  defp step_outcome(:workspace),
-    do: "Pick a blueprint and we create the agents and their first issues for you."
-
-  defp step_outcome(:shortcuts),
     do:
-      "Optional — these just help you move faster once you're inside. Press ? anytime to see them again."
+      "A few quick choices set up a CEO, CTO, specialist agents, a goal, a project, and seed issues."
 
-  defp step_outcome(:ready), do: "Everything below is live. Open any item to start working."
+  defp step_outcome(:blueprint),
+    do: "The blueprint decides which agents get hired and what their first issues are."
+
+  defp step_outcome(:company),
+    do: "The prefix becomes your issue IDs (like ACME-1); the goal is what the CEO decomposes."
+
+  defp step_outcome(:team),
+    do:
+      "CEO and CTO are always created. Engineers do the hands-on work — name them and pick their runtime."
+
+  defp step_outcome(:launch),
+    do:
+      "One transaction creates the company, your owner seat, all agents, the goal, project, and first issues."
+
+  defp step_outcome(:ready), do: "Everything below is live. Enter Cympho to start working."
   defp step_outcome(_), do: nil
-
-  # Only the step's true next action glows; the footer recedes when the card
-  # already holds the primary action (create company / open the workspace).
-  defp nav_cta_class(step) when step in [1, 3] do
-    "border border-border bg-surface text-text-secondary hover:bg-surface-hover hover:text-text-primary font-510 text-sm px-5 py-2.5 rounded-button transition-colors min-h-[44px]"
-  end
-
-  defp nav_cta_class(_step) do
-    "cta-glow bg-brand hover:bg-accent text-on-primary font-510 text-sm px-5 py-2.5 rounded-button transition-colors min-h-[44px]"
-  end
 end

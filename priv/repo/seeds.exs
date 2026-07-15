@@ -2,7 +2,7 @@ alias Cympho.Companies
 
 case Companies.list_companies() do
   [] ->
-    {:ok, %{company: company, agents: agents, first_issue: issue}} =
+    {:ok, %{company: company, agents: agents, seed_issues: [issue | _]}} =
       Companies.create_autonomous_company(%{
         name: "Cympho Labs",
         goal_title: "Build and operate an autonomous software company",

@@ -7,10 +7,22 @@ defmodule Cympho.ProjectsTest do
   alias Cympho.Projects
   alias Cympho.Projects.Project
 
+  # Projects now require a company; create a throwaway one per call so the
+  # existing fixtures stay self-contained.
+  defp create_project_with_company(attrs) do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Fixture Co",
+        slug: "fixture-co-#{System.unique_integer([:positive])}"
+      })
+
+    attrs |> Map.put_new(:company_id, company.id) |> Projects.create_project()
+  end
+
   describe "list_projects/0" do
     test "returns all projects" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Test Project",
           prefix: "TST",
           status: :active
@@ -25,7 +37,7 @@ defmodule Cympho.ProjectsTest do
   describe "get_project!/1" do
     test "returns the project with given id" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Test Project",
           prefix: "TST"
         })
@@ -45,7 +57,7 @@ defmodule Cympho.ProjectsTest do
   describe "get_project/1" do
     test "returns {:ok, project} for valid id" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Test Project",
           prefix: "TST"
         })
@@ -62,7 +74,7 @@ defmodule Cympho.ProjectsTest do
   describe "get_project_by_prefix/1" do
     test "returns {:ok, project} for valid prefix" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Test Project",
           prefix: "TST"
         })
@@ -84,7 +96,7 @@ defmodule Cympho.ProjectsTest do
         description: "A new project"
       }
 
-      assert {:ok, %Project{} = project} = Projects.create_project(attrs)
+      assert {:ok, %Project{} = project} = create_project_with_company(attrs)
       assert project.name == "New Project"
       assert project.prefix == "NEW"
       assert project.description == "A new project"
@@ -97,38 +109,38 @@ defmodule Cympho.ProjectsTest do
         prefix: "NP"
       }
 
-      assert {:ok, %Project{} = project} = Projects.create_project(attrs)
+      assert {:ok, %Project{} = project} = create_project_with_company(attrs)
       assert project.status == :active
     end
 
     test "returns error changeset for invalid data (missing name)" do
       attrs = %{prefix: "NO"}
-      assert {:error, %Ecto.Changeset{}} = Projects.create_project(attrs)
+      assert {:error, %Ecto.Changeset{}} = create_project_with_company(attrs)
     end
 
     test "returns error changeset for invalid prefix (lowercase)" do
       attrs = %{name: "Test", prefix: "lowercase"}
-      assert {:error, %Ecto.Changeset{}} = Projects.create_project(attrs)
+      assert {:error, %Ecto.Changeset{}} = create_project_with_company(attrs)
     end
 
     test "returns error changeset for prefix too short" do
       attrs = %{name: "Test", prefix: "A"}
-      assert {:error, %Ecto.Changeset{}} = Projects.create_project(attrs)
+      assert {:error, %Ecto.Changeset{}} = create_project_with_company(attrs)
     end
 
     test "returns error changeset for duplicate prefix" do
       attrs = %{name: "First", prefix: "DUPE"}
-      assert {:ok, _} = Projects.create_project(attrs)
+      assert {:ok, _} = create_project_with_company(attrs)
 
       attrs2 = %{name: "Second", prefix: "DUPE"}
-      assert {:error, %Ecto.Changeset{}} = Projects.create_project(attrs2)
+      assert {:error, %Ecto.Changeset{}} = create_project_with_company(attrs2)
     end
   end
 
   describe "update_project/2" do
     test "updates project with valid data" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Original Name",
           prefix: "ORIG"
         })
@@ -141,7 +153,7 @@ defmodule Cympho.ProjectsTest do
 
     test "returns error changeset for invalid data" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Test",
           prefix: "TST"
         })
@@ -154,7 +166,7 @@ defmodule Cympho.ProjectsTest do
   describe "archive_project/1" do
     test "archives the project" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Test",
           prefix: "TST"
         })
@@ -167,7 +179,7 @@ defmodule Cympho.ProjectsTest do
   describe "delete_project/1" do
     test "deletes the project" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Test",
           prefix: "TST"
         })
@@ -183,7 +195,7 @@ defmodule Cympho.ProjectsTest do
   describe "change_project/2" do
     test "returns a changeset" do
       {:ok, project} =
-        Projects.create_project(%{
+        create_project_with_company(%{
           name: "Test",
           prefix: "TST"
         })

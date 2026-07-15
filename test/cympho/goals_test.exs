@@ -23,7 +23,15 @@ defmodule Cympho.GoalsTest do
 
   describe "list_goals_by_project/1" do
     test "returns goals for a given project" do
-      {:ok, project} = Cympho.Projects.create_project(%{name: "Proj", prefix: "PRJ"})
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Goals Co",
+          slug: "goals-co-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, project} =
+        Cympho.Projects.create_project(%{name: "Proj", prefix: "PRJ", company_id: company.id})
+
       {:ok, goal} = Goals.create_goal(%{title: "Project Goal", project_id: project.id})
       {:ok, _other} = Goals.create_goal(%{title: "Other Goal"})
 
@@ -33,7 +41,15 @@ defmodule Cympho.GoalsTest do
     end
 
     test "returns empty list for project with no goals" do
-      {:ok, project} = Cympho.Projects.create_project(%{name: "Empty", prefix: "EMP"})
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Empty Goals Co",
+          slug: "empty-goals-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, project} =
+        Cympho.Projects.create_project(%{name: "Empty", prefix: "EMP", company_id: company.id})
+
       assert [] = Goals.list_goals_by_project(project.id)
     end
   end
@@ -76,7 +92,14 @@ defmodule Cympho.GoalsTest do
     end
 
     test "creates goal with all fields" do
-      {:ok, project} = Cympho.Projects.create_project(%{name: "Proj", prefix: "PRJ"})
+      {:ok, company} =
+        Companies.create_company(%{
+          name: "Full Goals Co",
+          slug: "full-goals-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, project} =
+        Cympho.Projects.create_project(%{name: "Proj", prefix: "PRJ", company_id: company.id})
 
       attrs = %{
         title: "Full Goal",

@@ -12,9 +12,15 @@ defmodule CymphoWeb.SessionController do
   @dev Mix.env() == :dev
 
   def new(conn, params) do
-    conn
-    |> put_layout(false)
-    |> html(sign_in_page(params, Phoenix.Flash.get(conn.assigns.flash, :error)))
+    if Repo.aggregate(User, :count) == 0 do
+      # Fresh instance: no owner yet — send the visitor to first-run setup
+      # instead of a login form nobody can pass.
+      redirect(conn, to: "/setup")
+    else
+      conn
+      |> put_layout(false)
+      |> html(sign_in_page(params, Phoenix.Flash.get(conn.assigns.flash, :error)))
+    end
   end
 
   def create(conn, %{"user" => %{"email" => email, "password" => password}})

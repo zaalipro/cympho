@@ -33,7 +33,8 @@ defmodule Cympho.Projects.Project do
       :settings,
       :company_id
     ])
-    |> validate_required([:name, :prefix])
+    |> validate_required([:name, :prefix, :company_id])
+    |> foreign_key_constraint(:company_id)
     |> validate_length(:name, min: 1, max: 255)
     |> validate_length(:prefix, min: 2, max: 10)
     |> validate_format(:prefix, ~r/^[A-Z]+$/, message: "must be uppercase, 2-10 characters")

@@ -6,10 +6,17 @@ defmodule Cympho.WakesTest do
   alias Cympho.{Agents, Companies, Issues, Comments, Projects, Repo}
 
   setup do
+    {:ok, company} =
+      Companies.create_company(%{
+        name: "Wake Test Co",
+        slug: "wake-test-#{System.unique_integer([:positive])}"
+      })
+
     {:ok, project} =
       Projects.create_project(%{
         name: "Wake Test Project",
-        prefix: "WAKE"
+        prefix: "WAKE",
+        company_id: company.id
       })
 
     {:ok, agent} =
